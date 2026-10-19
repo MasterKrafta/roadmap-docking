@@ -1,9 +1,7 @@
 #![forbid(unsafe_code)]
-
 pub mod geometry;
 pub mod ids;
 pub mod model;
-
-pub use geometry::DockMetrics;
+pub use geometry::{DockMetrics, Point, Rect, Size};
 pub use ids::{FloatingGroupId, NodeId, PanelId, PanelKey};
-pub use model::Profile;
+pub use model::{Axis, CanvasState, Column, ColumnMode, DockArea, DockSide, FloatingGroup, Node, Profile, Split, Tabs};

@@ -1,3 +1,22 @@
+mod axis;
+mod canvas_state;
+mod column;
+mod column_mode;
+mod dock_area;
+mod dock_side;
+mod floating_group;
+mod node;
 mod profile;
-
+mod split;
+mod tabs;
+pub use axis::Axis;
+pub use canvas_state::CanvasState;
+pub use column::Column;
+pub use column_mode::ColumnMode;
+pub use dock_area::DockArea;
+pub use dock_side::DockSide;
+pub use floating_group::FloatingGroup;
+pub use node::Node;
 pub use profile::Profile;
+pub use split::Split;
+pub use tabs::Tabs;
