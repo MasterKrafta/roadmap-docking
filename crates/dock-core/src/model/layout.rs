@@ -247,12 +247,12 @@ impl Layout {
                     DockCommand::ResizeFloating { .. } => "ResizeFloating",
                     DockCommand::RaiseFloating { .. } => "RaiseFloating",
                     DockCommand::DockFloating { .. } => "DockFloating",
-                    DockCommand::OpenPanel { .. }
-                    | DockCommand::ClosePanel { .. }
-                    | DockCommand::CloseGroup { .. }
-                    | DockCommand::ActivateTab { .. }
-                    | DockCommand::ReorderTab { .. }
-                    | DockCommand::MovePanel { .. } => unreachable!("handled above"),
+                    DockCommand::OpenPanel { .. } => "OpenPanel",
+                    DockCommand::ClosePanel { .. } => "ClosePanel",
+                    DockCommand::CloseGroup { .. } => "CloseGroup",
+                    DockCommand::ActivateTab { .. } => "ActivateTab",
+                    DockCommand::ReorderTab { .. } => "ReorderTab",
+                    DockCommand::MovePanel { .. } => "MovePanel",
                 };
                 Err(CommandError::UnsupportedCommand(name.to_owned()))
             }
