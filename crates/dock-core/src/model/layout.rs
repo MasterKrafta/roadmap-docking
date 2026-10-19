@@ -126,9 +126,7 @@ impl Layout {
         self.version
     }
 
-    /// Validate all model invariants, collecting every detectable error.
-    ///
-    /// Apply a docking operation as a transaction.
+    /// Apply one docking command atomically.
     ///
     /// The command mutates a candidate clone only. Normalization and validation must
     /// both succeed before the candidate replaces this layout, so rejected commands
@@ -765,6 +763,7 @@ impl Layout {
                 .find(|group| matches!(self.nodes.get(*group), Some(Node::Tabs(_)))))
     }
 
+    /// Validate all model invariants and collect every detectable error.
     pub fn validate(&self, metrics: &DockMetrics) -> Result<(), Vec<ValidationError>> {
         let mut errors = Vec::new();
         if let Err(message) = metrics.validate() {
@@ -1874,6 +1873,45 @@ mod tests {
         assert_eq!(layout.version(), version_before);
         assert_eq!(layout.dock_areas()[0].columns.len(), 1);
         assert_eq!(layout.dock_areas()[0].columns[0].groups, groups_before);
+        assert!(layout.validate(&metrics).is_ok());
+    }
+
+    #[test]
+    fn lateral_split_expands_new_column_to_panel_minimum_width() {
+        use crate::{DockCommand, SplitSide};
+
+        let mut layout = initial_layout();
+        let metrics = metrics();
+        let source_group = tab_group_id(&layout, 0, 0);
+        let old_panel = match layout.nodes().get(source_group).expect("target group exists") {
+            Node::Tabs(tabs) => tabs.panels[0],
+            Node::Split(_) => panic!("Photoshop groups must be Tabs"),
+        };
+        let old_instance = layout.panels.remove(old_panel).expect("panel instance exists");
+        let wide_panel = layout.panels.insert(PanelInstance::new(
+            old_instance.key().clone(),
+            PanelConstraints::new(
+                Size::new(420.0, 120.0),
+                Size::new(480.0, 240.0),
+                Size::new(800.0, 900.0),
+                true,
+            ),
+        ));
+        if let Some(Node::Tabs(tabs)) = layout.nodes.get_mut(source_group) {
+            tabs.panels[0] = wide_panel;
+        }
+
+        layout.apply(
+            DockCommand::SplitGroup {
+                panel: wide_panel,
+                group: source_group,
+                side: SplitSide::Right,
+            },
+            &metrics,
+        ).expect("lateral split should honor panel minimum width");
+
+        let new_column = &layout.dock_areas()[0].columns[1];
+        assert!((new_column.width - 420.0).abs() < 1e-3);
         assert!(layout.validate(&metrics).is_ok());
     }
 
