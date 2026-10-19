@@ -22,6 +22,7 @@ gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "9cd14daa
 slotmap = "1.0.7"
 serde = { version = "1.0", features = ["derive"] }
 thiserror = "2.0.21"
+tracing = "0.1"
 
 [workspace.lints.rust]
 unused_must_use = "deny"
