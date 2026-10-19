@@ -27,6 +27,9 @@ pub struct Layout {
     canvas: CanvasState,
     profile: Profile,
     version: u64,
+    /// Session-only fallback positions used when reopening recently closed panels.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    last_panel_locations: Vec<(PanelKey, DockSide, usize, usize)>,
 }
 
 impl Layout {
@@ -39,6 +42,7 @@ impl Layout {
             canvas,
             profile,
             version: 0,
+            last_panel_locations: Vec::new(),
         }
     }
 
@@ -124,11 +128,11 @@ impl Layout {
 
     /// Validate all model invariants, collecting every detectable error.
     ///
-    /// Dimensions and column widths are logical pixels. Ratios are compared using a
-    /// tolerance of 1e-4; pixel-sized values use 1e-3 where approximate comparison is needed.
-    /// Applies one command atomically. A candidate copy is normalized and validated
-    /// before it replaces the live layout, so every rejected command leaves the
-    /// original state and version untouched.
+    /// Apply a docking operation as a transaction.
+    ///
+    /// The command mutates a candidate clone only. Normalization and validation must
+    /// both succeed before the candidate replaces this layout, so rejected commands
+    /// preserve the full original state and version.
     pub fn apply(
         &mut self,
         command: crate::command::DockCommand,
@@ -139,12 +143,16 @@ impl Layout {
         tracing::debug!(version = self.version, command = ?command, "applying dock command");
 
         let mut candidate = self.clone();
-        if let Err(error) = candidate.apply_command_inner(command, metrics) {
-            tracing::warn!(version = self.version, error = %error, "dock command rejected");
-            return Err(error);
-        }
+        let mut changed_nodes = match candidate.apply_command_inner(command, metrics) {
+            Ok(changed) => changed,
+            Err(error) => {
+                tracing::warn!(version = self.version, error = %error, "dock command rejected");
+                return Err(error);
+            }
+        };
 
-        if let Err(errors) = candidate.normalize(metrics) {
+        let normalized = candidate.normalize(metrics);
+        if let Err(errors) = normalized {
             let error = CommandError::InvalidLayout {
                 reasons: errors.into_iter().map(|error| error.to_string()).collect(),
             };
@@ -159,8 +167,16 @@ impl Layout {
             return Err(error);
         }
 
-        candidate.version = self.version.checked_add(1).ok_or(CommandError::VersionOverflow)?;
-        let outcome = CommandOutcome::new(Vec::new(), candidate.version);
+        let Some(next_version) = self.version.checked_add(1) else {
+            let error = CommandError::VersionOverflow;
+            tracing::warn!(version = self.version, error = %error, "dock command rejected");
+            return Err(error);
+        };
+        candidate.version = next_version;
+
+        let mut seen = HashSet::new();
+        changed_nodes.retain(|node_id| seen.insert(*node_id));
+        let outcome = CommandOutcome::new(changed_nodes, candidate.version);
         *self = candidate;
         Ok(outcome)
     }
@@ -168,31 +184,435 @@ impl Layout {
     fn apply_command_inner(
         &mut self,
         command: crate::command::DockCommand,
-        _metrics: &DockMetrics,
-    ) -> Result<(), crate::command::CommandError> {
+        metrics: &DockMetrics,
+    ) -> Result<Vec<NodeId>, crate::command::CommandError> {
+        use crate::command::{CommandError, DockCommand};
+
+        match command {
+            DockCommand::ActivateTab { group, index } => {
+                let Some(node) = self.nodes.get_mut(group) else {
+                    return Err(CommandError::UnknownGroup(group));
+                };
+                let Node::Tabs(tabs) = node else {
+                    return Err(CommandError::GroupNotTabs(group));
+                };
+                if index >= tabs.panels.len() {
+                    return Err(CommandError::InvalidTabIndex { group, index });
+                }
+                tabs.active_index = index;
+                Ok(vec![group])
+            }
+            DockCommand::ReorderTab { group, from, to } => {
+                let Some(node) = self.nodes.get_mut(group) else {
+                    return Err(CommandError::UnknownGroup(group));
+                };
+                let Node::Tabs(tabs) = node else {
+                    return Err(CommandError::GroupNotTabs(group));
+                };
+                let len = tabs.panels.len();
+                if from >= len {
+                    return Err(CommandError::InvalidTabIndex { group, index: from });
+                }
+                if to >= len {
+                    return Err(CommandError::InvalidTabIndex { group, index: to });
+                }
+
+                let active_panel = tabs.panels.get(tabs.active_index).copied();
+                let moved_panel = tabs.panels.remove(from);
+                tabs.panels.insert(to, moved_panel);
+                if let Some(active_panel) = active_panel {
+                    if let Some(active_index) = tabs.panels.iter().position(|panel| *panel == active_panel) {
+                        tabs.active_index = active_index;
+                    }
+                }
+                Ok(vec![group])
+            }
+            DockCommand::MovePanel { panel, target } => {
+                self.move_panel_to_existing_group(panel, target)
+            }
+            DockCommand::ClosePanel { panel } => self.close_panel(panel),
+            DockCommand::CloseGroup { group } => self.close_group(group),
+            DockCommand::OpenPanel { key, constraints, target } => {
+                self.open_panel(key, constraints, target, metrics)
+            }
+            other => {
+                let name = match other {
+                    DockCommand::SplitGroup { .. } => "SplitGroup",
+                    DockCommand::ResizeGroups { .. } => "ResizeGroups",
+                    DockCommand::ResizeColumn { .. } => "ResizeColumn",
+                    DockCommand::ResizeColumnBoundary { .. } => "ResizeColumnBoundary",
+                    DockCommand::ResetColumnRatios { .. } => "ResetColumnRatios",
+                    DockCommand::Float { .. } => "Float",
+                    DockCommand::MoveFloating { .. } => "MoveFloating",
+                    DockCommand::ResizeFloating { .. } => "ResizeFloating",
+                    DockCommand::RaiseFloating { .. } => "RaiseFloating",
+                    DockCommand::DockFloating { .. } => "DockFloating",
+                    DockCommand::OpenPanel { .. }
+                    | DockCommand::ClosePanel { .. }
+                    | DockCommand::CloseGroup { .. }
+                    | DockCommand::ActivateTab { .. }
+                    | DockCommand::ReorderTab { .. }
+                    | DockCommand::MovePanel { .. } => unreachable!("handled above"),
+                };
+                Err(CommandError::UnsupportedCommand(name.to_owned()))
+            }
+        }
+    }
+
+    fn find_dock_group_location(&self, group: NodeId) -> Option<(DockSide, usize, usize)> {
+        self.dock_areas.iter().find_map(|area| {
+            area.columns.iter().enumerate().find_map(|(column_index, column)| {
+                column.groups.iter().position(|candidate| *candidate == group)
+                    .map(|group_index| (area.side, column_index, group_index))
+            })
+        })
+    }
+
+    fn find_dock_group_for_panel(&self, panel: crate::ids::PanelId) -> Option<(NodeId, usize)> {
+        self.nodes.iter().find_map(|(node_id, node)| {
+            let Node::Tabs(tabs) = node else { return None; };
+            tabs.panels.iter().position(|candidate| *candidate == panel)
+                .map(|index| (node_id, index))
+        })
+    }
+
+    fn remember_panel_location(&mut self, panel: crate::ids::PanelId, group: NodeId) {
+        let Some(key) = self.panels.get(panel).map(|instance| instance.key().clone()) else {
+            return;
+        };
+        let Some((side, column_index, group_index)) = self.find_dock_group_location(group) else {
+            return;
+        };
+        self.last_panel_locations.retain(|(saved_key, _, _, _)| saved_key != &key);
+        self.last_panel_locations.push((key, side, column_index, group_index));
+    }
+
+    fn remove_panel_from_tabs(tabs: &mut Tabs, index: usize) -> crate::ids::PanelId {
+        let removed = tabs.panels.remove(index);
+        if tabs.panels.is_empty() {
+            tabs.active_index = 0;
+        } else if index < tabs.active_index {
+            tabs.active_index -= 1;
+        } else if index == tabs.active_index {
+            tabs.active_index = tabs.active_index.min(tabs.panels.len() - 1);
+        }
+        removed
+    }
+
+    fn insert_panel_into_tabs(tabs: &mut Tabs, panel: crate::ids::PanelId, index: usize, activate: bool) {
+        let old_active = tabs.active_index;
+        tabs.panels.insert(index, panel);
+        if activate {
+            tabs.active_index = index;
+        } else if index <= old_active {
+            tabs.active_index = old_active + 1;
+        }
+    }
+
+    fn close_panel(
+        &mut self,
+        panel: crate::ids::PanelId,
+    ) -> Result<Vec<NodeId>, crate::command::CommandError> {
         use crate::command::CommandError;
 
-        // Concrete handlers are implemented in R3.3-R3.6. Rejecting an
-        // unimplemented operation is safer than reporting success without mutation.
-        let name = match command {
-            crate::command::DockCommand::OpenPanel { .. } => "OpenPanel",
-            crate::command::DockCommand::ClosePanel { .. } => "ClosePanel",
-            crate::command::DockCommand::CloseGroup { .. } => "CloseGroup",
-            crate::command::DockCommand::ActivateTab { .. } => "ActivateTab",
-            crate::command::DockCommand::ReorderTab { .. } => "ReorderTab",
-            crate::command::DockCommand::MovePanel { .. } => "MovePanel",
-            crate::command::DockCommand::SplitGroup { .. } => "SplitGroup",
-            crate::command::DockCommand::ResizeGroups { .. } => "ResizeGroups",
-            crate::command::DockCommand::ResizeColumn { .. } => "ResizeColumn",
-            crate::command::DockCommand::ResizeColumnBoundary { .. } => "ResizeColumnBoundary",
-            crate::command::DockCommand::ResetColumnRatios { .. } => "ResetColumnRatios",
-            crate::command::DockCommand::Float { .. } => "Float",
-            crate::command::DockCommand::MoveFloating { .. } => "MoveFloating",
-            crate::command::DockCommand::ResizeFloating { .. } => "ResizeFloating",
-            crate::command::DockCommand::RaiseFloating { .. } => "RaiseFloating",
-            crate::command::DockCommand::DockFloating { .. } => "DockFloating",
+        if !self.panels.contains_key(panel) {
+            return Err(CommandError::UnknownPanel(panel));
+        }
+
+        if let Some((group, index)) = self.find_dock_group_for_panel(panel) {
+            self.remember_panel_location(panel, group);
+            let Some(Node::Tabs(tabs)) = self.nodes.get_mut(group) else {
+                return Err(CommandError::GroupNotTabs(group));
+            };
+            Self::remove_panel_from_tabs(tabs, index);
+            self.panels.remove(panel);
+            return Ok(vec![group]);
+        }
+
+        let floating_location = self.floating_groups.iter().find_map(|(floating_id, floating)| {
+            floating.panels.iter().position(|candidate| *candidate == panel)
+                .map(|index| (floating_id, index))
+        });
+        if let Some((floating_id, index)) = floating_location {
+            if let Some(floating) = self.floating_groups.get_mut(floating_id) {
+                floating.panels.remove(index);
+                if floating.panels.is_empty() {
+                    self.floating_groups.remove(floating_id);
+                } else if index < floating.active_index {
+                    floating.active_index -= 1;
+                } else if index == floating.active_index {
+                    floating.active_index = floating.active_index.min(floating.panels.len() - 1);
+                }
+            }
+            self.panels.remove(panel);
+            return Ok(Vec::new());
+        }
+
+        Err(CommandError::PanelNotPlaced(panel))
+    }
+
+    fn close_group(
+        &mut self,
+        group: NodeId,
+    ) -> Result<Vec<NodeId>, crate::command::CommandError> {
+        use crate::command::CommandError;
+
+        let Some(node) = self.nodes.get(group) else {
+            return Err(CommandError::UnknownGroup(group));
         };
-        Err(CommandError::UnsupportedCommand(name.to_owned()))
+        let Node::Tabs(tabs) = node else {
+            return Err(CommandError::GroupNotTabs(group));
+        };
+        let panel_ids = tabs.panels.clone();
+        for panel_id in &panel_ids {
+            self.remember_panel_location(*panel_id, group);
+        }
+        for panel_id in panel_ids {
+            self.panels.remove(panel_id);
+        }
+        self.nodes.remove(group);
+        Ok(vec![group])
+    }
+
+    fn move_panel_to_existing_group(
+        &mut self,
+        panel: crate::ids::PanelId,
+        target: crate::command::DropTarget,
+    ) -> Result<Vec<NodeId>, crate::command::CommandError> {
+        use crate::command::{CommandError, DropTarget, DropZone};
+
+        if !self.panels.contains_key(panel) {
+            return Err(CommandError::UnknownPanel(panel));
+        }
+        let Some((source_group, source_index)) = self.find_dock_group_for_panel(panel) else {
+            return Err(CommandError::PanelNotInDockGroup(panel));
+        };
+        let (target_group, requested_index) = match target {
+            DropTarget::Group { group, zone: DropZone::Center } => {
+                let Some(Node::Tabs(tabs)) = self.nodes.get(group) else {
+                    return if self.nodes.contains_key(group) {
+                        Err(CommandError::GroupNotTabs(group))
+                    } else {
+                        Err(CommandError::UnknownGroup(group))
+                    };
+                };
+                (group, tabs.panels.len())
+            }
+            DropTarget::TabInsertion { group, index } => {
+                let Some(Node::Tabs(tabs)) = self.nodes.get(group) else {
+                    return if self.nodes.contains_key(group) {
+                        Err(CommandError::GroupNotTabs(group))
+                    } else {
+                        Err(CommandError::UnknownGroup(group))
+                    };
+                };
+                if index > tabs.panels.len() {
+                    return Err(CommandError::InvalidTabIndex { group, index });
+                }
+                (group, index)
+            }
+            _ => return Err(CommandError::InvalidDropTarget(
+                "R3.3 MovePanel only supports insertion into an existing dock group".to_owned()
+            )),
+        };
+
+        if source_group == target_group {
+            let Some(Node::Tabs(tabs)) = self.nodes.get_mut(source_group) else {
+                return Err(CommandError::GroupNotTabs(source_group));
+            };
+            let active_panel = tabs.panels.get(tabs.active_index).copied();
+            let mut insert_index = requested_index;
+            if source_index < insert_index {
+                insert_index -= 1;
+            }
+            let moved = tabs.panels.remove(source_index);
+            insert_index = insert_index.min(tabs.panels.len());
+            tabs.panels.insert(insert_index, moved);
+            if let Some(active_panel) = active_panel {
+                if let Some(index) = tabs.panels.iter().position(|candidate| *candidate == active_panel) {
+                    tabs.active_index = index;
+                }
+            }
+            return Ok(vec![source_group]);
+        }
+
+        let Some(Node::Tabs(source_tabs)) = self.nodes.get_mut(source_group) else {
+            return Err(CommandError::GroupNotTabs(source_group));
+        };
+        let active_source = source_tabs.panels.get(source_tabs.active_index).copied();
+        Self::remove_panel_from_tabs(source_tabs, source_index);
+        if let Some(active_source) = active_source.filter(|active| *active != panel) {
+            if let Some(index) = source_tabs.panels.iter().position(|candidate| *candidate == active_source) {
+                source_tabs.active_index = index;
+            }
+        }
+
+        let Some(Node::Tabs(target_tabs)) = self.nodes.get_mut(target_group) else {
+            return Err(CommandError::GroupNotTabs(target_group));
+        };
+        let insert_index = requested_index.min(target_tabs.panels.len());
+        Self::insert_panel_into_tabs(target_tabs, panel, insert_index, true);
+        Ok(vec![source_group, target_group])
+    }
+
+    fn open_panel(
+        &mut self,
+        key: PanelKey,
+        constraints: PanelConstraints,
+        target: Option<crate::command::DropTarget>,
+        metrics: &DockMetrics,
+    ) -> Result<Vec<NodeId>, crate::command::CommandError> {
+        use crate::command::{CommandError, DropTarget, DropZone};
+
+        if constraints.is_singleton() {
+            if let Some((existing_id, _)) = self.panels.iter().find(|(_, instance)| {
+                instance.key() == &key && instance.constraints().is_singleton()
+            }) {
+                let existing_id = *existing_id;
+                if let Some((group, index)) = self.find_dock_group_for_panel(existing_id) {
+                    let Some(Node::Tabs(tabs)) = self.nodes.get_mut(group) else {
+                        return Err(CommandError::GroupNotTabs(group));
+                    };
+                    tabs.active_index = index;
+                    return Ok(vec![group]);
+                }
+                if let Some((floating_id, index)) = self.floating_groups.iter().find_map(|(floating_id, floating)| {
+                    floating.panels.iter().position(|candidate| *candidate == existing_id)
+                        .map(|index| (floating_id, index))
+                }) {
+                    if let Some(floating) = self.floating_groups.get_mut(floating_id) {
+                        floating.active_index = index;
+                    }
+                    return Ok(Vec::new());
+                }
+            }
+        }
+
+        let panel = self.insert_panel(PanelInstance::new(key.clone(), constraints));
+        if let Some(target) = target {
+            return self.place_new_panel_at_explicit_target(panel, target);
+        }
+
+        let last_location = self.last_panel_locations.iter()
+            .find(|(saved_key, _, _, _)| saved_key == &key)
+            .map(|(_, side, column, group)| (*side, *column, *group));
+        if let Some((side, column_index, group_index)) = last_location {
+            if let Some(group) = self.group_at_location(side, column_index, group_index) {
+                let Some(Node::Tabs(tabs)) = self.nodes.get_mut(group) else {
+                    return Err(CommandError::GroupNotTabs(group));
+                };
+                let insert_index = tabs.panels.len();
+                Self::insert_panel_into_tabs(tabs, panel, insert_index, true);
+                return Ok(vec![group]);
+            }
+        }
+
+        if let Some(group) = self.default_start_group() {
+            let Some(Node::Tabs(tabs)) = self.nodes.get_mut(group) else {
+                return Err(CommandError::GroupNotTabs(group));
+            };
+            let insert_index = tabs.panels.len();
+            Self::insert_panel_into_tabs(tabs, panel, insert_index, true);
+            return Ok(vec![group]);
+        }
+
+        // The layout may have been closed down to no dock groups. Recreate the profile's
+        // right-side starting location without duplicating any existing panel instance.
+        let group = self.insert_node(Node::Tabs(Tabs { panels: vec![panel], active_index: 0 }));
+        let right_area = self.dock_areas.iter().position(|area| area.side == DockSide::Right);
+        match right_area {
+            Some(area_index) if !self.dock_areas[area_index].columns.is_empty() => {
+                let column = &mut self.dock_areas[area_index].columns[0];
+                column.groups.push(group);
+                column.group_ratios.push(1.0);
+                normalize_ratios(&mut column.group_ratios, column.groups.len());
+            }
+            Some(area_index) => {
+                self.dock_areas[area_index].columns.push(Column {
+                    width: metrics.default_column_width,
+                    mode: ColumnMode::Expanded,
+                    groups: vec![group],
+                    group_ratios: vec![1.0],
+                });
+            }
+            None => self.dock_areas.push(DockArea {
+                side: DockSide::Right,
+                columns: vec![Column {
+                    width: metrics.default_column_width,
+                    mode: ColumnMode::Expanded,
+                    groups: vec![group],
+                    group_ratios: vec![1.0],
+                }],
+            }),
+        }
+        Ok(vec![group])
+    }
+
+    fn place_new_panel_at_explicit_target(
+        &mut self,
+        panel: crate::ids::PanelId,
+        target: crate::command::DropTarget,
+    ) -> Result<Vec<NodeId>, crate::command::CommandError> {
+        use crate::command::{CommandError, DropTarget, DropZone};
+
+        let (group, index) = match target {
+            DropTarget::Group { group, zone: DropZone::Center } => {
+                let Some(Node::Tabs(tabs)) = self.nodes.get(group) else {
+                    return if self.nodes.contains_key(group) {
+                        Err(CommandError::GroupNotTabs(group))
+                    } else {
+                        Err(CommandError::UnknownGroup(group))
+                    };
+                };
+                (group, tabs.panels.len())
+            }
+            DropTarget::TabInsertion { group, index } => {
+                let Some(Node::Tabs(tabs)) = self.nodes.get(group) else {
+                    return if self.nodes.contains_key(group) {
+                        Err(CommandError::GroupNotTabs(group))
+                    } else {
+                        Err(CommandError::UnknownGroup(group))
+                    };
+                };
+                if index > tabs.panels.len() {
+                    return Err(CommandError::InvalidTabIndex { group, index });
+                }
+                (group, index)
+            }
+            _ => return Err(CommandError::InvalidDropTarget(
+                "R3.3 OpenPanel only supports insertion into an existing dock group".to_owned()
+            )),
+        };
+
+        let Some(Node::Tabs(tabs)) = self.nodes.get_mut(group) else {
+            return Err(CommandError::GroupNotTabs(group));
+        };
+        Self::insert_panel_into_tabs(tabs, panel, index, true);
+        Ok(vec![group])
+    }
+
+    fn group_at_location(&self, side: DockSide, column_index: usize, group_index: usize) -> Option<NodeId> {
+        let area = self.dock_areas.iter().find(|area| area.side == side)?;
+        let column = area.columns.get(column_index)?;
+        if column.groups.is_empty() {
+            return None;
+        }
+        column.groups.get(group_index.min(column.groups.len() - 1)).copied()
+            .filter(|group| matches!(self.nodes.get(*group), Some(Node::Tabs(_))))
+    }
+
+    fn default_start_group(&self) -> Option<NodeId> {
+        self.dock_areas.iter()
+            .filter(|area| area.side == DockSide::Right)
+            .flat_map(|area| area.columns.iter())
+            .flat_map(|column| column.groups.iter())
+            .copied()
+            .find(|group| matches!(self.nodes.get(*group), Some(Node::Tabs(_))))
+            .or_else(|| self.dock_areas.iter()
+                .flat_map(|area| area.columns.iter())
+                .flat_map(|column| column.groups.iter())
+                .copied()
+                .find(|group| matches!(self.nodes.get(*group), Some(Node::Tabs(_)))))
     }
 
     pub fn validate(&self, metrics: &DockMetrics) -> Result<(), Vec<ValidationError>> {
