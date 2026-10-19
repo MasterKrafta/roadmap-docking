@@ -230,6 +230,9 @@ impl Layout {
             DockCommand::MovePanel { panel, target } => {
                 self.move_panel_to_existing_group(panel, target)
             }
+            DockCommand::SplitGroup { panel, group, side } => {
+                self.split_group(panel, group, side, metrics)
+            }
             DockCommand::ClosePanel { panel } => self.close_panel(panel),
             DockCommand::CloseGroup { group } => self.close_group(group),
             DockCommand::OpenPanel { key, constraints, target } => {
@@ -255,6 +258,153 @@ impl Layout {
                     DockCommand::MovePanel { .. } => "MovePanel",
                 };
                 Err(CommandError::UnsupportedCommand(name.to_owned()))
+            }
+        }
+    }
+
+    fn split_group(
+        &mut self,
+        panel: PanelId,
+        group: NodeId,
+        side: crate::command::SplitSide,
+        metrics: &DockMetrics,
+    ) -> Result<Vec<NodeId>, crate::command::CommandError> {
+        use crate::command::{CommandError, SplitSide};
+
+        if self.profile != Profile::Photoshop {
+            return Err(CommandError::UnsupportedForProfile {
+                command: "SplitGroup".to_owned(),
+                profile: self.profile,
+            });
+        }
+        if !self.panels.contains_key(panel) {
+            return Err(CommandError::UnknownPanel(panel));
+        }
+
+        let location = self.dock_areas.iter().enumerate().find_map(|(area_index, area)| {
+            area.columns.iter().enumerate().find_map(|(column_index, column)| {
+                column.groups.iter().position(|candidate| *candidate == group)
+                    .map(|group_index| (area_index, column_index, group_index))
+            })
+        }).ok_or(CommandError::UnknownGroup(group))?;
+
+        let (area_index, column_index, group_index) = location;
+        let (panel_index, source_is_empty_after_move, original_ratio) = {
+            let Some(Node::Tabs(tabs)) = self.nodes.get(group) else {
+                return if self.nodes.contains_key(group) {
+                    Err(CommandError::GroupNotTabs(group))
+                } else {
+                    Err(CommandError::UnknownGroup(group))
+                };
+            };
+            let Some(panel_index) = tabs.panels.iter().position(|candidate| *candidate == panel) else {
+                return Err(CommandError::PanelNotInGroup { panel, group });
+            };
+            let ratio = self.dock_areas[area_index].columns[column_index]
+                .group_ratios.get(group_index).copied()
+                .ok_or_else(|| CommandError::InvalidCommandParameter {
+                    parameter: "group_ratios".to_owned(),
+                    reason: "target group has no matching height ratio".to_owned(),
+                })?;
+            if !ratio.is_finite() || ratio < 0.0 {
+                return Err(CommandError::InvalidCommandParameter {
+                    parameter: "group_ratios".to_owned(),
+                    reason: "target group has an invalid height ratio".to_owned(),
+                });
+            }
+            (panel_index, tabs.panels.len() == 1, ratio)
+        };
+
+        let constraints = self.panels.get(panel)
+            .ok_or(CommandError::UnknownPanel(panel))?
+            .constraints();
+        if !panel_constraints_are_valid(constraints) {
+            return Err(CommandError::InvalidCommandParameter {
+                parameter: "PanelConstraints".to_owned(),
+                reason: "the panel's minimum, preferred, and maximum sizes are inconsistent".to_owned(),
+            });
+        }
+        let min_size = constraints.min_size();
+
+        match side {
+            SplitSide::Top | SplitSide::Bottom => {
+                // The model stores proportional heights, not a window height. We can
+                // split the group's current share atomically here; R4 geometry will
+                // enforce the physical minimum allocations against the actual viewport.
+                let insertion_index = if side == SplitSide::Top {
+                    group_index
+                } else {
+                    group_index + 1
+                };
+                let new_group = self.insert_node(Node::Tabs(Tabs {
+                    panels: vec![panel],
+                    active_index: 0,
+                }));
+
+                let Some(Node::Tabs(source_tabs)) = self.nodes.get_mut(group) else {
+                    return Err(CommandError::GroupNotTabs(group));
+                };
+                Self::remove_panel_from_tabs(source_tabs, panel_index);
+
+                let column = &mut self.dock_areas[area_index].columns[column_index];
+                if source_is_empty_after_move {
+                    // The empty source group will be removed by normalization. Give the
+                    // new group the source group's full share; normalization removes the
+                    // old group's paired ratio without shrinking the remaining siblings.
+                    column.groups.insert(insertion_index, new_group);
+                    column.group_ratios.insert(insertion_index, original_ratio);
+                } else {
+                    let half = original_ratio * 0.5;
+                    column.group_ratios[group_index] = half;
+                    column.groups.insert(insertion_index, new_group);
+                    column.group_ratios.insert(insertion_index, half);
+                }
+
+                let _minimum_group_height = metrics.min_group_height.max(min_size.height);
+                Ok(vec![group, new_group])
+            }
+            SplitSide::Left | SplitSide::Right => {
+                let current_columns: usize = self.dock_areas.iter().map(|area| area.columns.len()).sum();
+                if current_columns >= metrics.max_columns {
+                    return Err(CommandError::ColumnLimitReached {
+                        maximum: metrics.max_columns,
+                    });
+                }
+
+                // New columns must be able to contain the dragged panel at its minimum
+                // width. Width remains independent from the height ratios of the column.
+                let width = metrics.default_column_width
+                    .max(metrics.min_column_width)
+                    .max(min_size.width);
+                if !width.is_finite() || width < metrics.min_column_width {
+                    return Err(CommandError::InvalidCommandParameter {
+                        parameter: "column width".to_owned(),
+                        reason: "new column cannot satisfy its minimum width".to_owned(),
+                    });
+                }
+
+                let new_group = self.insert_node(Node::Tabs(Tabs {
+                    panels: vec![panel],
+                    active_index: 0,
+                }));
+                let Some(Node::Tabs(source_tabs)) = self.nodes.get_mut(group) else {
+                    return Err(CommandError::GroupNotTabs(group));
+                };
+                Self::remove_panel_from_tabs(source_tabs, panel_index);
+
+                let new_column = Column {
+                    width,
+                    mode: ColumnMode::Expanded,
+                    groups: vec![new_group],
+                    group_ratios: vec![1.0],
+                };
+                let insert_at = if side == SplitSide::Left {
+                    column_index
+                } else {
+                    column_index + 1
+                };
+                self.dock_areas[area_index].columns.insert(insert_at, new_column);
+                Ok(vec![group, new_group])
             }
         }
     }
