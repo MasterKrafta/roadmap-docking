@@ -1985,6 +1985,35 @@ mod tests {
     }
 
     #[test]
+    fn vertical_split_rejects_when_known_height_cannot_fit_group_minimums() {
+        use crate::{CommandError, DockCommand, SplitSide};
+
+        let mut layout = initial_layout();
+        let metrics = metrics();
+        layout.set_canvas(crate::CanvasState {
+            bounds: Rect::new(Point::new(0.0, 0.0), Size::new(900.0, 200.0)),
+        });
+        let group = tab_group_id(&layout, 0, 0);
+        let panel = match layout.nodes().get(group).expect("target group exists") {
+            Node::Tabs(tabs) => tabs.panels[0],
+            Node::Split(_) => panic!("Photoshop groups must be Tabs"),
+        };
+        let version_before = layout.version();
+        let groups_before = layout.dock_areas()[0].columns[0].groups.clone();
+
+        let error = layout.apply(
+            DockCommand::SplitGroup { panel, group, side: SplitSide::Top },
+            &metrics,
+        ).expect_err("three groups need more height than the known viewport provides");
+
+        assert!(matches!(error, CommandError::InvalidCommandParameter { ref parameter, .. }
+            if parameter == "column height"));
+        assert_eq!(layout.version(), version_before);
+        assert_eq!(layout.dock_areas()[0].columns[0].groups, groups_before);
+        assert!(layout.validate(&metrics).is_ok());
+    }
+
+    #[test]
     fn split_rejects_panel_that_does_not_belong_to_target_group() {
         use crate::{CommandError, DockCommand, SplitSide};
 
