@@ -1008,6 +1008,49 @@ mod tests {
     }
 
     #[test]
+    fn validation_rejects_missing_node_references() {
+        let mut layout = initial_layout();
+        let missing = tab_group_id(&layout, 0, 0);
+        layout.nodes.remove(missing);
+
+        let errors = layout.validate(&metrics()).expect_err("missing node reference must fail");
+        assert!(errors.iter().any(|error| matches!(
+            error,
+            ValidationError::NodeReferenceMissing(node) if *node == missing
+        )));
+    }
+
+    #[test]
+    fn validation_rejects_ratios_that_do_not_sum_to_one() {
+        let mut layout = initial_layout();
+        layout.dock_areas[0].columns[0].group_ratios = vec![0.25, 0.25];
+
+        let errors = layout.validate(&metrics()).expect_err("invalid ratios must fail");
+        assert!(errors.iter().any(|error| matches!(
+            error,
+            ValidationError::ColumnRatiosDoNotSumToOne { .. }
+        )));
+    }
+
+    #[test]
+    fn validation_rejects_a_panel_placed_in_dock_and_floating_group() {
+        let mut layout = initial_layout();
+        let panel_id = *layout.panels.keys().next().expect("initial layout has panels");
+        layout.insert_floating_group(FloatingGroup {
+            panels: vec![panel_id],
+            active_index: 0,
+            bounds: Rect::new(Point::new(20.0, 20.0), Size::new(240.0, 180.0)),
+            z_order: 1,
+        });
+
+        let errors = layout.validate(&metrics()).expect_err("duplicate placement must fail");
+        assert!(errors.iter().any(|error| matches!(
+            error,
+            ValidationError::PanelPlacedMoreThanOnce(panel) if *panel == panel_id
+        )));
+    }
+
+    #[test]
     fn initial_layout_rejects_invalid_metrics() {
         let mut invalid = metrics();
         invalid.default_column_width = f32::NAN;

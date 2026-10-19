@@ -15,6 +15,9 @@ mod split;
 mod tabs;
 mod validation_error;
 
+#[cfg(test)]
+mod layout_builder;
+
 pub use axis::Axis;
 pub use canvas_state::CanvasState;
 pub use column::Column;
