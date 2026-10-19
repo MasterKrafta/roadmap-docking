@@ -358,7 +358,7 @@ impl Layout {
                     column.group_ratios.insert(insertion_index, half);
                 }
 
-                let _minimum_group_height = metrics.min_group_height.max(min_size.height);
+                self.ensure_column_fits_min_height(area_index, column_index, metrics)?;
                 Ok(vec![group, new_group])
             }
             SplitSide::Left | SplitSide::Right => {
@@ -402,9 +402,78 @@ impl Layout {
                     column_index + 1
                 };
                 self.dock_areas[area_index].columns.insert(insert_at, new_column);
+                let source_column_after_insert = column_index + usize::from(side == SplitSide::Left);
+                self.ensure_column_fits_min_height(area_index, source_column_after_insert, metrics)?;
+                self.ensure_column_fits_min_height(area_index, insert_at, metrics)?;
                 Ok(vec![group, new_group])
             }
         }
+    }
+
+    /// When Canvas geometry is known, ensure the dock column's group minimum heights
+    /// fit the available vertical span. A zero-sized Canvas is the pre-geometry state,
+    /// so feasibility is deferred until R4 assigns window-relative rectangles.
+    fn ensure_column_fits_min_height(
+        &self,
+        area_index: usize,
+        column_index: usize,
+        metrics: &DockMetrics,
+    ) -> Result<(), crate::command::CommandError> {
+        use crate::command::CommandError;
+
+        let available = self.canvas.bounds.size.height;
+        if !available.is_finite() || available <= 0.0 {
+            return Ok(());
+        }
+        let Some(area) = self.dock_areas.get(area_index) else {
+            return Err(CommandError::InvalidCommandParameter {
+                parameter: "dock area".to_owned(),
+                reason: "area disappeared while checking split dimensions".to_owned(),
+            });
+        };
+        let Some(column) = area.columns.get(column_index) else {
+            return Err(CommandError::InvalidCommandParameter {
+                parameter: "column".to_owned(),
+                reason: "column disappeared while checking split dimensions".to_owned(),
+            });
+        };
+
+        let mut required_height = 0.0_f32;
+        for group_id in &column.groups {
+            let Some(Node::Tabs(tabs)) = self.nodes.get(*group_id) else {
+                // The final validate call reports non-Tabs nodes in a Photoshop column.
+                continue;
+            };
+            if tabs.panels.is_empty() {
+                // This group is removed by normalization immediately after the command.
+                continue;
+            }
+            let mut group_minimum = metrics.min_group_height;
+            for panel_id in &tabs.panels {
+                let Some(panel) = self.panels.get(*panel_id) else {
+                    continue;
+                };
+                let min_height = panel.constraints().min_size().height;
+                if !min_height.is_finite() || min_height < 0.0 {
+                    return Err(CommandError::InvalidCommandParameter {
+                        parameter: "panel minimum height".to_owned(),
+                        reason: "must be finite and non-negative".to_owned(),
+                    });
+                }
+                group_minimum = group_minimum.max(min_height);
+            }
+            required_height += group_minimum;
+        }
+
+        if !required_height.is_finite() || required_height > available + PIXEL_TOLERANCE {
+            return Err(CommandError::InvalidCommandParameter {
+                parameter: "column height".to_owned(),
+                reason: format!(
+                    "split requires at least {required_height:.3} logical px but only {available:.3} are available"
+                ),
+            });
+        }
+        Ok(())
     }
 
     fn find_dock_group_location(&self, group: NodeId) -> Option<(DockSide, usize, usize)> {
