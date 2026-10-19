@@ -26,6 +26,12 @@ pub enum CommandError {
     #[error("node is not a tab group: {0:?}")]
     GroupNotTabs(NodeId),
 
+    #[error("panel {panel:?} is not in the target group {group:?}")]
+    PanelNotInGroup { panel: PanelId, group: NodeId },
+
+    #[error("cannot create another column; maximum is {maximum}")]
+    ColumnLimitReached { maximum: usize },
+
     #[error("dock column does not exist: {0:?}")]
     UnknownColumn(ColumnRef),
 
