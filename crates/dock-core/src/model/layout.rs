@@ -683,7 +683,7 @@ fn normalize_ratios(ratios: &mut Vec<f32>, expected_len: usize) {
 mod tests {
     use super::Layout;
     use crate::{
-        Axis, CanvasState, Column, ColumnMode, DockMetrics, DockSide, FloatingGroup, Node,
+        Axis, CanvasState, Column, ColumnMode, DockArea, DockMetrics, DockSide, FloatingGroup, Node,
         PanelConstraints, PanelInstance, PanelKey, Point, Profile, Rect, Size, Split, Tabs,
         ValidationError,
     };
