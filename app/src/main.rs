@@ -3,14 +3,22 @@ mod dock_metrics;
 #[cfg(windows)]
 fn main() {
     use dock_gpui::PrototypeWindow;
-    use gpui::{App, AppContext, WindowOptions};
+    use gpui::{App, AppContext, Bounds, WindowBounds, WindowOptions, px, size};
     use gpui_platform::application;
     use ui::Theme;
 
     application().run(|cx: &mut App| {
         let theme = Theme::default();
         let _metrics = dock_metrics::build(&theme);
-        let result = cx.open_window(WindowOptions::default(), move |_window, cx| {
+
+        // Создаем границы окна: по центру экрана с размером 800x600
+        let bounds = Bounds::centered(None, size(px(1000.), px(700.)), cx);
+        let window_options = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(bounds)),
+            ..Default::default()
+        };
+
+        let result = cx.open_window(window_options, move |_window, cx| {
             cx.new(|_| PrototypeWindow::new(theme))
         });
         if let Err(error) = result {
