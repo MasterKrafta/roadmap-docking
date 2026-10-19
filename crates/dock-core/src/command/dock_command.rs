@@ -6,8 +6,8 @@ use super::{ColumnRef, DropTarget, FloatSource, SplitSide};
 
 /// Serializable request to make one atomic change to the docking layout.
 ///
-/// This enum describes operations only. Transactional execution is implemented by
-/// Layout::apply in the next task; no command mutates a layout by itself.
+/// This enum describes operations only. Transactional execution is delegated to
+/// Layout::apply; no command mutates a layout by itself.
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum DockCommand {
