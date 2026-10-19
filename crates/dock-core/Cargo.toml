@@ -1,0 +1,16 @@
+[package]
+name = "dock-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+serde = ["dep:serde", "slotmap/serde"]
+
+[dependencies]
+slotmap.workspace = true
+serde = { workspace = true, optional = true }
+
+[lints]
+workspace = true
