@@ -126,6 +126,75 @@ impl Layout {
     ///
     /// Dimensions and column widths are logical pixels. Ratios are compared using a
     /// tolerance of 1e-4; pixel-sized values use 1e-3 where approximate comparison is needed.
+    /// Applies one command atomically. A candidate copy is normalized and validated
+    /// before it replaces the live layout, so every rejected command leaves the
+    /// original state and version untouched.
+    pub fn apply(
+        &mut self,
+        command: crate::command::DockCommand,
+        metrics: &DockMetrics,
+    ) -> Result<crate::command::CommandOutcome, crate::command::CommandError> {
+        use crate::command::{CommandError, CommandOutcome};
+
+        tracing::debug!(version = self.version, command = ?command, "applying dock command");
+
+        let mut candidate = self.clone();
+        if let Err(error) = candidate.apply_command_inner(command, metrics) {
+            tracing::warn!(version = self.version, error = %error, "dock command rejected");
+            return Err(error);
+        }
+
+        if let Err(errors) = candidate.normalize(metrics) {
+            let error = CommandError::InvalidLayout {
+                reasons: errors.into_iter().map(|error| error.to_string()).collect(),
+            };
+            tracing::warn!(version = self.version, error = %error, "dock command rejected");
+            return Err(error);
+        }
+        if let Err(errors) = candidate.validate(metrics) {
+            let error = CommandError::InvalidLayout {
+                reasons: errors.into_iter().map(|error| error.to_string()).collect(),
+            };
+            tracing::warn!(version = self.version, error = %error, "dock command rejected");
+            return Err(error);
+        }
+
+        candidate.version = self.version.checked_add(1).ok_or(CommandError::VersionOverflow)?;
+        let outcome = CommandOutcome::new(Vec::new(), candidate.version);
+        *self = candidate;
+        Ok(outcome)
+    }
+
+    fn apply_command_inner(
+        &mut self,
+        command: crate::command::DockCommand,
+        _metrics: &DockMetrics,
+    ) -> Result<(), crate::command::CommandError> {
+        use crate::command::CommandError;
+
+        // Concrete handlers are implemented in R3.3-R3.6. Rejecting an
+        // unimplemented operation is safer than reporting success without mutation.
+        let name = match command {
+            crate::command::DockCommand::OpenPanel { .. } => "OpenPanel",
+            crate::command::DockCommand::ClosePanel { .. } => "ClosePanel",
+            crate::command::DockCommand::CloseGroup { .. } => "CloseGroup",
+            crate::command::DockCommand::ActivateTab { .. } => "ActivateTab",
+            crate::command::DockCommand::ReorderTab { .. } => "ReorderTab",
+            crate::command::DockCommand::MovePanel { .. } => "MovePanel",
+            crate::command::DockCommand::SplitGroup { .. } => "SplitGroup",
+            crate::command::DockCommand::ResizeGroups { .. } => "ResizeGroups",
+            crate::command::DockCommand::ResizeColumn { .. } => "ResizeColumn",
+            crate::command::DockCommand::ResizeColumnBoundary { .. } => "ResizeColumnBoundary",
+            crate::command::DockCommand::ResetColumnRatios { .. } => "ResetColumnRatios",
+            crate::command::DockCommand::Float { .. } => "Float",
+            crate::command::DockCommand::MoveFloating { .. } => "MoveFloating",
+            crate::command::DockCommand::ResizeFloating { .. } => "ResizeFloating",
+            crate::command::DockCommand::RaiseFloating { .. } => "RaiseFloating",
+            crate::command::DockCommand::DockFloating { .. } => "DockFloating",
+        };
+        Err(CommandError::UnsupportedCommand(name.to_owned()))
+    }
+
     pub fn validate(&self, metrics: &DockMetrics) -> Result<(), Vec<ValidationError>> {
         let mut errors = Vec::new();
         if let Err(message) = metrics.validate() {
