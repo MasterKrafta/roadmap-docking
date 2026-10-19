@@ -1016,6 +1016,7 @@ dependencies = [
  "serde",
  "slotmap",
  "thiserror",
+ "tracing",
 ]
 
 [[package]]
