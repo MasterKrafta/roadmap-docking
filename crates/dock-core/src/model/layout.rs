@@ -5,7 +5,10 @@ use crate::ids::{FloatingGroupId, NodeId, PanelId};
 use super::{CanvasState, DockArea, FloatingGroup, Node, PanelInstance, Profile};
 
 /// Complete dock layout model, independent of GPUI, windows, and panel content.
-#[derive(Clone, Debug, PartialEq)]
+///
+/// Equality is intentionally not derived because SlotMap does not implement PartialEq;
+/// compare the public model projections or focused values in tests instead.
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Layout {
     nodes: SlotMap<NodeId, Node>,
