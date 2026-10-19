@@ -14,8 +14,17 @@ pub enum CommandError {
     #[error("panel instance does not exist: {0:?}")]
     UnknownPanel(PanelId),
 
+    #[error("panel is not placed in the dock: {0:?}")]
+    PanelNotInDockGroup(PanelId),
+
+    #[error("panel instance is not placed in the layout: {0:?}")]
+    PanelNotPlaced(PanelId),
+
     #[error("dock group does not exist: {0:?}")]
     UnknownGroup(NodeId),
+
+    #[error("node is not a tab group: {0:?}")]
+    GroupNotTabs(NodeId),
 
     #[error("dock column does not exist: {0:?}")]
     UnknownColumn(ColumnRef),
