@@ -1751,5 +1751,183 @@ mod tests {
         assert_eq!(layout.panels().len(), before);
         assert!(layout.validate(&metrics()).is_ok());
     }
-}
+
+
+    #[test]
+    fn split_top_creates_a_new_group_before_target_in_same_column() {
+        use crate::{DockCommand, SplitSide};
+
+        let mut layout = initial_layout();
+        let metrics = metrics();
+        let group = tab_group_id(&layout, 0, 0);
+        let panel = match layout.nodes().get(group).expect("target group exists") {
+            Node::Tabs(tabs) => tabs.panels[0],
+            Node::Split(_) => panic!("Photoshop groups must be Tabs"),
+        };
+        let original_canvas = *layout.canvas();
+
+        let outcome = layout.apply(
+            DockCommand::SplitGroup { panel, group, side: SplitSide::Top },
+            &metrics,
+        ).expect("top split should succeed");
+
+        let area = &layout.dock_areas()[0];
+        assert_eq!(area.columns.len(), 1);
+        assert_eq!(area.columns[0].groups.len(), 3);
+        let new_group = area.columns[0].groups[0];
+        let Node::Tabs(new_tabs) = layout.nodes().get(new_group).expect("new group exists") else {
+            panic!("new group must be Tabs");
+        };
+        assert_eq!(new_tabs.panels, vec![panel]);
+        let Node::Tabs(source_tabs) = layout.nodes().get(group).expect("source group remains") else {
+            panic!("source group must be Tabs");
+        };
+        assert!(!source_tabs.panels.contains(&panel));
+        assert!((area.columns[0].group_ratios.iter().sum::<f32>() - 1.0).abs() < 1e-4);
+        assert_eq!(layout.canvas(), &original_canvas);
+        assert!(outcome.changed_nodes.contains(&group));
+        assert!(outcome.changed_nodes.contains(&new_group));
+        assert!(layout.validate(&metrics).is_ok());
+    }
+
+    #[test]
+    fn split_bottom_creates_a_new_group_after_target() {
+        use crate::{DockCommand, SplitSide};
+
+        let mut layout = initial_layout();
+        let metrics = metrics();
+        let group = tab_group_id(&layout, 0, 0);
+        let panel = match layout.nodes().get(group).expect("target group exists") {
+            Node::Tabs(tabs) => tabs.panels[0],
+            Node::Split(_) => panic!("Photoshop groups must be Tabs"),
+        };
+
+        layout.apply(
+            DockCommand::SplitGroup { panel, group, side: SplitSide::Bottom },
+            &metrics,
+        ).expect("bottom split should succeed");
+
+        let column = &layout.dock_areas()[0].columns[0];
+        let new_group = column.groups[1];
+        let Node::Tabs(tabs) = layout.nodes().get(new_group).expect("new group exists") else {
+            panic!("new group must be Tabs");
+        };
+        assert_eq!(tabs.panels, vec![panel]);
+        assert_eq!(column.groups.len(), 3);
+        assert!(layout.validate(&metrics).is_ok());
+    }
+
+    #[test]
+    fn split_left_and_right_create_adjacent_columns_and_preserve_width_rules() {
+        use crate::{DockCommand, SplitSide};
+
+        for side in [SplitSide::Left, SplitSide::Right] {
+            let mut layout = initial_layout();
+            let metrics = metrics();
+            let group = tab_group_id(&layout, 0, 0);
+            let panel = match layout.nodes().get(group).expect("target group exists") {
+                Node::Tabs(tabs) => tabs.panels[0],
+                Node::Split(_) => panic!("Photoshop groups must be Tabs"),
+            };
+
+            layout.apply(
+                DockCommand::SplitGroup { panel, group, side },
+                &metrics,
+            ).expect("lateral split should succeed");
+
+            let columns = &layout.dock_areas()[0].columns;
+            assert_eq!(columns.len(), 2);
+            let new_index = if side == SplitSide::Left { 0 } else { 1 };
+            let new_column = &columns[new_index];
+            assert!(new_column.width >= metrics.min_column_width);
+            assert!((new_column.group_ratios.iter().sum::<f32>() - 1.0).abs() < 1e-4);
+            let new_group = new_column.groups[0];
+            let Node::Tabs(tabs) = layout.nodes().get(new_group).expect("new group exists") else {
+                panic!("new group must be Tabs");
+            };
+            assert_eq!(tabs.panels, vec![panel]);
+            assert!(layout.validate(&metrics).is_ok());
+        }
+    }
+
+    #[test]
+    fn split_rejects_column_limit_without_changing_layout() {
+        use crate::{CommandError, DockCommand, SplitSide};
+
+        let mut layout = initial_layout();
+        let mut metrics = metrics();
+        metrics.max_columns = 1;
+        let group = tab_group_id(&layout, 0, 0);
+        let panel = match layout.nodes().get(group).expect("target group exists") {
+            Node::Tabs(tabs) => tabs.panels[0],
+            Node::Split(_) => panic!("Photoshop groups must be Tabs"),
+        };
+        let version_before = layout.version();
+        let groups_before = layout.dock_areas()[0].columns[0].groups.clone();
+
+        let error = layout.apply(
+            DockCommand::SplitGroup { panel, group, side: SplitSide::Left },
+            &metrics,
+        ).expect_err("maximum column count must be respected");
+
+        assert!(matches!(error, CommandError::ColumnLimitReached { maximum: 1 }));
+        assert_eq!(layout.version(), version_before);
+        assert_eq!(layout.dock_areas()[0].columns.len(), 1);
+        assert_eq!(layout.dock_areas()[0].columns[0].groups, groups_before);
+        assert!(layout.validate(&metrics).is_ok());
+    }
+
+    #[test]
+    fn split_rejects_panel_that_does_not_belong_to_target_group() {
+        use crate::{CommandError, DockCommand, SplitSide};
+
+        let mut layout = initial_layout();
+        let metrics = metrics();
+        let group = tab_group_id(&layout, 0, 0);
+        let other_group = tab_group_id(&layout, 0, 1);
+        let panel = match layout.nodes().get(other_group).expect("second group exists") {
+            Node::Tabs(tabs) => tabs.panels[0],
+            Node::Split(_) => panic!("Photoshop groups must be Tabs"),
+        };
+        let version_before = layout.version();
+
+        let error = layout.apply(
+            DockCommand::SplitGroup { panel, group, side: SplitSide::Top },
+            &metrics,
+        ).expect_err("panel must belong to target group");
+
+        assert!(matches!(error, CommandError::PanelNotInGroup { panel: error_panel, group: error_group }
+            if error_panel == panel && error_group == group));
+        assert_eq!(layout.version(), version_before);
+        assert!(layout.validate(&metrics).is_ok());
+    }
+
+    #[test]
+    fn vertical_split_of_a_single_panel_group_normalizes_without_empty_groups() {
+        use crate::{DockCommand, SplitSide};
+
+        let mut layout = initial_layout();
+        let metrics = metrics();
+        let group = tab_group_id(&layout, 0, 0);
+        let (panel_to_split, panel_to_close) = match layout.nodes().get(group).expect("target group exists") {
+            Node::Tabs(tabs) => (tabs.panels[0], tabs.panels[1]),
+            Node::Split(_) => panic!("Photoshop groups must be Tabs"),
+        };
+        layout.apply(DockCommand::ClosePanel { panel: panel_to_close }, &metrics)
+            .expect("leave one panel in the source group");
+        let refreshed_group = tab_group_id(&layout, 0, 0);
+
+        layout.apply(
+            DockCommand::SplitGroup {
+                panel: panel_to_split,
+                group: refreshed_group,
+                side: SplitSide::Top,
+            },
+            &metrics,
+        ).expect("splitting the only panel must normalize safely");
+
+        assert_eq!(layout.dock_areas()[0].columns[0].groups.len(), 2);
+        assert!(layout.validate(&metrics).is_ok());
+    }
+
 }
