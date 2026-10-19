@@ -1035,7 +1035,7 @@ mod tests {
     #[test]
     fn validation_rejects_a_panel_placed_in_dock_and_floating_group() {
         let mut layout = initial_layout();
-        let panel_id = *layout.panels.keys().next().expect("initial layout has panels");
+        let panel_id = layout.panels.keys().next().expect("initial layout has panels");
         layout.insert_floating_group(FloatingGroup {
             panels: vec![panel_id],
             active_index: 0,
