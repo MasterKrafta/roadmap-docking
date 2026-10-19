@@ -13,6 +13,7 @@ mod panel_state;
 mod profile;
 mod split;
 mod tabs;
+mod validation_error;
 
 pub use axis::Axis;
 pub use canvas_state::CanvasState;
@@ -29,3 +30,4 @@ pub use panel_state::PanelState;
 pub use profile::Profile;
 pub use split::Split;
 pub use tabs::Tabs;
+pub use validation_error::ValidationError;
