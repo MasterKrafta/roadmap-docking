@@ -44,6 +44,9 @@ pub enum CommandError {
     #[error("layout version counter overflowed")]
     VersionOverflow,
 
+    #[error("command is not implemented yet: {0}")]
+    UnsupportedCommand(String),
+
     #[error("command {command} is unsupported by profile {profile:?}")]
     UnsupportedForProfile { command: String, profile: Profile },
 }
