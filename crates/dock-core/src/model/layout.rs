@@ -1545,4 +1545,61 @@ mod tests {
         invalid.default_column_width = f32::NAN;
         assert!(Layout::initial_photoshop(&invalid).is_err());
     }
+
+    #[test]
+    fn activate_tab_updates_active_index_and_validates() {
+        use crate::DockCommand;
+        let mut layout = initial_layout();
+        let group = tab_group_id(&layout, 0, 0);
+        let outcome = layout.apply(DockCommand::ActivateTab { group, index: 1 }, &metrics())
+            .expect("valid tab activation");
+        let Node::Tabs(tabs) = layout.nodes().get(group).expect("group exists") else {
+            panic!("group must be tabs");
+        };
+        assert_eq!(tabs.active_index, 1);
+        assert_eq!(outcome.version, layout.version());
+        assert!(outcome.changed_nodes.contains(&group));
+        assert!(layout.validate(&metrics()).is_ok());
+    }
+
+    #[test]
+    fn close_and_reopen_panel_restores_a_valid_layout() {
+        use crate::DockCommand;
+        let mut layout = initial_layout();
+        let group = tab_group_id(&layout, 0, 0);
+        let panel = layout.nodes().get(group).and_then(|node| match node {
+            Node::Tabs(tabs) => tabs.panels.first().copied(),
+            Node::Split(_) => None,
+        }).expect("first panel exists");
+        let instance = layout.panels().get(panel).expect("panel exists").clone();
+        layout.apply(DockCommand::ClosePanel { panel }, &metrics()).expect("close panel");
+        assert!(!layout.panels().contains_key(panel));
+        assert!(layout.validate(&metrics()).is_ok());
+
+        layout.apply(DockCommand::OpenPanel {
+            key: instance.key().clone(),
+            constraints: instance.constraints().clone(),
+            target: None,
+        }, &metrics()).expect("reopen panel");
+        assert!(layout.panels().values().any(|candidate| candidate.key() == instance.key()));
+        assert!(layout.validate(&metrics()).is_ok());
+    }
+
+    #[test]
+    fn singleton_open_activates_existing_panel_without_duplicate() {
+        use crate::DockCommand;
+        let mut layout = initial_layout();
+        let before = layout.panels().len();
+        let panel = layout.panels().iter().find(|(_, panel)| panel.key().as_str() == "layers")
+            .map(|(id, _)| *id).expect("layers exists");
+        let instance = layout.panels().get(panel).expect("panel exists").clone();
+        layout.apply(DockCommand::OpenPanel {
+            key: instance.key().clone(),
+            constraints: instance.constraints().clone(),
+            target: None,
+        }, &metrics()).expect("reopening singleton activates it");
+        assert_eq!(layout.panels().len(), before);
+        assert!(layout.validate(&metrics()).is_ok());
+    }
+}
 }
