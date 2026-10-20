@@ -235,6 +235,7 @@ mod tests {
 
         let content = registry.create_content(&key).expect("content factory should run");
         let content = content
+            .as_ref()
             .as_any()
             .downcast_ref::<CustomPanelContent>()
             .expect("factory returns the registered panel's content type");
@@ -385,6 +386,7 @@ mod tests {
         let descriptor = registry.get_by_str("layers").expect("layers descriptor exists");
         let content = descriptor.create_content();
         let content = content
+            .as_ref()
             .as_any()
             .downcast_ref::<PlaceholderPanelContent>()
             .expect("built-in content uses a framework-neutral placeholder model");
