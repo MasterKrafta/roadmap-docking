@@ -732,6 +732,22 @@ mod tests {
             );
         }
 
+        for (key, expected_active) in [
+            ("layers", true),
+            ("color", false),
+            ("properties", true),
+            ("history", false),
+        ] {
+            let panel_id = panel_id(&layout, key);
+            let panel_rect = rects
+                .panels
+                .iter()
+                .find(|panel| panel.panel == panel_id)
+                .expect("panel geometry exists");
+            assert_eq!(panel_rect.active, expected_active, "{key}");
+            assert_eq!(panel_rect.floating, None, "{key}");
+        }
+
         let group_splitter = rects
             .splitters
             .iter()
