@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use dock_core::{
     Axis, ColumnMode, ColumnRef, CommandError, DockCommand, DockMetrics, DockSide, DropTarget,
     DropZone, FloatSource, FloatingGroupId, Layout, Node, NodeId, PanelConstraints, PanelId,
@@ -525,10 +523,10 @@ proptest! {
     #![proptest_config(ProptestConfig {
         cases: 96,
         max_shrink_iters: 4096,
-        failure_persistence: Some(Box::new(FileFailurePersistence::Direct(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("tests/regressions/command_sequences.txt")
-        ))),
+        failure_persistence: Some(Box::new(FileFailurePersistence::Direct(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/regressions/command_sequences.txt"
+        )))),
         .. ProptestConfig::default()
     })]
 
