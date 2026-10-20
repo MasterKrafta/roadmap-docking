@@ -179,33 +179,65 @@ impl MainWindow {
         if matches!(
             self.drag_session.state(),
             DragSessionState::Pressed { .. } | DragSessionState::Dragging { .. }
-        ) {
+        ) || self.floating_interaction.is_some()
+        {
             return;
         }
 
         self.focus_handle.focus(window, cx);
         let geometry = self.window_geometry(window);
         let origin = self.local_dock_point(position, &geometry);
-        if let DropPayload::Panel(panel) = payload {
-            if let Some(floating) = self
-                .layout
-                .floating_groups()
-                .iter()
-                .find_map(|(floating, group)| group.panels.contains(&panel).then_some(floating))
-            {
+        self.floating_drag = None;
+
+        match payload {
+            DropPayload::Panel(panel) => {
+                if let Some(floating) = self
+                    .layout
+                    .floating_groups()
+                    .iter()
+                    .find_map(|(floating, group)| group.panels.contains(&panel).then_some(floating))
+                {
+                    if let Err(error) = self
+                        .layout
+                        .apply(DockCommand::RaiseFloating { floating }, &self.metrics)
+                    {
+                        eprintln!("Could not raise floating group {floating:?} for tab drag: {error}");
+                        return;
+                    }
+                }
+            }
+            DropPayload::FloatingGroup(floating) => {
+                let Some(initial_bounds) = geometry
+                    .rects
+                    .floating_groups
+                    .iter()
+                    .find(|rect| rect.floating == floating)
+                    .map(|rect| rect.bounds)
+                else {
+                    return;
+                };
                 if let Err(error) = self
                     .layout
                     .apply(DockCommand::RaiseFloating { floating }, &self.metrics)
                 {
-                    eprintln!("Could not raise floating group {floating:?} for tab drag: {error}");
+                    eprintln!("Could not raise floating group {floating:?} for group drag: {error}");
                     return;
                 }
+                self.floating_drag = Some(FloatingDragState {
+                    floating,
+                    pointer_origin: origin,
+                    initial_bounds,
+                    current_bounds: initial_bounds,
+                });
             }
+            DropPayload::Group(_) => {}
         }
 
-        if self.drag_session.press(payload, origin) {
-            cx.notify();
+        if !self.drag_session.press(payload, origin) {
+            self.floating_drag = None;
+            return;
         }
+        cx.notify();
     }
 
     fn cancel_panel_drag(&mut self, cx: &mut Context<Self>) {
@@ -2185,9 +2217,9 @@ where
                         )
                     })
                     .child({
-                        let begin_move = on_begin_interaction.clone();
                         let activate = on_activate.clone();
-                        let start_drag = on_start_drag.clone();
+                        let start_tab_drag = on_start_drag.clone();
+                        let start_group_drag = on_start_drag.clone();
                         panel_group_header(
                             theme,
                             width,
@@ -2196,10 +2228,15 @@ where
                             tabs,
                             move |tab_index, app| activate(floating_id, tab_index, app),
                             move |panel_id, position, window, app| {
-                                start_drag(DropPayload::Panel(panel_id), position, window, app)
+                                start_tab_drag(DropPayload::Panel(panel_id), position, window, app)
                             },
                             move |position, window, app| {
-                                begin_move(floating_id, None, position, window, app)
+                                start_group_drag(
+                                    DropPayload::FloatingGroup(floating_id),
+                                    position,
+                                    window,
+                                    app,
+                                )
                             },
                         )
                     })
