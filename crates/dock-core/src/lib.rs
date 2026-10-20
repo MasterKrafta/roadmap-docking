@@ -9,7 +9,7 @@ pub use command::{
     SplitSide,
 };
 pub use geometry::{
-    compute_rects, ColumnHeaderRect, ColumnRect, DockAreaRect, DockMetrics, DropZoneRect,
+    compute_rects, hit_test, ColumnHeaderRect, ColumnRect, DockAreaRect, DockMetrics, DropZoneRect,
     FloatingGroupRect, FloatingResizeEdgeRect, FloatingTitleRect, GroupRect, HitResult,
     LayoutRects, PanelRect, Point, Rect, ResizeEdge, Size, SplitterKind, SplitterRect,
     TabHeaderRect, TabStripRect,
