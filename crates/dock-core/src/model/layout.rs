@@ -2402,7 +2402,7 @@ mod tests {
     #[test]
     fn resize_groups_clamps_both_directions_and_reports_actual_delta() {
         use crate::command::ColumnRef;
-        use crate::{DockCommand, CommandError};
+        use crate::DockCommand;
 
         let metrics = metrics();
         for (requested_delta, expected_delta) in [(500.0_f32, 170.0_f32), (-500.0, -170.0)] {
@@ -2430,8 +2430,7 @@ mod tests {
             assert!(layout.validate(&metrics).is_ok());
 
             // A clamped drag is a successful command, not an error.
-            assert!(!matches!(outcome.actual_value, None));
-            let _ = CommandError::UnsupportedCommand("unused".to_owned());
+            assert!(outcome.actual_value.is_some());
         }
     }
 
