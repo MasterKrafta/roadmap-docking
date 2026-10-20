@@ -2,7 +2,7 @@ use crate::geometry::Rect;
 use crate::ids::{FloatingGroupId, NodeId, PanelId};
 use crate::model::DockSide;
 
-use super::{ResizeEdge, SplitterKind};
+use super::{ColumnRect, DockAreaRect, GroupRect, ResizeEdge, SplitterKind, TabStripRect};
 
 /// Rectangles produced by layout geometry, all expressed in logical pixels.
 ///
@@ -12,8 +12,16 @@ use super::{ResizeEdge, SplitterKind};
 #[derive(Clone, Debug, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct LayoutRects {
-    /// Protected document/canvas region.
+    /// Protected document/canvas region; it receives the remaining window width.
     pub canvas: Rect,
+    /// Full-height rectangles for left/right dock areas.
+    pub dock_areas: Vec<DockAreaRect>,
+    /// Full-height rectangles for columns, including their shared headers.
+    pub columns: Vec<ColumnRect>,
+    /// Rectangles for stacked dock groups, including tab strips and content.
+    pub groups: Vec<GroupRect>,
+    /// Rectangles for complete tab strips.
+    pub tab_strips: Vec<TabStripRect>,
     /// Content rectangles for panel instances.
     pub panels: Vec<PanelRect>,
     /// Tab-header rectangles, in tab-strip order for each group.
@@ -94,6 +102,10 @@ mod tests {
     fn layout_rects_default_to_empty_collections_and_zero_canvas() {
         let rects = LayoutRects::default();
         assert_eq!(rects.canvas, Rect::default());
+        assert!(rects.dock_areas.is_empty());
+        assert!(rects.columns.is_empty());
+        assert!(rects.groups.is_empty());
+        assert!(rects.tab_strips.is_empty());
         assert!(rects.panels.is_empty());
         assert!(rects.tab_headers.is_empty());
         assert!(rects.column_headers.is_empty());
@@ -110,6 +122,17 @@ mod tests {
         let floating = FloatingGroupId::null();
         let rects = LayoutRects {
             canvas: rect(0.0, 0.0, 1280.0, 720.0),
+            dock_areas: vec![DockAreaRect {
+                side: DockSide::Right,
+                bounds: rect(1000.0, 0.0, 280.0, 720.0),
+            }],
+            columns: vec![ColumnRect {
+                side: DockSide::Right,
+                index: 0,
+                bounds: rect(1000.0, 0.0, 280.0, 720.0),
+            }],
+            groups: vec![GroupRect { group, bounds }],
+            tab_strips: vec![TabStripRect { group, bounds }],
             panels: vec![PanelRect { panel, bounds }],
             tab_headers: vec![TabHeaderRect { group, index: 1, bounds }],
             column_headers: vec![ColumnHeaderRect { side: DockSide::Right, index: 0, bounds }],
