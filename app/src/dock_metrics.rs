@@ -52,33 +52,21 @@ mod tests {
     fn geometry_width_matches_default_registered_right_dock_width() {
         let theme = Theme::default();
         let metrics = build(&theme);
-        let mut layout = Layout::new(Profile::Photoshop, CanvasState::default());
-        let constraints = dock_core::PanelConstraints::new(
-            Size::new(metrics.min_column_width, metrics.min_group_height),
-            Size::new(metrics.default_column_width, metrics.min_group_height),
-            Size::new(f32::MAX, f32::MAX),
-            true,
-        );
-        let panel_key = dock_core::PanelKey::new("metric-probe").expect("valid panel key");
-        let panel = layout.insert_panel(dock_core::PanelInstance::new(panel_key, constraints));
-        let group = layout.insert_node(dock_core::Node::Tabs(dock_core::Tabs {
-            panels: vec![panel],
-            active_index: 0,
-        }));
-        layout.push_dock_area(dock_core::DockArea {
-            side: DockSide::Right,
-            columns: vec![dock_core::Column {
-                width: metrics.default_column_width,
-                mode: dock_core::ColumnMode::Expanded,
-                groups: vec![group],
-                group_ratios: vec![1.0],
-            }],
-        });
+        let registry = crate::panels::PanelRegistry::with_builtins()
+            .expect("built-in panel descriptors are valid");
+        let layout = registry
+            .build_initial_photoshop_layout(&metrics)
+            .expect("built-in panels form a valid model layout");
 
         let rects = compute_rects(&layout, Size::new(1000.0, 600.0), &metrics);
-        assert_eq!(rects.dock_areas[0].bounds.size.width, theme.metrics.default_column_width);
+        let right_dock = rects
+            .dock_areas
+            .iter()
+            .find(|area| area.side == DockSide::Right)
+            .expect("the initial Photoshop layout has a right dock");
+        assert_eq!(right_dock.bounds.size.width, theme.metrics.default_column_width);
         assert_eq!(
-            rects.canvas.size.width + rects.dock_areas[0].bounds.size.width,
+            rects.canvas.size.width + right_dock.bounds.size.width,
             1000.0
         );
     }
