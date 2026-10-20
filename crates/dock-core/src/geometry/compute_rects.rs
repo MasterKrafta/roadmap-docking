@@ -8,7 +8,7 @@ use crate::model::{DockSide, Layout, Node};
 /// Compute logical rectangles for the static dock, Canvas, and in-window floating groups.
 ///
 /// Dock column widths are fixed by the model; the Canvas receives the remaining width.
- /// Group heights follow their ratios while respecting minimum heights. If minimums cannot
+/// Group heights follow their ratios while respecting minimum heights. If minimums cannot
 /// fit in the viewport, groups retain their minimum sizes and the column is marked as
 /// vertically overflowing for a scrolling adapter. Floating groups are clamped to the
 /// client bounds and returned separately in ascending z-order so they can be painted last.
@@ -131,7 +131,7 @@ pub fn compute_rects(layout: &Layout, window: Size, metrics: &DockMetrics) -> La
                     });
 
                     let content_bounds = Rect::new(
-                        Point::new(column_x, y + strip_height),
+                        Point::new(column_x, finite_position_add(y, strip_height)),
                         Size::new(column_width, nonnegative_finite(group_height - strip_height)),
                     );
                     for panel in &tabs.panels {
@@ -144,13 +144,17 @@ pub fn compute_rects(layout: &Layout, window: Size, metrics: &DockMetrics) -> La
                     if !tabs.panels.is_empty() {
                         let tab_count = tabs.panels.len();
                         for (tab_index, _) in tabs.panels.iter().enumerate() {
-                            let left = column_x
-                                + column_width * (tab_index as f32 / tab_count as f32);
+                            let left = finite_position_add(
+                                column_x,
+                                column_width * (tab_index as f32 / tab_count as f32),
+                            );
                             let right = if tab_index + 1 == tab_count {
-                                column_x + column_width
+                                finite_position_add(column_x, column_width)
                             } else {
-                                column_x
-                                    + column_width * ((tab_index + 1) as f32 / tab_count as f32)
+                                finite_position_add(
+                                    column_x,
+                                    column_width * ((tab_index + 1) as f32 / tab_count as f32),
+                                )
                             };
                             rects.tab_headers.push(TabHeaderRect {
                                 group: group_id,
@@ -783,8 +787,9 @@ mod tests {
             },
             &metrics,
         ).expect("valid initial floating rectangle");
-        let rects = compute_rects(&layout, Size::new(0.0, 0.0), &metrics);
+        let rects = compute_rects(&layout, Size::new(f32::NAN, f32::INFINITY), &metrics);
         assert_eq!(rects.canvas.size, Size::new(0.0, 0.0));
+        assert!(rects.floating_groups.iter().all(|group| group.bounds.size == Size::new(0.0, 0.0)));
         for bounds in std::iter::once(rects.canvas)
             .chain(rects.dock_areas.iter().map(|area| area.bounds))
             .chain(rects.columns.iter().map(|column| column.bounds))
