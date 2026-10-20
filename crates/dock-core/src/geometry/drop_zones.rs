@@ -129,6 +129,21 @@ pub fn resolve_drop(
         return None;
     }
 
+    // Do not click/drop through the frontmost floating window if its own target
+    // is invalid for this payload (for example, dropping a group onto itself).
+    for floating_rect in rects.floating_groups.iter().rev() {
+        if !contains(floating_rect.bounds, point)
+            || !layout.floating_groups().contains_key(floating_rect.floating)
+        {
+            continue;
+        }
+        let target = DropTarget::FloatingGroup {
+            floating: floating_rect.floating,
+            zone: DropZone::Center,
+        };
+        return valid_target(layout, payload, &target, metrics).then_some(target);
+    }
+
     let zones = compute_drop_zones(layout, rects, payload, metrics);
     let zone = zones.iter().find(|zone| contains(zone.bounds, point))?;
     match &zone.target {
@@ -933,6 +948,51 @@ mod tests {
                 &layout,
                 Point::new(480.0, 320.0),
                 DropPayload::FloatingGroup(floating),
+                &rects,
+                &metrics,
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn dropping_on_a_frontmost_floating_group_does_not_fall_through() {
+        let metrics = metrics();
+        let mut layout = Layout::initial_photoshop(&metrics).unwrap();
+        let first_panel = panel_id(&layout, "layers");
+        let second_panel = panel_id(&layout, "properties");
+        let bounds = rect(320.0, 200.0, 320.0, 240.0);
+        layout
+            .apply(
+                DockCommand::Float {
+                    source: FloatSource::Panel(first_panel),
+                    rect: bounds,
+                },
+                &metrics,
+            )
+            .expect("first panel should float");
+        layout
+            .apply(
+                DockCommand::Float {
+                    source: FloatSource::Panel(second_panel),
+                    rect: bounds,
+                },
+                &metrics,
+            )
+            .expect("second panel should float");
+
+        let mut floating: Vec<_> = layout.floating_groups().iter().collect();
+        floating.sort_by_key(|(_, group)| group.z_order);
+        let bottom = *floating[0].0;
+        let top = *floating[1].0;
+        let rects = geometry(&layout, &metrics);
+        assert_ne!(bottom, top);
+
+        assert_eq!(
+            resolve_drop(
+                &layout,
+                Point::new(480.0, 320.0),
+                DropPayload::FloatingGroup(top),
                 &rects,
                 &metrics,
             ),
