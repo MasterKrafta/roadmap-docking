@@ -10,6 +10,7 @@ mod group_rect;
 mod hit_result;
 mod hit_test;
 mod layout_rects;
+mod pixel_snap;
 mod point;
 mod rect;
 mod resize_edge;
@@ -32,6 +33,7 @@ pub use layout_rects::{
     ColumnHeaderRect, FloatingResizeEdgeRect, FloatingTitleRect, LayoutRects, PanelRect,
     SplitterRect, TabHeaderRect,
 };
+pub use pixel_snap::{snap_logical_to_physical_pixel, snap_rect_to_physical_pixels};
 pub use point::Point;
 pub use rect::Rect;
 pub use resize_edge::ResizeEdge;
