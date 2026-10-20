@@ -45,6 +45,10 @@ pub struct LayoutRects {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PanelRect {
     pub panel: PanelId,
+    /// Floating container for this panel, or None when it belongs to the dock.
+    pub floating: Option<FloatingGroupId>,
+    /// Whether this panel is the visible/active tab in its container.
+    pub active: bool,
     pub bounds: Rect,
 }
 
@@ -140,7 +144,7 @@ mod tests {
             groups: vec![GroupRect { group, bounds }],
             tab_strips: vec![TabStripRect { group, bounds }],
             floating_groups: vec![],
-            panels: vec![PanelRect { panel, bounds }],
+            panels: vec![PanelRect { panel, floating: None, active: true, bounds }],
             tab_headers: vec![TabHeaderRect { group, index: 1, bounds }],
             column_headers: vec![ColumnHeaderRect { side: DockSide::Right, index: 0, bounds }],
             splitters: vec![SplitterRect { kind: SplitterKind::Group, index: 0, bounds }],
