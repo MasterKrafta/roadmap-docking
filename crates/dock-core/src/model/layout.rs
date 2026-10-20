@@ -544,7 +544,12 @@ impl Layout {
                     return Err(CommandError::UnknownGroup(group));
                 };
                 let area_index = self.dock_areas.iter()
-                    .position(|area| area.side == side)
+                    .position(|area| {
+                        area.side == side
+                            && area.columns.get(column_index)
+                                .and_then(|column| column.groups.get(group_index))
+                                == Some(&group)
+                    })
                     .ok_or(CommandError::UnknownGroup(group))?;
                 let (panels, active_index) = match self.nodes.get(group) {
                     Some(Node::Tabs(tabs)) if !tabs.panels.is_empty() => {
@@ -1522,7 +1527,7 @@ impl Layout {
                 (group, index)
             }
             _ => return Err(CommandError::InvalidDropTarget(
-                "R3.3 MovePanel only supports insertion into an existing dock group".to_owned()
+                "MovePanel supports existing dock groups and the Center zone of floating groups".to_owned()
             )),
         };
 
