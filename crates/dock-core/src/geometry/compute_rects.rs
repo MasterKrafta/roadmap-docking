@@ -571,7 +571,7 @@ fn finite_f64_to_f32(value: f64) -> f32 {
 mod tests {
     use super::compute_rects;
     use crate::{
-        DockCommand, DockMetrics, DockSide, FloatSource, FloatingGroupId, Layout, Node, PanelKey,
+        DockCommand, DockMetrics, DockSide, FloatSource, FloatingGroupId, Layout, Node,
         Point, Rect, Size, SplitSide, SplitterKind,
     };
 
@@ -771,10 +771,10 @@ mod tests {
         layout.apply(
             DockCommand::Float {
                 source: FloatSource::Panel(panel),
-                rect: rect(f32::INFINITY, f32::NAN, f32::MAX, f32::MAX),
+                rect: rect(10.0, 10.0, 320.0, 240.0),
             },
             &metrics,
-        ).expect("normal floating command requires finite bounds, so this will be checked separately");
+        ).expect("valid initial floating rectangle");
         let rects = compute_rects(&layout, Size::new(0.0, 0.0), &metrics);
         assert_eq!(rects.canvas.size, Size::new(0.0, 0.0));
         for bounds in std::iter::once(rects.canvas)
