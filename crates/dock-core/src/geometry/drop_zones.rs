@@ -247,10 +247,10 @@ fn append_tab_insertion_zones(
             continue;
         }
 
-        // Preserve the intentional neutral space near group/column splitters. The
-        // insertion marker itself remains full-height, but the drag target uses only
-        // the lower quarter of the strip, which lies inside the group's Center region.
-        let hit_top = strip.bounds.origin.y + strip.bounds.size.height * 0.75;
+        // Keep the insertion hit band below the splitter-to-Center transition.
+        // The marker remains full-height, but the hit band is inset another 2 px so
+        // the Center target can win immediately after the neutral split gap.
+        let hit_top = strip.bounds.origin.y + strip.bounds.size.height * 0.75 + 2.0;
         let hit_height =
             (strip.bounds.origin.y + strip.bounds.size.height - hit_top).max(0.0);
         if hit_height <= 0.0 {
