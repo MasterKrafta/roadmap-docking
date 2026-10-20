@@ -331,8 +331,8 @@ mod tests {
         PanelMenuSource, PlaceholderPanelContent, RegistryError,
     };
     use dock_core::{
-        CanvasState, DockCommand, DockMetrics, DropTarget, Layout, PanelConstraints, PanelKey,
-        Point, Profile, Rect, Size,
+        CanvasState, DockCommand, DockMetrics, DockSide, DropTarget, Layout, PanelConstraints,
+        PanelKey, Point, Profile, Rect, Size,
     };
 
     #[derive(Clone, Debug, PartialEq, Eq)]
