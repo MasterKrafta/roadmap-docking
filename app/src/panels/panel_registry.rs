@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-use dock_core::{DockCommand, DropTarget, DropZone, PanelConstraints, PanelKey, Size};
+use dock_core::{
+    CanvasState, DockCommand, DockMetrics, DockSide, DropTarget, DropZone, Layout, Node, NodeId,
+    PanelConstraints, PanelId, PanelKey, Profile, Size, SplitSide,
+};
 
 use super::{
     AllowedArea, IconResource, PanelContent, PanelContentFactory, PanelDescriptor, PanelMenuItem,
@@ -51,6 +54,113 @@ impl PanelRegistry {
             registry.register(descriptor)?;
         }
         Ok(registry)
+    }
+
+    /// Build the initial Photoshop panel composition entirely from registered descriptors.
+    ///
+    /// The layout model receives only panel keys and descriptor constraints; the placeholder
+    /// content, icons, and factories remain in the application layer. The composition starts
+    /// with Layers/Color in the upper tab group and Properties/History in the lower tab group.
+    pub fn build_initial_photoshop_layout(
+        &self,
+        metrics: &DockMetrics,
+    ) -> Result<Layout, RegistryError> {
+        metrics
+            .validate()
+            .map_err(|reason| RegistryError::LayoutBuildFailed(reason.to_owned()))?;
+
+        let mut layout = Layout::new(Profile::Photoshop, CanvasState::default());
+        let layers_key = PanelKey::new("layers")
+            .expect("built-in panel key is valid");
+        let color_key = PanelKey::new("color")
+            .expect("built-in panel key is valid");
+        let properties_key = PanelKey::new("properties")
+            .expect("built-in panel key is valid");
+        let history_key = PanelKey::new("history")
+            .expect("built-in panel key is valid");
+
+        self.open_into_layout(&mut layout, &layers_key, None, metrics)?;
+        let layers_panel = panel_id_by_key(&layout, &layers_key).ok_or_else(|| {
+            RegistryError::LayoutBuildFailed(
+                "opening Layers did not create a panel instance".to_owned(),
+            )
+        })?;
+        let main_group = group_for_panel(&layout, layers_panel).ok_or_else(|| {
+            RegistryError::LayoutBuildFailed(
+                "opening Layers did not create a dock tab group".to_owned(),
+            )
+        })?;
+
+        self.open_into_layout(
+            &mut layout,
+            &color_key,
+            Some(DropTarget::Group {
+                group: main_group,
+                zone: DropZone::Center,
+            }),
+            metrics,
+        )?;
+        self.open_into_layout(
+            &mut layout,
+            &properties_key,
+            Some(DropTarget::Group {
+                group: main_group,
+                zone: DropZone::Center,
+            }),
+            metrics,
+        )?;
+
+        let properties_panel = panel_id_by_key(&layout, &properties_key).ok_or_else(|| {
+            RegistryError::LayoutBuildFailed(
+                "opening Properties did not create a panel instance".to_owned(),
+            )
+        })?;
+        layout
+            .apply(
+                DockCommand::SplitGroup {
+                    panel: properties_panel,
+                    group: main_group,
+                    side: SplitSide::Bottom,
+                },
+                metrics,
+            )
+            .map_err(|error| RegistryError::LayoutBuildFailed(error.to_string()))?;
+
+        let properties_group = group_for_panel(&layout, properties_panel).ok_or_else(|| {
+            RegistryError::LayoutBuildFailed(
+                "splitting Properties did not create a dock tab group".to_owned(),
+            )
+        })?;
+        self.open_into_layout(
+            &mut layout,
+            &history_key,
+            Some(DropTarget::Group {
+                group: properties_group,
+                zone: DropZone::Center,
+            }),
+            metrics,
+        )?;
+
+        layout
+            .validate(metrics)
+            .map_err(|errors| RegistryError::LayoutBuildFailed(
+                errors.into_iter().map(|error| error.to_string()).collect::<Vec<_>>().join("; "),
+            ))?;
+        Ok(layout)
+    }
+
+    fn open_into_layout(
+        &self,
+        layout: &mut Layout,
+        key: &PanelKey,
+        target: Option<DropTarget>,
+        metrics: &DockMetrics,
+    ) -> Result<(), RegistryError> {
+        let command = self.open_command(key, target)?;
+        layout
+            .apply(command, metrics)
+            .map_err(|error| RegistryError::LayoutBuildFailed(error.to_string()))?;
+        Ok(())
     }
 
     pub fn register(&mut self, descriptor: PanelDescriptor) -> Result<(), RegistryError> {
@@ -169,6 +279,20 @@ impl PanelRegistry {
             target,
         })
     }
+}
+
+fn panel_id_by_key(layout: &Layout, key: &PanelKey) -> Option<PanelId> {
+    layout
+        .panels()
+        .iter()
+        .find_map(|(panel_id, panel)| (panel.key() == key).then_some(panel_id))
+}
+
+fn group_for_panel(layout: &Layout, panel_id: PanelId) -> Option<NodeId> {
+    layout.nodes().iter().find_map(|(node_id, node)| match node {
+        Node::Tabs(tabs) if tabs.panels.contains(&panel_id) => Some(node_id),
+        Node::Tabs(_) | Node::Split(_) => None,
+    })
 }
 
 fn builtin_descriptor(
@@ -424,6 +548,110 @@ mod tests {
         assert_eq!(content.panel_key.as_str(), "layers");
         assert_eq!(content.heading, "Layers");
         assert!(content.message.contains("visibility"));
+    }
+
+    #[test]
+    fn all_four_builtin_panels_create_their_own_placeholder_content() {
+        let registry = PanelRegistry::with_builtins().expect("built-ins are valid");
+        let expected = [
+            ("layers", "Layers", "Layer stack and visibility controls."),
+            (
+                "color",
+                "Color",
+                "Color selection and foreground/background swatches.",
+            ),
+            (
+                "properties",
+                "Properties",
+                "Properties for the selected document object.",
+            ),
+            ("history", "History", "Recent editing operations."),
+        ];
+
+        for (key, heading, message) in expected {
+            let panel_key = PanelKey::new(key).expect("built-in key is valid");
+            let content = registry
+                .create_content(&panel_key)
+                .expect("each built-in panel has a content factory");
+            let content = content
+                .as_ref()
+                .as_any()
+                .downcast_ref::<PlaceholderPanelContent>()
+                .expect("built-in factories return simple placeholder content");
+
+            assert_eq!(content.panel_key, panel_key);
+            assert_eq!(content.heading, heading);
+            assert_eq!(content.message, message);
+        }
+    }
+
+    #[test]
+    fn builtins_create_a_valid_model_layout_using_descriptor_constraints() {
+        use dock_core::Node;
+
+        let registry = PanelRegistry::with_builtins().expect("built-ins are valid");
+        let metrics = DockMetrics {
+            column_header_height: 32.0,
+            tab_strip_height: 28.0,
+            splitter_thickness: 4.0,
+            splitter_hit_zone: 8.0,
+            edge_drop_zone_width: 24.0,
+            drop_edge_zone: 24.0,
+            drag_start_threshold: 4.0,
+            default_column_width: 280.0,
+            min_column_width: 200.0,
+            rail_width: 36.0,
+            min_group_height: 80.0,
+            collapsed_group_height: 28.0,
+            min_document_width: 320.0,
+            max_columns: 4,
+        };
+
+        let layout = registry
+            .build_initial_photoshop_layout(&metrics)
+            .expect("registered test panels should form a valid initial layout");
+
+        assert_eq!(layout.panels().len(), 4);
+        assert_eq!(layout.dock_areas().len(), 1);
+        assert_eq!(layout.dock_areas()[0].side, DockSide::Right);
+        assert_eq!(layout.dock_areas()[0].columns.len(), 1);
+
+        let column = &layout.dock_areas()[0].columns[0];
+        assert_eq!(column.groups.len(), 2);
+        let group_keys: Vec<Vec<&str>> = column
+            .groups
+            .iter()
+            .map(|group_id| match layout.nodes().get(*group_id).expect("group exists") {
+                Node::Tabs(tabs) => tabs
+                    .panels
+                    .iter()
+                    .map(|panel_id| {
+                        layout
+                            .panels()
+                            .get(*panel_id)
+                            .expect("tab references a panel")
+                            .key()
+                            .as_str()
+                    })
+                    .collect(),
+                Node::Split(_) => panic!("Photoshop dock groups must be tab nodes"),
+            })
+            .collect();
+        assert_eq!(
+            group_keys,
+            vec![vec!["layers", "color"], vec!["properties", "history"]]
+        );
+
+        for descriptor in registry.descriptors() {
+            let instances: Vec<_> = layout
+                .panels()
+                .values()
+                .filter(|panel| panel.key() == descriptor.key())
+                .collect();
+            assert_eq!(instances.len(), 1, "one instance for {}", descriptor.key().as_str());
+            assert_eq!(instances[0].constraints(), &descriptor.constraints());
+        }
+        assert!(layout.validate(&metrics).is_ok());
     }
 
     #[test]
