@@ -176,7 +176,8 @@ mod tests {
         PanelMenuSource, PlaceholderPanelContent, RegistryError,
     };
     use dock_core::{
-        DockCommand, DropTarget, PanelConstraints, PanelKey, Point, Rect, Size,
+        CanvasState, DockCommand, DockMetrics, DropTarget, Layout, PanelConstraints, PanelKey,
+        Point, Profile, Rect, Size,
     };
 
     #[derive(Clone, Debug, PartialEq, Eq)]
@@ -252,7 +253,7 @@ mod tests {
             .open_command(&key, None)
             .expect("registered descriptor should produce OpenPanel");
         assert!(matches!(
-            command,
+            command.clone(),
             DockCommand::OpenPanel { key: command_key, constraints, target: None }
                 if command_key == key
                     && constraints == PanelConstraints::new(
@@ -262,6 +263,42 @@ mod tests {
                         false,
                     )
         ));
+
+        let metrics = DockMetrics {
+            column_header_height: 32.0,
+            tab_strip_height: 28.0,
+            splitter_thickness: 4.0,
+            splitter_hit_zone: 8.0,
+            edge_drop_zone_width: 24.0,
+            drop_edge_zone: 24.0,
+            drag_start_threshold: 4.0,
+            default_column_width: 280.0,
+            min_column_width: 200.0,
+            rail_width: 36.0,
+            min_group_height: 80.0,
+            collapsed_group_height: 28.0,
+            min_document_width: 320.0,
+            max_columns: 4,
+        };
+        let mut layout = Layout::new(Profile::Photoshop, CanvasState::default());
+        layout
+            .apply(command, &metrics)
+            .expect("the core should open a registered app panel from the generated command");
+        let instance = layout
+            .panels()
+            .values()
+            .find(|panel| panel.key().as_str() == "custom.adjustments")
+            .expect("core created the custom panel instance");
+        assert_eq!(
+            instance.constraints(),
+            &PanelConstraints::new(
+                Size::new(120.0, 80.0),
+                Size::new(240.0, 160.0),
+                Size::new(640.0, 480.0),
+                false,
+            )
+        );
+        assert!(layout.validate(&metrics).is_ok());
     }
 
     #[test]
