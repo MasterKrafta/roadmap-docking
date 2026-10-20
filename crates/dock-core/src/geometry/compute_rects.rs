@@ -136,9 +136,11 @@ pub fn compute_rects(layout: &Layout, window: Size, metrics: &DockMetrics) -> La
                         Point::new(column_x, finite_position_add(y, strip_height)),
                         Size::new(column_width, nonnegative_finite(group_height - strip_height)),
                     );
-                    for panel in &tabs.panels {
+                    for (panel_index, panel) in tabs.panels.iter().copied().enumerate() {
                         rects.panels.push(PanelRect {
-                            panel: *panel,
+                            panel,
+                            floating: None,
+                            active: panel_index == tabs.active_index,
                             bounds: content_bounds,
                         });
                     }
@@ -248,9 +250,11 @@ pub fn compute_rects(layout: &Layout, window: Size, metrics: &DockMetrics) -> La
             Point::new(bounds.origin.x, panel_content_y),
             Size::new(bounds.size.width, panel_content_height),
         );
-        for panel in &floating.panels {
+        for (panel_index, panel) in floating.panels.iter().copied().enumerate() {
             rects.panels.push(PanelRect {
-                panel: *panel,
+                panel,
+                floating: Some(floating_id),
+                active: panel_index == floating.active_index,
                 bounds: panel_bounds,
             });
         }
