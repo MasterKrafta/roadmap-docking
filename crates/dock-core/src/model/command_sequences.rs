@@ -101,7 +101,7 @@ fn generated_command(
     let floating: Vec<FloatingGroupId> = layout.floating_groups().keys().collect();
     let pairs = adjacent_column_pairs(layout);
 
-    match operation % 17 {
+    match operation % 16 {
         0 => {
             if groups.is_empty() {
                 return None;
@@ -337,14 +337,7 @@ fn generated_command(
                 target,
             })
         }
-        _ => {
-            if columns.is_empty() {
-                return None;
-            }
-            Some(DockCommand::ResetColumnRatios {
-                column: choose(&columns, a),
-            })
-        }
+        _ => None,
     }
 }
 
