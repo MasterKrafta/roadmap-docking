@@ -7,9 +7,9 @@ use super::DropPayload;
 
 // A wider hover band makes horizontal splitting easier to target than the resize handle alone.
 // The preview remains anchored to the actual splitter rectangle.
-const GROUP_SPLIT_DROP_ZONE_MIN_HEIGHT: f32 = 24.0;
+const HORIZONTAL_DROP_ZONE_MIN_HEIGHT: f32 = 24.0;
 /// Neutral pointer space separating split and center targets.
-const GROUP_SPLIT_CENTER_GAP: f32 = 8.0;
+const DROP_ZONE_CENTER_GAP: f32 = 8.0;
 
 /// Build data-only rectangles for the docking overlay.
 ///
@@ -286,6 +286,7 @@ fn append_column_end_zones(
     if requested_height <= 0.0 {
         return;
     }
+    let requested_height = requested_height.max(HORIZONTAL_DROP_ZONE_MIN_HEIGHT);
 
     for column in &rects.columns {
         if !valid_rect(column.bounds) {
@@ -410,7 +411,7 @@ fn append_group_splitter_zones(
 /// vertical centers of the two groups so the target cannot swallow either center.
 fn group_split_drop_bounds(splitter: Rect, previous: Rect, next: Rect) -> Rect {
     let splitter_center_y = splitter.origin.y + splitter.size.height * 0.5;
-    let desired_height = GROUP_SPLIT_DROP_ZONE_MIN_HEIGHT.max(splitter.size.height);
+    let desired_height = HORIZONTAL_DROP_ZONE_MIN_HEIGHT.max(splitter.size.height);
     let top_limit = previous.origin.y + previous.size.height * 0.5;
     let bottom_limit = next.origin.y + next.size.height * 0.5;
     let top = (splitter_center_y - desired_height * 0.5).max(top_limit);
@@ -444,9 +445,54 @@ fn append_group_zones(
         let mut center_top = bounds.origin.y;
         let mut center_bottom = group_bottom;
 
-        // Keep a neutral vertical gap between the wider split target and this
-        // group's center target. During a drag the pointer can cross this band
-        // without immediately switching from Center to Split (or vice versa).
+        // The first and last group also need a neutral gap between their Center
+        // target and the column-level Top / Bottom targets.
+        if let Some(column) = rects.columns.iter().find(|column| {
+            column.bounds.origin.x == bounds.origin.x
+                && column.bounds.size.width == bounds.size.width
+        }) {
+            let column_bounds = column.bounds;
+            let column_bottom = column_bounds.origin.y + column_bounds.size.height;
+            let column_ref = ColumnRef::new(column.side, column.index);
+            let height = finite_positive(metrics.splitter_hit_zone)
+                .max(HORIZONTAL_DROP_ZONE_MIN_HEIGHT)
+                .min(column_bounds.size.height * 0.5);
+            let header_bottom = rects
+                .column_headers
+                .iter()
+                .find(|header| header.side == column.side && header.index == column.index)
+                .filter(|header| valid_rect(header.bounds))
+                .map(|header| header.bounds.origin.y + header.bounds.size.height)
+                .unwrap_or(column_bounds.origin.y)
+                .max(column_bounds.origin.y)
+                .min(column_bottom);
+
+            if (bounds.origin.y - header_bottom).abs() < 0.001 {
+                let target = DropTarget::Column {
+                    column: column_ref,
+                    zone: DropZone::Top,
+                };
+                if valid_target(layout, payload, &target, metrics) {
+                    let top_zone_bottom = (header_bottom + height * 0.5).min(column_bottom);
+                    center_top = center_top.max(top_zone_bottom + DROP_ZONE_CENTER_GAP);
+                }
+            }
+
+            if (group_bottom - column_bottom).abs() < 0.001 {
+                let target = DropTarget::Column {
+                    column: column_ref,
+                    zone: DropZone::Bottom,
+                };
+                if valid_target(layout, payload, &target, metrics) {
+                    let bottom_zone_top = (column_bottom - height).max(column_bounds.origin.y);
+                    center_bottom =
+                        center_bottom.min(bottom_zone_top - DROP_ZONE_CENTER_GAP);
+                }
+            }
+        }
+
+        // Keep a neutral vertical gap between the wider internal split target and
+        // the adjacent group's Center target.
         for splitter in rects.splitters.iter().filter(|splitter| {
             splitter.kind == SplitterKind::Group
                 && splitter.bounds.origin.x == bounds.origin.x
@@ -455,7 +501,7 @@ fn append_group_zones(
             let splitter_center_y =
                 splitter.bounds.origin.y + splitter.bounds.size.height * 0.5;
             let split_half_height =
-                GROUP_SPLIT_DROP_ZONE_MIN_HEIGHT.max(splitter.bounds.size.height) * 0.5;
+                HORIZONTAL_DROP_ZONE_MIN_HEIGHT.max(splitter.bounds.size.height) * 0.5;
 
             if splitter_center_y <= bounds.origin.y
                 && splitter.bounds.origin.y + splitter.bounds.size.height >= bounds.origin.y
@@ -463,7 +509,7 @@ fn append_group_zones(
                 // A splitter immediately above this group: leave the gap below its hit zone.
                 center_top = center_top.max(
                     (splitter_center_y + split_half_height).min(group_center_y)
-                        + GROUP_SPLIT_CENTER_GAP,
+                        + DROP_ZONE_CENTER_GAP,
                 );
             } else if splitter_center_y >= group_bottom
                 && splitter.bounds.origin.y <= group_bottom
@@ -471,7 +517,7 @@ fn append_group_zones(
                 // A splitter immediately below this group: leave the gap above its hit zone.
                 center_bottom = center_bottom.min(
                     (splitter_center_y - split_half_height).max(group_center_y)
-                        - GROUP_SPLIT_CENTER_GAP,
+                        - DROP_ZONE_CENTER_GAP,
                 );
             }
         }
@@ -975,7 +1021,7 @@ fn contains(bounds: Rect, point: Point) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        GROUP_SPLIT_DROP_ZONE_MIN_HEIGHT, compute_drop_zones, contains, resolve_drop,
+        HORIZONTAL_DROP_ZONE_MIN_HEIGHT, compute_drop_zones, contains, resolve_drop,
     };
     use crate::{
         ColumnRef, DockCommand, DockMetrics, DockSide, DropPayload, DropTarget, DropZone,
@@ -1055,9 +1101,22 @@ mod tests {
             "top horizontal target is centered on the boundary below the shared column header"
         );
         assert_eq!(
+            resolve_drop(&layout, Point::new(1100.0, 43.0), center_payload, &rects, &metrics),
+            Some(DropTarget::Column {
+                column,
+                zone: DropZone::Top,
+            }),
+            "the widened column-top target remains active up to its lower edge"
+        );
+        assert_eq!(
+            resolve_drop(&layout, Point::new(1100.0, 48.0), center_payload, &rects, &metrics),
+            None,
+            "a neutral gap separates the column-top target from Center"
+        );
+        assert_eq!(
             resolve_drop(
                 &layout,
-                Point::new(1100.0, 40.0),
+                Point::new(1100.0, 54.0),
                 center_payload,
                 &rects,
                 &metrics,
@@ -1066,7 +1125,7 @@ mod tests {
                 group: first_group,
                 zone: DropZone::Center,
             }),
-            "the group's tab strip is a center target, not a top split target"
+            "the group's tab strip becomes a center target after the neutral gap"
         );
         assert_eq!(
             resolve_drop(
@@ -1082,12 +1141,25 @@ mod tests {
             })
         );
         assert_eq!(
-            resolve_drop(&layout, Point::new(1100.0, 798.0), payload, &rects, &metrics),
+            resolve_drop(&layout, Point::new(1100.0, 764.0), payload, &rects, &metrics),
+            Some(DropTarget::Group {
+                group: next_group,
+                zone: DropZone::Center,
+            }),
+            "the last group's center remains active above the bottom neutral gap"
+        );
+        assert_eq!(
+            resolve_drop(&layout, Point::new(1100.0, 772.0), payload, &rects, &metrics),
+            None,
+            "a neutral gap separates Center from the column-bottom target"
+        );
+        assert_eq!(
+            resolve_drop(&layout, Point::new(1100.0, 778.0), payload, &rects, &metrics),
             Some(DropTarget::Column {
                 column,
                 zone: DropZone::Bottom,
             }),
-            "bottom horizontal target belongs to the column, not its last group"
+            "the widened bottom target belongs to the column, not its last group"
         );
 
         let splitter = rects
@@ -1187,7 +1259,7 @@ mod tests {
         assert_eq!(split_zone.bounds.size.width, splitter.bounds.size.width);
         assert_eq!(
             split_zone.bounds.size.height,
-            GROUP_SPLIT_DROP_ZONE_MIN_HEIGHT.max(splitter.bounds.size.height)
+            HORIZONTAL_DROP_ZONE_MIN_HEIGHT.max(splitter.bounds.size.height)
         );
         assert!(
             (split_zone.bounds.origin.y + split_zone.bounds.size.height * 0.5
@@ -1208,7 +1280,7 @@ mod tests {
                     })
             })
             .expect("column top zone should be present");
-        assert_eq!(top_column_zone.bounds, rect(1000.0, 28.0, 280.0, 8.0));
+        assert_eq!(top_column_zone.bounds, rect(1000.0, 20.0, 280.0, 24.0));
         let bottom_column_zone = zones
             .iter()
             .find(|zone| {
@@ -1219,7 +1291,7 @@ mod tests {
                     })
             })
             .expect("column bottom zone should be present");
-        assert_eq!(bottom_column_zone.bounds, rect(1000.0, 792.0, 280.0, 8.0));
+        assert_eq!(bottom_column_zone.bounds, rect(1000.0, 776.0, 280.0, 24.0));
         assert!(
             zones
                 .iter()
@@ -1351,11 +1423,22 @@ mod tests {
                 &rects,
                 &metrics,
             ),
+            None,
+            "the top neutral gap must not resolve to a tab-center target"
+        );
+        assert_eq!(
+            resolve_drop(
+                &layout,
+                Point::new(1140.0, 54.0),
+                external_panel,
+                &rects,
+                &metrics,
+            ),
             Some(DropTarget::Group {
                 group,
                 zone: DropZone::Center,
             }),
-            "the tab strip belongs to the group's center target"
+            "the tab strip becomes a center target after the column-top gap"
         );
         assert_eq!(
             resolve_drop(
