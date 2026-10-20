@@ -32,35 +32,36 @@ pub fn compute_drop_zones(
         return zones;
     }
 
-    // A floating window occludes dock targets beneath it. The geometry list is
-    // bottom-to-top, so visit it in reverse paint order.
+    // Floating windows are opaque to the drop overlay. Visit them front-to-back,
+    // expose only the center hit area, and remember even invalid drop targets as
+    // occluders so drops cannot pass through a dragged window onto content beneath it.
+    let mut floating_occluders = Vec::new();
     for floating_rect in rects.floating_groups.iter().rev() {
-        let Some(floating) = layout.floating_groups().get(floating_rect.floating) else {
-            continue;
-        };
-        if !valid_target(
-            layout,
-            payload,
-            &DropTarget::FloatingGroup {
+        let bounds = floating_rect.bounds;
+        if let Some(floating) = layout.floating_groups().get(floating_rect.floating) {
+            let target = DropTarget::FloatingGroup {
                 floating: floating_rect.floating,
                 zone: DropZone::Center,
-            },
-            metrics,
-        ) {
-            continue;
+            };
+            if !floating.panels.is_empty()
+                && valid_rect(bounds)
+                && valid_target(layout, payload, &target, metrics)
+            {
+                if let Some(center_bounds) =
+                    floating_target_bounds(rects, floating_rect.floating, bounds, metrics)
+                {
+                    for visible_bounds in subtract_occlusion(center_bounds, &floating_occluders) {
+                        push_zone(&mut zones, target.clone(), visible_bounds);
+                    }
+                }
+            }
         }
-        if floating.panels.is_empty() || !valid_rect(floating_rect.bounds) {
-            continue;
+        if valid_rect(bounds) {
+            floating_occluders.push(bounds);
         }
-        push_zone(
-            &mut zones,
-            DropTarget::FloatingGroup {
-                floating: floating_rect.floating,
-                zone: DropZone::Center,
-            },
-            floating_rect.bounds,
-        );
     }
+    // Only the front-to-back floating center zones are in the list so far.
+    let floating_zone_count = zones.len();
 
     let can_add_column = column_count(layout) < metrics.max_columns;
     let outer_zone_width = finite_positive(metrics.edge_drop_zone_width)
@@ -108,7 +109,18 @@ pub fn compute_drop_zones(
         );
     }
 
-    zones
+    // Hide every dock/free-area overlay rectangle underneath every floating window.
+    // Keep the front-to-back floating targets already emitted above; their centers
+    // were clipped against windows in front of them as they were added.
+    let occluded_zones: Vec<_> = zones.drain(floating_zone_count..).collect();
+    let mut visible_zones = zones;
+    for zone in occluded_zones {
+        for visible_bounds in subtract_occlusion(zone.bounds, &floating_occluders) {
+            push_zone(&mut visible_zones, zone.target.clone(), visible_bounds);
+        }
+    }
+
+    visible_zones
 }
 
 /// Resolve a drop point to a valid semantic target.
@@ -135,11 +147,20 @@ pub fn resolve_drop(
         {
             continue;
         }
+
+        // The whole floating window blocks drop-through, but only its center area
+        // is a docking target. Title bars and resize borders stay available to window
+        // interactions and must not accidentally merge tabs.
         let target = DropTarget::FloatingGroup {
             floating: floating_rect.floating,
             zone: DropZone::Center,
         };
-        return valid_target(layout, payload, &target, metrics).then_some(target);
+        if !valid_target(layout, payload, &target, metrics) {
+            return None;
+        }
+        let center_bounds =
+            floating_target_bounds(rects, floating_rect.floating, floating_rect.bounds, metrics)?;
+        return contains(center_bounds, point).then_some(target);
     }
 
     let zones = compute_drop_zones(layout, rects, payload, metrics);
@@ -645,6 +666,133 @@ fn floating_bounds_at_point(
     let x = (point.x - width * 0.5).clamp(viewport.origin.x, max_x);
     let y = (point.y - height * 0.5).clamp(viewport.origin.y, max_y);
     Some(Rect::new(Point::new(x, y), Size::new(width, height)))
+}
+
+/// Return the true center drop area of a floating window, excluding its title bar,
+/// resize borders, and a small safety strip along the bottom and sides.
+fn floating_target_bounds(
+    rects: &LayoutRects,
+    floating: crate::ids::FloatingGroupId,
+    bounds: Rect,
+    metrics: &DockMetrics,
+) -> Option<Rect> {
+    if !valid_rect(bounds) {
+        return None;
+    }
+
+    let fallback_title_height =
+        finite_positive(metrics.column_header_height).min(bounds.size.height);
+    let title_bottom = rects
+        .floating_titles
+        .iter()
+        .find(|title| title.floating == floating)
+        .map(|title| title.bounds.origin.y + title.bounds.size.height)
+        .filter(|bottom| bottom.is_finite())
+        .unwrap_or(bounds.origin.y + fallback_title_height);
+
+    let horizontal_inset = finite_positive(metrics.drop_edge_zone).min(bounds.size.width * 0.5);
+    let vertical_inset = finite_positive(metrics.drop_edge_zone).min(bounds.size.height * 0.5);
+    let left = bounds.origin.x + horizontal_inset;
+    let right = bounds.origin.x + bounds.size.width - horizontal_inset;
+    let top = title_bottom.max(bounds.origin.y + vertical_inset);
+    let bottom = bounds.origin.y + bounds.size.height - vertical_inset;
+
+    if !left.is_finite()
+        || !right.is_finite()
+        || !top.is_finite()
+        || !bottom.is_finite()
+        || right <= left
+        || bottom <= top
+    {
+        return None;
+    }
+
+    Some(Rect::new(
+        Point::new(left, top),
+        Size::new(right - left, bottom - top),
+    ))
+}
+
+/// Remove any area covered by floating windows. Each subtraction returns up to four
+/// non-overlapping rectangles, so overlay geometry and resolve_drop agree on occlusion.
+fn subtract_occlusion(source: Rect, occluders: &[Rect]) -> Vec<Rect> {
+    if !valid_rect(source) {
+        return Vec::new();
+    }
+
+    let mut visible = vec![source];
+    for occluder in occluders {
+        visible = visible
+            .into_iter()
+            .flat_map(|piece| subtract_rect(piece, *occluder))
+            .collect();
+        if visible.is_empty() {
+            break;
+        }
+    }
+    visible
+}
+
+fn subtract_rect(source: Rect, occluder: Rect) -> Vec<Rect> {
+    if !valid_rect(source) {
+        return Vec::new();
+    }
+    if !valid_rect(occluder) {
+        return vec![source];
+    }
+
+    let source_left = source.origin.x;
+    let source_top = source.origin.y;
+    let source_right = source_left + source.size.width;
+    let source_bottom = source_top + source.size.height;
+    let occluder_left = occluder.origin.x;
+    let occluder_top = occluder.origin.y;
+    let occluder_right = occluder_left + occluder.size.width;
+    let occluder_bottom = occluder_top + occluder.size.height;
+
+    if !source_right.is_finite()
+        || !source_bottom.is_finite()
+        || !occluder_right.is_finite()
+        || !occluder_bottom.is_finite()
+    {
+        return vec![source];
+    }
+
+    let intersection_left = source_left.max(occluder_left);
+    let intersection_top = source_top.max(occluder_top);
+    let intersection_right = source_right.min(occluder_right);
+    let intersection_bottom = source_bottom.min(occluder_bottom);
+    if intersection_right <= intersection_left || intersection_bottom <= intersection_top {
+        return vec![source];
+    }
+
+    let mut visible = Vec::with_capacity(4);
+    if intersection_top > source_top {
+        visible.push(Rect::new(
+            Point::new(source_left, source_top),
+            Size::new(source.size.width, intersection_top - source_top),
+        ));
+    }
+    if intersection_bottom < source_bottom {
+        visible.push(Rect::new(
+            Point::new(source_left, intersection_bottom),
+            Size::new(source.size.width, source_bottom - intersection_bottom),
+        ));
+    }
+    if intersection_left > source_left {
+        visible.push(Rect::new(
+            Point::new(source_left, intersection_top),
+            Size::new(intersection_left - source_left, intersection_bottom - intersection_top),
+        ));
+    }
+    if intersection_right < source_right {
+        visible.push(Rect::new(
+            Point::new(intersection_right, intersection_top),
+            Size::new(source_right - intersection_right, intersection_bottom - intersection_top),
+        ));
+    }
+
+    visible.into_iter().filter(|rect| valid_rect(*rect)).collect()
 }
 
 fn desired_floating_size(
