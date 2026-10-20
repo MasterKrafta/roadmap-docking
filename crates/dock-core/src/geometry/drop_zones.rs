@@ -269,9 +269,18 @@ fn append_tab_insertion_zones(
                 continue;
             }
 
+            let insertion_index = match payload {
+                DropPayload::Panel(panel) => tabs
+                    .panels
+                    .iter()
+                    .position(|candidate| *candidate == panel)
+                    .filter(|source_index| *source_index < next.index)
+                    .map_or(next.index, |_| next.index + 1),
+                _ => next.index,
+            };
             let target = DropTarget::TabInsertion {
                 group: group_rect.group,
-                index: next.index,
+                index: insertion_index,
             };
             if valid_target(layout, payload, &target, metrics) {
                 push_zone(
@@ -401,10 +410,15 @@ fn valid_target(
             let Some(Node::Tabs(tabs)) = layout.nodes().get(*group) else {
                 return false;
             };
-            if !is_docked_group(layout, *group) || *index == 0 || *index >= tabs.panels.len() {
+            if !is_docked_group(layout, *group) || *index == 0 || *index > tabs.panels.len() {
                 return false;
             }
-            if matches!(payload, DropPayload::Group(_)) {
+            if matches!(payload, DropPayload::Group(source) if source == *group) {
+                return false;
+            }
+            if *index == tabs.panels.len()
+                && !matches!(payload, DropPayload::Panel(panel) if tabs.panels.contains(&panel))
+            {
                 return false;
             }
             if let DropPayload::FloatingGroup(source) = payload {
@@ -422,11 +436,8 @@ fn valid_target(
             column_exists(layout, *column)
                 && matches!(zone, DropZone::Left | DropZone::Right)
                 && can_add_column(layout, metrics)
-                && !matches!(payload, DropPayload::Group(_))
         }
-        DropTarget::DockEdge { .. } => {
-            can_add_column(layout, metrics) && !matches!(payload, DropPayload::Group(_))
-        }
+        DropTarget::DockEdge { .. } => can_add_column(layout, metrics),
         DropTarget::FloatingGroup { floating, zone } => {
             *zone == DropZone::Center
                 && layout.floating_groups().get(*floating).is_some_and(|target| {
@@ -787,10 +798,10 @@ mod tests {
             zone.target,
             DropTarget::DockEdge { .. } | DropTarget::Column { .. }
         )));
-        assert_eq!(
+        assert!(!matches!(
             resolve_drop(&layout, Point::new(1.0, 300.0), payload, &rects, &metrics),
-            None
-        );
+            Some(DropTarget::DockEdge { .. } | DropTarget::Column { .. })
+        ));
     }
 
     #[test]
