@@ -1,7 +1,11 @@
 mod dock_metrics;
+mod panels;
 
 #[cfg(windows)]
 fn main() {
+    let _panel_registry = panels::PanelRegistry::with_builtins()
+        .expect("built-in panel descriptors must be valid");
+
     use dock_gpui::PrototypeWindow;
     use gpui::{App, AppContext, Bounds, WindowBounds, WindowOptions, px, size};
     use gpui_platform::application;
