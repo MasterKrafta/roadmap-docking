@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use dock_core::{
     ColumnRef, DockCommand, DockMetrics, DockSide, DragCancelReason, DragSession, DragSessionState,
     DropPayload, DropTarget, DropZone, FloatSource, FloatingGroupId, Layout, LayoutRects, Node,
@@ -7,7 +9,7 @@ use dock_core::{
 use dock_gpui::{DockGroupData, TabItem, dock_column_view, drop_overlay};
 use gpui::{
     AnyElement, App, Context, FocusHandle, KeyDownEvent, MouseButton, MouseMoveEvent, MouseUpEvent,
-    Pixels, Point as GpuiPoint, Render, Window, div, prelude::*, px, rgb,
+    Pixels, Point as GpuiPoint, Render, ScrollHandle, Window, div, prelude::*, px, rgb,
 };
 use ui::Theme;
 
@@ -24,6 +26,7 @@ pub struct MainWindow {
     drag_session: DragSession,
     floating_interaction: Option<FloatingInteraction>,
     floating_drag: Option<FloatingDragState>,
+    panel_content_scroll_handles: HashMap<PanelId, ScrollHandle>,
     splitter_interaction: Option<SplitterInteraction>,
     splitter_frame_scheduled: bool,
     splitter_pending_position: Option<GpuiPoint<Pixels>>,
@@ -87,6 +90,12 @@ impl MainWindow {
         layout: Layout,
         focus_handle: FocusHandle,
     ) -> Self {
+        let panel_content_scroll_handles = layout
+            .panels()
+            .iter()
+            .map(|(panel_id, _)| (panel_id, ScrollHandle::new()))
+            .collect();
+
         Self {
             theme,
             metrics,
@@ -96,6 +105,7 @@ impl MainWindow {
             drag_session: DragSession::new(),
             floating_interaction: None,
             floating_drag: None,
+            panel_content_scroll_handles,
             splitter_interaction: None,
             splitter_frame_scheduled: false,
             splitter_pending_position: None,
@@ -1017,6 +1027,12 @@ impl MainWindow {
 
 impl Render for MainWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        for (panel_id, _) in self.layout.panels().iter() {
+            self.panel_content_scroll_handles
+                .entry(panel_id)
+                .or_insert_with(ScrollHandle::new);
+        }
+
         let colors = self.theme.colors;
         let typography = self.theme.typography;
         let weak_window = cx.entity().downgrade();
@@ -1203,10 +1219,12 @@ impl Render for MainWindow {
                                 &self.registry,
                                 &rects,
                                 DockSide::Left,
+                                &self.panel_content_scroll_handles,
                                 left_dock_width,
                                 body_height,
                                 on_activate_tab.clone(),
                                 on_start_drag.clone(),
+                                on_begin_splitter_interaction.clone(),
                             ))
                             .child(canvas(&self.theme, canvas_width, body_height))
                             .child(render_dock_side(
@@ -1215,10 +1233,12 @@ impl Render for MainWindow {
                                 &self.registry,
                                 &rects,
                                 DockSide::Right,
+                                &self.panel_content_scroll_handles,
                                 right_dock_width,
                                 body_height,
                                 on_activate_tab,
                                 on_start_drag.clone(),
+                                on_begin_splitter_interaction.clone(),
                             ))
                             .children(render_splitter_handles(
                                 &self.theme,
@@ -1230,6 +1250,7 @@ impl Render for MainWindow {
                                 &self.layout,
                                 &self.registry,
                                 &rects,
+                                &self.panel_content_scroll_handles,
                                 on_activate_floating_tab,
                                 on_begin_floating_interaction,
                                 on_focus_floating,
@@ -1364,9 +1385,8 @@ fn cancel_drag_interaction(
     true
 }
 
-/// Build transparent splitter hit-zones and their Theme-sized visual handles.
-/// Group splitters already occupy their 4 px layout gap; the column separator is painted
-/// here because column children otherwise touch without a visible boundary.
+/// Render root-level vertical column separators and their Theme-sized capture handles.
+/// Horizontal group splitter hit-zones are colocated with their separators inside each group row.
 fn render_splitter_handles<F>(
     theme: &Theme,
     rects: &LayoutRects,
@@ -1375,11 +1395,17 @@ fn render_splitter_handles<F>(
 where
     F: Fn(SplitterKind, usize, GpuiPoint<Pixels>, &mut Window, &mut App) + Clone + 'static,
 {
-    let mut elements = Vec::with_capacity(rects.splitters.len() * 2);
+    let mut elements = Vec::with_capacity(rects.splitters.len());
     let colors = theme.colors;
     let thickness = theme.metrics.splitter_thickness;
 
-    for splitter in &rects.splitters {
+    // Horizontal group splitters live inside the scrollable column; only vertical column
+    // boundaries need a root-level absolute hit-zone.
+    for splitter in rects
+        .splitters
+        .iter()
+        .filter(|splitter| splitter.kind == SplitterKind::Column)
+    {
         let bounds = splitter.bounds;
         if !bounds.origin.x.is_finite()
             || !bounds.origin.y.is_finite()
@@ -1418,10 +1444,7 @@ where
             .top(px(bounds.origin.y))
             .w(px(bounds.size.width))
             .h(px(bounds.size.height));
-        let handle = match kind {
-            SplitterKind::Group => handle.cursor_ns_resize(),
-            SplitterKind::Column => handle.cursor_col_resize(),
-        };
+        let handle = handle.cursor_col_resize();
         elements.push(
             handle
                 .on_mouse_down(MouseButton::Left, move |_, window, app| {
@@ -1839,20 +1862,25 @@ fn dock_side_width(rects: &LayoutRects, side: DockSide) -> f32 {
         .sum()
 }
 
-fn render_dock_side<OnActivate, OnStartDrag>(
+fn render_dock_side<OnActivate, OnStartDrag, OnBeginSplitter>(
     theme: &Theme,
     layout: &Layout,
     registry: &PanelRegistry,
     rects: &LayoutRects,
     side: DockSide,
+    panel_content_scroll_handles: &HashMap<PanelId, ScrollHandle>,
     width: f32,
     height: f32,
     on_activate: OnActivate,
     on_start_drag: OnStartDrag,
+    on_begin_splitter: OnBeginSplitter,
 ) -> impl IntoElement
 where
     OnActivate: Fn(NodeId, usize, &mut App) + Clone + 'static,
     OnStartDrag: Fn(DropPayload, GpuiPoint<Pixels>, &mut Window, &mut App) + Clone + 'static,
+    OnBeginSplitter: Fn(SplitterKind, usize, GpuiPoint<Pixels>, &mut Window, &mut App)
+        + Clone
+        + 'static,
 {
     let areas = layout
         .dock_areas()
@@ -1893,6 +1921,8 @@ where
                         .map(|bounds| bounds.bounds.size.height.max(0.0))
                         .unwrap_or(theme.metrics.column_header_height);
 
+                    let group_splitter_indices =
+                        group_splitter_indices(layout, side, column_index);
                     let groups = column
                         .groups
                         .iter()
@@ -1922,8 +1952,11 @@ where
                         column_height,
                         header_height,
                         groups,
+                        panel_content_scroll_handles,
+                        group_splitter_indices,
                         on_activate.clone(),
                         on_start_drag.clone(),
+                        on_begin_splitter.clone(),
                     )
                 });
 
@@ -1944,11 +1977,26 @@ where
         .children(areas)
 }
 
+fn group_splitter_indices(layout: &Layout, side: DockSide, column_index: usize) -> Vec<usize> {
+    let mut splitter_index = 0usize;
+    for area in layout.dock_areas() {
+        for (index, column) in area.columns.iter().enumerate() {
+            let count = column.groups.len().saturating_sub(1);
+            if area.side == side && index == column_index {
+                return (splitter_index..splitter_index + count).collect();
+            }
+            splitter_index += count;
+        }
+    }
+    Vec::new()
+}
+
 fn render_floating_groups<OnActivateFloating, OnBeginFloating, OnFocusFloating, OnStartDrag>(
     theme: &Theme,
     layout: &Layout,
     registry: &PanelRegistry,
     rects: &LayoutRects,
+    panel_content_scroll_handles: &HashMap<PanelId, ScrollHandle>,
     on_activate: OnActivateFloating,
     on_begin_interaction: OnBeginFloating,
     on_focus_floating: OnFocusFloating,
@@ -1999,10 +2047,8 @@ where
                 })
                 .collect();
 
-            let active_panel = floating
-                .panels
-                .get(floating.active_index)
-                .and_then(|panel_id| layout.panels().get(*panel_id));
+            let active_panel_id = floating.panels.get(floating.active_index).copied();
+            let active_panel = active_panel_id.and_then(|panel_id| layout.panels().get(panel_id));
             let fallback_heading = active_panel
                 .map(|panel| {
                     registry
@@ -2011,7 +2057,7 @@ where
                         .unwrap_or_else(|| panel.key().as_str().to_owned())
                 })
                 .unwrap_or_else(|| "Panel".to_owned());
-            let (heading, message) = active_panel
+            let (heading, message, content_scrollable) = active_panel
                 .and_then(|panel| {
                     registry
                         .create_content(panel.key())
@@ -2022,11 +2068,15 @@ where
                                 .as_any()
                                 .downcast_ref::<PlaceholderPanelContent>()
                                 .map(|placeholder| {
-                                    (placeholder.heading.clone(), placeholder.message.clone())
+                                    (
+                                        placeholder.heading.clone(),
+                                        placeholder.message.clone(),
+                                        placeholder.scrollable,
+                                    )
                                 })
                         })
                 })
-                .unwrap_or((fallback_heading, "Panel placeholder".to_owned()));
+                .unwrap_or((fallback_heading, "Panel placeholder".to_owned(), false));
 
             Some((
                 floating.z_order,
@@ -2036,6 +2086,8 @@ where
                 tabs,
                 heading,
                 message,
+                active_panel_id,
+                content_scrollable,
             ))
         })
         .collect();
@@ -2045,7 +2097,17 @@ where
     floating_groups
         .into_iter()
         .map(
-            move |(_, floating_id, bounds, title_height, tabs, heading, message)| {
+            move |(
+                _,
+                floating_id,
+                bounds,
+                title_height,
+                tabs,
+                heading,
+                message,
+                active_panel_id,
+                content_scrollable,
+            )| {
                 let width = bounds.size.width.max(0.0);
                 let height = bounds.size.height.max(0.0);
                 let tab_height = metrics
@@ -2141,22 +2203,25 @@ where
                     )
                     .child({
                         let focus = on_focus_floating.clone();
-                        div()
+                        let content_id = active_panel_id
+                            .map(|panel_id| format!("floating-panel-content-{panel_id:?}"))
+                            .unwrap_or_else(|| format!("floating-panel-content-{floating_id:?}"));
+                        let content_scroll_handle = active_panel_id
+                            .and_then(|panel_id| panel_content_scroll_handles.get(&panel_id));
+                        let content_view = div()
+                            .id(content_id)
                             .w_full()
                             .h(px(content_height))
                             .flex()
                             .flex_col()
-                            .overflow_hidden()
                             .px(px(metrics.content_padding))
                             .py(px(metrics.content_padding))
                             .bg(rgb(colors.group_background))
                             .text_color(rgb(colors.primary_text))
-                            .on_mouse_down(MouseButton::Left, move |_, _, app| {
-                                focus(floating_id, app)
-                            })
                             .child(
                                 div()
                                     .w_full()
+                                    .flex_none()
                                     .text_size(px(typography.title_size))
                                     .whitespace_nowrap()
                                     .overflow_hidden()
@@ -2166,13 +2231,21 @@ where
                             .child(
                                 div()
                                     .w_full()
+                                    .flex_none()
                                     .text_size(px(typography.body_size))
                                     .text_color(rgb(colors.muted_text))
-                                    .whitespace_nowrap()
-                                    .overflow_hidden()
-                                    .text_ellipsis()
                                     .child(message),
-                            )
+                            );
+                        let content_view = match (content_scrollable, content_scroll_handle) {
+                            (true, Some(handle)) => {
+                                content_view.overflow_y_scroll().track_scroll(handle)
+                            }
+                            _ => content_view.overflow_hidden(),
+                        };
+                        content_view
+                            .on_mouse_down(MouseButton::Left, move |_, _, app| {
+                                focus(floating_id, app)
+                            })
                     })
                     .children(
                         rects
@@ -2250,7 +2323,7 @@ fn group_view_data(
                 .unwrap_or_else(|| panel.key().as_str().to_owned());
 
             if index == group.active_index {
-                let fallback = (title.clone(), "Panel placeholder".to_owned());
+                let fallback = (title.clone(), "Panel placeholder".to_owned(), false);
                 active_content = registry
                     .create_content(panel.key())
                     .ok()
@@ -2260,10 +2333,17 @@ fn group_view_data(
                             .as_any()
                             .downcast_ref::<PlaceholderPanelContent>()
                             .map(|placeholder| {
-                                (placeholder.heading.clone(), placeholder.message.clone())
+                                (
+                                    placeholder.heading.clone(),
+                                    placeholder.message.clone(),
+                                    placeholder.scrollable,
+                                )
                             })
                     })
-                    .or(Some(fallback));
+                    .or(Some(fallback))
+                    .map(|(heading, message, scrollable)| {
+                        (heading, message, scrollable, Some(panel_id))
+                    });
             }
 
             tabs.push(TabItem {
@@ -2274,14 +2354,23 @@ fn group_view_data(
         }
     }
 
-    let (active_heading, active_message) =
-        active_content.unwrap_or_else(|| ("Panel".to_owned(), "No panel content".to_owned()));
+    let (active_heading, active_message, active_content_scrollable, active_panel_id) =
+        active_content.unwrap_or_else(|| {
+            (
+                "Panel".to_owned(),
+                "No panel content".to_owned(),
+                false,
+                None,
+            )
+        });
 
     DockGroupData {
         group_id,
         height: group_height,
         tab_strip_height,
         tabs,
+        active_panel_id,
+        active_content_scrollable,
         active_heading,
         active_message,
     }
@@ -2290,9 +2379,9 @@ fn group_view_data(
 #[cfg(test)]
 mod tests {
     use super::{
-        SplitterInteraction, align_tab_header_rects, cancel_drag_interaction, group_view_data,
-        resize_floating_rect, resolve_splitter_interaction, splitter_visible_bounds,
-        titlebar_resize_edge,
+        SplitterInteraction, align_tab_header_rects, cancel_drag_interaction,
+        group_splitter_indices, group_view_data, resize_floating_rect,
+        resolve_splitter_interaction, splitter_visible_bounds, titlebar_resize_edge,
     };
     use crate::{dock_metrics, panels::PanelRegistry};
     use ui::Theme;
@@ -2346,6 +2435,12 @@ mod tests {
             .expect("initial dock layout is valid");
         let rects = dock_core::compute_rects(&layout, Size::new(1000.0, 600.0), &metrics);
         let pointer = Point::new(720.0, 200.0);
+
+        assert_eq!(
+            group_splitter_indices(&layout, DockSide::Right, 0),
+            vec![0],
+            "group splitter indices must use the same stable order as compute_rects"
+        );
 
         assert_eq!(
             resolve_splitter_interaction(&layout, &rects, SplitterKind::Group, 0, pointer,),

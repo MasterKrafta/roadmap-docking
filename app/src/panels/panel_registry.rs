@@ -31,24 +31,28 @@ impl PanelRegistry {
                 "Layers",
                 "builtin:layers",
                 "Layer stack and visibility controls.",
+                true,
             ),
             builtin_descriptor(
                 "color",
                 "Color",
                 "builtin:color",
                 "Color selection and foreground/background swatches.",
+                false,
             ),
             builtin_descriptor(
                 "properties",
                 "Properties",
                 "builtin:properties",
                 "Properties for the selected document object.",
+                true,
             ),
             builtin_descriptor(
                 "history",
                 "History",
                 "builtin:history",
                 "Recent editing operations.",
+                true,
             ),
         ] {
             registry.register(descriptor)?;
@@ -309,9 +313,16 @@ fn group_for_panel(layout: &Layout, panel_id: PanelId) -> Option<NodeId> {
         })
 }
 
-fn builtin_descriptor(key: &str, title: &str, icon: &str, message: &str) -> PanelDescriptor {
+fn builtin_descriptor(
+    key: &str,
+    title: &str,
+    icon: &str,
+    message: &str,
+    content_scrollable: bool,
+) -> PanelDescriptor {
     let key = PanelKey::new(key).expect("built-in panel key is valid");
-    let content = PlaceholderPanelContent::new(key.clone(), title, message);
+    let content =
+        PlaceholderPanelContent::new(key.clone(), title, message).with_scrollable(content_scrollable);
     let constraints = PanelConstraints::new(
         Size::new(200.0, 80.0),
         Size::new(280.0, 240.0),
@@ -583,6 +594,21 @@ mod tests {
         assert_eq!(content.panel_key.as_str(), "layers");
         assert_eq!(content.heading, "Layers");
         assert!(content.message.contains("visibility"));
+        assert!(content.scrollable, "Layers content can grow beyond its viewport");
+
+        let color_key = PanelKey::new("color").expect("built-in key is valid");
+        let color_content = registry
+            .create_content(&color_key)
+            .expect("Color content exists");
+        let color_content = color_content
+            .as_ref()
+            .as_any()
+            .downcast_ref::<PlaceholderPanelContent>()
+            .expect("built-in Color content uses a placeholder model");
+        assert!(
+            !color_content.scrollable,
+            "Color content should remain fixed instead of getting a scroll container"
+        );
     }
 
     #[test]
