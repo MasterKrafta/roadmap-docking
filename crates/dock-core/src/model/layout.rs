@@ -525,9 +525,13 @@ impl Layout {
                 if self.find_dock_group_location(group).is_none() {
                     return Err(CommandError::PanelNotInDockGroup(panel));
                 }
-                let Some(Node::Tabs(tabs)) = self.nodes.get(group) else {
-                    return Err(CommandError::GroupNotTabs(group));
-                };
+                if !matches!(self.nodes.get(group), Some(Node::Tabs(_))) {
+                    return if self.nodes.contains_key(group) {
+                        Err(CommandError::GroupNotTabs(group))
+                    } else {
+                        Err(CommandError::UnknownGroup(group))
+                    };
+                }
                 self.validate_floating_rect(rect, &[panel], metrics)?;
                 let Some(Node::Tabs(tabs)) = self.nodes.get_mut(group) else {
                     return Err(CommandError::GroupNotTabs(group));
