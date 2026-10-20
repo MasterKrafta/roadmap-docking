@@ -2398,6 +2398,7 @@ mod tests {
             splitter_thickness: 4.0,
             splitter_hit_zone: 8.0,
             edge_drop_zone_width: 24.0,
+            drop_edge_zone: 24.0,
             drag_start_threshold: 4.0,
             default_column_width: 280.0,
             min_column_width: 200.0,
