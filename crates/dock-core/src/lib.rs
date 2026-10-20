@@ -9,9 +9,9 @@ pub use command::{
     SplitSide,
 };
 pub use geometry::{
-    ColumnHeaderRect, DockMetrics, DropZoneRect, FloatingResizeEdgeRect, FloatingTitleRect,
-    HitResult, LayoutRects, PanelRect, Point, Rect, ResizeEdge, Size, SplitterKind, SplitterRect,
-    TabHeaderRect,
+    compute_rects, ColumnHeaderRect, ColumnRect, DockAreaRect, DockMetrics, DropZoneRect,
+    FloatingResizeEdgeRect, FloatingTitleRect, GroupRect, HitResult, LayoutRects, PanelRect,
+    Point, Rect, ResizeEdge, Size, SplitterKind, SplitterRect, TabHeaderRect, TabStripRect,
 };
 pub use ids::{FloatingGroupId, NodeId, PanelId, PanelKey};
 pub use model::{
