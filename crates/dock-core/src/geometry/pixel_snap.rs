@@ -18,7 +18,11 @@ pub fn snap_logical_to_physical_pixel(value: f32, scale_factor: f32) -> f32 {
     let scale = f64::from(scale_factor);
     let snapped = (f64::from(value) * scale).round() / scale;
     let snapped = snapped as f32;
-    if snapped.is_finite() { snapped } else { value }
+    if snapped.is_finite() {
+        snapped
+    } else {
+        value
+    }
 }
 
 /// Snap every edge of a logical rectangle to the physical-pixel grid.
@@ -91,10 +95,7 @@ mod tests {
     fn splitter_rectangle_edges_align_to_physical_pixels() {
         // Four logical pixels is the default splitter thickness. Its paint rectangle
         // must have crisp edges even when the logical origin is fractional.
-        let splitter = Rect::new(
-            Point::new(101.3, 27.7),
-            Size::new(4.0, 280.3),
-        );
+        let splitter = Rect::new(Point::new(101.3, 27.7), Size::new(4.0, 280.3));
 
         for scale in SCALES {
             let snapped = snap_rect_to_physical_pixels(splitter, scale);
@@ -131,10 +132,7 @@ mod tests {
     fn invalid_scale_factors_leave_coordinates_and_rectangles_unchanged() {
         let rect = Rect::new(Point::new(10.3, 20.7), Size::new(4.0, 80.0));
         for invalid_scale in [0.0, -1.0, f32::NAN, f32::INFINITY] {
-            assert_eq!(
-                snap_logical_to_physical_pixel(13.3, invalid_scale),
-                13.3
-            );
+            assert_eq!(snap_logical_to_physical_pixel(13.3, invalid_scale), 13.3);
             assert_eq!(snap_rect_to_physical_pixels(rect, invalid_scale), rect);
         }
     }
