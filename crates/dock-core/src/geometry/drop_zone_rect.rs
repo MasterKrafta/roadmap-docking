@@ -4,7 +4,8 @@ use crate::geometry::Rect;
 /// A candidate drop target and the logical rectangle that activates it.
 ///
 /// The target includes the semantic destination and its DropZone where applicable.
-/// Hit-testing and zone resolution are kept outside this data type.
+/// For a FreeArea, this rectangle is the hit area; the floating window's actual
+/// bounds are resolved at the cursor position by resolve_drop.
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct DropZoneRect {
