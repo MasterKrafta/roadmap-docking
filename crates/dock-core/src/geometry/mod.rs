@@ -6,6 +6,7 @@ mod drop_zone_rect;
 mod floating_group_rect;
 mod group_rect;
 mod hit_result;
+mod hit_test;
 mod layout_rects;
 mod point;
 mod rect;
@@ -22,6 +23,7 @@ pub use drop_zone_rect::DropZoneRect;
 pub use floating_group_rect::FloatingGroupRect;
 pub use group_rect::GroupRect;
 pub use hit_result::HitResult;
+pub use hit_test::hit_test;
 pub use layout_rects::{
     ColumnHeaderRect, FloatingResizeEdgeRect, FloatingTitleRect, LayoutRects, PanelRect,
     SplitterRect, TabHeaderRect,
