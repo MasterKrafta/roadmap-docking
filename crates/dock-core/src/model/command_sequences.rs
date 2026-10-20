@@ -101,7 +101,7 @@ fn generated_command(
     let floating: Vec<FloatingGroupId> = layout.floating_groups().keys().collect();
     let pairs = adjacent_column_pairs(layout);
 
-    match operation % 16 {
+    match operation % 17 {
         0 => {
             if groups.is_empty() {
                 return None;
@@ -335,6 +335,24 @@ fn generated_command(
                 key,
                 constraints,
                 target,
+            })
+        }
+        16 => {
+            if floating.len() < 2 {
+                return None;
+            }
+            let source = choose(&floating, a);
+            let targets: Vec<FloatingGroupId> = floating
+                .iter()
+                .copied()
+                .filter(|candidate| *candidate != source)
+                .collect();
+            Some(DockCommand::DockFloating {
+                floating: source,
+                target: DropTarget::FloatingGroup {
+                    floating: choose(&targets, b),
+                    zone: DropZone::Center,
+                },
             })
         }
         _ => None,
