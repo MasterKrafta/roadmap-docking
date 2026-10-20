@@ -141,7 +141,8 @@ impl Layout {
         tracing::debug!(version = self.version, command = ?command, "applying dock command");
 
         let mut candidate = self.clone();
-        let mut changed_nodes = match candidate.apply_command_inner(command, metrics) {
+        let mut actual_value = None;
+        let mut changed_nodes = match candidate.apply_command_inner(command, metrics, &mut actual_value) {
             Ok(changed) => changed,
             Err(error) => {
                 tracing::warn!(version = self.version, error = %error, "dock command rejected");
@@ -174,7 +175,8 @@ impl Layout {
 
         let mut seen = HashSet::new();
         changed_nodes.retain(|node_id| seen.insert(*node_id));
-        let outcome = CommandOutcome::new(changed_nodes, candidate.version);
+        let outcome = CommandOutcome::new(changed_nodes, candidate.version)
+            .with_actual_value(actual_value);
         *self = candidate;
         Ok(outcome)
     }
@@ -183,6 +185,7 @@ impl Layout {
         &mut self,
         command: crate::command::DockCommand,
         metrics: &DockMetrics,
+        actual_value: &mut Option<f32>,
     ) -> Result<Vec<NodeId>, crate::command::CommandError> {
         use crate::command::{CommandError, DockCommand};
 
@@ -230,6 +233,15 @@ impl Layout {
             }
             DockCommand::SplitGroup { panel, group, side } => {
                 self.split_group(panel, group, side, metrics)
+            }
+            DockCommand::ResizeGroups { column, boundary, delta } => {
+                self.resize_groups(column, boundary, delta, metrics, actual_value)
+            }
+            DockCommand::ResizeColumn { column, width } => {
+                self.resize_column(column, width, metrics, actual_value)
+            }
+            DockCommand::ResizeColumnBoundary { first, second, delta } => {
+                self.resize_column_boundary(first, second, delta, metrics, actual_value)
             }
             DockCommand::ClosePanel { panel } => self.close_panel(panel),
             DockCommand::CloseGroup { group } => self.close_group(group),
@@ -408,6 +420,326 @@ impl Layout {
                 Ok(vec![group, new_group])
             }
         }
+    }
+
+    fn resolve_column_ref(
+        &self,
+        column_ref: crate::command::ColumnRef,
+    ) -> Result<(usize, usize), crate::command::CommandError> {
+        use crate::command::CommandError;
+
+        let Some(area_index) = self.dock_areas.iter().position(|area| area.side == column_ref.side) else {
+            return Err(CommandError::UnknownColumn(column_ref));
+        };
+        if self.dock_areas[area_index].columns.get(column_ref.index).is_none() {
+            return Err(CommandError::UnknownColumn(column_ref));
+        }
+        Ok((area_index, column_ref.index))
+    }
+
+    fn minimum_group_height(
+        &self,
+        group_id: NodeId,
+        metrics: &DockMetrics,
+    ) -> Result<f32, crate::command::CommandError> {
+        use crate::command::CommandError;
+
+        let Some(node) = self.nodes.get(group_id) else {
+            return Err(CommandError::UnknownGroup(group_id));
+        };
+        let Node::Tabs(tabs) = node else {
+            return Err(CommandError::GroupNotTabs(group_id));
+        };
+
+        let mut minimum = metrics.min_group_height;
+        for panel_id in &tabs.panels {
+            let Some(panel) = self.panels.get(*panel_id) else {
+                return Err(CommandError::UnknownPanel(*panel_id));
+            };
+            let height = panel.constraints().min_size().height;
+            if !height.is_finite() || height < 0.0 {
+                return Err(CommandError::InvalidCommandParameter {
+                    parameter: "panel minimum height".to_owned(),
+                    reason: "must be finite and non-negative".to_owned(),
+                });
+            }
+            minimum = minimum.max(height);
+        }
+        if !minimum.is_finite() || minimum < 0.0 {
+            return Err(CommandError::InvalidCommandParameter {
+                parameter: "group minimum height".to_owned(),
+                reason: "must be finite and non-negative".to_owned(),
+            });
+        }
+        Ok(minimum)
+    }
+
+    fn minimum_column_width(&self, area_index: usize, column_index: usize, metrics: &DockMetrics) -> f32 {
+        match self.dock_areas[area_index].columns[column_index].mode {
+            ColumnMode::Expanded => metrics.min_column_width,
+            ColumnMode::IconsAndLabels | ColumnMode::IconsOnly => metrics.rail_width,
+        }
+    }
+
+    fn resize_groups(
+        &mut self,
+        column_ref: crate::command::ColumnRef,
+        boundary: usize,
+        delta: f32,
+        metrics: &DockMetrics,
+        actual_value: &mut Option<f32>,
+    ) -> Result<Vec<NodeId>, crate::command::CommandError> {
+        use crate::command::CommandError;
+
+        if !delta.is_finite() {
+            return Err(CommandError::InvalidCommandParameter {
+                parameter: "delta".to_owned(),
+                reason: "must be finite".to_owned(),
+            });
+        }
+        let (area_index, column_index) = self.resolve_column_ref(column_ref)?;
+        let available_height = self.canvas.bounds.size.height;
+        if !available_height.is_finite() || available_height <= 0.0 {
+            return Err(CommandError::InvalidCommandParameter {
+                parameter: "canvas height".to_owned(),
+                reason: "must be finite and positive before resizing group boundaries".to_owned(),
+            });
+        }
+
+        let (first_group, second_group, first_ratio, second_ratio) = {
+            let column = &self.dock_areas[area_index].columns[column_index];
+            if boundary >= column.groups.len().saturating_sub(1) {
+                return Err(CommandError::InvalidCommandParameter {
+                    parameter: "group boundary".to_owned(),
+                    reason: format!(
+                        "boundary {boundary} must identify two adjacent groups in column {column_ref:?}"
+                    ),
+                });
+            }
+            if column.group_ratios.len() != column.groups.len() {
+                return Err(CommandError::InvalidCommandParameter {
+                    parameter: "group_ratios".to_owned(),
+                    reason: "there must be one ratio for every group".to_owned(),
+                });
+            }
+            let first_ratio = column.group_ratios[boundary];
+            let second_ratio = column.group_ratios[boundary + 1];
+            if !first_ratio.is_finite() || first_ratio < 0.0
+                || !second_ratio.is_finite() || second_ratio < 0.0
+            {
+                return Err(CommandError::InvalidCommandParameter {
+                    parameter: "group_ratios".to_owned(),
+                    reason: "adjacent group ratios must be finite and non-negative".to_owned(),
+                });
+            }
+            (
+                column.groups[boundary],
+                column.groups[boundary + 1],
+                first_ratio,
+                second_ratio,
+            )
+        };
+
+        let first_height = first_ratio * available_height;
+        let second_height = second_ratio * available_height;
+        let pair_height = first_height + second_height;
+        if !first_height.is_finite() || !second_height.is_finite() || !pair_height.is_finite() {
+            return Err(CommandError::InvalidCommandParameter {
+                parameter: "group height".to_owned(),
+                reason: "current group heights must be finite".to_owned(),
+            });
+        }
+
+        let first_minimum = self.minimum_group_height(first_group, metrics)?;
+        let second_minimum = self.minimum_group_height(second_group, metrics)?;
+        let minimum_pair_height = first_minimum + second_minimum;
+        if !minimum_pair_height.is_finite()
+            || minimum_pair_height > pair_height + PIXEL_TOLERANCE
+        {
+            return Err(CommandError::InvalidCommandParameter {
+                parameter: "group minimum heights".to_owned(),
+                reason: format!(
+                    "adjacent groups need at least {minimum_pair_height:.3} logical px, but their combined allocation is {pair_height:.3}"
+                ),
+            });
+        }
+
+        // Positive delta grows the first (upper) group and shrinks the next group.
+        let minimum_delta = first_minimum - first_height;
+        let maximum_delta = second_height - second_minimum;
+        if !minimum_delta.is_finite() || !maximum_delta.is_finite() || minimum_delta > maximum_delta {
+            return Err(CommandError::InvalidCommandParameter {
+                parameter: "delta bounds".to_owned(),
+                reason: "group minimums leave no valid splitter position".to_owned(),
+            });
+        }
+        let applied_delta = if delta < minimum_delta {
+            minimum_delta
+        } else if delta > maximum_delta {
+            maximum_delta
+        } else {
+            delta
+        };
+        let updated_first_height = first_height + applied_delta;
+        let updated_second_height = second_height - applied_delta;
+        if !updated_first_height.is_finite()
+            || !updated_second_height.is_finite()
+            || updated_first_height < 0.0
+            || updated_second_height < 0.0
+        {
+            return Err(CommandError::InvalidCommandParameter {
+                parameter: "group height".to_owned(),
+                reason: "resized group heights must be finite and non-negative".to_owned(),
+            });
+        }
+
+        let column = &mut self.dock_areas[area_index].columns[column_index];
+        column.group_ratios[boundary] = updated_first_height / available_height;
+        column.group_ratios[boundary + 1] = updated_second_height / available_height;
+        *actual_value = Some(applied_delta);
+        Ok(vec![first_group, second_group])
+    }
+
+    fn resize_column(
+        &mut self,
+        column_ref: crate::command::ColumnRef,
+        requested_width: f32,
+        metrics: &DockMetrics,
+        actual_value: &mut Option<f32>,
+    ) -> Result<Vec<NodeId>, crate::command::CommandError> {
+        use crate::command::CommandError;
+
+        if !requested_width.is_finite() || requested_width < 0.0 {
+            return Err(CommandError::InvalidCommandParameter {
+                parameter: "width".to_owned(),
+                reason: "must be finite and non-negative".to_owned(),
+            });
+        }
+        let (area_index, column_index) = self.resolve_column_ref(column_ref)?;
+        let minimum_width = self.minimum_column_width(area_index, column_index, metrics);
+        if !minimum_width.is_finite() || minimum_width <= 0.0 {
+            return Err(CommandError::InvalidCommandParameter {
+                parameter: "minimum column width".to_owned(),
+                reason: "must be finite and positive".to_owned(),
+            });
+        }
+        let applied_width = requested_width.max(minimum_width);
+        if !applied_width.is_finite() {
+            return Err(CommandError::InvalidCommandParameter {
+                parameter: "width".to_owned(),
+                reason: "resulting width must be finite".to_owned(),
+            });
+        }
+
+        let column = &mut self.dock_areas[area_index].columns[column_index];
+        column.width = applied_width;
+        let changed = column.groups.clone();
+        *actual_value = Some(applied_width);
+        Ok(changed)
+    }
+
+    fn resize_column_boundary(
+        &mut self,
+        first_ref: crate::command::ColumnRef,
+        second_ref: crate::command::ColumnRef,
+        delta: f32,
+        metrics: &DockMetrics,
+        actual_value: &mut Option<f32>,
+    ) -> Result<Vec<NodeId>, crate::command::CommandError> {
+        use crate::command::CommandError;
+
+        if !delta.is_finite() {
+            return Err(CommandError::InvalidCommandParameter {
+                parameter: "delta".to_owned(),
+                reason: "must be finite".to_owned(),
+            });
+        }
+        if first_ref.side != second_ref.side || first_ref.index.checked_add(1) != Some(second_ref.index) {
+            return Err(CommandError::InvalidCommandParameter {
+                parameter: "columns".to_owned(),
+                reason: "references must identify two adjacent columns in their existing order".to_owned(),
+            });
+        }
+        let (area_index, first_index) = self.resolve_column_ref(first_ref)?;
+        let (second_area_index, second_index) = self.resolve_column_ref(second_ref)?;
+        if area_index != second_area_index || second_index != first_index + 1 {
+            return Err(CommandError::InvalidCommandParameter {
+                parameter: "columns".to_owned(),
+                reason: "references must identify two adjacent columns in the same dock area".to_owned(),
+            });
+        }
+
+        let (first_width, second_width, first_groups, second_groups) = {
+            let columns = &self.dock_areas[area_index].columns;
+            let first = &columns[first_index];
+            let second = &columns[second_index];
+            if !first.width.is_finite() || first.width <= 0.0
+                || !second.width.is_finite() || second.width <= 0.0
+            {
+                return Err(CommandError::InvalidCommandParameter {
+                    parameter: "column width".to_owned(),
+                    reason: "current widths must be finite and positive".to_owned(),
+                });
+            }
+            (
+                first.width,
+                second.width,
+                first.groups.clone(),
+                second.groups.clone(),
+            )
+        };
+        let combined_width = first_width + second_width;
+        if !combined_width.is_finite() {
+            return Err(CommandError::InvalidCommandParameter {
+                parameter: "combined column width".to_owned(),
+                reason: "must be finite".to_owned(),
+            });
+        }
+
+        let first_minimum = self.minimum_column_width(area_index, first_index, metrics);
+        let second_minimum = self.minimum_column_width(area_index, second_index, metrics);
+        let minimum_pair_width = first_minimum + second_minimum;
+        if !minimum_pair_width.is_finite() || minimum_pair_width > combined_width + PIXEL_TOLERANCE {
+            return Err(CommandError::InvalidCommandParameter {
+                parameter: "column minimum widths".to_owned(),
+                reason: "adjacent columns cannot both satisfy their minimum widths without changing their combined width".to_owned(),
+            });
+        }
+
+        // Positive delta grows the first column and shrinks the second by the same amount.
+        let minimum_delta = first_minimum - first_width;
+        let maximum_delta = second_width - second_minimum;
+        if !minimum_delta.is_finite() || !maximum_delta.is_finite() || minimum_delta > maximum_delta {
+            return Err(CommandError::InvalidCommandParameter {
+                parameter: "delta bounds".to_owned(),
+                reason: "column minimums leave no valid splitter position".to_owned(),
+            });
+        }
+        let applied_delta = if delta < minimum_delta {
+            minimum_delta
+        } else if delta > maximum_delta {
+            maximum_delta
+        } else {
+            delta
+        };
+        let updated_first_width = first_width + applied_delta;
+        let updated_second_width = second_width - applied_delta;
+        if !updated_first_width.is_finite() || updated_first_width <= 0.0
+            || !updated_second_width.is_finite() || updated_second_width <= 0.0
+        {
+            return Err(CommandError::InvalidCommandParameter {
+                parameter: "column width".to_owned(),
+                reason: "resized widths must be finite and positive".to_owned(),
+            });
+        }
+
+        let columns = &mut self.dock_areas[area_index].columns;
+        columns[first_index].width = updated_first_width;
+        columns[second_index].width = updated_second_width;
+        *actual_value = Some(applied_delta);
+        let mut changed = first_groups;
+        changed.extend(second_groups);
+        Ok(changed)
     }
 
     /// When Canvas geometry is known, ensure the dock column's group minimum heights
