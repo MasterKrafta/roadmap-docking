@@ -3505,6 +3505,10 @@ mod tests {
             Node::Tabs(tabs) => tabs.panels.clone(),
             Node::Split(_) => panic!("Photoshop groups must be Tabs"),
         };
+        let target_panels = match layout.nodes().get(target_group).expect("target group exists") {
+            Node::Tabs(tabs) => tabs.panels.clone(),
+            Node::Split(_) => panic!("Photoshop groups must be Tabs"),
+        };
         layout.apply(
             DockCommand::Float {
                 source: FloatSource::Group(source_group),
@@ -3526,14 +3530,11 @@ mod tests {
         let Node::Tabs(target) = layout.nodes().get(target_group).expect("target group remains") else {
             panic!("target group must be Tabs");
         };
-        assert_eq!(target.panels, vec![crate::PanelId::null(); 0].into_iter().chain(source_panels.iter().copied()).chain([
-            match layout.nodes().get(target_group).expect("target exists") {
-                Node::Tabs(tabs) => tabs.panels[0],
-                Node::Split(_) => unreachable!(),
-            }
-        ]).collect::<Vec<_>>().len(), 3);
+        let mut expected_panels = target_panels;
+        expected_panels.extend(source_panels.iter().copied());
+        assert_eq!(target.panels, expected_panels);
         assert!(source_panels.iter().all(|panel| target.panels.contains(panel)));
-        assert_eq!(target.active_index, 1);
+        assert_eq!(target.active_index, 2);
         assert!(layout.validate(&metrics).is_ok());
     }
 
@@ -3569,6 +3570,49 @@ mod tests {
         assert_eq!(layout.dock_areas()[0].side, DockSide::Right);
         assert_eq!(layout.dock_areas()[1].side, DockSide::Left);
         assert!(layout.floating_groups().is_empty());
+        assert!(layout.validate(&metrics).is_ok());
+    }
+
+    #[test]
+    fn move_panel_transfers_a_tab_between_floating_groups_and_removes_empty_source() {
+        use crate::{DockCommand, DropTarget, DropZone, FloatSource};
+
+        let metrics = metrics();
+        let mut layout = initial_layout();
+        let group_a = tab_group_id(&layout, 0, 0);
+        let group_b = tab_group_id(&layout, 0, 1);
+        let panel_a = match layout.nodes().get(group_a).expect("first group exists") {
+            Node::Tabs(tabs) => tabs.panels[0],
+            Node::Split(_) => panic!("Photoshop groups must be Tabs"),
+        };
+        let panel_b = match layout.nodes().get(group_b).expect("second group exists") {
+            Node::Tabs(tabs) => tabs.panels[0],
+            Node::Split(_) => panic!("Photoshop groups must be Tabs"),
+        };
+        let rect = floating_rect(0.0, 0.0, 300.0, 180.0);
+        layout.apply(
+            DockCommand::Float { source: FloatSource::Panel(panel_a), rect },
+            &metrics,
+        ).expect("first panel should float");
+        layout.apply(
+            DockCommand::Float { source: FloatSource::Panel(panel_b), rect },
+            &metrics,
+        ).expect("second panel should float");
+        let target_id = floating_id_for_panel(&layout, panel_a);
+        let source_id = floating_id_for_panel(&layout, panel_b);
+
+        layout.apply(
+            DockCommand::MovePanel {
+                panel: panel_b,
+                target: DropTarget::FloatingGroup { floating: target_id, zone: DropZone::Center },
+            },
+            &metrics,
+        ).expect("panel should move to the other floating group's tabs");
+
+        assert!(layout.floating_groups().get(source_id).is_none());
+        let target = layout.floating_groups().get(target_id).expect("target remains");
+        assert_eq!(target.panels, vec![panel_a, panel_b]);
+        assert_eq!(target.active_index, 1);
         assert!(layout.validate(&metrics).is_ok());
     }
 
