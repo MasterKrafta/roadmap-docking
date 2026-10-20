@@ -136,8 +136,56 @@ pub fn resolve_drop(
             let bounds = floating_bounds_at_point(layout, rects, payload, point, metrics)?;
             Some(DropTarget::FreeArea { bounds })
         }
+        DropTarget::TabInsertion { group, index } => {
+            let index = adjusted_tab_index(layout, rects, point, payload, *group, *index);
+            let target = DropTarget::TabInsertion { group: *group, index };
+            valid_target(layout, payload, &target, metrics).then_some(target)
+        }
         target if valid_target(layout, payload, target, metrics) => Some(target.clone()),
         _ => None,
+    }
+}
+
+fn adjusted_tab_index(
+    layout: &Layout,
+    rects: &LayoutRects,
+    point: Point,
+    payload: DropPayload,
+    group: NodeId,
+    index: usize,
+) -> usize {
+    let DropPayload::Panel(panel) = payload else {
+        return index;
+    };
+    let Some(Node::Tabs(tabs)) = layout.nodes().get(group) else {
+        return index;
+    };
+    let Some(source_index) = tabs.panels.iter().position(|candidate| *candidate == panel) else {
+        return index;
+    };
+    let Some(previous) = rects
+        .tab_headers
+        .iter()
+        .find(|header| header.group == group && header.index + 1 == index)
+    else {
+        return index;
+    };
+    let Some(next) = rects
+        .tab_headers
+        .iter()
+        .find(|header| header.group == group && header.index == index)
+    else {
+        return index;
+    };
+    let boundary_x = (previous.bounds.origin.x + previous.bounds.size.width
+        + next.bounds.origin.x) * 0.5;
+
+    if source_index < index && point.x >= boundary_x {
+        index + 1
+    } else if source_index >= index && point.x < boundary_x {
+        index.saturating_sub(1)
+    } else {
+        index
     }
 }
 
@@ -410,16 +458,18 @@ fn valid_target(
             let Some(Node::Tabs(tabs)) = layout.nodes().get(*group) else {
                 return false;
             };
-            if !is_docked_group(layout, *group) || *index == 0 || *index > tabs.panels.len() {
+            if !is_docked_group(layout, *group) || *index > tabs.panels.len() {
                 return false;
             }
             if matches!(payload, DropPayload::Group(source) if source == *group) {
                 return false;
             }
-            if *index == tabs.panels.len()
-                && !matches!(payload, DropPayload::Panel(panel) if tabs.panels.contains(&panel))
-            {
-                return false;
+            let reordering_within_group =
+                matches!(payload, DropPayload::Panel(panel) if tabs.panels.contains(&panel));
+            if reordering_within_group {
+                true
+            } else {
+                *index > 0 && *index < tabs.panels.len()
             }
             if let DropPayload::FloatingGroup(source) = payload {
                 if layout
@@ -805,16 +855,41 @@ mod tests {
     }
 
     #[test]
-    fn tab_strip_boundaries_resolve_to_insertion_positions() {
+    fn tab_strip_boundaries_resolve_to_insertion_and_reorder_positions() {
         let metrics = metrics();
         let layout = Layout::initial_photoshop(&metrics).unwrap();
         let group = group_id(&layout, "layers");
-        let payload = DropPayload::Panel(panel_id(&layout, "properties"));
         let rects = geometry(&layout, &metrics);
 
         assert_eq!(
-            resolve_drop(&layout, Point::new(1140.0, 45.0), payload, &rects, &metrics),
+            resolve_drop(
+                &layout,
+                Point::new(1140.0, 45.0),
+                DropPayload::Panel(panel_id(&layout, "properties")),
+                &rects,
+                &metrics,
+            ),
             Some(DropTarget::TabInsertion { group, index: 1 })
+        );
+        assert_eq!(
+            resolve_drop(
+                &layout,
+                Point::new(1141.0, 45.0),
+                DropPayload::Panel(panel_id(&layout, "layers")),
+                &rects,
+                &metrics,
+            ),
+            Some(DropTarget::TabInsertion { group, index: 2 })
+        );
+        assert_eq!(
+            resolve_drop(
+                &layout,
+                Point::new(1139.0, 45.0),
+                DropPayload::Panel(panel_id(&layout, "color")),
+                &rects,
+                &metrics,
+            ),
+            Some(DropTarget::TabInsertion { group, index: 0 })
         );
     }
 
