@@ -6,7 +6,7 @@ use dock_core::{
     NodeId, PanelId, PanelKey, Point as DockPoint, Rect as DockRect, ResizeEdge, Size as DockSize,
     SplitterKind, SplitterRect, compute_rects, resolve_drop,
 };
-use dock_gpui::{DockGroupData, TabItem, dock_column_view, drop_overlay, panel_content, panel_group_header};
+use dock_gpui::{DockGroupData, TabItem, dock_column_view, drop_overlay, floating_panel_header, panel_content, panel_group_header};
 use gpui::{
     AnyElement, App, Context, FocusHandle, KeyDownEvent, MouseButton, MouseMoveEvent, MouseUpEvent,
     Pixels, Point as GpuiPoint, Render, ScrollHandle, Window, div, prelude::*, px, rgb,
@@ -330,7 +330,9 @@ impl MainWindow {
         }
         DockSize::new(
             minimum_width,
-            minimum_content_height + self.metrics.column_header_height,
+            minimum_content_height
+                + self.metrics.column_header_height
+                + self.metrics.tab_strip_height,
         )
     }
 
@@ -2067,6 +2069,9 @@ where
                 .filter(|height| height.is_finite() && *height > 0.0)
                 .unwrap_or(metrics.column_header_height)
                 .min(bounds.size.height.max(0.0));
+            let tab_strip_height = metrics
+                .tab_strip_height
+                .min((bounds.size.height - title_height).max(0.0));
 
             let tabs: Vec<_> = floating
                 .panels
@@ -2123,6 +2128,7 @@ where
                 floating_id,
                 bounds,
                 title_height,
+                tab_strip_height,
                 tabs,
                 heading,
                 message,
@@ -2142,6 +2148,7 @@ where
                 floating_id,
                 bounds,
                 title_height,
+                tab_strip_height,
                 tabs,
                 heading,
                 message,
@@ -2150,7 +2157,7 @@ where
             )| {
                 let width = bounds.size.width.max(0.0);
                 let height = bounds.size.height.max(0.0);
-                let content_height = (height - title_height).max(0.0);
+                let content_height = (height - title_height - tab_strip_height).max(0.0);
 
                 div()
                     .id(format!("floating-group-{floating_id:?}"))
@@ -2167,15 +2174,26 @@ where
                     .border_color(rgb(colors.border))
                     .child({
                         let begin_move = on_begin_interaction.clone();
+                        floating_panel_header(
+                            theme,
+                            width,
+                            format!("floating-group-{floating_id:?}"),
+                            title_height,
+                            move |position, window, app| {
+                                begin_move(floating_id, None, position, window, app)
+                            },
+                        )
+                    })
+                    .child({
+                        let begin_move = on_begin_interaction.clone();
                         let activate = on_activate.clone();
                         let start_drag = on_start_drag.clone();
                         panel_group_header(
                             theme,
                             width,
                             format!("floating-group-{floating_id:?}"),
-                            title_height,
+                            tab_strip_height,
                             tabs,
-                            true,
                             move |tab_index, app| activate(floating_id, tab_index, app),
                             move |panel_id, position, window, app| {
                                 start_drag(DropPayload::Panel(panel_id), position, window, app)
