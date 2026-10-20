@@ -1,6 +1,6 @@
 use crate::command::{ColumnRef, DropTarget, DropZone};
 use crate::geometry::{
-    DockMetrics, DropZoneRect, LayoutRects, Point, Rect, Size, SplitterKind,
+    DockMetrics, DropZoneRect, LayoutRects, Point, Rect, Size,
 };
 use crate::ids::{NodeId, PanelId};
 use crate::model::{DockSide, Layout, Node};
@@ -373,27 +373,12 @@ fn append_group_gap_zones(
                 continue;
             }
 
-            // Use the splitter's wider logical hit zone when it corresponds to this
-            // physical gap; this keeps docking behavior forgiving without depending
-            // on how the separator is painted.
-            let gap_mid_y = (gap_top + gap_bottom) * 0.5;
-            let bounds = rects
-                .splitters
-                .iter()
-                .find(|splitter| {
-                    splitter.kind == SplitterKind::Group
-                        && splitter.bounds.origin.x == column.bounds.origin.x
-                        && splitter.bounds.size.width == column.bounds.size.width
-                        && gap_mid_y >= splitter.bounds.origin.y
-                        && gap_mid_y < splitter.bounds.origin.y + splitter.bounds.size.height
-                })
-                .map(|splitter| splitter.bounds)
-                .unwrap_or_else(|| {
-                    Rect::new(
-                        Point::new(column.bounds.origin.x, gap_top),
-                        Size::new(column.bounds.size.width, gap_bottom - gap_top),
-                    )
-                });
+            // Keep the gap zone inside the true physical gap so it does not
+            // override the adjacent groups' own top/bottom edge zones.
+            let bounds = Rect::new(
+                Point::new(column.bounds.origin.x, gap_top),
+                Size::new(column.bounds.size.width, gap_bottom - gap_top),
+            );
 
             let target = DropTarget::Group {
                 group: next.group,
