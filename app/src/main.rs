@@ -1,4 +1,5 @@
 mod dock_metrics;
+#[cfg(windows)]
 mod main_window;
 mod panels;
 
