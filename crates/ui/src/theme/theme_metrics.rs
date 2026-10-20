@@ -2,7 +2,8 @@
 pub struct ThemeMetrics {
     pub column_header_height: f32, pub tab_strip_height: f32, pub button_size: f32, pub button_gap: f32,
     pub content_padding: f32, pub splitter_thickness: f32, pub splitter_hit_zone: f32,
-    pub edge_drop_zone_width: f32, pub drop_edge_zone: f32, pub drag_start_threshold: f32, pub default_column_width: f32,
+    pub edge_drop_zone_width: f32, /// Logical-pixel hit-zone width for group/column docking edges.
+    pub drop_edge_zone: f32, pub drag_start_threshold: f32, pub default_column_width: f32,
     pub min_column_width: f32, pub rail_width: f32, pub min_group_height: f32,
     pub collapsed_group_height: f32, pub min_document_width: f32, pub max_columns: usize,
 }
