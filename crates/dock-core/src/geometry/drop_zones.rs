@@ -937,7 +937,7 @@ fn contains(bounds: Rect, point: Point) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{compute_drop_zones, contains, resolve_drop};
+    use super::{contains, compute_drop_zones, resolve_drop};
     use crate::{
         compute_rects, ColumnRef, DockCommand, DockMetrics, DockSide, DropPayload, DropTarget,
         DropZone, FloatSource, Layout, Node, Point, Profile, Rect, Size, SplitSide,
@@ -1234,6 +1234,21 @@ mod tests {
             );
         }
 
+        assert!(
+            zones.iter().any(|zone| {
+                contains(zone.bounds, Point::new(100.0, 100.0))
+                    && matches!(&zone.target, DropTarget::FreeArea { .. })
+            }),
+            "visible Canvas area outside the floating window should keep its free-area target"
+        );
+        assert!(
+            zones.iter().any(|zone| {
+                contains(zone.bounds, Point::new(700.0, 300.0))
+                    && matches!(&zone.target, DropTarget::FreeArea { .. })
+            }),
+            "visible Canvas area beside the floating window should keep its free-area target"
+        );
+
         let zones_at_center: Vec<_> = zones
             .iter()
             .filter(|zone| contains(zone.bounds, center))
@@ -1329,7 +1344,7 @@ mod tests {
 
         let zones = compute_drop_zones(&layout, &rects, payload, &metrics);
         assert!(
-            zones.iter().all(|zone| !matches!(zone.target, DropTarget::FreeArea { .. })),
+            zones.iter().all(|zone| !matches!(&zone.target, DropTarget::FreeArea { .. })),
             "FreeArea is invalid when the minimum floating height exceeds the viewport"
         );
         assert_eq!(
