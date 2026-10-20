@@ -5,6 +5,7 @@ pub struct DockMetrics {
     pub splitter_thickness: f32,
     pub splitter_hit_zone: f32,
     pub edge_drop_zone_width: f32,
+    pub drop_edge_zone: f32,
     pub drag_start_threshold: f32,
     pub default_column_width: f32,
     pub min_column_width: f32,
@@ -17,7 +18,7 @@ pub struct DockMetrics {
 impl DockMetrics {
     pub fn validate(&self) -> Result<(), &'static str> {
         let values = [self.column_header_height, self.tab_strip_height, self.splitter_thickness,
-            self.splitter_hit_zone, self.edge_drop_zone_width, self.drag_start_threshold,
+            self.splitter_hit_zone, self.edge_drop_zone_width, self.drop_edge_zone, self.drag_start_threshold,
             self.default_column_width, self.min_column_width, self.rail_width, self.min_group_height,
             self.collapsed_group_height, self.min_document_width];
         if values.iter().any(|v| !v.is_finite()) { return Err("metrics must be finite"); }
@@ -34,7 +35,7 @@ mod tests {
     #[test]
     fn rejects_non_finite_values() {
         let m = DockMetrics { column_header_height: f32::NAN, tab_strip_height: 28.0, splitter_thickness: 4.0,
-            splitter_hit_zone: 8.0, edge_drop_zone_width: 24.0, drag_start_threshold: 4.0,
+            splitter_hit_zone: 8.0, edge_drop_zone_width: 24.0, drop_edge_zone: 24.0, drag_start_threshold: 4.0,
             default_column_width: 280.0, min_column_width: 200.0, rail_width: 36.0,
             min_group_height: 80.0, collapsed_group_height: 28.0, min_document_width: 320.0, max_columns: 4 };
         assert!(m.validate().is_err());
@@ -42,7 +43,7 @@ mod tests {
     #[test]
     fn accepts_complete_positive_metric_bundle() {
         let m = DockMetrics { column_header_height: 32.0, tab_strip_height: 28.0, splitter_thickness: 4.0,
-            splitter_hit_zone: 8.0, edge_drop_zone_width: 24.0, drag_start_threshold: 4.0,
+            splitter_hit_zone: 8.0, edge_drop_zone_width: 24.0, drop_edge_zone: 24.0, drag_start_threshold: 4.0,
             default_column_width: 280.0, min_column_width: 200.0, rail_width: 36.0,
             min_group_height: 80.0, collapsed_group_height: 28.0, min_document_width: 320.0, max_columns: 4 };
         assert!(m.validate().is_ok());
