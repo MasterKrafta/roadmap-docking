@@ -1829,7 +1829,6 @@ impl Layout {
             let Some(Node::Tabs(tabs)) = self.nodes.get_mut(source_group) else {
                 return Err(CommandError::GroupNotTabs(source_group));
             };
-            let active_panel = tabs.panels.get(tabs.active_index).copied();
             let mut insert_index = requested_index;
             if source_index < insert_index {
                 insert_index -= 1;
@@ -1837,15 +1836,9 @@ impl Layout {
             let moved = tabs.panels.remove(source_index);
             insert_index = insert_index.min(tabs.panels.len());
             tabs.panels.insert(insert_index, moved);
-            if let Some(active_panel) = active_panel {
-                if let Some(index) = tabs
-                    .panels
-                    .iter()
-                    .position(|candidate| *candidate == active_panel)
-                {
-                    tabs.active_index = index;
-                }
-            }
+            // A tab dropped into a new position becomes the active tab, including
+            // when it is reordered inside its current group.
+            tabs.active_index = insert_index;
             return Ok(vec![source_group]);
         }
 
@@ -4186,6 +4179,161 @@ mod tests {
                 .z_order
                 > second_z
         );
+        assert!(layout.validate(&metrics).is_ok());
+    }
+
+    #[test]
+    fn move_panel_center_drop_appends_and_activates_without_duplicate_instances() {
+        use crate::{DockCommand, DropTarget, DropZone};
+
+        let metrics = metrics();
+        let mut layout = initial_layout();
+        let source_group = tab_group_id(&layout, 0, 0);
+        let target_group = tab_group_id(&layout, 0, 1);
+        let moved_panel = match layout.nodes().get(source_group).unwrap() {
+            Node::Tabs(tabs) => tabs.panels[1],
+            Node::Split(_) => panic!("groups must be Tabs"),
+        };
+        let original_panel_count = layout.panels().len();
+
+        layout
+            .apply(
+                DockCommand::MovePanel {
+                    panel: moved_panel,
+                    target: DropTarget::Group {
+                        group: target_group,
+                        zone: DropZone::Center,
+                    },
+                },
+                &metrics,
+            )
+            .expect("center drop should add the panel as a tab");
+
+        assert!(matches!(
+            layout.nodes().get(source_group),
+            Some(Node::Tabs(tabs)) if tabs.panels.len() == 1 && !tabs.panels.contains(&moved_panel)
+        ));
+        assert!(matches!(
+            layout.nodes().get(target_group),
+            Some(Node::Tabs(tabs))
+                if tabs.panels.last() == Some(&moved_panel)
+                    && tabs.active_index == tabs.panels.len() - 1
+        ));
+        let placed_count: usize = layout
+            .dock_areas()
+            .iter()
+            .flat_map(|area| area.columns.iter())
+            .flat_map(|column| column.groups.iter())
+            .filter_map(|group| match layout.nodes().get(*group) {
+                Some(Node::Tabs(tabs)) => Some(tabs.panels.len()),
+                _ => None,
+            })
+            .sum();
+        assert_eq!(layout.panels().len(), original_panel_count);
+        assert_eq!(placed_count, original_panel_count);
+        assert!(layout.validate(&metrics).is_ok());
+    }
+
+    #[test]
+    fn move_panel_tab_insertion_places_and_activates_in_target_group() {
+        use crate::{DockCommand, DropTarget};
+
+        let metrics = metrics();
+        let mut layout = initial_layout();
+        let source_group = tab_group_id(&layout, 0, 0);
+        let target_group = tab_group_id(&layout, 0, 1);
+        let (moved_panel, remaining_panel) = match layout.nodes().get(source_group).unwrap() {
+            Node::Tabs(tabs) => (tabs.panels[1], tabs.panels[0]),
+            Node::Split(_) => panic!("groups must be Tabs"),
+        };
+        let original_panel_count = layout.panels().len();
+
+        layout
+            .apply(
+                DockCommand::MovePanel {
+                    panel: moved_panel,
+                    target: DropTarget::TabInsertion {
+                        group: target_group,
+                        index: 1,
+                    },
+                },
+                &metrics,
+            )
+            .expect("tab insertion should place the panel at the requested position");
+
+        assert!(matches!(
+            layout.nodes().get(source_group),
+            Some(Node::Tabs(tabs)) if tabs.panels == vec![remaining_panel]
+        ));
+        assert!(matches!(
+            layout.nodes().get(target_group),
+            Some(Node::Tabs(tabs))
+                if tabs.panels.len() == 3
+                    && tabs.panels[1] == moved_panel
+                    && tabs.active_index == 1
+        ));
+        let placed_count: usize = layout
+            .dock_areas()
+            .iter()
+            .flat_map(|area| area.columns.iter())
+            .flat_map(|column| column.groups.iter())
+            .filter_map(|group| match layout.nodes().get(*group) {
+                Some(Node::Tabs(tabs)) => Some(tabs.panels.len()),
+                _ => None,
+            })
+            .sum();
+        assert_eq!(layout.panels().len(), original_panel_count);
+        assert_eq!(placed_count, original_panel_count);
+        assert!(layout.validate(&metrics).is_ok());
+    }
+
+    #[test]
+    fn move_panel_tab_insertion_reorders_within_group_without_loss_or_duplication() {
+        use crate::DockCommand;
+
+        let metrics = metrics();
+        let mut layout = initial_layout();
+        let group = tab_group_id(&layout, 0, 0);
+        let (moved_panel, other_panel) = match layout.nodes().get(group).unwrap() {
+            Node::Tabs(tabs) => (tabs.panels[0], tabs.panels[1]),
+            Node::Split(_) => panic!("groups must be Tabs"),
+        };
+        let original_panel_ids: Vec<_> = layout.panels().iter().map(|(id, _)| id).collect();
+        let original_panel_count = layout.panels().len();
+
+        layout
+            .apply(
+                DockCommand::MovePanel {
+                    panel: moved_panel,
+                    target: crate::DropTarget::TabInsertion { group, index: 2 },
+                },
+                &metrics,
+            )
+            .expect("same-group insertion should reorder the existing panel");
+
+        assert!(matches!(
+            layout.nodes().get(group),
+            Some(Node::Tabs(tabs))
+                if tabs.panels == vec![other_panel, moved_panel]
+                    && tabs.active_index == 1
+        ));
+        let placed_panels: Vec<_> = layout
+            .dock_areas()
+            .iter()
+            .flat_map(|area| area.columns.iter())
+            .flat_map(|column| column.groups.iter())
+            .filter_map(|group| match layout.nodes().get(*group) {
+                Some(Node::Tabs(tabs)) => Some(tabs.panels.as_slice()),
+                _ => None,
+            })
+            .flatten()
+            .copied()
+            .collect();
+        assert_eq!(layout.panels().len(), original_panel_count);
+        assert_eq!(placed_panels.len(), original_panel_count);
+        for panel in original_panel_ids {
+            assert_eq!(placed_panels.iter().filter(|candidate| **candidate == panel).count(), 1);
+        }
         assert!(layout.validate(&metrics).is_ok());
     }
 

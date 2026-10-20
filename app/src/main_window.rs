@@ -1,6 +1,7 @@
 use dock_core::{
-    DockCommand, DockMetrics, DockSide, DragSession, DragSessionState, DropPayload, Layout,
-    LayoutRects, Node, NodeId, PanelId, PanelKey, Point as DockPoint, Size as DockSize,
+    DockCommand, DockMetrics, DockSide, DragSession, DragSessionState, DropPayload, DropTarget,
+    DropZone, Layout, LayoutRects, Node, NodeId, PanelId, PanelKey, Point as DockPoint,
+    Rect as DockRect, Size as DockSize,
     compute_rects, resolve_drop,
 };
 use dock_gpui::{DockGroupData, TabItem, dock_column_view, drop_overlay};
@@ -70,10 +71,16 @@ impl MainWindow {
         let body_height =
             (window_height - menu_height - panel_menu_height - options_height).max(0.0);
         let docking_viewport_width = (window_width - metrics.rail_width).max(0.0);
-        let rects = compute_rects(
+        let mut rects = compute_rects(
             &self.layout,
             DockSize::new(docking_viewport_width, body_height),
             &self.metrics,
+        );
+        align_tab_header_rects(
+            &self.layout,
+            &mut rects,
+            metrics.content_padding,
+            metrics.button_size,
         );
 
         WindowGeometry {
@@ -156,12 +163,32 @@ impl MainWindow {
         self.update_panel_drag(position, window, cx);
         let request = self.drag_session.release();
 
-        // Actual layout commands are intentionally handled by the next R6 interaction
-        // task. This task is the preview layer: releasing clears the preview, while
-        // DragSession still guarantees that invalid/cancelled drops yield no request.
         if let Some(request) = request {
-            let _previewed_target = request.target;
-            let _previewed_payload = request.payload;
+            if let DropPayload::Panel(panel) = request.payload {
+                let supported_target = matches!(
+                    &request.target,
+                    DropTarget::Group {
+                        zone: DropZone::Center,
+                        ..
+                    } | DropTarget::TabInsertion { .. }
+                        | DropTarget::FloatingGroup {
+                            zone: DropZone::Center,
+                            ..
+                        }
+                );
+                if supported_target {
+                    match self.layout.apply(
+                        DockCommand::MovePanel {
+                            panel,
+                            target: request.target,
+                        },
+                        &self.metrics,
+                    ) {
+                        Ok(_) => {}
+                        Err(error) => eprintln!("Could not drop panel {panel:?}: {error}"),
+                    }
+                }
+            }
         }
         cx.notify();
     }
@@ -283,6 +310,15 @@ impl MainWindow {
     }
 
     fn activate_tab(&mut self, group_id: NodeId, tab_index: usize, cx: &mut Context<Self>) {
+        // A mouse-up following a drag may also synthesize a click on the original tab.
+        // Do not let that stale tab index undo the selection made by MovePanel.
+        if matches!(
+            self.drag_session.state(),
+            DragSessionState::Dragging { .. } | DragSessionState::Dropped { .. }
+        ) {
+            return;
+        }
+
         if let Some(Node::Tabs(tabs)) = self.layout.nodes().get(group_id) {
             if tabs.active_index == tab_index {
                 return;
@@ -446,6 +482,46 @@ impl Render for MainWindow {
             )
             .on_mouse_move(on_pointer_move)
             .on_mouse_up(MouseButton::Left, on_pointer_up)
+    }
+}
+
+/// Match pure tab-header rectangles to the tab-strip's actual GPUI flex row.
+/// Core geometry intentionally has no dependency on UI spacing or the group-menu button;
+/// this adapter applies those view metrics before hit-testing and painting insertion markers.
+fn align_tab_header_rects(
+    layout: &Layout,
+    rects: &mut LayoutRects,
+    content_padding: f32,
+    action_width: f32,
+) {
+    const BORDER_WIDTH: f32 = 1.0;
+
+    for strip in &rects.tab_strips {
+        let Some(Node::Tabs(tabs)) = layout.nodes().get(strip.group) else {
+            continue;
+        };
+        let tab_count = tabs.panels.len();
+        if tab_count == 0 {
+            continue;
+        }
+
+        let inset = content_padding.max(0.0) + BORDER_WIDTH;
+        let available_width =
+            (strip.bounds.size.width - inset * 2.0 - action_width.max(0.0)).max(0.0);
+        // Every tab and the trailing flexible spacer use flex_1 in tab_strip().
+        let slot_width = available_width / (tab_count + 1) as f32;
+
+        for header in rects
+            .tab_headers
+            .iter_mut()
+            .filter(|header| header.group == strip.group)
+        {
+            let left = strip.bounds.origin.x + inset + slot_width * header.index as f32;
+            header.bounds = DockRect::new(
+                DockPoint::new(left, strip.bounds.origin.y),
+                DockSize::new(slot_width, strip.bounds.size.height),
+            );
+        }
     }
 }
 
@@ -805,9 +881,52 @@ fn group_view_data(
 
 #[cfg(test)]
 mod tests {
-    use super::group_view_data;
+    use super::{align_tab_header_rects, group_view_data};
     use crate::{dock_metrics, panels::PanelRegistry};
     use ui::Theme;
+
+    #[test]
+    fn tab_header_drop_geometry_matches_rendered_tab_strip_flex_layout() {
+        let theme = Theme::default();
+        let metrics = dock_metrics::build(&theme);
+        let registry = PanelRegistry::with_builtins().expect("built-in descriptors are valid");
+        let layout = registry
+            .build_initial_photoshop_layout(&metrics)
+            .expect("initial dock layout is valid");
+        let group = layout.dock_areas()[0].columns[0].groups[0];
+        let mut rects =
+            dock_core::compute_rects(&layout, dock_core::Size::new(1000.0, 600.0), &metrics);
+        align_tab_header_rects(
+            &layout,
+            &mut rects,
+            theme.metrics.content_padding,
+            theme.metrics.button_size,
+        );
+
+        let strip = rects
+            .tab_strips
+            .iter()
+            .find(|strip| strip.group == group)
+            .expect("first group has a tab strip");
+        let mut headers: Vec<_> = rects
+            .tab_headers
+            .iter()
+            .filter(|header| header.group == group)
+            .collect();
+        headers.sort_by_key(|header| header.index);
+        let inset = theme.metrics.content_padding + 1.0;
+        let expected_slot_width =
+            (strip.bounds.size.width - inset * 2.0 - theme.metrics.button_size) / 3.0;
+
+        assert!((headers[0].bounds.origin.x - (strip.bounds.origin.x + inset)).abs() < 0.001);
+        assert!((headers[0].bounds.size.width - expected_slot_width).abs() < 0.001);
+        assert!(
+            (headers[1].bounds.origin.x
+                - (headers[0].bounds.origin.x + headers[0].bounds.size.width))
+                .abs()
+                < 0.001
+        );
+    }
 
     #[test]
     fn active_panel_projection_tracks_each_groups_independent_layout_state() {

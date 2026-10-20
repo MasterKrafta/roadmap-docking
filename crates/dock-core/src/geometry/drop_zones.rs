@@ -10,13 +10,15 @@ use super::DropPayload;
 const HORIZONTAL_DROP_ZONE_MIN_HEIGHT: f32 = 24.0;
 /// Neutral pointer space separating split and center targets.
 const DROP_ZONE_CENTER_GAP: f32 = 8.0;
+/// Horizontal hit width around an insertion marker between tab headers.
+const TAB_INSERTION_HIT_WIDTH: f32 = 12.0;
 
 /// Build data-only rectangles for the docking overlay.
 ///
 /// The vector is ordered by hit-test priority: floating groups (front to back),
-/// dock edges, column edges, column ends, group splitters, group centers, and finally
-/// the free Canvas area. The overlay can paint these rectangles without
-/// depending on GPUI or other rendering code.
+/// tab insertion slots, dock edges, column edges, column ends, group splitters,
+/// group centers, and finally the free Canvas area. The overlay can paint these
+/// rectangles without depending on GPUI or other rendering code.
 ///
 /// A `FreeArea` zone uses its `DropZoneRect.bounds` as the hit area. The actual
 /// floating bounds are placed around the cursor by `resolve_drop`.
@@ -68,6 +70,10 @@ pub fn compute_drop_zones(
     let floating_zone_count = zones.len();
 
     let can_add_column = column_count(layout) < metrics.max_columns;
+    // Tab insertion targets have priority over center/edge targets only in the
+    // narrow active band at the bottom of a tab strip; split/column neutral gaps stay empty.
+    append_tab_insertion_zones(layout, rects, payload, &mut zones, metrics);
+
     let outer_zone_width =
         finite_positive(metrics.edge_drop_zone_width).min(viewport.size.width * 0.5);
     if can_add_column && outer_zone_width > 0.0 {
@@ -199,6 +205,92 @@ pub fn resolve_drop(
         }
         target if valid_target(layout, payload, target, metrics) => Some((*target).clone()),
         _ => None,
+    }
+}
+
+fn append_tab_insertion_zones(
+    layout: &Layout,
+    rects: &LayoutRects,
+    payload: DropPayload,
+    zones: &mut Vec<DropZoneRect>,
+    metrics: &DockMetrics,
+) {
+    let DropPayload::Panel(panel) = payload else {
+        return;
+    };
+    let Some(source_group) = find_dock_group_for_panel(layout, panel) else {
+        return;
+    };
+    let source_index = match layout.nodes().get(source_group) {
+        Some(Node::Tabs(tabs)) => tabs.panels.iter().position(|candidate| *candidate == panel),
+        _ => None,
+    };
+
+    for strip in &rects.tab_strips {
+        if !is_docked_group(layout, strip.group) || !valid_rect(strip.bounds) {
+            continue;
+        }
+        let Some(Node::Tabs(tabs)) = layout.nodes().get(strip.group) else {
+            continue;
+        };
+        if tabs.panels.is_empty() {
+            continue;
+        }
+
+        let mut headers: Vec<_> = rects
+            .tab_headers
+            .iter()
+            .filter(|header| header.group == strip.group)
+            .collect();
+        headers.sort_by_key(|header| header.index);
+        if headers.len() != tabs.panels.len() {
+            continue;
+        }
+
+        // Preserve the intentional neutral space near group/column splitters. The
+        // insertion marker itself remains full-height, but the drag target uses only
+        // the lower quarter of the strip, which lies inside the group's Center region.
+        let hit_top = strip.bounds.origin.y + strip.bounds.size.height * 0.75;
+        let hit_height =
+            (strip.bounds.origin.y + strip.bounds.size.height - hit_top).max(0.0);
+        if hit_height <= 0.0 {
+            continue;
+        }
+
+        for index in 0..=headers.len() {
+            if strip.group == source_group
+                && source_index.is_some_and(|source| index == source || index == source + 1)
+            {
+                // The two boundaries around the dragged tab would be a no-op.
+                continue;
+            }
+            let target = DropTarget::TabInsertion {
+                group: strip.group,
+                index,
+            };
+            if !valid_target(layout, payload, &target, metrics) {
+                continue;
+            }
+
+            let (x, adjacent_width) = if index < headers.len() {
+                (
+                    headers[index].bounds.origin.x,
+                    headers[index].bounds.size.width,
+                )
+            } else {
+                let last = headers.last().expect("non-empty headers checked above");
+                (
+                    last.bounds.origin.x + last.bounds.size.width,
+                    last.bounds.size.width,
+                )
+            };
+            let hit_width = TAB_INSERTION_HIT_WIDTH.min(adjacent_width.max(0.0));
+            let bounds = Rect::new(
+                Point::new(x - hit_width * 0.5, hit_top),
+                Size::new(hit_width, hit_height),
+            );
+            push_zone(zones, target, bounds);
+        }
     }
 }
 
@@ -603,29 +695,21 @@ fn valid_target(
             if !is_docked_group(layout, *group) || *index > tabs.panels.len() {
                 return false;
             }
-            if matches!(payload, DropPayload::Group(source) if source == *group) {
-                return false;
-            }
-            let reordering_within_group =
-                matches!(payload, DropPayload::Panel(panel) if tabs.panels.contains(&panel));
-            let valid_index = if reordering_within_group {
-                *index <= tabs.panels.len()
-            } else {
-                *index > 0 && *index < tabs.panels.len()
-            };
-            if !valid_index {
-                return false;
-            }
-            if let DropPayload::FloatingGroup(source) = payload {
-                if layout
-                    .floating_groups()
-                    .get(source)
-                    .is_none_or(|floating| floating.panels.is_empty())
-                {
-                    return false;
+
+            match payload {
+                DropPayload::Panel(_) => true,
+                DropPayload::Group(source) => {
+                    source != *group && *index > 0 && *index < tabs.panels.len()
+                }
+                DropPayload::FloatingGroup(source) => {
+                    *index > 0
+                        && *index < tabs.panels.len()
+                        && layout
+                            .floating_groups()
+                            .get(source)
+                            .is_some_and(|floating| !floating.panels.is_empty())
                 }
             }
-            true
         }
         DropTarget::Column { column, zone } => {
             if !can_target_dock(layout, payload) || !column_exists(layout, *column) {
@@ -1401,35 +1485,58 @@ mod tests {
     }
 
     #[test]
-    fn tab_strip_has_no_separate_tab_insertion_zones() {
+    fn tab_strip_exposes_insertion_slots_and_keeps_regular_area_as_center_target() {
         let metrics = metrics();
         let layout = Layout::initial_photoshop(&metrics).unwrap();
         let group = group_id(&layout, "layers");
         let rects = geometry(&layout, &metrics);
         let external_panel = DropPayload::Panel(panel_id(&layout, "properties"));
         let zones = compute_drop_zones(&layout, &rects, external_panel, &metrics);
+        let insertion_indices: Vec<_> = zones
+            .iter()
+            .filter_map(|zone| match &zone.target {
+                DropTarget::TabInsertion {
+                    group: target_group,
+                    index,
+                } if *target_group == group => Some(*index),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(insertion_indices, vec![0, 1, 2]);
 
-        assert!(
-            zones
-                .iter()
-                .all(|zone| !matches!(&zone.target, DropTarget::TabInsertion { .. })),
-            "tab strips must not expose a separate insertion target"
+        let same_group_panel = DropPayload::Panel(panel_id(&layout, "layers"));
+        let same_group_zones = compute_drop_zones(&layout, &rects, same_group_panel, &metrics);
+        let same_group_indices: Vec<_> = same_group_zones
+            .iter()
+            .filter_map(|zone| match &zone.target {
+                DropTarget::TabInsertion {
+                    group: target_group,
+                    index,
+                } if *target_group == group => Some(*index),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            same_group_indices,
+            vec![2],
+            "the two insertion positions that leave the dragged tab in place are omitted"
         );
+
         assert_eq!(
             resolve_drop(
                 &layout,
-                Point::new(1140.0, 45.0),
+                Point::new(1120.0, 45.0),
                 external_panel,
                 &rects,
                 &metrics,
             ),
             None,
-            "the top neutral gap must not resolve to a tab-center target"
+            "the top neutral gap must remain empty"
         );
         assert_eq!(
             resolve_drop(
                 &layout,
-                Point::new(1140.0, 54.0),
+                Point::new(1120.0, 54.0),
                 external_panel,
                 &rects,
                 &metrics,
@@ -1438,12 +1545,12 @@ mod tests {
                 group,
                 zone: DropZone::Center,
             }),
-            "the tab strip becomes a center target after the column-top gap"
+            "the regular tab-strip area remains a center target"
         );
         assert_eq!(
             resolve_drop(
                 &layout,
-                Point::new(1140.0, 70.0),
+                Point::new(1120.0, 70.0),
                 external_panel,
                 &rects,
                 &metrics,
@@ -1452,6 +1559,56 @@ mod tests {
                 group,
                 zone: DropZone::Center,
             })
+        );
+
+        let strip = rects
+            .tab_strips
+            .iter()
+            .find(|strip| strip.group == group)
+            .expect("target group has a tab strip");
+        let marker_y = strip.bounds.origin.y + strip.bounds.size.height * 0.85;
+        let first_header = rects
+            .tab_headers
+            .iter()
+            .find(|header| header.group == group && header.index == 0)
+            .unwrap();
+        assert_eq!(
+            resolve_drop(
+                &layout,
+                Point::new(first_header.bounds.origin.x, marker_y),
+                external_panel,
+                &rects,
+                &metrics,
+            ),
+            Some(DropTarget::TabInsertion { group, index: 0 })
+        );
+        let second_header = rects
+            .tab_headers
+            .iter()
+            .find(|header| header.group == group && header.index == 1)
+            .unwrap();
+        assert_eq!(
+            resolve_drop(
+                &layout,
+                Point::new(second_header.bounds.origin.x, marker_y),
+                external_panel,
+                &rects,
+                &metrics,
+            ),
+            Some(DropTarget::TabInsertion { group, index: 1 })
+        );
+        assert_eq!(
+            resolve_drop(
+                &layout,
+                Point::new(
+                    second_header.bounds.origin.x + second_header.bounds.size.width - 1.0,
+                    marker_y,
+                ),
+                external_panel,
+                &rects,
+                &metrics,
+            ),
+            Some(DropTarget::TabInsertion { group, index: 2 })
         );
     }
 
