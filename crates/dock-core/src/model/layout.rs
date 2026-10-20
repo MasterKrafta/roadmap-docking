@@ -588,27 +588,54 @@ impl Layout {
                 if !self.panels.contains_key(panel) {
                     return Err(CommandError::UnknownPanel(panel));
                 }
-                let Some((group, panel_index)) = self.find_dock_group_for_panel(panel) else {
-                    return Err(CommandError::PanelNotInDockGroup(panel));
-                };
-                if self.find_dock_group_location(group).is_none() {
-                    return Err(CommandError::PanelNotInDockGroup(panel));
-                }
-                if !matches!(self.nodes.get(group), Some(Node::Tabs(_))) {
-                    return if self.nodes.contains_key(group) {
-                        Err(CommandError::GroupNotTabs(group))
-                    } else {
-                        Err(CommandError::UnknownGroup(group))
+
+                let dock_source = self
+                    .find_dock_group_for_panel(panel)
+                    .filter(|(group, _)| self.find_dock_group_location(*group).is_some());
+                if let Some((group, panel_index)) = dock_source {
+                    if !matches!(self.nodes.get(group), Some(Node::Tabs(_))) {
+                        return if self.nodes.contains_key(group) {
+                            Err(CommandError::GroupNotTabs(group))
+                        } else {
+                            Err(CommandError::UnknownGroup(group))
+                        };
+                    }
+                    self.validate_floating_rect(rect, &[panel], metrics)?;
+                    // Keep the prior dock position so closing this floating panel can restore it.
+                    self.remember_panel_location(panel, group);
+                    let Some(Node::Tabs(tabs)) = self.nodes.get_mut(group) else {
+                        return Err(CommandError::GroupNotTabs(group));
                     };
+                    Self::remove_panel_from_tabs(tabs, panel_index);
+                    (vec![panel], 0, vec![group])
+                } else if let Some((source_floating, panel_index)) =
+                    self.floating_groups.iter().find_map(|(floating, group)| {
+                        group
+                            .panels
+                            .iter()
+                            .position(|candidate| *candidate == panel)
+                            .map(|index| (floating, index))
+                    })
+                {
+                    // A floating tab remains independently draggable even when it is the
+                    // group's only tab. Detach the existing PanelId into a new floating
+                    // group, preserving the panel instance and its saved dock location.
+                    self.validate_floating_rect(rect, &[panel], metrics)?;
+                    let Some(group) = self.floating_groups.get_mut(source_floating) else {
+                        return Err(CommandError::UnknownFloatingGroup(source_floating));
+                    };
+                    group.panels.remove(panel_index);
+                    if group.panels.is_empty() {
+                        self.floating_groups.remove(source_floating);
+                    } else if panel_index < group.active_index {
+                        group.active_index -= 1;
+                    } else if panel_index == group.active_index {
+                        group.active_index = group.active_index.min(group.panels.len() - 1);
+                    }
+                    (vec![panel], 0, Vec::new())
+                } else {
+                    return Err(CommandError::PanelNotInDockGroup(panel));
                 }
-                self.validate_floating_rect(rect, &[panel], metrics)?;
-                // Keep the prior dock position so closing this floating panel can restore it.
-                self.remember_panel_location(panel, group);
-                let Some(Node::Tabs(tabs)) = self.nodes.get_mut(group) else {
-                    return Err(CommandError::GroupNotTabs(group));
-                };
-                Self::remove_panel_from_tabs(tabs, panel_index);
-                (vec![panel], 0, vec![group])
             }
             FloatSource::Group(group) => {
                 let Some((side, column_index, group_index)) = self.find_dock_group_location(group)
@@ -5698,6 +5725,54 @@ mod tests {
             layout.floating_groups().get(floating_id),
             Some(&floating_before)
         );
+        assert!(layout.validate(&metrics).is_ok());
+    }
+
+    #[test]
+    fn floating_panel_tab_can_be_detached_again_without_creating_a_new_panel_instance() {
+        use crate::{DockCommand, FloatSource};
+
+        let metrics = metrics();
+        let mut layout = initial_layout();
+        let group = tab_group_id(&layout, 0, 0);
+        let panel = match layout.nodes().get(group).expect("group exists") {
+            Node::Tabs(tabs) => tabs.panels[0],
+            Node::Split(_) => panic!("Photoshop groups must be Tabs"),
+        };
+        let panel_count_before = layout.panels().len();
+
+        layout
+            .apply(
+                DockCommand::Float {
+                    source: FloatSource::Panel(panel),
+                    rect: floating_rect(10.0, 20.0, 300.0, 180.0),
+                },
+                &metrics,
+            )
+            .expect("panel should first detach from the dock");
+        let original_floating = floating_id_for_panel(&layout, panel);
+
+        layout
+            .apply(
+                DockCommand::Float {
+                    source: FloatSource::Panel(panel),
+                    rect: floating_rect(80.0, 90.0, 300.0, 180.0),
+                },
+                &metrics,
+            )
+            .expect("the floating tab should detach independently");
+        let next_floating = floating_id_for_panel(&layout, panel);
+
+        assert_ne!(original_floating, next_floating);
+        assert!(layout.floating_groups().get(original_floating).is_none());
+        let floating = layout
+            .floating_groups()
+            .get(next_floating)
+            .expect("detached tab has a floating container");
+        assert_eq!(floating.panels, vec![panel]);
+        assert_eq!(floating.bounds, floating_rect(80.0, 90.0, 300.0, 180.0));
+        assert_eq!(layout.panels().len(), panel_count_before);
+        assert!(layout.panels().contains_key(panel));
         assert!(layout.validate(&metrics).is_ok());
     }
 
