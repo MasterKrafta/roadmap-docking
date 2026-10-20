@@ -9,37 +9,39 @@ use super::AllowedArea;
 pub enum RegistryError {
     DuplicateKey(PanelKey),
     UnknownPanel(PanelKey),
-    InvalidDescriptor {
-        key: PanelKey,
-        reason: &'static str,
-    },
-    AreaNotAllowed {
-        key: PanelKey,
-        area: AllowedArea,
-    },
-    UnsupportedOpenTarget {
-        key: PanelKey,
-        target: &'static str,
-    },
+    InvalidDescriptor { key: PanelKey, reason: &'static str },
+    AreaNotAllowed { key: PanelKey, area: AllowedArea },
+    UnsupportedOpenTarget { key: PanelKey, target: &'static str },
     LayoutBuildFailed(String),
 }
 
 impl fmt::Display for RegistryError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::DuplicateKey(key) => write!(formatter, "panel key is already registered: {key:?}"),
+            Self::DuplicateKey(key) => {
+                write!(formatter, "panel key is already registered: {key:?}")
+            }
             Self::UnknownPanel(key) => write!(formatter, "panel key is not registered: {key:?}"),
             Self::InvalidDescriptor { key, reason } => {
                 write!(formatter, "invalid descriptor for panel {key:?}: {reason}")
             }
             Self::AreaNotAllowed { key, area } => {
-                write!(formatter, "panel {key:?} does not allow placement in {area:?}")
+                write!(
+                    formatter,
+                    "panel {key:?} does not allow placement in {area:?}"
+                )
             }
             Self::UnsupportedOpenTarget { key, target } => {
-                write!(formatter, "OpenPanel does not support target {target} for panel {key:?}")
+                write!(
+                    formatter,
+                    "OpenPanel does not support target {target} for panel {key:?}"
+                )
             }
             Self::LayoutBuildFailed(reason) => {
-                write!(formatter, "could not build initial Photoshop panel layout: {reason}")
+                write!(
+                    formatter,
+                    "could not build initial Photoshop panel layout: {reason}"
+                )
             }
         }
     }

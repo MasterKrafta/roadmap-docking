@@ -12,7 +12,9 @@ impl PanelContentFactory {
         F: Fn() -> C + 'static,
         C: PanelContent + 'static,
     {
-        Self(Rc::new(move || -> Box<dyn PanelContent> { Box::new(factory()) }))
+        Self(Rc::new(move || -> Box<dyn PanelContent> {
+            Box::new(factory())
+        }))
     }
 
     pub fn create(&self) -> Box<dyn PanelContent> {

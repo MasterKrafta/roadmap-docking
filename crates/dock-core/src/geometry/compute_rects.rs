@@ -134,7 +134,10 @@ pub fn compute_rects(layout: &Layout, window: Size, metrics: &DockMetrics) -> La
 
                     let content_bounds = Rect::new(
                         Point::new(column_x, finite_position_add(y, strip_height)),
-                        Size::new(column_width, nonnegative_finite(group_height - strip_height)),
+                        Size::new(
+                            column_width,
+                            nonnegative_finite(group_height - strip_height),
+                        ),
                     );
                     for (panel_index, panel) in tabs.panels.iter().copied().enumerate() {
                         rects.panels.push(PanelRect {
@@ -259,12 +262,7 @@ pub fn compute_rects(layout: &Layout, window: Size, metrics: &DockMetrics) -> La
             });
         }
 
-        append_floating_resize_edges(
-            &mut rects,
-            floating_id,
-            bounds,
-            resize_hit_zone,
-        );
+        append_floating_resize_edges(&mut rects, floating_id, bounds, resize_hit_zone);
     }
 
     rects
@@ -285,11 +283,7 @@ fn minimum_group_height(layout: &Layout, group_id: crate::NodeId, metrics: &Dock
 /// Allocate group heights by ratio, while enforcing per-group minima. When the sum of
 /// minimums exceeds the viewport, minimum sizes win and the caller marks the column as
 /// vertically overflowing instead of shrinking panels below their constraints.
-fn allocate_group_heights(
-    ratios: &[f32],
-    minimums: &[f32],
-    available: f32,
-) -> (Vec<f32>, bool) {
+fn allocate_group_heights(ratios: &[f32], minimums: &[f32], available: f32) -> (Vec<f32>, bool) {
     let count = minimums.len();
     if count == 0 {
         return (Vec::new(), false);
@@ -360,14 +354,11 @@ fn allocate_group_heights(
         }
     }
 
-    heights
-        .iter_mut()
-        .enumerate()
-        .for_each(|(index, height)| {
-            if active[index] && *height == 0.0 {
-                *height = f64::from(minimums[index]);
-            }
-        });
+    heights.iter_mut().enumerate().for_each(|(index, height)| {
+        if active[index] && *height == 0.0 {
+            *height = f64::from(minimums[index]);
+        }
+    });
 
     let mut result: Vec<f32> = heights
         .into_iter()
@@ -473,7 +464,9 @@ fn append_floating_resize_edges(
         return;
     }
 
-    let hit = nonnegative_finite(requested_hit_zone).min(width).min(height);
+    let hit = nonnegative_finite(requested_hit_zone)
+        .min(width)
+        .min(height);
     if hit <= 0.0 {
         return;
     }
@@ -485,7 +478,10 @@ fn append_floating_resize_edges(
     let bottom = bounds.origin.y + height;
 
     let corners = [
-        (ResizeEdge::TopLeft, Rect::new(bounds.origin, Size::new(corner_width, corner_height))),
+        (
+            ResizeEdge::TopLeft,
+            Rect::new(bounds.origin, Size::new(corner_width, corner_height)),
+        ),
         (
             ResizeEdge::TopRight,
             Rect::new(
@@ -529,21 +525,30 @@ fn append_floating_resize_edges(
         (
             ResizeEdge::Top,
             Rect::new(
-                Point::new(finite_position_add(bounds.origin.x, corner_width), bounds.origin.y),
+                Point::new(
+                    finite_position_add(bounds.origin.x, corner_width),
+                    bounds.origin.y,
+                ),
                 Size::new(inner_width, hit),
             ),
         ),
         (
             ResizeEdge::Right,
             Rect::new(
-                Point::new(right - hit, finite_position_add(bounds.origin.y, corner_height)),
+                Point::new(
+                    right - hit,
+                    finite_position_add(bounds.origin.y, corner_height),
+                ),
                 Size::new(hit, inner_height),
             ),
         ),
         (
             ResizeEdge::Bottom,
             Rect::new(
-                Point::new(finite_position_add(bounds.origin.x, corner_width), bottom - hit),
+                Point::new(
+                    finite_position_add(bounds.origin.x, corner_width),
+                    bottom - hit,
+                ),
                 Size::new(inner_width, hit),
             ),
         ),
@@ -592,8 +597,8 @@ fn finite_f64_to_f32(value: f64) -> f32 {
 mod tests {
     use super::compute_rects;
     use crate::{
-        DockCommand, DockMetrics, DockSide, FloatSource, FloatingGroupId, Layout, Node,
-        Point, Rect, Size, SplitSide, SplitterKind,
+        DockCommand, DockMetrics, DockSide, FloatSource, FloatingGroupId, Layout, Node, Point,
+        Rect, Size, SplitSide, SplitterKind,
     };
 
     fn metrics() -> DockMetrics {
@@ -666,7 +671,10 @@ mod tests {
         assert_eq!(rects.columns.len(), 1);
         assert_eq!(rects.columns[0].bounds, rect(1000.0, 0.0, 280.0, 800.0));
         assert!(!rects.columns[0].vertical_overflow);
-        assert_eq!(rects.column_headers[0].bounds, rect(1000.0, 0.0, 280.0, 32.0));
+        assert_eq!(
+            rects.column_headers[0].bounds,
+            rect(1000.0, 0.0, 280.0, 32.0)
+        );
 
         let layers_group = group_id(&layout, "layers");
         let properties_group = group_id(&layout, "properties");
@@ -699,13 +707,17 @@ mod tests {
 
         assert_eq!(rects.tab_headers.len(), 4);
         assert_eq!(
-            rects.tab_headers.iter()
+            rects
+                .tab_headers
+                .iter()
                 .find(|header| header.group == layers_group && header.index == 0)
                 .map(|header| header.bounds),
             Some(rect(1000.0, 32.0, 140.0, 28.0))
         );
         assert_eq!(
-            rects.tab_headers.iter()
+            rects
+                .tab_headers
+                .iter()
                 .find(|header| header.group == layers_group && header.index == 1)
                 .map(|header| header.bounds),
             Some(rect(1140.0, 32.0, 140.0, 28.0))
@@ -851,11 +863,22 @@ mod tests {
         assert_eq!(second.bounds, rect(960.0, 560.0, 320.0, 240.0));
         assert_eq!(rects.floating_titles.len(), 2);
         assert_eq!(rects.floating_resize_edges.len(), 16);
-        assert!(rects.floating_titles.iter().all(|title| title.bounds.size.height == 32.0));
-        assert!(rects.floating_resize_edges.iter().all(|edge| {
-            edge.bounds.size.width >= 0.0 && edge.bounds.size.height >= 0.0
-        }));
-        assert_eq!(compute_rects(&layout, Size::new(1280.0, 800.0), &metrics), rects);
+        assert!(
+            rects
+                .floating_titles
+                .iter()
+                .all(|title| title.bounds.size.height == 32.0)
+        );
+        assert!(
+            rects
+                .floating_resize_edges
+                .iter()
+                .all(|edge| { edge.bounds.size.width >= 0.0 && edge.bounds.size.height >= 0.0 })
+        );
+        assert_eq!(
+            compute_rects(&layout, Size::new(1280.0, 800.0), &metrics),
+            rects
+        );
     }
 
     #[test]
@@ -874,7 +897,12 @@ mod tests {
             .expect("valid initial floating rectangle");
         let rects = compute_rects(&layout, Size::new(f32::NAN, f32::INFINITY), &metrics);
         assert_eq!(rects.canvas.size, Size::new(0.0, 0.0));
-        assert!(rects.floating_groups.iter().all(|group| group.bounds.size == Size::new(0.0, 0.0)));
+        assert!(
+            rects
+                .floating_groups
+                .iter()
+                .all(|group| group.bounds.size == Size::new(0.0, 0.0))
+        );
         let all_bounds: Vec<Rect> = std::iter::once(rects.canvas)
             .chain(rects.dock_areas.iter().map(|area| area.bounds))
             .chain(rects.columns.iter().map(|column| column.bounds))
@@ -914,13 +942,10 @@ mod allocation_tests {
     }
 }
 
-
 #[cfg(test)]
 mod geometry_regression_tests {
     use super::compute_rects;
-    use crate::{
-        DockCommand, DockMetrics, Layout, Node, Point, Rect, Size, SplitSide,
-    };
+    use crate::{DockCommand, DockMetrics, Layout, Node, Point, Rect, Size, SplitSide};
 
     fn metrics() -> DockMetrics {
         DockMetrics {
@@ -955,8 +980,16 @@ mod geometry_regression_tests {
     fn assert_rect_near(actual: Rect, expected: Rect, context: &str) {
         near(actual.origin.x, expected.origin.x, &format!("{context} x"));
         near(actual.origin.y, expected.origin.y, &format!("{context} y"));
-        near(actual.size.width, expected.size.width, &format!("{context} width"));
-        near(actual.size.height, expected.size.height, &format!("{context} height"));
+        near(
+            actual.size.width,
+            expected.size.width,
+            &format!("{context} width"),
+        );
+        near(
+            actual.size.height,
+            expected.size.height,
+            &format!("{context} height"),
+        );
     }
 
     fn panel_id(layout: &Layout, key: &str) -> crate::PanelId {
@@ -1074,7 +1107,10 @@ mod geometry_regression_tests {
         let area = &layout.dock_areas()[0];
         assert_eq!(area.columns.len(), 2);
         assert!(
-            layout.nodes().values().all(|node| matches!(node, Node::Tabs(_))),
+            layout
+                .nodes()
+                .values()
+                .all(|node| matches!(node, Node::Tabs(_))),
             "Photoshop columns must contain tab groups, not horizontal split nodes"
         );
 
@@ -1092,11 +1128,7 @@ mod geometry_regression_tests {
         let multi_groups = area.columns[multi_column_index].groups.clone();
 
         let mut observed_multi_group_heights = Vec::new();
-        for (width, height) in [
-            (1280.0, 800.0),
-            (1280.0, 900.5),
-            (1280.5, 799.5),
-        ] {
+        for (width, height) in [(1280.0, 800.0), (1280.0, 900.5), (1280.5, 799.5)] {
             let rects = compute_rects(&layout, Size::new(width, height), &metrics);
             assert_eq!(rects.columns.len(), 2);
             for column in &rects.columns {
@@ -1143,7 +1175,10 @@ mod geometry_regression_tests {
             );
         }
 
-        assert_ne!(observed_multi_group_heights[0], observed_multi_group_heights[1]);
+        assert_ne!(
+            observed_multi_group_heights[0],
+            observed_multi_group_heights[1]
+        );
         assert_eq!(observed_multi_group_heights[0], 382.0);
         assert_eq!(observed_multi_group_heights[1], 432.25);
     }

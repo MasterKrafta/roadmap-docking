@@ -81,12 +81,7 @@ pub fn dock_column_view(
 }
 
 /// Shared column header. The empty flex region is the future drag handle; actions are inert.
-pub fn column_header(
-    theme: &Theme,
-    width: f32,
-    height: f32,
-    title: &str,
-) -> impl IntoElement {
+pub fn column_header(theme: &Theme, width: f32, height: f32, title: &str) -> impl IntoElement {
     let colors = theme.colors;
     let metrics = theme.metrics;
     let typography = theme.typography;

@@ -18,23 +18,16 @@ pub enum DockCommand {
         target: Option<DropTarget>,
     },
     /// Close a panel instance. The protected Canvas is not a panel and cannot be closed.
-    ClosePanel {
-        panel: PanelId,
-    },
+    ClosePanel { panel: PanelId },
     /// Close all panels in one tab group.
-    CloseGroup {
-        group: NodeId,
-    },
+    CloseGroup { group: NodeId },
     /// Make the tab at the zero-based index active in a floating group.
     ActivateFloatingTab {
         floating: FloatingGroupId,
         index: usize,
     },
     /// Make the tab at the zero-based index active.
-    ActivateTab {
-        group: NodeId,
-        index: usize,
-    },
+    ActivateTab { group: NodeId, index: usize },
     /// Move a tab to another zero-based position in the same group.
     ReorderTab {
         group: NodeId,
@@ -42,10 +35,7 @@ pub enum DockCommand {
         to: usize,
     },
     /// Move a panel to the selected dock or floating target.
-    MovePanel {
-        panel: PanelId,
-        target: DropTarget,
-    },
+    MovePanel { panel: PanelId, target: DropTarget },
     /// Split a panel out of a group. Top/bottom create a group in the same
     /// column; left/right create a neighboring column in the Photoshop profile.
     SplitGroup {
@@ -61,10 +51,7 @@ pub enum DockCommand {
     },
     /// Set a column's width in logical pixels. For an outer boundary the Canvas
     /// receives the remaining space; for an inner boundary use ResizeColumnBoundary.
-    ResizeColumn {
-        column: ColumnRef,
-        width: f32,
-    },
+    ResizeColumn { column: ColumnRef, width: f32 },
     /// Atomically resize two adjacent columns while preserving their combined width.
     ResizeColumnBoundary {
         first: ColumnRef,
@@ -72,14 +59,9 @@ pub enum DockCommand {
         delta: f32,
     },
     /// Restore even height distribution for the groups in a column.
-    ResetColumnRatios {
-        column: ColumnRef,
-    },
+    ResetColumnRatios { column: ColumnRef },
     /// Detach a panel or group into an in-window floating group.
-    Float {
-        source: FloatSource,
-        rect: Rect,
-    },
+    Float { source: FloatSource, rect: Rect },
     /// Move an existing floating group within the main window.
     MoveFloating {
         floating: FloatingGroupId,
@@ -91,9 +73,7 @@ pub enum DockCommand {
         rect: Rect,
     },
     /// Raise a floating group above other floating groups.
-    RaiseFloating {
-        floating: FloatingGroupId,
-    },
+    RaiseFloating { floating: FloatingGroupId },
     /// Dock a floating group at a resolved target.
     DockFloating {
         floating: FloatingGroupId,

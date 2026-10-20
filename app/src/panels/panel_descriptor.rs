@@ -1,7 +1,4 @@
-use std::{
-    collections::HashSet,
-    fmt,
-};
+use std::{collections::HashSet, fmt};
 
 use dock_core::PanelConstraints;
 
@@ -99,7 +96,10 @@ impl PanelDescriptor {
             max.width,
             max.height,
         ];
-        if values.iter().any(|value| !value.is_finite() || *value < 0.0) {
+        if values
+            .iter()
+            .any(|value| !value.is_finite() || *value < 0.0)
+        {
             return Some("panel size constraints must be finite and non-negative");
         }
         if min.width > preferred.width

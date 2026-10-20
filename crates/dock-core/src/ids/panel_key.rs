@@ -25,7 +25,13 @@ mod tests {
 
     #[test]
     fn accepts_builtin_and_new_panel_keys_without_an_enum() {
-        for value in ["layers", "properties", "color", "history", "custom.adjustments"] {
+        for value in [
+            "layers",
+            "properties",
+            "color",
+            "history",
+            "custom.adjustments",
+        ] {
             let key = PanelKey::new(value).expect("non-empty panel key should be accepted");
             assert_eq!(key.as_str(), value);
         }
@@ -43,7 +49,10 @@ mod tests {
         let mut ordered = BTreeSet::new();
         ordered.insert(properties.clone());
         ordered.insert(layers.clone());
-        assert_eq!(ordered.into_iter().collect::<Vec<_>>(), vec![layers.clone(), properties.clone()]);
+        assert_eq!(
+            ordered.into_iter().collect::<Vec<_>>(),
+            vec![layers.clone(), properties.clone()]
+        );
 
         let mut hashed = HashSet::new();
         hashed.insert(layers.clone());

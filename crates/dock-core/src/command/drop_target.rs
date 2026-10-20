@@ -12,31 +12,18 @@ use super::{ColumnRef, DropZone};
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum DropTarget {
     /// Drop into or beside a regular dock group.
-    Group {
-        group: NodeId,
-        zone: DropZone,
-    },
+    Group { group: NodeId, zone: DropZone },
     /// Insert at a particular position in a group's tab strip.
-    TabInsertion {
-        group: NodeId,
-        index: usize,
-    },
+    TabInsertion { group: NodeId, index: usize },
     /// Drop against a particular column edge.
-    Column {
-        column: ColumnRef,
-        zone: DropZone,
-    },
+    Column { column: ColumnRef, zone: DropZone },
     /// Drop at the outer edge of a dock area.
-    DockEdge {
-        side: DockSide,
-    },
+    DockEdge { side: DockSide },
     /// Drop into an existing floating group.
     FloatingGroup {
         floating: FloatingGroupId,
         zone: DropZone,
     },
     /// Drop in free space and create a floating group at these logical bounds.
-    FreeArea {
-        bounds: Rect,
-    },
+    FreeArea { bounds: Rect },
 }

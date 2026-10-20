@@ -87,9 +87,10 @@ fn preview_indicators(
             )]
         }
         DropTarget::Column { column, zone } => {
-            let column = rects.columns.iter().find(|item| {
-                item.side == column.side && item.index == column.index
-            })?;
+            let column = rects
+                .columns
+                .iter()
+                .find(|item| item.side == column.side && item.index == column.index)?;
             match zone {
                 DropZone::Left => vec![vertical_edge(column.bounds, true, line_thickness)],
                 DropZone::Right => vec![vertical_edge(column.bounds, false, line_thickness)],
@@ -133,12 +134,18 @@ fn outline(bounds: Rect, thickness: f32) -> Vec<Rect> {
     vec![
         Rect::new(bounds.origin, Size::new(bounds.size.width, thickness)),
         Rect::new(
-            Point::new(bounds.origin.x, bounds.origin.y + bounds.size.height - thickness),
+            Point::new(
+                bounds.origin.x,
+                bounds.origin.y + bounds.size.height - thickness,
+            ),
             Size::new(bounds.size.width, thickness),
         ),
         Rect::new(bounds.origin, Size::new(thickness, bounds.size.height)),
         Rect::new(
-            Point::new(bounds.origin.x + bounds.size.width - thickness, bounds.origin.y),
+            Point::new(
+                bounds.origin.x + bounds.size.width - thickness,
+                bounds.origin.y,
+            ),
             Size::new(thickness, bounds.size.height),
         ),
     ]

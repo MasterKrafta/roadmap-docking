@@ -9,6 +9,10 @@ pub struct PanelState {
 }
 
 impl PanelState {
-    pub const fn new(last_known_size: Option<Size>) -> Self { Self { last_known_size } }
-    pub const fn last_known_size(&self) -> Option<Size> { self.last_known_size }
+    pub const fn new(last_known_size: Option<Size>) -> Self {
+        Self { last_known_size }
+    }
+    pub const fn last_known_size(&self) -> Option<Size> {
+        self.last_known_size
+    }
 }

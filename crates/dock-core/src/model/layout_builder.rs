@@ -76,10 +76,7 @@ impl LayoutBuilder {
         }
 
         let constraints = PanelConstraints::new(
-            Size::new(
-                self.metrics.min_column_width,
-                self.metrics.min_group_height,
-            ),
+            Size::new(self.metrics.min_column_width, self.metrics.min_group_height),
             Size::new(
                 self.metrics.default_column_width,
                 self.metrics.min_group_height,
@@ -90,7 +87,10 @@ impl LayoutBuilder {
 
         let panel_ids = keys
             .into_iter()
-            .map(|key| self.layout.insert_panel(PanelInstance::new(key, constraints)))
+            .map(|key| {
+                self.layout
+                    .insert_panel(PanelInstance::new(key, constraints))
+            })
             .collect();
         let group_id = self.layout.insert_node(Node::Tabs(Tabs {
             panels: panel_ids,

@@ -4,7 +4,10 @@ use dock_core::{
     compute_rects, resolve_drop,
 };
 use dock_gpui::{DockGroupData, TabItem, dock_column_view, drop_overlay};
-use gpui::{App, Context, MouseButton, Pixels, Point as GpuiPoint, Render, Window, div, prelude::*, px, rgb};
+use gpui::{
+    App, Context, MouseButton, MouseMoveEvent, MouseUpEvent, Pixels, Point as GpuiPoint, Render,
+    Window, div, prelude::*, px, rgb,
+};
 use ui::Theme;
 
 use crate::panels::{PanelRegistry, PlaceholderPanelContent};
@@ -84,7 +87,11 @@ impl MainWindow {
         }
     }
 
-    fn local_dock_point(&self, position: GpuiPoint<Pixels>, geometry: &WindowGeometry) -> DockPoint {
+    fn local_dock_point(
+        &self,
+        position: GpuiPoint<Pixels>,
+        geometry: &WindowGeometry,
+    ) -> DockPoint {
         DockPoint::new(
             position.x.as_f32() - self.theme.metrics.rail_width,
             position.y.as_f32() - geometry.body_top,
@@ -168,21 +175,25 @@ impl MainWindow {
         // The menu represents registered panel types, not instances. Prefer an existing
         // instance in either docked or floating layout so even non-singleton descriptors
         // do not produce accidental duplicates when selected from Window > Panels.
-        let existing_panel = self.layout.panels().iter().find_map(|(panel_id, panel)| {
-            (panel.key() == &key).then_some(panel_id)
-        });
+        let existing_panel = self
+            .layout
+            .panels()
+            .iter()
+            .find_map(|(panel_id, panel)| (panel.key() == &key).then_some(panel_id));
 
         let result: Result<(), String> = if let Some(panel_id) = existing_panel {
-            let dock_location = self.layout.nodes().iter().find_map(|(group, node)| {
-                match node {
+            let dock_location = self
+                .layout
+                .nodes()
+                .iter()
+                .find_map(|(group, node)| match node {
                     Node::Tabs(tabs) => tabs
                         .panels
                         .iter()
                         .position(|candidate| *candidate == panel_id)
                         .map(|index| (group, index)),
                     Node::Split(_) => None,
-                }
-            });
+                });
 
             if let Some((group, index)) = dock_location {
                 let already_active = matches!(
@@ -198,13 +209,16 @@ impl MainWindow {
                         .map_err(|error| error.to_string())
                 }
             } else if let Some((floating, index)) =
-                self.layout.floating_groups().iter().find_map(|(floating, group)| {
-                    group
-                        .panels
-                        .iter()
-                        .position(|candidate| *candidate == panel_id)
-                        .map(|index| (floating, index))
-                })
+                self.layout
+                    .floating_groups()
+                    .iter()
+                    .find_map(|(floating, group)| {
+                        group
+                            .panels
+                            .iter()
+                            .position(|candidate| *candidate == panel_id)
+                            .map(|index| (floating, index))
+                    })
             {
                 self.layout
                     .apply(
@@ -220,7 +234,9 @@ impl MainWindow {
                             .map_err(|error| error.to_string())
                     })
             } else {
-                Err(format!("panel instance {panel_id:?} is not placed in the layout"))
+                Err(format!(
+                    "panel instance {panel_id:?} is not placed in the layout"
+                ))
             }
         } else {
             self.registry
@@ -244,12 +260,17 @@ impl MainWindow {
     }
 
     fn toggle_panel_from_menu(&mut self, key: PanelKey, cx: &mut Context<Self>) {
-        let existing_panel = self.layout.panels().iter().find_map(|(panel_id, panel)| {
-            (panel.key() == &key).then_some(panel_id)
-        });
+        let existing_panel = self
+            .layout
+            .panels()
+            .iter()
+            .find_map(|(panel_id, panel)| (panel.key() == &key).then_some(panel_id));
 
         if let Some(panel_id) = existing_panel {
-            match self.layout.apply(DockCommand::ClosePanel { panel: panel_id }, &self.metrics) {
+            match self
+                .layout
+                .apply(DockCommand::ClosePanel { panel: panel_id }, &self.metrics)
+            {
                 Ok(_) => {
                     self.window_menu_open = false;
                     cx.notify();
@@ -261,12 +282,7 @@ impl MainWindow {
         }
     }
 
-    fn activate_tab(
-        &mut self,
-        group_id: NodeId,
-        tab_index: usize,
-        cx: &mut Context<Self>,
-    ) {
+    fn activate_tab(&mut self, group_id: NodeId, tab_index: usize, cx: &mut Context<Self>) {
         if let Some(Node::Tabs(tabs)) = self.layout.nodes().get(group_id) {
             if tabs.active_index == tab_index {
                 return;
@@ -281,9 +297,9 @@ impl MainWindow {
             &self.metrics,
         ) {
             Ok(_) => cx.notify(),
-            Err(error) => eprintln!(
-                "Could not activate tab {tab_index} in group {group_id:?}: {error}"
-            ),
+            Err(error) => {
+                eprintln!("Could not activate tab {tab_index} in group {group_id:?}: {error}")
+            }
         }
     }
 }
@@ -322,12 +338,10 @@ impl Render for MainWindow {
         };
 
         let start_drag_window = weak_window.clone();
-        let on_start_drag = move |
-            panel: PanelId,
-            position: GpuiPoint<Pixels>,
-            window: &mut Window,
-            app: &mut App,
-        | {
+        let on_start_drag = move |panel: PanelId,
+                                  position: GpuiPoint<Pixels>,
+                                  window: &mut Window,
+                                  app: &mut App| {
             if let Err(error) = start_drag_window.update(app, |this, cx| {
                 this.begin_panel_drag(panel, position, window, cx);
             }) {
@@ -336,7 +350,7 @@ impl Render for MainWindow {
         };
 
         let update_drag_window = weak_window.clone();
-        let on_pointer_move = move |_, window: &mut Window, app: &mut App| {
+        let on_pointer_move = move |_: &MouseMoveEvent, window: &mut Window, app: &mut App| {
             let position = window.mouse_position();
             if let Err(error) = update_drag_window.update(app, |this, cx| {
                 this.update_panel_drag(position, window, cx);
@@ -346,7 +360,7 @@ impl Render for MainWindow {
         };
 
         let finish_drag_window = weak_window.clone();
-        let on_pointer_up = move |_, window: &mut Window, app: &mut App| {
+        let on_pointer_up = move |_: &MouseUpEvent, window: &mut Window, app: &mut App| {
             let position = window.mouse_position();
             if let Err(error) = finish_drag_window.update(app, |this, cx| {
                 this.finish_panel_drag(position, window, cx);
@@ -375,11 +389,7 @@ impl Render for MainWindow {
             .text_color(rgb(colors.primary_text))
             .text_size(px(typography.body_size))
             .font_family(typography.family)
-            .child(menu_bar(
-                &self.theme,
-                menu_height,
-                on_toggle_window_menu,
-            ))
+            .child(menu_bar(&self.theme, menu_height, on_toggle_window_menu))
             .when(self.window_menu_open, |element| {
                 element.child(panels_menu(
                     &self.theme,
@@ -661,52 +671,61 @@ where
                         .sum()
                 });
 
-            let columns = area.columns.iter().enumerate().map(|(column_index, column)| {
-                let column_bounds = rects
-                    .columns
-                    .iter()
-                    .find(|bounds| bounds.side == side && bounds.index == column_index);
-                let column_width = column_bounds
-                    .map(|bounds| bounds.bounds.size.width.max(0.0))
-                    .unwrap_or_else(|| column.width.max(0.0));
-                let column_height = column_bounds
-                    .map(|bounds| bounds.bounds.size.height.max(0.0))
-                    .unwrap_or(height);
-                let header_height = rects
-                    .column_headers
-                    .iter()
-                    .find(|bounds| bounds.side == side && bounds.index == column_index)
-                    .map(|bounds| bounds.bounds.size.height.max(0.0))
-                    .unwrap_or(theme.metrics.column_header_height);
+            let columns = area
+                .columns
+                .iter()
+                .enumerate()
+                .map(|(column_index, column)| {
+                    let column_bounds = rects
+                        .columns
+                        .iter()
+                        .find(|bounds| bounds.side == side && bounds.index == column_index);
+                    let column_width = column_bounds
+                        .map(|bounds| bounds.bounds.size.width.max(0.0))
+                        .unwrap_or_else(|| column.width.max(0.0));
+                    let column_height = column_bounds
+                        .map(|bounds| bounds.bounds.size.height.max(0.0))
+                        .unwrap_or(height);
+                    let header_height = rects
+                        .column_headers
+                        .iter()
+                        .find(|bounds| bounds.side == side && bounds.index == column_index)
+                        .map(|bounds| bounds.bounds.size.height.max(0.0))
+                        .unwrap_or(theme.metrics.column_header_height);
 
-                let groups = column.groups.iter().copied().map(|group_id| {
-                    let group_height = rects
+                    let groups = column
                         .groups
                         .iter()
-                        .find(|bounds| bounds.group == group_id)
-                        .map(|bounds| bounds.bounds.size.height.max(0.0))
-                        .unwrap_or(0.0);
-                    let strip_height = rects
-                        .tab_strips
-                        .iter()
-                        .find(|strip| strip.group == group_id)
-                        .map(|strip| strip.bounds.size.height.max(0.0))
-                        .unwrap_or(theme.metrics.tab_strip_height)
-                        .min(group_height);
+                        .copied()
+                        .map(|group_id| {
+                            let group_height = rects
+                                .groups
+                                .iter()
+                                .find(|bounds| bounds.group == group_id)
+                                .map(|bounds| bounds.bounds.size.height.max(0.0))
+                                .unwrap_or(0.0);
+                            let strip_height = rects
+                                .tab_strips
+                                .iter()
+                                .find(|strip| strip.group == group_id)
+                                .map(|strip| strip.bounds.size.height.max(0.0))
+                                .unwrap_or(theme.metrics.tab_strip_height)
+                                .min(group_height);
 
-                    group_view_data(layout, registry, group_id, group_height, strip_height)
-                }).collect::<Vec<_>>();
+                            group_view_data(layout, registry, group_id, group_height, strip_height)
+                        })
+                        .collect::<Vec<_>>();
 
-                dock_column_view(
-                    theme,
-                    column_width,
-                    column_height,
-                    header_height,
-                    groups,
-                    on_activate.clone(),
-                    on_start_drag.clone(),
-                )
-            });
+                    dock_column_view(
+                        theme,
+                        column_width,
+                        column_height,
+                        header_height,
+                        groups,
+                        on_activate.clone(),
+                        on_start_drag.clone(),
+                    )
+                });
 
             div()
                 .w(px(area_width))
@@ -812,7 +831,11 @@ mod tests {
             theme.metrics.tab_strip_height,
         );
         assert_eq!(
-            upper_initial.tabs.iter().map(|tab| tab.title.as_str()).collect::<Vec<_>>(),
+            upper_initial
+                .tabs
+                .iter()
+                .map(|tab| tab.title.as_str())
+                .collect::<Vec<_>>(),
             vec!["Layers", "Color"]
         );
         assert!(upper_initial.tabs[0].active);
@@ -831,7 +854,11 @@ mod tests {
             theme.metrics.tab_strip_height,
         );
         assert_eq!(
-            lower_initial.tabs.iter().map(|tab| tab.title.as_str()).collect::<Vec<_>>(),
+            lower_initial
+                .tabs
+                .iter()
+                .map(|tab| tab.title.as_str())
+                .collect::<Vec<_>>(),
             vec!["Properties", "History"]
         );
         assert!(lower_initial.tabs[0].active);
@@ -932,7 +959,12 @@ mod tests {
             .apply(DockCommand::ClosePanel { panel: color_panel }, &metrics)
             .expect("ClosePanel should close Color");
         assert_eq!(layout.panels().len(), 3);
-        assert!(!layout.panels().iter().any(|(_, panel)| panel.key() == &color_key));
+        assert!(
+            !layout
+                .panels()
+                .iter()
+                .any(|(_, panel)| panel.key() == &color_key)
+        );
 
         let open_command = registry
             .open_command(&color_key, None)
@@ -973,7 +1005,6 @@ mod tests {
         assert_eq!(layout.panels().len(), 4);
     }
 
-
     #[test]
     fn window_panel_menu_marks_registered_open_panels_and_excludes_canvas() {
         use super::panel_is_open;
@@ -1002,9 +1033,7 @@ mod tests {
         let color_panel = layout
             .panels()
             .iter()
-            .find_map(|(panel_id, panel)| {
-                (panel.key() == &color_key).then_some(panel_id)
-            })
+            .find_map(|(panel_id, panel)| (panel.key() == &color_key).then_some(panel_id))
             .expect("Color panel is open");
         layout
             .apply(DockCommand::ClosePanel { panel: color_panel }, &metrics)
@@ -1013,5 +1042,4 @@ mod tests {
         assert!(panel_is_open(&layout, &layers_key));
         assert!(!panel_is_open(&layout, &color_key));
     }
-
 }

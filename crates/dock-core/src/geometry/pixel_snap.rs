@@ -18,11 +18,7 @@ pub fn snap_logical_to_physical_pixel(value: f32, scale_factor: f32) -> f32 {
     let scale = f64::from(scale_factor);
     let snapped = (f64::from(value) * scale).round() / scale;
     let snapped = snapped as f32;
-    if snapped.is_finite() {
-        snapped
-    } else {
-        value
-    }
+    if snapped.is_finite() { snapped } else { value }
 }
 
 /// Snap every edge of a logical rectangle to the physical-pixel grid.

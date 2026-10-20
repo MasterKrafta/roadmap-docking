@@ -13,14 +13,26 @@ pub struct PanelInstance {
 
 impl PanelInstance {
     pub fn new(key: PanelKey, constraints: PanelConstraints) -> Self {
-        Self { key, constraints, state: PanelState::default() }
+        Self {
+            key,
+            constraints,
+            state: PanelState::default(),
+        }
     }
 
-    pub fn key(&self) -> &PanelKey { &self.key }
-    pub const fn constraints(&self) -> &PanelConstraints { &self.constraints }
-    pub const fn state(&self) -> &PanelState { &self.state }
+    pub fn key(&self) -> &PanelKey {
+        &self.key
+    }
+    pub const fn constraints(&self) -> &PanelConstraints {
+        &self.constraints
+    }
+    pub const fn state(&self) -> &PanelState {
+        &self.state
+    }
 
-    pub(crate) fn set_state(&mut self, state: PanelState) { self.state = state; }
+    pub(crate) fn set_state(&mut self, state: PanelState) {
+        self.state = state;
+    }
 }
 
 #[cfg(test)]
@@ -39,7 +51,10 @@ mod tests {
         let instance = PanelInstance::new(key, constraints);
         assert_eq!(instance.key().as_str(), "layers");
         assert_eq!(instance.constraints().min_size(), Size::new(160.0, 100.0));
-        assert_eq!(instance.constraints().preferred_size(), Size::new(280.0, 300.0));
+        assert_eq!(
+            instance.constraints().preferred_size(),
+            Size::new(280.0, 300.0)
+        );
         assert_eq!(instance.constraints().max_size(), Size::new(640.0, 900.0));
         assert!(instance.constraints().is_singleton());
         assert_eq!(instance.state(), &PanelState::default());

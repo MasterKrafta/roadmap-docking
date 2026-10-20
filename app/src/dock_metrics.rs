@@ -28,14 +28,17 @@ pub(crate) fn build(theme: &Theme) -> DockMetrics {
 #[cfg(test)]
 mod tests {
     use super::build;
-    use dock_core::{compute_rects, CanvasState, DockSide, Layout, Profile, Size};
+    use dock_core::{CanvasState, DockSide, Layout, Profile, Size, compute_rects};
     use ui::Theme;
 
     #[test]
     fn theme_metrics_are_passed_through_to_core_geometry() {
         let theme = Theme::default();
         let metrics = build(&theme);
-        assert_eq!(metrics.column_header_height, theme.metrics.column_header_height);
+        assert_eq!(
+            metrics.column_header_height,
+            theme.metrics.column_header_height
+        );
         assert_eq!(metrics.tab_strip_height, theme.metrics.tab_strip_height);
         assert_eq!(metrics.splitter_thickness, theme.metrics.splitter_thickness);
         assert_eq!(metrics.splitter_hit_zone, theme.metrics.splitter_hit_zone);
@@ -58,7 +61,10 @@ mod tests {
             .build_initial_photoshop_layout(&metrics)
             .expect("built-in panels form a valid model layout");
         assert!(
-            layout.panels().values().all(|panel| panel.key().as_str() != "toolbar"),
+            layout
+                .panels()
+                .values()
+                .all(|panel| panel.key().as_str() != "toolbar"),
             "Toolbar is fixed app chrome and must not be part of the dock panel model"
         );
 
@@ -68,7 +74,10 @@ mod tests {
             .iter()
             .find(|area| area.side == DockSide::Right)
             .expect("the initial Photoshop layout has a right dock");
-        assert_eq!(right_dock.bounds.size.width, theme.metrics.default_column_width);
+        assert_eq!(
+            right_dock.bounds.size.width,
+            theme.metrics.default_column_width
+        );
         assert_eq!(
             rects.canvas.size.width + right_dock.bounds.size.width,
             1000.0

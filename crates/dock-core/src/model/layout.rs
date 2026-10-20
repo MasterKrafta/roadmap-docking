@@ -4659,12 +4659,14 @@ mod tests {
             .iter()
             .find_map(|(panel_id, instance)| (instance.key() == &key).then_some(panel_id))
             .expect("reopened panel instance exists");
-        let restored_group = layout.nodes().iter().find_map(|(group_id, node)| match node {
-            Node::Tabs(tabs) if tabs.panels.contains(&reopened) => Some(group_id),
-            Node::Tabs(_) | Node::Split(_) => None,
-        });
+        let restored_group = layout
+            .nodes()
+            .iter()
+            .find_map(|(group_id, node)| match node {
+                Node::Tabs(tabs) if tabs.panels.contains(&reopened) => Some(group_id),
+                Node::Tabs(_) | Node::Split(_) => None,
+            });
         assert_eq!(restored_group, Some(group));
         assert!(layout.validate(&metrics).is_ok());
     }
-
 }
