@@ -930,7 +930,7 @@ fn contains(bounds: Rect, point: Point) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{compute_drop_zones, resolve_drop};
+    use super::{compute_drop_zones, contains, resolve_drop};
     use crate::{
         compute_rects, ColumnRef, DockCommand, DockMetrics, DockSide, DropPayload, DropTarget,
         DropZone, FloatSource, Layout, Node, Point, Profile, Rect, Size, SplitSide,
@@ -1170,6 +1170,78 @@ mod tests {
     }
 
     #[test]
+    fn floating_group_drop_zone_excludes_titlebar_edges_and_occluded_canvas() {
+        let metrics = metrics();
+        let mut layout = Layout::initial_photoshop(&metrics).unwrap();
+        let floating_panel = panel_id(&layout, "layers");
+        let incoming_panel = panel_id(&layout, "properties");
+        let bounds = rect(320.0, 200.0, 320.0, 240.0);
+        layout
+            .apply(
+                DockCommand::Float {
+                    source: FloatSource::Panel(floating_panel),
+                    rect: bounds,
+                },
+                &metrics,
+            )
+            .expect("panel should float");
+        let floating = layout
+            .floating_groups()
+            .iter()
+            .find_map(|(id, group)| group.panels.contains(&floating_panel).then_some(id))
+            .expect("floating group exists");
+        let rects = geometry(&layout, &metrics);
+        let payload = DropPayload::Panel(incoming_panel);
+        let zones = compute_drop_zones(&layout, &rects, payload, &metrics);
+
+        let floating_zone = zones
+            .iter()
+            .find(|zone| zone.target == DropTarget::FloatingGroup {
+                floating,
+                zone: DropZone::Center,
+            })
+            .expect("visible center target exists");
+        assert_eq!(floating_zone.bounds, rect(344.0, 232.0, 272.0, 184.0));
+
+        let center = Point::new(480.0, 320.0);
+        assert_eq!(
+            resolve_drop(&layout, center, payload, &rects, &metrics),
+            Some(DropTarget::FloatingGroup {
+                floating,
+                zone: DropZone::Center,
+            })
+        );
+        for blocked_point in [
+            Point::new(480.0, 210.0), // title bar
+            Point::new(322.0, 320.0), // left resize edge
+            Point::new(480.0, 438.0), // bottom resize edge
+        ] {
+            assert_eq!(
+                resolve_drop(&layout, blocked_point, payload, &rects, &metrics),
+                None,
+                "non-center point {blocked_point:?} must not become a tab target or fall through"
+            );
+            assert!(
+                !zones.iter().any(|zone| contains(zone.bounds, blocked_point)),
+                "overlay must not advertise a drop zone at blocked point {blocked_point:?}"
+            );
+        }
+
+        let zones_at_center: Vec<_> = zones
+            .iter()
+            .filter(|zone| contains(zone.bounds, center))
+            .collect();
+        assert_eq!(zones_at_center.len(), 1);
+        assert_eq!(
+            zones_at_center[0].target,
+            DropTarget::FloatingGroup {
+                floating,
+                zone: DropZone::Center,
+            }
+        );
+    }
+
+    #[test]
     fn dropping_on_a_frontmost_floating_group_does_not_fall_through() {
         let metrics = metrics();
         let mut layout = Layout::initial_photoshop(&metrics).unwrap();
@@ -1202,15 +1274,22 @@ mod tests {
         let rects = geometry(&layout, &metrics);
         assert_ne!(bottom, top);
 
+        let payload = DropPayload::FloatingGroup(top);
         assert_eq!(
             resolve_drop(
                 &layout,
                 Point::new(480.0, 320.0),
-                DropPayload::FloatingGroup(top),
+                payload,
                 &rects,
                 &metrics,
             ),
             None
+        );
+        assert!(
+            compute_drop_zones(&layout, &rects, payload, &metrics)
+                .iter()
+                .all(|zone| !contains(zone.bounds, Point::new(480.0, 320.0))),
+            "the invalid frontmost self-target must occlude every lower target in the overlay"
         );
     }
 
