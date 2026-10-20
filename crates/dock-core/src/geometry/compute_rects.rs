@@ -913,3 +913,232 @@ mod allocation_tests {
         assert_eq!(heights, vec![80.0, 80.0]);
     }
 }
+
+
+#[cfg(test)]
+mod geometry_regression_tests {
+    use super::compute_rects;
+    use crate::{
+        DockCommand, DockMetrics, DockSide, Layout, Node, Point, Rect, Size, SplitSide,
+    };
+
+    fn metrics() -> DockMetrics {
+        DockMetrics {
+            column_header_height: 32.0,
+            tab_strip_height: 28.0,
+            splitter_thickness: 4.0,
+            splitter_hit_zone: 8.0,
+            edge_drop_zone_width: 24.0,
+            drop_edge_zone: 24.0,
+            drag_start_threshold: 4.0,
+            default_column_width: 280.0,
+            min_column_width: 200.0,
+            rail_width: 36.0,
+            min_group_height: 80.0,
+            collapsed_group_height: 28.0,
+            min_document_width: 320.0,
+            max_columns: 4,
+        }
+    }
+
+    fn rect(x: f32, y: f32, width: f32, height: f32) -> Rect {
+        Rect::new(Point::new(x, y), Size::new(width, height))
+    }
+
+    fn near(actual: f32, expected: f32, context: &str) {
+        assert!(
+            (actual - expected).abs() < 1.0e-3,
+            "{context}: expected {expected}, got {actual}"
+        );
+    }
+
+    fn assert_rect_near(actual: Rect, expected: Rect, context: &str) {
+        near(actual.origin.x, expected.origin.x, &format!("{context} x"));
+        near(actual.origin.y, expected.origin.y, &format!("{context} y"));
+        near(actual.size.width, expected.size.width, &format!("{context} width"));
+        near(actual.size.height, expected.size.height, &format!("{context} height"));
+    }
+
+    fn panel_id(layout: &Layout, key: &str) -> crate::PanelId {
+        layout
+            .panels()
+            .iter()
+            .find_map(|(id, panel)| (panel.key().as_str() == key).then_some(id))
+            .expect("panel exists")
+    }
+
+    fn group_for_panel(layout: &Layout, panel: crate::PanelId) -> crate::NodeId {
+        layout
+            .dock_areas()
+            .iter()
+            .flat_map(|area| area.columns.iter())
+            .flat_map(|column| column.groups.iter().copied())
+            .find(|group| {
+                matches!(
+                    layout.nodes().get(*group),
+                    Some(Node::Tabs(tabs)) if tabs.panels.contains(&panel)
+                )
+            })
+            .expect("panel group exists")
+    }
+
+    #[test]
+    fn reference_rectangles_are_stable_for_integer_and_fractional_viewports() {
+        let metrics = metrics();
+        let layout = Layout::initial_photoshop(&metrics).expect("initial layout");
+
+        // These viewports include exact, odd, and fractional logical dimensions. The
+        // reference values derive solely from the layout model and the metric bundle.
+        for (width, height) in [
+            (1280.0, 800.0),
+            (1440.0, 900.0),
+            (1280.5, 799.5),
+            (1024.25, 600.75),
+        ] {
+            let window = Size::new(width, height);
+            let rects = compute_rects(&layout, window, &metrics);
+            let right_x = width - metrics.default_column_width;
+            let group_height =
+                (height - metrics.column_header_height - metrics.splitter_thickness) / 2.0;
+
+            assert_rect_near(
+                rects.canvas,
+                rect(0.0, 0.0, width - metrics.default_column_width, height),
+                "canvas",
+            );
+            assert_eq!(rects.dock_areas.len(), 1);
+            assert_rect_near(
+                rects.dock_areas[0].bounds,
+                rect(right_x, 0.0, 280.0, height),
+                "dock area",
+            );
+            assert_eq!(rects.columns.len(), 1);
+            assert_rect_near(
+                rects.columns[0].bounds,
+                rect(right_x, 0.0, 280.0, height),
+                "column",
+            );
+            assert_rect_near(
+                rects.column_headers[0].bounds,
+                rect(right_x, 0.0, 280.0, 32.0),
+                "column header",
+            );
+            assert_eq!(rects.groups.len(), 2);
+            assert_rect_near(
+                rects.groups[0].bounds,
+                rect(right_x, 32.0, 280.0, group_height),
+                "first group",
+            );
+            assert_rect_near(
+                rects.groups[1].bounds,
+                rect(right_x, 32.0 + group_height + 4.0, 280.0, group_height),
+                "second group",
+            );
+            let group_splitter = rects
+                .splitters
+                .iter()
+                .find(|splitter| splitter.kind == crate::SplitterKind::Group)
+                .expect("two groups have a splitter");
+            assert_rect_near(
+                group_splitter.bounds,
+                rect(right_x, 32.0 + group_height - 2.0, 280.0, 8.0),
+                "group splitter hit region",
+            );
+
+            assert_eq!(
+                compute_rects(&layout, window, &metrics),
+                rects,
+                "geometry must be deterministic for viewport {width}x{height}"
+            );
+        }
+    }
+
+    #[test]
+    fn single_group_column_keeps_width_while_groups_reflow_vertically() {
+        let metrics = metrics();
+        let mut layout = Layout::initial_photoshop(&metrics).expect("initial layout");
+        let panel = panel_id(&layout, "layers");
+        let source_group = group_for_panel(&layout, panel);
+
+        layout
+            .apply(
+                DockCommand::SplitGroup {
+                    panel,
+                    group: source_group,
+                    side: SplitSide::Left,
+                },
+                &metrics,
+            )
+            .expect("splitting a panel should create a one-group column");
+
+        let area = &layout.dock_areas()[0];
+        assert_eq!(area.columns.len(), 2);
+        assert!(layout.nodes().values().all(|node| matches!(node, Node::Tabs(_))),
+            "Photoshop columns must contain tab groups, not horizontal split nodes");
+
+        let single_column_index = area
+            .columns
+            .iter()
+            .position(|column| column.groups.len() == 1)
+            .expect("one column has exactly one group");
+        let multi_column_index = area
+            .columns
+            .iter()
+            .position(|column| column.groups.len() == 2)
+            .expect("another column has two vertically stacked groups");
+        let single_group = area.columns[single_column_index].groups[0];
+        let multi_groups = area.columns[multi_column_index].groups.clone();
+
+        let mut observed_multi_group_heights = Vec::new();
+        for (width, height) in [
+            (1280.0, 800.0),
+            (1280.0, 900.5),
+            (1280.5, 799.5),
+        ] {
+            let rects = compute_rects(&layout, Size::new(width, height), &metrics);
+            assert_eq!(rects.columns.len(), 2);
+            for column in &rects.columns {
+                assert_eq!(column.bounds.size.width, 280.0, "column width is fixed");
+                assert_eq!(column.bounds.size.height, height);
+            }
+
+            let single = rects
+                .groups
+                .iter()
+                .find(|group| group.group == single_group)
+                .expect("single group has geometry");
+            assert_rect_near(
+                single.bounds,
+                rect(
+                    rects.columns[single_column_index].bounds.origin.x,
+                    32.0,
+                    280.0,
+                    height - 32.0,
+                ),
+                "single-group column",
+            );
+
+            let expected_multi_height = (height - 32.0 - 4.0) / 2.0;
+            for group_id in &multi_groups {
+                let group = rects
+                    .groups
+                    .iter()
+                    .find(|group| group.group == *group_id)
+                    .expect("stacked group has geometry");
+                near(group.bounds.size.width, 280.0, "stacked group width");
+                near(group.bounds.size.height, expected_multi_height, "stacked group height");
+            }
+            observed_multi_group_heights.push(expected_multi_height);
+
+            assert!(
+                !rects.columns[single_column_index].vertical_overflow
+                    && !rects.columns[multi_column_index].vertical_overflow,
+                "these viewports fit all group minimums"
+            );
+        }
+
+        assert_ne!(observed_multi_group_heights[0], observed_multi_group_heights[1]);
+        assert_eq!(observed_multi_group_heights[0], 382.0);
+        assert_eq!(observed_multi_group_heights[1], 432.25);
+    }
+}
