@@ -149,56 +149,13 @@ pub fn resolve_drop(
             let bounds = floating_bounds_at_point(layout, rects, payload, point, metrics)?;
             Some(DropTarget::FreeArea { bounds })
         }
-        DropTarget::TabInsertion { group, index } => {
-            let index = adjusted_tab_index(layout, rects, point, payload, *group, *index);
-            let target = DropTarget::TabInsertion { group: *group, index };
-            valid_target(layout, payload, &target, metrics).then_some(target)
+        target @ DropTarget::TabInsertion { .. }
+            if valid_target(layout, payload, target, metrics) =>
+        {
+            Some(target.clone())
         }
         target if valid_target(layout, payload, target, metrics) => Some(target.clone()),
         _ => None,
-    }
-}
-
-fn adjusted_tab_index(
-    layout: &Layout,
-    rects: &LayoutRects,
-    point: Point,
-    payload: DropPayload,
-    group: NodeId,
-    index: usize,
-) -> usize {
-    let DropPayload::Panel(panel) = payload else {
-        return index;
-    };
-    let Some(Node::Tabs(tabs)) = layout.nodes().get(group) else {
-        return index;
-    };
-    let Some(source_index) = tabs.panels.iter().position(|candidate| *candidate == panel) else {
-        return index;
-    };
-    let Some(previous) = rects
-        .tab_headers
-        .iter()
-        .find(|header| header.group == group && header.index + 1 == index)
-    else {
-        return index;
-    };
-    let Some(next) = rects
-        .tab_headers
-        .iter()
-        .find(|header| header.group == group && header.index == index)
-    else {
-        return index;
-    };
-    let boundary_x = (previous.bounds.origin.x + previous.bounds.size.width
-        + next.bounds.origin.x) * 0.5;
-
-    if source_index < index && point.x >= boundary_x {
-        index + 1
-    } else if source_index >= index && point.x < boundary_x {
-        index.saturating_sub(1)
-    } else {
-        index
     }
 }
 
@@ -326,19 +283,59 @@ fn append_tab_insertion_zones(
                 continue;
             }
 
-            let target = DropTarget::TabInsertion {
-                group: group_rect.group,
-                index: next.index,
+            let zone_left = boundary_x - width * 0.5;
+            let left_bounds = Rect::new(
+                Point::new(zone_left, strip.bounds.origin.y),
+                Size::new(width * 0.5, strip.bounds.size.height),
+            );
+            let right_bounds = Rect::new(
+                Point::new(boundary_x, strip.bounds.origin.y),
+                Size::new(width * 0.5, strip.bounds.size.height),
+            );
+
+            let source_index = match payload {
+                DropPayload::Panel(panel) => tabs
+                    .panels
+                    .iter()
+                    .position(|candidate| *candidate == panel),
+                _ => None,
             };
-            if valid_target(layout, payload, &target, metrics) {
-                push_zone(
-                    zones,
-                    target,
-                    Rect::new(
-                        Point::new(boundary_x - width * 0.5, strip.bounds.origin.y),
-                        Size::new(width, strip.bounds.size.height),
-                    ),
-                );
+            if let Some(source_index) = source_index {
+                // Moving a tab within this same group has different resulting indices
+                // on the two sides of a boundary because MovePanel removes the source
+                // tab before inserting it at the requested position.
+                let (left_index, right_index) = if source_index < next.index {
+                    (next.index, next.index + 1)
+                } else {
+                    (next.index.saturating_sub(1), next.index)
+                };
+                for (index, bounds) in [
+                    (left_index, left_bounds),
+                    (right_index, right_bounds),
+                ] {
+                    let target = DropTarget::TabInsertion {
+                        group: group_rect.group,
+                        index,
+                    };
+                    if valid_target(layout, payload, &target, metrics) {
+                        push_zone(zones, target, bounds);
+                    }
+                }
+            } else {
+                let target = DropTarget::TabInsertion {
+                    group: group_rect.group,
+                    index: next.index,
+                };
+                if valid_target(layout, payload, &target, metrics) {
+                    push_zone(
+                        zones,
+                        target,
+                        Rect::new(
+                            Point::new(zone_left, strip.bounds.origin.y),
+                            Size::new(width, strip.bounds.size.height),
+                        ),
+                    );
+                }
             }
         }
     }
