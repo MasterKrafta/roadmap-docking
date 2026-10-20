@@ -510,23 +510,53 @@ fn append_group_splitter_zones(
                 previous.bounds,
                 next.bounds,
             );
+            // Both directions are valid at the same divider: the upper half inserts
+            // after the preceding group (Bottom), and the lower half inserts before
+            // the following group (Top). Keeping the hit rectangles disjoint gives
+            // the pointer one deterministic semantic target without losing the split band.
+            let split_y = drop_bounds.origin.y + drop_bounds.size.height * 0.5;
+            let upper_bounds = Rect::new(
+                drop_bounds.origin,
+                Size::new(drop_bounds.size.width, (split_y - drop_bounds.origin.y).max(0.0)),
+            );
+            let lower_bounds = Rect::new(
+                Point::new(drop_bounds.origin.x, split_y),
+                Size::new(
+                    drop_bounds.size.width,
+                    (drop_bounds.origin.y + drop_bounds.size.height - split_y).max(0.0),
+                ),
+            );
+            let column_can_split = can_add_group_to_column(
+                layout,
+                rects,
+                payload,
+                column.side,
+                column.index,
+                metrics,
+            );
 
-            let target = DropTarget::Group {
+            let bottom_target = DropTarget::Group {
+                group: previous.group,
+                zone: DropZone::Bottom,
+            };
+            if upper_bounds.size.height > 0.0
+                && column_can_split
+                && valid_target(layout, payload, &bottom_target, metrics)
+                && can_split_group_vertically(layout, rects, payload, previous.group, metrics)
+            {
+                push_zone(zones, bottom_target, upper_bounds);
+            }
+
+            let top_target = DropTarget::Group {
                 group: next.group,
                 zone: DropZone::Top,
             };
-            if valid_target(layout, payload, &target, metrics)
+            if lower_bounds.size.height > 0.0
+                && column_can_split
+                && valid_target(layout, payload, &top_target, metrics)
                 && can_split_group_vertically(layout, rects, payload, next.group, metrics)
-                && can_add_group_to_column(
-                    layout,
-                    rects,
-                    payload,
-                    column.side,
-                    column.index,
-                    metrics,
-                )
             {
-                push_zone(zones, target, drop_bounds);
+                push_zone(zones, top_target, lower_bounds);
             }
         }
     }
@@ -1492,7 +1522,22 @@ mod tests {
             }),
             "the center of the visible group splitter resolves to a split target"
         );
-        for offset in [-10.0, 10.0] {
+        for (offset, target) in [
+            (
+                -10.0,
+                DropTarget::Group {
+                    group: first_group,
+                    zone: DropZone::Bottom,
+                },
+            ),
+            (
+                10.0,
+                DropTarget::Group {
+                    group: next_group,
+                    zone: DropZone::Top,
+                },
+            ),
+        ] {
             assert_eq!(
                 resolve_drop(
                     &layout,
@@ -1501,11 +1546,8 @@ mod tests {
                     &rects,
                     &metrics,
                 ),
-                Some(DropTarget::Group {
-                    group: next_group,
-                    zone: DropZone::Top,
-                }),
-                "the wider split target should remain stable just above and below the visible separator"
+                Some(target),
+                "the upper and lower halves of a splitter must resolve to distinct semantic targets"
             );
         }
         assert_eq!(
@@ -1558,8 +1600,9 @@ mod tests {
             }),
             "the previous group's center remains available outside the gap"
         );
-        let split_zone = compute_drop_zones(&layout, &rects, payload, &metrics)
-            .into_iter()
+        let zones = compute_drop_zones(&layout, &rects, payload, &metrics);
+        let split_zone = zones
+            .iter()
             .find(|zone| {
                 zone.target
                     == (DropTarget::Group {
@@ -1572,17 +1615,32 @@ mod tests {
         assert_eq!(split_zone.bounds.size.width, splitter.bounds.size.width);
         assert_eq!(
             split_zone.bounds.size.height,
-            HORIZONTAL_DROP_ZONE_MIN_HEIGHT.max(splitter.bounds.size.height)
+            HORIZONTAL_DROP_ZONE_MIN_HEIGHT.max(splitter.bounds.size.height) * 0.5
         );
         assert!(
-            (split_zone.bounds.origin.y + split_zone.bounds.size.height * 0.5
+            (split_zone.bounds.origin.y - splitter_center.y).abs() < 0.001,
+            "the lower split hit half starts at the actual splitter center"
+        );
+        let upper_split_zone = zones
+            .iter()
+            .find(|zone| {
+                zone.target
+                    == (DropTarget::Group {
+                        group: first_group,
+                        zone: DropZone::Bottom,
+                    })
+            })
+            .expect("group bottom target should be advertised");
+        assert_eq!(upper_split_zone.bounds.origin.x, splitter.bounds.origin.x);
+        assert_eq!(upper_split_zone.bounds.size.width, splitter.bounds.size.width);
+        assert!(
+            (upper_split_zone.bounds.origin.y + upper_split_zone.bounds.size.height
                 - splitter_center.y)
                 .abs()
                 < 0.001,
-            "the wider hit zone stays centered on the actual splitter"
+            "the upper and lower split zones meet at the splitter without overlapping"
         );
 
-        let zones = compute_drop_zones(&layout, &rects, payload, &metrics);
         let top_column_zone = zones
             .iter()
             .find(|zone| {
@@ -1624,11 +1682,14 @@ mod tests {
                     }
                     let splitter_center_y =
                         splitter.bounds.origin.y + splitter.bounds.size.height * 0.5;
-                    let zone_center_y = zone.bounds.origin.y + zone.bounds.size.height * 0.5;
-                    (splitter_center_y - zone_center_y).abs() < 0.001
+                    let zone_bottom = zone.bounds.origin.y + zone.bounds.size.height;
+                    // The upper and lower semantic targets meet at the splitter center,
+                    // do not overlap, and remain wide enough to activate with a pointer.
+                    zone.bounds.origin.y <= splitter_center_y + 0.001
+                        && zone_bottom >= splitter_center_y - 0.001
                         && zone.bounds.size.height >= splitter.bounds.size.height
                 })),
-            "group top/bottom targets must be centered on a real splitter"
+            "group top/bottom targets must meet at a real splitter"
         );
     }
 

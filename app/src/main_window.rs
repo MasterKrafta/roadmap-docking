@@ -1,5 +1,5 @@
 use dock_core::{
-    DockCommand, DockMetrics, DockSide, DragSession, DragSessionState, DropPayload, DropTarget,
+    DockCommand, DockMetrics, DockSide, DragCancelReason, DragSession, DragSessionState, DropPayload, DropTarget,
     DropZone, FloatSource, FloatingGroupId, Layout, LayoutRects, Node, NodeId, PanelId, PanelKey,
     Point as DockPoint,
     Rect as DockRect, ResizeEdge, Size as DockSize,
@@ -7,8 +7,8 @@ use dock_core::{
 };
 use dock_gpui::{DockGroupData, TabItem, dock_column_view, drop_overlay};
 use gpui::{
-    AnyElement, App, Context, MouseButton, MouseMoveEvent, MouseUpEvent, Pixels, Point as GpuiPoint, Render,
-    Window, div, prelude::*, px, rgb,
+    AnyElement, App, Context, FocusHandle, KeyDownEvent, MouseButton, MouseMoveEvent, MouseUpEvent,
+    Pixels, Point as GpuiPoint, Render, Window, div, prelude::*, px, rgb,
 };
 use ui::Theme;
 
@@ -21,6 +21,7 @@ pub struct MainWindow {
     metrics: DockMetrics,
     registry: PanelRegistry,
     layout: Layout,
+    focus_handle: FocusHandle,
     drag_session: DragSession,
     floating_interaction: Option<FloatingInteraction>,
     floating_drag: Option<FloatingDragState>,
@@ -60,12 +61,14 @@ impl MainWindow {
         metrics: DockMetrics,
         registry: PanelRegistry,
         layout: Layout,
+        focus_handle: FocusHandle,
     ) -> Self {
         Self {
             theme,
             metrics,
             registry,
             layout,
+            focus_handle,
             drag_session: DragSession::new(),
             floating_interaction: None,
             floating_drag: None,
@@ -132,7 +135,7 @@ impl MainWindow {
         &mut self,
         payload: DropPayload,
         position: GpuiPoint<Pixels>,
-        window: &Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if matches!(
@@ -142,6 +145,7 @@ impl MainWindow {
             return;
         }
 
+        self.focus_handle.focus(window, cx);
         let geometry = self.window_geometry(window);
         let origin = self.local_dock_point(position, &geometry);
         if let DropPayload::Panel(panel) = payload {
@@ -162,6 +166,12 @@ impl MainWindow {
         }
 
         if self.drag_session.press(payload, origin) {
+            cx.notify();
+        }
+    }
+
+    fn cancel_panel_drag(&mut self, cx: &mut Context<Self>) {
+        if cancel_drag_interaction(&mut self.drag_session, &mut self.floating_drag) {
             cx.notify();
         }
     }
@@ -870,6 +880,17 @@ impl Render for MainWindow {
             }
         };
 
+        let cancel_drag_window = weak_window.clone();
+        let on_key_down = move |event: &KeyDownEvent, _window: &mut Window, app: &mut App| {
+            if event.keystroke.key == "escape" {
+                if let Err(error) = cancel_drag_window.update(app, |this, cx| {
+                    this.cancel_panel_drag(cx);
+                }) {
+                    eprintln!("Could not cancel drag: {error}");
+                }
+            }
+        };
+
         let geometry = self.window_geometry(window);
         let menu_height = geometry.menu_height;
         let panel_menu_height = geometry.panel_menu_height;
@@ -955,9 +976,23 @@ impl Render for MainWindow {
                             )),
                     ),
             )
+            .track_focus(&self.focus_handle)
+            .on_key_down(on_key_down)
             .on_mouse_move(on_pointer_move)
             .on_mouse_up(MouseButton::Left, on_pointer_up)
     }
+}
+
+fn cancel_drag_interaction(
+    drag_session: &mut DragSession,
+    floating_drag: &mut Option<FloatingDragState>,
+) -> bool {
+    if !drag_session.cancel(DragCancelReason::Escape) {
+        return false;
+    }
+
+    *floating_drag = None;
+    true
 }
 
 fn titlebar_resize_edge(
@@ -1808,10 +1843,46 @@ fn group_view_data(
 #[cfg(test)]
 mod tests {
     use super::{
-        align_tab_header_rects, group_view_data, resize_floating_rect, titlebar_resize_edge,
+        align_tab_header_rects, cancel_drag_interaction, group_view_data, resize_floating_rect,
+        titlebar_resize_edge,
     };
     use crate::{dock_metrics, panels::PanelRegistry};
     use ui::Theme;
+
+    #[test]
+    fn escape_cancels_drag_preview_and_discards_floating_preview() {
+        use dock_core::{
+            DragCancelReason, DragSession, DragSessionState, DockSide, DropPayload, DropTarget,
+            FloatingGroupId, Point, Rect, Size,
+        };
+        use slotmap::Key;
+
+        let floating = FloatingGroupId::null();
+        let mut session = DragSession::new();
+        assert!(session.press(DropPayload::FloatingGroup(floating), Point::new(10.0, 10.0)));
+        assert!(session.pointer_moved(
+            Point::new(20.0, 10.0),
+            Some(DropTarget::DockEdge { side: DockSide::Left }),
+        ));
+        let mut preview = Some(super::FloatingDragState {
+            floating,
+            pointer_origin: Point::new(10.0, 10.0),
+            initial_bounds: Rect::new(Point::new(20.0, 30.0), Size::new(320.0, 240.0)),
+            current_bounds: Rect::new(Point::new(30.0, 30.0), Size::new(320.0, 240.0)),
+        });
+
+        assert!(cancel_drag_interaction(&mut session, &mut preview));
+        assert_eq!(
+            session.state(),
+            &DragSessionState::Cancelled {
+                reason: DragCancelReason::Escape
+            }
+        );
+        assert!(session.preview_target().is_none());
+        assert!(preview.is_none());
+        assert!(session.release().is_none());
+        assert!(!cancel_drag_interaction(&mut session, &mut preview));
+    }
 
     #[test]
     fn titlebar_top_hit_band_routes_to_resize_edges_not_move() {

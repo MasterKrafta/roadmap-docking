@@ -36,7 +36,9 @@ fn main() {
         };
 
         let result = cx.open_window(window_options, move |_window, cx| {
-            cx.new(move |_| main_window::MainWindow::new(theme, metrics, registry, layout))
+            cx.new(move |cx| {
+                main_window::MainWindow::new(theme, metrics, registry, layout, cx.focus_handle())
+            })
         });
         if let Err(error) = result {
             eprintln!("Could not open the main application window: {error}");
