@@ -1,4 +1,5 @@
-use gpui::{div, prelude::*, px, rgb};
+use dock_core::NodeId;
+use gpui::{App, div, prelude::*, px, rgb};
 use ui::Theme;
 
 /// Display-only projection of a tab in the current Layout.
@@ -12,6 +13,7 @@ pub struct TabItem {
 /// Display-only projection of one group, created from Layout and PanelRegistry on render.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DockGroupData {
+    pub group_id: NodeId,
     pub height: f32,
     pub tab_strip_height: f32,
     pub tabs: Vec<TabItem>,
@@ -26,6 +28,7 @@ pub fn dock_column_view(
     height: f32,
     header_height: f32,
     groups: Vec<DockGroupData>,
+    on_activate: impl Fn(NodeId, usize, &mut App) + Clone + 'static,
 ) -> impl IntoElement {
     let group_count = groups.len();
     let group_rows = groups.into_iter().enumerate().map(|(index, group)| {
@@ -35,6 +38,7 @@ pub fn dock_column_view(
             0.0
         };
         let content_height = (group.height - group.tab_strip_height).max(0.0);
+        let group_id = group.group_id;
         div()
             .w(px(width))
             .h(px((group.height + splitter_height).max(0.0)))
@@ -44,7 +48,14 @@ pub fn dock_column_view(
                 theme,
                 width,
                 group.height,
-                tab_strip(theme, width, group.tab_strip_height, group.tabs),
+                tab_strip(
+                    theme,
+                    width,
+                    group_id,
+                    group.tab_strip_height,
+                    group.tabs,
+                    on_activate.clone(),
+                ),
                 panel_content(
                     theme,
                     width,
@@ -123,14 +134,16 @@ pub fn dock_group_view(
 pub fn tab_strip(
     theme: &Theme,
     width: f32,
+    group_id: NodeId,
     height: f32,
     tabs: Vec<TabItem>,
+    on_activate: impl Fn(NodeId, usize, &mut App) + Clone + 'static,
 ) -> impl IntoElement {
     let colors = theme.colors;
     let metrics = theme.metrics;
     let typography = theme.typography;
 
-    let tab_elements = tabs.into_iter().map(|tab| {
+    let tab_elements = tabs.into_iter().enumerate().map(|(index, tab)| {
         let background = if tab.active {
             colors.active_tab
         } else {
@@ -141,8 +154,10 @@ pub fn tab_strip(
         } else {
             colors.muted_text
         };
+        let activate = on_activate.clone();
 
         div()
+            .id(format!("dock-tab-{group_id:?}-{index}"))
             .flex_1()
             .min_w(px(0.0))
             .h_full()
@@ -155,6 +170,9 @@ pub fn tab_strip(
             .whitespace_nowrap()
             .overflow_hidden()
             .text_ellipsis()
+            .cursor_pointer()
+            .hover(|style| style.bg(rgb(colors.hover)))
+            .on_click(move |_, _, app| activate(group_id, index, app))
             .child(tab.title)
     });
 
