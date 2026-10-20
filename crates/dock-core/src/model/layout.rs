@@ -3714,7 +3714,7 @@ mod tests {
             &metrics,
         ).expect("wide panel should open in the dock group");
         let wide_panel = layout.panels().iter()
-            .find_map(|(id, panel)| (panel.key().as_str() == "wide-tool").then_some(*id))
+            .find_map(|(id, panel)| (panel.key().as_str() == "wide-tool").then_some(id))
             .expect("wide panel instance exists");
         let floating_before = layout.floating_groups().get(floating_id).expect("floating exists").clone();
         let version_before = layout.version();
