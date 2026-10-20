@@ -202,7 +202,7 @@ fn generated_command(
             }
             Some(DockCommand::ResizeColumn {
                 column: choose(&columns, a),
-                width: metrics.min_column_width + f32::from(b % 280),
+                width: metrics.min_column_width + f32::from(b),
             })
         }
         6 => {
