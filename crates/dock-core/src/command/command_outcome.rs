@@ -13,6 +13,10 @@ pub struct CommandOutcome {
     pub changed_nodes: Vec<NodeId>,
     pub version: u64,
     pub inverse: Option<DockCommand>,
+    /// Actual logical-pixel result for resize commands: applied delta for boundary
+    /// drags, or resulting width for ResizeColumn. None for other commands.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub actual_value: Option<f32>,
 }
 
 impl CommandOutcome {
@@ -21,7 +25,13 @@ impl CommandOutcome {
             changed_nodes,
             version,
             inverse: None,
+            actual_value: None,
         }
+    }
+
+    pub fn with_actual_value(mut self, actual_value: Option<f32>) -> Self {
+        self.actual_value = actual_value;
+        self
     }
 }
 
