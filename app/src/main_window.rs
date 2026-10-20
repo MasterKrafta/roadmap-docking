@@ -1,6 +1,7 @@
 use dock_core::{
     DockCommand, DockMetrics, DockSide, DragSession, DragSessionState, DropPayload, DropTarget,
-    DropZone, Layout, LayoutRects, Node, NodeId, PanelId, PanelKey, Point as DockPoint,
+    DropZone, FloatSource, Layout, LayoutRects, Node, NodeId, PanelId, PanelKey,
+    Point as DockPoint,
     Rect as DockRect, Size as DockSize,
     compute_rects, resolve_drop,
 };
@@ -168,22 +169,40 @@ impl MainWindow {
                 let supported_target = matches!(
                     &request.target,
                     DropTarget::Group {
-                        zone: DropZone::Center,
+                        zone: DropZone::Center | DropZone::Top | DropZone::Bottom,
                         ..
                     } | DropTarget::TabInsertion { .. }
+                        | DropTarget::Column {
+                            zone: DropZone::Top
+                                | DropZone::Bottom
+                                | DropZone::Left
+                                | DropZone::Right,
+                            ..
+                        }
+                        | DropTarget::DockEdge { .. }
                         | DropTarget::FloatingGroup {
                             zone: DropZone::Center,
                             ..
                         }
+                        | DropTarget::FreeArea { .. }
                 );
                 if supported_target {
-                    match self.layout.apply(
-                        DockCommand::MovePanel {
-                            panel,
-                            target: request.target,
-                        },
-                        &self.metrics,
-                    ) {
+                    let result = match request.target {
+                        // Canvas is a protected document surface: a drop there may float a
+                        // panel, but it must never create a dock group or tab on the Canvas.
+                        DropTarget::FreeArea { bounds } => self.layout.apply(
+                            DockCommand::Float {
+                                source: FloatSource::Panel(panel),
+                                rect: bounds,
+                            },
+                            &self.metrics,
+                        ),
+                        target => self.layout.apply(
+                            DockCommand::MovePanel { panel, target },
+                            &self.metrics,
+                        ),
+                    };
+                    match result {
                         Ok(_) => {}
                         Err(error) => eprintln!("Could not drop panel {panel:?}: {error}"),
                     }

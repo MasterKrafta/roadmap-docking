@@ -251,6 +251,14 @@ impl Layout {
                 crate::command::DropTarget::FloatingGroup { floating, zone } => {
                     self.move_panel_to_floating_group(panel, floating, zone, metrics)
                 }
+                target @ crate::command::DropTarget::Group {
+                    zone: crate::command::DropZone::Top | crate::command::DropZone::Bottom,
+                    ..
+                }
+                | target @ crate::command::DropTarget::Column { .. }
+                | target @ crate::command::DropTarget::DockEdge { .. } => {
+                    self.move_panel_to_dock_side(panel, target, metrics)
+                }
                 target => self.move_panel_to_existing_group(panel, target),
             },
             DockCommand::Float { source, rect } => self.float_source(source, rect, metrics),
@@ -1603,6 +1611,7 @@ impl Layout {
         };
 
         let mut required_height = 0.0_f32;
+        let mut non_empty_groups = 0usize;
         for group_id in &column.groups {
             let Some(Node::Tabs(tabs)) = self.nodes.get(*group_id) else {
                 // The final validate call reports non-Tabs nodes in a Photoshop column.
@@ -1627,7 +1636,12 @@ impl Layout {
                 group_minimum = group_minimum.max(min_height);
             }
             required_height += group_minimum;
+            non_empty_groups += 1;
         }
+        // The separator rows consume physical height too; omitting them allowed a
+        // direct side-drop command to pass with groups below their minimum allocations.
+        required_height += metrics.splitter_thickness.max(0.0)
+            * non_empty_groups.saturating_sub(1) as f32;
 
         if !required_height.is_finite() || required_height > available + PIXEL_TOLERANCE {
             return Err(CommandError::InvalidCommandParameter {
@@ -1777,6 +1791,244 @@ impl Layout {
         }
         self.nodes.remove(group);
         Ok(vec![group])
+    }
+
+    /// Move one docked panel to a four-sided drop target by creating a new group.
+    ///
+    /// The command runs inside Layout::apply's candidate transaction, so every failure
+    /// leaves the original layout untouched and successful changes are normalized/validated.
+    fn move_panel_to_dock_side(
+        &mut self,
+        panel: crate::ids::PanelId,
+        target: crate::command::DropTarget,
+        metrics: &DockMetrics,
+    ) -> Result<Vec<NodeId>, crate::command::CommandError> {
+        use crate::command::{CommandError, DropTarget, DropZone};
+        use crate::model::DockSide;
+
+        if self.profile != Profile::Photoshop {
+            return Err(CommandError::UnsupportedForProfile {
+                command: "four-sided MovePanel".to_owned(),
+                profile: self.profile,
+            });
+        }
+        if !self.panels.contains_key(panel) {
+            return Err(CommandError::UnknownPanel(panel));
+        }
+        let Some((source_group, source_index)) = self.find_dock_group_for_panel(panel) else {
+            return Err(CommandError::PanelNotInDockGroup(panel));
+        };
+
+        match target {
+            DropTarget::Group {
+                group,
+                zone: zone @ (DropZone::Top | DropZone::Bottom),
+            } => {
+                let Some((side, column_index, group_index)) =
+                    self.find_dock_group_location(group)
+                else {
+                    return Err(CommandError::UnknownGroup(group));
+                };
+                if !matches!(self.nodes.get(group), Some(Node::Tabs(_))) {
+                    return if self.nodes.contains_key(group) {
+                        Err(CommandError::GroupNotTabs(group))
+                    } else {
+                        Err(CommandError::UnknownGroup(group))
+                    };
+                }
+                let area_index = self
+                    .dock_areas
+                    .iter()
+                    .position(|area| area.side == side)
+                    .ok_or(CommandError::UnknownGroup(group))?;
+                self.ensure_panels_fit_column(&[panel], area_index, column_index, metrics)?;
+
+                let ratio = self.dock_areas[area_index].columns[column_index]
+                    .group_ratios
+                    .get(group_index)
+                    .copied()
+                    .ok_or_else(|| CommandError::InvalidCommandParameter {
+                        parameter: "group_ratios".to_owned(),
+                        reason: "target group has no matching height ratio".to_owned(),
+                    })?;
+                if !ratio.is_finite() || ratio < 0.0 {
+                    return Err(CommandError::InvalidCommandParameter {
+                        parameter: "group_ratios".to_owned(),
+                        reason: "target group ratio must be finite and non-negative".to_owned(),
+                    });
+                }
+                if self.dock_areas[area_index].columns[column_index].group_ratios.len()
+                    != self.dock_areas[area_index].columns[column_index].groups.len()
+                {
+                    return Err(CommandError::InvalidCommandParameter {
+                        parameter: "group_ratios".to_owned(),
+                        reason: "there must be one ratio for every group".to_owned(),
+                    });
+                }
+
+                let Some(Node::Tabs(source_tabs)) = self.nodes.get_mut(source_group) else {
+                    return Err(CommandError::GroupNotTabs(source_group));
+                };
+                Self::remove_panel_from_tabs(source_tabs, source_index);
+                let new_group = self.insert_node(Node::Tabs(Tabs {
+                    panels: vec![panel],
+                    active_index: 0,
+                }));
+
+                let insert_at = if zone == DropZone::Top {
+                    group_index
+                } else {
+                    group_index + 1
+                };
+                let half = ratio * 0.5;
+                let column = &mut self.dock_areas[area_index].columns[column_index];
+                column.group_ratios[group_index] = half;
+                column.groups.insert(insert_at, new_group);
+                column.group_ratios.insert(insert_at, half);
+                self.ensure_column_fits_min_height(area_index, column_index, metrics)?;
+                Ok(vec![source_group, group, new_group])
+            }
+            DropTarget::Column { column, zone } => {
+                let (area_index, column_index) = self.resolve_column_ref(column)?;
+                match zone {
+                    DropZone::Left | DropZone::Right => {
+                        self.ensure_can_add_column(metrics)?;
+                        let width = self.minimum_floating_dock_width(&[panel], metrics)?;
+                        self.ensure_document_width_after_new_column(width, metrics)?;
+
+                        let Some(Node::Tabs(source_tabs)) = self.nodes.get_mut(source_group) else {
+                            return Err(CommandError::GroupNotTabs(source_group));
+                        };
+                        Self::remove_panel_from_tabs(source_tabs, source_index);
+                        let new_group = self.insert_node(Node::Tabs(Tabs {
+                            panels: vec![panel],
+                            active_index: 0,
+                        }));
+                        let new_column = Column {
+                            width,
+                            mode: ColumnMode::Expanded,
+                            groups: vec![new_group],
+                            group_ratios: vec![1.0],
+                        };
+                        let insert_at = column_index + usize::from(zone == DropZone::Right);
+                        self.dock_areas[area_index]
+                            .columns
+                            .insert(insert_at, new_column);
+                        self.ensure_column_fits_min_height(area_index, insert_at, metrics)?;
+                        Ok(vec![source_group, new_group])
+                    }
+                    DropZone::Top | DropZone::Bottom => {
+                        self.ensure_panels_fit_column(&[panel], area_index, column_index, metrics)?;
+
+                        let Some(Node::Tabs(source_tabs)) = self.nodes.get_mut(source_group) else {
+                            return Err(CommandError::GroupNotTabs(source_group));
+                        };
+                        Self::remove_panel_from_tabs(source_tabs, source_index);
+                        let new_group = self.insert_node(Node::Tabs(Tabs {
+                            panels: vec![panel],
+                            active_index: 0,
+                        }));
+                        let column = &mut self.dock_areas[area_index].columns[column_index];
+                        let insert_at = if zone == DropZone::Top {
+                            0
+                        } else {
+                            column.groups.len()
+                        };
+                        column.groups.insert(insert_at, new_group);
+                        column.group_ratios.insert(insert_at, 1.0);
+                        normalize_ratios(&mut column.group_ratios, column.groups.len());
+                        self.ensure_column_fits_min_height(area_index, column_index, metrics)?;
+                        Ok(vec![source_group, new_group])
+                    }
+                    DropZone::Center => Err(CommandError::InvalidDropTarget(
+                        "a column Center zone is not a docking destination".to_owned(),
+                    )),
+                }
+            }
+            DropTarget::DockEdge { side } => {
+                self.ensure_can_add_column(metrics)?;
+                let width = self.minimum_floating_dock_width(&[panel], metrics)?;
+                self.ensure_document_width_after_new_column(width, metrics)?;
+
+                let Some(Node::Tabs(source_tabs)) = self.nodes.get_mut(source_group) else {
+                    return Err(CommandError::GroupNotTabs(source_group));
+                };
+                Self::remove_panel_from_tabs(source_tabs, source_index);
+                let new_group = self.insert_node(Node::Tabs(Tabs {
+                    panels: vec![panel],
+                    active_index: 0,
+                }));
+                let new_column = Column {
+                    width,
+                    mode: ColumnMode::Expanded,
+                    groups: vec![new_group],
+                    group_ratios: vec![1.0],
+                };
+
+                if let Some(area_index) =
+                    self.dock_areas.iter().position(|area| area.side == side)
+                {
+                    let insert_at = if side == DockSide::Left {
+                        0
+                    } else {
+                        self.dock_areas[area_index].columns.len()
+                    };
+                    self.dock_areas[area_index]
+                        .columns
+                        .insert(insert_at, new_column);
+                    self.ensure_column_fits_min_height(area_index, insert_at, metrics)?;
+                } else {
+                    self.dock_areas.push(DockArea {
+                        side,
+                        columns: vec![new_column],
+                    });
+                    let area_index = self.dock_areas.len() - 1;
+                    self.ensure_column_fits_min_height(area_index, 0, metrics)?;
+                }
+                Ok(vec![source_group, new_group])
+            }
+            _ => Err(CommandError::InvalidDropTarget(
+                "four-sided MovePanel requires a Group, Column, or DockEdge side target"
+                    .to_owned(),
+            )),
+        }
+    }
+
+    fn ensure_document_width_after_new_column(
+        &self,
+        new_column_width: f32,
+        metrics: &DockMetrics,
+    ) -> Result<(), crate::command::CommandError> {
+        use crate::command::CommandError;
+
+        let canvas_width = self.canvas.bounds.size.width;
+        if canvas_width == 0.0 {
+            // Geometry has not yet been assigned to Canvas; the hit-testing layer will
+            // hide side targets when the live viewport cannot preserve the document minimum.
+            return Ok(());
+        }
+        if !canvas_width.is_finite()
+            || canvas_width < 0.0
+            || !new_column_width.is_finite()
+            || new_column_width <= 0.0
+        {
+            return Err(CommandError::InvalidCommandParameter {
+                parameter: "canvas/column width".to_owned(),
+                reason: "known document width and new column width must be finite and valid"
+                    .to_owned(),
+            });
+        }
+        let remaining_width = canvas_width - new_column_width;
+        if remaining_width + PIXEL_TOLERANCE < metrics.min_document_width {
+            return Err(CommandError::InvalidCommandParameter {
+                parameter: "document width".to_owned(),
+                reason: format!(
+                    "new column leaves only {remaining_width:.3} logical px for Canvas; at least {:.3} are required",
+                    metrics.min_document_width
+                ),
+            });
+        }
+        Ok(())
     }
 
     fn move_panel_to_existing_group(
@@ -4179,6 +4431,272 @@ mod tests {
                 .z_order
                 > second_z
         );
+        assert!(layout.validate(&metrics).is_ok());
+    }
+
+    #[test]
+    fn move_panel_four_sided_drops_create_groups_and_preserve_validation() {
+        use crate::{DockCommand, DropTarget, DropZone};
+
+        let metrics = metrics();
+        for case in [
+            "group-top",
+            "group-bottom",
+            "column-top",
+            "column-bottom",
+            "column-left",
+            "column-right",
+            "edge-left",
+            "edge-right",
+        ] {
+            let mut layout = initial_layout();
+            let source_group = tab_group_id(&layout, 0, 0);
+            let target_group = tab_group_id(&layout, 0, 1);
+            let moved_panel = match layout.nodes().get(source_group).unwrap() {
+                Node::Tabs(tabs) => tabs.panels[1],
+                Node::Split(_) => panic!("groups must be Tabs"),
+            };
+            let target = match case {
+                "group-top" => DropTarget::Group {
+                    group: target_group,
+                    zone: DropZone::Top,
+                },
+                "group-bottom" => DropTarget::Group {
+                    group: target_group,
+                    zone: DropZone::Bottom,
+                },
+                "column-top" => DropTarget::Column {
+                    column: crate::command::ColumnRef::new(DockSide::Right, 0),
+                    zone: DropZone::Top,
+                },
+                "column-bottom" => DropTarget::Column {
+                    column: crate::command::ColumnRef::new(DockSide::Right, 0),
+                    zone: DropZone::Bottom,
+                },
+                "column-left" => DropTarget::Column {
+                    column: crate::command::ColumnRef::new(DockSide::Right, 0),
+                    zone: DropZone::Left,
+                },
+                "column-right" => DropTarget::Column {
+                    column: crate::command::ColumnRef::new(DockSide::Right, 0),
+                    zone: DropZone::Right,
+                },
+                "edge-left" => DropTarget::DockEdge {
+                    side: DockSide::Left,
+                },
+                "edge-right" => DropTarget::DockEdge {
+                    side: DockSide::Right,
+                },
+                _ => unreachable!(),
+            };
+
+            layout
+                .apply(
+                    DockCommand::MovePanel {
+                        panel: moved_panel,
+                        target,
+                    },
+                    &metrics,
+                )
+                .unwrap_or_else(|error| panic!("{case} drop should succeed: {error}"));
+
+            let panel_group = layout
+                .dock_areas()
+                .iter()
+                .flat_map(|area| area.columns.iter())
+                .flat_map(|column| column.groups.iter().copied())
+                .find(|group| {
+                    matches!(
+                        layout.nodes().get(*group),
+                        Some(Node::Tabs(tabs)) if tabs.panels == vec![moved_panel]
+                    )
+                })
+                .unwrap_or_else(|| panic!("{case} drop should create a one-panel group"));
+            let placement_count = layout
+                .dock_areas()
+                .iter()
+                .flat_map(|area| area.columns.iter())
+                .flat_map(|column| column.groups.iter())
+                .filter_map(|group| match layout.nodes().get(*group) {
+                    Some(Node::Tabs(tabs)) => Some(
+                        tabs.panels
+                            .iter()
+                            .filter(|panel| **panel == moved_panel)
+                            .count(),
+                    ),
+                    _ => None,
+                })
+                .sum::<usize>()
+                + layout
+                    .floating_groups()
+                    .values()
+                    .map(|floating| {
+                        floating
+                            .panels
+                            .iter()
+                            .filter(|panel| **panel == moved_panel)
+                            .count()
+                    })
+                    .sum::<usize>();
+            assert_eq!(placement_count, 1, "{case} must not duplicate or lose the panel");
+            assert!(layout.validate(&metrics).is_ok(), "{case} must leave a valid layout");
+
+            match case {
+                "group-top" | "group-bottom" => {
+                    let column = &layout.dock_areas()[0].columns[0];
+                    let new_index = column.groups.iter().position(|group| *group == panel_group).unwrap();
+                    let target_index = column.groups.iter().position(|group| *group == target_group).unwrap();
+                    if case == "group-top" {
+                        assert!(new_index < target_index, "group-top inserts before the target group");
+                    } else {
+                        assert!(new_index > target_index, "group-bottom inserts after the target group");
+                    }
+                }
+                "column-top" | "column-bottom" => {
+                    let column = &layout.dock_areas()[0].columns[0];
+                    if case == "column-top" {
+                        assert_eq!(column.groups.first(), Some(&panel_group));
+                    } else {
+                        assert_eq!(column.groups.last(), Some(&panel_group));
+                    }
+                }
+                "column-left" | "column-right" => {
+                    let area = layout.dock_areas().iter().find(|area| area.side == DockSide::Right).unwrap();
+                    let new_index = area.columns.iter().position(|column| column.groups.contains(&panel_group)).unwrap();
+                    let target_index = area.columns.iter().position(|column| column.groups.contains(&target_group)).unwrap();
+                    if case == "column-left" {
+                        assert!(new_index < target_index);
+                    } else {
+                        assert!(new_index > target_index);
+                    }
+                }
+                "edge-left" | "edge-right" => {
+                    let side = if case == "edge-left" { DockSide::Left } else { DockSide::Right };
+                    let area = layout.dock_areas().iter().find(|area| area.side == side).unwrap();
+                    let new_index = area.columns.iter().position(|column| column.groups.contains(&panel_group)).unwrap();
+                    if case == "edge-left" {
+                        assert_eq!(new_index, 0);
+                    } else {
+                        assert_eq!(new_index, area.columns.len() - 1);
+                    }
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    #[test]
+    fn move_panel_side_drops_reject_impossible_minimums_atomically() {
+        use crate::{CommandError, DockCommand, DropTarget, DropZone};
+
+        let metrics = metrics();
+        for (height, target_zone) in [
+            (200.0, DropZone::Top),
+            (246.0, DropZone::Bottom),
+        ] {
+            let mut layout = initial_layout();
+            layout.set_canvas(CanvasState {
+                bounds: Rect::new(Point::new(0.0, 0.0), Size::new(1200.0, height)),
+            });
+            let source_group = tab_group_id(&layout, 0, 0);
+            let panel = match layout.nodes().get(source_group).unwrap() {
+                Node::Tabs(tabs) => tabs.panels[1],
+                Node::Split(_) => panic!("groups must be Tabs"),
+            };
+            let version = layout.version();
+            let err = layout.apply(
+                DockCommand::MovePanel {
+                    panel,
+                    target: DropTarget::Column {
+                        column: crate::command::ColumnRef::new(DockSide::Right, 0),
+                        zone: target_zone,
+                    },
+                },
+                &metrics,
+            ).expect_err("a new group cannot fit alongside existing group minimums");
+            assert!(matches!(err, CommandError::InvalidCommandParameter { .. }));
+            assert_eq!(layout.version(), version, "rejected drop is atomic");
+            assert!(layout.validate(&metrics).is_ok());
+        }
+
+        for zone in [DropZone::Top, DropZone::Bottom] {
+            let mut layout = initial_layout();
+            layout.set_canvas(CanvasState {
+                bounds: Rect::new(Point::new(0.0, 0.0), Size::new(1200.0, 200.0)),
+            });
+            let source_group = tab_group_id(&layout, 0, 0);
+            let target_group = tab_group_id(&layout, 0, 1);
+            let panel = match layout.nodes().get(source_group).unwrap() {
+                Node::Tabs(tabs) => tabs.panels[1],
+                Node::Split(_) => panic!("groups must be Tabs"),
+            };
+            let version = layout.version();
+            let err = layout
+                .apply(
+                    DockCommand::MovePanel {
+                        panel,
+                        target: DropTarget::Group {
+                            group: target_group,
+                            zone,
+                        },
+                    },
+                    &metrics,
+                )
+                .expect_err("group-side split must preserve all group minimum heights");
+            assert!(matches!(err, CommandError::InvalidCommandParameter { .. }));
+            assert_eq!(layout.version(), version);
+            assert!(layout.validate(&metrics).is_ok());
+        }
+
+        let mut maxed_metrics = metrics();
+        maxed_metrics.max_columns = 1;
+        let mut maxed_layout = initial_layout();
+        let maxed_source = tab_group_id(&maxed_layout, 0, 0);
+        let maxed_panel = match maxed_layout.nodes().get(maxed_source).unwrap() {
+            Node::Tabs(tabs) => tabs.panels[1],
+            Node::Split(_) => panic!("groups must be Tabs"),
+        };
+        let maxed_version = maxed_layout.version();
+        let maxed_error = maxed_layout
+            .apply(
+                DockCommand::MovePanel {
+                    panel: maxed_panel,
+                    target: DropTarget::Column {
+                        column: crate::command::ColumnRef::new(DockSide::Right, 0),
+                        zone: DropZone::Left,
+                    },
+                },
+                &maxed_metrics,
+            )
+            .expect_err("maximum column count must be respected for side drops");
+        assert!(matches!(
+            maxed_error,
+            CommandError::ColumnLimitReached { maximum: 1 }
+        ));
+        assert_eq!(maxed_layout.version(), maxed_version);
+        assert!(maxed_layout.validate(&maxed_metrics).is_ok());
+
+        let mut layout = initial_layout();
+        layout.set_canvas(CanvasState {
+            bounds: Rect::new(Point::new(0.0, 0.0), Size::new(450.0, 800.0)),
+        });
+        let source_group = tab_group_id(&layout, 0, 0);
+        let panel = match layout.nodes().get(source_group).unwrap() {
+            Node::Tabs(tabs) => tabs.panels[1],
+            Node::Split(_) => panic!("groups must be Tabs"),
+        };
+        let version = layout.version();
+        let err = layout.apply(
+            DockCommand::MovePanel {
+                panel,
+                target: DropTarget::DockEdge {
+                    side: DockSide::Left,
+                },
+            },
+            &metrics,
+        ).expect_err("new column must preserve the document minimum width");
+        assert!(matches!(err, CommandError::InvalidCommandParameter { .. }));
+        assert_eq!(layout.version(), version);
         assert!(layout.validate(&metrics).is_ok());
     }
 

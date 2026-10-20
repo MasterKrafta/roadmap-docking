@@ -69,7 +69,9 @@ pub fn compute_drop_zones(
     // Only the front-to-back floating center zones are in the list so far.
     let floating_zone_count = zones.len();
 
-    let can_add_column = column_count(layout) < metrics.max_columns;
+    // Suppress lateral targets when adding the narrowest valid column would leave
+    // the live Canvas narrower than its required document minimum.
+    let can_add_column = can_add_column_in_viewport(layout, rects, payload, metrics);
     // Tab insertion targets have priority over center/edge targets only in the
     // narrow active band at the bottom of a tab strip; split/column neutral gaps stay empty.
     append_tab_insertion_zones(layout, rects, payload, &mut zones, metrics);
@@ -407,7 +409,16 @@ fn append_column_end_zones(
             column: column_ref,
             zone: DropZone::Top,
         };
-        if valid_target(layout, payload, &top_target, metrics) {
+        if valid_target(layout, payload, &top_target, metrics)
+            && can_add_group_to_column(
+                layout,
+                rects,
+                payload,
+                column.side,
+                column.index,
+                metrics,
+            )
+        {
             let top = (header_bottom - height * 0.5).max(bounds.origin.y);
             let bottom = (header_bottom + height * 0.5).min(column_bottom);
             push_zone(
@@ -424,7 +435,16 @@ fn append_column_end_zones(
             column: column_ref,
             zone: DropZone::Bottom,
         };
-        if valid_target(layout, payload, &bottom_target, metrics) {
+        if valid_target(layout, payload, &bottom_target, metrics)
+            && can_add_group_to_column(
+                layout,
+                rects,
+                payload,
+                column.side,
+                column.index,
+                metrics,
+            )
+        {
             push_zone(
                 zones,
                 bottom_target,
@@ -495,7 +515,17 @@ fn append_group_splitter_zones(
                 group: next.group,
                 zone: DropZone::Top,
             };
-            if valid_target(layout, payload, &target, metrics) {
+            if valid_target(layout, payload, &target, metrics)
+                && can_split_group_vertically(layout, rects, payload, next.group, metrics)
+                && can_add_group_to_column(
+                    layout,
+                    rects,
+                    payload,
+                    column.side,
+                    column.index,
+                    metrics,
+                )
+            {
                 push_zone(zones, target, drop_bounds);
             }
         }
@@ -675,8 +705,12 @@ fn valid_target(
                 return false;
             }
             match zone {
-                DropZone::Center | DropZone::Top | DropZone::Bottom => {}
-                DropZone::Left | DropZone::Right => return false,
+                DropZone::Center => {}
+                DropZone::Top | DropZone::Bottom
+                    if layout.profile() == crate::model::Profile::Photoshop => {}
+                DropZone::Top | DropZone::Bottom | DropZone::Left | DropZone::Right => {
+                    return false;
+                }
             }
             if *zone == DropZone::Center {
                 if let DropPayload::Panel(panel) = payload {
@@ -717,7 +751,10 @@ fn valid_target(
             }
         }
         DropTarget::Column { column, zone } => {
-            if !can_target_dock(layout, payload) || !column_exists(layout, *column) {
+            if layout.profile() != crate::model::Profile::Photoshop
+                || !can_target_dock(layout, payload)
+                || !column_exists(layout, *column)
+            {
                 return false;
             }
             match zone {
@@ -791,7 +828,177 @@ fn column_exists(layout: &Layout, column: ColumnRef) -> bool {
 }
 
 fn can_add_column(layout: &Layout, metrics: &DockMetrics) -> bool {
-    column_count(layout) < metrics.max_columns
+    layout.profile() == crate::model::Profile::Photoshop
+        && column_count(layout) < metrics.max_columns
+}
+
+/// Includes live viewport feasibility in addition to the model's column-count limit.
+fn can_add_column_in_viewport(
+    layout: &Layout,
+    rects: &LayoutRects,
+    payload: DropPayload,
+    metrics: &DockMetrics,
+) -> bool {
+    if !can_add_column(layout, metrics) {
+        return false;
+    }
+    let Some(width) = minimum_docked_column_width(layout, payload, metrics) else {
+        return false;
+    };
+    let canvas_width = rects.canvas.size.width;
+    canvas_width.is_finite()
+        && canvas_width >= width
+        && canvas_width - width + 1.0e-3 >= metrics.min_document_width
+}
+
+/// Width needed if this payload becomes a new expanded Photoshop column.
+fn minimum_docked_column_width(
+    layout: &Layout,
+    payload: DropPayload,
+    metrics: &DockMetrics,
+) -> Option<f32> {
+    let panels = payload_panels(layout, payload)?;
+    let mut width = metrics.default_column_width.max(metrics.min_column_width);
+    for panel in panels {
+        let panel = layout.panels().get(panel)?;
+        let minimum = panel.constraints().min_size().width;
+        if !minimum.is_finite() || minimum < 0.0 {
+            return None;
+        }
+        width = width.max(minimum);
+    }
+    (width.is_finite() && width > 0.0).then_some(width)
+}
+
+fn payload_panels(layout: &Layout, payload: DropPayload) -> Option<Vec<PanelId>> {
+    match payload {
+        DropPayload::Panel(panel) => layout.panels().contains_key(panel).then_some(vec![panel]),
+        DropPayload::Group(group) => match layout.nodes().get(group)? {
+            Node::Tabs(tabs) if !tabs.panels.is_empty() => Some(tabs.panels.clone()),
+            _ => None,
+        },
+        DropPayload::FloatingGroup(floating) => {
+            let group = layout.floating_groups().get(floating)?;
+            (!group.panels.is_empty()).then_some(group.panels.clone())
+        }
+    }
+}
+
+fn minimum_group_height_for_panels(
+    layout: &Layout,
+    panels: &[PanelId],
+    metrics: &DockMetrics,
+) -> Option<f32> {
+    if panels.is_empty() {
+        return Some(0.0);
+    }
+    let mut height = metrics.min_group_height;
+    for panel_id in panels {
+        let panel = layout.panels().get(*panel_id)?;
+        let minimum = panel.constraints().min_size().height;
+        if !minimum.is_finite() || minimum < 0.0 {
+            return None;
+        }
+        height = height.max(minimum);
+    }
+    (height.is_finite() && height >= 0.0).then_some(height)
+}
+
+fn minimum_payload_group_height(
+    layout: &Layout,
+    payload: DropPayload,
+    metrics: &DockMetrics,
+) -> Option<f32> {
+    minimum_group_height_for_panels(layout, &payload_panels(layout, payload)?, metrics)
+}
+
+/// Minimum remaining height of a dock group after removing the dragged payload from it.
+fn minimum_group_height_after_drop(
+    layout: &Layout,
+    group: NodeId,
+    payload: DropPayload,
+    metrics: &DockMetrics,
+) -> Option<f32> {
+    let Some(Node::Tabs(tabs)) = layout.nodes().get(group) else {
+        return None;
+    };
+    let mut panels = tabs.panels.clone();
+    match payload {
+        DropPayload::Panel(panel) if find_dock_group_for_panel(layout, panel) == Some(group) => {
+            panels.retain(|candidate| *candidate != panel);
+        }
+        DropPayload::Group(source) if source == group => panels.clear(),
+        _ => {}
+    }
+    minimum_group_height_for_panels(layout, &panels, metrics)
+}
+
+/// Whether a side drop can allocate a new group without violating column minimum heights.
+fn can_add_group_to_column(
+    layout: &Layout,
+    rects: &LayoutRects,
+    payload: DropPayload,
+    side: DockSide,
+    index: usize,
+    metrics: &DockMetrics,
+) -> bool {
+    let Some(column) = rects
+        .columns
+        .iter()
+        .find(|column| column.side == side && column.index == index && valid_rect(column.bounds))
+    else {
+        return false;
+    };
+    let Some(model_column) = layout
+        .dock_areas()
+        .iter()
+        .find(|area| area.side == side)
+        .and_then(|area| area.columns.get(index))
+    else {
+        return false;
+    };
+
+    let mut required_heights = Vec::with_capacity(model_column.groups.len() + 1);
+    for group in &model_column.groups {
+        let Some(height) = minimum_group_height_after_drop(layout, *group, payload, metrics)
+        else {
+            return false;
+        };
+        if height > 0.0 {
+            required_heights.push(height);
+        }
+    }
+    let Some(incoming_height) = minimum_payload_group_height(layout, payload, metrics) else {
+        return false;
+    };
+    required_heights.push(incoming_height);
+    let group_count = required_heights.len();
+    let required_height: f32 = required_heights.iter().sum::<f32>()
+        + metrics.splitter_thickness.max(0.0) * group_count.saturating_sub(1) as f32;
+    required_height.is_finite()
+        && required_height <= column.bounds.size.height + 1.0e-3
+}
+
+/// The target group's current allocation must fit both sides of the new split.
+fn can_split_group_vertically(
+    layout: &Layout,
+    rects: &LayoutRects,
+    payload: DropPayload,
+    group: NodeId,
+    metrics: &DockMetrics,
+) -> bool {
+    let Some(bounds) = rects.groups.iter().find(|rect| rect.group == group) else {
+        return false;
+    };
+    let Some(existing_height) = minimum_group_height_after_drop(layout, group, payload, metrics)
+    else {
+        return false;
+    };
+    let Some(incoming_height) = minimum_payload_group_height(layout, payload, metrics) else {
+        return false;
+    };
+    let required = existing_height + incoming_height + metrics.splitter_thickness.max(0.0);
+    required.is_finite() && required <= bounds.bounds.size.height + 1.0e-3
 }
 
 fn column_count(layout: &Layout) -> usize {
@@ -1487,6 +1694,47 @@ mod tests {
                     }
             )
         ));
+    }
+
+    #[test]
+    fn hides_four_sided_targets_when_document_or_group_minimums_do_not_fit() {
+        let metrics = metrics();
+        let layout = Layout::initial_photoshop(&metrics).unwrap();
+        let payload = DropPayload::Panel(panel_id(&layout, "color"));
+
+        let narrow_rects = compute_rects(&layout, Size::new(500.0, 800.0), &metrics);
+        assert!(
+            narrow_rects.canvas.size.width < metrics.min_document_width,
+            "fixture must leave less than the minimum document width"
+        );
+        let narrow_zones = compute_drop_zones(&layout, &narrow_rects, payload, &metrics);
+        assert!(
+            narrow_zones.iter().all(|zone| !matches!(
+                &zone.target,
+                DropTarget::DockEdge { .. }
+                    | DropTarget::Column {
+                        zone: DropZone::Left | DropZone::Right,
+                        ..
+                    }
+            )),
+            "lateral targets must be hidden when they would squeeze Canvas below its minimum"
+        );
+
+        let short_rects = compute_rects(&layout, Size::new(1280.0, 150.0), &metrics);
+        let short_zones = compute_drop_zones(&layout, &short_rects, payload, &metrics);
+        assert!(
+            short_zones.iter().all(|zone| !matches!(
+                &zone.target,
+                DropTarget::Group {
+                    zone: DropZone::Top | DropZone::Bottom,
+                    ..
+                } | DropTarget::Column {
+                    zone: DropZone::Top | DropZone::Bottom,
+                    ..
+                }
+            )),
+            "vertical split targets must be hidden when group minimum heights do not fit"
+        );
     }
 
     #[test]
