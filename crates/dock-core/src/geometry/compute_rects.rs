@@ -405,7 +405,7 @@ mod tests {
     }
 
     #[test]
-    fn ratios_are_normalized_before_group_heights_are_distributed() {
+    fn equal_initial_ratios_divide_available_group_height() {
         let metrics = metrics();
         let layout = Layout::initial_photoshop(&metrics).expect("initial layout");
         let rects = compute_rects(&layout, Size::new(1280.0, 800.0), &metrics);
