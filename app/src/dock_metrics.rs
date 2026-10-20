@@ -57,6 +57,10 @@ mod tests {
         let layout = registry
             .build_initial_photoshop_layout(&metrics)
             .expect("built-in panels form a valid model layout");
+        assert!(
+            layout.panels().values().all(|panel| panel.key().as_str() != "toolbar"),
+            "Toolbar is fixed app chrome and must not be part of the dock panel model"
+        );
 
         let rects = compute_rects(&layout, Size::new(1000.0, 600.0), &metrics);
         let right_dock = rects
