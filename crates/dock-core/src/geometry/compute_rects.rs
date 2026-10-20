@@ -219,7 +219,8 @@ fn normalized_weights(ratios: &[f32], count: usize) -> Vec<f32> {
 mod tests {
     use super::compute_rects;
     use crate::{
-        DockMetrics, DockSide, Layout, Node, PanelKey, Point, Rect, Size, SplitterKind,
+        DockCommand, DockMetrics, DockSide, Layout, Node, PanelKey, Point, Rect, Size, SplitSide,
+        SplitterKind,
     };
 
     fn metrics() -> DockMetrics {
@@ -414,6 +415,33 @@ mod tests {
         assert_eq!(rects.groups[1].bounds.origin.y, 418.0);
     }
 }
+    #[test]
+    fn split_groups_use_model_ratios_for_height_distribution() {
+        let metrics = metrics();
+        let mut layout = Layout::initial_photoshop(&metrics).expect("initial layout");
+        let group = group_id(&layout, "layers");
+        let panel = panel_id(&layout, "layers");
+        layout
+            .apply(
+                DockCommand::SplitGroup {
+                    panel,
+                    group,
+                    side: SplitSide::Top,
+                },
+                &metrics,
+            )
+            .expect("split should create one more group");
+
+        let rects = compute_rects(&layout, Size::new(1280.0, 800.0), &metrics);
+        assert_eq!(rects.groups.len(), 3);
+        assert_eq!(rects.groups[0].bounds.size.height, 190.0);
+        assert_eq!(rects.groups[1].bounds.size.height, 190.0);
+        assert_eq!(rects.groups[2].bounds.size.height, 380.0);
+        assert_eq!(rects.groups[0].bounds.origin.y, 32.0);
+        assert_eq!(rects.groups[1].bounds.origin.y, 226.0);
+        assert_eq!(rects.groups[2].bounds.origin.y, 420.0);
+    }
+
 
 #[cfg(test)]
 mod ratio_tests {
