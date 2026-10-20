@@ -135,6 +135,7 @@ mod tests {
                 side: DockSide::Right,
                 index: 0,
                 bounds: rect(1000.0, 0.0, 280.0, 720.0),
+                vertical_overflow: false,
             }],
             groups: vec![GroupRect { group, bounds }],
             tab_strips: vec![TabStripRect { group, bounds }],
