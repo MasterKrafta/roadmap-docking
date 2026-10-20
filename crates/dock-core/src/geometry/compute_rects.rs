@@ -317,6 +317,26 @@ mod tests {
             ]
         );
 
+        assert_eq!(rects.tab_headers.len(), 4);
+        assert_eq!(
+            rects.tab_headers.iter()
+                .find(|header| header.group == layers_group && header.index == 0)
+                .map(|header| header.bounds),
+            Some(rect(1000.0, 32.0, 140.0, 28.0))
+        );
+        assert_eq!(
+            rects.tab_headers.iter()
+                .find(|header| header.group == layers_group && header.index == 1)
+                .map(|header| header.bounds),
+            Some(rect(1140.0, 32.0, 140.0, 28.0))
+        );
+        assert_eq!(
+            rects.tab_headers.iter()
+                .find(|header| header.group == properties_group && header.index == 0)
+                .map(|header| header.bounds),
+            Some(rect(1000.0, 418.0, 140.0, 28.0))
+        );
+
         let panel_bounds = rect(1000.0, 60.0, 280.0, 354.0);
         assert_eq!(
             rects.panels
@@ -355,16 +375,21 @@ mod tests {
         assert_eq!(group_splitters.len(), 1);
         assert_eq!(group_splitters[0].index, 0);
         assert_eq!(group_splitters[0].bounds, rect(1000.0, 414.0, 280.0, 4.0));
-        assert_eq!(rects.splitters.len(), 2);
-        assert_eq!(rects.splitters[1].kind, SplitterKind::Column);
-        assert_eq!(rects.splitters[1].bounds, rect(998.0, 0.0, 4.0, 800.0));
+        let column_splitters: Vec<_> = rects
+            .splitters
+            .iter()
+            .filter(|splitter| splitter.kind == SplitterKind::Column)
+            .collect();
+        assert_eq!(column_splitters.len(), 1);
+        assert_eq!(column_splitters[0].index, 0);
+        assert_eq!(column_splitters[0].bounds, rect(998.0, 0.0, 4.0, 800.0));
 
         // Repeated calls are deterministic down to every logical coordinate.
         assert_eq!(compute_rects(&layout, window, &metrics), rects);
     }
 
     #[test]
-    fn column_widths_are_fixed_and_canvas_gets_both_sides_remaining_space() {
+    fn column_width_is_fixed_and_canvas_gets_remaining_space() {
         let metrics = metrics();
         let mut layout = Layout::initial_photoshop(&metrics).expect("initial layout");
         let first = layout.dock_areas()[0].columns[0].width;
@@ -384,5 +409,13 @@ mod tests {
         assert_eq!(rects.groups[1].bounds.size.height, 382.0);
         assert_eq!(rects.groups[0].bounds.origin.y, 32.0);
         assert_eq!(rects.groups[1].bounds.origin.y, 418.0);
+    }
+}
+
+#[cfg(test)]
+mod ratio_tests {
+    #[test]
+    fn normalizes_arbitrary_group_weights_to_proportions() {
+        assert_eq!(super::normalized_weights(&[1.0, 3.0], 2), vec![0.25, 0.75]);
     }
 }
