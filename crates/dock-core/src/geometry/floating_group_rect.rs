@@ -17,6 +17,7 @@ pub struct FloatingGroupRect {
 mod tests {
     use super::FloatingGroupRect;
     use crate::{FloatingGroupId, Point, Rect, Size};
+    use slotmap::Key;
 
     #[test]
     fn floating_group_rect_retains_bounds_and_stack_order() {

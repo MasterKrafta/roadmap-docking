@@ -1,13 +1,14 @@
 use proptest::prelude::*;
 use proptest::test_runner::{Config as ProptestConfig, FileFailurePersistence};
+use slotmap::Key;
 
-use crate::{
-    ColumnRef, DockCommand, DockMetrics, DockSide, DropTarget, DropZone, FloatSource,
-    FloatingGroupId, Layout, Node, NodeId, PanelConstraints, PanelId, PanelKey, Point, Rect,
-    Size, SplitSide,
-};
 #[cfg(feature = "serde")]
 use crate::{ColumnMode, PanelState, Profile};
+use crate::{
+    ColumnRef, DockCommand, DockMetrics, DockSide, DropTarget, DropZone, FloatSource,
+    FloatingGroupId, Layout, Node, NodeId, PanelConstraints, PanelId, PanelKey, Point, Rect, Size,
+    SplitSide,
+};
 
 fn metrics() -> DockMetrics {
     DockMetrics {
@@ -60,9 +61,7 @@ fn columns(layout: &Layout) -> Vec<ColumnRef> {
     layout
         .dock_areas()
         .iter()
-        .flat_map(|area| {
-            (0..area.columns.len()).map(move |index| ColumnRef::new(area.side, index))
-        })
+        .flat_map(|area| (0..area.columns.len()).map(move |index| ColumnRef::new(area.side, index)))
         .collect()
 }
 
@@ -504,6 +503,7 @@ proptest! {
         ))),
         .. ProptestConfig::default()
     })]
+
 
     #[test]
     fn random_command_sequences_preserve_invariants_and_replay(

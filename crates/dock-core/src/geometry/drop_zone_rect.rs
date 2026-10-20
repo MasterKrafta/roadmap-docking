@@ -17,6 +17,7 @@ pub struct DropZoneRect {
 mod tests {
     use super::DropZoneRect;
     use crate::{DockSide, DropTarget, DropZone, NodeId, Point, Rect, Size};
+    use slotmap::Key;
 
     #[test]
     fn drop_zone_rect_keeps_target_and_logical_bounds_together() {
@@ -39,7 +40,9 @@ mod tests {
         assert_eq!(zone.bounds, bounds);
 
         let edge = DropZoneRect {
-            target: DropTarget::DockEdge { side: DockSide::Left },
+            target: DropTarget::DockEdge {
+                side: DockSide::Left,
+            },
             bounds,
         };
         assert_eq!(edge.bounds, bounds);

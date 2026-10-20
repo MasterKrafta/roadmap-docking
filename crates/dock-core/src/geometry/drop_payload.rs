@@ -17,6 +17,7 @@ pub enum DropPayload {
 mod tests {
     use super::DropPayload;
     use crate::{FloatingGroupId, NodeId, PanelId};
+    use slotmap::Key;
 
     #[test]
     fn payload_distinguishes_dragged_item_kinds() {

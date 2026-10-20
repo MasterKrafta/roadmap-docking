@@ -70,14 +70,10 @@ impl PanelRegistry {
             .map_err(|reason| RegistryError::LayoutBuildFailed(reason.to_owned()))?;
 
         let mut layout = Layout::new(Profile::Photoshop, CanvasState::default());
-        let layers_key = PanelKey::new("layers")
-            .expect("built-in panel key is valid");
-        let color_key = PanelKey::new("color")
-            .expect("built-in panel key is valid");
-        let properties_key = PanelKey::new("properties")
-            .expect("built-in panel key is valid");
-        let history_key = PanelKey::new("history")
-            .expect("built-in panel key is valid");
+        let layers_key = PanelKey::new("layers").expect("built-in panel key is valid");
+        let color_key = PanelKey::new("color").expect("built-in panel key is valid");
+        let properties_key = PanelKey::new("properties").expect("built-in panel key is valid");
+        let history_key = PanelKey::new("history").expect("built-in panel key is valid");
 
         self.open_into_layout(&mut layout, &layers_key, None, metrics)?;
         let layers_panel = panel_id_by_key(&layout, &layers_key).ok_or_else(|| {
@@ -141,11 +137,15 @@ impl PanelRegistry {
             metrics,
         )?;
 
-        layout
-            .validate(metrics)
-            .map_err(|errors| RegistryError::LayoutBuildFailed(
-                errors.into_iter().map(|error| error.to_string()).collect::<Vec<_>>().join("; "),
-            ))?;
+        layout.validate(metrics).map_err(|errors| {
+            RegistryError::LayoutBuildFailed(
+                errors
+                    .into_iter()
+                    .map(|error| error.to_string())
+                    .collect::<Vec<_>>()
+                    .join("; "),
+            )
+        })?;
         Ok(layout)
     }
 
@@ -173,7 +173,8 @@ impl PanelRegistry {
         if self.descriptors.contains_key(descriptor.key()) {
             return Err(RegistryError::DuplicateKey(descriptor.key().clone()));
         }
-        self.descriptors.insert(descriptor.key().clone(), descriptor);
+        self.descriptors
+            .insert(descriptor.key().clone(), descriptor);
         Ok(())
     }
 
@@ -182,7 +183,9 @@ impl PanelRegistry {
     }
 
     pub fn get_by_str(&self, key: &str) -> Option<&PanelDescriptor> {
-        self.descriptors.values().find(|descriptor| descriptor.key().as_str() == key)
+        self.descriptors
+            .values()
+            .find(|descriptor| descriptor.key().as_str() == key)
     }
 
     /// Returns descriptors in key order for deterministic menus and tests.
@@ -289,18 +292,16 @@ fn panel_id_by_key(layout: &Layout, key: &PanelKey) -> Option<PanelId> {
 }
 
 fn group_for_panel(layout: &Layout, panel_id: PanelId) -> Option<NodeId> {
-    layout.nodes().iter().find_map(|(node_id, node)| match node {
-        Node::Tabs(tabs) if tabs.panels.contains(&panel_id) => Some(node_id),
-        Node::Tabs(_) | Node::Split(_) => None,
-    })
+    layout
+        .nodes()
+        .iter()
+        .find_map(|(node_id, node)| match node {
+            Node::Tabs(tabs) if tabs.panels.contains(&panel_id) => Some(node_id),
+            Node::Tabs(_) | Node::Split(_) => None,
+        })
 }
 
-fn builtin_descriptor(
-    key: &str,
-    title: &str,
-    icon: &str,
-    message: &str,
-) -> PanelDescriptor {
+fn builtin_descriptor(key: &str, title: &str, icon: &str, message: &str) -> PanelDescriptor {
     let key = PanelKey::new(key).expect("built-in panel key is valid");
     let content = PlaceholderPanelContent::new(key.clone(), title, message);
     let constraints = PanelConstraints::new(
@@ -331,22 +332,21 @@ mod tests {
         PanelMenuSource, PlaceholderPanelContent, RegistryError,
     };
     use dock_core::{
-        CanvasState, DockCommand, DockMetrics, DockSide, DropTarget, Layout, PanelConstraints,
-        PanelKey, Point, Profile, Rect, Size,
+        CanvasState, DockCommand, DockMetrics, DockSide, DropTarget, DropZone, Layout,
+        PanelConstraints, PanelKey, Point, Profile, Rect, Size,
     };
+    use slotmap::Key;
 
     #[derive(Clone, Debug, PartialEq, Eq)]
     struct CustomPanelContent {
         heading: String,
     }
 
-    fn custom_descriptor(
-        key: &str,
-        areas: Vec<AllowedArea>,
-    ) -> PanelDescriptor {
+    fn custom_descriptor(key: &str, areas: Vec<AllowedArea>) -> PanelDescriptor {
         let key = PanelKey::new(key).expect("test key is valid");
-        let content_factory =
-            PanelContentFactory::new(|| CustomPanelContent { heading: "Custom".to_owned() });
+        let content_factory = PanelContentFactory::new(|| CustomPanelContent {
+            heading: "Custom".to_owned(),
+        });
         let menu_source = PanelMenuSource::new(|| {
             vec![
                 PanelMenuItem::new("reset", "Reset"),
@@ -388,7 +388,9 @@ mod tests {
         assert!(descriptor.allows(AllowedArea::Floating));
         assert!(!descriptor.allows(AllowedArea::Rail));
 
-        let content = registry.create_content(&key).expect("content factory should run");
+        let content = registry
+            .create_content(&key)
+            .expect("content factory should run");
         let content = content
             .as_ref()
             .as_any()
@@ -396,12 +398,16 @@ mod tests {
             .expect("factory returns the registered panel's content type");
         assert_eq!(content.heading, "Custom");
 
-        let items = registry.panel_menu_items(&key).expect("panel menu source runs");
+        let items = registry
+            .panel_menu_items(&key)
+            .expect("panel menu source runs");
         assert_eq!(items.len(), 2);
         assert_eq!(items[0].id, "reset");
         assert!(items[1].separator_before);
         assert!(
-            items.iter().all(|item| item.id != "close" && item.id != "close_tab_group"),
+            items
+                .iter()
+                .all(|item| item.id != "close" && item.id != "close_tab_group"),
             "shared dock actions are composed by the dock UI"
         );
 
@@ -467,8 +473,18 @@ mod tests {
             registry.register(custom_descriptor("custom.panel", vec![AllowedArea::Floating])),
             Err(RegistryError::DuplicateKey(key)) if key.as_str() == "custom.panel"
         ));
-        assert!(registry.get_by_str("custom.panel").unwrap().allows(AllowedArea::Dock));
-        assert!(!registry.get_by_str("custom.panel").unwrap().allows(AllowedArea::Floating));
+        assert!(
+            registry
+                .get_by_str("custom.panel")
+                .unwrap()
+                .allows(AllowedArea::Dock)
+        );
+        assert!(
+            !registry
+                .get_by_str("custom.panel")
+                .unwrap()
+                .allows(AllowedArea::Floating)
+        );
     }
 
     #[test]
@@ -494,7 +510,9 @@ mod tests {
                 false,
             ),
             vec![AllowedArea::Dock],
-            PanelContentFactory::new(|| CustomPanelContent { heading: "Invalid".into() }),
+            PanelContentFactory::new(|| CustomPanelContent {
+                heading: "Invalid".into(),
+            }),
             PanelMenuSource::empty(),
         );
         assert!(matches!(
@@ -511,7 +529,10 @@ mod tests {
         let mut registry = PanelRegistry::new();
         let key = PanelKey::new("custom.rail-only").unwrap();
         registry
-            .register(custom_descriptor("custom.rail-only", vec![AllowedArea::Rail]))
+            .register(custom_descriptor(
+                "custom.rail-only",
+                vec![AllowedArea::Rail],
+            ))
             .unwrap();
 
         assert_eq!(
@@ -534,11 +555,17 @@ mod tests {
         let registry = PanelRegistry::with_builtins().expect("built-ins are valid");
         assert_eq!(registry.len(), 4);
         assert_eq!(
-            registry.descriptors().iter().map(|descriptor| descriptor.key().as_str()).collect::<Vec<_>>(),
+            registry
+                .descriptors()
+                .iter()
+                .map(|descriptor| descriptor.key().as_str())
+                .collect::<Vec<_>>(),
             vec!["color", "history", "layers", "properties"]
         );
 
-        let descriptor = registry.get_by_str("layers").expect("layers descriptor exists");
+        let descriptor = registry
+            .get_by_str("layers")
+            .expect("layers descriptor exists");
         let content = descriptor.create_content();
         let content = content
             .as_ref()
@@ -621,21 +648,23 @@ mod tests {
         let group_keys: Vec<Vec<&str>> = column
             .groups
             .iter()
-            .map(|group_id| match layout.nodes().get(*group_id).expect("group exists") {
-                Node::Tabs(tabs) => tabs
-                    .panels
-                    .iter()
-                    .map(|panel_id| {
-                        layout
-                            .panels()
-                            .get(*panel_id)
-                            .expect("tab references a panel")
-                            .key()
-                            .as_str()
-                    })
-                    .collect(),
-                Node::Split(_) => panic!("Photoshop dock groups must be tab nodes"),
-            })
+            .map(
+                |group_id| match layout.nodes().get(*group_id).expect("group exists") {
+                    Node::Tabs(tabs) => tabs
+                        .panels
+                        .iter()
+                        .map(|panel_id| {
+                            layout
+                                .panels()
+                                .get(*panel_id)
+                                .expect("tab references a panel")
+                                .key()
+                                .as_str()
+                        })
+                        .collect(),
+                    Node::Split(_) => panic!("Photoshop dock groups must be tab nodes"),
+                },
+            )
             .collect();
         assert_eq!(
             group_keys,
@@ -648,7 +677,12 @@ mod tests {
                 .values()
                 .filter(|panel| panel.key() == descriptor.key())
                 .collect();
-            assert_eq!(instances.len(), 1, "one instance for {}", descriptor.key().as_str());
+            assert_eq!(
+                instances.len(),
+                1,
+                "one instance for {}",
+                descriptor.key().as_str()
+            );
             assert_eq!(instances[0].constraints(), &descriptor.constraints());
         }
         assert!(layout.validate(&metrics).is_ok());

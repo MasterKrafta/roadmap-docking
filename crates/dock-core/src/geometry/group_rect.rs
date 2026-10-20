@@ -13,6 +13,7 @@ pub struct GroupRect {
 mod tests {
     use super::GroupRect;
     use crate::{NodeId, Point, Rect, Size};
+    use slotmap::Key;
 
     #[test]
     fn group_rect_keeps_its_node_identity() {

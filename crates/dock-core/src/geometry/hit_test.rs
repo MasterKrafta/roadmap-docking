@@ -15,18 +15,22 @@ pub fn hit_test(point: Point, rects: &LayoutRects) -> HitResult {
             continue;
         }
 
-        if let Some(edge) = rects.floating_resize_edges.iter().find(|edge| {
-            edge.floating == floating.floating && contains(edge.bounds, point)
-        }) {
+        if let Some(edge) = rects
+            .floating_resize_edges
+            .iter()
+            .find(|edge| edge.floating == floating.floating && contains(edge.bounds, point))
+        {
             return HitResult::FloatingResizeEdge {
                 floating: floating.floating,
                 edge: edge.edge,
             };
         }
 
-        if rects.floating_titles.iter().any(|title| {
-            title.floating == floating.floating && contains(title.bounds, point)
-        }) {
+        if rects
+            .floating_titles
+            .iter()
+            .any(|title| title.floating == floating.floating && contains(title.bounds, point))
+        {
             return HitResult::FloatingTitle(floating.floating);
         }
 
@@ -81,9 +85,11 @@ pub fn hit_test(point: Point, rects: &LayoutRects) -> HitResult {
         };
     }
 
-    if let Some(panel) = rects.panels.iter().find(|panel| {
-        panel.floating.is_none() && panel.active && contains(panel.bounds, point)
-    }) {
+    if let Some(panel) = rects
+        .panels
+        .iter()
+        .find(|panel| panel.floating.is_none() && panel.active && contains(panel.bounds, point))
+    {
         return HitResult::Panel(panel.panel);
     }
 
@@ -114,15 +120,12 @@ fn contains(bounds: super::Rect, point: Point) -> bool {
     let y = f64::from(point.y);
     let left = f64::from(origin.x);
     let top = f64::from(origin.y);
-    x >= left
-        && x < left + f64::from(size.width)
-        && y >= top
-        && y < top + f64::from(size.height)
+    x >= left && x < left + f64::from(size.width) && y >= top && y < top + f64::from(size.height)
 }
 
 #[cfg(test)]
 mod tests {
-    use slotmap::SlotMap;
+    use slotmap::{Key, SlotMap};
 
     use super::hit_test;
     use crate::{
@@ -167,8 +170,14 @@ mod tests {
             ..LayoutRects::default()
         };
 
-        assert_eq!(hit_test(Point::new(10.0, 10.0), &rects), HitResult::Panel(panel_id));
-        assert_eq!(hit_test(Point::new(19.999, 19.999), &rects), HitResult::Panel(panel_id));
+        assert_eq!(
+            hit_test(Point::new(10.0, 10.0), &rects),
+            HitResult::Panel(panel_id)
+        );
+        assert_eq!(
+            hit_test(Point::new(19.999, 19.999), &rects),
+            HitResult::Panel(panel_id)
+        );
         assert_eq!(hit_test(Point::new(20.0, 15.0), &rects), HitResult::Empty);
         assert_eq!(hit_test(Point::new(15.0, 20.0), &rects), HitResult::Empty);
         assert_eq!(hit_test(Point::new(9.999, 15.0), &rects), HitResult::Empty);
@@ -193,7 +202,12 @@ mod tests {
                 },
             ],
             panels: vec![
-                panel(bottom_panel, rect(0.0, 20.0, 100.0, 80.0), Some(bottom), true),
+                panel(
+                    bottom_panel,
+                    rect(0.0, 20.0, 100.0, 80.0),
+                    Some(bottom),
+                    true,
+                ),
                 panel(top_panel, rect(0.0, 20.0, 100.0, 80.0), Some(top), true),
                 panel(PanelId::null(), bounds, None, true),
             ],
@@ -258,7 +272,12 @@ mod tests {
                 },
             ],
             panels: vec![
-                panel(bottom_panel, rect(0.0, 20.0, 100.0, 80.0), Some(bottom), true),
+                panel(
+                    bottom_panel,
+                    rect(0.0, 20.0, 100.0, 80.0),
+                    Some(bottom),
+                    true,
+                ),
                 panel(top_panel, rect(0.0, 30.0, 100.0, 70.0), Some(top), true),
                 panel(PanelId::null(), rect(0.0, 20.0, 100.0, 80.0), None, true),
             ],
@@ -351,7 +370,10 @@ mod tests {
             ..LayoutRects::default()
         };
 
-        assert_eq!(hit_test(Point::new(50.0, 50.0), &rects), HitResult::Panel(active));
+        assert_eq!(
+            hit_test(Point::new(50.0, 50.0), &rects),
+            HitResult::Panel(active)
+        );
     }
 
     #[test]
@@ -360,7 +382,13 @@ mod tests {
             canvas: rect(0.0, 0.0, 100.0, 100.0),
             ..LayoutRects::default()
         };
-        assert_eq!(hit_test(Point::new(f32::NAN, 10.0), &rects), HitResult::Empty);
-        assert_eq!(hit_test(Point::new(10.0, f32::INFINITY), &rects), HitResult::Empty);
+        assert_eq!(
+            hit_test(Point::new(f32::NAN, 10.0), &rects),
+            HitResult::Empty
+        );
+        assert_eq!(
+            hit_test(Point::new(10.0, f32::INFINITY), &rects),
+            HitResult::Empty
+        );
     }
 }

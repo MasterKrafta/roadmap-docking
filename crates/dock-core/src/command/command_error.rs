@@ -70,6 +70,7 @@ pub enum CommandError {
 mod tests {
     use super::CommandError;
     use crate::ids::NodeId;
+    use slotmap::Key;
 
     #[test]
     fn command_errors_have_diagnostic_display_messages() {

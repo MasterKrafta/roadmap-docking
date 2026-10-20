@@ -13,6 +13,7 @@ pub struct TabStripRect {
 mod tests {
     use super::TabStripRect;
     use crate::{NodeId, Point, Rect, Size};
+    use slotmap::Key;
 
     #[test]
     fn tab_strip_rect_keeps_group_and_strip_height() {

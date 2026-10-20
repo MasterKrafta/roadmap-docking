@@ -10,6 +10,9 @@ dock-gpui = { path = "../crates/dock-gpui" }
 ui = { path = "../crates/ui" }
 platform-api = { path = "../crates/platform-api" }
 
+[dev-dependencies]
+slotmap.workspace = true
+
 [target.'cfg(windows)'.dependencies]
 gpui.workspace = true
 gpui_platform.workspace = true

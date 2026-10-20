@@ -101,6 +101,7 @@ pub struct FloatingResizeEdgeRect {
 mod tests {
     use super::*;
     use crate::{DockSide, FloatingGroupId, NodeId, PanelId, Point, Size};
+    use slotmap::Key;
 
     fn rect(x: f32, y: f32, width: f32, height: f32) -> Rect {
         Rect::new(Point::new(x, y), Size::new(width, height))
@@ -144,10 +145,27 @@ mod tests {
             groups: vec![GroupRect { group, bounds }],
             tab_strips: vec![TabStripRect { group, bounds }],
             floating_groups: vec![],
-            panels: vec![PanelRect { panel, floating: None, active: true, bounds }],
-            tab_headers: vec![TabHeaderRect { group, index: 1, bounds }],
-            column_headers: vec![ColumnHeaderRect { side: DockSide::Right, index: 0, bounds }],
-            splitters: vec![SplitterRect { kind: SplitterKind::Group, index: 0, bounds }],
+            panels: vec![PanelRect {
+                panel,
+                floating: None,
+                active: true,
+                bounds,
+            }],
+            tab_headers: vec![TabHeaderRect {
+                group,
+                index: 1,
+                bounds,
+            }],
+            column_headers: vec![ColumnHeaderRect {
+                side: DockSide::Right,
+                index: 0,
+                bounds,
+            }],
+            splitters: vec![SplitterRect {
+                kind: SplitterKind::Group,
+                index: 0,
+                bounds,
+            }],
             floating_titles: vec![FloatingTitleRect { floating, bounds }],
             floating_resize_edges: vec![FloatingResizeEdgeRect {
                 floating,

@@ -1,5 +1,5 @@
 use dock_core::{
-    compute_rects, DockMetrics, DockSide, Layout, LayoutRects, Node, Size as DockSize,
+    DockMetrics, DockSide, Layout, LayoutRects, Node, Size as DockSize, compute_rects,
 };
 use gpui::{Context, Render, Window, div, prelude::*, px, rgb};
 use ui::Theme;
@@ -38,10 +38,12 @@ impl Render for MainWindow {
         let typography = self.theme.typography;
 
         let window_bounds = window.bounds();
-        let window_width = window_bounds.size.width.0.max(0.0);
-        let window_height = window_bounds.size.height.0.max(0.0);
+        let window_width = window_bounds.size.width.as_f32().max(0.0);
+        let window_height = window_bounds.size.height.as_f32().max(0.0);
         let menu_height = metrics.column_header_height.min(window_height);
-        let options_height = metrics.tab_strip_height.min((window_height - menu_height).max(0.0));
+        let options_height = metrics
+            .tab_strip_height
+            .min((window_height - menu_height).max(0.0));
         let body_height = (window_height - menu_height - options_height).max(0.0);
 
         // Toolbar is fixed chrome and deliberately excluded from dock-core's geometry.
@@ -101,7 +103,9 @@ fn menu_bar(theme: &Theme, height: f32) -> impl IntoElement {
     let colors = theme.colors;
     let metrics = theme.metrics;
     let typography = theme.typography;
-    let labels = ["File", "Edit", "Image", "Layer", "Type", "Select", "Filter", "View", "Window", "Help"];
+    let labels = [
+        "File", "Edit", "Image", "Layer", "Type", "Select", "Filter", "View", "Window", "Help",
+    ];
 
     div()
         .w_full()
@@ -204,78 +208,87 @@ fn render_dock_side(
                 .iter()
                 .find(|bounds| bounds.side == side)
                 .map(|bounds| bounds.bounds.size.width.max(0.0))
-                .unwrap_or_else(|| area.columns.iter().map(|column| column.width.max(0.0)).sum());
+                .unwrap_or_else(|| {
+                    area.columns
+                        .iter()
+                        .map(|column| column.width.max(0.0))
+                        .sum()
+                });
 
-            let columns = area.columns.iter().enumerate().map(|(column_index, column)| {
-                let column_bounds = rects
-                    .columns
+            let columns =
+                area.columns
                     .iter()
-                    .find(|bounds| bounds.side == side && bounds.index == column_index);
-                let column_width = column_bounds
-                    .map(|bounds| bounds.bounds.size.width.max(0.0))
-                    .unwrap_or_else(|| column.width.max(0.0));
-                let column_height = column_bounds
-                    .map(|bounds| bounds.bounds.size.height.max(0.0))
-                    .unwrap_or(height);
-                let header_height = rects
-                    .column_headers
-                    .iter()
-                    .find(|bounds| bounds.side == side && bounds.index == column_index)
-                    .map(|bounds| bounds.bounds.size.height.max(0.0))
-                    .unwrap_or(theme.metrics.column_header_height);
-
-                let group_count = column.groups.len();
-                let groups = column.groups.iter().copied().enumerate().map(
-                    |(group_index, group_id)| {
-                        let group_height = rects
-                            .groups
+                    .enumerate()
+                    .map(|(column_index, column)| {
+                        let column_bounds = rects
+                            .columns
                             .iter()
-                            .find(|bounds| bounds.group == group_id)
+                            .find(|bounds| bounds.side == side && bounds.index == column_index);
+                        let column_width = column_bounds
+                            .map(|bounds| bounds.bounds.size.width.max(0.0))
+                            .unwrap_or_else(|| column.width.max(0.0));
+                        let column_height = column_bounds
                             .map(|bounds| bounds.bounds.size.height.max(0.0))
-                            .unwrap_or(0.0);
-                        let strip_height = rects
-                            .tab_strips
+                            .unwrap_or(height);
+                        let header_height = rects
+                            .column_headers
                             .iter()
-                            .find(|strip| strip.group == group_id)
-                            .map(|strip| strip.bounds.size.height.max(0.0))
-                            .unwrap_or(theme.metrics.tab_strip_height)
-                            .min(group_height);
-                        let splitter_height = if group_index + 1 < group_count {
-                            theme.metrics.splitter_thickness
-                        } else {
-                            0.0
-                        };
+                            .find(|bounds| bounds.side == side && bounds.index == column_index)
+                            .map(|bounds| bounds.bounds.size.height.max(0.0))
+                            .unwrap_or(theme.metrics.column_header_height);
 
-                        div()
-                            .w_full()
-                            .h(px(group_height + splitter_height))
-                            .flex()
-                            .flex_col()
-                            .child(render_group(
-                                theme,
-                                layout,
-                                registry,
-                                group_id,
-                                group_height,
-                                strip_height,
-                            ))
-                            .child(
+                        let group_count = column.groups.len();
+                        let groups = column.groups.iter().copied().enumerate().map(
+                            |(group_index, group_id)| {
+                                let group_height = rects
+                                    .groups
+                                    .iter()
+                                    .find(|bounds| bounds.group == group_id)
+                                    .map(|bounds| bounds.bounds.size.height.max(0.0))
+                                    .unwrap_or(0.0);
+                                let strip_height = rects
+                                    .tab_strips
+                                    .iter()
+                                    .find(|strip| strip.group == group_id)
+                                    .map(|strip| strip.bounds.size.height.max(0.0))
+                                    .unwrap_or(theme.metrics.tab_strip_height)
+                                    .min(group_height);
+                                let splitter_height = if group_index + 1 < group_count {
+                                    theme.metrics.splitter_thickness
+                                } else {
+                                    0.0
+                                };
+
                                 div()
                                     .w_full()
-                                    .h(px(splitter_height))
-                                    .bg(rgb(theme.colors.splitter)),
-                            )
-                    },
-                );
+                                    .h(px(group_height + splitter_height))
+                                    .flex()
+                                    .flex_col()
+                                    .child(render_group(
+                                        theme,
+                                        layout,
+                                        registry,
+                                        group_id,
+                                        group_height,
+                                        strip_height,
+                                    ))
+                                    .child(
+                                        div()
+                                            .w_full()
+                                            .h(px(splitter_height))
+                                            .bg(rgb(theme.colors.splitter)),
+                                    )
+                            },
+                        );
 
-                div()
-                    .w(px(column_width))
-                    .h(px(column_height))
-                    .flex()
-                    .flex_col()
-                    .child(column_header(theme, header_height))
-                    .children(groups)
-            });
+                        div()
+                            .w(px(column_width))
+                            .h(px(column_height))
+                            .flex()
+                            .flex_col()
+                            .child(column_header(theme, header_height))
+                            .children(groups)
+                    });
 
             div()
                 .w(px(area_width))
@@ -364,8 +377,8 @@ fn render_group(
         }
     }
 
-    let (heading, message) = active_content
-        .unwrap_or_else(|| ("Panel".to_owned(), "No panel content".to_owned()));
+    let (heading, message) =
+        active_content.unwrap_or_else(|| ("Panel".to_owned(), "No panel content".to_owned()));
     let content_height = (group_height - strip_height).max(0.0);
     let tab_row = div()
         .w_full()
@@ -376,7 +389,11 @@ fn render_group(
         .border_1()
         .border_color(rgb(colors.border))
         .children(tab_labels.into_iter().map(|(label, active)| {
-            let tab_color = if active { colors.active_tab } else { colors.group_background };
+            let tab_color = if active {
+                colors.active_tab
+            } else {
+                colors.group_background
+            };
             div()
                 .flex_1()
                 .h(px(strip_height))

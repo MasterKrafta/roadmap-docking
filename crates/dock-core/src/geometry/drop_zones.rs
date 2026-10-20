@@ -1,7 +1,5 @@
 use crate::command::{ColumnRef, DropTarget, DropZone};
-use crate::geometry::{
-    DockMetrics, DropZoneRect, LayoutRects, Point, Rect, Size,
-};
+use crate::geometry::{DockMetrics, DropZoneRect, LayoutRects, Point, Rect, Size};
 use crate::ids::{NodeId, PanelId};
 use crate::model::{DockSide, Layout, Node};
 
@@ -64,12 +62,14 @@ pub fn compute_drop_zones(
     let floating_zone_count = zones.len();
 
     let can_add_column = column_count(layout) < metrics.max_columns;
-    let outer_zone_width = finite_positive(metrics.edge_drop_zone_width)
-        .min(viewport.size.width * 0.5);
+    let outer_zone_width =
+        finite_positive(metrics.edge_drop_zone_width).min(viewport.size.width * 0.5);
     if can_add_column && outer_zone_width > 0.0 {
         push_zone(
             &mut zones,
-            DropTarget::DockEdge { side: DockSide::Left },
+            DropTarget::DockEdge {
+                side: DockSide::Left,
+            },
             Rect::new(
                 Point::new(viewport.origin.x, viewport.origin.y),
                 Size::new(outer_zone_width, viewport.size.height),
@@ -77,7 +77,9 @@ pub fn compute_drop_zones(
         );
         push_zone(
             &mut zones,
-            DropTarget::DockEdge { side: DockSide::Right },
+            DropTarget::DockEdge {
+                side: DockSide::Right,
+            },
             Rect::new(
                 Point::new(
                     viewport.origin.x + viewport.size.width - outer_zone_width,
@@ -110,7 +112,9 @@ pub fn compute_drop_zones(
         if floating_bounds_at_point(layout, rects, payload, canvas_center, metrics).is_some() {
             push_zone(
                 &mut zones,
-                DropTarget::FreeArea { bounds: Rect::default() },
+                DropTarget::FreeArea {
+                    bounds: Rect::default(),
+                },
                 rects.canvas,
             );
         }
@@ -150,7 +154,9 @@ pub fn resolve_drop(
     // is invalid for this payload (for example, dropping a group onto itself).
     for floating_rect in rects.floating_groups.iter().rev() {
         if !contains(floating_rect.bounds, point)
-            || !layout.floating_groups().contains_key(floating_rect.floating)
+            || !layout
+                .floating_groups()
+                .contains_key(floating_rect.floating)
         {
             continue;
         }
@@ -211,10 +217,9 @@ fn append_column_edge_zones(
         for pair in columns.windows(2) {
             let left_column = pair[0];
             let boundary_x = left_column.bounds.origin.x + left_column.bounds.size.width;
-            let left = (boundary_x - zone_width * 0.5)
-                .max(viewport.origin.x);
-            let right = (boundary_x + zone_width * 0.5)
-                .min(viewport.origin.x + viewport.size.width);
+            let left = (boundary_x - zone_width * 0.5).max(viewport.origin.x);
+            let right =
+                (boundary_x + zone_width * 0.5).min(viewport.origin.x + viewport.size.width);
             push_zone(
                 zones,
                 DropTarget::Column {
@@ -261,7 +266,6 @@ fn append_column_edge_zones(
             }
         }
     }
-
 }
 
 fn append_tab_insertion_zones(
@@ -283,7 +287,10 @@ fn append_tab_insertion_zones(
         if !is_docked_group(layout, group_rect.group) || tabs.panels.len() < 2 {
             continue;
         }
-        let Some(strip) = rects.tab_strips.iter().find(|strip| strip.group == group_rect.group)
+        let Some(strip) = rects
+            .tab_strips
+            .iter()
+            .find(|strip| strip.group == group_rect.group)
         else {
             continue;
         };
@@ -303,9 +310,9 @@ fn append_tab_insertion_zones(
             if next.index != previous.index + 1 {
                 continue;
             }
-            let boundary_x = (previous.bounds.origin.x + previous.bounds.size.width
-                + next.bounds.origin.x)
-                * 0.5;
+            let boundary_x =
+                (previous.bounds.origin.x + previous.bounds.size.width + next.bounds.origin.x)
+                    * 0.5;
             let width = requested_width
                 .min(previous.bounds.size.width)
                 .min(next.bounds.size.width);
@@ -324,10 +331,9 @@ fn append_tab_insertion_zones(
             );
 
             let source_index = match payload {
-                DropPayload::Panel(panel) => tabs
-                    .panels
-                    .iter()
-                    .position(|candidate| *candidate == panel),
+                DropPayload::Panel(panel) => {
+                    tabs.panels.iter().position(|candidate| *candidate == panel)
+                }
                 _ => None,
             };
             if let Some(source_index) = source_index {
@@ -339,10 +345,7 @@ fn append_tab_insertion_zones(
                 } else {
                     (next.index.saturating_sub(1), next.index)
                 };
-                for (index, bounds) in [
-                    (left_index, left_bounds),
-                    (right_index, right_bounds),
-                ] {
+                for (index, bounds) in [(left_index, left_bounds), (right_index, right_bounds)] {
                     let target = DropTarget::TabInsertion {
                         group: group_rect.group,
                         index,
@@ -388,9 +391,7 @@ fn append_group_gap_zones(
                     && valid_rect(group.bounds)
             })
             .collect();
-        groups.sort_by(|left, right| {
-            left.bounds.origin.y.total_cmp(&right.bounds.origin.y)
-        });
+        groups.sort_by(|left, right| left.bounds.origin.y.total_cmp(&right.bounds.origin.y));
 
         for pair in groups.windows(2) {
             let previous = pair[0];
@@ -444,7 +445,10 @@ fn append_group_zones(
         let zone_width = bounds.size.width;
         let top_bounds = Rect::new(bounds.origin, Size::new(zone_width, vertical_edge));
         let bottom_bounds = Rect::new(
-            Point::new(bounds.origin.x, bounds.origin.y + bounds.size.height - vertical_edge),
+            Point::new(
+                bounds.origin.x,
+                bounds.origin.y + bounds.size.height - vertical_edge,
+            ),
             Size::new(zone_width, vertical_edge),
         );
         for (zone, zone_bounds) in [
@@ -619,10 +623,11 @@ fn find_dock_group_for_panel(layout: &Layout, panel: PanelId) -> Option<NodeId> 
 }
 
 fn is_docked_group(layout: &Layout, group: NodeId) -> bool {
-    layout
-        .dock_areas()
-        .iter()
-        .any(|area| area.columns.iter().any(|column| column.groups.contains(&group)))
+    layout.dock_areas().iter().any(|area| {
+        area.columns
+            .iter()
+            .any(|column| column.groups.contains(&group))
+    })
 }
 
 fn column_exists(layout: &Layout, column: ColumnRef) -> bool {
@@ -789,17 +794,26 @@ fn subtract_rect(source: Rect, occluder: Rect) -> Vec<Rect> {
     if intersection_left > source_left {
         visible.push(Rect::new(
             Point::new(source_left, intersection_top),
-            Size::new(intersection_left - source_left, intersection_bottom - intersection_top),
+            Size::new(
+                intersection_left - source_left,
+                intersection_bottom - intersection_top,
+            ),
         ));
     }
     if intersection_right < source_right {
         visible.push(Rect::new(
             Point::new(intersection_right, intersection_top),
-            Size::new(source_right - intersection_right, intersection_bottom - intersection_top),
+            Size::new(
+                source_right - intersection_right,
+                intersection_bottom - intersection_top,
+            ),
         ));
     }
 
-    visible.into_iter().filter(|rect| valid_rect(*rect)).collect()
+    visible
+        .into_iter()
+        .filter(|rect| valid_rect(*rect))
+        .collect()
 }
 
 fn desired_floating_size(
@@ -816,14 +830,14 @@ fn desired_floating_size(
             let constraints = panel.constraints();
             let minimum = constraints.min_size();
             let preferred = constraints.preferred_size();
-            let minimum_content_height = finite_positive(metrics.min_group_height)
-                .max(finite_positive(minimum.height));
+            let minimum_content_height =
+                finite_positive(metrics.min_group_height).max(finite_positive(minimum.height));
             let width = finite_positive(metrics.default_column_width)
                 .max(finite_positive(metrics.min_column_width))
                 .max(finite_positive(preferred.width))
                 .max(finite_positive(minimum.width));
-            let minimum_width = finite_positive(metrics.min_column_width)
-                .max(finite_positive(minimum.width));
+            let minimum_width =
+                finite_positive(metrics.min_column_width).max(finite_positive(minimum.width));
             let height = finite_positive(preferred.height).max(minimum_content_height)
                 + title_height
                 + tab_height;
@@ -834,7 +848,11 @@ fn desired_floating_size(
             let Node::Tabs(tabs) = layout.nodes().get(group_id)? else {
                 return None;
             };
-            let bounds = rects.groups.iter().find(|group| group.group == group_id)?.bounds;
+            let bounds = rects
+                .groups
+                .iter()
+                .find(|group| group.group == group_id)?
+                .bounds;
             let mut minimum_width = finite_positive(metrics.min_column_width);
             let mut minimum_content_height = finite_positive(metrics.min_group_height);
             for panel_id in &tabs.panels {
@@ -843,7 +861,9 @@ fn desired_floating_size(
                 minimum_content_height =
                     minimum_content_height.max(finite_positive(constraints.min_size().height));
             }
-            let width = bounds.size.width
+            let width = bounds
+                .size
+                .width
                 .max(finite_positive(metrics.default_column_width))
                 .max(minimum_width);
             let height = bounds.size.height + title_height;
@@ -937,11 +957,12 @@ fn contains(bounds: Rect, point: Point) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{contains, compute_drop_zones, resolve_drop};
+    use super::{compute_drop_zones, contains, resolve_drop};
     use crate::{
-        compute_rects, ColumnRef, DockCommand, DockMetrics, DockSide, DropPayload, DropTarget,
-        DropZone, FloatSource, Layout, Node, Point, Profile, Rect, Size, SplitSide,
+        ColumnRef, DockCommand, DockMetrics, DockSide, DropPayload, DropTarget, DropZone,
+        FloatSource, Layout, Node, Point, Profile, Rect, Size, SplitSide, compute_rects,
     };
+    use slotmap::Key;
 
     fn metrics() -> DockMetrics {
         DockMetrics {
@@ -1004,7 +1025,13 @@ mod tests {
         let rects = geometry(&layout, &metrics);
 
         assert_eq!(
-            resolve_drop(&layout, Point::new(1100.0, 200.0), payload, &rects, &metrics),
+            resolve_drop(
+                &layout,
+                Point::new(1100.0, 200.0),
+                payload,
+                &rects,
+                &metrics
+            ),
             Some(DropTarget::Group {
                 group,
                 zone: DropZone::Center,
@@ -1018,7 +1045,13 @@ mod tests {
             })
         );
         assert_eq!(
-            resolve_drop(&layout, Point::new(1100.0, 400.0), payload, &rects, &metrics),
+            resolve_drop(
+                &layout,
+                Point::new(1100.0, 400.0),
+                payload,
+                &rects,
+                &metrics
+            ),
             Some(DropTarget::Group {
                 group,
                 zone: DropZone::Bottom,
@@ -1027,7 +1060,13 @@ mod tests {
 
         let next_group = group_id(&layout, "properties");
         assert_eq!(
-            resolve_drop(&layout, Point::new(1100.0, 416.0), payload, &rects, &metrics),
+            resolve_drop(
+                &layout,
+                Point::new(1100.0, 416.0),
+                payload,
+                &rects,
+                &metrics
+            ),
             Some(DropTarget::Group {
                 group: next_group,
                 zone: DropZone::Top,
@@ -1056,14 +1095,30 @@ mod tests {
 
         assert_eq!(
             resolve_drop(&layout, Point::new(1.0, 300.0), payload, &rects, &metrics),
-            Some(DropTarget::DockEdge { side: DockSide::Left })
+            Some(DropTarget::DockEdge {
+                side: DockSide::Left
+            })
         );
         assert_eq!(
-            resolve_drop(&layout, Point::new(1279.0, 300.0), payload, &rects, &metrics),
-            Some(DropTarget::DockEdge { side: DockSide::Right })
+            resolve_drop(
+                &layout,
+                Point::new(1279.0, 300.0),
+                payload,
+                &rects,
+                &metrics
+            ),
+            Some(DropTarget::DockEdge {
+                side: DockSide::Right
+            })
         );
         assert_eq!(
-            resolve_drop(&layout, Point::new(1000.0, 300.0), payload, &rects, &metrics),
+            resolve_drop(
+                &layout,
+                Point::new(1000.0, 300.0),
+                payload,
+                &rects,
+                &metrics
+            ),
             Some(DropTarget::Column {
                 column: ColumnRef::new(DockSide::Right, 0),
                 zone: DropZone::Right,
@@ -1203,10 +1258,13 @@ mod tests {
 
         let floating_zone = zones
             .iter()
-            .find(|zone| zone.target == (DropTarget::FloatingGroup {
-                floating,
-                zone: DropZone::Center,
-            }))
+            .find(|zone| {
+                zone.target
+                    == (DropTarget::FloatingGroup {
+                        floating,
+                        zone: DropZone::Center,
+                    })
+            })
             .expect("visible center target exists");
         assert_eq!(floating_zone.bounds, rect(344.0, 232.0, 272.0, 184.0));
 
@@ -1229,7 +1287,9 @@ mod tests {
                 "non-center point {blocked_point:?} must not become a tab target or fall through"
             );
             assert!(
-                !zones.iter().any(|zone| contains(zone.bounds, blocked_point)),
+                !zones
+                    .iter()
+                    .any(|zone| contains(zone.bounds, blocked_point)),
                 "overlay must not advertise a drop zone at blocked point {blocked_point:?}"
             );
         }
@@ -1298,13 +1358,7 @@ mod tests {
 
         let payload = DropPayload::FloatingGroup(top);
         assert_eq!(
-            resolve_drop(
-                &layout,
-                Point::new(480.0, 320.0),
-                payload,
-                &rects,
-                &metrics,
-            ),
+            resolve_drop(&layout, Point::new(480.0, 320.0), payload, &rects, &metrics,),
             None
         );
         assert!(
@@ -1331,7 +1385,10 @@ mod tests {
         assert!(bounds.size.height >= metrics.column_header_height + metrics.tab_strip_height);
         assert_eq!(
             bounds.origin,
-            Point::new(400.0 - bounds.size.width * 0.5, 300.0 - bounds.size.height * 0.5)
+            Point::new(
+                400.0 - bounds.size.width * 0.5,
+                300.0 - bounds.size.height * 0.5
+            )
         );
     }
 
@@ -1344,7 +1401,9 @@ mod tests {
 
         let zones = compute_drop_zones(&layout, &rects, payload, &metrics);
         assert!(
-            zones.iter().all(|zone| !matches!(&zone.target, DropTarget::FreeArea { .. })),
+            zones
+                .iter()
+                .all(|zone| !matches!(&zone.target, DropTarget::FreeArea { .. })),
             "FreeArea is invalid when the minimum floating height exceeds the viewport"
         );
         assert_eq!(
@@ -1370,17 +1429,22 @@ mod tests {
             ),
             None
         );
-        assert!(!compute_drop_zones(
-            &layout,
-            &rects,
-            DropPayload::Panel(panel_id(&layout, "properties")),
-            &metrics,
-        )
-        .iter()
-        .any(|zone| matches!(
-            &zone.target,
-            DropTarget::Group { zone: DropZone::Left | DropZone::Right, .. }
-        )));
+        assert!(
+            !compute_drop_zones(
+                &layout,
+                &rects,
+                DropPayload::Panel(panel_id(&layout, "properties")),
+                &metrics,
+            )
+            .iter()
+            .any(|zone| matches!(
+                &zone.target,
+                DropTarget::Group {
+                    zone: DropZone::Left | DropZone::Right,
+                    ..
+                }
+            ))
+        );
 
         let missing_group = crate::NodeId::null();
         let payload = DropPayload::Panel(panel_id(&layout, "properties"));
@@ -1391,27 +1455,21 @@ mod tests {
             }],
             ..rects.clone()
         };
-        assert!(!compute_drop_zones(
-            &layout,
-            &rects_with_missing_group,
-            payload,
-            &metrics,
-        )
-        .iter()
-        .any(|zone| matches!(
-            &zone.target,
-            DropTarget::Group { group, .. } if *group == missing_group
-        )));
+        assert!(
+            !compute_drop_zones(&layout, &rects_with_missing_group, payload, &metrics,)
+                .iter()
+                .any(|zone| matches!(
+                    &zone.target,
+                    DropTarget::Group { group, .. } if *group == missing_group
+                ))
+        );
 
         let empty = Layout::new(Profile::Photoshop, crate::CanvasState::default());
         assert!(compute_drop_zones(&empty, &rects, payload, &metrics).is_empty());
-        assert!(compute_drop_zones(
-            &layout,
-            &rects,
-            DropPayload::Group(missing_group),
-            &metrics,
-        )
-        .is_empty());
+        assert!(
+            compute_drop_zones(&layout, &rects, DropPayload::Group(missing_group), &metrics,)
+                .is_empty()
+        );
     }
 
     #[test]
@@ -1422,27 +1480,49 @@ mod tests {
         let payload = DropPayload::Panel(panel_id(&layout, "layers"));
 
         assert_eq!(
-            resolve_drop(&layout, Point::new(f32::NAN, 200.0), payload, &rects, &metrics),
+            resolve_drop(
+                &layout,
+                Point::new(f32::NAN, 200.0),
+                payload,
+                &rects,
+                &metrics
+            ),
             None
         );
         assert_eq!(
-            resolve_drop(&layout, Point::new(200.0, f32::INFINITY), payload, &rects, &metrics),
+            resolve_drop(
+                &layout,
+                Point::new(200.0, f32::INFINITY),
+                payload,
+                &rects,
+                &metrics
+            ),
             None
         );
         assert_eq!(
-            resolve_drop(&layout, Point::new(640.0, 400.0), DropPayload::Panel(crate::PanelId::null()), &rects, &metrics),
+            resolve_drop(
+                &layout,
+                Point::new(640.0, 400.0),
+                DropPayload::Panel(crate::PanelId::null()),
+                &rects,
+                &metrics
+            ),
             None
         );
 
         let panel = panel_id(&layout, "layers");
-        layout.apply(
-            DockCommand::Float {
-                source: FloatSource::Panel(panel),
-                rect: rect(320.0, 200.0, 320.0, 240.0),
-            },
-            &metrics,
-        ).expect("panel should float");
-        let floating_id = layout.floating_groups().iter()
+        layout
+            .apply(
+                DockCommand::Float {
+                    source: FloatSource::Panel(panel),
+                    rect: rect(320.0, 200.0, 320.0, 240.0),
+                },
+                &metrics,
+            )
+            .expect("panel should float");
+        let floating_id = layout
+            .floating_groups()
+            .iter()
             .find_map(|(id, floating)| floating.panels.contains(&panel).then_some(id))
             .expect("floating group exists");
         let floating_rects = geometry(&layout, &metrics);
