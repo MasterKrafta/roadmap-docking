@@ -195,17 +195,53 @@ pub fn dock_group_view(
         .child(content)
 }
 
-/// Draw one reusable panel-group header.
-///
-/// Docked groups show tabs, a free drag area, and the group menu. A floating panel
-/// is also a column, so its header includes the column controls before the same tabs.
+/// Draw the first row of a floating panel: a blank drag area and column controls.
+pub fn floating_panel_header<OnStartGroupDrag>(
+    theme: &Theme,
+    width: f32,
+    id_prefix: String,
+    height: f32,
+    on_start_group_drag: OnStartGroupDrag,
+) -> impl IntoElement
+where
+    OnStartGroupDrag: Fn(GpuiPoint<Pixels>, &mut Window, &mut App) + Clone + 'static,
+{
+    let colors = theme.colors;
+    let metrics = theme.metrics;
+
+    div()
+        .id(format!("floating-panel-header-{id_prefix}"))
+        .w(px(width))
+        .h(px(height.max(0.0)))
+        .flex()
+        .flex_row()
+        .items_center()
+        .px(px(metrics.content_padding))
+        .bg(rgb(colors.dock_background))
+        .border_1()
+        .border_color(rgb(colors.border))
+        .child({
+            let start_group_drag = on_start_group_drag.clone();
+            div()
+                .id(format!("floating-panel-header-drag-{id_prefix}"))
+                .flex_1()
+                .h_full()
+                .cursor_move()
+                .on_mouse_down(MouseButton::Left, move |_, window, app| {
+                    start_group_drag(window.mouse_position(), window, app)
+                })
+        })
+        .child(static_button(theme, "»", colors.dock_background))
+        .child(static_button(theme, "×", colors.dock_background))
+}
+
+/// Draw a reusable tab strip: tabs, a non-highlighted blank drag area, and the group menu.
 pub fn panel_group_header<OnActivate, OnStartTabDrag, OnStartGroupDrag>(
     theme: &Theme,
     width: f32,
     id_prefix: String,
     height: f32,
     tabs: Vec<TabItem>,
-    show_column_controls: bool,
     on_activate: OnActivate,
     on_start_tab_drag: OnStartTabDrag,
     on_start_group_drag: OnStartGroupDrag,
@@ -258,7 +294,7 @@ where
             .child(tab.title)
     });
 
-    let header = div()
+    div()
         .id(format!("panel-group-header-{id_prefix}"))
         .w(px(width))
         .h(px(height.max(0.0)))
@@ -268,19 +304,9 @@ where
         .px(px(metrics.content_padding))
         .bg(rgb(colors.group_background))
         .border_1()
-        .border_color(rgb(colors.border));
-
-    let header = if show_column_controls {
-        header
-            .child(static_button(theme, "»", colors.dock_background))
-            .child(static_button(theme, "×", colors.dock_background))
-    } else {
-        header
-    };
-
-    header
+        .border_color(rgb(colors.border))
         .children(tab_elements)
-        // The free area is the group drag handle: docked groups detach, floating groups move.
+        // The free area is the group drag handle, but it must not highlight on hover.
         .child({
             let start_group_drag = on_start_group_drag.clone();
             div()
@@ -288,7 +314,6 @@ where
                 .flex_1()
                 .h_full()
                 .cursor_move()
-                .hover(|style| style.bg(rgb(colors.hover)))
                 .on_mouse_down(MouseButton::Left, move |_, window, app| {
                     start_group_drag(window.mouse_position(), window, app)
                 })
@@ -316,7 +341,6 @@ pub fn tab_strip(
         format!("dock-group-{group_id:?}"),
         height,
         tabs,
-        false,
         move |index, app| activate(group_id, index, app),
         move |panel, position, window, app| {
             start_drag_for_tabs(DropPayload::Panel(panel), position, window, app)
