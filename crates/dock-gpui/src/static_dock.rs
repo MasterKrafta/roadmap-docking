@@ -1,4 +1,4 @@
-use dock_core::NodeId;
+use dock_core::{NodeId, PanelId};
 use gpui::{App, div, prelude::*, px, rgb};
 use ui::Theme;
 
@@ -6,6 +6,7 @@ use ui::Theme;
 /// This is render input, not another copy of the docking model.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TabItem {
+    pub panel_id: PanelId,
     pub title: String,
     pub active: bool,
 }
@@ -29,6 +30,7 @@ pub fn dock_column_view(
     header_height: f32,
     groups: Vec<DockGroupData>,
     on_activate: impl Fn(NodeId, usize, &mut App) + Clone + 'static,
+    on_close: impl Fn(PanelId, &mut App) + Clone + 'static,
 ) -> impl IntoElement {
     let group_count = groups.len();
     let group_rows = groups.into_iter().enumerate().map(|(index, group)| {
@@ -55,6 +57,7 @@ pub fn dock_column_view(
                     group.tab_strip_height,
                     group.tabs,
                     on_activate.clone(),
+                    on_close.clone(),
                 ),
                 panel_content(
                     theme,
@@ -138,6 +141,7 @@ pub fn tab_strip(
     height: f32,
     tabs: Vec<TabItem>,
     on_activate: impl Fn(NodeId, usize, &mut App) + Clone + 'static,
+    on_close: impl Fn(PanelId, &mut App) + Clone + 'static,
 ) -> impl IntoElement {
     let colors = theme.colors;
     let metrics = theme.metrics;
@@ -155,25 +159,53 @@ pub fn tab_strip(
             colors.muted_text
         };
         let activate = on_activate.clone();
+        let close = on_close.clone();
+        let panel_id = tab.panel_id;
 
+        // Keep activation and closing on sibling hit targets so clicking × does not
+        // also activate the tab through a parent click handler.
         div()
             .id(format!("dock-tab-{group_id:?}-{index}"))
             .flex_1()
             .min_w(px(0.0))
             .h_full()
             .flex()
+            .flex_row()
             .items_center()
-            .px(px(metrics.content_padding))
             .bg(rgb(background))
             .text_color(rgb(foreground))
             .text_size(px(typography.tab_size))
-            .whitespace_nowrap()
-            .overflow_hidden()
-            .text_ellipsis()
-            .cursor_pointer()
-            .hover(|style| style.bg(rgb(colors.hover)))
-            .on_click(move |_, _, app| activate(group_id, index, app))
-            .child(tab.title)
+            .child(
+                div()
+                    .id(format!("dock-tab-activate-{group_id:?}-{index}"))
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .h_full()
+                    .flex()
+                    .items_center()
+                    .px(px(metrics.content_padding))
+                    .whitespace_nowrap()
+                    .overflow_hidden()
+                    .text_ellipsis()
+                    .cursor_pointer()
+                    .hover(|style| style.bg(rgb(colors.hover)))
+                    .on_click(move |_, _, app| activate(group_id, index, app))
+                    .child(tab.title),
+            )
+            .child(
+                div()
+                    .id(format!("dock-tab-close-{group_id:?}-{index}"))
+                    .w(px((metrics.button_size * 0.75).max(16.0)))
+                    .h_full()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_color(rgb(colors.muted_text))
+                    .cursor_pointer()
+                    .hover(|style| style.bg(rgb(colors.hover)))
+                    .on_click(move |_, _, app| close(panel_id, app))
+                    .child("×"),
+            )
     });
 
     div()

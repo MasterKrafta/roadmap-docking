@@ -1,5 +1,5 @@
 use dock_core::{
-    DockCommand, DockMetrics, DockSide, Layout, LayoutRects, Node, NodeId, PanelKey,
+    DockCommand, DockMetrics, DockSide, Layout, LayoutRects, Node, NodeId, PanelId, PanelKey,
     Size as DockSize, compute_rects,
 };
 use dock_gpui::{DockGroupData, TabItem, dock_column_view};
@@ -118,22 +118,10 @@ impl MainWindow {
         }
     }
 
-    fn close_panel_from_menu(&mut self, key: PanelKey, cx: &mut Context<Self>) {
-        let panel_id = self.layout.panels().iter().find_map(|(panel_id, panel)| {
-            (panel.key() == &key).then_some(panel_id)
-        });
-        let Some(panel_id) = panel_id else {
-            self.window_menu_open = false;
-            cx.notify();
-            return;
-        };
-
+    fn close_panel(&mut self, panel_id: PanelId, cx: &mut Context<Self>) {
         match self.layout.apply(DockCommand::ClosePanel { panel: panel_id }, &self.metrics) {
-            Ok(_) => {
-                self.window_menu_open = false;
-                cx.notify();
-            }
-            Err(error) => eprintln!("Could not close panel {key:?}: {error}"),
+            Ok(_) => cx.notify(),
+            Err(error) => eprintln!("Could not close panel {panel_id:?}: {error}"),
         }
     }
 
@@ -190,9 +178,9 @@ impl Render for MainWindow {
         };
 
         let close_panel_window = weak_window.clone();
-        let on_close_panel = move |key: PanelKey, app: &mut App| {
+        let on_close_panel = move |panel_id: PanelId, app: &mut App| {
             if let Err(error) = close_panel_window.update(app, |this, cx| {
-                this.close_panel_from_menu(key.clone(), cx);
+                this.close_panel(panel_id, cx);
             }) {
                 eprintln!("Could not dispatch panel close: {error}");
             }
@@ -258,7 +246,6 @@ impl Render for MainWindow {
                     &self.layout,
                     panel_menu_height,
                     on_open_panel,
-                    on_close_panel,
                 ))
             })
             .child(options_bar(&self.theme, options_height))
@@ -278,6 +265,7 @@ impl Render for MainWindow {
                         left_dock_width,
                         body_height,
                         on_activate_tab.clone(),
+                        on_close_panel.clone(),
                     ))
                     .child(canvas(&self.theme, canvas_width, body_height))
                     .child(render_dock_side(
@@ -289,6 +277,7 @@ impl Render for MainWindow {
                         right_dock_width,
                         body_height,
                         on_activate_tab,
+                        on_close_panel,
                     )),
             )
     }
@@ -338,17 +327,15 @@ where
         }))
 }
 
-fn panels_menu<OnOpen, OnClose>(
+fn panels_menu<OnOpen>(
     theme: &Theme,
     registry: &PanelRegistry,
     layout: &Layout,
     height: f32,
     on_open: OnOpen,
-    on_close: OnClose,
 ) -> impl IntoElement
 where
     OnOpen: Fn(PanelKey, &mut App) + Clone + 'static,
-    OnClose: Fn(PanelKey, &mut App) + Clone + 'static,
 {
     let colors = theme.colors;
     let metrics = theme.metrics;
@@ -362,44 +349,18 @@ where
 
         let open_key = key.clone();
         let open = on_open.clone();
-        let close_key = key.clone();
-        let close = on_close.clone();
-
-        let title_item = div()
-            .id(format!("window-panel-open-{}", key.as_str()))
-            .flex_1()
-            .h(px(row_height))
-            .flex()
-            .items_center()
-            .cursor_pointer()
-            .hover(|style| style.bg(rgb(colors.hover)))
-            .on_click(move |_, _, app| open(open_key.clone(), app))
-            .child(title);
-
-        let close_item = div()
-            .id(format!("window-panel-close-{}", key.as_str()))
-            .w(px(metrics.button_size))
-            .h(px(row_height))
-            .flex()
-            .items_center()
-            .justify_center()
-            .text_color(rgb(colors.muted_text))
-            .cursor_pointer()
-            .hover(|style| style.bg(rgb(colors.hover)))
-            .on_click(move |_, _, app| {
-                if is_open {
-                    close(close_key.clone(), app);
-                }
-            })
-            .child(if is_open { "×" } else { "" });
 
         div()
+            .id(format!("window-panel-{}", key.as_str()))
             .w_full()
             .h(px(row_height))
             .flex()
             .flex_row()
             .items_center()
             .px(px(metrics.content_padding))
+            .cursor_pointer()
+            .hover(|style| style.bg(rgb(colors.hover)))
+            .on_click(move |_, _, app| open(open_key.clone(), app))
             .child(
                 div()
                     .w(px(20.0))
@@ -409,8 +370,14 @@ where
                     .text_color(rgb(colors.primary_text))
                     .child(if is_open { "✓" } else { "" }),
             )
-            .child(title_item)
-            .child(close_item)
+            .child(
+                div()
+                    .flex_1()
+                    .h(px(row_height))
+                    .flex()
+                    .items_center()
+                    .child(title),
+            )
     });
 
     div()
@@ -515,6 +482,7 @@ fn render_dock_side<OnActivate>(
     width: f32,
     height: f32,
     on_activate: OnActivate,
+    on_close: impl Fn(PanelId, &mut App) + Clone + 'static,
 ) -> impl IntoElement
 where
     OnActivate: Fn(NodeId, usize, &mut App) + Clone + 'static,
@@ -579,6 +547,7 @@ where
                     header_height,
                     groups,
                     on_activate.clone(),
+                    on_close.clone(),
                 )
             });
 
@@ -638,6 +607,7 @@ fn group_view_data(
             }
 
             tabs.push(TabItem {
+                panel_id,
                 title,
                 active: index == group.active_index,
             });
@@ -665,7 +635,7 @@ mod tests {
 
     #[test]
     fn active_panel_projection_tracks_each_groups_independent_layout_state() {
-        use dock_core::DockCommand;
+        use dock_core::{DockCommand, Node};
 
         let theme = Theme::default();
         let metrics = dock_metrics::build(&theme);
@@ -688,6 +658,15 @@ mod tests {
             upper_initial.tabs.iter().map(|tab| tab.title.as_str()).collect::<Vec<_>>(),
             vec!["Layers", "Color"]
         );
+        let upper_panel_ids = match layout.nodes().get(groups[0]).expect("upper group exists") {
+            Node::Tabs(tabs) => tabs.panels.clone(),
+            Node::Split(_) => panic!("Photoshop groups must be Tabs"),
+        };
+        assert_eq!(
+            upper_initial.tabs.iter().map(|tab| tab.panel_id).collect::<Vec<_>>(),
+            upper_panel_ids,
+            "each tab close control must target its own panel instance"
+        );
         assert!(upper_initial.tabs[0].active);
         assert!(!upper_initial.tabs[1].active);
         assert_eq!(upper_initial.active_heading, "Layers");
@@ -706,6 +685,15 @@ mod tests {
         assert_eq!(
             lower_initial.tabs.iter().map(|tab| tab.title.as_str()).collect::<Vec<_>>(),
             vec!["Properties", "History"]
+        );
+        let lower_panel_ids = match layout.nodes().get(groups[1]).expect("lower group exists") {
+            Node::Tabs(tabs) => tabs.panels.clone(),
+            Node::Split(_) => panic!("Photoshop groups must be Tabs"),
+        };
+        assert_eq!(
+            lower_initial.tabs.iter().map(|tab| tab.panel_id).collect::<Vec<_>>(),
+            lower_panel_ids,
+            "each tab close control must target its own panel instance"
         );
         assert!(lower_initial.tabs[0].active);
         assert_eq!(lower_initial.active_heading, "Properties");
