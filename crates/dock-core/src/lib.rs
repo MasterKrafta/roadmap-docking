@@ -10,7 +10,7 @@ pub use command::{
 };
 pub use geometry::{
     compute_rects, ColumnHeaderRect, ColumnRect, DockAreaRect, DockMetrics, DropZoneRect,
-    FloatingResizeEdgeRect, FloatingTitleRect, GroupRect, HitResult, LayoutRects, PanelRect,
+    FloatingGroupRect, FloatingResizeEdgeRect, FloatingTitleRect, GroupRect, HitResult, LayoutRects, PanelRect,
     Point, Rect, ResizeEdge, Size, SplitterKind, SplitterRect, TabHeaderRect, TabStripRect,
 };
 pub use ids::{FloatingGroupId, NodeId, PanelId, PanelKey};
