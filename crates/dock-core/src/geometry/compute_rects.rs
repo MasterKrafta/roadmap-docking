@@ -718,7 +718,11 @@ mod tests {
         }
         for key in ["properties", "history"] {
             assert_eq!(
-                rects.panels.iter().find(|panel| panel.panel == panel_id(&layout, key)).map(|panel| panel.bounds),
+                rects
+                    .panels
+                    .iter()
+                    .find(|panel| panel.panel == panel_id(&layout, key))
+                    .map(|panel| panel.bounds),
                 Some(rect(1000.0, 446.0, 280.0, 354.0))
             );
         }
