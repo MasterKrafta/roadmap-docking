@@ -30,10 +30,7 @@ pub enum DragSessionState {
     /// No pointer interaction is active.
     Idle,
     /// Pointer is down, but movement has not crossed the drag threshold.
-    Pressed {
-        payload: DropPayload,
-        origin: Point,
-    },
+    Pressed { payload: DropPayload, origin: Point },
     /// The drag threshold was crossed. The current target is preview-only.
     Dragging {
         payload: DropPayload,
@@ -47,9 +44,7 @@ pub enum DragSessionState {
         target: DropTarget,
     },
     /// The active interaction ended without a drop request.
-    Cancelled {
-        reason: DragCancelReason,
-    },
+    Cancelled { reason: DragCancelReason },
 }
 
 /// One accepted release. The UI adapter translates this request into exactly one
@@ -135,7 +130,9 @@ impl DragSession {
                 };
                 true
             }
-            DragSessionState::Dragging { payload, origin, .. } => {
+            DragSessionState::Dragging {
+                payload, origin, ..
+            } => {
                 self.state = DragSessionState::Dragging {
                     payload,
                     origin,
@@ -216,13 +213,12 @@ fn is_finite_point(point: Point) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        DRAG_START_THRESHOLD, DragCancelReason, DragSession, DragSessionState,
-    };
+    use super::{DRAG_START_THRESHOLD, DragCancelReason, DragSession, DragSessionState};
     use crate::{
-        CanvasState, DockCommand, DockMetrics, DropPayload, DropTarget, DropZone, Layout,
-        PanelId, PanelKey, Point, Profile, Rect, Size,
+        CanvasState, DockCommand, DockMetrics, DropPayload, DropTarget, DropZone, Layout, PanelId,
+        PanelKey, Point, Profile, Rect, Size,
     };
+    use slotmap::Key;
 
     fn panel_payload() -> DropPayload {
         DropPayload::Panel(PanelId::null())
@@ -296,7 +292,9 @@ mod tests {
         assert!(drag.press(payload, Point::new(0.0, 0.0)));
         assert!(drag.pointer_moved(Point::new(4.0, 0.0), Some(destination.clone())));
 
-        let drop = drag.release().expect("valid release should produce a drop request");
+        let drop = drag
+            .release()
+            .expect("valid release should produce a drop request");
         assert_eq!(drop.payload, payload);
         assert_eq!(drop.target, destination);
         assert_eq!(
@@ -306,7 +304,10 @@ mod tests {
                 target: destination
             }
         );
-        assert!(drag.release().is_none(), "a second release must emit nothing");
+        assert!(
+            drag.release().is_none(),
+            "a second release must emit nothing"
+        );
         assert!(!drag.pointer_moved(Point::new(20.0, 0.0), Some(target())));
     }
 
@@ -358,10 +359,7 @@ mod tests {
             assert!(drag.cancel(reason));
             assert!(drag.release().is_none());
 
-            assert_eq!(
-                drag.state(),
-                &DragSessionState::Cancelled { reason }
-            );
+            assert_eq!(drag.state(), &DragSessionState::Cancelled { reason });
             assert_eq!(layout.version(), version_before);
             assert_eq!(layout.panels().len(), panel_count_before);
             assert!(layout.validate(&metrics).is_ok());
@@ -421,10 +419,18 @@ mod tests {
         let mut drag = DragSession::new();
         assert!(drag.press(DropPayload::Panel(panel), Point::new(10.0, 10.0)));
         assert!(drag.pointer_moved(Point::new(14.0, 10.0), Some(destination.clone())));
-        assert_eq!(layout.version(), version_before, "preview must not mutate the dock tree");
+        assert_eq!(
+            layout.version(),
+            version_before,
+            "preview must not mutate the dock tree"
+        );
 
         let request = drag.release().expect("valid drop emits one request");
         assert_eq!(request.target, destination);
-        assert_eq!(layout.version(), version_before, "the core session is intent-only");
+        assert_eq!(
+            layout.version(),
+            version_before,
+            "the core session is intent-only"
+        );
     }
 }
