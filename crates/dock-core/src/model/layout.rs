@@ -3213,4 +3213,399 @@ mod tests {
         }
     }
 
+
+    fn floating_rect(x: f32, y: f32, width: f32, height: f32) -> Rect {
+        Rect::new(Point::new(x, y), Size::new(width, height))
+    }
+
+    fn floating_id_for_panel(layout: &Layout, panel: crate::PanelId) -> crate::FloatingGroupId {
+        layout.floating_groups().iter()
+            .find_map(|(id, group)| group.panels.contains(&panel).then_some(id))
+            .expect("panel should be in a floating group")
+    }
+
+    #[test]
+    fn float_panel_detaches_it_from_dock_and_preserves_canvas() {
+        use crate::{DockCommand, FloatSource};
+
+        let metrics = metrics();
+        let mut layout = initial_layout();
+        let group = tab_group_id(&layout, 0, 0);
+        let panel = match layout.nodes().get(group).expect("group exists") {
+            Node::Tabs(tabs) => tabs.panels[0],
+            Node::Split(_) => panic!("Photoshop groups must be Tabs"),
+        };
+        let canvas_before = *layout.canvas();
+
+        let outcome = layout.apply(
+            DockCommand::Float {
+                source: FloatSource::Panel(panel),
+                rect: floating_rect(20.0, 30.0, 300.0, 180.0),
+            },
+            &metrics,
+        ).expect("valid panel should detach into a floating group");
+
+        let floating_id = floating_id_for_panel(&layout, panel);
+        let floating = layout.floating_groups().get(floating_id).expect("floating group exists");
+        assert_eq!(floating.panels, vec![panel]);
+        assert_eq!(floating.active_index, 0);
+        assert_eq!(floating.bounds, floating_rect(20.0, 30.0, 300.0, 180.0));
+        let Node::Tabs(source) = layout.nodes().get(group).expect("source group remains") else {
+            panic!("source group must be Tabs");
+        };
+        assert!(!source.panels.contains(&panel));
+        assert!(outcome.changed_nodes.contains(&group));
+        assert_eq!(layout.canvas(), &canvas_before);
+        assert!(layout.validate(&metrics).is_ok());
+    }
+
+    #[test]
+    fn float_group_detaches_all_tabs_and_normalizes_empty_column() {
+        use crate::{DockCommand, FloatSource};
+
+        let metrics = metrics();
+        let mut layout = initial_layout();
+        let group = tab_group_id(&layout, 0, 0);
+        let panels = match layout.nodes().get(group).expect("group exists") {
+            Node::Tabs(tabs) => tabs.panels.clone(),
+            Node::Split(_) => panic!("Photoshop groups must be Tabs"),
+        };
+
+        layout.apply(
+            DockCommand::Float {
+                source: FloatSource::Group(group),
+                rect: floating_rect(-10.0, 15.0, 320.0, 200.0),
+            },
+            &metrics,
+        ).expect("valid group should detach into one floating group");
+
+        assert_eq!(layout.dock_areas()[0].columns[0].groups.len(), 1);
+        let floating = layout.floating_groups().values().next().expect("floating group exists");
+        assert_eq!(floating.panels, panels);
+        assert_eq!(floating.active_index, 0);
+        assert!(layout.nodes().get(group).is_none(), "unreachable source node is normalized away");
+        assert!(layout.validate(&metrics).is_ok());
+    }
+
+    #[test]
+    fn float_rejects_invalid_or_too_small_rect_without_mutating_layout() {
+        use crate::{CommandError, DockCommand, FloatSource};
+
+        let metrics = metrics();
+        let mut layout = initial_layout();
+        let group = tab_group_id(&layout, 0, 0);
+        let panel = match layout.nodes().get(group).expect("group exists") {
+            Node::Tabs(tabs) => tabs.panels[0],
+            Node::Split(_) => panic!("Photoshop groups must be Tabs"),
+        };
+        let panels_before = match layout.nodes().get(group).expect("group exists") {
+            Node::Tabs(tabs) => tabs.panels.clone(),
+            Node::Split(_) => unreachable!(),
+        };
+        let version_before = layout.version();
+
+        for rect in [
+            floating_rect(0.0, 0.0, 0.0, 100.0),
+            floating_rect(0.0, 0.0, f32::NAN, 200.0),
+            floating_rect(0.0, 0.0, 80.0, 40.0),
+        ] {
+            let error = layout.apply(
+                DockCommand::Float { source: FloatSource::Panel(panel), rect },
+                &metrics,
+            ).expect_err("invalid or undersized float bounds must be rejected");
+            assert!(matches!(error, CommandError::InvalidCommandParameter { ref parameter, .. }
+                if parameter == "floating rect"));
+            assert_eq!(layout.version(), version_before);
+            assert_eq!(layout.floating_groups().len(), 0);
+            let Node::Tabs(source) = layout.nodes().get(group).expect("source group remains") else {
+                panic!("source group must remain Tabs");
+            };
+            assert_eq!(source.panels, panels_before);
+            assert!(layout.validate(&metrics).is_ok());
+        }
+    }
+
+    #[test]
+    fn move_and_resize_floating_change_only_the_requested_rect_component() {
+        use crate::DockCommand;
+
+        let metrics = metrics();
+        let mut layout = initial_layout();
+        let group = tab_group_id(&layout, 0, 0);
+        let panel = match layout.nodes().get(group).expect("group exists") {
+            Node::Tabs(tabs) => tabs.panels[0],
+            Node::Split(_) => panic!("Photoshop groups must be Tabs"),
+        };
+        layout.apply(
+            DockCommand::Float {
+                source: crate::FloatSource::Panel(panel),
+                rect: floating_rect(10.0, 20.0, 300.0, 180.0),
+            },
+            &metrics,
+        ).expect("initial float should succeed");
+        let floating_id = floating_id_for_panel(&layout, panel);
+
+        layout.apply(
+            DockCommand::MoveFloating {
+                floating: floating_id,
+                rect: floating_rect(60.0, 70.0, 300.0, 180.0),
+            },
+            &metrics,
+        ).expect("floating group should move");
+        let group_after_move = layout.floating_groups().get(floating_id).expect("floating exists");
+        assert_eq!(group_after_move.bounds, floating_rect(60.0, 70.0, 300.0, 180.0));
+
+        layout.apply(
+            DockCommand::ResizeFloating {
+                floating: floating_id,
+                rect: floating_rect(60.0, 70.0, 360.0, 240.0),
+            },
+            &metrics,
+        ).expect("floating group should resize");
+        let group_after_resize = layout.floating_groups().get(floating_id).expect("floating exists");
+        assert_eq!(group_after_resize.bounds, floating_rect(60.0, 70.0, 360.0, 240.0));
+        assert!(layout.validate(&metrics).is_ok());
+    }
+
+    #[test]
+    fn floating_rect_commands_reject_invalid_minimums_and_unknown_ids_atomically() {
+        use crate::{CommandError, DockCommand};
+
+        let metrics = metrics();
+        let mut layout = initial_layout();
+        let group = tab_group_id(&layout, 0, 0);
+        let panel = match layout.nodes().get(group).expect("group exists") {
+            Node::Tabs(tabs) => tabs.panels[0],
+            Node::Split(_) => panic!("Photoshop groups must be Tabs"),
+        };
+        layout.apply(
+            DockCommand::Float {
+                source: crate::FloatSource::Panel(panel),
+                rect: floating_rect(10.0, 20.0, 300.0, 180.0),
+            },
+            &metrics,
+        ).expect("initial float should succeed");
+        let floating_id = floating_id_for_panel(&layout, panel);
+        let before = layout.floating_groups().get(floating_id).expect("floating exists").clone();
+        let version_before = layout.version();
+
+        let error = layout.apply(
+            DockCommand::ResizeFloating {
+                floating: floating_id,
+                rect: floating_rect(10.0, 20.0, 100.0, 40.0),
+            },
+            &metrics,
+        ).expect_err("minimum panel size must be respected");
+        assert!(matches!(error, CommandError::InvalidCommandParameter { ref parameter, .. }
+            if parameter == "floating rect"));
+        assert_eq!(layout.version(), version_before);
+        assert_eq!(layout.floating_groups().get(floating_id), Some(&before));
+
+        let error = layout.apply(
+            DockCommand::MoveFloating {
+                floating: crate::FloatingGroupId::null(),
+                rect: floating_rect(20.0, 30.0, 300.0, 180.0),
+            },
+            &metrics,
+        ).expect_err("unknown floating ID must be rejected");
+        assert!(matches!(error, CommandError::UnknownFloatingGroup(_)));
+        assert_eq!(layout.version(), version_before);
+        assert!(layout.validate(&metrics).is_ok());
+    }
+
+    #[test]
+    fn raise_floating_moves_group_to_front_of_z_order() {
+        use crate::DockCommand;
+
+        let metrics = metrics();
+        let mut layout = initial_layout();
+        let first_group = tab_group_id(&layout, 0, 0);
+        let second_group = tab_group_id(&layout, 0, 1);
+        let panel_a = match layout.nodes().get(first_group).expect("first group exists") {
+            Node::Tabs(tabs) => tabs.panels[0],
+            Node::Split(_) => panic!("Photoshop groups must be Tabs"),
+        };
+        let panel_b = match layout.nodes().get(second_group).expect("second group exists") {
+            Node::Tabs(tabs) => tabs.panels[0],
+            Node::Split(_) => panic!("Photoshop groups must be Tabs"),
+        };
+        layout.apply(
+            DockCommand::Float {
+                source: crate::FloatSource::Panel(panel_a),
+                rect: floating_rect(0.0, 0.0, 300.0, 180.0),
+            },
+            &metrics,
+        ).expect("first floating group should be created");
+        layout.apply(
+            DockCommand::Float {
+                source: crate::FloatSource::Panel(panel_b),
+                rect: floating_rect(20.0, 20.0, 300.0, 180.0),
+            },
+            &metrics,
+        ).expect("second floating group should be created");
+        let floating_a = floating_id_for_panel(&layout, panel_a);
+        let floating_b = floating_id_for_panel(&layout, panel_b);
+        let second_z = layout.floating_groups().get(floating_b).expect("second float exists").z_order;
+
+        layout.apply(DockCommand::RaiseFloating { floating: floating_a }, &metrics)
+            .expect("floating group should be raised");
+
+        assert!(layout.floating_groups().get(floating_a).expect("first float exists").z_order > second_z);
+        assert!(layout.validate(&metrics).is_ok());
+    }
+
+    #[test]
+    fn move_panel_can_add_a_docked_tab_to_an_existing_floating_group() {
+        use crate::{DockCommand, DropTarget, DropZone};
+
+        let metrics = metrics();
+        let mut layout = initial_layout();
+        let first_group = tab_group_id(&layout, 0, 0);
+        let second_group = tab_group_id(&layout, 0, 1);
+        let target_panel = match layout.nodes().get(first_group).expect("first group exists") {
+            Node::Tabs(tabs) => tabs.panels[0],
+            Node::Split(_) => panic!("Photoshop groups must be Tabs"),
+        };
+        let moved_panel = match layout.nodes().get(second_group).expect("second group exists") {
+            Node::Tabs(tabs) => tabs.panels[0],
+            Node::Split(_) => panic!("Photoshop groups must be Tabs"),
+        };
+        layout.apply(
+            DockCommand::Float {
+                source: crate::FloatSource::Panel(target_panel),
+                rect: floating_rect(0.0, 0.0, 300.0, 180.0),
+            },
+            &metrics,
+        ).expect("target floating group should be created");
+        let floating_id = floating_id_for_panel(&layout, target_panel);
+
+        layout.apply(
+            DockCommand::MovePanel {
+                panel: moved_panel,
+                target: DropTarget::FloatingGroup { floating: floating_id, zone: DropZone::Center },
+            },
+            &metrics,
+        ).expect("panel should become a tab in the floating group");
+
+        let floating = layout.floating_groups().get(floating_id).expect("floating group remains");
+        assert_eq!(floating.panels, vec![target_panel, moved_panel]);
+        assert_eq!(floating.active_index, 1);
+        assert!(layout.validate(&metrics).is_ok());
+    }
+
+    #[test]
+    fn dock_floating_moves_all_tabs_to_dock_and_removes_floating_container() {
+        use crate::{DockCommand, DropTarget, DropZone, FloatSource};
+
+        let metrics = metrics();
+        let mut layout = initial_layout();
+        let source_group = tab_group_id(&layout, 0, 0);
+        let target_group = tab_group_id(&layout, 0, 1);
+        let source_panels = match layout.nodes().get(source_group).expect("source group exists") {
+            Node::Tabs(tabs) => tabs.panels.clone(),
+            Node::Split(_) => panic!("Photoshop groups must be Tabs"),
+        };
+        layout.apply(
+            DockCommand::Float {
+                source: FloatSource::Group(source_group),
+                rect: floating_rect(0.0, 0.0, 320.0, 200.0),
+            },
+            &metrics,
+        ).expect("source group should float");
+        let floating_id = floating_id_for_panel(&layout, source_panels[0]);
+
+        layout.apply(
+            DockCommand::DockFloating {
+                floating: floating_id,
+                target: DropTarget::Group { group: target_group, zone: DropZone::Center },
+            },
+            &metrics,
+        ).expect("floating group should dock as tabs into target group");
+
+        assert!(layout.floating_groups().get(floating_id).is_none());
+        let Node::Tabs(target) = layout.nodes().get(target_group).expect("target group remains") else {
+            panic!("target group must be Tabs");
+        };
+        assert_eq!(target.panels, vec![crate::PanelId::null(); 0].into_iter().chain(source_panels.iter().copied()).chain([
+            match layout.nodes().get(target_group).expect("target exists") {
+                Node::Tabs(tabs) => tabs.panels[0],
+                Node::Split(_) => unreachable!(),
+            }
+        ]).collect::<Vec<_>>().len(), 3);
+        assert!(source_panels.iter().all(|panel| target.panels.contains(panel)));
+        assert_eq!(target.active_index, 1);
+        assert!(layout.validate(&metrics).is_ok());
+    }
+
+    #[test]
+    fn dock_floating_can_create_a_new_dock_edge_column() {
+        use crate::{DockCommand, DropTarget, DockSide, FloatSource};
+
+        let metrics = metrics();
+        let mut layout = initial_layout();
+        let source_group = tab_group_id(&layout, 0, 0);
+        let panel = match layout.nodes().get(source_group).expect("source group exists") {
+            Node::Tabs(tabs) => tabs.panels[0],
+            Node::Split(_) => panic!("Photoshop groups must be Tabs"),
+        };
+        layout.apply(
+            DockCommand::Float {
+                source: FloatSource::Panel(panel),
+                rect: floating_rect(0.0, 0.0, 300.0, 180.0),
+            },
+            &metrics,
+        ).expect("panel should float");
+        let floating_id = floating_id_for_panel(&layout, panel);
+
+        layout.apply(
+            DockCommand::DockFloating {
+                floating: floating_id,
+                target: DropTarget::DockEdge { side: DockSide::Left },
+            },
+            &metrics,
+        ).expect("floating group should dock at the left edge");
+
+        assert_eq!(layout.dock_areas().len(), 2);
+        assert_eq!(layout.dock_areas()[0].side, DockSide::Right);
+        assert_eq!(layout.dock_areas()[1].side, DockSide::Left);
+        assert!(layout.floating_groups().is_empty());
+        assert!(layout.validate(&metrics).is_ok());
+    }
+
+    #[test]
+    fn dock_floating_rejects_free_area_target_without_removing_source() {
+        use crate::{CommandError, DockCommand, DropTarget, FloatSource};
+
+        let metrics = metrics();
+        let mut layout = initial_layout();
+        let group = tab_group_id(&layout, 0, 0);
+        let panel = match layout.nodes().get(group).expect("group exists") {
+            Node::Tabs(tabs) => tabs.panels[0],
+            Node::Split(_) => panic!("Photoshop groups must be Tabs"),
+        };
+        layout.apply(
+            DockCommand::Float {
+                source: FloatSource::Panel(panel),
+                rect: floating_rect(0.0, 0.0, 300.0, 180.0),
+            },
+            &metrics,
+        ).expect("panel should float");
+        let floating_id = floating_id_for_panel(&layout, panel);
+        let floating_before = layout.floating_groups().get(floating_id).expect("floating exists").clone();
+        let version_before = layout.version();
+
+        let error = layout.apply(
+            DockCommand::DockFloating {
+                floating: floating_id,
+                target: DropTarget::FreeArea { bounds: floating_rect(10.0, 10.0, 320.0, 200.0) },
+            },
+            &metrics,
+        ).expect_err("free area is not a dock target");
+        assert!(matches!(error, CommandError::InvalidDropTarget(_)));
+        assert_eq!(layout.version(), version_before);
+        assert_eq!(layout.floating_groups().get(floating_id), Some(&floating_before));
+        assert!(layout.validate(&metrics).is_ok());
+    }
+
+
 }
