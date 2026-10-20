@@ -229,7 +229,23 @@ impl Layout {
                 Ok(vec![group])
             }
             DockCommand::MovePanel { panel, target } => {
-                self.move_panel_to_existing_group(panel, target)
+                match target {
+                    crate::command::DropTarget::FloatingGroup { floating, zone } => {
+                        self.move_panel_to_floating_group(panel, floating, zone)
+                    }
+                    target => self.move_panel_to_existing_group(panel, target),
+                }
+            }
+            DockCommand::Float { source, rect } => self.float_source(source, rect, metrics),
+            DockCommand::MoveFloating { floating, rect } => {
+                self.move_floating(floating, rect, metrics)
+            }
+            DockCommand::ResizeFloating { floating, rect } => {
+                self.resize_floating(floating, rect, metrics)
+            }
+            DockCommand::RaiseFloating { floating } => self.raise_floating(floating),
+            DockCommand::DockFloating { floating, target } => {
+                self.dock_floating(floating, target, metrics)
             }
             DockCommand::SplitGroup { panel, group, side } => {
                 self.split_group(panel, group, side, metrics)
@@ -420,6 +436,518 @@ impl Layout {
                 Ok(vec![group, new_group])
             }
         }
+    }
+
+    fn validate_floating_rect(
+        &self,
+        rect: crate::geometry::Rect,
+        panels: &[PanelId],
+        metrics: &DockMetrics,
+    ) -> Result<(), crate::command::CommandError> {
+        use crate::command::CommandError;
+
+        if !rect.origin.x.is_finite() || !rect.origin.y.is_finite()
+            || !rect.size.width.is_finite() || !rect.size.height.is_finite()
+            || rect.size.width <= 0.0 || rect.size.height <= 0.0
+        {
+            return Err(CommandError::InvalidCommandParameter {
+                parameter: "floating rect".to_owned(),
+                reason: "origin must be finite and size must be finite and positive".to_owned(),
+            });
+        }
+
+        let mut minimum_width = metrics.min_column_width;
+        let mut minimum_height = metrics.min_group_height;
+        for panel_id in panels {
+            let Some(panel) = self.panels.get(*panel_id) else {
+                return Err(CommandError::UnknownPanel(*panel_id));
+            };
+            let constraints = panel.constraints();
+            if !panel_constraints_are_valid(constraints) {
+                return Err(CommandError::InvalidCommandParameter {
+                    parameter: "PanelConstraints".to_owned(),
+                    reason: "the panel's minimum, preferred, and maximum sizes are inconsistent".to_owned(),
+                });
+            }
+            minimum_width = minimum_width.max(constraints.min_size().width);
+            minimum_height = minimum_height.max(constraints.min_size().height);
+        }
+        if !minimum_width.is_finite() || !minimum_height.is_finite()
+            || rect.size.width + PIXEL_TOLERANCE < minimum_width
+            || rect.size.height + PIXEL_TOLERANCE < minimum_height
+        {
+            return Err(CommandError::InvalidCommandParameter {
+                parameter: "floating rect".to_owned(),
+                reason: format!(
+                    "floating bounds must be at least {minimum_width:.3} x {minimum_height:.3} logical px"
+                ),
+            });
+        }
+        Ok(())
+    }
+
+    fn next_floating_z_order(&mut self) -> u64 {
+        let maximum = self.floating_groups.values().map(|group| group.z_order).max();
+        if let Some(next) = maximum.and_then(u64::checked_add) {
+            return next;
+        }
+
+        // Compact an exhausted z-order range without changing the relative order.
+        let mut ordered: Vec<(FloatingGroupId, u64)> = self.floating_groups
+            .iter()
+            .map(|(id, group)| (id, group.z_order))
+            .collect();
+        ordered.sort_by_key(|(_, z_order)| *z_order);
+        for (rank, (id, _)) in ordered.iter().enumerate() {
+            if let Some(group) = self.floating_groups.get_mut(*id) {
+                group.z_order = rank as u64;
+            }
+        }
+        ordered.len() as u64
+    }
+
+    fn float_source(
+        &mut self,
+        source: crate::command::FloatSource,
+        rect: crate::geometry::Rect,
+        metrics: &DockMetrics,
+    ) -> Result<Vec<NodeId>, crate::command::CommandError> {
+        use crate::command::{CommandError, FloatSource};
+
+        let (panels, active_index, changed_nodes) = match source {
+            FloatSource::Panel(panel) => {
+                if !self.panels.contains_key(panel) {
+                    return Err(CommandError::UnknownPanel(panel));
+                }
+                let Some((group, panel_index)) = self.find_dock_group_for_panel(panel) else {
+                    return Err(CommandError::PanelNotInDockGroup(panel));
+                };
+                if self.find_dock_group_location(group).is_none() {
+                    return Err(CommandError::PanelNotInDockGroup(panel));
+                }
+                let Some(Node::Tabs(tabs)) = self.nodes.get(group) else {
+                    return Err(CommandError::GroupNotTabs(group));
+                };
+                self.validate_floating_rect(rect, &[panel], metrics)?;
+                let Some(Node::Tabs(tabs)) = self.nodes.get_mut(group) else {
+                    return Err(CommandError::GroupNotTabs(group));
+                };
+                Self::remove_panel_from_tabs(tabs, panel_index);
+                (vec![panel], 0, vec![group])
+            }
+            FloatSource::Group(group) => {
+                let Some((side, column_index, group_index)) = self.find_dock_group_location(group) else {
+                    return Err(CommandError::UnknownGroup(group));
+                };
+                let area_index = self.dock_areas.iter()
+                    .position(|area| area.side == side)
+                    .ok_or(CommandError::UnknownGroup(group))?;
+                let (panels, active_index) = match self.nodes.get(group) {
+                    Some(Node::Tabs(tabs)) if !tabs.panels.is_empty() => {
+                        (tabs.panels.clone(), tabs.active_index)
+                    }
+                    Some(Node::Tabs(_)) => {
+                        return Err(CommandError::InvalidCommandParameter {
+                            parameter: "floating source group".to_owned(),
+                            reason: "cannot float an empty group".to_owned(),
+                        });
+                    }
+                    Some(Node::Split(_)) => return Err(CommandError::GroupNotTabs(group)),
+                    None => return Err(CommandError::UnknownGroup(group)),
+                };
+                self.validate_floating_rect(rect, &panels, metrics)?;
+                let column = self.dock_areas.get_mut(area_index)
+                    .and_then(|area| area.columns.get_mut(column_index))
+                    .ok_or(CommandError::UnknownGroup(group))?;
+                if column.groups.get(group_index) != Some(&group)
+                    || column.group_ratios.len() != column.groups.len()
+                {
+                    return Err(CommandError::InvalidCommandParameter {
+                        parameter: "floating source group".to_owned(),
+                        reason: "source column references or height ratios are inconsistent".to_owned(),
+                    });
+                }
+                column.groups.remove(group_index);
+                column.group_ratios.remove(group_index);
+                normalize_ratios(&mut column.group_ratios, column.groups.len());
+                (panels, active_index, vec![group])
+            }
+        };
+
+        let z_order = self.next_floating_z_order();
+        self.insert_floating_group(FloatingGroup {
+            panels,
+            active_index,
+            bounds: rect,
+            z_order,
+        });
+        Ok(changed_nodes)
+    }
+
+    fn move_floating(
+        &mut self,
+        floating_id: FloatingGroupId,
+        rect: crate::geometry::Rect,
+        metrics: &DockMetrics,
+    ) -> Result<Vec<NodeId>, crate::command::CommandError> {
+        use crate::command::CommandError;
+
+        let Some(group) = self.floating_groups.get(floating_id) else {
+            return Err(CommandError::UnknownFloatingGroup(floating_id));
+        };
+        self.validate_floating_rect(rect, &group.panels, metrics)?;
+        let Some(group) = self.floating_groups.get_mut(floating_id) else {
+            return Err(CommandError::UnknownFloatingGroup(floating_id));
+        };
+        group.bounds.origin = rect.origin;
+        Ok(Vec::new())
+    }
+
+    fn resize_floating(
+        &mut self,
+        floating_id: FloatingGroupId,
+        rect: crate::geometry::Rect,
+        metrics: &DockMetrics,
+    ) -> Result<Vec<NodeId>, crate::command::CommandError> {
+        use crate::command::CommandError;
+
+        let Some(group) = self.floating_groups.get(floating_id) else {
+            return Err(CommandError::UnknownFloatingGroup(floating_id));
+        };
+        self.validate_floating_rect(rect, &group.panels, metrics)?;
+        let Some(group) = self.floating_groups.get_mut(floating_id) else {
+            return Err(CommandError::UnknownFloatingGroup(floating_id));
+        };
+        group.bounds.size = rect.size;
+        Ok(Vec::new())
+    }
+
+    fn raise_floating(
+        &mut self,
+        floating_id: FloatingGroupId,
+    ) -> Result<Vec<NodeId>, crate::command::CommandError> {
+        use crate::command::CommandError;
+
+        if !self.floating_groups.contains_key(floating_id) {
+            return Err(CommandError::UnknownFloatingGroup(floating_id));
+        }
+        let z_order = self.next_floating_z_order();
+        let Some(group) = self.floating_groups.get_mut(floating_id) else {
+            return Err(CommandError::UnknownFloatingGroup(floating_id));
+        };
+        group.z_order = z_order;
+        Ok(Vec::new())
+    }
+
+    fn move_panel_to_floating_group(
+        &mut self,
+        panel: PanelId,
+        target_id: FloatingGroupId,
+        zone: crate::command::DropZone,
+    ) -> Result<Vec<NodeId>, crate::command::CommandError> {
+        use crate::command::{CommandError, DropZone};
+
+        if zone != DropZone::Center {
+            return Err(CommandError::InvalidDropTarget(
+                "MovePanel into a floating group only supports the Center zone".to_owned(),
+            ));
+        }
+        if !self.panels.contains_key(panel) {
+            return Err(CommandError::UnknownPanel(panel));
+        }
+        let Some(target_group) = self.floating_groups.get(target_id) else {
+            return Err(CommandError::UnknownFloatingGroup(target_id));
+        };
+        if let Some(index) = target_group.panels.iter().position(|candidate| *candidate == panel) {
+            if let Some(target_group) = self.floating_groups.get_mut(target_id) {
+                target_group.active_index = index;
+            }
+            return Ok(Vec::new());
+        }
+
+        let dock_source = self.find_dock_group_for_panel(panel)
+            .filter(|(group, _)| self.find_dock_group_location(*group).is_some());
+        let floating_source = self.floating_groups.iter().find_map(|(id, group)| {
+            group.panels.iter().position(|candidate| *candidate == panel)
+                .map(|index| (id, index))
+        });
+        if dock_source.is_none() && floating_source.is_none() {
+            return Err(CommandError::PanelNotPlaced(panel));
+        }
+
+        let mut changed_nodes = Vec::new();
+        if let Some((source_group, source_index)) = dock_source {
+            let Some(Node::Tabs(tabs)) = self.nodes.get_mut(source_group) else {
+                return Err(CommandError::GroupNotTabs(source_group));
+            };
+            Self::remove_panel_from_tabs(tabs, source_index);
+            changed_nodes.push(source_group);
+        } else if let Some((source_id, source_index)) = floating_source {
+            if source_id != target_id {
+                if let Some(source) = self.floating_groups.get_mut(source_id) {
+                    source.panels.remove(source_index);
+                    if source.panels.is_empty() {
+                        self.floating_groups.remove(source_id);
+                    } else if source_index < source.active_index {
+                        source.active_index -= 1;
+                    } else if source_index == source.active_index {
+                        source.active_index = source.active_index.min(source.panels.len() - 1);
+                    }
+                }
+            }
+        }
+
+        let Some(target_group) = self.floating_groups.get_mut(target_id) else {
+            return Err(CommandError::UnknownFloatingGroup(target_id));
+        };
+        let insert_index = target_group.panels.len();
+        target_group.panels.push(panel);
+        target_group.active_index = insert_index;
+        Ok(changed_nodes)
+    }
+
+    fn dock_floating(
+        &mut self,
+        floating_id: FloatingGroupId,
+        target: crate::command::DropTarget,
+        metrics: &DockMetrics,
+    ) -> Result<Vec<NodeId>, crate::command::CommandError> {
+        use crate::command::{CommandError, DropTarget, DropZone};
+        use crate::model::DockSide;
+
+        let Some(source) = self.floating_groups.get(floating_id).cloned() else {
+            return Err(CommandError::UnknownFloatingGroup(floating_id));
+        };
+        self.validate_floating_rect(source.bounds, &source.panels, metrics)?;
+        if source.panels.is_empty() {
+            return Err(CommandError::InvalidCommandParameter {
+                parameter: "floating group".to_owned(),
+                reason: "cannot dock an empty floating group".to_owned(),
+            });
+        }
+
+        let mut changed_nodes = Vec::new();
+        match target {
+            DropTarget::Group { group, zone: DropZone::Center } => {
+                let Some(Node::Tabs(tabs)) = self.nodes.get(group) else {
+                    return if self.nodes.contains_key(group) {
+                        Err(CommandError::GroupNotTabs(group))
+                    } else {
+                        Err(CommandError::UnknownGroup(group))
+                    };
+                };
+                let insert_at = tabs.panels.len();
+                let Some(Node::Tabs(tabs)) = self.nodes.get_mut(group) else {
+                    return Err(CommandError::GroupNotTabs(group));
+                };
+                tabs.panels.extend(source.panels.iter().copied());
+                tabs.active_index = insert_at + source.active_index;
+                changed_nodes.push(group);
+            }
+            DropTarget::TabInsertion { group, index } => {
+                let Some(Node::Tabs(tabs)) = self.nodes.get(group) else {
+                    return if self.nodes.contains_key(group) {
+                        Err(CommandError::GroupNotTabs(group))
+                    } else {
+                        Err(CommandError::UnknownGroup(group))
+                    };
+                };
+                if index > tabs.panels.len() {
+                    return Err(CommandError::InvalidTabIndex { group, index });
+                }
+                let Some(Node::Tabs(tabs)) = self.nodes.get_mut(group) else {
+                    return Err(CommandError::GroupNotTabs(group));
+                };
+                for (offset, panel) in source.panels.iter().copied().enumerate() {
+                    tabs.panels.insert(index + offset, panel);
+                }
+                tabs.active_index = index + source.active_index;
+                changed_nodes.push(group);
+            }
+            DropTarget::Group { group, zone } => {
+                let Some((side, column_index, group_index)) = self.find_dock_group_location(group) else {
+                    return Err(CommandError::UnknownGroup(group));
+                };
+                if !matches!(self.nodes.get(group), Some(Node::Tabs(_))) {
+                    return Err(CommandError::GroupNotTabs(group));
+                }
+                if zone == DropZone::Top || zone == DropZone::Bottom {
+                    let area_index = self.dock_areas.iter().position(|area| area.side == side)
+                        .ok_or(CommandError::UnknownGroup(group))?;
+                    let new_group = self.insert_node(Node::Tabs(Tabs {
+                        panels: source.panels.clone(),
+                        active_index: source.active_index,
+                    }));
+                    let column = &mut self.dock_areas[area_index].columns[column_index];
+                    if column.group_ratios.len() != column.groups.len() {
+                        return Err(CommandError::InvalidCommandParameter {
+                            parameter: "group_ratios".to_owned(),
+                            reason: "there must be one ratio for every group".to_owned(),
+                        });
+                    }
+                    let ratio = column.group_ratios[group_index];
+                    if !ratio.is_finite() || ratio < 0.0 {
+                        return Err(CommandError::InvalidCommandParameter {
+                            parameter: "group_ratios".to_owned(),
+                            reason: "target group ratio must be finite and non-negative".to_owned(),
+                        });
+                    }
+                    let half = ratio * 0.5;
+                    let insert_at = if zone == DropZone::Top { group_index } else { group_index + 1 };
+                    column.group_ratios[group_index] = half;
+                    column.groups.insert(insert_at, new_group);
+                    column.group_ratios.insert(insert_at, half);
+                    self.ensure_column_fits_min_height(area_index, column_index, metrics)?;
+                    changed_nodes.extend([group, new_group]);
+                } else if zone == DropZone::Left || zone == DropZone::Right {
+                    let area_index = self.dock_areas.iter().position(|area| area.side == side)
+                        .ok_or(CommandError::UnknownGroup(group))?;
+                    self.ensure_can_add_column(metrics)?;
+                    let width = self.minimum_floating_dock_width(&source.panels, metrics)?;
+                    let new_group = self.insert_node(Node::Tabs(Tabs {
+                        panels: source.panels.clone(),
+                        active_index: source.active_index,
+                    }));
+                    let column = Column {
+                        width,
+                        mode: ColumnMode::Expanded,
+                        groups: vec![new_group],
+                        group_ratios: vec![1.0],
+                    };
+                    let insert_at = column_index + usize::from(zone == DropZone::Right);
+                    self.dock_areas[area_index].columns.insert(insert_at, column);
+                    self.ensure_column_fits_min_height(area_index, insert_at, metrics)?;
+                    changed_nodes.extend([group, new_group]);
+                } else {
+                    return Err(CommandError::InvalidDropTarget(
+                        "unsupported group zone for DockFloating".to_owned(),
+                    ));
+                }
+            }
+            DropTarget::Column { column, zone } => {
+                let (area_index, column_index) = self.resolve_column_ref(column)?;
+                if zone == DropZone::Left || zone == DropZone::Right {
+                    self.ensure_can_add_column(metrics)?;
+                    let width = self.minimum_floating_dock_width(&source.panels, metrics)?;
+                    let new_group = self.insert_node(Node::Tabs(Tabs {
+                        panels: source.panels.clone(),
+                        active_index: source.active_index,
+                    }));
+                    let new_column = Column {
+                        width,
+                        mode: ColumnMode::Expanded,
+                        groups: vec![new_group],
+                        group_ratios: vec![1.0],
+                    };
+                    let insert_at = column_index + usize::from(zone == DropZone::Right);
+                    self.dock_areas[area_index].columns.insert(insert_at, new_column);
+                    self.ensure_column_fits_min_height(area_index, insert_at, metrics)?;
+                    changed_nodes.extend(source.panels.iter().filter_map(|_| None::<NodeId>));
+                    changed_nodes.push(new_group);
+                } else {
+                    let new_group = self.insert_node(Node::Tabs(Tabs {
+                        panels: source.panels.clone(),
+                        active_index: source.active_index,
+                    }));
+                    let column = &mut self.dock_areas[area_index].columns[column_index];
+                    let insert_at = if zone == DropZone::Top { 0 } else { column.groups.len() };
+                    column.groups.insert(insert_at, new_group);
+                    column.group_ratios.insert(insert_at, 1.0);
+                    normalize_ratios(&mut column.group_ratios, column.groups.len());
+                    self.ensure_column_fits_min_height(area_index, column_index, metrics)?;
+                    changed_nodes.push(new_group);
+                }
+            }
+            DropTarget::DockEdge { side } => {
+                self.ensure_can_add_column(metrics)?;
+                let width = self.minimum_floating_dock_width(&source.panels, metrics)?;
+                let new_group = self.insert_node(Node::Tabs(Tabs {
+                    panels: source.panels.clone(),
+                    active_index: source.active_index,
+                }));
+                let new_column = Column {
+                    width,
+                    mode: ColumnMode::Expanded,
+                    groups: vec![new_group],
+                    group_ratios: vec![1.0],
+                };
+                let insert_at = self.dock_areas.iter()
+                    .position(|area| area.side == side)
+                    .map(|area_index| {
+                        if side == DockSide::Left { 0 } else { self.dock_areas[area_index].columns.len() }
+                    });
+                if let Some(area_index) = self.dock_areas.iter().position(|area| area.side == side) {
+                    let index = insert_at.unwrap_or(0);
+                    self.dock_areas[area_index].columns.insert(index, new_column);
+                    self.ensure_column_fits_min_height(area_index, index, metrics)?;
+                } else {
+                    self.dock_areas.push(DockArea { side, columns: vec![new_column] });
+                }
+                changed_nodes.push(new_group);
+            }
+            DropTarget::FloatingGroup { floating: target_id, zone } => {
+                if target_id == floating_id {
+                    return Err(CommandError::InvalidDropTarget(
+                        "a floating group cannot be docked into itself".to_owned(),
+                    ));
+                }
+                if zone != DropZone::Center {
+                    return Err(CommandError::InvalidDropTarget(
+                        "merging floating groups only supports the Center zone".to_owned(),
+                    ));
+                }
+                let Some(target_group) = self.floating_groups.get_mut(target_id) else {
+                    return Err(CommandError::UnknownFloatingGroup(target_id));
+                };
+                let insert_at = target_group.panels.len();
+                target_group.panels.extend(source.panels.iter().copied());
+                target_group.active_index = insert_at + source.active_index;
+            }
+            DropTarget::FreeArea { .. } => {
+                return Err(CommandError::InvalidDropTarget(
+                    "FreeArea creates or positions a floating group; it is not a dock target".to_owned(),
+                ));
+            }
+        }
+
+        self.floating_groups.remove(floating_id);
+        Ok(changed_nodes)
+    }
+
+    fn ensure_can_add_column(
+        &self,
+        metrics: &DockMetrics,
+    ) -> Result<(), crate::command::CommandError> {
+        use crate::command::CommandError;
+        if self.profile == Profile::Photoshop {
+            let actual: usize = self.dock_areas.iter().map(|area| area.columns.len()).sum();
+            if actual >= metrics.max_columns {
+                return Err(CommandError::ColumnLimitReached { maximum: metrics.max_columns });
+            }
+        }
+        Ok(())
+    }
+
+    fn minimum_floating_dock_width(
+        &self,
+        panels: &[PanelId],
+        metrics: &DockMetrics,
+    ) -> Result<f32, crate::command::CommandError> {
+        use crate::command::CommandError;
+        let mut width = metrics.default_column_width.max(metrics.min_column_width);
+        for panel_id in panels {
+            let Some(panel) = self.panels.get(*panel_id) else {
+                return Err(CommandError::UnknownPanel(*panel_id));
+            };
+            width = width.max(panel.constraints().min_size().width);
+        }
+        if !width.is_finite() || width <= 0.0 {
+            return Err(CommandError::InvalidCommandParameter {
+                parameter: "column width".to_owned(),
+                reason: "must be finite and positive".to_owned(),
+            });
+        }
+        Ok(width)
     }
 
     fn resolve_column_ref(
