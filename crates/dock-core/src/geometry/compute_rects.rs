@@ -241,14 +241,9 @@ pub fn compute_rects(layout: &Layout, window: Size, metrics: &DockMetrics) -> La
             bounds: Rect::new(bounds.origin, Size::new(bounds.size.width, title_height)),
         });
 
-        let strip_height = nonnegative_finite(metrics.tab_strip_height)
-            .min(nonnegative_finite(bounds.size.height - title_height));
-        let panel_content_y = finite_position_add(
-            finite_position_add(bounds.origin.y, title_height),
-            strip_height,
-        );
-        let panel_content_height =
-            nonnegative_finite(bounds.size.height - title_height - strip_height);
+        // A floating group uses one combined header (column controls + tabs).
+        let panel_content_y = finite_position_add(bounds.origin.y, title_height);
+        let panel_content_height = nonnegative_finite(bounds.size.height - title_height);
         let panel_bounds = Rect::new(
             Point::new(bounds.origin.x, panel_content_y),
             Size::new(bounds.size.width, panel_content_height),
@@ -431,13 +426,14 @@ fn minimum_floating_height(
     panels: &[crate::PanelId],
     metrics: &DockMetrics,
 ) -> f32 {
-    let mut minimum = nonnegative_finite(metrics.min_group_height);
+    let mut minimum_content_height = nonnegative_finite(metrics.min_group_height);
     for panel_id in panels {
         if let Some(panel) = layout.panels().get(*panel_id) {
-            minimum = minimum.max(nonnegative_finite(panel.constraints().min_size().height));
+            minimum_content_height =
+                minimum_content_height.max(nonnegative_finite(panel.constraints().min_size().height));
         }
     }
-    minimum
+    nonnegative_finite(metrics.column_header_height) + minimum_content_height
 }
 
 fn clamped_dimension(requested: f32, minimum: f32, available: f32) -> f32 {
@@ -868,6 +864,14 @@ mod tests {
                 .floating_titles
                 .iter()
                 .all(|title| title.bounds.size.height == 32.0)
+        );
+        assert!(
+            rects
+                .panels
+                .iter()
+                .filter(|panel| panel.floating.is_some())
+                .all(|panel| panel.bounds == rect(960.0, 592.0, 320.0, 208.0)),
+            "floating content starts immediately below the combined single-row header"
         );
         assert!(
             rects
