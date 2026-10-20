@@ -48,7 +48,7 @@ impl PanelRegistry {
                 "Recent editing operations.",
             ),
         ] {
-            registry.register(descriptor?)?;
+            registry.register(descriptor)?;
         }
         Ok(registry)
     }
@@ -145,7 +145,7 @@ fn builtin_descriptor(
     title: &str,
     icon: &str,
     message: &str,
-) -> Result<PanelDescriptor, RegistryError> {
+) -> PanelDescriptor {
     let key = PanelKey::new(key).expect("built-in panel key is valid");
     let content = PlaceholderPanelContent::new(key.clone(), title, message);
     let constraints = PanelConstraints::new(
@@ -157,7 +157,7 @@ fn builtin_descriptor(
     let icon = Some(IconResource::new(icon).expect("built-in icon resource id is valid"));
     let content_factory = PanelContentFactory::new(move || content.clone());
 
-    Ok(PanelDescriptor::new(
+    PanelDescriptor::new(
         key,
         title,
         icon,
@@ -165,7 +165,7 @@ fn builtin_descriptor(
         vec![AllowedArea::Dock, AllowedArea::Floating, AllowedArea::Rail],
         content_factory,
         PanelMenuSource::empty(),
-    ))
+    )
 }
 
 #[cfg(test)]
