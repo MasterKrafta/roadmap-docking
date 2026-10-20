@@ -919,7 +919,7 @@ mod allocation_tests {
 mod geometry_regression_tests {
     use super::compute_rects;
     use crate::{
-        DockCommand, DockMetrics, DockSide, Layout, Node, Point, Rect, Size, SplitSide,
+        DockCommand, DockMetrics, Layout, Node, Point, Rect, Size, SplitSide,
     };
 
     fn metrics() -> DockMetrics {
@@ -1073,8 +1073,10 @@ mod geometry_regression_tests {
 
         let area = &layout.dock_areas()[0];
         assert_eq!(area.columns.len(), 2);
-        assert!(layout.nodes().values().all(|node| matches!(node, Node::Tabs(_))),
-            "Photoshop columns must contain tab groups, not horizontal split nodes");
+        assert!(
+            layout.nodes().values().all(|node| matches!(node, Node::Tabs(_))),
+            "Photoshop columns must contain tab groups, not horizontal split nodes"
+        );
 
         let single_column_index = area
             .columns
@@ -1126,7 +1128,11 @@ mod geometry_regression_tests {
                     .find(|group| group.group == *group_id)
                     .expect("stacked group has geometry");
                 near(group.bounds.size.width, 280.0, "stacked group width");
-                near(group.bounds.size.height, expected_multi_height, "stacked group height");
+                near(
+                    group.bounds.size.height,
+                    expected_multi_height,
+                    "stacked group height",
+                );
             }
             observed_multi_group_heights.push(expected_multi_height);
 
