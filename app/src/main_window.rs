@@ -1,5 +1,5 @@
 use dock_core::{
-    DockCommand, DockMetrics, DockSide, Layout, LayoutRects, Node, NodeId, PanelId, PanelKey,
+    DockCommand, DockMetrics, DockSide, Layout, LayoutRects, Node, NodeId, PanelKey,
     Size as DockSize, compute_rects,
 };
 use dock_gpui::{DockGroupData, TabItem, dock_column_view};
@@ -118,10 +118,21 @@ impl MainWindow {
         }
     }
 
-    fn close_panel(&mut self, panel_id: PanelId, cx: &mut Context<Self>) {
-        match self.layout.apply(DockCommand::ClosePanel { panel: panel_id }, &self.metrics) {
-            Ok(_) => cx.notify(),
-            Err(error) => eprintln!("Could not close panel {panel_id:?}: {error}"),
+    fn toggle_panel_from_menu(&mut self, key: PanelKey, cx: &mut Context<Self>) {
+        let existing_panel = self.layout.panels().iter().find_map(|(panel_id, panel)| {
+            (panel.key() == &key).then_some(panel_id)
+        });
+
+        if let Some(panel_id) = existing_panel {
+            match self.layout.apply(DockCommand::ClosePanel { panel: panel_id }, &self.metrics) {
+                Ok(_) => {
+                    self.window_menu_open = false;
+                    cx.notify();
+                }
+                Err(error) => eprintln!("Could not close panel {key:?} from Window menu: {error}"),
+            }
+        } else {
+            self.open_or_activate_panel(key, cx);
         }
     }
 
@@ -171,18 +182,9 @@ impl Render for MainWindow {
         let open_panel_window = weak_window.clone();
         let on_open_panel = move |key: PanelKey, app: &mut App| {
             if let Err(error) = open_panel_window.update(app, |this, cx| {
-                this.open_or_activate_panel(key.clone(), cx);
+                this.toggle_panel_from_menu(key.clone(), cx);
             }) {
                 eprintln!("Could not dispatch panel open: {error}");
-            }
-        };
-
-        let close_panel_window = weak_window.clone();
-        let on_close_panel = move |panel_id: PanelId, app: &mut App| {
-            if let Err(error) = close_panel_window.update(app, |this, cx| {
-                this.close_panel(panel_id, cx);
-            }) {
-                eprintln!("Could not dispatch panel close: {error}");
             }
         };
 
@@ -265,7 +267,6 @@ impl Render for MainWindow {
                         left_dock_width,
                         body_height,
                         on_activate_tab.clone(),
-                        on_close_panel.clone(),
                     ))
                     .child(canvas(&self.theme, canvas_width, body_height))
                     .child(render_dock_side(
@@ -277,7 +278,6 @@ impl Render for MainWindow {
                         right_dock_width,
                         body_height,
                         on_activate_tab,
-                        on_close_panel,
                     )),
             )
     }
@@ -482,7 +482,6 @@ fn render_dock_side<OnActivate>(
     width: f32,
     height: f32,
     on_activate: OnActivate,
-    on_close: impl Fn(PanelId, &mut App) + Clone + 'static,
 ) -> impl IntoElement
 where
     OnActivate: Fn(NodeId, usize, &mut App) + Clone + 'static,
@@ -547,7 +546,6 @@ where
                     header_height,
                     groups,
                     on_activate.clone(),
-                    on_close.clone(),
                 )
             });
 
@@ -607,7 +605,6 @@ fn group_view_data(
             }
 
             tabs.push(TabItem {
-                panel_id,
                 title,
                 active: index == group.active_index,
             });
@@ -658,15 +655,6 @@ mod tests {
             upper_initial.tabs.iter().map(|tab| tab.title.as_str()).collect::<Vec<_>>(),
             vec!["Layers", "Color"]
         );
-        let upper_panel_ids = match layout.nodes().get(groups[0]).expect("upper group exists") {
-            Node::Tabs(tabs) => tabs.panels.clone(),
-            Node::Split(_) => panic!("Photoshop groups must be Tabs"),
-        };
-        assert_eq!(
-            upper_initial.tabs.iter().map(|tab| tab.panel_id).collect::<Vec<_>>(),
-            upper_panel_ids,
-            "each tab close control must target its own panel instance"
-        );
         assert!(upper_initial.tabs[0].active);
         assert!(!upper_initial.tabs[1].active);
         assert_eq!(upper_initial.active_heading, "Layers");
@@ -685,15 +673,6 @@ mod tests {
         assert_eq!(
             lower_initial.tabs.iter().map(|tab| tab.title.as_str()).collect::<Vec<_>>(),
             vec!["Properties", "History"]
-        );
-        let lower_panel_ids = match layout.nodes().get(groups[1]).expect("lower group exists") {
-            Node::Tabs(tabs) => tabs.panels.clone(),
-            Node::Split(_) => panic!("Photoshop groups must be Tabs"),
-        };
-        assert_eq!(
-            lower_initial.tabs.iter().map(|tab| tab.panel_id).collect::<Vec<_>>(),
-            lower_panel_ids,
-            "each tab close control must target its own panel instance"
         );
         assert!(lower_initial.tabs[0].active);
         assert_eq!(lower_initial.active_heading, "Properties");
@@ -824,7 +803,7 @@ mod tests {
         assert_eq!(tab_index, 1);
         assert_eq!(active_index, 1);
 
-        // The menu issues OpenPanel for registered keys; the core activates the singleton.
+        // OpenPanel remains safe if another caller requests an already-open singleton.
         let activate_existing = registry
             .open_command(&color_key, None)
             .expect("registered Color has an open command");
