@@ -63,14 +63,15 @@ pub fn compute_drop_zones(
     }
 
     let can_add_column = column_count(layout) < metrics.max_columns;
-    let outer_zone_width = finite_positive(metrics.edge_drop_zone_width);
+    let outer_zone_width = finite_positive(metrics.edge_drop_zone_width)
+        .min(viewport.size.width * 0.5);
     if can_add_column && outer_zone_width > 0.0 {
         push_zone(
             &mut zones,
             DropTarget::DockEdge { side: DockSide::Left },
             Rect::new(
                 Point::new(viewport.origin.x, viewport.origin.y),
-                Size::new(outer_zone_width.min(viewport.size.width), viewport.size.height),
+                Size::new(outer_zone_width, viewport.size.height),
             ),
         );
         push_zone(
@@ -78,11 +79,10 @@ pub fn compute_drop_zones(
             DropTarget::DockEdge { side: DockSide::Right },
             Rect::new(
                 Point::new(
-                    viewport.origin.x + viewport.size.width
-                        - outer_zone_width.min(viewport.size.width),
+                    viewport.origin.x + viewport.size.width - outer_zone_width,
                     viewport.origin.y,
                 ),
-                Size::new(outer_zone_width.min(viewport.size.width), viewport.size.height),
+                Size::new(outer_zone_width, viewport.size.height),
             ),
         );
     }
@@ -902,6 +902,10 @@ mod tests {
             Some(DropTarget::DockEdge { side: DockSide::Left })
         );
         assert_eq!(
+            resolve_drop(&layout, Point::new(1279.0, 300.0), payload, &rects, &metrics),
+            Some(DropTarget::DockEdge { side: DockSide::Right })
+        );
+        assert_eq!(
             resolve_drop(&layout, Point::new(1000.0, 300.0), payload, &rects, &metrics),
             Some(DropTarget::Column {
                 column: ColumnRef::new(DockSide::Right, 0),
@@ -1043,8 +1047,8 @@ mod tests {
 
         let mut floating: Vec<_> = layout.floating_groups().iter().collect();
         floating.sort_by_key(|(_, group)| group.z_order);
-        let bottom = *floating[0].0;
-        let top = *floating[1].0;
+        let bottom = floating[0].0;
+        let top = floating[1].0;
         let rects = geometry(&layout, &metrics);
         assert_ne!(bottom, top);
 
