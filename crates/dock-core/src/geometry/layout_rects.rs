@@ -34,7 +34,7 @@ pub struct LayoutRects {
     pub column_headers: Vec<ColumnHeaderRect>,
     /// Splitter hit regions. Their order is kept stable for the associated hit-test indices.
     pub splitters: Vec<SplitterRect>,
-    /// Single-row header regions for floating groups (field name retained for API compatibility).
+    /// Column-control header regions for floating groups (field name retained for API compatibility).
     pub floating_titles: Vec<FloatingTitleRect>,
     /// Resizable edge/corner regions for floating groups.
     pub floating_resize_edges: Vec<FloatingResizeEdgeRect>,
