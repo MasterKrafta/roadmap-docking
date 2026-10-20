@@ -224,30 +224,49 @@ fn render_dock_side(
                     .map(|bounds| bounds.bounds.size.height.max(0.0))
                     .unwrap_or(theme.metrics.column_header_height);
 
-                let groups = column.groups.iter().copied().map(|group_id| {
-                    let group_height = rects
-                        .groups
-                        .iter()
-                        .find(|bounds| bounds.group == group_id)
-                        .map(|bounds| bounds.bounds.size.height.max(0.0))
-                        .unwrap_or(0.0);
-                    let strip_height = rects
-                        .tab_strips
-                        .iter()
-                        .find(|strip| strip.group == group_id)
-                        .map(|strip| strip.bounds.size.height.max(0.0))
-                        .unwrap_or(theme.metrics.tab_strip_height)
-                        .min(group_height);
+                let group_count = column.groups.len();
+                let groups = column.groups.iter().copied().enumerate().map(
+                    |(group_index, group_id)| {
+                        let group_height = rects
+                            .groups
+                            .iter()
+                            .find(|bounds| bounds.group == group_id)
+                            .map(|bounds| bounds.bounds.size.height.max(0.0))
+                            .unwrap_or(0.0);
+                        let strip_height = rects
+                            .tab_strips
+                            .iter()
+                            .find(|strip| strip.group == group_id)
+                            .map(|strip| strip.bounds.size.height.max(0.0))
+                            .unwrap_or(theme.metrics.tab_strip_height)
+                            .min(group_height);
+                        let splitter_height = if group_index + 1 < group_count {
+                            theme.metrics.splitter_thickness
+                        } else {
+                            0.0
+                        };
 
-                    render_group(
-                        theme,
-                        layout,
-                        registry,
-                        group_id,
-                        group_height,
-                        strip_height,
-                    )
-                });
+                        div()
+                            .w_full()
+                            .h(px(group_height + splitter_height))
+                            .flex()
+                            .flex_col()
+                            .child(render_group(
+                                theme,
+                                layout,
+                                registry,
+                                group_id,
+                                group_height,
+                                strip_height,
+                            ))
+                            .child(
+                                div()
+                                    .w_full()
+                                    .h(px(splitter_height))
+                                    .bg(rgb(theme.colors.splitter)),
+                            )
+                    },
+                );
 
                 div()
                     .w(px(column_width))
