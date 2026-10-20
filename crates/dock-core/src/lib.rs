@@ -9,8 +9,10 @@ pub use command::{
     SplitSide,
 };
 pub use geometry::{
-    compute_rects, hit_test, compute_drop_zones, resolve_drop, snap_logical_to_physical_pixel, snap_rect_to_physical_pixels, DropPayload, ColumnHeaderRect, ColumnRect, DockAreaRect, DockMetrics, DropZoneRect,
-    FloatingGroupRect, FloatingResizeEdgeRect, FloatingTitleRect, GroupRect, HitResult,
+    compute_rects, compute_drop_zones, hit_test, resolve_drop, snap_logical_to_physical_pixel,
+    snap_rect_to_physical_pixels, ColumnHeaderRect, ColumnRect, DockAreaRect, DockMetrics,
+    DropPayload, DropZoneRect, FloatingGroupRect, FloatingResizeEdgeRect, FloatingTitleRect,
+    GroupRect, HitResult,
     LayoutRects, PanelRect, Point, Rect, ResizeEdge, Size, SplitterKind, SplitterRect,
     TabHeaderRect, TabStripRect,
 };
