@@ -149,10 +149,12 @@ pub fn resolve_drop(
             let bounds = floating_bounds_at_point(layout, rects, payload, point, metrics)?;
             Some(DropTarget::FreeArea { bounds })
         }
-        target @ DropTarget::TabInsertion { .. }
-            if valid_target(layout, payload, target, metrics) =>
-        {
-            Some(target.clone())
+        DropTarget::TabInsertion { group, index } => {
+            let target = DropTarget::TabInsertion {
+                group: *group,
+                index: *index,
+            };
+            valid_target(layout, payload, &target, metrics).then_some(target)
         }
         target if valid_target(layout, payload, target, metrics) => Some(target.clone()),
         _ => None,
