@@ -1,9 +1,8 @@
 use dock_core::{
-    DockCommand, DockMetrics, DockSide, DragCancelReason, DragSession, DragSessionState, DropPayload, DropTarget,
-    DropZone, FloatSource, FloatingGroupId, Layout, LayoutRects, Node, NodeId, PanelId, PanelKey,
-    Point as DockPoint,
-    Rect as DockRect, ResizeEdge, Size as DockSize,
-    compute_rects, resolve_drop,
+    DockCommand, DockMetrics, DockSide, DragCancelReason, DragSession, DragSessionState,
+    DropPayload, DropTarget, DropZone, FloatSource, FloatingGroupId, Layout, LayoutRects, Node,
+    NodeId, PanelId, PanelKey, Point as DockPoint, Rect as DockRect, ResizeEdge,
+    Size as DockSize, SplitterKind, SplitterRect, compute_rects, resolve_drop,
 };
 use dock_gpui::{DockGroupData, TabItem, dock_column_view, drop_overlay};
 use gpui::{
@@ -959,6 +958,7 @@ impl Render for MainWindow {
                                 on_activate_tab,
                                 on_start_drag.clone(),
                             ))
+                            .children(render_splitter_handles(&self.theme, &rects))
                             .children(render_floating_groups(
                                 &self.theme,
                                 &self.layout,
@@ -993,6 +993,92 @@ fn cancel_drag_interaction(
 
     *floating_drag = None;
     true
+}
+
+/// Build transparent splitter hit-zones and their Theme-sized visual handles.
+/// Group splitters already occupy their 4 px layout gap; the column separator is painted
+/// here because column children otherwise touch without a visible boundary.
+fn render_splitter_handles(theme: &Theme, rects: &LayoutRects) -> Vec<AnyElement> {
+    let mut elements = Vec::with_capacity(rects.splitters.len() * 2);
+    let colors = theme.colors;
+    let thickness = theme.metrics.splitter_thickness;
+
+    for splitter in &rects.splitters {
+        let bounds = splitter.bounds;
+        if !bounds.origin.x.is_finite()
+            || !bounds.origin.y.is_finite()
+            || !bounds.size.width.is_finite()
+            || !bounds.size.height.is_finite()
+            || bounds.size.width <= 0.0
+            || bounds.size.height <= 0.0
+        {
+            continue;
+        }
+
+        let handle = div()
+            .id(format!("dock-splitter-hit-{:?}-{}", splitter.kind, splitter.index))
+            .absolute()
+            .left(px(bounds.origin.x))
+            .top(px(bounds.origin.y))
+            .w(px(bounds.size.width))
+            .h(px(bounds.size.height));
+
+        let handle = match splitter.kind {
+            SplitterKind::Group => handle.cursor_ns_resize(),
+            SplitterKind::Column => handle.cursor_col_resize(),
+        };
+        elements.push(handle.into_any_element());
+
+        if let Some(visible) = splitter_visible_bounds(splitter, thickness) {
+            elements.push(
+                div()
+                    .id(format!(
+                        "dock-splitter-visible-{:?}-{}",
+                        splitter.kind, splitter.index
+                    ))
+                    .absolute()
+                    .left(px(visible.origin.x))
+                    .top(px(visible.origin.y))
+                    .w(px(visible.size.width))
+                    .h(px(visible.size.height))
+                    .cursor_col_resize()
+                    .bg(rgb(colors.splitter))
+                    .into_any_element(),
+            );
+        }
+    }
+
+    elements
+}
+
+/// Return the visible vertical line centered inside a column split's wider hit-zone.
+fn splitter_visible_bounds(splitter: &SplitterRect, requested_thickness: f32) -> Option<DockRect> {
+    if splitter.kind != SplitterKind::Column
+        || !requested_thickness.is_finite()
+        || requested_thickness <= 0.0
+    {
+        return None;
+    }
+
+    let bounds = splitter.bounds;
+    if !bounds.origin.x.is_finite()
+        || !bounds.origin.y.is_finite()
+        || !bounds.size.width.is_finite()
+        || !bounds.size.height.is_finite()
+        || bounds.size.width <= 0.0
+        || bounds.size.height <= 0.0
+    {
+        return None;
+    }
+
+    let width = requested_thickness.min(bounds.size.width);
+    Some(DockRect::new(
+        DockPoint::new(
+            bounds.origin.x + (bounds.size.width - width) * 0.5,
+            bounds.origin.y,
+        ),
+        DockSize::new(width, bounds.size.height),
+    ))
 }
 
 fn titlebar_resize_edge(
@@ -1844,7 +1930,7 @@ fn group_view_data(
 mod tests {
     use super::{
         align_tab_header_rects, cancel_drag_interaction, group_view_data, resize_floating_rect,
-        titlebar_resize_edge,
+        splitter_visible_bounds, titlebar_resize_edge,
     };
     use crate::{dock_metrics, panels::PanelRegistry};
     use ui::Theme;
@@ -1882,6 +1968,36 @@ mod tests {
         assert!(preview.is_none());
         assert!(session.release().is_none());
         assert!(!cancel_drag_interaction(&mut session, &mut preview));
+    }
+
+    #[test]
+    fn column_splitter_draws_a_four_pixel_line_centered_in_the_eight_pixel_hit_zone() {
+        use dock_core::{Point, Rect, Size, SplitterKind, SplitterRect};
+
+        let splitter = SplitterRect {
+            kind: SplitterKind::Column,
+            index: 1,
+            bounds: Rect::new(Point::new(96.0, 0.0), Size::new(8.0, 640.0)),
+        };
+        let visible = splitter_visible_bounds(&splitter, 4.0).expect("column line is visible");
+
+        assert_eq!(
+            visible,
+            Rect::new(Point::new(98.0, 0.0), Size::new(4.0, 640.0)),
+            "the visible 4 px line is centered in the 8 px capture zone"
+        );
+        assert!(
+            splitter_visible_bounds(&splitter, f32::NAN).is_none(),
+            "invalid theme thickness must not produce invalid drawing geometry"
+        );
+        assert!(
+            splitter_visible_bounds(
+                &SplitterRect { kind: SplitterKind::Group, ..splitter },
+                4.0,
+            )
+            .is_none(),
+            "this helper draws column lines only; group separators already render in the column"
+        );
     }
 
     #[test]
