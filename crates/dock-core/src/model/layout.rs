@@ -2398,4 +2398,217 @@ mod tests {
         assert!(layout.validate(&metrics).is_ok());
     }
 
+
+    #[test]
+    fn resize_groups_clamps_both_directions_and_reports_actual_delta() {
+        use crate::command::ColumnRef;
+        use crate::{DockCommand, CommandError};
+
+        let metrics = metrics();
+        for (requested_delta, expected_delta) in [(500.0_f32, 170.0_f32), (-500.0, -170.0)] {
+            let mut layout = initial_layout();
+            layout.set_canvas(CanvasState {
+                bounds: Rect::new(Point::new(0.0, 0.0), Size::new(1200.0, 500.0)),
+            });
+            let column_ref = ColumnRef::new(DockSide::Right, 0);
+            let outcome = layout.apply(
+                DockCommand::ResizeGroups {
+                    column: column_ref,
+                    boundary: 0,
+                    delta: requested_delta,
+                },
+                &metrics,
+            ).expect("group boundary resize should clamp to the available minimums");
+
+            assert!((outcome.actual_value.expect("resize result") - expected_delta).abs() < 1e-3);
+            let column = &layout.dock_areas()[0].columns[0];
+            let first_height = column.group_ratios[0] * 500.0;
+            let second_height = column.group_ratios[1] * 500.0;
+            assert!(first_height >= metrics.min_group_height - 1e-3);
+            assert!(second_height >= metrics.min_group_height - 1e-3);
+            assert!((column.group_ratios.iter().sum::<f32>() - 1.0).abs() < 1e-4);
+            assert!(layout.validate(&metrics).is_ok());
+
+            // A clamped drag is a successful command, not an error.
+            assert!(!matches!(outcome.actual_value, None));
+            let _ = CommandError::UnsupportedCommand("unused".to_owned());
+        }
+    }
+
+    #[test]
+    fn resize_groups_rejects_non_finite_delta_bad_boundary_and_unknown_geometry_atomically() {
+        use crate::command::ColumnRef;
+        use crate::{CommandError, DockCommand};
+
+        let metrics = metrics();
+        let column_ref = ColumnRef::new(DockSide::Right, 0);
+        let mut layout = initial_layout();
+        layout.set_canvas(CanvasState {
+            bounds: Rect::new(Point::new(0.0, 0.0), Size::new(1200.0, 500.0)),
+        });
+        let ratios_before = layout.dock_areas()[0].columns[0].group_ratios.clone();
+        let version_before = layout.version();
+
+        for delta in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let error = layout.apply(
+                DockCommand::ResizeGroups { column: column_ref, boundary: 0, delta },
+                &metrics,
+            ).expect_err("non-finite delta must be rejected");
+            assert!(matches!(error, CommandError::InvalidCommandParameter { ref parameter, .. }
+                if parameter == "delta"));
+            assert_eq!(layout.version(), version_before);
+            assert_eq!(layout.dock_areas()[0].columns[0].group_ratios, ratios_before);
+            assert!(layout.validate(&metrics).is_ok());
+        }
+
+        let error = layout.apply(
+            DockCommand::ResizeGroups { column: column_ref, boundary: 7, delta: 10.0 },
+            &metrics,
+        ).expect_err("invalid boundary must be rejected");
+        assert!(matches!(error, CommandError::InvalidCommandParameter { ref parameter, .. }
+            if parameter == "group boundary"));
+        assert_eq!(layout.version(), version_before);
+        assert_eq!(layout.dock_areas()[0].columns[0].group_ratios, ratios_before);
+
+        let mut without_geometry = initial_layout();
+        let error = without_geometry.apply(
+            DockCommand::ResizeGroups { column: column_ref, boundary: 0, delta: 10.0 },
+            &metrics,
+        ).expect_err("pixel delta requires known canvas height");
+        assert!(matches!(error, CommandError::InvalidCommandParameter { ref parameter, .. }
+            if parameter == "canvas height"));
+        assert_eq!(without_geometry.version(), 0);
+        assert!(without_geometry.validate(&metrics).is_ok());
+    }
+
+    #[test]
+    fn resize_column_clamps_to_minimum_and_reports_resulting_width() {
+        use crate::command::ColumnRef;
+        use crate::DockCommand;
+
+        let metrics = metrics();
+        let mut layout = initial_layout();
+        let column_ref = ColumnRef::new(DockSide::Right, 0);
+        let outcome = layout.apply(
+            DockCommand::ResizeColumn { column: column_ref, width: 120.0 },
+            &metrics,
+        ).expect("an undersized request clamps to the column minimum");
+
+        assert_eq!(outcome.actual_value, Some(metrics.min_column_width));
+        assert_eq!(layout.dock_areas()[0].columns[0].width, metrics.min_column_width);
+        assert!(layout.validate(&metrics).is_ok());
+    }
+
+    #[test]
+    fn resize_column_rejects_non_finite_and_negative_widths_atomically() {
+        use crate::command::ColumnRef;
+        use crate::{CommandError, DockCommand};
+
+        let metrics = metrics();
+        let mut layout = initial_layout();
+        let column_ref = ColumnRef::new(DockSide::Right, 0);
+        let old_width = layout.dock_areas()[0].columns[0].width;
+        for width in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -1.0] {
+            let version_before = layout.version();
+            let error = layout.apply(
+                DockCommand::ResizeColumn { column: column_ref, width },
+                &metrics,
+            ).expect_err("invalid width must be rejected");
+            assert!(matches!(error, CommandError::InvalidCommandParameter { ref parameter, .. }
+                if parameter == "width"));
+            assert_eq!(layout.version(), version_before);
+            assert_eq!(layout.dock_areas()[0].columns[0].width, old_width);
+            assert!(layout.validate(&metrics).is_ok());
+        }
+    }
+
+    fn layout_with_two_columns(metrics: &DockMetrics) -> Layout {
+        use crate::{DockCommand, SplitSide};
+
+        let mut layout = initial_layout();
+        let group = tab_group_id(&layout, 0, 0);
+        let panel = match layout.nodes().get(group).expect("first group exists") {
+            Node::Tabs(tabs) => tabs.panels[0],
+            Node::Split(_) => panic!("Photoshop dock groups must be Tabs"),
+        };
+        layout.apply(
+            DockCommand::SplitGroup { panel, group, side: SplitSide::Right },
+            metrics,
+        ).expect("split should create a neighboring column");
+        assert_eq!(layout.dock_areas()[0].columns.len(), 2);
+        layout
+    }
+
+    #[test]
+    fn resize_column_boundary_clamps_pair_atomically_and_preserves_total_width() {
+        use crate::command::ColumnRef;
+        use crate::DockCommand;
+
+        let metrics = metrics();
+        for (requested_delta, expected_delta) in [(500.0_f32, 80.0_f32), (-500.0, -80.0)] {
+            let mut layout = layout_with_two_columns(&metrics);
+            let first_ref = ColumnRef::new(DockSide::Right, 0);
+            let second_ref = ColumnRef::new(DockSide::Right, 1);
+            let before = &layout.dock_areas()[0].columns;
+            let total_before = before[0].width + before[1].width;
+            let outcome = layout.apply(
+                DockCommand::ResizeColumnBoundary {
+                    first: first_ref,
+                    second: second_ref,
+                    delta: requested_delta,
+                },
+                &metrics,
+            ).expect("adjacent column resize should clamp to minimum widths");
+
+            let columns = &layout.dock_areas()[0].columns;
+            assert!((outcome.actual_value.expect("resize result") - expected_delta).abs() < 1e-3);
+            assert!((columns[0].width - (280.0 + expected_delta)).abs() < 1e-3);
+            assert!((columns[1].width - (280.0 - expected_delta)).abs() < 1e-3);
+            assert!((columns[0].width + columns[1].width - total_before).abs() < 1e-3);
+            assert!(columns.iter().all(|column| column.width >= metrics.min_column_width));
+            assert!(layout.validate(&metrics).is_ok());
+        }
+    }
+
+    #[test]
+    fn resize_column_boundary_rejects_non_adjacent_or_reversed_columns_atomically() {
+        use crate::command::ColumnRef;
+        use crate::{CommandError, DockCommand, SplitSide};
+
+        let metrics = metrics();
+        let mut layout = initial_layout();
+        for group_index in [0, 1] {
+            let group = tab_group_id(&layout, 0, group_index);
+            let panel = match layout.nodes().get(group).expect("source group exists") {
+                Node::Tabs(tabs) => tabs.panels[0],
+                Node::Split(_) => panic!("Photoshop dock groups must be Tabs"),
+            };
+            layout.apply(
+                DockCommand::SplitGroup { panel, group, side: SplitSide::Right },
+                &metrics,
+            ).expect("split should add a column while leaving the source group populated");
+        }
+        assert_eq!(layout.dock_areas()[0].columns.len(), 3);
+        let widths_before: Vec<f32> = layout.dock_areas()[0].columns.iter().map(|column| column.width).collect();
+        let version_before = layout.version();
+
+        for (first, second) in [
+            (ColumnRef::new(DockSide::Right, 0), ColumnRef::new(DockSide::Right, 2)),
+            (ColumnRef::new(DockSide::Right, 1), ColumnRef::new(DockSide::Right, 0)),
+        ] {
+            let error = layout.apply(
+                DockCommand::ResizeColumnBoundary { first, second, delta: 10.0 },
+                &metrics,
+            ).expect_err("only the existing adjacent ordered pair may be resized");
+            assert!(matches!(error, CommandError::InvalidCommandParameter { ref parameter, .. }
+                if parameter == "columns"));
+            assert_eq!(layout.version(), version_before);
+            assert_eq!(
+                layout.dock_areas()[0].columns.iter().map(|column| column.width).collect::<Vec<_>>(),
+                widths_before
+            );
+            assert!(layout.validate(&metrics).is_ok());
+        }
+    }
+
 }
