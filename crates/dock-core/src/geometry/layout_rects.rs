@@ -34,7 +34,7 @@ pub struct LayoutRects {
     pub column_headers: Vec<ColumnHeaderRect>,
     /// Splitter hit regions. Their order is kept stable for the associated hit-test indices.
     pub splitters: Vec<SplitterRect>,
-    /// Title-bar regions for floating groups.
+    /// Single-row header regions for floating groups (field name retained for API compatibility).
     pub floating_titles: Vec<FloatingTitleRect>,
     /// Resizable edge/corner regions for floating groups.
     pub floating_resize_edges: Vec<FloatingResizeEdgeRect>,
@@ -80,7 +80,7 @@ pub struct SplitterRect {
     pub bounds: Rect,
 }
 
-/// Logical rectangle for a floating group's title bar.
+/// Logical rectangle for the single-row header of a floating group.
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct FloatingTitleRect {
