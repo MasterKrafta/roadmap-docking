@@ -23,6 +23,7 @@ pub struct MainWindow {
     layout: Layout,
     drag_session: DragSession,
     floating_interaction: Option<FloatingInteraction>,
+    floating_drag: Option<FloatingDragState>,
     window_menu_open: bool,
 }
 
@@ -38,11 +39,6 @@ struct WindowGeometry {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum FloatingInteraction {
-    Move {
-        floating: FloatingGroupId,
-        pointer_origin: DockPoint,
-        initial_bounds: DockRect,
-    },
     Resize {
         floating: FloatingGroupId,
         edge: ResizeEdge,
@@ -51,6 +47,13 @@ enum FloatingInteraction {
     },
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct FloatingDragState {
+    floating: FloatingGroupId,
+    pointer_origin: DockPoint,
+    initial_bounds: DockRect,
+    current_bounds: DockRect,
+}
 impl MainWindow {
     pub fn new(
         theme: Theme,
@@ -65,6 +68,7 @@ impl MainWindow {
             layout,
             drag_session: DragSession::new(),
             floating_interaction: None,
+            floating_drag: None,
             window_menu_open: false,
         }
     }
@@ -100,6 +104,7 @@ impl MainWindow {
             metrics.content_padding,
             metrics.button_size,
         );
+        self.apply_floating_drag_preview(&mut rects);
 
         WindowGeometry {
             menu_height,
@@ -130,8 +135,32 @@ impl MainWindow {
         window: &Window,
         cx: &mut Context<Self>,
     ) {
+        if matches!(
+            self.drag_session.state(),
+            DragSessionState::Pressed { .. } | DragSessionState::Dragging { .. }
+        ) {
+            return;
+        }
+
         let geometry = self.window_geometry(window);
         let origin = self.local_dock_point(position, &geometry);
+        if let DropPayload::Panel(panel) = payload {
+            if let Some(floating) = self
+                .layout
+                .floating_groups()
+                .iter()
+                .find_map(|(floating, group)| group.panels.contains(&panel).then_some(floating))
+            {
+                if let Err(error) = self.layout.apply(
+                    DockCommand::RaiseFloating { floating },
+                    &self.metrics,
+                ) {
+                    eprintln!("Could not raise floating group {floating:?} for tab drag: {error}");
+                    return;
+                }
+            }
+        }
+
         if self.drag_session.press(payload, origin) {
             cx.notify();
         }
@@ -145,6 +174,14 @@ impl MainWindow {
         window: &Window,
         cx: &mut Context<Self>,
     ) {
+        if matches!(
+            self.drag_session.state(),
+            DragSessionState::Pressed { .. } | DragSessionState::Dragging { .. }
+        ) || self.floating_interaction.is_some()
+        {
+            return;
+        }
+
         let geometry = self.window_geometry(window);
         let Some(initial_bounds) = geometry
             .rects
@@ -176,19 +213,33 @@ impl MainWindow {
             return;
         }
 
-        self.floating_interaction = Some(match edge {
-            Some(edge) => FloatingInteraction::Resize {
-                floating,
-                edge,
-                pointer_origin,
-                initial_bounds,
-            },
-            None => FloatingInteraction::Move {
-                floating,
-                pointer_origin,
-                initial_bounds,
-            },
-        });
+        match edge {
+            Some(edge) => {
+                self.floating_drag = None;
+                self.floating_interaction = Some(FloatingInteraction::Resize {
+                    floating,
+                    edge,
+                    pointer_origin,
+                    initial_bounds,
+                });
+            }
+            None => {
+                self.floating_interaction = None;
+                if self
+                    .drag_session
+                    .press(DropPayload::FloatingGroup(floating), pointer_origin)
+                {
+                    self.floating_drag = Some(FloatingDragState {
+                        floating,
+                        pointer_origin,
+                        initial_bounds,
+                        current_bounds: initial_bounds,
+                    });
+                } else {
+                    self.floating_drag = None;
+                }
+            }
+        }
         cx.notify();
     }
 
@@ -228,7 +279,13 @@ impl MainWindow {
         window: &Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(interaction) = self.floating_interaction else {
+        let Some(FloatingInteraction::Resize {
+            floating,
+            edge,
+            pointer_origin,
+            initial_bounds,
+        }) = self.floating_interaction
+        else {
             return;
         };
         let geometry = self.window_geometry(window);
@@ -237,52 +294,12 @@ impl MainWindow {
             geometry.docking_viewport_width.max(0.0),
             geometry.body_height.max(0.0),
         );
-        let (floating, rect, resizing) = match interaction {
-            FloatingInteraction::Move {
-                floating,
-                pointer_origin,
-                initial_bounds,
-            } => {
-                let delta_x = point.x - pointer_origin.x;
-                let delta_y = point.y - pointer_origin.y;
-                // Clamp the visible rectangle, but preserve the model's dimensions in
-                // MoveFloating so a temporarily undersized viewport does not invalidate it.
-                let width = initial_bounds.size.width.min(viewport.width);
-                let height = initial_bounds.size.height.min(viewport.height);
-                let max_x = (viewport.width - width).max(0.0);
-                let max_y = (viewport.height - height).max(0.0);
-                let x = (initial_bounds.origin.x + delta_x).clamp(0.0, max_x);
-                let y = (initial_bounds.origin.y + delta_y).clamp(0.0, max_y);
-                let model_size = self
-                    .layout
-                    .floating_groups()
-                    .get(floating)
-                    .map(|group| group.bounds.size)
-                    .unwrap_or(initial_bounds.size);
-                (
-                    floating,
-                    DockRect::new(DockPoint::new(x, y), model_size),
-                    false,
-                )
-            }
-            FloatingInteraction::Resize {
-                floating,
-                edge,
-                pointer_origin,
-                initial_bounds,
-            } => {
-                let delta = DockPoint::new(
-                    point.x - pointer_origin.x,
-                    point.y - pointer_origin.y,
-                );
-                let minimum = self.floating_minimum_size(floating);
-                (
-                    floating,
-                    resize_floating_rect(initial_bounds, edge, delta, minimum, viewport),
-                    true,
-                )
-            }
-        };
+        let delta = DockPoint::new(
+            point.x - pointer_origin.x,
+            point.y - pointer_origin.y,
+        );
+        let minimum = self.floating_minimum_size(floating);
+        let rect = resize_floating_rect(initial_bounds, edge, delta, minimum, viewport);
 
         let current_bounds = self
             .layout
@@ -293,13 +310,11 @@ impl MainWindow {
             return;
         }
 
-        let command = if resizing {
-            DockCommand::ResizeFloating { floating, rect }
-        } else {
-            DockCommand::MoveFloating { floating, rect }
-        };
-        if let Err(error) = self.layout.apply(command, &self.metrics) {
-            eprintln!("Could not update floating group {floating:?}: {error}");
+        if let Err(error) = self.layout.apply(
+            DockCommand::ResizeFloating { floating, rect },
+            &self.metrics,
+        ) {
+            eprintln!("Could not resize floating group {floating:?}: {error}");
         } else {
             cx.notify();
         }
@@ -322,18 +337,61 @@ impl MainWindow {
             return;
         };
 
-        let geometry = self.window_geometry(window);
-        let point = self.local_dock_point(position, &geometry);
-        let target = resolve_drop(&self.layout, point, payload, &geometry.rects, &self.metrics);
-        // The capture handle detaches a whole group only; don't preview unrelated
-        // dock targets for this gesture. Single-tab drags keep all R6.4 targets.
-        let target = match payload {
-            DropPayload::Group(_) => target.filter(|target| {
-                matches!(target, DropTarget::FreeArea { .. })
-            }),
-            DropPayload::Panel(_) | DropPayload::FloatingGroup(_) => target,
-        };
+        let base_geometry = self.window_geometry(window);
+        let point = self.local_dock_point(position, &base_geometry);
         let previous_state = self.drag_session.state().clone();
+
+        // Enter/update Dragging before resolving so the floating group can follow the
+        // cursor as a visual preview, while the actual Layout remains untouched.
+        self.drag_session.pointer_moved(point, None);
+        let dragging_payload = match self.drag_session.state() {
+            DragSessionState::Dragging { payload, .. } => Some(*payload),
+            _ => None,
+        };
+
+        let target = if let Some(dragging_payload) = dragging_payload {
+            if let (
+                DropPayload::FloatingGroup(floating),
+                Some(drag),
+            ) = (dragging_payload, self.floating_drag)
+                && drag.floating == floating
+            {
+                let viewport = DockSize::new(
+                    base_geometry.docking_viewport_width.max(0.0),
+                    base_geometry.body_height.max(0.0),
+                );
+                let current_bounds = floating_drag_preview_bounds(
+                    drag.initial_bounds,
+                    drag.pointer_origin,
+                    point,
+                    viewport,
+                );
+                if let Some(state) = self.floating_drag.as_mut() {
+                    state.current_bounds = current_bounds;
+                }
+            }
+
+            let geometry = self.window_geometry(window);
+            let target_rects = drop_target_rects(&geometry.rects, dragging_payload);
+            let target = resolve_drop(
+                &self.layout,
+                point,
+                dragging_payload,
+                &target_rects,
+                &self.metrics,
+            );
+            // The capture handle detaches a docked group only. Floating groups can
+            // dock into groups/split zones or merge with another floating group.
+            match dragging_payload {
+                DropPayload::Group(_) => {
+                    target.filter(|target| matches!(target, DropTarget::FreeArea { .. }))
+                }
+                DropPayload::Panel(_) | DropPayload::FloatingGroup(_) => target,
+            }
+        } else {
+            None
+        };
+
         self.drag_session.pointer_moved(point, target);
         if self.drag_session.state() != &previous_state {
             cx.notify();
@@ -355,6 +413,7 @@ impl MainWindow {
 
         // Resolve once more on release to handle a coalesced final pointer event.
         self.update_panel_drag(position, window, cx);
+        let was_dragging = matches!(self.drag_session.state(), DragSessionState::Dragging { .. });
         let request = self.drag_session.release();
 
         if let Some(request) = request {
@@ -380,13 +439,31 @@ impl MainWindow {
                         | DropTarget::FreeArea { .. }
                 ),
                 DropPayload::Group(_) => matches!(&request.target, DropTarget::FreeArea { .. }),
-                DropPayload::FloatingGroup(_) => false,
+                DropPayload::FloatingGroup(_) => matches!(
+                    &request.target,
+                    DropTarget::Group {
+                        zone: DropZone::Center | DropZone::Top | DropZone::Bottom,
+                        ..
+                    } | DropTarget::TabInsertion { .. }
+                        | DropTarget::Column {
+                            zone: DropZone::Top
+                                | DropZone::Bottom
+                                | DropZone::Left
+                                | DropZone::Right,
+                            ..
+                        }
+                        | DropTarget::DockEdge { .. }
+                        | DropTarget::FloatingGroup {
+                            zone: DropZone::Center,
+                            ..
+                        }
+                ),
             };
 
             if supported_target {
                 let result = match (request.payload, request.target) {
                     (DropPayload::Panel(panel), DropTarget::FreeArea { bounds }) => {
-                        // An individual tab detaches into a bounded in-window floating group.
+                        // An individual dock tab detaches into a bounded in-window floating group.
                         self.layout.apply(
                             DockCommand::Float {
                                 source: FloatSource::Panel(panel),
@@ -396,7 +473,7 @@ impl MainWindow {
                         )
                     }
                     (DropPayload::Group(group), DropTarget::FreeArea { bounds }) => {
-                        // Dragging the capture zone preserves every tab and the active index.
+                        // Dragging the dock group's capture zone preserves all tabs and active index.
                         self.layout.apply(
                             DockCommand::Float {
                                 source: FloatSource::Group(group),
@@ -408,16 +485,97 @@ impl MainWindow {
                     (DropPayload::Panel(panel), target) => {
                         self.layout.apply(DockCommand::MovePanel { panel, target }, &self.metrics)
                     }
-                    // Whole-group drags intentionally only detach over free Canvas space.
-                    _ => return cx.notify(),
+                    (DropPayload::FloatingGroup(floating), target) => self.layout.apply(
+                        DockCommand::DockFloating { floating, target },
+                        &self.metrics,
+                    ),
+                    _ => {
+                        self.floating_drag = None;
+                        cx.notify();
+                        return;
+                    },
                 };
-                match result {
-                    Ok(_) => {}
-                    Err(error) => eprintln!("Could not detach/drop payload: {error}"),
+                if let Err(error) = result {
+                    eprintln!("Could not apply floating/dock drop: {error}");
+                }
+            }
+        } else if was_dragging {
+            // Releasing a floating group over non-dock space is an ordinary move.
+            // Its model bounds were never changed during preview, so a rejected dock
+            // command leaves its source fully intact.
+            if let Some(drag) = self.floating_drag
+                && let Some(source) = self.layout.floating_groups().get(drag.floating)
+            {
+                let rect = DockRect::new(drag.current_bounds.origin, source.bounds.size);
+                if source.bounds != rect
+                    && let Err(error) = self.layout.apply(
+                        DockCommand::MoveFloating {
+                            floating: drag.floating,
+                            rect,
+                        },
+                        &self.metrics,
+                    )
+                {
+                    eprintln!("Could not move floating group {:#?}: {error}", drag.floating);
                 }
             }
         }
+
+        self.floating_drag = None;
         cx.notify();
+    }
+
+    fn apply_floating_drag_preview(&self, rects: &mut LayoutRects) {
+        let Some(drag) = self.floating_drag else {
+            return;
+        };
+        if !matches!(
+            self.drag_session.state(),
+            DragSessionState::Dragging {
+                payload: DropPayload::FloatingGroup(floating),
+                ..
+            } if *floating == drag.floating
+        ) {
+            return;
+        }
+
+        let Some(source_rect) = rects
+            .floating_groups
+            .iter_mut()
+            .find(|rect| rect.floating == drag.floating)
+        else {
+            return;
+        };
+        let previous_bounds = source_rect.bounds;
+        let next_bounds = drag.current_bounds;
+        let delta_x = next_bounds.origin.x - previous_bounds.origin.x;
+        let delta_y = next_bounds.origin.y - previous_bounds.origin.y;
+        source_rect.bounds = next_bounds;
+
+        for title in rects
+            .floating_titles
+            .iter_mut()
+            .filter(|title| title.floating == drag.floating)
+        {
+            title.bounds.origin = next_bounds.origin;
+            title.bounds.size.width = next_bounds.size.width;
+        }
+        for handle in rects
+            .floating_resize_edges
+            .iter_mut()
+            .filter(|handle| handle.floating == drag.floating)
+        {
+            handle.bounds.origin.x += delta_x;
+            handle.bounds.origin.y += delta_y;
+        }
+        for panel in rects
+            .panels
+            .iter_mut()
+            .filter(|panel| panel.floating == Some(drag.floating))
+        {
+            panel.bounds.origin.x += delta_x;
+            panel.bounds.origin.y += delta_y;
+        }
     }
 
     fn toggle_window_menu(&mut self, cx: &mut Context<Self>) {
@@ -542,6 +700,23 @@ impl MainWindow {
         tab_index: usize,
         cx: &mut Context<Self>,
     ) {
+        // A mouse-up after dragging a floating tab may synthesize a click on its
+        // original tab. Do not let that stale click undo the completed transfer.
+        if matches!(
+            self.drag_session.state(),
+            DragSessionState::Dragging {
+                payload: DropPayload::Panel(_),
+                ..
+            } | DragSessionState::Dropped {
+                payload: DropPayload::Panel(_),
+                ..
+            } | DragSessionState::Cancelled {
+                reason: dock_core::DragCancelReason::ReleasedOutsideTarget,
+            }
+        ) {
+            return;
+        }
+
         match self.layout.apply(
             DockCommand::ActivateFloatingTab { floating, index: tab_index },
             &self.metrics,
@@ -761,7 +936,7 @@ impl Render for MainWindow {
                                 right_dock_width,
                                 body_height,
                                 on_activate_tab,
-                                on_start_drag,
+                                on_start_drag.clone(),
                             ))
                             .children(render_floating_groups(
                                 &self.theme,
@@ -771,10 +946,11 @@ impl Render for MainWindow {
                                 on_activate_floating_tab,
                                 on_begin_floating_interaction,
                                 on_focus_floating,
+                                on_start_drag.clone(),
                             ))
                             .child(drop_overlay(
                                 &self.theme,
-                                &rects,
+                                &drop_target_rects_for_session(&rects, self.drag_session.state()),
                                 self.drag_session.preview_target(),
                             )),
                     ),
@@ -816,6 +992,66 @@ fn titlebar_resize_edge(
     } else {
         Some(ResizeEdge::Top)
     }
+}
+
+fn drop_target_rects_for_session(
+    rects: &LayoutRects,
+    state: &DragSessionState,
+) -> LayoutRects {
+    let payload = match state {
+        DragSessionState::Pressed { payload, .. }
+        | DragSessionState::Dragging { payload, .. } => *payload,
+        _ => return rects.clone(),
+    };
+    drop_target_rects(rects, payload)
+}
+
+fn drop_target_rects(rects: &LayoutRects, payload: DropPayload) -> LayoutRects {
+    let mut target_rects = rects.clone();
+    let source_floating = match payload {
+        DropPayload::FloatingGroup(floating) => Some(floating),
+        DropPayload::Panel(panel) => rects
+            .panels
+            .iter()
+            .find(|rect| rect.panel == panel)
+            .and_then(|rect| rect.floating),
+        DropPayload::Group(_) => None,
+    };
+    if let Some(source) = source_floating {
+        // A dragged floating group or one of its tabs is no longer a drop occluder.
+        // This lets a tab be returned to a dock group even when that dock lies directly
+        // beneath the floating window, while the window remains visible as a drag source.
+        target_rects
+            .floating_groups
+            .retain(|rect| rect.floating != source);
+        target_rects
+            .floating_titles
+            .retain(|title| title.floating != source);
+        target_rects
+            .floating_resize_edges
+            .retain(|handle| handle.floating != source);
+        target_rects
+            .panels
+            .retain(|panel| panel.floating != Some(source));
+    }
+    target_rects
+}
+
+fn floating_drag_preview_bounds(
+    initial_bounds: DockRect,
+    pointer_origin: DockPoint,
+    point: DockPoint,
+    viewport: DockSize,
+) -> DockRect {
+    let viewport_width = viewport.width.max(0.0);
+    let viewport_height = viewport.height.max(0.0);
+    let width = initial_bounds.size.width.max(0.0).min(viewport_width);
+    let height = initial_bounds.size.height.max(0.0).min(viewport_height);
+    let max_x = (viewport_width - width).max(0.0);
+    let max_y = (viewport_height - height).max(0.0);
+    let x = (initial_bounds.origin.x + point.x - pointer_origin.x).clamp(0.0, max_x);
+    let y = (initial_bounds.origin.y + point.y - pointer_origin.y).clamp(0.0, max_y);
+    DockRect::new(DockPoint::new(x, y), DockSize::new(width, height))
 }
 
 fn resize_floating_rect(
@@ -1208,7 +1444,12 @@ where
         .children(areas)
 }
 
-fn render_floating_groups<OnActivateFloating, OnBeginFloating, OnFocusFloating>(
+fn render_floating_groups<
+    OnActivateFloating,
+    OnBeginFloating,
+    OnFocusFloating,
+    OnStartDrag,
+>(
     theme: &Theme,
     layout: &Layout,
     registry: &PanelRegistry,
@@ -1216,6 +1457,7 @@ fn render_floating_groups<OnActivateFloating, OnBeginFloating, OnFocusFloating>(
     on_activate: OnActivateFloating,
     on_begin_interaction: OnBeginFloating,
     on_focus_floating: OnFocusFloating,
+    on_start_drag: OnStartDrag,
 ) -> Vec<AnyElement>
 where
     OnActivateFloating: Fn(FloatingGroupId, usize, &mut App) + Clone + 'static,
@@ -1228,6 +1470,7 @@ where
         ) + Clone
         + 'static,
     OnFocusFloating: Fn(FloatingGroupId, &mut App) + Clone + 'static,
+    OnStartDrag: Fn(DropPayload, GpuiPoint<Pixels>, &mut Window, &mut App) + Clone + 'static,
 {
     let colors = theme.colors;
     let metrics = theme.metrics;
@@ -1321,8 +1564,9 @@ where
                 let content_height = (height - title_height - tab_height).max(0.0);
 
                 let tab_elements = tabs.into_iter().map(
-                    |(index, _panel_id, title, active)| {
+                    |(index, panel_id, title, active)| {
                         let activate = on_activate.clone();
+                        let start_drag = on_start_drag.clone();
                         div()
                             .id(format!("floating-tab-{floating_id:?}-{index}"))
                             .flex_1()
@@ -1347,6 +1591,14 @@ where
                             .text_ellipsis()
                             .cursor_pointer()
                             .hover(|style| style.bg(rgb(colors.hover)))
+                            .on_mouse_down(MouseButton::Left, move |_, window, app| {
+                                start_drag(
+                                    DropPayload::Panel(panel_id),
+                                    window.mouse_position(),
+                                    window,
+                                    app,
+                                )
+                            })
                             .on_click(move |_, _, app| {
                                 activate(floating_id, index, app)
                             })

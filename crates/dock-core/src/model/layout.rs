@@ -2043,9 +2043,21 @@ impl Layout {
         if !self.panels.contains_key(panel) {
             return Err(CommandError::UnknownPanel(panel));
         }
-        let Some((source_group, source_index)) = self.find_dock_group_for_panel(panel) else {
-            return Err(CommandError::PanelNotInDockGroup(panel));
-        };
+
+        let dock_source = self
+            .find_dock_group_for_panel(panel)
+            .filter(|(group, _)| self.find_dock_group_location(*group).is_some());
+        let floating_source = self.floating_groups.iter().find_map(|(floating, group)| {
+            group
+                .panels
+                .iter()
+                .position(|candidate| *candidate == panel)
+                .map(|index| (floating, index))
+        });
+        if dock_source.is_none() && floating_source.is_none() {
+            return Err(CommandError::PanelNotPlaced(panel));
+        }
+
         let (target_group, requested_index) = match target {
             DropTarget::Group {
                 group,
@@ -2079,35 +2091,52 @@ impl Layout {
             )),
         };
 
-        if source_group == target_group {
-            let Some(Node::Tabs(tabs)) = self.nodes.get_mut(source_group) else {
-                return Err(CommandError::GroupNotTabs(source_group));
-            };
-            let mut insert_index = requested_index;
-            if source_index < insert_index {
-                insert_index -= 1;
+        if let Some((source_group, source_index)) = dock_source {
+            if source_group == target_group {
+                let Some(Node::Tabs(tabs)) = self.nodes.get_mut(source_group) else {
+                    return Err(CommandError::GroupNotTabs(source_group));
+                };
+                let mut insert_index = requested_index;
+                if source_index < insert_index {
+                    insert_index -= 1;
+                }
+                let moved = tabs.panels.remove(source_index);
+                insert_index = insert_index.min(tabs.panels.len());
+                tabs.panels.insert(insert_index, moved);
+                // A tab dropped into a new position becomes the active tab, including
+                // when it is reordered inside its current group.
+                tabs.active_index = insert_index;
+                return Ok(vec![source_group]);
             }
-            let moved = tabs.panels.remove(source_index);
-            insert_index = insert_index.min(tabs.panels.len());
-            tabs.panels.insert(insert_index, moved);
-            // A tab dropped into a new position becomes the active tab, including
-            // when it is reordered inside its current group.
-            tabs.active_index = insert_index;
-            return Ok(vec![source_group]);
         }
 
-        let Some(Node::Tabs(source_tabs)) = self.nodes.get_mut(source_group) else {
-            return Err(CommandError::GroupNotTabs(source_group));
-        };
-        let active_source = source_tabs.panels.get(source_tabs.active_index).copied();
-        Self::remove_panel_from_tabs(source_tabs, source_index);
-        if let Some(active_source) = active_source.filter(|active| *active != panel) {
-            if let Some(index) = source_tabs
-                .panels
-                .iter()
-                .position(|candidate| *candidate == active_source)
-            {
-                source_tabs.active_index = index;
+        let mut changed_nodes = Vec::new();
+        if let Some((source_group, source_index)) = dock_source {
+            let Some(Node::Tabs(source_tabs)) = self.nodes.get_mut(source_group) else {
+                return Err(CommandError::GroupNotTabs(source_group));
+            };
+            let active_source = source_tabs.panels.get(source_tabs.active_index).copied();
+            Self::remove_panel_from_tabs(source_tabs, source_index);
+            if let Some(active_source) = active_source.filter(|active| *active != panel) {
+                if let Some(index) = source_tabs
+                    .panels
+                    .iter()
+                    .position(|candidate| *candidate == active_source)
+                {
+                    source_tabs.active_index = index;
+                }
+            }
+            changed_nodes.push(source_group);
+        } else if let Some((source_id, source_index)) = floating_source {
+            if let Some(source) = self.floating_groups.get_mut(source_id) {
+                source.panels.remove(source_index);
+                if source.panels.is_empty() {
+                    self.floating_groups.remove(source_id);
+                } else if source_index < source.active_index {
+                    source.active_index -= 1;
+                } else if source_index == source.active_index {
+                    source.active_index = source.active_index.min(source.panels.len() - 1);
+                }
             }
         }
 
@@ -2116,7 +2145,8 @@ impl Layout {
         };
         let insert_index = requested_index.min(target_tabs.panels.len());
         Self::insert_panel_into_tabs(target_tabs, panel, insert_index, true);
-        Ok(vec![source_group, target_group])
+        changed_nodes.push(target_group);
+        Ok(changed_nodes)
     }
 
     fn open_panel(
@@ -4979,6 +5009,81 @@ mod tests {
     }
 
     #[test]
+    fn dock_floating_split_zone_creates_a_docked_group_and_removes_source() {
+        use crate::{DockCommand, DropTarget, DropZone, FloatSource, Node};
+
+        let metrics = metrics();
+        let mut layout = initial_layout();
+        let source_group = tab_group_id(&layout, 0, 0);
+        let target_group = tab_group_id(&layout, 0, 1);
+        let source_panels = match layout.nodes().get(source_group).expect("source group exists") {
+            Node::Tabs(tabs) => tabs.panels.clone(),
+            Node::Split(_) => panic!("Photoshop groups must be Tabs"),
+        };
+        layout
+            .apply(
+                DockCommand::Float {
+                    source: FloatSource::Group(source_group),
+                    rect: floating_rect(40.0, 40.0, 320.0, 220.0),
+                },
+                &metrics,
+            )
+            .expect("whole source group should float");
+        let floating = floating_id_for_panel(&layout, source_panels[0]);
+
+        layout
+            .apply(
+                DockCommand::DockFloating {
+                    floating,
+                    target: DropTarget::Group {
+                        group: target_group,
+                        zone: DropZone::Top,
+                    },
+                },
+                &metrics,
+            )
+            .expect("floating group should dock through the target's top split zone");
+
+        assert!(layout.floating_groups().get(floating).is_none());
+        let target_location = layout
+            .dock_areas()
+            .iter()
+            .enumerate()
+            .find_map(|(area_index, area)| {
+                area.columns.iter().enumerate().find_map(|(column_index, column)| {
+                    column
+                        .groups
+                        .iter()
+                        .position(|group| *group == target_group)
+                        .map(|target_index| (area_index, column_index, target_index))
+                })
+            })
+            .expect("target group remains docked");
+        let (area_index, column_index, target_index) = target_location;
+        assert!(target_index > 0, "top split inserts the new group before the target");
+        let column = &layout.dock_areas()[area_index].columns[column_index];
+        let new_group = column.groups[target_index - 1];
+        let Node::Tabs(docked) = layout.nodes().get(new_group).unwrap() else {
+            panic!("split result must be a tab group");
+        };
+        assert_eq!(docked.panels, source_panels);
+        for panel in &source_panels {
+            let occurrences = layout
+                .dock_areas()
+                .iter()
+                .flat_map(|area| area.columns.iter())
+                .flat_map(|column| column.groups.iter())
+                .filter_map(|group| match layout.nodes().get(*group) {
+                    Some(Node::Tabs(tabs)) => Some(tabs.panels.iter().filter(|id| *id == panel).count()),
+                    Some(Node::Split(_)) | None => None,
+                })
+                .sum::<usize>();
+            assert_eq!(occurrences, 1, "each original panel must remain placed exactly once");
+        }
+        assert!(layout.validate(&metrics).is_ok());
+    }
+
+    #[test]
     fn dock_floating_can_create_a_new_dock_edge_column() {
         use crate::{DockCommand, DockSide, DropTarget, FloatSource};
 
@@ -5163,6 +5268,196 @@ mod tests {
             .expect("target remains");
         assert_eq!(target.panels, vec![panel_a, panel_b]);
         assert_eq!(target.active_index, 1);
+        assert!(layout.validate(&metrics).is_ok());
+    }
+
+    #[test]
+    fn move_panel_from_floating_to_docked_group_removes_empty_source_without_duplicates() {
+        use crate::{DockCommand, DropTarget, DropZone, FloatSource, Node};
+
+        let metrics = metrics();
+        let mut layout = initial_layout();
+        let source_group = tab_group_id(&layout, 0, 0);
+        let target_group = tab_group_id(&layout, 0, 1);
+        let source_panel = match layout.nodes().get(source_group).expect("source group exists") {
+            Node::Tabs(tabs) => tabs.panels[0],
+            Node::Split(_) => panic!("Photoshop groups must be Tabs"),
+        };
+        let target_panel = match layout.nodes().get(target_group).expect("target group exists") {
+            Node::Tabs(tabs) => tabs.panels[0],
+            Node::Split(_) => panic!("Photoshop groups must be Tabs"),
+        };
+        let panel_count_before = layout.panels().len();
+
+        layout
+            .apply(
+                DockCommand::Float {
+                    source: FloatSource::Panel(source_panel),
+                    rect: floating_rect(20.0, 24.0, 300.0, 180.0),
+                },
+                &metrics,
+            )
+            .expect("source panel should float");
+        let source_floating = floating_id_for_panel(&layout, source_panel);
+        assert_eq!(
+            layout.floating_groups().get(source_floating).unwrap().panels,
+            vec![source_panel]
+        );
+
+        layout
+            .apply(
+                DockCommand::MovePanel {
+                    panel: source_panel,
+                    target: DropTarget::Group {
+                        group: target_group,
+                        zone: DropZone::Center,
+                    },
+                },
+                &metrics,
+            )
+            .expect("floating panel should dock as a tab in the existing group");
+
+        assert!(layout.floating_groups().get(source_floating).is_none());
+        assert_eq!(layout.panels().len(), panel_count_before);
+        let Node::Tabs(target) = layout.nodes().get(target_group).unwrap() else {
+            panic!("target group must remain Tabs");
+        };
+        assert_eq!(target.panels.last(), Some(&source_panel));
+        assert_eq!(target.active_index, target.panels.len() - 1);
+
+        let mut occurrences = 0;
+        for area in layout.dock_areas() {
+            for column in &area.columns {
+                for group in &column.groups {
+                    if let Some(Node::Tabs(tabs)) = layout.nodes().get(*group) {
+                        occurrences += tabs.panels.iter().filter(|id| **id == source_panel).count();
+                    }
+                }
+            }
+        }
+        for floating in layout.floating_groups().values() {
+            occurrences += floating.panels.iter().filter(|id| **id == source_panel).count();
+        }
+        assert_eq!(occurrences, 1, "the original PanelId must be placed exactly once");
+        assert!(layout.panels().contains_key(target_panel));
+        assert!(layout.validate(&metrics).is_ok());
+    }
+
+    #[test]
+    fn failed_dock_of_floating_panel_preserves_its_source_and_layout_version() {
+        use crate::{CommandError, DockCommand, DropTarget, FloatSource, Node};
+
+        let metrics = metrics();
+        let mut layout = initial_layout();
+        let source_group = tab_group_id(&layout, 0, 0);
+        let target_group = tab_group_id(&layout, 0, 1);
+        let panel = match layout.nodes().get(source_group).expect("source group exists") {
+            Node::Tabs(tabs) => tabs.panels[0],
+            Node::Split(_) => panic!("Photoshop groups must be Tabs"),
+        };
+        layout
+            .apply(
+                DockCommand::Float {
+                    source: FloatSource::Panel(panel),
+                    rect: floating_rect(20.0, 24.0, 300.0, 180.0),
+                },
+                &metrics,
+            )
+            .expect("source panel should float");
+        let floating = floating_id_for_panel(&layout, panel);
+        let before = layout.floating_groups().get(floating).unwrap().clone();
+        let version_before = layout.version();
+        let target_before = match layout.nodes().get(target_group).unwrap() {
+            Node::Tabs(tabs) => tabs.panels.clone(),
+            Node::Split(_) => panic!("target group must be Tabs"),
+        };
+
+        let error = layout
+            .apply(
+                DockCommand::MovePanel {
+                    panel,
+                    target: DropTarget::TabInsertion {
+                        group: target_group,
+                        index: usize::MAX,
+                    },
+                },
+                &metrics,
+            )
+            .expect_err("invalid target index should reject the transfer atomically");
+        assert!(matches!(error, CommandError::InvalidTabIndex { .. }));
+        assert_eq!(layout.version(), version_before);
+        assert_eq!(layout.floating_groups().get(floating), Some(&before));
+        assert_eq!(
+            match layout.nodes().get(target_group).unwrap() {
+                Node::Tabs(tabs) => tabs.panels.clone(),
+                Node::Split(_) => panic!("target group must be Tabs"),
+            },
+            target_before
+        );
+        assert!(layout.panels().contains_key(panel));
+        assert!(layout.validate(&metrics).is_ok());
+    }
+
+    #[test]
+    fn docking_one_floating_group_into_another_merges_tabs_and_removes_source() {
+        use crate::{DockCommand, DropTarget, DropZone, FloatSource};
+
+        let metrics = metrics();
+        let mut layout = initial_layout();
+        let source_group = tab_group_id(&layout, 0, 0);
+        let target_group = tab_group_id(&layout, 0, 1);
+        let source_panel = match layout.nodes().get(source_group).expect("source group exists") {
+            Node::Tabs(tabs) => tabs.panels[0],
+            Node::Split(_) => panic!("Photoshop groups must be Tabs"),
+        };
+        let target_panel = match layout.nodes().get(target_group).expect("target group exists") {
+            Node::Tabs(tabs) => tabs.panels[0],
+            Node::Split(_) => panic!("Photoshop groups must be Tabs"),
+        };
+        let count_before = layout.panels().len();
+        let rect = floating_rect(20.0, 24.0, 320.0, 200.0);
+
+        layout
+            .apply(
+                DockCommand::Float {
+                    source: FloatSource::Panel(target_panel),
+                    rect,
+                },
+                &metrics,
+            )
+            .expect("target panel should float");
+        layout
+            .apply(
+                DockCommand::Float {
+                    source: FloatSource::Panel(source_panel),
+                    rect: floating_rect(60.0, 64.0, 320.0, 200.0),
+                },
+                &metrics,
+            )
+            .expect("source panel should float");
+        let target_floating = floating_id_for_panel(&layout, target_panel);
+        let source_floating = floating_id_for_panel(&layout, source_panel);
+
+        layout
+            .apply(
+                DockCommand::DockFloating {
+                    floating: source_floating,
+                    target: DropTarget::FloatingGroup {
+                        floating: target_floating,
+                        zone: DropZone::Center,
+                    },
+                },
+                &metrics,
+            )
+            .expect("source floating group should merge into the target floating group");
+
+        assert!(layout.floating_groups().get(source_floating).is_none());
+        let target = layout.floating_groups().get(target_floating).unwrap();
+        assert_eq!(target.panels, vec![target_panel, source_panel]);
+        assert_eq!(target.active_index, 1);
+        assert_eq!(layout.panels().len(), count_before);
+        assert!(layout.panels().contains_key(source_panel));
+        assert!(layout.panels().contains_key(target_panel));
         assert!(layout.validate(&metrics).is_ok());
     }
 

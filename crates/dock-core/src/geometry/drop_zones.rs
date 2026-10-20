@@ -697,20 +697,28 @@ fn valid_target(
 ) -> bool {
     match target {
         DropTarget::Group { group, zone } => {
-            if !can_target_dock(layout, payload)
+            let can_target_group = match zone {
+                // A single panel may originate in either a dock group or a floating group.
+                // Other split operations remain limited to docked payloads because they
+                // create dock topology rather than merely joining an existing tab group.
+                DropZone::Center => {
+                    can_target_dock(layout, payload)
+                        || matches!(payload, DropPayload::Panel(panel)
+                            if is_floating_panel(layout, panel))
+                }
+                DropZone::Top | DropZone::Bottom
+                    if layout.profile() == crate::model::Profile::Photoshop =>
+                {
+                    can_target_dock(layout, payload)
+                }
+                DropZone::Top | DropZone::Bottom | DropZone::Left | DropZone::Right => false,
+            };
+            if !can_target_group
                 || !is_docked_group(layout, *group)
                 || !matches!(layout.nodes().get(*group), Some(Node::Tabs(_)))
                 || matches!(payload, DropPayload::Group(source) if source == *group)
             {
                 return false;
-            }
-            match zone {
-                DropZone::Center => {}
-                DropZone::Top | DropZone::Bottom
-                    if layout.profile() == crate::model::Profile::Photoshop => {}
-                DropZone::Top | DropZone::Bottom | DropZone::Left | DropZone::Right => {
-                    return false;
-                }
             }
             if *zone == DropZone::Center {
                 if let DropPayload::Panel(panel) = payload {
@@ -784,6 +792,13 @@ fn is_docked_payload(layout: &Layout, payload: DropPayload) -> bool {
         DropPayload::Group(group) => is_docked_group(layout, group),
         DropPayload::FloatingGroup(_) => false,
     }
+}
+
+fn is_floating_panel(layout: &Layout, panel: PanelId) -> bool {
+    layout
+        .floating_groups()
+        .values()
+        .any(|floating| floating.panels.contains(&panel))
 }
 
 fn can_target_dock(layout: &Layout, payload: DropPayload) -> bool {
@@ -1934,6 +1949,63 @@ mod tests {
     }
 
     #[test]
+    fn floating_panel_can_drop_into_docked_group_center_without_enabling_split_targets() {
+        let metrics = metrics();
+        let mut layout = Layout::initial_photoshop(&metrics).unwrap();
+        let floating_panel = panel_id(&layout, "layers");
+        layout
+            .apply(
+                DockCommand::Float {
+                    source: FloatSource::Panel(floating_panel),
+                    rect: rect(320.0, 200.0, 320.0, 240.0),
+                },
+                &metrics,
+            )
+            .expect("source panel should float");
+        let target_group = group_id(&layout, "properties");
+        let rects = geometry(&layout, &metrics);
+        let bounds = rects
+            .groups
+            .iter()
+            .find(|group| group.group == target_group)
+            .expect("dock target group geometry exists")
+            .bounds;
+        let center = Point::new(
+            bounds.origin.x + bounds.size.width * 0.5,
+            bounds.origin.y + bounds.size.height * 0.5,
+        );
+        let payload = DropPayload::Panel(floating_panel);
+
+        assert_eq!(
+            resolve_drop(&layout, center, payload, &rects, &metrics),
+            Some(DropTarget::Group {
+                group: target_group,
+                zone: DropZone::Center,
+            }),
+            "a floating tab should be accepted by the center of an existing dock group"
+        );
+
+        if let Some(splitter) = rects
+            .splitters
+            .iter()
+            .find(|splitter| splitter.kind == SplitterKind::Group)
+        {
+            let split_center = Point::new(
+                splitter.bounds.origin.x + splitter.bounds.size.width * 0.5,
+                splitter.bounds.origin.y + splitter.bounds.size.height * 0.5,
+            );
+            assert_ne!(
+                resolve_drop(&layout, split_center, payload, &rects, &metrics),
+                Some(DropTarget::Group {
+                    group: target_group,
+                    zone: DropZone::Top,
+                }),
+                "a floating single tab uses existing-group center drops; whole groups own split drops"
+            );
+        }
+    }
+
+    #[test]
     fn floating_group_drop_zone_excludes_titlebar_edges_and_occluded_canvas() {
         let metrics = metrics();
         let mut layout = Layout::initial_photoshop(&metrics).unwrap();
@@ -2373,7 +2445,11 @@ mod tests {
                 &floating_rects,
                 &metrics,
             ),
-            None
+            Some(DropTarget::Group {
+                group: group_id(&layout, "color"),
+                zone: DropZone::Center,
+            }),
+            "a valid finite drop from a floating panel onto a dock group is accepted"
         );
         assert!(layout.floating_groups().contains_key(floating_id));
     }
