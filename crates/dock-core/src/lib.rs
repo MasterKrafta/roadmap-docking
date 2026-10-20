@@ -1,9 +1,13 @@
 #![forbid(unsafe_code)]
 pub mod command;
+pub mod drag_session;
 pub mod geometry;
 pub mod ids;
 pub mod model;
 
+pub use drag_session::{
+    DRAG_START_THRESHOLD, DragCancelReason, DragDropRequest, DragSession, DragSessionState,
+};
 pub use command::{
     ColumnRef, CommandError, CommandOutcome, DockCommand, DropTarget, DropZone, FloatSource,
     SplitSide,
