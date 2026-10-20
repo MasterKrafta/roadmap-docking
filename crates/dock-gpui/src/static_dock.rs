@@ -1,11 +1,12 @@
-use dock_core::NodeId;
-use gpui::{App, div, prelude::*, px, rgb};
+use dock_core::{NodeId, PanelId};
+use gpui::{App, MouseButton, Pixels, Point as GpuiPoint, Window, div, prelude::*, px, rgb};
 use ui::Theme;
 
 /// Display-only projection of a tab in the current Layout.
 /// This is render input, not another copy of the docking model.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TabItem {
+    pub panel_id: PanelId,
     pub title: String,
     pub active: bool,
 }
@@ -29,6 +30,7 @@ pub fn dock_column_view(
     header_height: f32,
     groups: Vec<DockGroupData>,
     on_activate: impl Fn(NodeId, usize, &mut App) + Clone + 'static,
+    on_start_drag: impl Fn(PanelId, GpuiPoint<Pixels>, &mut Window, &mut App) + Clone + 'static,
 ) -> impl IntoElement {
     let group_count = groups.len();
     let group_rows = groups.into_iter().enumerate().map(|(index, group)| {
@@ -55,6 +57,7 @@ pub fn dock_column_view(
                     group.tab_strip_height,
                     group.tabs,
                     on_activate.clone(),
+                    on_start_drag.clone(),
                 ),
                 panel_content(
                     theme,
@@ -138,6 +141,7 @@ pub fn tab_strip(
     height: f32,
     tabs: Vec<TabItem>,
     on_activate: impl Fn(NodeId, usize, &mut App) + Clone + 'static,
+    on_start_drag: impl Fn(PanelId, GpuiPoint<Pixels>, &mut Window, &mut App) + Clone + 'static,
 ) -> impl IntoElement {
     let colors = theme.colors;
     let metrics = theme.metrics;
@@ -155,6 +159,8 @@ pub fn tab_strip(
             colors.muted_text
         };
         let activate = on_activate.clone();
+        let start_drag = on_start_drag.clone();
+        let panel_id = tab.panel_id;
 
         div()
             .id(format!("dock-tab-{group_id:?}-{index}"))
@@ -173,6 +179,9 @@ pub fn tab_strip(
             .cursor_pointer()
             .hover(|style| style.bg(rgb(colors.hover)))
             .on_click(move |_, _, app| activate(group_id, index, app))
+            .on_mouse_down(MouseButton::Left, move |_, window, app| {
+                start_drag(panel_id, window.mouse_position(), window, app)
+            })
             .child(tab.title)
     });
 

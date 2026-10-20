@@ -15,6 +15,8 @@ pub struct ThemeColors {
     pub active_tab: Rgb,
     pub hover: Rgb,
     pub focus: Rgb,
+    /// Accent used for the active dock drop preview.
+    pub drop_target: Rgb,
     pub toolbar_background: Rgb,
 }
 
@@ -32,6 +34,7 @@ impl Default for ThemeColors {
             active_tab: 0x3A3D43,
             hover: 0x383B41,
             focus: 0x7AA2F7,
+            drop_target: 0x7AA2F7,
             toolbar_background: 0x303238,
         }
     }

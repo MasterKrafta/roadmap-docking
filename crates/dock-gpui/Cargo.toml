@@ -9,5 +9,8 @@ dock-core = { path = "../dock-core" }
 gpui.workspace = true
 ui = { path = "../ui" }
 
+[dev-dependencies]
+slotmap.workspace = true
+
 [lints]
 workspace = true

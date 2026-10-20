@@ -1080,7 +1080,9 @@ dependencies = [
 name = "dock-gpui"
 version = "0.1.0"
 dependencies = [
+ "dock-core",
  "gpui",
+ "slotmap",
  "ui",
 ]
 

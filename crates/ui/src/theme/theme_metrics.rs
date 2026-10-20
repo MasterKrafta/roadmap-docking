@@ -5,6 +5,10 @@ pub struct ThemeMetrics {
     pub edge_drop_zone_width: f32,
     /// Logical-pixel hit-zone width for group and column docking edges.
     pub drop_edge_zone: f32,
+    /// Thickness of the live drop insertion and split indicators in logical pixels.
+    pub drop_indicator_thickness: f32,
+    /// Thickness of the outline around a target group or floating-window preview.
+    pub drop_outline_thickness: f32,
     pub drag_start_threshold: f32, pub default_column_width: f32,
     pub min_column_width: f32, pub rail_width: f32, pub min_group_height: f32,
     pub collapsed_group_height: f32, pub min_document_width: f32, pub max_columns: usize,
@@ -13,7 +17,9 @@ impl Default for ThemeMetrics {
     fn default() -> Self {
         Self { column_header_height: 32.0, tab_strip_height: 28.0, button_size: 24.0, button_gap: 4.0,
             content_padding: 8.0, splitter_thickness: 4.0, splitter_hit_zone: 8.0,
-            edge_drop_zone_width: 24.0, drop_edge_zone: 24.0, drag_start_threshold: 4.0, default_column_width: 280.0,
+            edge_drop_zone_width: 24.0, drop_edge_zone: 24.0,
+            drop_indicator_thickness: 4.0, drop_outline_thickness: 3.0,
+            drag_start_threshold: 4.0, default_column_width: 280.0,
             min_column_width: 200.0, rail_width: 36.0, min_group_height: 80.0,
             collapsed_group_height: 28.0, min_document_width: 320.0, max_columns: 4 }
     }
@@ -35,5 +41,7 @@ mod tests {
         assert!((m.edge_drop_zone_width - 24.0).abs() < 1e-3);
         assert!((m.drop_edge_zone - 24.0).abs() < 1e-3);
         assert!((m.drag_start_threshold - 4.0).abs() < 1e-3);
+        assert!((m.drop_indicator_thickness - 4.0).abs() < 1e-3);
+        assert!((m.drop_outline_thickness - 3.0).abs() < 1e-3);
     }
 }

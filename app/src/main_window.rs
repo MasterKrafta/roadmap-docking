@@ -1,9 +1,10 @@
 use dock_core::{
-    DockCommand, DockMetrics, DockSide, Layout, LayoutRects, Node, NodeId, PanelKey,
-    Size as DockSize, compute_rects,
+    DockCommand, DockMetrics, DockSide, DragSession, DragSessionState, DropPayload, Layout,
+    LayoutRects, Node, NodeId, PanelId, PanelKey, Point as DockPoint, Size as DockSize,
+    compute_rects, resolve_drop,
 };
-use dock_gpui::{DockGroupData, TabItem, dock_column_view};
-use gpui::{App, Context, Render, Window, div, prelude::*, px, rgb};
+use dock_gpui::{DockGroupData, TabItem, dock_column_view, drop_overlay};
+use gpui::{App, Context, MouseButton, Pixels, Point as GpuiPoint, Render, Window, div, prelude::*, px, rgb};
 use ui::Theme;
 
 use crate::panels::{PanelRegistry, PlaceholderPanelContent};
@@ -15,7 +16,18 @@ pub struct MainWindow {
     metrics: DockMetrics,
     registry: PanelRegistry,
     layout: Layout,
+    drag_session: DragSession,
     window_menu_open: bool,
+}
+
+struct WindowGeometry {
+    menu_height: f32,
+    panel_menu_height: f32,
+    options_height: f32,
+    body_height: f32,
+    body_top: f32,
+    docking_viewport_width: f32,
+    rects: LayoutRects,
 }
 
 impl MainWindow {
@@ -30,8 +42,121 @@ impl MainWindow {
             metrics,
             registry,
             layout,
+            drag_session: DragSession::new(),
             window_menu_open: false,
         }
+    }
+
+    fn window_geometry(&self, window: &Window) -> WindowGeometry {
+        let bounds = window.bounds();
+        let window_width = bounds.size.width.as_f32().max(0.0);
+        let window_height = bounds.size.height.as_f32().max(0.0);
+        let metrics = self.theme.metrics;
+        let menu_height = metrics.column_header_height.min(window_height);
+        let panel_menu_height = if self.window_menu_open {
+            (metrics.tab_strip_height.max(24.0) * (self.registry.len() as f32 + 1.0)
+                + metrics.content_padding
+                + 2.0)
+                .min((window_height - menu_height - metrics.tab_strip_height).max(0.0))
+        } else {
+            0.0
+        };
+        let options_height = metrics
+            .tab_strip_height
+            .min((window_height - menu_height - panel_menu_height).max(0.0));
+        let body_height =
+            (window_height - menu_height - panel_menu_height - options_height).max(0.0);
+        let docking_viewport_width = (window_width - metrics.rail_width).max(0.0);
+        let rects = compute_rects(
+            &self.layout,
+            DockSize::new(docking_viewport_width, body_height),
+            &self.metrics,
+        );
+
+        WindowGeometry {
+            menu_height,
+            panel_menu_height,
+            options_height,
+            body_height,
+            body_top: menu_height + panel_menu_height + options_height,
+            docking_viewport_width,
+            rects,
+        }
+    }
+
+    fn local_dock_point(&self, position: GpuiPoint<Pixels>, geometry: &WindowGeometry) -> DockPoint {
+        DockPoint::new(
+            position.x.as_f32() - self.theme.metrics.rail_width,
+            position.y.as_f32() - geometry.body_top,
+        )
+    }
+
+    fn begin_panel_drag(
+        &mut self,
+        panel: PanelId,
+        position: GpuiPoint<Pixels>,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        let geometry = self.window_geometry(window);
+        let origin = self.local_dock_point(position, &geometry);
+        if self.drag_session.press(DropPayload::Panel(panel), origin) {
+            cx.notify();
+        }
+    }
+
+    fn update_panel_drag(
+        &mut self,
+        position: GpuiPoint<Pixels>,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        let payload = match self.drag_session.state() {
+            DragSessionState::Pressed { payload, .. }
+            | DragSessionState::Dragging { payload, .. } => Some(*payload),
+            DragSessionState::Idle
+            | DragSessionState::Dropped { .. }
+            | DragSessionState::Cancelled { .. } => None,
+        };
+        let Some(payload) = payload else {
+            return;
+        };
+
+        let geometry = self.window_geometry(window);
+        let point = self.local_dock_point(position, &geometry);
+        let target = resolve_drop(&self.layout, point, payload, &geometry.rects, &self.metrics);
+        let previous_state = self.drag_session.state().clone();
+        self.drag_session.pointer_moved(point, target);
+        if self.drag_session.state() != &previous_state {
+            cx.notify();
+        }
+    }
+
+    fn finish_panel_drag(
+        &mut self,
+        position: GpuiPoint<Pixels>,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !matches!(
+            self.drag_session.state(),
+            DragSessionState::Pressed { .. } | DragSessionState::Dragging { .. }
+        ) {
+            return;
+        }
+
+        // Resolve once more on release to handle a coalesced final pointer event.
+        self.update_panel_drag(position, window, cx);
+        let request = self.drag_session.release();
+
+        // Actual layout commands are intentionally handled by the next R6 interaction
+        // task. This task is the preview layer: releasing clears the preview, while
+        // DragSession still guarantees that invalid/cancelled drops yield no request.
+        if let Some(request) = request {
+            let _previewed_target = request.target;
+            let _previewed_payload = request.payload;
+        }
+        cx.notify();
     }
 
     fn toggle_window_menu(&mut self, cx: &mut Context<Self>) {
@@ -166,7 +291,6 @@ impl MainWindow {
 impl Render for MainWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = self.theme.colors;
-        let metrics = self.theme.metrics;
         let typography = self.theme.typography;
         let weak_window = cx.entity().downgrade();
 
@@ -197,32 +321,47 @@ impl Render for MainWindow {
             }
         };
 
-        let window_bounds = window.bounds();
-        let window_width = window_bounds.size.width.as_f32().max(0.0);
-        let window_height = window_bounds.size.height.as_f32().max(0.0);
-        let menu_height = metrics.column_header_height.min(window_height);
-        let panel_menu_height = if self.window_menu_open {
-            (metrics.tab_strip_height.max(24.0) * (self.registry.len() as f32 + 1.0)
-                + metrics.content_padding
-                + 2.0)
-                .min((window_height - menu_height - metrics.tab_strip_height).max(0.0))
-        } else {
-            0.0
+        let start_drag_window = weak_window.clone();
+        let on_start_drag = move |
+            panel: PanelId,
+            position: GpuiPoint<Pixels>,
+            window: &mut Window,
+            app: &mut App,
+        | {
+            if let Err(error) = start_drag_window.update(app, |this, cx| {
+                this.begin_panel_drag(panel, position, window, cx);
+            }) {
+                eprintln!("Could not begin panel drag: {error}");
+            }
         };
-        let options_height = metrics
-            .tab_strip_height
-            .min((window_height - menu_height - panel_menu_height).max(0.0));
-        let body_height =
-            (window_height - menu_height - panel_menu_height - options_height).max(0.0);
 
-        // Toolbar is fixed chrome and deliberately excluded from dock-core's geometry.
-        // The rest of the body is calculated in logical pixels by the pure core geometry.
-        let docking_viewport_width = (window_width - metrics.rail_width).max(0.0);
-        let rects = compute_rects(
-            &self.layout,
-            DockSize::new(docking_viewport_width, body_height),
-            &self.metrics,
-        );
+        let update_drag_window = weak_window.clone();
+        let on_pointer_move = move |_, window: &mut Window, app: &mut App| {
+            let position = window.mouse_position();
+            if let Err(error) = update_drag_window.update(app, |this, cx| {
+                this.update_panel_drag(position, window, cx);
+            }) {
+                eprintln!("Could not update panel drag: {error}");
+            }
+        };
+
+        let finish_drag_window = weak_window.clone();
+        let on_pointer_up = move |_, window: &mut Window, app: &mut App| {
+            let position = window.mouse_position();
+            if let Err(error) = finish_drag_window.update(app, |this, cx| {
+                this.finish_panel_drag(position, window, cx);
+            }) {
+                eprintln!("Could not finish panel drag: {error}");
+            }
+        };
+
+        let geometry = self.window_geometry(window);
+        let menu_height = geometry.menu_height;
+        let panel_menu_height = geometry.panel_menu_height;
+        let options_height = geometry.options_height;
+        let body_height = geometry.body_height;
+        let docking_viewport_width = geometry.docking_viewport_width;
+        let rects = geometry.rects;
 
         let left_dock_width = dock_side_width(&rects, DockSide::Left);
         let right_dock_width = dock_side_width(&rects, DockSide::Right);
@@ -258,28 +397,45 @@ impl Render for MainWindow {
                     .flex()
                     .flex_row()
                     .child(toolbar(&self.theme, body_height))
-                    .child(render_dock_side(
-                        &self.theme,
-                        &self.layout,
-                        &self.registry,
-                        &rects,
-                        DockSide::Left,
-                        left_dock_width,
-                        body_height,
-                        on_activate_tab.clone(),
-                    ))
-                    .child(canvas(&self.theme, canvas_width, body_height))
-                    .child(render_dock_side(
-                        &self.theme,
-                        &self.layout,
-                        &self.registry,
-                        &rects,
-                        DockSide::Right,
-                        right_dock_width,
-                        body_height,
-                        on_activate_tab,
-                    )),
+                    .child(
+                        div()
+                            .w(px(docking_viewport_width))
+                            .h(px(body_height))
+                            .relative()
+                            .flex()
+                            .flex_row()
+                            .child(render_dock_side(
+                                &self.theme,
+                                &self.layout,
+                                &self.registry,
+                                &rects,
+                                DockSide::Left,
+                                left_dock_width,
+                                body_height,
+                                on_activate_tab.clone(),
+                                on_start_drag.clone(),
+                            ))
+                            .child(canvas(&self.theme, canvas_width, body_height))
+                            .child(render_dock_side(
+                                &self.theme,
+                                &self.layout,
+                                &self.registry,
+                                &rects,
+                                DockSide::Right,
+                                right_dock_width,
+                                body_height,
+                                on_activate_tab,
+                                on_start_drag,
+                            ))
+                            .child(drop_overlay(
+                                &self.theme,
+                                &rects,
+                                self.drag_session.preview_target(),
+                            )),
+                    ),
             )
+            .on_mouse_move(on_pointer_move)
+            .on_mouse_up(MouseButton::Left, on_pointer_up)
     }
 }
 
@@ -473,7 +629,7 @@ fn dock_side_width(rects: &LayoutRects, side: DockSide) -> f32 {
         .sum()
 }
 
-fn render_dock_side<OnActivate>(
+fn render_dock_side<OnActivate, OnStartDrag>(
     theme: &Theme,
     layout: &Layout,
     registry: &PanelRegistry,
@@ -482,9 +638,11 @@ fn render_dock_side<OnActivate>(
     width: f32,
     height: f32,
     on_activate: OnActivate,
+    on_start_drag: OnStartDrag,
 ) -> impl IntoElement
 where
     OnActivate: Fn(NodeId, usize, &mut App) + Clone + 'static,
+    OnStartDrag: Fn(PanelId, GpuiPoint<Pixels>, &mut Window, &mut App) + Clone + 'static,
 {
     let areas = layout
         .dock_areas()
@@ -546,6 +704,7 @@ where
                     header_height,
                     groups,
                     on_activate.clone(),
+                    on_start_drag.clone(),
                 )
             });
 
@@ -605,6 +764,7 @@ fn group_view_data(
             }
 
             tabs.push(TabItem {
+                panel_id,
                 title,
                 active: index == group.active_index,
             });
