@@ -623,11 +623,41 @@ impl Layout {
                 reason: "must be finite and positive".to_owned(),
             });
         }
-        let applied_width = requested_width.max(minimum_width);
-        if !applied_width.is_finite() {
+
+        // When current Canvas geometry is available, enlarging this column must not
+        // leave the document region narrower than min_document_width. Before geometry
+        // has been assigned (zero width), the constraint is deferred to the geometry stage.
+        let current_width = self.dock_areas[area_index].columns[column_index].width;
+        let canvas_width = self.canvas.bounds.size.width;
+        let maximum_width = if canvas_width == 0.0 {
+            None
+        } else if !canvas_width.is_finite() || canvas_width < 0.0
+            || !current_width.is_finite() || current_width <= 0.0
+        {
+            return Err(CommandError::InvalidCommandParameter {
+                parameter: "canvas/column width".to_owned(),
+                reason: "known geometry and current column width must be finite and non-negative/positive".to_owned(),
+            });
+        } else {
+            let available_growth = (canvas_width - metrics.min_document_width).max(0.0);
+            let maximum = current_width + available_growth;
+            if !maximum.is_finite() || maximum + PIXEL_TOLERANCE < minimum_width {
+                return Err(CommandError::InvalidCommandParameter {
+                    parameter: "column width".to_owned(),
+                    reason: "current geometry cannot satisfy both column and minimum document widths".to_owned(),
+                });
+            }
+            Some(maximum)
+        };
+
+        let requested_applied_width = requested_width.max(minimum_width);
+        let applied_width = maximum_width
+            .map(|maximum| requested_applied_width.min(maximum))
+            .unwrap_or(requested_applied_width);
+        if !applied_width.is_finite() || applied_width + PIXEL_TOLERANCE < minimum_width {
             return Err(CommandError::InvalidCommandParameter {
                 parameter: "width".to_owned(),
-                reason: "resulting width must be finite".to_owned(),
+                reason: "resulting width must be finite and satisfy the column minimum".to_owned(),
             });
         }
 
@@ -2495,6 +2525,33 @@ mod tests {
 
         assert_eq!(outcome.actual_value, Some(metrics.min_column_width));
         assert_eq!(layout.dock_areas()[0].columns[0].width, metrics.min_column_width);
+        assert!(layout.validate(&metrics).is_ok());
+    }
+
+    #[test]
+    fn resize_column_preserves_minimum_document_width_when_geometry_is_known() {
+        use crate::command::ColumnRef;
+        use crate::DockCommand;
+
+        let metrics = metrics();
+        let mut layout = initial_layout();
+        layout.set_canvas(CanvasState {
+            bounds: Rect::new(Point::new(0.0, 0.0), Size::new(500.0, 800.0)),
+        });
+
+        let outcome = layout.apply(
+            DockCommand::ResizeColumn {
+                column: ColumnRef::new(DockSide::Right, 0),
+                width: 900.0,
+            },
+            &metrics,
+        ).expect("column width should clamp to leave the minimum document width");
+
+        let column_width = layout.dock_areas()[0].columns[0].width;
+        assert!((column_width - 460.0).abs() < 1e-3);
+        assert_eq!(outcome.actual_value, Some(column_width));
+        assert!(column_width >= metrics.min_column_width);
+        assert!((500.0 - (column_width - 280.0) - metrics.min_document_width).abs() < 1e-3);
         assert!(layout.validate(&metrics).is_ok());
     }
 
