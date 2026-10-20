@@ -1,8 +1,8 @@
 use crate::command::{ColumnRef, DropTarget, DropZone};
 use crate::geometry::{
-    DockMetrics, DropZoneRect, GroupRect, LayoutRects, Point, Rect, Size,
+    DockMetrics, DropZoneRect, LayoutRects, Point, Rect, Size,
 };
-use crate::ids::{FloatingGroupId, NodeId, PanelId};
+use crate::ids::{NodeId, PanelId};
 use crate::model::{DockSide, Layout, Node};
 
 use super::DropPayload;
@@ -95,7 +95,7 @@ pub fn compute_drop_zones(
     // Tab insertion zones precede group center/edge zones so dropping between two
     // labels can reorder or insert a tab rather than create a neighboring group.
     if matches!(payload, DropPayload::Panel(_) | DropPayload::FloatingGroup(_)) {
-        append_tab_insertion_zones(layout, rects, &mut zones, metrics);
+        append_tab_insertion_zones(layout, rects, &mut zones, payload, metrics);
     }
 
     append_group_zones(layout, rects, payload, &mut zones, metrics);
@@ -224,6 +224,7 @@ fn append_tab_insertion_zones(
     layout: &Layout,
     rects: &LayoutRects,
     zones: &mut Vec<DropZoneRect>,
+    payload: DropPayload,
     metrics: &DockMetrics,
 ) {
     let requested_width = finite_positive(metrics.drop_edge_zone);
@@ -272,7 +273,7 @@ fn append_tab_insertion_zones(
                 group: group_rect.group,
                 index: next.index,
             };
-            if valid_target(layout, current_payload_placeholder(layout), &target, metrics) {
+            if valid_target(layout, payload, &target, metrics) {
                 push_zone(
                     zones,
                     target,
@@ -283,18 +284,6 @@ fn append_tab_insertion_zones(
                 );
             }
         }
-    }
-}
-
-fn current_payload_placeholder(layout: &Layout) -> DropPayload {
-    // Tab insertion zones are only appended by compute_drop_zones for Panel or
-    // FloatingGroup payloads. A real payload is checked again in resolve_drop.
-    if let Some((id, _)) = layout.panels().iter().next() {
-        DropPayload::Panel(id)
-    } else if let Some((id, _)) = layout.floating_groups().iter().next() {
-        DropPayload::FloatingGroup(id)
-    } else {
-        DropPayload::Panel(PanelId::null())
     }
 }
 
@@ -916,30 +905,29 @@ mod tests {
 
         let missing_group = crate::NodeId::null();
         let payload = DropPayload::Panel(panel_id(&layout, "properties"));
-        assert_eq!(
-            resolve_drop(
-                &layout,
-                Point::new(1100.0, 200.0),
-                payload,
-                &crate::LayoutRects {
-                    groups: vec![crate::GroupRect {
-                        group: missing_group,
-                        bounds: rect(1000.0, 100.0, 280.0, 300.0),
-                    }],
-                    ..rects.clone()
-                },
-                &metrics,
-            ),
-            Some(DropTarget::Group {
-                group,
-                zone: DropZone::Center,
-            })
-        );
-        let mut empty = Layout::new(Profile::Photoshop, crate::CanvasState::default());
+        let rects_with_missing_group = crate::LayoutRects {
+            groups: vec![crate::GroupRect {
+                group: missing_group,
+                bounds: rect(1000.0, 100.0, 280.0, 300.0),
+            }],
+            ..rects.clone()
+        };
+        assert!(!compute_drop_zones(
+            &layout,
+            &rects_with_missing_group,
+            payload,
+            &metrics,
+        )
+        .iter()
+        .any(|zone| matches!(
+            zone.target,
+            DropTarget::Group { group, .. } if group == missing_group
+        )));
+
+        let empty = Layout::new(Profile::Photoshop, crate::CanvasState::default());
         assert!(compute_drop_zones(&empty, &rects, payload, &metrics).is_empty());
-        empty = layout.clone();
         assert!(compute_drop_zones(
-            &empty,
+            &layout,
             &rects,
             DropPayload::Group(missing_group),
             &metrics,
