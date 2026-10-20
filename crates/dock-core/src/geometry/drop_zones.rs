@@ -1,6 +1,6 @@
 use crate::command::{ColumnRef, DropTarget, DropZone};
 use crate::geometry::{
-    DockMetrics, DropZoneRect, LayoutRects, Point, Rect, Size,
+    DockMetrics, DropZoneRect, LayoutRects, Point, Rect, Size, SplitterKind,
 };
 use crate::ids::{NodeId, PanelId};
 use crate::model::{DockSide, Layout, Node};
@@ -95,7 +95,7 @@ pub fn compute_drop_zones(
     // Tab insertion zones precede group center/edge zones so dropping between two
     // labels can reorder or insert a tab rather than create a neighboring group.
     append_tab_insertion_zones(layout, rects, &mut zones, payload, metrics);
-
+    append_group_gap_zones(layout, rects, payload, &mut zones, metrics);
     append_group_zones(layout, rects, payload, &mut zones, metrics);
 
     // Canvas is protected as a docking destination, but its unoccupied surface is a
@@ -339,6 +339,69 @@ fn append_tab_insertion_zones(
                         Size::new(width, strip.bounds.size.height),
                     ),
                 );
+            }
+        }
+    }
+}
+
+fn append_group_gap_zones(
+    layout: &Layout,
+    rects: &LayoutRects,
+    payload: DropPayload,
+    zones: &mut Vec<DropZoneRect>,
+    metrics: &DockMetrics,
+) {
+    for column in &rects.columns {
+        let mut groups: Vec<_> = rects
+            .groups
+            .iter()
+            .filter(|group| {
+                group.bounds.origin.x == column.bounds.origin.x
+                    && group.bounds.size.width == column.bounds.size.width
+                    && valid_rect(group.bounds)
+            })
+            .collect();
+        groups.sort_by(|left, right| {
+            left.bounds.origin.y.total_cmp(&right.bounds.origin.y)
+        });
+
+        for pair in groups.windows(2) {
+            let previous = pair[0];
+            let next = pair[1];
+            let gap_top = previous.bounds.origin.y + previous.bounds.size.height;
+            let gap_bottom = next.bounds.origin.y;
+            if gap_bottom <= gap_top {
+                continue;
+            }
+
+            // Use the splitter's wider logical hit zone when it corresponds to this
+            // physical gap; this keeps docking behavior forgiving without depending
+            // on how the separator is painted.
+            let gap_mid_y = (gap_top + gap_bottom) * 0.5;
+            let bounds = rects
+                .splitters
+                .iter()
+                .find(|splitter| {
+                    splitter.kind == SplitterKind::Group
+                        && splitter.bounds.origin.x == column.bounds.origin.x
+                        && splitter.bounds.size.width == column.bounds.size.width
+                        && gap_mid_y >= splitter.bounds.origin.y
+                        && gap_mid_y < splitter.bounds.origin.y + splitter.bounds.size.height
+                })
+                .map(|splitter| splitter.bounds)
+                .unwrap_or_else(|| {
+                    Rect::new(
+                        Point::new(column.bounds.origin.x, gap_top),
+                        Size::new(column.bounds.size.width, gap_bottom - gap_top),
+                    )
+                });
+
+            let target = DropTarget::Group {
+                group: next.group,
+                zone: DropZone::Top,
+            };
+            if valid_target(layout, payload, &target, metrics) {
+                push_zone(zones, target, bounds);
             }
         }
     }
@@ -802,6 +865,15 @@ mod tests {
             Some(DropTarget::Group {
                 group,
                 zone: DropZone::Bottom,
+            })
+        );
+
+        let next_group = group_id(&layout, "properties");
+        assert_eq!(
+            resolve_drop(&layout, Point::new(1100.0, 416.0), payload, &rects, &metrics),
+            Some(DropTarget::Group {
+                group: next_group,
+                zone: DropZone::Top,
             })
         );
     }
