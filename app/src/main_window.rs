@@ -6,7 +6,7 @@ use dock_core::{
     NodeId, PanelId, PanelKey, Point as DockPoint, Rect as DockRect, ResizeEdge, Size as DockSize,
     SplitterKind, SplitterRect, compute_rects, resolve_drop,
 };
-use dock_gpui::{DockGroupData, TabItem, dock_column_view, drop_overlay};
+use dock_gpui::{DockGroupData, TabItem, dock_column_view, drop_overlay, panel_content, panel_group_header};
 use gpui::{
     AnyElement, App, Context, FocusHandle, KeyDownEvent, MouseButton, MouseMoveEvent, MouseUpEvent,
     Pixels, Point as GpuiPoint, Render, ScrollHandle, Window, div, prelude::*, px, rgb,
@@ -330,9 +330,7 @@ impl MainWindow {
         }
         DockSize::new(
             minimum_width,
-            minimum_content_height
-                + self.metrics.column_header_height
-                + self.metrics.tab_strip_height,
+            minimum_content_height + self.metrics.column_header_height,
         )
     }
 
@@ -2051,7 +2049,6 @@ where
 {
     let colors = theme.colors;
     let metrics = theme.metrics;
-    let typography = theme.typography;
 
     let mut floating_groups: Vec<_> = layout
         .floating_groups()
@@ -2082,7 +2079,11 @@ where
                         .get(panel.key())
                         .map(|descriptor| descriptor.title().to_owned())
                         .unwrap_or_else(|| panel.key().as_str().to_owned());
-                    Some((index, panel_id, title, index == floating.active_index))
+                    Some(TabItem {
+                        panel_id,
+                        title,
+                        active: index == floating.active_index,
+                    })
                 })
                 .collect();
 
@@ -2149,50 +2150,7 @@ where
             )| {
                 let width = bounds.size.width.max(0.0);
                 let height = bounds.size.height.max(0.0);
-                let tab_height = metrics
-                    .tab_strip_height
-                    .max(0.0)
-                    .min((height - title_height).max(0.0));
-                let content_height = (height - title_height - tab_height).max(0.0);
-
-                let tab_elements = tabs.into_iter().map(|(index, panel_id, title, active)| {
-                    let activate = on_activate.clone();
-                    let start_drag = on_start_drag.clone();
-                    div()
-                        .id(format!("floating-tab-{floating_id:?}-{index}"))
-                        .flex_1()
-                        .min_w(px(0.0))
-                        .h(px(tab_height))
-                        .flex()
-                        .items_center()
-                        .px(px(metrics.content_padding))
-                        .bg(rgb(if active {
-                            colors.active_tab
-                        } else {
-                            colors.group_background
-                        }))
-                        .text_color(rgb(if active {
-                            colors.primary_text
-                        } else {
-                            colors.muted_text
-                        }))
-                        .text_size(px(typography.tab_size))
-                        .whitespace_nowrap()
-                        .overflow_hidden()
-                        .text_ellipsis()
-                        .cursor_pointer()
-                        .hover(|style| style.bg(rgb(colors.hover)))
-                        .on_mouse_down(MouseButton::Left, move |_, window, app| {
-                            start_drag(
-                                DropPayload::Panel(panel_id),
-                                window.mouse_position(),
-                                window,
-                                app,
-                            )
-                        })
-                        .on_click(move |_, _, app| activate(floating_id, index, app))
-                        .child(title)
-                });
+                let content_height = (height - title_height).max(0.0);
 
                 div()
                     .id(format!("floating-group-{floating_id:?}"))
@@ -2209,37 +2167,24 @@ where
                     .border_color(rgb(colors.border))
                     .child({
                         let begin_move = on_begin_interaction.clone();
-                        div()
-                            .w_full()
-                            .h(px(title_height))
-                            .flex()
-                            .items_center()
-                            .px(px(metrics.content_padding))
-                            .bg(rgb(colors.dock_background))
-                            .border_1()
-                            .border_color(rgb(colors.border))
-                            .text_size(px(typography.tab_size))
-                            .text_color(rgb(colors.muted_text))
-                            .cursor_move()
-                            .hover(|style| style.bg(rgb(colors.hover)))
-                            .on_mouse_down(MouseButton::Left, move |_, window, app| {
-                                begin_move(floating_id, None, window.mouse_position(), window, app)
-                            })
-                            .child(format!("Floating · {heading}"))
+                        let activate = on_activate.clone();
+                        let start_drag = on_start_drag.clone();
+                        panel_group_header(
+                            theme,
+                            width,
+                            format!("floating-group-{floating_id:?}"),
+                            title_height,
+                            tabs,
+                            true,
+                            move |tab_index, app| activate(floating_id, tab_index, app),
+                            move |panel_id, position, window, app| {
+                                start_drag(DropPayload::Panel(panel_id), position, window, app)
+                            },
+                            move |position, window, app| {
+                                begin_move(floating_id, None, position, window, app)
+                            },
+                        )
                     })
-                    .child(
-                        div()
-                            .w_full()
-                            .h(px(tab_height))
-                            .flex()
-                            .flex_row()
-                            .items_center()
-                            .overflow_hidden()
-                            .bg(rgb(colors.group_background))
-                            .border_1()
-                            .border_color(rgb(colors.border))
-                            .children(tab_elements),
-                    )
                     .child({
                         let focus = on_focus_floating.clone();
                         let content_id = active_panel_id
@@ -2247,44 +2192,17 @@ where
                             .unwrap_or_else(|| format!("floating-panel-content-{floating_id:?}"));
                         let content_scroll_handle = active_panel_id
                             .and_then(|panel_id| panel_content_scroll_handles.get(&panel_id));
-                        let content_view = div()
-                            .id(content_id)
-                            .w_full()
-                            .h(px(content_height))
-                            .flex()
-                            .flex_col()
-                            .px(px(metrics.content_padding))
-                            .py(px(metrics.content_padding))
-                            .bg(rgb(colors.group_background))
-                            .text_color(rgb(colors.primary_text))
-                            .child(
-                                div()
-                                    .w_full()
-                                    .flex_none()
-                                    .text_size(px(typography.title_size))
-                                    .whitespace_nowrap()
-                                    .overflow_hidden()
-                                    .text_ellipsis()
-                                    .child(heading),
-                            )
-                            .child(
-                                div()
-                                    .w_full()
-                                    .flex_none()
-                                    .text_size(px(typography.body_size))
-                                    .text_color(rgb(colors.muted_text))
-                                    .child(message),
-                            );
-                        let content_view = match (content_scrollable, content_scroll_handle) {
-                            (true, Some(handle)) => {
-                                content_view.overflow_y_scroll().track_scroll(handle)
-                            }
-                            _ => content_view.overflow_hidden(),
-                        };
-                        content_view
-                            .on_mouse_down(MouseButton::Left, move |_, _, app| {
-                                focus(floating_id, app)
-                            })
+                        panel_content(
+                            theme,
+                            width,
+                            content_height,
+                            heading,
+                            message,
+                            content_id,
+                            content_scrollable,
+                            content_scroll_handle,
+                            move |app| focus(floating_id, app),
+                        )
                     })
                     .children(
                         rects
