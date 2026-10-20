@@ -231,7 +231,7 @@ impl Layout {
             DockCommand::MovePanel { panel, target } => {
                 match target {
                     crate::command::DropTarget::FloatingGroup { floating, zone } => {
-                        self.move_panel_to_floating_group(panel, floating, zone)
+                        self.move_panel_to_floating_group(panel, floating, zone, metrics)
                     }
                     target => self.move_panel_to_existing_group(panel, target),
                 }
@@ -653,6 +653,7 @@ impl Layout {
         panel: PanelId,
         target_id: FloatingGroupId,
         zone: crate::command::DropZone,
+        metrics: &DockMetrics,
     ) -> Result<Vec<NodeId>, crate::command::CommandError> {
         use crate::command::{CommandError, DropZone};
 
@@ -673,6 +674,10 @@ impl Layout {
             }
             return Ok(Vec::new());
         }
+        let target_bounds = target_group.bounds;
+        let mut prospective_panels = target_group.panels.clone();
+        prospective_panels.push(panel);
+        self.validate_floating_rect(target_bounds, &prospective_panels, metrics)?;
 
         let dock_source = self.find_dock_group_for_panel(panel)
             .filter(|(group, _)| self.find_dock_group_location(*group).is_some());
@@ -745,6 +750,7 @@ impl Layout {
                         Err(CommandError::UnknownGroup(group))
                     };
                 };
+                self.ensure_group_accepts_panels_width(group, &source.panels, metrics)?;
                 let insert_at = tabs.panels.len();
                 let Some(Node::Tabs(tabs)) = self.nodes.get_mut(group) else {
                     return Err(CommandError::GroupNotTabs(group));
@@ -761,6 +767,7 @@ impl Layout {
                         Err(CommandError::UnknownGroup(group))
                     };
                 };
+                self.ensure_group_accepts_panels_width(group, &source.panels, metrics)?;
                 if index > tabs.panels.len() {
                     return Err(CommandError::InvalidTabIndex { group, index });
                 }
@@ -781,8 +788,13 @@ impl Layout {
                     return Err(CommandError::GroupNotTabs(group));
                 }
                 if zone == DropZone::Top || zone == DropZone::Bottom {
-                    let area_index = self.dock_areas.iter().position(|area| area.side == side)
-                        .ok_or(CommandError::UnknownGroup(group))?;
+                    self.ensure_group_accepts_panels_width(group, &source.panels, metrics)?;
+                    let area_index = self.dock_areas.iter().position(|area| {
+                        area.side == side
+                            && area.columns.get(column_index)
+                                .and_then(|column| column.groups.get(group_index))
+                                == Some(&group)
+                    }).ok_or(CommandError::UnknownGroup(group))?;
                     let new_group = self.insert_node(Node::Tabs(Tabs {
                         panels: source.panels.clone(),
                         active_index: source.active_index,
@@ -853,6 +865,7 @@ impl Layout {
                     self.ensure_column_fits_min_height(area_index, insert_at, metrics)?;
                     changed_nodes.push(new_group);
                 } else {
+                    self.ensure_panels_fit_column(&source.panels, area_index, column_index, metrics)?;
                     let new_group = self.insert_node(Node::Tabs(Tabs {
                         panels: source.panels.clone(),
                         active_index: source.active_index,
@@ -890,6 +903,8 @@ impl Layout {
                     self.ensure_column_fits_min_height(area_index, index, metrics)?;
                 } else {
                     self.dock_areas.push(DockArea { side, columns: vec![new_column] });
+                    let area_index = self.dock_areas.len() - 1;
+                    self.ensure_column_fits_min_height(area_index, 0, metrics)?;
                 }
                 changed_nodes.push(new_group);
             }
@@ -904,6 +919,12 @@ impl Layout {
                         "merging floating groups only supports the Center zone".to_owned(),
                     ));
                 }
+                let Some(target_group) = self.floating_groups.get(target_id) else {
+                    return Err(CommandError::UnknownFloatingGroup(target_id));
+                };
+                let mut prospective_panels = target_group.panels.clone();
+                prospective_panels.extend(source.panels.iter().copied());
+                self.validate_floating_rect(target_group.bounds, &prospective_panels, metrics)?;
                 let Some(target_group) = self.floating_groups.get_mut(target_id) else {
                     return Err(CommandError::UnknownFloatingGroup(target_id));
                 };
@@ -920,6 +941,83 @@ impl Layout {
 
         self.floating_groups.remove(floating_id);
         Ok(changed_nodes)
+    }
+
+    fn ensure_group_accepts_panels_width(
+        &self,
+        group_id: NodeId,
+        incoming_panels: &[PanelId],
+        metrics: &DockMetrics,
+    ) -> Result<(), crate::command::CommandError> {
+        use crate::command::CommandError;
+
+        let Some(Node::Tabs(tabs)) = self.nodes.get(group_id) else {
+            return if self.nodes.contains_key(group_id) {
+                Err(CommandError::GroupNotTabs(group_id))
+            } else {
+                Err(CommandError::UnknownGroup(group_id))
+            };
+        };
+        let Some((area_index, column_index)) = self.dock_areas.iter().enumerate()
+            .find_map(|(area_index, area)| {
+                area.columns.iter().position(|column| column.groups.contains(&group_id))
+                    .map(|column_index| (area_index, column_index))
+            })
+        else {
+            return Err(CommandError::UnknownGroup(group_id));
+        };
+
+        let mut all_panels = tabs.panels.clone();
+        all_panels.extend(incoming_panels.iter().copied());
+        self.ensure_panels_fit_column(&all_panels, area_index, column_index, metrics)
+    }
+
+    fn ensure_panels_fit_column(
+        &self,
+        panels: &[PanelId],
+        area_index: usize,
+        column_index: usize,
+        metrics: &DockMetrics,
+    ) -> Result<(), crate::command::CommandError> {
+        use crate::command::CommandError;
+
+        let Some(column) = self.dock_areas.get(area_index)
+            .and_then(|area| area.columns.get(column_index))
+        else {
+            return Err(CommandError::InvalidCommandParameter {
+                parameter: "column".to_owned(),
+                reason: "target column does not exist".to_owned(),
+            });
+        };
+        let base_minimum = match column.mode {
+            ColumnMode::Expanded => metrics.min_column_width,
+            ColumnMode::IconsAndLabels | ColumnMode::IconsOnly => metrics.rail_width,
+        };
+        let mut required_width = base_minimum;
+        for panel_id in panels {
+            let Some(panel) = self.panels.get(*panel_id) else {
+                return Err(CommandError::UnknownPanel(*panel_id));
+            };
+            if !panel_constraints_are_valid(panel.constraints()) {
+                return Err(CommandError::InvalidCommandParameter {
+                    parameter: "PanelConstraints".to_owned(),
+                    reason: "the panel's minimum, preferred, and maximum sizes are inconsistent".to_owned(),
+                });
+            }
+            required_width = required_width.max(panel.constraints().min_size().width);
+        }
+        if !column.width.is_finite() || column.width <= 0.0
+            || !required_width.is_finite()
+            || column.width + PIXEL_TOLERANCE < required_width
+        {
+            return Err(CommandError::InvalidCommandParameter {
+                parameter: "column width".to_owned(),
+                reason: format!(
+                    "target column must be at least {required_width:.3} logical px wide for the incoming panels"
+                ),
+            });
+        }
+        Ok(())
     }
 
     fn ensure_can_add_column(
