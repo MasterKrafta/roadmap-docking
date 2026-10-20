@@ -923,7 +923,9 @@ fn contains(bounds: Rect, point: Point) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{compute_drop_zones, contains, resolve_drop};
+    use super::{
+        GROUP_SPLIT_DROP_ZONE_MIN_HEIGHT, compute_drop_zones, contains, resolve_drop,
+    };
     use crate::{
         ColumnRef, DockCommand, DockMetrics, DockSide, DropPayload, DropTarget, DropZone,
         FloatSource, Layout, Node, Point, Profile, Rect, Size, SplitSide, SplitterKind, compute_rects,
