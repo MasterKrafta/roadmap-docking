@@ -1,5 +1,8 @@
+mod column_rect;
+mod dock_area_rect;
 mod dock_metrics;
 mod drop_zone_rect;
+mod group_rect;
 mod hit_result;
 mod layout_rects;
 mod point;
@@ -7,9 +10,14 @@ mod rect;
 mod resize_edge;
 mod size;
 mod splitter_kind;
+mod tab_strip_rect;
+mod compute_rects;
 
+pub use column_rect::ColumnRect;
+pub use dock_area_rect::DockAreaRect;
 pub use dock_metrics::DockMetrics;
 pub use drop_zone_rect::DropZoneRect;
+pub use group_rect::GroupRect;
 pub use hit_result::HitResult;
 pub use layout_rects::{
     ColumnHeaderRect, FloatingResizeEdgeRect, FloatingTitleRect, LayoutRects, PanelRect,
@@ -20,3 +28,5 @@ pub use rect::Rect;
 pub use resize_edge::ResizeEdge;
 pub use size::Size;
 pub use splitter_kind::SplitterKind;
+pub use tab_strip_rect::TabStripRect;
+pub use compute_rects::compute_rects;
