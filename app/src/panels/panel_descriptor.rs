@@ -15,7 +15,7 @@ use super::{
 pub struct PanelDescriptor {
     key: PanelKey,
     title: String,
-    icon: Option<IconResource>,
+    icon: IconResource,
     constraints: PanelConstraints,
     allowed_areas: Vec<AllowedArea>,
     content_factory: PanelContentFactory,
@@ -27,7 +27,7 @@ impl PanelDescriptor {
     pub fn new(
         key: PanelKey,
         title: impl Into<String>,
-        icon: Option<IconResource>,
+        icon: IconResource,
         constraints: PanelConstraints,
         allowed_areas: Vec<AllowedArea>,
         content_factory: PanelContentFactory,
@@ -52,8 +52,8 @@ impl PanelDescriptor {
         &self.title
     }
 
-    pub fn icon(&self) -> Option<&IconResource> {
-        self.icon.as_ref()
+    pub fn icon(&self) -> &IconResource {
+        &self.icon
     }
 
     pub const fn constraints(&self) -> PanelConstraints {
