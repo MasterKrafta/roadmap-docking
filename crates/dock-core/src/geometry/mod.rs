@@ -3,6 +3,7 @@ mod dock_area_rect;
 mod dock_metrics;
 mod drop_zone_rect;
 mod group_rect;
+mod floating_group_rect;
 mod hit_result;
 mod layout_rects;
 mod point;
@@ -18,6 +19,7 @@ pub use dock_area_rect::DockAreaRect;
 pub use dock_metrics::DockMetrics;
 pub use drop_zone_rect::DropZoneRect;
 pub use group_rect::GroupRect;
+pub use floating_group_rect::FloatingGroupRect;
 pub use hit_result::HitResult;
 pub use layout_rects::{
     ColumnHeaderRect, FloatingResizeEdgeRect, FloatingTitleRect, LayoutRects, PanelRect,
