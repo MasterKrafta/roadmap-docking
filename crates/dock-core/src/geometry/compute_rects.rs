@@ -20,7 +20,8 @@ pub fn compute_rects(layout: &Layout, window: Size, metrics: &DockMetrics) -> La
     let header_height = nonnegative_finite(metrics.column_header_height).min(window_height);
     let tab_strip_height = nonnegative_finite(metrics.tab_strip_height);
     let splitter_thickness = nonnegative_finite(metrics.splitter_thickness);
-    let splitter_hit_zone = nonnegative_finite(metrics.splitter_hit_zone);
+    let group_splitter_hit_zone = nonnegative_finite(metrics.splitter_hit_zone).min(window_height);
+    let column_splitter_hit_zone = nonnegative_finite(metrics.splitter_hit_zone).min(window_width);
 
     let left_width = side_width(layout, DockSide::Left);
     let right_width = side_width(layout, DockSide::Right);
@@ -176,9 +177,9 @@ pub fn compute_rects(layout: &Layout, window: Size, metrics: &DockMetrics) -> La
                         bounds: Rect::new(
                             Point::new(
                                 column_x,
-                                finite_position_add(y, (splitter_thickness - splitter_hit_zone) * 0.5),
+                                finite_position_add(y, (splitter_thickness - group_splitter_hit_zone) * 0.5),
                             ),
-                            Size::new(column_width, splitter_hit_zone),
+                            Size::new(column_width, group_splitter_hit_zone),
                         ),
                     });
                     group_splitter_index += 1;
@@ -196,8 +197,8 @@ pub fn compute_rects(layout: &Layout, window: Size, metrics: &DockMetrics) -> La
             kind: SplitterKind::Column,
             index,
             bounds: Rect::new(
-                Point::new(finite_position_add(x, -splitter_hit_zone * 0.5), 0.0),
-                Size::new(splitter_hit_zone, window_height),
+                Point::new(finite_position_add(x, -column_splitter_hit_zone * 0.5), 0.0),
+                Size::new(column_splitter_hit_zone, window_height),
             ),
         });
     }
@@ -520,21 +521,21 @@ fn append_floating_resize_edges(
         (
             ResizeEdge::Top,
             Rect::new(
-                Point::new(bounds.origin.x + corner_width, bounds.origin.y),
+                Point::new(finite_position_add(bounds.origin.x, corner_width), bounds.origin.y),
                 Size::new(inner_width, hit),
             ),
         ),
         (
             ResizeEdge::Right,
             Rect::new(
-                Point::new(right - hit, bounds.origin.y + corner_height),
+                Point::new(right - hit, finite_position_add(bounds.origin.y, corner_height)),
                 Size::new(hit, inner_height),
             ),
         ),
         (
             ResizeEdge::Bottom,
             Rect::new(
-                Point::new(bounds.origin.x + corner_width, bottom - hit),
+                Point::new(finite_position_add(bounds.origin.x, corner_width), bottom - hit),
                 Size::new(inner_width, hit),
             ),
         ),
@@ -790,12 +791,21 @@ mod tests {
         let rects = compute_rects(&layout, Size::new(f32::NAN, f32::INFINITY), &metrics);
         assert_eq!(rects.canvas.size, Size::new(0.0, 0.0));
         assert!(rects.floating_groups.iter().all(|group| group.bounds.size == Size::new(0.0, 0.0)));
-        for bounds in std::iter::once(rects.canvas)
+        let all_bounds: Vec<Rect> = std::iter::once(rects.canvas)
             .chain(rects.dock_areas.iter().map(|area| area.bounds))
             .chain(rects.columns.iter().map(|column| column.bounds))
+            .chain(rects.column_headers.iter().map(|header| header.bounds))
             .chain(rects.groups.iter().map(|group| group.bounds))
+            .chain(rects.tab_strips.iter().map(|strip| strip.bounds))
+            .chain(rects.tab_headers.iter().map(|header| header.bounds))
+            .chain(rects.panels.iter().map(|panel| panel.bounds))
+            .chain(rects.splitters.iter().map(|splitter| splitter.bounds))
             .chain(rects.floating_groups.iter().map(|group| group.bounds))
-        {
+            .chain(rects.floating_titles.iter().map(|title| title.bounds))
+            .chain(rects.floating_resize_edges.iter().map(|edge| edge.bounds))
+            .collect();
+        for bounds in all_bounds {
+            assert!(bounds.origin.x.is_finite() && bounds.origin.y.is_finite());
             assert!(bounds.size.width.is_finite() && bounds.size.width >= 0.0);
             assert!(bounds.size.height.is_finite() && bounds.size.height >= 0.0);
         }
