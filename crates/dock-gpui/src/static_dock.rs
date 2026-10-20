@@ -76,6 +76,7 @@ pub fn dock_column_view(
             content_id,
             content_scrollable,
             content_scroll_handle,
+            |_| {},
         );
 
         div()
@@ -194,19 +195,30 @@ pub fn dock_group_view(
         .child(content)
 }
 
-/// Draw tabs, flexible empty space, and a disabled group-menu glyph.
-pub fn tab_strip(
+/// Draw one reusable panel-group header.
+///
+/// Docked groups show tabs, a free drag area, and the group menu. A floating panel
+/// is also a column, so its header includes the column controls before the same tabs.
+pub fn panel_group_header<OnActivate, OnStartTabDrag, OnStartGroupDrag>(
     theme: &Theme,
     width: f32,
-    group_id: NodeId,
+    id_prefix: String,
     height: f32,
     tabs: Vec<TabItem>,
-    on_activate: impl Fn(NodeId, usize, &mut App) + Clone + 'static,
-    on_start_drag: impl Fn(DropPayload, GpuiPoint<Pixels>, &mut Window, &mut App) + Clone + 'static,
-) -> impl IntoElement {
+    show_column_controls: bool,
+    on_activate: OnActivate,
+    on_start_tab_drag: OnStartTabDrag,
+    on_start_group_drag: OnStartGroupDrag,
+) -> impl IntoElement
+where
+    OnActivate: Fn(usize, &mut App) + Clone + 'static,
+    OnStartTabDrag: Fn(PanelId, GpuiPoint<Pixels>, &mut Window, &mut App) + Clone + 'static,
+    OnStartGroupDrag: Fn(GpuiPoint<Pixels>, &mut Window, &mut App) + Clone + 'static,
+{
     let colors = theme.colors;
     let metrics = theme.metrics;
     let typography = theme.typography;
+    let tab_id_prefix = id_prefix.clone();
 
     let tab_elements = tabs.into_iter().enumerate().map(|(index, tab)| {
         let background = if tab.active {
@@ -220,11 +232,11 @@ pub fn tab_strip(
             colors.muted_text
         };
         let activate = on_activate.clone();
-        let start_drag = on_start_drag.clone();
+        let start_drag = on_start_tab_drag.clone();
         let panel_id = tab.panel_id;
 
         div()
-            .id(format!("dock-tab-{group_id:?}-{index}"))
+            .id(format!("panel-group-tab-{tab_id_prefix}-{index}"))
             .flex_1()
             .min_w(px(0.0))
             .h_full()
@@ -239,19 +251,15 @@ pub fn tab_strip(
             .text_ellipsis()
             .cursor_pointer()
             .hover(|style| style.bg(rgb(colors.hover)))
-            .on_click(move |_, _, app| activate(group_id, index, app))
+            .on_click(move |_, _, app| activate(index, app))
             .on_mouse_down(MouseButton::Left, move |_, window, app| {
-                start_drag(
-                    DropPayload::Panel(panel_id),
-                    window.mouse_position(),
-                    window,
-                    app,
-                )
+                start_drag(panel_id, window.mouse_position(), window, app)
             })
             .child(tab.title)
     });
 
-    div()
+    let header = div()
+        .id(format!("panel-group-header-{id_prefix}"))
         .w(px(width))
         .h(px(height.max(0.0)))
         .flex()
@@ -260,32 +268,67 @@ pub fn tab_strip(
         .px(px(metrics.content_padding))
         .bg(rgb(colors.group_background))
         .border_1()
-        .border_color(rgb(colors.border))
+        .border_color(rgb(colors.border));
+
+    let header = if show_column_controls {
+        header
+            .child(static_button(theme, "»", colors.dock_background))
+            .child(static_button(theme, "×", colors.dock_background))
+    } else {
+        header
+    };
+
+    header
         .children(tab_elements)
-        // The blank area is the explicit capture zone for detaching the entire group.
-        // Individual tabs keep their own Panel drag payloads; this handle uses Group.
+        // The free area is the group drag handle: docked groups detach, floating groups move.
         .child({
-            let start_group_drag = on_start_drag.clone();
+            let start_group_drag = on_start_group_drag.clone();
             div()
-                .id(format!("dock-group-drag-handle-{group_id:?}"))
+                .id(format!("panel-group-drag-handle-{id_prefix}"))
                 .flex_1()
                 .h_full()
                 .cursor_move()
                 .hover(|style| style.bg(rgb(colors.hover)))
                 .on_mouse_down(MouseButton::Left, move |_, window, app| {
-                    start_group_drag(
-                        DropPayload::Group(group_id),
-                        window.mouse_position(),
-                        window,
-                        app,
-                    )
+                    start_group_drag(window.mouse_position(), window, app)
                 })
         })
         .child(static_button(theme, "≡", colors.group_background))
 }
 
+/// Draw a docked tab strip using the shared panel-group header implementation.
+pub fn tab_strip(
+    theme: &Theme,
+    width: f32,
+    group_id: NodeId,
+    height: f32,
+    tabs: Vec<TabItem>,
+    on_activate: impl Fn(NodeId, usize, &mut App) + Clone + 'static,
+    on_start_drag: impl Fn(DropPayload, GpuiPoint<Pixels>, &mut Window, &mut App) + Clone + 'static,
+) -> impl IntoElement {
+    let activate = on_activate.clone();
+    let start_drag_for_tabs = on_start_drag.clone();
+    let start_drag_for_group = on_start_drag;
+
+    panel_group_header(
+        theme,
+        width,
+        format!("dock-group-{group_id:?}"),
+        height,
+        tabs,
+        false,
+        move |index, app| activate(group_id, index, app),
+        move |panel, position, window, app| {
+            start_drag_for_tabs(DropPayload::Panel(panel), position, window, app)
+        },
+        move |position, window, app| {
+            start_drag_for_group(DropPayload::Group(group_id), position, window, app)
+        },
+    )
+}
+
 /// Render a panel's content. Scrolling is opt-in and applies only to this content area.
-pub fn panel_content(
+pub fn panel_content<OnMouseDown>(
     theme: &Theme,
     width: f32,
     height: f32,
@@ -294,7 +337,11 @@ pub fn panel_content(
     content_id: String,
     scrollable: bool,
     scroll_handle: Option<&ScrollHandle>,
-) -> AnyElement {
+    on_mouse_down: OnMouseDown,
+) -> AnyElement
+where
+    OnMouseDown: Fn(&mut App) + Clone + 'static,
+{
     let colors = theme.colors;
     let metrics = theme.metrics;
     let typography = theme.typography;
@@ -327,6 +374,9 @@ pub fn panel_content(
                 .text_color(rgb(colors.muted_text))
                 .child(message),
         );
+
+    let on_mouse_down = on_mouse_down.clone();
+    let content = content.on_mouse_down(move |_, _, app| on_mouse_down(app));
 
     match (scrollable, scroll_handle) {
         (true, Some(handle)) => content
