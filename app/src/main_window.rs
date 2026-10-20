@@ -766,6 +766,7 @@ impl MainWindow {
                             zone: DropZone::Center,
                             ..
                         }
+                        | DropTarget::FreeArea { .. }
                 ),
             };
 
@@ -794,6 +795,21 @@ impl MainWindow {
                     (DropPayload::Panel(panel), target) => self
                         .layout
                         .apply(DockCommand::MovePanel { panel, target }, &self.metrics),
+                    (DropPayload::FloatingGroup(floating), DropTarget::FreeArea { .. }) => {
+                        let Some(drag) = self.floating_drag.filter(|drag| drag.floating == floating)
+                        else {
+                            self.floating_drag = None;
+                            cx.notify();
+                            return;
+                        };
+                        self.layout.apply(
+                            DockCommand::MoveFloating {
+                                floating,
+                                rect: drag.current_bounds,
+                            },
+                            &self.metrics,
+                        )
+                    }
                     (DropPayload::FloatingGroup(floating), target) => self.layout.apply(
                         DockCommand::DockFloating { floating, target },
                         &self.metrics,
