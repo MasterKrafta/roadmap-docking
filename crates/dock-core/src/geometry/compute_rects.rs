@@ -782,14 +782,24 @@ mod tests {
         let second_panel = panel_id(&layout, "properties");
         let requested = rect(1200.0, 760.0, 320.0, 240.0);
 
-        layout.apply(
-            DockCommand::Float { source: FloatSource::Panel(first_panel), rect: requested },
-            &metrics,
-        ).expect("first panel should float");
-        layout.apply(
-            DockCommand::Float { source: FloatSource::Panel(second_panel), rect: requested },
-            &metrics,
-        ).expect("second panel should float");
+        layout
+            .apply(
+                DockCommand::Float {
+                    source: FloatSource::Panel(first_panel),
+                    rect: requested,
+                },
+                &metrics,
+            )
+            .expect("first panel should float");
+        layout
+            .apply(
+                DockCommand::Float {
+                    source: FloatSource::Panel(second_panel),
+                    rect: requested,
+                },
+                &metrics,
+            )
+            .expect("second panel should float");
 
         let first_id = floating_id_for_panel(&layout, first_panel);
         let second_id = floating_id_for_panel(&layout, second_panel);
@@ -832,13 +842,15 @@ mod tests {
         let metrics = metrics();
         let mut layout = Layout::initial_photoshop(&metrics).expect("initial layout");
         let panel = panel_id(&layout, "layers");
-        layout.apply(
-            DockCommand::Float {
-                source: FloatSource::Panel(panel),
-                rect: rect(10.0, 10.0, 320.0, 240.0),
-            },
-            &metrics,
-        ).expect("valid initial floating rectangle");
+        layout
+            .apply(
+                DockCommand::Float {
+                    source: FloatSource::Panel(panel),
+                    rect: rect(10.0, 10.0, 320.0, 240.0),
+                },
+                &metrics,
+            )
+            .expect("valid initial floating rectangle");
         let rects = compute_rects(&layout, Size::new(f32::NAN, f32::INFINITY), &metrics);
         assert_eq!(rects.canvas.size, Size::new(0.0, 0.0));
         assert!(rects.floating_groups.iter().all(|group| group.bounds.size == Size::new(0.0, 0.0)));
