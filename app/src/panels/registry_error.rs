@@ -17,6 +17,10 @@ pub enum RegistryError {
         key: PanelKey,
         area: AllowedArea,
     },
+    UnsupportedOpenTarget {
+        key: PanelKey,
+        target: &'static str,
+    },
 }
 
 impl fmt::Display for RegistryError {
@@ -29,6 +33,9 @@ impl fmt::Display for RegistryError {
             }
             Self::AreaNotAllowed { key, area } => {
                 write!(formatter, "panel {key:?} does not allow placement in {area:?}")
+            }
+            Self::UnsupportedOpenTarget { key, target } => {
+                write!(formatter, "OpenPanel does not support target {target} for panel {key:?}")
             }
         }
     }
