@@ -2591,6 +2591,25 @@ mod tests {
         let widths_before: Vec<f32> = layout.dock_areas()[0].columns.iter().map(|column| column.width).collect();
         let version_before = layout.version();
 
+        for delta in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let error = layout.apply(
+                DockCommand::ResizeColumnBoundary {
+                    first: ColumnRef::new(DockSide::Right, 0),
+                    second: ColumnRef::new(DockSide::Right, 1),
+                    delta,
+                },
+                &metrics,
+            ).expect_err("non-finite boundary delta must be rejected");
+            assert!(matches!(error, CommandError::InvalidCommandParameter { ref parameter, .. }
+                if parameter == "delta"));
+            assert_eq!(layout.version(), version_before);
+            assert_eq!(
+                layout.dock_areas()[0].columns.iter().map(|column| column.width).collect::<Vec<_>>(),
+                widths_before
+            );
+            assert!(layout.validate(&metrics).is_ok());
+        }
+
         for (first, second) in [
             (ColumnRef::new(DockSide::Right, 0), ColumnRef::new(DockSide::Right, 2)),
             (ColumnRef::new(DockSide::Right, 1), ColumnRef::new(DockSide::Right, 0)),
