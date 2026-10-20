@@ -5,6 +5,10 @@ use crate::model::{DockSide, Layout, Node};
 
 use super::DropPayload;
 
+// A wider hover band makes horizontal splitting easier to target than the resize handle alone.
+// The preview remains anchored to the actual splitter rectangle.
+const GROUP_SPLIT_DROP_ZONE_MIN_HEIGHT: f32 = 24.0;
+
 /// Build data-only rectangles for the docking overlay.
 ///
 /// The vector is ordered by hit-test priority: floating groups (front to back),
@@ -366,8 +370,10 @@ fn append_group_splitter_zones(
                 continue;
             }
 
-            // Use the actual splitter hit rectangle (which may be wider than the
-            // visible separator), not top/bottom bands inside either adjacent group.
+            // Anchor the split target on the actual separator, but make the hover
+            // band wider than the resize handle. Clip it to the adjacent group
+            // centers so it cannot consume either group's whole center target or
+            // overlap a neighboring split target.
             let Some(splitter) = rects.splitters.iter().find(|splitter| {
                 splitter.kind == SplitterKind::Group
                     && splitter.bounds.origin.x == column.bounds.origin.x
@@ -381,12 +387,25 @@ fn append_group_splitter_zones(
                 continue;
             };
 
+            let splitter_center_y =
+                splitter.bounds.origin.y + splitter.bounds.size.height * 0.5;
+            let desired_height =
+                GROUP_SPLIT_DROP_ZONE_MIN_HEIGHT.max(splitter.bounds.size.height);
+            let top_limit = previous.bounds.origin.y + previous.bounds.size.height * 0.5;
+            let bottom_limit = next.bounds.origin.y + next.bounds.size.height * 0.5;
+            let top = (splitter_center_y - desired_height * 0.5).max(top_limit);
+            let bottom = (splitter_center_y + desired_height * 0.5).min(bottom_limit);
+            let drop_bounds = Rect::new(
+                Point::new(splitter.bounds.origin.x, top),
+                Size::new(splitter.bounds.size.width, (bottom - top).max(0.0)),
+            );
+
             let target = DropTarget::Group {
                 group: next.group,
                 zone: DropZone::Top,
             };
             if valid_target(layout, payload, &target, metrics) {
-                push_zone(zones, target, splitter.bounds);
+                push_zone(zones, target, drop_bounds);
             }
         }
     }
@@ -1033,7 +1052,37 @@ mod tests {
                 group: next_group,
                 zone: DropZone::Top,
             }),
-            "the drop target is the actual group splitter, not a band above or below it"
+            "the center of the visible group splitter resolves to a split target"
+        );
+        for offset in [-10.0, 10.0] {
+            assert_eq!(
+                resolve_drop(
+                    &layout,
+                    Point::new(splitter_center.x, splitter_center.y + offset),
+                    payload,
+                    &rects,
+                    &metrics,
+                ),
+                Some(DropTarget::Group {
+                    group: next_group,
+                    zone: DropZone::Top,
+                }),
+                "the wider split target should remain stable just above and below the visible separator"
+            );
+        }
+        assert_eq!(
+            resolve_drop(
+                &layout,
+                Point::new(splitter_center.x, splitter_center.y + 14.0),
+                payload,
+                &rects,
+                &metrics,
+            ),
+            Some(DropTarget::Group {
+                group: next_group,
+                zone: DropZone::Center,
+            }),
+            "the center target remains available outside the widened split band"
         );
         let split_zone = compute_drop_zones(&layout, &rects, payload, &metrics)
             .into_iter()
@@ -1045,7 +1094,19 @@ mod tests {
                     })
             })
             .expect("group split target should be advertised");
-        assert_eq!(split_zone.bounds, splitter.bounds);
+        assert_eq!(split_zone.bounds.origin.x, splitter.bounds.origin.x);
+        assert_eq!(split_zone.bounds.size.width, splitter.bounds.size.width);
+        assert_eq!(
+            split_zone.bounds.size.height,
+            GROUP_SPLIT_DROP_ZONE_MIN_HEIGHT.max(splitter.bounds.size.height)
+        );
+        assert!(
+            (split_zone.bounds.origin.y + split_zone.bounds.size.height * 0.5
+                - splitter_center.y)
+                .abs()
+                < 0.001,
+            "the wider hit zone stays centered on the actual splitter"
+        );
 
         let zones = compute_drop_zones(&layout, &rects, payload, &metrics);
         let top_column_zone = zones
@@ -1081,9 +1142,19 @@ mod tests {
                     }
                 ))
                 .all(|zone| rects.splitters.iter().any(|splitter| {
-                    splitter.kind == SplitterKind::Group && splitter.bounds == zone.bounds
+                    if splitter.kind != SplitterKind::Group
+                        || splitter.bounds.origin.x != zone.bounds.origin.x
+                        || splitter.bounds.size.width != zone.bounds.size.width
+                    {
+                        return false;
+                    }
+                    let splitter_center_y =
+                        splitter.bounds.origin.y + splitter.bounds.size.height * 0.5;
+                    let zone_center_y = zone.bounds.origin.y + zone.bounds.size.height * 0.5;
+                    (splitter_center_y - zone_center_y).abs() < 0.001
+                        && zone.bounds.size.height >= splitter.bounds.size.height
                 })),
-            "group top/bottom targets must only occupy actual group splitter hit areas"
+            "group top/bottom targets must be centered on a real splitter"
         );
     }
 
