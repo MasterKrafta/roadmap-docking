@@ -103,6 +103,8 @@ mod tests {
             assert_pixel_aligned(snapped.origin.y, scale);
             assert_pixel_aligned(snapped.origin.x + snapped.size.width, scale);
             assert_pixel_aligned(snapped.origin.y + snapped.size.height, scale);
+            assert_pixel_aligned(snapped.size.width, scale);
+            assert_pixel_aligned(snapped.size.height, scale);
             assert!(snapped.size.width >= 0.0 && snapped.size.height >= 0.0);
         }
     }
