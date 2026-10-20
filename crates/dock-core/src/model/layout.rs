@@ -204,6 +204,22 @@ impl Layout {
                 tabs.active_index = index;
                 Ok(vec![group])
             }
+            DockCommand::ActivateFloatingTab { floating, index } => {
+                let Some(group) = self.floating_groups.get_mut(floating) else {
+                    return Err(CommandError::UnknownFloatingGroup(floating));
+                };
+                if index >= group.panels.len() {
+                    return Err(CommandError::InvalidCommandParameter {
+                        parameter: "floating tab index".to_owned(),
+                        reason: format!(
+                            "index {index} must be smaller than floating group tab count {}",
+                            group.panels.len()
+                        ),
+                    });
+                }
+                group.active_index = index;
+                Ok(Vec::new())
+            }
             DockCommand::ReorderTab { group, from, to } => {
                 let Some(node) = self.nodes.get_mut(group) else {
                     return Err(CommandError::UnknownGroup(group));
@@ -286,6 +302,7 @@ impl Layout {
                     DockCommand::OpenPanel { .. } => "OpenPanel",
                     DockCommand::ClosePanel { .. } => "ClosePanel",
                     DockCommand::CloseGroup { .. } => "CloseGroup",
+                    DockCommand::ActivateFloatingTab { .. } => "ActivateFloatingTab",
                     DockCommand::ActivateTab { .. } => "ActivateTab",
                     DockCommand::ReorderTab { .. } => "ReorderTab",
                     DockCommand::MovePanel { .. } => "MovePanel",
@@ -576,6 +593,8 @@ impl Layout {
                     };
                 }
                 self.validate_floating_rect(rect, &[panel], metrics)?;
+                // Keep the prior dock position so closing this floating panel can restore it.
+                self.remember_panel_location(panel, group);
                 let Some(Node::Tabs(tabs)) = self.nodes.get_mut(group) else {
                     return Err(CommandError::GroupNotTabs(group));
                 };
@@ -613,6 +632,11 @@ impl Layout {
                     None => return Err(CommandError::UnknownGroup(group)),
                 };
                 self.validate_floating_rect(rect, &panels, metrics)?;
+                // Preserve a per-panel fallback to this group's former dock location.
+                // If the floating group is later closed, each panel can return here.
+                for panel in &panels {
+                    self.remember_panel_location(*panel, group);
+                }
                 let column = self
                     .dock_areas
                     .get_mut(area_index)
@@ -4521,4 +4545,126 @@ mod tests {
         );
         assert!(layout.validate(&metrics).is_ok());
     }
+
+    #[test]
+    fn activating_a_floating_tab_updates_the_existing_group_without_duplicating_panels() {
+        use crate::{DockCommand, DropTarget, DropZone, FloatSource};
+
+        let metrics = metrics();
+        let mut layout = initial_layout();
+        let group_a = tab_group_id(&layout, 0, 0);
+        let group_b = tab_group_id(&layout, 0, 1);
+        let panel_a = match layout.nodes().get(group_a).expect("first group exists") {
+            Node::Tabs(tabs) => tabs.panels[0],
+            Node::Split(_) => panic!("Photoshop dock groups must be Tabs"),
+        };
+        let panel_b = match layout.nodes().get(group_b).expect("second group exists") {
+            Node::Tabs(tabs) => tabs.panels[0],
+            Node::Split(_) => panic!("Photoshop dock groups must be Tabs"),
+        };
+        let rect = floating_rect(0.0, 0.0, 300.0, 180.0);
+
+        layout
+            .apply(
+                DockCommand::Float {
+                    source: FloatSource::Panel(panel_a),
+                    rect,
+                },
+                &metrics,
+            )
+            .expect("first panel should float");
+        layout
+            .apply(
+                DockCommand::Float {
+                    source: FloatSource::Panel(panel_b),
+                    rect,
+                },
+                &metrics,
+            )
+            .expect("second panel should float");
+        let floating = floating_id_for_panel(&layout, panel_a);
+
+        layout
+            .apply(
+                DockCommand::MovePanel {
+                    panel: panel_b,
+                    target: DropTarget::FloatingGroup {
+                        floating,
+                        zone: DropZone::Center,
+                    },
+                },
+                &metrics,
+            )
+            .expect("second panel should join the existing floating group");
+
+        let count_before = layout.panels().len();
+        layout
+            .apply(
+                DockCommand::ActivateFloatingTab { floating, index: 1 },
+                &metrics,
+            )
+            .expect("existing floating tabs can be activated");
+
+        let group = layout
+            .floating_groups()
+            .get(floating)
+            .expect("floating group remains");
+        assert_eq!(group.active_index, 1);
+        assert_eq!(group.panels, vec![panel_a, panel_b]);
+        assert_eq!(layout.panels().len(), count_before);
+        assert!(layout.validate(&metrics).is_ok());
+    }
+
+    #[test]
+    fn closing_a_floating_panel_restores_its_last_dock_location() {
+        use crate::{DockCommand, FloatSource};
+
+        let metrics = metrics();
+        let mut layout = initial_layout();
+        let group = tab_group_id(&layout, 0, 0);
+        let panel = match layout.nodes().get(group).expect("group exists") {
+            Node::Tabs(tabs) => tabs.panels[0],
+            Node::Split(_) => panic!("Photoshop dock groups must be Tabs"),
+        };
+        let instance = layout.panels().get(panel).expect("panel instance exists");
+        let key = instance.key().to_owned();
+        let constraints = (*instance.constraints()).clone();
+
+        layout
+            .apply(
+                DockCommand::Float {
+                    source: FloatSource::Panel(panel),
+                    rect: floating_rect(0.0, 0.0, 300.0, 180.0),
+                },
+                &metrics,
+            )
+            .expect("panel should float");
+        layout
+            .apply(DockCommand::ClosePanel { panel }, &metrics)
+            .expect("floating panel should close");
+
+        layout
+            .apply(
+                DockCommand::OpenPanel {
+                    key: key.clone(),
+                    constraints,
+                    target: None,
+                },
+                &metrics,
+            )
+            .expect("closed panel should reopen");
+
+        let reopened = layout
+            .panels()
+            .iter()
+            .find_map(|(panel_id, instance)| (instance.key() == &key).then_some(panel_id))
+            .expect("reopened panel instance exists");
+        let restored_group = layout.nodes().iter().find_map(|(group_id, node)| match node {
+            Node::Tabs(tabs) if tabs.panels.contains(&reopened) => Some(group_id),
+            Node::Tabs(_) | Node::Split(_) => None,
+        });
+        assert_eq!(restored_group, Some(group));
+        assert!(layout.validate(&metrics).is_ok());
+    }
+
 }

@@ -25,6 +25,11 @@ pub enum DockCommand {
     CloseGroup {
         group: NodeId,
     },
+    /// Make the tab at the zero-based index active in a floating group.
+    ActivateFloatingTab {
+        floating: FloatingGroupId,
+        index: usize,
+    },
     /// Make the tab at the zero-based index active.
     ActivateTab {
         group: NodeId,
