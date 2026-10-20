@@ -926,7 +926,7 @@ mod tests {
         let rects = geometry(&layout, &metrics);
         let zones = compute_drop_zones(&layout, &rects, payload, &metrics);
         assert!(zones.iter().all(|zone| !matches!(
-            zone.target,
+            &zone.target,
             DropTarget::DockEdge { .. } | DropTarget::Column { .. }
         )));
         assert!(!matches!(
@@ -1111,7 +1111,7 @@ mod tests {
         )
         .iter()
         .any(|zone| matches!(
-            zone.target,
+            &zone.target,
             DropTarget::Group { zone: DropZone::Left | DropZone::Right, .. }
         )));
 
@@ -1132,8 +1132,8 @@ mod tests {
         )
         .iter()
         .any(|zone| matches!(
-            zone.target,
-            DropTarget::Group { group, .. } if group == missing_group
+            &zone.target,
+            DropTarget::Group { group, .. } if *group == missing_group
         )));
 
         let empty = Layout::new(Profile::Photoshop, crate::CanvasState::default());
