@@ -330,36 +330,27 @@ fn append_group_zones(
             continue;
         }
         let bounds = group_rect.bounds;
-        let strip_height = rects
+        let strip = rects
             .tab_strips
             .iter()
             .find(|strip| strip.group == group_rect.group)
-            .filter(|strip| valid_rect(strip.bounds))
-            .map(|strip| {
-                let target = DropTarget::Group {
-                    group: group_rect.group,
-                    zone: DropZone::Center,
-                };
-                if valid_target(layout, payload, &target, metrics) {
-                    push_zone(zones, target, strip.bounds);
-                }
-                strip.bounds.size.height.max(0.0).min(bounds.size.height)
-            })
+            .filter(|strip| valid_rect(strip.bounds));
+        let strip_height = strip
+            .map(|strip| strip.bounds.size.height.max(0.0).min(bounds.size.height))
             .unwrap_or(0.0);
         let content_top = bounds.origin.y + strip_height;
-        let content_height = (bounds.size.height - strip_height).max(0.0);
-        if content_height <= 0.0 {
-            continue;
-        }
+        let content_bottom = bounds.origin.y + bounds.size.height;
 
         let horizontal_edge = edge.min(bounds.size.width * 0.5);
-        let vertical_edge = edge.min(content_height / 3.0);
+        // The top/bottom hit areas must start/end at the same group edges as their
+        // visible indicators, even when a tab strip occupies the top of the group.
+        let vertical_edge = edge.min(bounds.size.height / 3.0);
 
-        // Split zones cover panel content below the tab strip. The full strip itself
-        // is a center target; outer column-edge zones still take priority.
+        // Keep outer column-edge zones first. Group top/bottom zones then precede the
+        // center tab-strip target so the horizontal indicator's hit area matches its line.
         let zone_width = bounds.size.width;
         let top_bounds = Rect::new(
-            Point::new(bounds.origin.x, content_top),
+            bounds.origin,
             Size::new(zone_width, vertical_edge),
         );
         let bottom_bounds = Rect::new(
@@ -382,14 +373,23 @@ fn append_group_zones(
             }
         }
 
+        if let Some(strip) = strip {
+            let target = DropTarget::Group {
+                group: group_rect.group,
+                zone: DropZone::Center,
+            };
+            if valid_target(layout, payload, &target, metrics) {
+                push_zone(zones, target, strip.bounds);
+            }
+        }
+
+        let center_top = content_top.max(bounds.origin.y + vertical_edge);
+        let center_bottom = content_bottom - vertical_edge;
         let center_bounds = Rect::new(
-            Point::new(
-                bounds.origin.x + horizontal_edge,
-                content_top + vertical_edge,
-            ),
+            Point::new(bounds.origin.x + horizontal_edge, center_top),
             Size::new(
                 (bounds.size.width - horizontal_edge * 2.0).max(0.0),
-                (content_height - vertical_edge * 2.0).max(0.0),
+                (center_bottom - center_top).max(0.0),
             ),
         );
         let target = DropTarget::Group {
@@ -959,14 +959,15 @@ mod tests {
             resolve_drop(&layout, Point::new(1100.0, 40.0), payload, &rects, &metrics),
             Some(DropTarget::Group {
                 group,
-                zone: DropZone::Center,
-            })
+                zone: DropZone::Top,
+            }),
+            "the top hit area must begin at the same y coordinate as its visible line"
         );
         assert_eq!(
             resolve_drop(&layout, Point::new(1100.0, 70.0), payload, &rects, &metrics),
             Some(DropTarget::Group {
                 group,
-                zone: DropZone::Top,
+                zone: DropZone::Center,
             })
         );
         assert_eq!(
@@ -1071,7 +1072,7 @@ mod tests {
     }
 
     #[test]
-    fn tab_strip_resolves_to_group_center_without_tab_insertion_zones() {
+    fn tab_strip_has_no_separate_tab_insertion_zones() {
         let metrics = metrics();
         let layout = Layout::initial_photoshop(&metrics).unwrap();
         let group = group_id(&layout, "layers");
@@ -1085,34 +1086,31 @@ mod tests {
                 .all(|zone| !matches!(&zone.target, DropTarget::TabInsertion { .. })),
             "tab strips must not expose a separate insertion target"
         );
-
-        for x in [1139.0, 1140.0, 1141.0] {
-            assert_eq!(
-                resolve_drop(
-                    &layout,
-                    Point::new(x, 45.0),
-                    external_panel,
-                    &rects,
-                    &metrics,
-                ),
-                Some(DropTarget::Group {
-                    group,
-                    zone: DropZone::Center,
-                })
-            );
-        }
-
-        let panel_from_same_group = DropPayload::Panel(panel_id(&layout, "layers"));
         assert_eq!(
             resolve_drop(
                 &layout,
                 Point::new(1140.0, 45.0),
-                panel_from_same_group,
+                external_panel,
                 &rects,
                 &metrics,
             ),
-            None,
-            "dropping a tab onto its own strip must not silently reorder it"
+            Some(DropTarget::Group {
+                group,
+                zone: DropZone::Top,
+            })
+        );
+        assert_eq!(
+            resolve_drop(
+                &layout,
+                Point::new(1140.0, 70.0),
+                external_panel,
+                &rects,
+                &metrics,
+            ),
+            Some(DropTarget::Group {
+                group,
+                zone: DropZone::Center,
+            })
         );
     }
 
