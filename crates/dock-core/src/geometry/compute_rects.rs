@@ -20,8 +20,9 @@ pub fn compute_rects(layout: &Layout, window: Size, metrics: &DockMetrics) -> La
     let header_height = nonnegative_finite(metrics.column_header_height).min(window_height);
     let tab_strip_height = nonnegative_finite(metrics.tab_strip_height);
     let splitter_thickness = nonnegative_finite(metrics.splitter_thickness);
-    let group_splitter_hit_zone = nonnegative_finite(metrics.splitter_hit_zone).min(window_height);
-    let column_splitter_hit_zone = nonnegative_finite(metrics.splitter_hit_zone).min(window_width);
+    let resize_hit_zone = nonnegative_finite(metrics.splitter_hit_zone);
+    let group_splitter_hit_zone = resize_hit_zone.min(window_height);
+    let column_splitter_hit_zone = resize_hit_zone.min(window_width);
 
     let left_width = side_width(layout, DockSide::Left);
     let right_width = side_width(layout, DockSide::Right);
@@ -258,7 +259,7 @@ pub fn compute_rects(layout: &Layout, window: Size, metrics: &DockMetrics) -> La
             &mut rects,
             floating_id,
             bounds,
-            splitter_hit_zone,
+            resize_hit_zone,
         );
     }
 
