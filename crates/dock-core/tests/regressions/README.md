@@ -1,5 +1,3 @@
-# Proptest regression seeds
+# Property-test regressions
 
-The property test in command_sequences.rs writes a minimized failing command-sequence seed to command_sequences.txt when a counterexample is found. Keep any generated seed file in version control after fixing the bug; proptest replays persisted seeds on later runs.
-
-Named, hand-written regressions belong in the Rust test file and run with both the default configuration and the optional serde feature.
+The proptest suite in `src/model/command_sequences.rs` persists minimized failure seeds under `tests/regressions/model/command_sequences.txt`. Commit each new seed with the fix that makes it pass. No historical failing seed was fabricated for R3.7.

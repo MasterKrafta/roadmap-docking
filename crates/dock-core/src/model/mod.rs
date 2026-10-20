@@ -16,6 +16,8 @@ mod tabs;
 mod validation_error;
 
 #[cfg(test)]
+mod command_sequences;
+#[cfg(test)]
 mod layout_builder;
 
 pub use axis::Axis;
