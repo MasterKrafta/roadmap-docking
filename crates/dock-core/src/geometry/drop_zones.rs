@@ -326,18 +326,9 @@ fn append_tab_insertion_zones(
                 continue;
             }
 
-            let insertion_index = match payload {
-                DropPayload::Panel(panel) => tabs
-                    .panels
-                    .iter()
-                    .position(|candidate| *candidate == panel)
-                    .filter(|source_index| *source_index < next.index)
-                    .map_or(next.index, |_| next.index + 1),
-                _ => next.index,
-            };
             let target = DropTarget::TabInsertion {
                 group: group_rect.group,
-                index: insertion_index,
+                index: next.index,
             };
             if valid_target(layout, payload, &target, metrics) {
                 push_zone(
