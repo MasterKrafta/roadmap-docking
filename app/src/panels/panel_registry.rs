@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use dock_core::{
-    CanvasState, DockCommand, DockMetrics, DockSide, DropTarget, DropZone, Layout, Node, NodeId,
+    CanvasState, DockCommand, DockMetrics, DropTarget, DropZone, Layout, Node, NodeId,
     PanelConstraints, PanelId, PanelKey, Profile, Size, SplitSide,
 };
 
