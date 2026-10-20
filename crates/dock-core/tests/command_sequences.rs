@@ -140,10 +140,14 @@ fn command_for(
             let Node::Tabs(tabs) = layout.nodes().get(group)? else {
                 return None;
             };
-            (!tabs.panels.is_empty()).then_some(DockCommand::ActivateTab {
-                group,
-                index: b % tabs.panels.len(),
-            })
+            if tabs.panels.is_empty() {
+                None
+            } else {
+                Some(DockCommand::ActivateTab {
+                    group,
+                    index: b % tabs.panels.len(),
+                })
+            }
         }
         1 => {
             let candidates: Vec<_> = groups
