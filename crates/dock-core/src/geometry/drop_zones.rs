@@ -156,7 +156,7 @@ pub fn resolve_drop(
             };
             valid_target(layout, payload, &target, metrics).then_some(target)
         }
-        target if valid_target(layout, payload, target, metrics) => Some(target.clone()),
+        target if valid_target(layout, payload, target, metrics) => Some((*target).clone()),
         _ => None,
     }
 }
