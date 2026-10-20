@@ -621,16 +621,22 @@ impl Layout {
                     // group's only tab. Detach the existing PanelId into a new floating
                     // group, preserving the panel instance and its saved dock location.
                     self.validate_floating_rect(rect, &[panel], metrics)?;
-                    let Some(group) = self.floating_groups.get_mut(source_floating) else {
-                        return Err(CommandError::UnknownFloatingGroup(source_floating));
+                    let source_is_empty = {
+                        let Some(group) = self.floating_groups.get_mut(source_floating) else {
+                            return Err(CommandError::UnknownFloatingGroup(source_floating));
+                        };
+                        group.panels.remove(panel_index);
+                        if !group.panels.is_empty() {
+                            if panel_index < group.active_index {
+                                group.active_index -= 1;
+                            } else if panel_index == group.active_index {
+                                group.active_index = group.active_index.min(group.panels.len() - 1);
+                            }
+                        }
+                        group.panels.is_empty()
                     };
-                    group.panels.remove(panel_index);
-                    if group.panels.is_empty() {
+                    if source_is_empty {
                         self.floating_groups.remove(source_floating);
-                    } else if panel_index < group.active_index {
-                        group.active_index -= 1;
-                    } else if panel_index == group.active_index {
-                        group.active_index = group.active_index.min(group.panels.len() - 1);
                     }
                     (vec![panel], 0, Vec::new())
                 } else {
