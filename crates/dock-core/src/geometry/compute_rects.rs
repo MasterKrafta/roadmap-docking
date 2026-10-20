@@ -1,7 +1,7 @@
 use crate::geometry::{
     ColumnHeaderRect, ColumnRect, DockAreaRect, DockMetrics, FloatingGroupRect,
     FloatingResizeEdgeRect, FloatingTitleRect, GroupRect, LayoutRects, PanelRect, Point, Rect,
-    Size, SplitterKind, SplitterRect, TabHeaderRect, TabStripRect, ResizeEdge,
+    ResizeEdge, Size, SplitterKind, SplitterRect, TabHeaderRect, TabStripRect,
 };
 use crate::model::{DockSide, Layout, Node};
 
@@ -177,7 +177,10 @@ pub fn compute_rects(layout: &Layout, window: Size, metrics: &DockMetrics) -> La
                         bounds: Rect::new(
                             Point::new(
                                 column_x,
-                                finite_position_add(y, (splitter_thickness - group_splitter_hit_zone) * 0.5),
+                                finite_position_add(
+                                    y,
+                                    (splitter_thickness - group_splitter_hit_zone) * 0.5,
+                                ),
                             ),
                             Size::new(column_width, group_splitter_hit_zone),
                         ),
@@ -664,15 +667,27 @@ mod tests {
         assert_eq!(
             rects.groups,
             vec![
-                super::super::GroupRect { group: layers_group, bounds: rect(1000.0, 32.0, 280.0, 382.0) },
-                super::super::GroupRect { group: properties_group, bounds: rect(1000.0, 418.0, 280.0, 382.0) },
+                super::super::GroupRect {
+                    group: layers_group,
+                    bounds: rect(1000.0, 32.0, 280.0, 382.0),
+                },
+                super::super::GroupRect {
+                    group: properties_group,
+                    bounds: rect(1000.0, 418.0, 280.0, 382.0),
+                },
             ]
         );
         assert_eq!(
             rects.tab_strips,
             vec![
-                super::super::TabStripRect { group: layers_group, bounds: rect(1000.0, 32.0, 280.0, 28.0) },
-                super::super::TabStripRect { group: properties_group, bounds: rect(1000.0, 418.0, 280.0, 28.0) },
+                super::super::TabStripRect {
+                    group: layers_group,
+                    bounds: rect(1000.0, 32.0, 280.0, 28.0),
+                },
+                super::super::TabStripRect {
+                    group: properties_group,
+                    bounds: rect(1000.0, 418.0, 280.0, 28.0),
+                },
             ]
         );
 
@@ -693,7 +708,11 @@ mod tests {
         let panel_bounds = rect(1000.0, 60.0, 280.0, 354.0);
         for key in ["layers", "color"] {
             assert_eq!(
-                rects.panels.iter().find(|panel| panel.panel == panel_id(&layout, key)).map(|panel| panel.bounds),
+                rects
+                    .panels
+                    .iter()
+                    .find(|panel| panel.panel == panel_id(&layout, key))
+                    .map(|panel| panel.bounds),
                 Some(panel_bounds)
             );
         }
@@ -704,9 +723,17 @@ mod tests {
             );
         }
 
-        let group_splitter = rects.splitters.iter().find(|splitter| splitter.kind == SplitterKind::Group).unwrap();
+        let group_splitter = rects
+            .splitters
+            .iter()
+            .find(|splitter| splitter.kind == SplitterKind::Group)
+            .unwrap();
         assert_eq!(group_splitter.bounds, rect(1000.0, 412.0, 280.0, 8.0));
-        let column_splitter = rects.splitters.iter().find(|splitter| splitter.kind == SplitterKind::Column).unwrap();
+        let column_splitter = rects
+            .splitters
+            .iter()
+            .find(|splitter| splitter.kind == SplitterKind::Column)
+            .unwrap();
         assert_eq!(column_splitter.bounds, rect(996.0, 0.0, 8.0, 800.0));
         assert_eq!(compute_rects(&layout, window, &metrics), rects);
     }
@@ -729,8 +756,17 @@ mod tests {
         assert!(rects.columns[0].vertical_overflow);
         assert_eq!(rects.groups[0].bounds.size.height, 80.0);
         assert_eq!(rects.groups[1].bounds.size.height, 80.0);
-        assert_eq!(rects.groups[0].bounds.size.height.min(rects.groups[1].bounds.size.height), 80.0);
-        assert!(rects.splitters.iter().all(|splitter| splitter.bounds.size.width >= 0.0 && splitter.bounds.size.height >= 0.0));
+        assert_eq!(
+            rects.groups[0]
+                .bounds
+                .size
+                .height
+                .min(rects.groups[1].bounds.size.height),
+            80.0
+        );
+        assert!(rects.splitters.iter().all(|splitter| {
+            splitter.bounds.size.width >= 0.0 && splitter.bounds.size.height >= 0.0
+        }));
     }
 
     #[test]
@@ -765,14 +801,24 @@ mod tests {
             assert!(floating.bounds.origin.y + floating.bounds.size.height <= 800.0);
         }
 
-        let first = rects.floating_groups.iter().find(|floating| floating.floating == first_id).unwrap();
-        let second = rects.floating_groups.iter().find(|floating| floating.floating == second_id).unwrap();
+        let first = rects
+            .floating_groups
+            .iter()
+            .find(|floating| floating.floating == first_id)
+            .unwrap();
+        let second = rects
+            .floating_groups
+            .iter()
+            .find(|floating| floating.floating == second_id)
+            .unwrap();
         assert_eq!(first.bounds, rect(960.0, 560.0, 320.0, 240.0));
         assert_eq!(second.bounds, rect(960.0, 560.0, 320.0, 240.0));
         assert_eq!(rects.floating_titles.len(), 2);
         assert_eq!(rects.floating_resize_edges.len(), 16);
         assert!(rects.floating_titles.iter().all(|title| title.bounds.size.height == 32.0));
-        assert!(rects.floating_resize_edges.iter().all(|edge| edge.bounds.size.width >= 0.0 && edge.bounds.size.height >= 0.0));
+        assert!(rects.floating_resize_edges.iter().all(|edge| {
+            edge.bounds.size.width >= 0.0 && edge.bounds.size.height >= 0.0
+        }));
         assert_eq!(compute_rects(&layout, Size::new(1280.0, 800.0), &metrics), rects);
     }
 
@@ -816,7 +862,8 @@ mod tests {
 mod allocation_tests {
     #[test]
     fn ratios_respect_minimums_when_only_one_group_would_underflow() {
-        let (heights, overflow) = super::allocate_group_heights(&[0.01, 0.99], &[80.0, 80.0], 300.0);
+        let (heights, overflow) =
+            super::allocate_group_heights(&[0.01, 0.99], &[80.0, 80.0], 300.0);
         assert!(!overflow);
         assert_eq!(heights, vec![80.0, 220.0]);
     }
