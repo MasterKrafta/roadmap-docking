@@ -104,7 +104,7 @@ pub fn compute_rects(layout: &Layout, window: Size, metrics: &DockMetrics) -> La
             });
 
             if column_index + 1 < area.columns.len() {
-                column_splitter_positions.push(column_x + column_width);
+                column_splitter_positions.push(finite_position_add(column_x, column_width));
             }
 
             let mut y = header_height;
@@ -145,12 +145,12 @@ pub fn compute_rects(layout: &Layout, window: Size, metrics: &DockMetrics) -> La
                         let tab_count = tabs.panels.len();
                         for (tab_index, _) in tabs.panels.iter().enumerate() {
                             let left = column_x
-                                + column_width * tab_index as f32 / tab_count as f32;
+                                + column_width * (tab_index as f32 / tab_count as f32);
                             let right = if tab_index + 1 == tab_count {
                                 column_x + column_width
                             } else {
                                 column_x
-                                    + column_width * (tab_index + 1) as f32 / tab_count as f32
+                                    + column_width * ((tab_index + 1) as f32 / tab_count as f32)
                             };
                             rects.tab_headers.push(TabHeaderRect {
                                 group: group_id,
@@ -164,7 +164,7 @@ pub fn compute_rects(layout: &Layout, window: Size, metrics: &DockMetrics) -> La
                     }
                 }
 
-                y += group_height;
+                y = finite_saturating_add(y, group_height);
                 if group_index + 1 < group_count {
                     rects.splitters.push(SplitterRect {
                         kind: SplitterKind::Group,
@@ -172,17 +172,17 @@ pub fn compute_rects(layout: &Layout, window: Size, metrics: &DockMetrics) -> La
                         bounds: Rect::new(
                             Point::new(
                                 column_x,
-                                y + (splitter_thickness - splitter_hit_zone) * 0.5,
+                                finite_position_add(y, (splitter_thickness - splitter_hit_zone) * 0.5),
                             ),
                             Size::new(column_width, splitter_hit_zone),
                         ),
                     });
                     group_splitter_index += 1;
-                    y += splitter_thickness;
+                    y = finite_saturating_add(y, splitter_thickness);
                 }
             }
 
-            column_x += column_width;
+            column_x = finite_position_add(column_x, column_width);
         }
     }
 
@@ -192,7 +192,7 @@ pub fn compute_rects(layout: &Layout, window: Size, metrics: &DockMetrics) -> La
             kind: SplitterKind::Column,
             index,
             bounds: Rect::new(
-                Point::new(x - splitter_hit_zone * 0.5, 0.0),
+                Point::new(finite_position_add(x, -splitter_hit_zone * 0.5), 0.0),
                 Size::new(splitter_hit_zone, window_height),
             ),
         });
@@ -229,7 +229,10 @@ pub fn compute_rects(layout: &Layout, window: Size, metrics: &DockMetrics) -> La
 
         let strip_height = nonnegative_finite(metrics.tab_strip_height)
             .min(nonnegative_finite(bounds.size.height - title_height));
-        let panel_content_y = bounds.origin.y + title_height + strip_height;
+        let panel_content_y = finite_position_add(
+            finite_position_add(bounds.origin.y, title_height),
+            strip_height,
+        );
         let panel_content_height =
             nonnegative_finite(bounds.size.height - title_height - strip_height);
         let panel_bounds = Rect::new(
@@ -541,6 +544,11 @@ fn append_floating_resize_edges(
             });
         }
     }
+}
+
+fn finite_position_add(left: f32, right: f32) -> f32 {
+    let value = f64::from(left) + f64::from(right);
+    value.clamp(-f64::from(f32::MAX), f64::from(f32::MAX)) as f32
 }
 
 fn finite_saturating_add(left: f32, right: f32) -> f32 {
