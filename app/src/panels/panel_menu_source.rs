@@ -15,7 +15,7 @@ impl PanelMenuSource {
     }
 
     pub fn empty() -> Self {
-        Self::new(Vec::new)
+        Self::new(|| Vec::<PanelMenuItem>::new())
     }
 
     pub fn items(&self) -> Vec<PanelMenuItem> {
