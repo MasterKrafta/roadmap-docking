@@ -1193,8 +1193,9 @@ mod tests {
             ),
             Some(DropTarget::Group {
                 group,
-                zone: DropZone::Top,
-            })
+                zone: DropZone::Center,
+            }),
+            "the tab strip belongs to the group's center target"
         );
         assert_eq!(
             resolve_drop(
