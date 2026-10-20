@@ -2,7 +2,9 @@ use crate::geometry::Rect;
 use crate::ids::{FloatingGroupId, NodeId, PanelId};
 use crate::model::DockSide;
 
-use super::{ColumnRect, DockAreaRect, GroupRect, ResizeEdge, SplitterKind, TabStripRect};
+use super::{
+    ColumnRect, DockAreaRect, FloatingGroupRect, GroupRect, ResizeEdge, SplitterKind, TabStripRect,
+};
 
 /// Rectangles produced by layout geometry, all expressed in logical pixels.
 ///
@@ -22,6 +24,8 @@ pub struct LayoutRects {
     pub groups: Vec<GroupRect>,
     /// Rectangles for complete tab strips.
     pub tab_strips: Vec<TabStripRect>,
+    /// Floating groups, ordered bottom-to-top by z_order and positioned over dock rectangles.
+    pub floating_groups: Vec<FloatingGroupRect>,
     /// Content rectangles for panel instances.
     pub panels: Vec<PanelRect>,
     /// Tab-header rectangles, in tab-strip order for each group.
@@ -106,6 +110,7 @@ mod tests {
         assert!(rects.columns.is_empty());
         assert!(rects.groups.is_empty());
         assert!(rects.tab_strips.is_empty());
+        assert!(rects.floating_groups.is_empty());
         assert!(rects.panels.is_empty());
         assert!(rects.tab_headers.is_empty());
         assert!(rects.column_headers.is_empty());
@@ -133,6 +138,7 @@ mod tests {
             }],
             groups: vec![GroupRect { group, bounds }],
             tab_strips: vec![TabStripRect { group, bounds }],
+            floating_groups: vec![],
             panels: vec![PanelRect { panel, bounds }],
             tab_headers: vec![TabHeaderRect { group, index: 1, bounds }],
             column_headers: vec![ColumnHeaderRect { side: DockSide::Right, index: 0, bounds }],
