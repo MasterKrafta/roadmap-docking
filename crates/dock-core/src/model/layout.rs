@@ -488,7 +488,7 @@ impl Layout {
 
     fn next_floating_z_order(&mut self) -> u64 {
         let maximum = self.floating_groups.values().map(|group| group.z_order).max();
-        if let Some(next) = maximum.and_then(u64::checked_add) {
+        if let Some(next) = maximum.and_then(|value| value.checked_add(1)) {
             return next;
         }
 
@@ -842,7 +842,6 @@ impl Layout {
                     let insert_at = column_index + usize::from(zone == DropZone::Right);
                     self.dock_areas[area_index].columns.insert(insert_at, new_column);
                     self.ensure_column_fits_min_height(area_index, insert_at, metrics)?;
-                    changed_nodes.extend(source.panels.iter().filter_map(|_| None::<NodeId>));
                     changed_nodes.push(new_group);
                 } else {
                     let new_group = self.insert_node(Node::Tabs(Tabs {
