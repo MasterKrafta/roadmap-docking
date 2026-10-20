@@ -123,7 +123,7 @@ pub fn resolve_drop(
     rects: &LayoutRects,
     metrics: &DockMetrics,
 ) -> Option<DropTarget> {
-    if !point.x.is_finite() || !point.y.is_finite() {
+    if !point.x.is_finite() || !point.y.is_finite() || !valid_payload(layout, payload) {
         return None;
     }
 
@@ -497,7 +497,8 @@ fn valid_target(
 ) -> bool {
     match target {
         DropTarget::Group { group, zone } => {
-            if !is_docked_group(layout, *group)
+            if !can_target_dock(layout, payload)
+                || !is_docked_group(layout, *group)
                 || !matches!(layout.nodes().get(*group), Some(Node::Tabs(_)))
                 || matches!(payload, DropPayload::Group(source) if source == *group)
             {
@@ -518,6 +519,9 @@ fn valid_target(
             true
         }
         DropTarget::TabInsertion { group, index } => {
+            if !can_target_dock(layout, payload) {
+                return false;
+            }
             let Some(Node::Tabs(tabs)) = layout.nodes().get(*group) else {
                 return false;
             };
@@ -549,11 +553,14 @@ fn valid_target(
             true
         }
         DropTarget::Column { column, zone } => {
-            column_exists(layout, *column)
+            can_target_dock(layout, payload)
+                && column_exists(layout, *column)
                 && matches!(zone, DropZone::Left | DropZone::Right)
                 && can_add_column(layout, metrics)
         }
-        DropTarget::DockEdge { .. } => can_add_column(layout, metrics),
+        DropTarget::DockEdge { .. } => {
+            can_target_dock(layout, payload) && can_add_column(layout, metrics)
+        },
         DropTarget::FloatingGroup { floating, zone } => {
             *zone == DropZone::Center
                 && layout.floating_groups().get(*floating).is_some_and(|target| {
@@ -571,6 +578,17 @@ fn is_docked_payload(layout: &Layout, payload: DropPayload) -> bool {
         DropPayload::Panel(panel) => find_dock_group_for_panel(layout, panel).is_some(),
         DropPayload::Group(group) => is_docked_group(layout, group),
         DropPayload::FloatingGroup(_) => false,
+    }
+}
+
+fn can_target_dock(layout: &Layout, payload: DropPayload) -> bool {
+    match payload {
+        DropPayload::Panel(panel) => find_dock_group_for_panel(layout, panel).is_some(),
+        DropPayload::Group(group) => is_docked_group(layout, group),
+        DropPayload::FloatingGroup(floating) => layout
+            .floating_groups()
+            .get(floating)
+            .is_some_and(|group| !group.panels.is_empty()),
     }
 }
 
@@ -1148,7 +1166,7 @@ mod tests {
     #[test]
     fn invalid_or_non_finite_points_do_not_resolve() {
         let metrics = metrics();
-        let layout = Layout::initial_photoshop(&metrics).unwrap();
+        let mut layout = Layout::initial_photoshop(&metrics).unwrap();
         let rects = geometry(&layout, &metrics);
         let payload = DropPayload::Panel(panel_id(&layout, "layers"));
 
@@ -1164,5 +1182,39 @@ mod tests {
             resolve_drop(&layout, Point::new(640.0, 400.0), DropPayload::Panel(crate::PanelId::null()), &rects, &metrics),
             None
         );
+
+        let panel = panel_id(&layout, "layers");
+        layout.apply(
+            DockCommand::Float {
+                source: FloatSource::Panel(panel),
+                rect: rect(320.0, 200.0, 320.0, 240.0),
+            },
+            &metrics,
+        ).expect("panel should float");
+        let floating_id = layout.floating_groups().iter()
+            .find_map(|(id, floating)| floating.panels.contains(&panel).then_some(id))
+            .expect("floating group exists");
+        let floating_rects = geometry(&layout, &metrics);
+        assert_eq!(
+            resolve_drop(
+                &layout,
+                Point::new(480.0, 320.0),
+                DropPayload::Panel(crate::PanelId::null()),
+                &floating_rects,
+                &metrics,
+            ),
+            None
+        );
+        assert_eq!(
+            resolve_drop(
+                &layout,
+                Point::new(1100.0, 200.0),
+                DropPayload::Panel(panel),
+                &floating_rects,
+                &metrics,
+            ),
+            None
+        );
+        assert!(layout.floating_groups().contains_key(floating_id));
     }
 }
