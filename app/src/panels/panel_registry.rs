@@ -137,6 +137,14 @@ impl PanelRegistry {
             metrics,
         )?;
 
+        // Opening a panel activates it by design. The initial Photoshop workspace,
+        // however, starts with the first tab selected in each group.
+        for group in [main_group, properties_group] {
+            layout
+                .apply(DockCommand::ActivateTab { group, index: 0 }, metrics)
+                .map_err(|error| RegistryError::LayoutBuildFailed(error.to_string()))?;
+        }
+
         layout.validate(metrics).map_err(|errors| {
             RegistryError::LayoutBuildFailed(
                 errors
