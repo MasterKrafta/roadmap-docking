@@ -100,13 +100,20 @@ pub fn compute_drop_zones(
     append_group_zones(layout, rects, payload, &mut zones, metrics);
 
     // Canvas is protected as a docking destination, but its unoccupied surface is a
-    // valid place to release a docked panel/group and create a separate floating group.
+    // valid place to create a floating group only when the payload's minimum window
+    // size can fit inside the current viewport.
     if is_docked_payload(layout, payload) && valid_rect(rects.canvas) {
-        push_zone(
-            &mut zones,
-            DropTarget::FreeArea { bounds: Rect::default() },
-            rects.canvas,
+        let canvas_center = Point::new(
+            rects.canvas.origin.x + rects.canvas.size.width * 0.5,
+            rects.canvas.origin.y + rects.canvas.size.height * 0.5,
         );
+        if floating_bounds_at_point(layout, rects, payload, canvas_center, metrics).is_some() {
+            push_zone(
+                &mut zones,
+                DropTarget::FreeArea { bounds: Rect::default() },
+                rects.canvas,
+            );
+        }
     }
 
     // Hide every dock/free-area overlay rectangle underneath every floating window.
@@ -1310,6 +1317,24 @@ mod tests {
         assert_eq!(
             bounds.origin,
             Point::new(400.0 - bounds.size.width * 0.5, 300.0 - bounds.size.height * 0.5)
+        );
+    }
+
+    #[test]
+    fn free_area_zone_is_not_advertised_when_minimum_floating_size_cannot_fit() {
+        let metrics = metrics();
+        let layout = Layout::initial_photoshop(&metrics).unwrap();
+        let payload = DropPayload::Panel(panel_id(&layout, "layers"));
+        let rects = compute_rects(&layout, Size::new(1280.0, 100.0), &metrics);
+
+        let zones = compute_drop_zones(&layout, &rects, payload, &metrics);
+        assert!(
+            zones.iter().all(|zone| !matches!(zone.target, DropTarget::FreeArea { .. })),
+            "FreeArea is invalid when the minimum floating height exceeds the viewport"
+        );
+        assert_eq!(
+            resolve_drop(&layout, Point::new(400.0, 50.0), payload, &rects, &metrics),
+            None
         );
     }
 
