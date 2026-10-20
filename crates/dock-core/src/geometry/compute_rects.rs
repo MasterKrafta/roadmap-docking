@@ -147,8 +147,11 @@ pub fn compute_rects(layout: &Layout, window: Size, metrics: &DockMetrics) -> La
                         kind: SplitterKind::Group,
                         index: group_splitter_index,
                         bounds: Rect::new(
-                            Point::new(column_x, y),
-                            Size::new(column.width, metrics.splitter_thickness),
+                            Point::new(
+                                column_x,
+                                y + (metrics.splitter_thickness - metrics.splitter_hit_zone) * 0.5,
+                            ),
+                            Size::new(column.width, metrics.splitter_hit_zone),
                         ),
                     });
                     group_splitter_index += 1;
@@ -165,8 +168,8 @@ pub fn compute_rects(layout: &Layout, window: Size, metrics: &DockMetrics) -> La
             kind: SplitterKind::Column,
             index,
             bounds: Rect::new(
-                Point::new(x - metrics.splitter_thickness * 0.5, 0.0),
-                Size::new(metrics.splitter_thickness, window.height),
+                Point::new(x - metrics.splitter_hit_zone * 0.5, 0.0),
+                Size::new(metrics.splitter_hit_zone, window.height),
             ),
         });
     }
@@ -374,7 +377,7 @@ mod tests {
             .collect();
         assert_eq!(group_splitters.len(), 1);
         assert_eq!(group_splitters[0].index, 0);
-        assert_eq!(group_splitters[0].bounds, rect(1000.0, 414.0, 280.0, 4.0));
+        assert_eq!(group_splitters[0].bounds, rect(1000.0, 412.0, 280.0, 8.0));
         let column_splitters: Vec<_> = rects
             .splitters
             .iter()
@@ -382,7 +385,7 @@ mod tests {
             .collect();
         assert_eq!(column_splitters.len(), 1);
         assert_eq!(column_splitters[0].index, 0);
-        assert_eq!(column_splitters[0].bounds, rect(998.0, 0.0, 4.0, 800.0));
+        assert_eq!(column_splitters[0].bounds, rect(996.0, 0.0, 8.0, 800.0));
 
         // Repeated calls are deterministic down to every logical coordinate.
         assert_eq!(compute_rects(&layout, window, &metrics), rects);
@@ -391,7 +394,7 @@ mod tests {
     #[test]
     fn column_width_is_fixed_and_canvas_gets_remaining_space() {
         let metrics = metrics();
-        let mut layout = Layout::initial_photoshop(&metrics).expect("initial layout");
+        let layout = Layout::initial_photoshop(&metrics).expect("initial layout");
         let first = layout.dock_areas()[0].columns[0].width;
         assert_eq!(first, 280.0);
 
