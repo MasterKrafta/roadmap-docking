@@ -154,7 +154,7 @@ fn builtin_descriptor(
         Size::new(f32::MAX, f32::MAX),
         true,
     );
-    let icon = Some(IconResource::new(icon).expect("built-in icon resource id is valid"));
+    let icon = IconResource::new(icon).expect("built-in icon resource id is valid");
     let content_factory = PanelContentFactory::new(move || content.clone());
 
     PanelDescriptor::new(
@@ -201,7 +201,7 @@ mod tests {
         PanelDescriptor::new(
             key,
             "Custom Panel",
-            Some(IconResource::new("test:custom").expect("valid icon key")),
+            IconResource::new("test:custom").expect("valid icon key"),
             PanelConstraints::new(
                 Size::new(120.0, 80.0),
                 Size::new(240.0, 160.0),
@@ -228,7 +228,7 @@ mod tests {
         assert_eq!(registry.len(), 1);
         let descriptor = registry.get(&key).expect("custom panel is registered");
         assert_eq!(descriptor.title(), "Custom Panel");
-        assert_eq!(descriptor.icon().map(IconResource::as_str), Some("test:custom"));
+        assert_eq!(descriptor.icon().as_str(), "test:custom");
         assert!(descriptor.allows(AllowedArea::Dock));
         assert!(descriptor.allows(AllowedArea::Floating));
         assert!(!descriptor.allows(AllowedArea::Rail));
@@ -331,7 +331,7 @@ mod tests {
         invalid = PanelDescriptor::new(
             PanelKey::new("custom.invalid").unwrap(),
             "Invalid Constraints",
-            None,
+            IconResource::new("test:invalid").expect("valid icon key"),
             PanelConstraints::new(
                 Size::new(320.0, 80.0),
                 Size::new(240.0, 160.0),
