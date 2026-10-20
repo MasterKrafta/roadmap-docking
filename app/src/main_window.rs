@@ -64,6 +64,7 @@ impl Render for MainWindow {
             .bg(rgb(colors.window_background))
             .text_color(rgb(colors.primary_text))
             .text_size(px(typography.body_size))
+            .font_family(typography.family)
             .child(menu_bar(&self.theme, menu_height))
             .child(options_bar(&self.theme, options_height))
             .child(
