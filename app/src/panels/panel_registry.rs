@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 
-use dock_core::{
-    DockCommand, DockMetrics, DockSide, DropTarget, PanelConstraints, PanelKey, Size,
-};
+use dock_core::{DockCommand, DropTarget, PanelConstraints, PanelKey, Size};
 
 use super::{
     AllowedArea, IconResource, PanelContent, PanelContentFactory, PanelDescriptor, PanelMenuItem,
@@ -156,7 +154,7 @@ fn builtin_descriptor(
         Size::new(f32::MAX, f32::MAX),
         true,
     );
-    let icon = IconResource::new(icon).ok();
+    let icon = Some(IconResource::new(icon).expect("built-in icon resource id is valid"));
     let content_factory = PanelContentFactory::new(move || content.clone());
 
     Ok(PanelDescriptor::new(
@@ -178,7 +176,7 @@ mod tests {
         PanelMenuSource, PlaceholderPanelContent, RegistryError,
     };
     use dock_core::{
-        DockCommand, DropTarget, DropZone, PanelConstraints, PanelKey, Point, Rect, Size,
+        DockCommand, DropTarget, PanelConstraints, PanelKey, Point, Rect, Size,
     };
 
     #[derive(Clone, Debug, PartialEq, Eq)]
@@ -272,10 +270,10 @@ mod tests {
         let descriptor = custom_descriptor("custom.panel", vec![AllowedArea::Dock]);
         registry.register(descriptor).unwrap();
 
-        assert_eq!(
+        assert!(matches!(
             registry.register(custom_descriptor("custom.panel", vec![AllowedArea::Floating])),
-            Err(RegistryError::DuplicateKey(PanelKey::new("custom.panel").unwrap()))
-        );
+            Err(RegistryError::DuplicateKey(key)) if key.as_str() == "custom.panel"
+        ));
         assert!(registry.get_by_str("custom.panel").unwrap().allows(AllowedArea::Dock));
         assert!(!registry.get_by_str("custom.panel").unwrap().allows(AllowedArea::Floating));
     }
@@ -284,13 +282,13 @@ mod tests {
     fn registry_validates_constraints_and_allowed_areas() {
         let mut registry = PanelRegistry::new();
         let mut invalid = custom_descriptor("custom.invalid", vec![]);
-        assert_eq!(
+        assert!(matches!(
             registry.register(invalid.clone()),
             Err(RegistryError::InvalidDescriptor {
-                key: PanelKey::new("custom.invalid").unwrap(),
+                key,
                 reason: "at least one allowed area must be selected",
-            })
-        );
+            }) if key.as_str() == "custom.invalid"
+        ));
 
         invalid = PanelDescriptor::new(
             PanelKey::new("custom.invalid").unwrap(),
@@ -378,7 +376,5 @@ mod tests {
                 area: AllowedArea::Floating,
             })
         );
-
-        let _center_zone = DropZone::Center;
     }
 }
