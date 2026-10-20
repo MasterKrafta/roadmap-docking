@@ -710,7 +710,9 @@ impl Layout {
         let Some(group) = self.floating_groups.get_mut(floating_id) else {
             return Err(CommandError::UnknownFloatingGroup(floating_id));
         };
-        group.bounds.size = rect.size;
+        // Resize commands carry the complete rectangle: left/top edge drags
+        // must move the origin as the opposite edge remains anchored.
+        group.bounds = rect;
         Ok(Vec::new())
     }
 
@@ -4251,7 +4253,7 @@ mod tests {
     }
 
     #[test]
-    fn move_and_resize_floating_change_only_the_requested_rect_component() {
+    fn move_and_resize_floating_apply_the_requested_bounds() {
         use crate::DockCommand;
 
         let metrics = metrics();
@@ -4294,7 +4296,7 @@ mod tests {
             .apply(
                 DockCommand::ResizeFloating {
                     floating: floating_id,
-                    rect: floating_rect(60.0, 70.0, 360.0, 240.0),
+                    rect: floating_rect(40.0, 50.0, 360.0, 240.0),
                 },
                 &metrics,
             )
@@ -4305,7 +4307,7 @@ mod tests {
             .expect("floating exists");
         assert_eq!(
             group_after_resize.bounds,
-            floating_rect(60.0, 70.0, 360.0, 240.0)
+            floating_rect(40.0, 50.0, 360.0, 240.0)
         );
         assert!(layout.validate(&metrics).is_ok());
     }
@@ -4648,7 +4650,7 @@ mod tests {
             assert!(layout.validate(&metrics).is_ok());
         }
 
-        let mut maxed_metrics = metrics();
+        let mut maxed_metrics = self::metrics();
         maxed_metrics.max_columns = 1;
         let mut maxed_layout = initial_layout();
         let maxed_source = tab_group_id(&maxed_layout, 0, 0);

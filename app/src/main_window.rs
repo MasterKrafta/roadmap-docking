@@ -2,7 +2,7 @@ use dock_core::{
     DockCommand, DockMetrics, DockSide, DragSession, DragSessionState, DropPayload, DropTarget,
     DropZone, FloatSource, FloatingGroupId, Layout, LayoutRects, Node, NodeId, PanelId, PanelKey,
     Point as DockPoint,
-    Rect as DockRect, Size as DockSize,
+    Rect as DockRect, ResizeEdge, Size as DockSize,
     compute_rects, resolve_drop,
 };
 use dock_gpui::{DockGroupData, TabItem, dock_column_view, drop_overlay};
@@ -22,6 +22,7 @@ pub struct MainWindow {
     registry: PanelRegistry,
     layout: Layout,
     drag_session: DragSession,
+    floating_interaction: Option<FloatingInteraction>,
     window_menu_open: bool,
 }
 
@@ -33,6 +34,21 @@ struct WindowGeometry {
     body_top: f32,
     docking_viewport_width: f32,
     rects: LayoutRects,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum FloatingInteraction {
+    Move {
+        floating: FloatingGroupId,
+        pointer_origin: DockPoint,
+        initial_bounds: DockRect,
+    },
+    Resize {
+        floating: FloatingGroupId,
+        edge: ResizeEdge,
+        pointer_origin: DockPoint,
+        initial_bounds: DockRect,
+    },
 }
 
 impl MainWindow {
@@ -48,6 +64,7 @@ impl MainWindow {
             registry,
             layout,
             drag_session: DragSession::new(),
+            floating_interaction: None,
             window_menu_open: false,
         }
     }
@@ -116,6 +133,174 @@ impl MainWindow {
         let geometry = self.window_geometry(window);
         let origin = self.local_dock_point(position, &geometry);
         if self.drag_session.press(payload, origin) {
+            cx.notify();
+        }
+    }
+
+    fn begin_floating_interaction(
+        &mut self,
+        floating: FloatingGroupId,
+        edge: Option<ResizeEdge>,
+        position: GpuiPoint<Pixels>,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        let geometry = self.window_geometry(window);
+        let Some(initial_bounds) = geometry
+            .rects
+            .floating_groups
+            .iter()
+            .find(|rect| rect.floating == floating)
+            .map(|rect| rect.bounds)
+        else {
+            return;
+        };
+        let pointer_origin = self.local_dock_point(position, &geometry);
+        // The title bar is also the visible surface behind the top resize hit band.
+        // If hit-testing lands on the title bar instead of its overlapping resize child,
+        // route the gesture by its exact pointer position so the top edge/corners resize
+        // rather than accidentally starting a move.
+        let edge = edge.or_else(|| {
+            titlebar_resize_edge(
+                pointer_origin,
+                initial_bounds,
+                self.metrics.splitter_hit_zone,
+            )
+        });
+
+        if let Err(error) = self.layout.apply(
+            DockCommand::RaiseFloating { floating },
+            &self.metrics,
+        ) {
+            eprintln!("Could not raise floating group {floating:?}: {error}");
+            return;
+        }
+
+        self.floating_interaction = Some(match edge {
+            Some(edge) => FloatingInteraction::Resize {
+                floating,
+                edge,
+                pointer_origin,
+                initial_bounds,
+            },
+            None => FloatingInteraction::Move {
+                floating,
+                pointer_origin,
+                initial_bounds,
+            },
+        });
+        cx.notify();
+    }
+
+    fn focus_floating(&mut self, floating: FloatingGroupId, cx: &mut Context<Self>) {
+        match self.layout.apply(DockCommand::RaiseFloating { floating }, &self.metrics) {
+            Ok(_) => cx.notify(),
+            Err(error) => eprintln!("Could not raise floating group {floating:?}: {error}"),
+        }
+    }
+
+    fn floating_minimum_size(&self, floating: FloatingGroupId) -> DockSize {
+        let mut minimum_width = self
+            .metrics
+            .default_column_width
+            .max(self.metrics.min_column_width);
+        let mut minimum_content_height = self.metrics.min_group_height;
+        if let Some(group) = self.layout.floating_groups().get(floating) {
+            for panel_id in &group.panels {
+                if let Some(panel) = self.layout.panels().get(*panel_id) {
+                    minimum_width = minimum_width.max(panel.constraints().min_size().width);
+                    minimum_content_height =
+                        minimum_content_height.max(panel.constraints().min_size().height);
+                }
+            }
+        }
+        DockSize::new(
+            minimum_width,
+            minimum_content_height
+                + self.metrics.column_header_height
+                + self.metrics.tab_strip_height,
+        )
+    }
+
+    fn update_floating_interaction(
+        &mut self,
+        position: GpuiPoint<Pixels>,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(interaction) = self.floating_interaction else {
+            return;
+        };
+        let geometry = self.window_geometry(window);
+        let point = self.local_dock_point(position, &geometry);
+        let viewport = DockSize::new(
+            geometry.docking_viewport_width.max(0.0),
+            geometry.body_height.max(0.0),
+        );
+        let (floating, rect, resizing) = match interaction {
+            FloatingInteraction::Move {
+                floating,
+                pointer_origin,
+                initial_bounds,
+            } => {
+                let delta_x = point.x - pointer_origin.x;
+                let delta_y = point.y - pointer_origin.y;
+                // Clamp the visible rectangle, but preserve the model's dimensions in
+                // MoveFloating so a temporarily undersized viewport does not invalidate it.
+                let width = initial_bounds.size.width.min(viewport.width);
+                let height = initial_bounds.size.height.min(viewport.height);
+                let max_x = (viewport.width - width).max(0.0);
+                let max_y = (viewport.height - height).max(0.0);
+                let x = (initial_bounds.origin.x + delta_x).clamp(0.0, max_x);
+                let y = (initial_bounds.origin.y + delta_y).clamp(0.0, max_y);
+                let model_size = self
+                    .layout
+                    .floating_groups()
+                    .get(floating)
+                    .map(|group| group.bounds.size)
+                    .unwrap_or(initial_bounds.size);
+                (
+                    floating,
+                    DockRect::new(DockPoint::new(x, y), model_size),
+                    false,
+                )
+            }
+            FloatingInteraction::Resize {
+                floating,
+                edge,
+                pointer_origin,
+                initial_bounds,
+            } => {
+                let delta = DockPoint::new(
+                    point.x - pointer_origin.x,
+                    point.y - pointer_origin.y,
+                );
+                let minimum = self.floating_minimum_size(floating);
+                (
+                    floating,
+                    resize_floating_rect(initial_bounds, edge, delta, minimum, viewport),
+                    true,
+                )
+            }
+        };
+
+        let current_bounds = self
+            .layout
+            .floating_groups()
+            .get(floating)
+            .map(|group| group.bounds);
+        if current_bounds == Some(rect) {
+            return;
+        }
+
+        let command = if resizing {
+            DockCommand::ResizeFloating { floating, rect }
+        } else {
+            DockCommand::MoveFloating { floating, rect }
+        };
+        if let Err(error) = self.layout.apply(command, &self.metrics) {
+            eprintln!("Could not update floating group {floating:?}: {error}");
+        } else {
             cx.notify();
         }
     }
@@ -458,13 +643,39 @@ impl Render for MainWindow {
             }
         };
 
+        let begin_floating_window = weak_window.clone();
+        let on_begin_floating_interaction = move |floating: FloatingGroupId,
+                                                  edge: Option<ResizeEdge>,
+                                                  position: GpuiPoint<Pixels>,
+                                                  window: &mut Window,
+                                                  app: &mut App| {
+            if let Err(error) = begin_floating_window.update(app, |this, cx| {
+                this.begin_floating_interaction(floating, edge, position, window, cx);
+            }) {
+                eprintln!("Could not begin floating interaction: {error}");
+            }
+        };
+
+        let focus_floating_window = weak_window.clone();
+        let on_focus_floating = move |floating: FloatingGroupId, app: &mut App| {
+            if let Err(error) = focus_floating_window.update(app, |this, cx| {
+                this.focus_floating(floating, cx);
+            }) {
+                eprintln!("Could not focus floating group: {error}");
+            }
+        };
+
         let update_drag_window = weak_window.clone();
         let on_pointer_move = move |_: &MouseMoveEvent, window: &mut Window, app: &mut App| {
             let position = window.mouse_position();
             if let Err(error) = update_drag_window.update(app, |this, cx| {
-                this.update_panel_drag(position, window, cx);
+                if this.floating_interaction.is_some() {
+                    this.update_floating_interaction(position, window, cx);
+                } else {
+                    this.update_panel_drag(position, window, cx);
+                }
             }) {
-                eprintln!("Could not update panel drag: {error}");
+                eprintln!("Could not update pointer interaction: {error}");
             }
         };
 
@@ -472,9 +683,15 @@ impl Render for MainWindow {
         let on_pointer_up = move |_: &MouseUpEvent, window: &mut Window, app: &mut App| {
             let position = window.mouse_position();
             if let Err(error) = finish_drag_window.update(app, |this, cx| {
-                this.finish_panel_drag(position, window, cx);
+                if this.floating_interaction.is_some() {
+                    this.update_floating_interaction(position, window, cx);
+                    this.floating_interaction = None;
+                    cx.notify();
+                } else {
+                    this.finish_panel_drag(position, window, cx);
+                }
             }) {
-                eprintln!("Could not finish panel drag: {error}");
+                eprintln!("Could not finish pointer interaction: {error}");
             }
         };
 
@@ -552,6 +769,8 @@ impl Render for MainWindow {
                                 &self.registry,
                                 &rects,
                                 on_activate_floating_tab,
+                                on_begin_floating_interaction,
+                                on_focus_floating,
                             ))
                             .child(drop_overlay(
                                 &self.theme,
@@ -563,6 +782,90 @@ impl Render for MainWindow {
             .on_mouse_move(on_pointer_move)
             .on_mouse_up(MouseButton::Left, on_pointer_up)
     }
+}
+
+fn titlebar_resize_edge(
+    point: DockPoint,
+    bounds: DockRect,
+    requested_hit_zone: f32,
+) -> Option<ResizeEdge> {
+    let hit = if requested_hit_zone.is_finite() {
+        requested_hit_zone.max(0.0)
+    } else {
+        0.0
+    };
+    let width = bounds.size.width.max(0.0);
+    let height = bounds.size.height.max(0.0);
+    if hit <= 0.0 || width <= 0.0 || height <= 0.0 {
+        return None;
+    }
+
+    let top = bounds.origin.y;
+    let top_hit_bottom = top + hit.min(height);
+    if point.y < top || point.y > top_hit_bottom {
+        return None;
+    }
+
+    let corner_width = hit.min(width * 0.5);
+    let left = bounds.origin.x;
+    let right = left + width;
+    if point.x <= left + corner_width {
+        Some(ResizeEdge::TopLeft)
+    } else if point.x >= right - corner_width {
+        Some(ResizeEdge::TopRight)
+    } else {
+        Some(ResizeEdge::Top)
+    }
+}
+
+fn resize_floating_rect(
+    initial: DockRect,
+    edge: ResizeEdge,
+    delta: DockPoint,
+    minimum: DockSize,
+    viewport: DockSize,
+) -> DockRect {
+    let viewport_width = viewport.width.max(0.0);
+    let viewport_height = viewport.height.max(0.0);
+    let min_width = minimum.width.max(0.0).min(viewport_width);
+    let min_height = minimum.height.max(0.0).min(viewport_height);
+
+    let mut left = initial.origin.x.clamp(0.0, viewport_width);
+    let mut top = initial.origin.y.clamp(0.0, viewport_height);
+    let mut right = (initial.origin.x + initial.size.width).clamp(left, viewport_width);
+    let mut bottom = (initial.origin.y + initial.size.height).clamp(top, viewport_height);
+
+    match edge {
+        ResizeEdge::Left | ResizeEdge::TopLeft | ResizeEdge::BottomLeft => {
+            left = (left + delta.x).clamp(0.0, (right - min_width).max(0.0));
+        }
+        _ => {}
+    }
+    match edge {
+        ResizeEdge::Right | ResizeEdge::TopRight | ResizeEdge::BottomRight => {
+            right = (right + delta.x)
+                .clamp((left + min_width).min(viewport_width), viewport_width);
+        }
+        _ => {}
+    }
+    match edge {
+        ResizeEdge::Top | ResizeEdge::TopLeft | ResizeEdge::TopRight => {
+            top = (top + delta.y).clamp(0.0, (bottom - min_height).max(0.0));
+        }
+        _ => {}
+    }
+    match edge {
+        ResizeEdge::Bottom | ResizeEdge::BottomLeft | ResizeEdge::BottomRight => {
+            bottom = (bottom + delta.y)
+                .clamp((top + min_height).min(viewport_height), viewport_height);
+        }
+        _ => {}
+    }
+
+    DockRect::new(
+        DockPoint::new(left, top),
+        DockSize::new((right - left).max(0.0), (bottom - top).max(0.0)),
+    )
 }
 
 /// Match pure tab-header rectangles to the tab-strip's actual GPUI flex row.
@@ -905,15 +1208,26 @@ where
         .children(areas)
 }
 
-fn render_floating_groups<OnActivateFloating>(
+fn render_floating_groups<OnActivateFloating, OnBeginFloating, OnFocusFloating>(
     theme: &Theme,
     layout: &Layout,
     registry: &PanelRegistry,
     rects: &LayoutRects,
     on_activate: OnActivateFloating,
+    on_begin_interaction: OnBeginFloating,
+    on_focus_floating: OnFocusFloating,
 ) -> Vec<AnyElement>
 where
     OnActivateFloating: Fn(FloatingGroupId, usize, &mut App) + Clone + 'static,
+    OnBeginFloating: Fn(
+            FloatingGroupId,
+            Option<ResizeEdge>,
+            GpuiPoint<Pixels>,
+            &mut Window,
+            &mut App,
+        ) + Clone
+        + 'static,
+    OnFocusFloating: Fn(FloatingGroupId, &mut App) + Clone + 'static,
 {
     let colors = theme.colors;
     let metrics = theme.metrics;
@@ -1053,7 +1367,8 @@ where
                     .bg(rgb(colors.group_background))
                     .border_1()
                     .border_color(rgb(colors.border))
-                    .child(
+                    .child({
+                        let begin_move = on_begin_interaction.clone();
                         div()
                             .w_full()
                             .h(px(title_height))
@@ -1065,8 +1380,19 @@ where
                             .border_color(rgb(colors.border))
                             .text_size(px(typography.tab_size))
                             .text_color(rgb(colors.muted_text))
-                            .child(format!("Floating · {heading}")),
-                    )
+                            .cursor_move()
+                            .hover(|style| style.bg(rgb(colors.hover)))
+                            .on_mouse_down(MouseButton::Left, move |_, window, app| {
+                                begin_move(
+                                    floating_id,
+                                    None,
+                                    window.mouse_position(),
+                                    window,
+                                    app,
+                                )
+                            })
+                            .child(format!("Floating · {heading}"))
+                    })
                     .child(
                         div()
                             .w_full()
@@ -1080,7 +1406,8 @@ where
                             .border_color(rgb(colors.border))
                             .children(tab_elements),
                     )
-                    .child(
+                    .child({
+                        let focus = on_focus_floating.clone();
                         div()
                             .w_full()
                             .h(px(content_height))
@@ -1091,6 +1418,9 @@ where
                             .py(px(metrics.content_padding))
                             .bg(rgb(colors.group_background))
                             .text_color(rgb(colors.primary_text))
+                            .on_mouse_down(MouseButton::Left, move |_, _, app| {
+                                focus(floating_id, app)
+                            })
                             .child(
                                 div()
                                     .w_full()
@@ -1109,7 +1439,55 @@ where
                                     .overflow_hidden()
                                     .text_ellipsis()
                                     .child(message),
-                            ),
+                            )
+                    })
+                    .children(
+                        rects
+                            .floating_resize_edges
+                            .iter()
+                            .filter(|handle| handle.floating == floating_id)
+                            .map(|handle| {
+                                let edge = handle.edge;
+                                let start_resize = on_begin_interaction.clone();
+                                let left = handle.bounds.origin.x - bounds.origin.x;
+                                let top = handle.bounds.origin.y - bounds.origin.y;
+                                let handle_element = div()
+                                    .id(format!("floating-resize-{floating_id:?}-{edge:?}"))
+                                    .absolute()
+                                    .left(px(left))
+                                    .top(px(top))
+                                    .w(px(handle.bounds.size.width.max(0.0)))
+                                    .h(px(handle.bounds.size.height.max(0.0)));
+
+                                // Resize hit regions stay visually transparent. Only the cursor
+                                // indicates the direction in which this edge/corner can move.
+                                let handle_element = match edge {
+                                    ResizeEdge::Left | ResizeEdge::Right => {
+                                        handle_element.cursor_ew_resize()
+                                    }
+                                    ResizeEdge::Top | ResizeEdge::Bottom => {
+                                        handle_element.cursor_ns_resize()
+                                    }
+                                    ResizeEdge::TopLeft | ResizeEdge::BottomRight => {
+                                        handle_element.cursor_nwse_resize()
+                                    }
+                                    ResizeEdge::TopRight | ResizeEdge::BottomLeft => {
+                                        handle_element.cursor_nesw_resize()
+                                    }
+                                };
+
+                                handle_element
+                                    .on_mouse_down(MouseButton::Left, move |_, window, app| {
+                                        start_resize(
+                                            floating_id,
+                                            Some(edge),
+                                            window.mouse_position(),
+                                            window,
+                                            app,
+                                        )
+                                    })
+                                    .into_any_element()
+                            }),
                     )
                     .into_any_element()
         })
@@ -1177,9 +1555,66 @@ fn group_view_data(
 
 #[cfg(test)]
 mod tests {
-    use super::{align_tab_header_rects, group_view_data};
+    use super::{
+        align_tab_header_rects, group_view_data, resize_floating_rect, titlebar_resize_edge,
+    };
     use crate::{dock_metrics, panels::PanelRegistry};
     use ui::Theme;
+
+    #[test]
+    fn titlebar_top_hit_band_routes_to_resize_edges_not_move() {
+        use dock_core::{Point, Rect, ResizeEdge, Size};
+
+        let bounds = Rect::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
+        assert_eq!(
+            titlebar_resize_edge(Point::new(103.0, 84.0), bounds, 8.0),
+            Some(ResizeEdge::TopLeft)
+        );
+        assert_eq!(
+            titlebar_resize_edge(Point::new(250.0, 84.0), bounds, 8.0),
+            Some(ResizeEdge::Top)
+        );
+        assert_eq!(
+            titlebar_resize_edge(Point::new(397.0, 84.0), bounds, 8.0),
+            Some(ResizeEdge::TopRight)
+        );
+        assert_eq!(titlebar_resize_edge(Point::new(250.0, 100.0), bounds, 8.0), None);
+        assert_eq!(titlebar_resize_edge(Point::new(250.0, 79.0), bounds, 8.0), None);
+        assert_eq!(titlebar_resize_edge(Point::new(250.0, 84.0), bounds, 0.0), None);
+    }
+
+    #[test]
+    fn floating_resize_anchors_opposite_edge_and_clamps_to_viewport() {
+        use dock_core::{Point, Rect, ResizeEdge, Size};
+
+        let initial = Rect::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
+        let from_left = resize_floating_rect(
+            initial,
+            ResizeEdge::Left,
+            Point::new(50.0, 0.0),
+            Size::new(180.0, 130.0),
+            Size::new(500.0, 400.0),
+        );
+        assert_eq!(from_left, Rect::new(Point::new(150.0, 80.0), Size::new(250.0, 200.0)));
+
+        let from_top = resize_floating_rect(
+            initial,
+            ResizeEdge::Top,
+            Point::new(0.0, 500.0),
+            Size::new(180.0, 130.0),
+            Size::new(500.0, 400.0),
+        );
+        assert_eq!(from_top, Rect::new(Point::new(100.0, 150.0), Size::new(300.0, 130.0)));
+
+        let from_right = resize_floating_rect(
+            initial,
+            ResizeEdge::Right,
+            Point::new(1_000.0, 0.0),
+            Size::new(180.0, 130.0),
+            Size::new(500.0, 400.0),
+        );
+        assert_eq!(from_right, Rect::new(Point::new(100.0, 80.0), Size::new(400.0, 200.0)));
+    }
 
     #[test]
     fn tab_header_drop_geometry_matches_rendered_tab_strip_flex_layout() {

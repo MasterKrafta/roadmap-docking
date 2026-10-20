@@ -436,7 +436,7 @@ mod tests {
     #[test]
     fn whole_group_drag_is_preview_only_until_release() {
         let metrics = metrics();
-        let mut layout = Layout::initial_photoshop(&metrics).expect("initial layout is valid");
+        let layout = Layout::initial_photoshop(&metrics).expect("initial layout is valid");
         let group = layout.dock_areas()[0].columns[0].groups[0];
         let panels_before = match layout.nodes().get(group).unwrap() {
             crate::Node::Tabs(tabs) => tabs.panels.clone(),
