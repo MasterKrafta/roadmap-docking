@@ -288,6 +288,7 @@ impl Layout {
                 second,
                 delta,
             } => self.resize_column_boundary(first, second, delta, metrics, actual_value),
+            DockCommand::ResetColumnRatios { column } => self.reset_column_ratios(column),
             DockCommand::ClosePanel { panel } => self.close_panel(panel),
             DockCommand::CloseGroup { group } => self.close_group(group),
             DockCommand::OpenPanel {
@@ -1410,6 +1411,29 @@ impl Layout {
         column.group_ratios[boundary + 1] = updated_second_height / available_height;
         *actual_value = Some(applied_delta);
         Ok(vec![first_group, second_group])
+    }
+
+    fn reset_column_ratios(
+        &mut self,
+        column_ref: crate::command::ColumnRef,
+    ) -> Result<Vec<NodeId>, crate::command::CommandError> {
+        use crate::command::CommandError;
+
+        let (area_index, column_index) = self.resolve_column_ref(column_ref)?;
+        let column = &mut self.dock_areas[area_index].columns[column_index];
+        let group_count = column.groups.len();
+        if group_count == 0 {
+            return Err(CommandError::InvalidCommandParameter {
+                parameter: "column groups".to_owned(),
+                reason: "a column must contain at least one group to reset its ratios".to_owned(),
+            });
+        }
+
+        // Ratios describe the relative height distribution beneath the fixed column header.
+        // A reset restores a uniform share for every group, regardless of prior splitter drags.
+        let even_ratio = 1.0 / group_count as f32;
+        column.group_ratios = vec![even_ratio; group_count];
+        Ok(column.groups.clone())
     }
 
     fn resize_column(
@@ -3812,6 +3836,42 @@ mod tests {
             .expect("splitting the only panel must normalize safely");
 
         assert_eq!(layout.dock_areas()[0].columns[0].groups.len(), 2);
+        assert!(layout.validate(&metrics).is_ok());
+    }
+
+    #[test]
+    fn reset_column_ratios_restores_even_group_distribution_through_apply() {
+        use crate::command::ColumnRef;
+        use crate::{DockCommand, DockSide};
+
+        let metrics = metrics();
+        let mut layout = initial_layout();
+        layout.set_canvas(CanvasState {
+            bounds: Rect::new(Point::new(0.0, 0.0), Size::new(1200.0, 500.0)),
+        });
+        let column = ColumnRef::new(DockSide::Right, 0);
+
+        layout
+            .apply(
+                DockCommand::ResizeGroups {
+                    column,
+                    boundary: 0,
+                    delta: 80.0,
+                },
+                &metrics,
+            )
+            .expect("the first group can be enlarged");
+
+        let dragged_ratios = layout.dock_areas()[0].columns[0].group_ratios.clone();
+        assert_ne!(dragged_ratios, vec![0.5, 0.5]);
+        let version_before_reset = layout.version();
+
+        layout
+            .apply(DockCommand::ResetColumnRatios { column }, &metrics)
+            .expect("resetting group ratios is a supported layout command");
+
+        assert_eq!(layout.dock_areas()[0].columns[0].group_ratios, vec![0.5, 0.5]);
+        assert_eq!(layout.version(), version_before_reset + 1);
         assert!(layout.validate(&metrics).is_ok());
     }
 

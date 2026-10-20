@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use dock_core::{DropPayload, NodeId, PanelId, SplitterKind};
+use dock_core::{ColumnRef, DropPayload, NodeId, PanelId, SplitterKind};
 use gpui::{
     AnyElement, App, MouseButton, Pixels, Point as GpuiPoint, ScrollHandle, Window, div,
     prelude::*, px, rgb,
@@ -38,6 +38,8 @@ pub fn dock_column_view(
     groups: Vec<DockGroupData>,
     panel_content_scroll_handles: &HashMap<PanelId, ScrollHandle>,
     group_splitter_indices: Vec<usize>,
+    column_ref: ColumnRef,
+    on_reset_column_ratios: impl Fn(ColumnRef, &mut Window, &mut App) + Clone + 'static,
     on_activate: impl Fn(NodeId, usize, &mut App) + Clone + 'static,
     on_start_drag: impl Fn(DropPayload, GpuiPoint<Pixels>, &mut Window, &mut App) + Clone + 'static,
     on_begin_splitter_interaction: impl Fn(
@@ -102,6 +104,7 @@ pub fn dock_column_view(
             .child(splitter_view(theme, width, splitter_height))
             .when_some(group_splitter_indices.get(index).copied(), |row, splitter_index| {
                 let on_begin = on_begin_splitter_interaction.clone();
+                let on_reset = on_reset_column_ratios.clone();
                 row.child(
                     div()
                         .id(format!("dock-group-splitter-hit-{splitter_index}"))
@@ -116,14 +119,18 @@ pub fn dock_column_view(
                         .w(px(width))
                         .h(px(theme.metrics.splitter_hit_zone))
                         .cursor_ns_resize()
-                        .on_mouse_down(MouseButton::Left, move |_, window, app| {
-                            on_begin(
-                                SplitterKind::Group,
-                                splitter_index,
-                                window.mouse_position(),
-                                window,
-                                app,
-                            );
+                        .on_mouse_down(MouseButton::Left, move |event, window, app| {
+                            if event.click_count >= 2 {
+                                on_reset(column_ref, window, app);
+                            } else {
+                                on_begin(
+                                    SplitterKind::Group,
+                                    splitter_index,
+                                    window.mouse_position(),
+                                    window,
+                                    app,
+                                );
+                            }
                         }),
                 )
             })

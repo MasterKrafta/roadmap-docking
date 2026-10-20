@@ -380,6 +380,29 @@ impl MainWindow {
         }
     }
 
+    fn reset_column_ratios(
+        &mut self,
+        column: ColumnRef,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let geometry = self.window_geometry(window);
+        self.layout.set_canvas_bounds(geometry.rects.canvas);
+
+        // A double-click is a discrete action, not the beginning of a drag session.
+        self.splitter_interaction = None;
+        self.splitter_layout_before = None;
+        self.splitter_pending_position = None;
+
+        match self
+            .layout
+            .apply(DockCommand::ResetColumnRatios { column }, &self.metrics)
+        {
+            Ok(_) => cx.notify(),
+            Err(error) => eprintln!("Could not reset group ratios for {column:?}: {error}"),
+        }
+    }
+
     fn begin_splitter_interaction(
         &mut self,
         kind: SplitterKind,
@@ -1114,6 +1137,16 @@ impl Render for MainWindow {
                 }
             };
 
+        let reset_column_ratios_window = weak_window.clone();
+        let on_reset_column_ratios =
+            move |column: ColumnRef, window: &mut Window, app: &mut App| {
+                if let Err(error) = reset_column_ratios_window.update(app, |this, cx| {
+                    this.reset_column_ratios(column, window, cx);
+                }) {
+                    eprintln!("Could not reset group ratios for {column:?}: {error}");
+                }
+            };
+
         let focus_floating_window = weak_window.clone();
         let on_focus_floating = move |floating: FloatingGroupId, app: &mut App| {
             if let Err(error) = focus_floating_window.update(app, |this, cx| {
@@ -1225,6 +1258,7 @@ impl Render for MainWindow {
                                 on_activate_tab.clone(),
                                 on_start_drag.clone(),
                                 on_begin_splitter_interaction.clone(),
+                                on_reset_column_ratios.clone(),
                             ))
                             .child(canvas(&self.theme, canvas_width, body_height))
                             .child(render_dock_side(
@@ -1239,6 +1273,7 @@ impl Render for MainWindow {
                                 on_activate_tab,
                                 on_start_drag.clone(),
                                 on_begin_splitter_interaction.clone(),
+                                on_reset_column_ratios.clone(),
                             ))
                             .children(render_splitter_handles(
                                 &self.theme,
@@ -1862,7 +1897,7 @@ fn dock_side_width(rects: &LayoutRects, side: DockSide) -> f32 {
         .sum()
 }
 
-fn render_dock_side<OnActivate, OnStartDrag, OnBeginSplitter>(
+fn render_dock_side<OnActivate, OnStartDrag, OnBeginSplitter, OnResetColumnRatios>(
     theme: &Theme,
     layout: &Layout,
     registry: &PanelRegistry,
@@ -1874,6 +1909,7 @@ fn render_dock_side<OnActivate, OnStartDrag, OnBeginSplitter>(
     on_activate: OnActivate,
     on_start_drag: OnStartDrag,
     on_begin_splitter: OnBeginSplitter,
+    on_reset_column_ratios: OnResetColumnRatios,
 ) -> impl IntoElement
 where
     OnActivate: Fn(NodeId, usize, &mut App) + Clone + 'static,
@@ -1881,6 +1917,7 @@ where
     OnBeginSplitter: Fn(SplitterKind, usize, GpuiPoint<Pixels>, &mut Window, &mut App)
         + Clone
         + 'static,
+    OnResetColumnRatios: Fn(ColumnRef, &mut Window, &mut App) + Clone + 'static,
 {
     let areas = layout
         .dock_areas()
@@ -1954,6 +1991,8 @@ where
                         groups,
                         panel_content_scroll_handles,
                         group_splitter_indices,
+                        ColumnRef::new(side, column_index),
+                        on_reset_column_ratios.clone(),
                         on_activate.clone(),
                         on_start_drag.clone(),
                         on_begin_splitter.clone(),
