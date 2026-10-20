@@ -5,6 +5,7 @@ pub struct DockMetrics {
     pub splitter_thickness: f32,
     pub splitter_hit_zone: f32,
     pub edge_drop_zone_width: f32,
+    /// Logical-pixel hit-zone width for group and column edges.
     pub drop_edge_zone: f32,
     pub drag_start_threshold: f32,
     pub default_column_width: f32,
