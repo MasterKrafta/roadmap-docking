@@ -8,6 +8,8 @@ use super::DropPayload;
 // A wider hover band makes horizontal splitting easier to target than the resize handle alone.
 // The preview remains anchored to the actual splitter rectangle.
 const GROUP_SPLIT_DROP_ZONE_MIN_HEIGHT: f32 = 24.0;
+/// Neutral pointer space separating split and center targets.
+const GROUP_SPLIT_CENTER_GAP: f32 = 8.0;
 
 /// Build data-only rectangles for the docking overlay.
 ///
@@ -387,17 +389,10 @@ fn append_group_splitter_zones(
                 continue;
             };
 
-            let splitter_center_y =
-                splitter.bounds.origin.y + splitter.bounds.size.height * 0.5;
-            let desired_height =
-                GROUP_SPLIT_DROP_ZONE_MIN_HEIGHT.max(splitter.bounds.size.height);
-            let top_limit = previous.bounds.origin.y + previous.bounds.size.height * 0.5;
-            let bottom_limit = next.bounds.origin.y + next.bounds.size.height * 0.5;
-            let top = (splitter_center_y - desired_height * 0.5).max(top_limit);
-            let bottom = (splitter_center_y + desired_height * 0.5).min(bottom_limit);
-            let drop_bounds = Rect::new(
-                Point::new(splitter.bounds.origin.x, top),
-                Size::new(splitter.bounds.size.width, (bottom - top).max(0.0)),
+            let drop_bounds = group_split_drop_bounds(
+                splitter.bounds,
+                previous.bounds,
+                next.bounds,
             );
 
             let target = DropTarget::Group {
@@ -409,6 +404,21 @@ fn append_group_splitter_zones(
             }
         }
     }
+}
+
+/// Expand a group-split hit area around the actual splitter, limited by the
+/// vertical centers of the two groups so the target cannot swallow either center.
+fn group_split_drop_bounds(splitter: Rect, previous: Rect, next: Rect) -> Rect {
+    let splitter_center_y = splitter.origin.y + splitter.size.height * 0.5;
+    let desired_height = GROUP_SPLIT_DROP_ZONE_MIN_HEIGHT.max(splitter.size.height);
+    let top_limit = previous.origin.y + previous.size.height * 0.5;
+    let bottom_limit = next.origin.y + next.size.height * 0.5;
+    let top = (splitter_center_y - desired_height * 0.5).max(top_limit);
+    let bottom = (splitter_center_y + desired_height * 0.5).min(bottom_limit);
+    Rect::new(
+        Point::new(splitter.origin.x, top),
+        Size::new(splitter.size.width, (bottom - top).max(0.0)),
+    )
 }
 
 fn append_group_zones(
@@ -429,11 +439,52 @@ fn append_group_zones(
         }
         let bounds = group_rect.bounds;
         let horizontal_edge = edge.min(bounds.size.width * 0.5);
+        let group_bottom = bounds.origin.y + bounds.size.height;
+        let group_center_y = bounds.origin.y + bounds.size.height * 0.5;
+        let mut center_top = bounds.origin.y;
+        let mut center_bottom = group_bottom;
+
+        // Keep a neutral vertical gap between the wider split target and this
+        // group's center target. During a drag the pointer can cross this band
+        // without immediately switching from Center to Split (or vice versa).
+        for splitter in rects.splitters.iter().filter(|splitter| {
+            splitter.kind == SplitterKind::Group
+                && splitter.bounds.origin.x == bounds.origin.x
+                && splitter.bounds.size.width == bounds.size.width
+        }) {
+            let splitter_center_y =
+                splitter.bounds.origin.y + splitter.bounds.size.height * 0.5;
+            let split_half_height =
+                GROUP_SPLIT_DROP_ZONE_MIN_HEIGHT.max(splitter.bounds.size.height) * 0.5;
+
+            if splitter_center_y <= bounds.origin.y
+                && splitter.bounds.origin.y + splitter.bounds.size.height >= bounds.origin.y
+            {
+                // A splitter immediately above this group: leave the gap below its hit zone.
+                center_top = center_top.max(
+                    (splitter_center_y + split_half_height).min(group_center_y)
+                        + GROUP_SPLIT_CENTER_GAP,
+                );
+            } else if splitter_center_y >= group_bottom
+                && splitter.bounds.origin.y <= group_bottom
+            {
+                // A splitter immediately below this group: leave the gap above its hit zone.
+                center_bottom = center_bottom.min(
+                    (splitter_center_y - split_half_height).max(group_center_y)
+                        - GROUP_SPLIT_CENTER_GAP,
+                );
+            }
+        }
+
+        if center_bottom <= center_top {
+            continue;
+        }
+
         let center_bounds = Rect::new(
-            Point::new(bounds.origin.x + horizontal_edge, bounds.origin.y),
+            Point::new(bounds.origin.x + horizontal_edge, center_top),
             Size::new(
                 (bounds.size.width - horizontal_edge * 2.0).max(0.0),
-                bounds.size.height,
+                (center_bottom - center_top).max(0.0),
             ),
         );
         let target = DropTarget::Group {
@@ -1080,11 +1131,47 @@ mod tests {
                 &rects,
                 &metrics,
             ),
+            None,
+            "a neutral gap separates the split target from the center target"
+        );
+        assert_eq!(
+            resolve_drop(
+                &layout,
+                Point::new(splitter_center.x, splitter_center.y + 24.0),
+                payload,
+                &rects,
+                &metrics,
+            ),
             Some(DropTarget::Group {
                 group: next_group,
                 zone: DropZone::Center,
             }),
-            "the center target remains available outside the widened split band"
+            "the center target begins again after the neutral gap"
+        );
+        assert_eq!(
+            resolve_drop(
+                &layout,
+                Point::new(splitter_center.x, splitter_center.y - 14.0),
+                center_payload,
+                &rects,
+                &metrics,
+            ),
+            None,
+            "the neutral gap is also present above the splitter"
+        );
+        assert_eq!(
+            resolve_drop(
+                &layout,
+                Point::new(splitter_center.x, splitter_center.y - 24.0),
+                center_payload,
+                &rects,
+                &metrics,
+            ),
+            Some(DropTarget::Group {
+                group: first_group,
+                zone: DropZone::Center,
+            }),
+            "the previous group's center remains available outside the gap"
         );
         let split_zone = compute_drop_zones(&layout, &rects, payload, &metrics)
             .into_iter()
