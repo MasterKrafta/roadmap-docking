@@ -375,16 +375,13 @@ where
                 .child(message),
         );
 
-    let on_mouse_down = on_mouse_down.clone();
-    let content = content.on_mouse_down(move |_, _, app| on_mouse_down(app));
-
-    match (scrollable, scroll_handle) {
-        (true, Some(handle)) => content
-            .overflow_y_scroll()
-            .track_scroll(handle)
-            .into_any_element(),
-        _ => content.overflow_hidden().into_any_element(),
-    }
+    let content = match (scrollable, scroll_handle) {
+        (true, Some(handle)) => content.overflow_y_scroll().track_scroll(handle),
+        _ => content.overflow_hidden(),
+    };
+    content
+        .on_mouse_down(move |_, _, app| on_mouse_down(app))
+        .into_any_element()
 }
 
 /// Visual-only horizontal separator. Height and color are both theme-owned.
