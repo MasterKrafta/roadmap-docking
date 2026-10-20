@@ -508,8 +508,13 @@ fn align_tab_header_rects(
         let inset = content_padding.max(0.0) + BORDER_WIDTH;
         let available_width =
             (strip.bounds.size.width - inset * 2.0 - action_width.max(0.0)).max(0.0);
-        // Every tab and the trailing flexible spacer use flex_1 in tab_strip().
-        let slot_width = available_width / (tab_count + 1) as f32;
+        // Each tab's flex item adds horizontal padding, while the trailing spacer does not.
+        // With flex-basis 0, that padding makes each rendered tab wider than the spacer:
+        // tab_width = (remaining_width + both tab paddings) / (tab_count + 1).
+        // Include it here so hit targets and insertion markers follow the rendered edges.
+        let tab_padding = content_padding.max(0.0);
+        let slot_width =
+            (available_width + tab_padding * 2.0) / (tab_count + 1) as f32;
 
         for header in rects
             .tab_headers
@@ -915,8 +920,11 @@ mod tests {
             .collect();
         headers.sort_by_key(|header| header.index);
         let inset = theme.metrics.content_padding + 1.0;
+        let available_width =
+            strip.bounds.size.width - inset * 2.0 - theme.metrics.button_size;
+        // The two rendered tabs carry horizontal padding; the trailing flex spacer does not.
         let expected_slot_width =
-            (strip.bounds.size.width - inset * 2.0 - theme.metrics.button_size) / 3.0;
+            (available_width + theme.metrics.content_padding * 2.0) / 3.0;
 
         assert!((headers[0].bounds.origin.x - (strip.bounds.origin.x + inset)).abs() < 0.001);
         assert!((headers[0].bounds.size.width - expected_slot_width).abs() < 0.001);
