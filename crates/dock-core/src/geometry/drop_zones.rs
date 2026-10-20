@@ -475,10 +475,13 @@ fn valid_target(
             }
             let reordering_within_group =
                 matches!(payload, DropPayload::Panel(panel) if tabs.panels.contains(&panel));
-            if reordering_within_group {
-                true
+            let valid_index = if reordering_within_group {
+                *index <= tabs.panels.len()
             } else {
                 *index > 0 && *index < tabs.panels.len()
+            };
+            if !valid_index {
+                return false;
             }
             if let DropPayload::FloatingGroup(source) = payload {
                 if layout
