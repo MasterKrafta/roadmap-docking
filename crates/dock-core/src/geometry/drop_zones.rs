@@ -1226,11 +1226,13 @@ fn desired_floating_size(
                 .max(finite_positive(metrics.default_column_width))
                 .max(minimum_width);
             let height = bounds.size.height + title_height;
+            // A floating group keeps its own tab strip as well as the outer title bar.
+            // Require room for both chrome rows plus the active panel's minimum content.
             Some((
                 width,
                 height,
                 minimum_width,
-                minimum_content_height + title_height,
+                minimum_content_height + title_height + tab_height,
             ))
         }
         DropPayload::FloatingGroup(floating_id) => {
@@ -2070,6 +2072,114 @@ mod tests {
     }
 
     #[test]
+    fn free_canvas_detaches_panels_and_whole_groups_inside_the_client_viewport() {
+        let metrics = metrics();
+
+        // Detaching one tab clamps its floating bounds at the client edge and commits
+        // only after the drag session releases the resulting FreeArea target.
+        let mut panel_layout = Layout::initial_photoshop(&metrics).unwrap();
+        let panel = panel_id(&panel_layout, "layers");
+        let panel_rects = geometry(&panel_layout, &metrics);
+        let panel_target = resolve_drop(
+            &panel_layout,
+            Point::new(30.0, 10.0),
+            DropPayload::Panel(panel),
+            &panel_rects,
+            &metrics,
+        )
+        .expect("free Canvas area should accept a single panel detach");
+        let DropTarget::FreeArea { bounds: panel_bounds } = panel_target else {
+            panic!("Canvas drop must create a floating group, not a dock target");
+        };
+        assert_eq!(panel_bounds.origin, Point::new(0.0, 0.0));
+        assert!(panel_bounds.origin.x >= 0.0 && panel_bounds.origin.y >= 0.0);
+        assert!(panel_bounds.origin.x + panel_bounds.size.width <= 1280.0);
+        assert!(panel_bounds.origin.y + panel_bounds.size.height <= 800.0);
+
+        panel_layout
+            .apply(
+                DockCommand::Float {
+                    source: FloatSource::Panel(panel),
+                    rect: panel_bounds,
+                },
+                &metrics,
+            )
+            .expect("release should detach a single panel");
+        let floating_panel = panel_layout
+            .floating_groups()
+            .values()
+            .next()
+            .expect("detached panel should be visible in a floating group");
+        assert_eq!(floating_panel.panels, vec![panel]);
+        assert_eq!(floating_panel.active_index, 0);
+        assert!(panel_layout.validate(&metrics).is_ok());
+
+        // The blank group capture area sends a Group payload. All tabs and the
+        // active tab survive detachment, and both near-edge placements are clamped.
+        let mut group_layout = Layout::initial_photoshop(&metrics).unwrap();
+        let group = group_id(&group_layout, "layers");
+        group_layout
+            .apply(DockCommand::ActivateTab { group, index: 1 }, &metrics)
+            .expect("test group can activate its second tab");
+        let original_panels = match group_layout.nodes().get(group).unwrap() {
+            Node::Tabs(tabs) => {
+                assert_eq!(tabs.active_index, 1);
+                tabs.panels.clone()
+            }
+            Node::Split(_) => panic!("Photoshop group should be Tabs"),
+        };
+        let group_rects = geometry(&group_layout, &metrics);
+        let group_payload = DropPayload::Group(group);
+        let DropTarget::FreeArea { bounds: group_bounds } = resolve_drop(
+            &group_layout,
+            Point::new(30.0, 10.0),
+            group_payload,
+            &group_rects,
+            &metrics,
+        )
+        .expect("free Canvas area should accept a whole-group detach") else {
+            panic!("whole-group Canvas drop must resolve to FreeArea");
+        };
+        assert_eq!(group_bounds.origin, Point::new(0.0, 0.0));
+        assert!(group_bounds.origin.x + group_bounds.size.width <= 1280.0);
+        assert!(group_bounds.origin.y + group_bounds.size.height <= 800.0);
+
+        let DropTarget::FreeArea { bounds: lower_bounds } = resolve_drop(
+            &group_layout,
+            Point::new(960.0, 790.0),
+            group_payload,
+            &group_rects,
+            &metrics,
+        )
+        .expect("Canvas remains a valid target near its lower edge") else {
+            panic!("lower-edge group detach must resolve to FreeArea");
+        };
+        assert!(lower_bounds.origin.x >= 0.0 && lower_bounds.origin.y >= 0.0);
+        assert!(lower_bounds.origin.x + lower_bounds.size.width <= 1280.0);
+        assert!(lower_bounds.origin.y + lower_bounds.size.height <= 800.0);
+
+        group_layout
+            .apply(
+                DockCommand::Float {
+                    source: FloatSource::Group(group),
+                    rect: group_bounds,
+                },
+                &metrics,
+            )
+            .expect("release should detach the complete group");
+        assert!(group_layout.nodes().get(group).is_none());
+        let floating_group = group_layout
+            .floating_groups()
+            .values()
+            .next()
+            .expect("detached group should remain inside the main window");
+        assert_eq!(floating_group.panels, original_panels);
+        assert_eq!(floating_group.active_index, 1);
+        assert_eq!(floating_group.bounds, group_bounds);
+        assert!(group_layout.validate(&metrics).is_ok());
+    }
+
+    #[test]
     fn free_canvas_area_creates_a_cursor_centered_floating_rect() {
         let metrics = metrics();
         let layout = Layout::initial_photoshop(&metrics).unwrap();
@@ -2108,6 +2218,25 @@ mod tests {
         );
         assert_eq!(
             resolve_drop(&layout, Point::new(400.0, 50.0), payload, &rects, &metrics),
+            None
+        );
+
+        let group_payload = DropPayload::Group(group_id(&layout, "layers"));
+        let group_zones = compute_drop_zones(&layout, &rects, group_payload, &metrics);
+        assert!(
+            group_zones
+                .iter()
+                .all(|zone| !matches!(&zone.target, DropTarget::FreeArea { .. })),
+            "a whole group needs room for its title bar, tab strip, and minimum content height"
+        );
+        assert_eq!(
+            resolve_drop(
+                &layout,
+                Point::new(400.0, 50.0),
+                group_payload,
+                &rects,
+                &metrics,
+            ),
             None
         );
     }

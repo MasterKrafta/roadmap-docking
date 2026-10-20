@@ -433,4 +433,37 @@ mod tests {
             "the core session is intent-only"
         );
     }
+    #[test]
+    fn whole_group_drag_is_preview_only_until_release() {
+        let metrics = metrics();
+        let mut layout = Layout::initial_photoshop(&metrics).expect("initial layout is valid");
+        let group = layout.dock_areas()[0].columns[0].groups[0];
+        let panels_before = match layout.nodes().get(group).unwrap() {
+            crate::Node::Tabs(tabs) => tabs.panels.clone(),
+            crate::Node::Split(_) => panic!("Photoshop group should be Tabs"),
+        };
+        let version_before = layout.version();
+        let destination = DropTarget::FreeArea {
+            bounds: Rect::new(Point::new(0.0, 0.0), Size::new(280.0, 420.0)),
+        };
+
+        let mut drag = DragSession::new();
+        assert!(drag.press(DropPayload::Group(group), Point::new(100.0, 40.0)));
+        assert!(drag.pointer_moved(
+            Point::new(104.0, 40.0),
+            Some(destination.clone()),
+        ));
+        assert_eq!(layout.version(), version_before);
+        assert!(matches!(
+            layout.nodes().get(group),
+            Some(crate::Node::Tabs(tabs)) if tabs.panels == panels_before
+        ));
+
+        let request = drag.release().expect("release emits a whole-group drop request");
+        assert_eq!(request.payload, DropPayload::Group(group));
+        assert_eq!(request.target, destination);
+        assert_eq!(layout.version(), version_before);
+        assert!(layout.validate(&metrics).is_ok());
+    }
+
 }

@@ -1,13 +1,13 @@
 use dock_core::{
     DockCommand, DockMetrics, DockSide, DragSession, DragSessionState, DropPayload, DropTarget,
-    DropZone, FloatSource, Layout, LayoutRects, Node, NodeId, PanelId, PanelKey,
+    DropZone, FloatSource, FloatingGroupId, Layout, LayoutRects, Node, NodeId, PanelId, PanelKey,
     Point as DockPoint,
     Rect as DockRect, Size as DockSize,
     compute_rects, resolve_drop,
 };
 use dock_gpui::{DockGroupData, TabItem, dock_column_view, drop_overlay};
 use gpui::{
-    App, Context, MouseButton, MouseMoveEvent, MouseUpEvent, Pixels, Point as GpuiPoint, Render,
+    AnyElement, App, Context, MouseButton, MouseMoveEvent, MouseUpEvent, Pixels, Point as GpuiPoint, Render,
     Window, div, prelude::*, px, rgb,
 };
 use ui::Theme;
@@ -106,16 +106,16 @@ impl MainWindow {
         )
     }
 
-    fn begin_panel_drag(
+    fn begin_drag(
         &mut self,
-        panel: PanelId,
+        payload: DropPayload,
         position: GpuiPoint<Pixels>,
         window: &Window,
         cx: &mut Context<Self>,
     ) {
         let geometry = self.window_geometry(window);
         let origin = self.local_dock_point(position, &geometry);
-        if self.drag_session.press(DropPayload::Panel(panel), origin) {
+        if self.drag_session.press(payload, origin) {
             cx.notify();
         }
     }
@@ -140,6 +140,14 @@ impl MainWindow {
         let geometry = self.window_geometry(window);
         let point = self.local_dock_point(position, &geometry);
         let target = resolve_drop(&self.layout, point, payload, &geometry.rects, &self.metrics);
+        // The capture handle detaches a whole group only; don't preview unrelated
+        // dock targets for this gesture. Single-tab drags keep all R6.4 targets.
+        let target = match payload {
+            DropPayload::Group(_) => target.filter(|target| {
+                matches!(target, DropTarget::FreeArea { .. })
+            }),
+            DropPayload::Panel(_) | DropPayload::FloatingGroup(_) => target,
+        };
         let previous_state = self.drag_session.state().clone();
         self.drag_session.pointer_moved(point, target);
         if self.drag_session.state() != &previous_state {
@@ -165,8 +173,8 @@ impl MainWindow {
         let request = self.drag_session.release();
 
         if let Some(request) = request {
-            if let DropPayload::Panel(panel) = request.payload {
-                let supported_target = matches!(
+            let supported_target = match request.payload {
+                DropPayload::Panel(_) => matches!(
                     &request.target,
                     DropTarget::Group {
                         zone: DropZone::Center | DropZone::Top | DropZone::Bottom,
@@ -185,27 +193,42 @@ impl MainWindow {
                             ..
                         }
                         | DropTarget::FreeArea { .. }
-                );
-                if supported_target {
-                    let result = match request.target {
-                        // Canvas is a protected document surface: a drop there may float a
-                        // panel, but it must never create a dock group or tab on the Canvas.
-                        DropTarget::FreeArea { bounds } => self.layout.apply(
+                ),
+                DropPayload::Group(_) => matches!(&request.target, DropTarget::FreeArea { .. }),
+                DropPayload::FloatingGroup(_) => false,
+            };
+
+            if supported_target {
+                let result = match (request.payload, request.target) {
+                    (DropPayload::Panel(panel), DropTarget::FreeArea { bounds }) => {
+                        // An individual tab detaches into a bounded in-window floating group.
+                        self.layout.apply(
                             DockCommand::Float {
                                 source: FloatSource::Panel(panel),
                                 rect: bounds,
                             },
                             &self.metrics,
-                        ),
-                        target => self.layout.apply(
-                            DockCommand::MovePanel { panel, target },
-                            &self.metrics,
-                        ),
-                    };
-                    match result {
-                        Ok(_) => {}
-                        Err(error) => eprintln!("Could not drop panel {panel:?}: {error}"),
+                        )
                     }
+                    (DropPayload::Group(group), DropTarget::FreeArea { bounds }) => {
+                        // Dragging the capture zone preserves every tab and the active index.
+                        self.layout.apply(
+                            DockCommand::Float {
+                                source: FloatSource::Group(group),
+                                rect: bounds,
+                            },
+                            &self.metrics,
+                        )
+                    }
+                    (DropPayload::Panel(panel), target) => {
+                        self.layout.apply(DockCommand::MovePanel { panel, target }, &self.metrics)
+                    }
+                    // Whole-group drags intentionally only detach over free Canvas space.
+                    _ => return cx.notify(),
+                };
+                match result {
+                    Ok(_) => {}
+                    Err(error) => eprintln!("Could not detach/drop payload: {error}"),
                 }
             }
         }
@@ -328,6 +351,26 @@ impl MainWindow {
         }
     }
 
+    fn activate_floating_tab(
+        &mut self,
+        floating: FloatingGroupId,
+        tab_index: usize,
+        cx: &mut Context<Self>,
+    ) {
+        match self.layout.apply(
+            DockCommand::ActivateFloatingTab { floating, index: tab_index },
+            &self.metrics,
+        ) {
+            Ok(_) => match self.layout.apply(DockCommand::RaiseFloating { floating }, &self.metrics) {
+                Ok(_) => cx.notify(),
+                Err(error) => eprintln!("Could not raise floating group {floating:?}: {error}"),
+            },
+            Err(error) => {
+                eprintln!("Could not activate floating tab {tab_index} in {floating:?}: {error}")
+            }
+        }
+    }
+
     fn activate_tab(&mut self, group_id: NodeId, tab_index: usize, cx: &mut Context<Self>) {
         // A mouse-up following a drag may also synthesize a click on the original tab.
         // Do not let that stale tab index undo the selection made by MovePanel.
@@ -393,14 +436,25 @@ impl Render for MainWindow {
         };
 
         let start_drag_window = weak_window.clone();
-        let on_start_drag = move |panel: PanelId,
+        let on_start_drag = move |payload: DropPayload,
                                   position: GpuiPoint<Pixels>,
                                   window: &mut Window,
                                   app: &mut App| {
             if let Err(error) = start_drag_window.update(app, |this, cx| {
-                this.begin_panel_drag(panel, position, window, cx);
+                this.begin_drag(payload, position, window, cx);
             }) {
-                eprintln!("Could not begin panel drag: {error}");
+                eprintln!("Could not begin drag: {error}");
+            }
+        };
+
+        let activate_floating_window = weak_window.clone();
+        let on_activate_floating_tab = move |floating: FloatingGroupId,
+                                             tab_index: usize,
+                                             app: &mut App| {
+            if let Err(error) = activate_floating_window.update(app, |this, cx| {
+                this.activate_floating_tab(floating, tab_index, cx);
+            }) {
+                eprintln!("Could not dispatch floating tab activation: {error}");
             }
         };
 
@@ -491,6 +545,13 @@ impl Render for MainWindow {
                                 body_height,
                                 on_activate_tab,
                                 on_start_drag,
+                            ))
+                            .children(render_floating_groups(
+                                &self.theme,
+                                &self.layout,
+                                &self.registry,
+                                &rects,
+                                on_activate_floating_tab,
                             ))
                             .child(drop_overlay(
                                 &self.theme,
@@ -752,7 +813,7 @@ fn render_dock_side<OnActivate, OnStartDrag>(
 ) -> impl IntoElement
 where
     OnActivate: Fn(NodeId, usize, &mut App) + Clone + 'static,
-    OnStartDrag: Fn(PanelId, GpuiPoint<Pixels>, &mut Window, &mut App) + Clone + 'static,
+    OnStartDrag: Fn(DropPayload, GpuiPoint<Pixels>, &mut Window, &mut App) + Clone + 'static,
 {
     let areas = layout
         .dock_areas()
@@ -842,6 +903,217 @@ where
         .flex_row()
         .bg(rgb(theme.colors.dock_background))
         .children(areas)
+}
+
+fn render_floating_groups<OnActivateFloating>(
+    theme: &Theme,
+    layout: &Layout,
+    registry: &PanelRegistry,
+    rects: &LayoutRects,
+    on_activate: OnActivateFloating,
+) -> Vec<AnyElement>
+where
+    OnActivateFloating: Fn(FloatingGroupId, usize, &mut App) + Clone + 'static,
+{
+    let colors = theme.colors;
+    let metrics = theme.metrics;
+    let typography = theme.typography;
+
+    let mut floating_groups: Vec<_> = layout
+        .floating_groups()
+        .iter()
+        .filter_map(|(floating_id, floating)| {
+            let bounds = rects
+                .floating_groups
+                .iter()
+                .find(|rect| rect.floating == floating_id)
+                .map(|rect| rect.bounds)?;
+            let title_height = rects
+                .floating_titles
+                .iter()
+                .find(|title| title.floating == floating_id)
+                .map(|title| title.bounds.size.height)
+                .filter(|height| height.is_finite() && *height > 0.0)
+                .unwrap_or(metrics.column_header_height)
+                .min(bounds.size.height.max(0.0));
+
+            let tabs: Vec<_> = floating
+                .panels
+                .iter()
+                .copied()
+                .enumerate()
+                .filter_map(|(index, panel_id)| {
+                    let panel = layout.panels().get(panel_id)?;
+                    let title = registry
+                        .get(panel.key())
+                        .map(|descriptor| descriptor.title().to_owned())
+                        .unwrap_or_else(|| panel.key().as_str().to_owned());
+                    Some((index, panel_id, title, index == floating.active_index))
+                })
+                .collect();
+
+            let active_panel = floating
+                .panels
+                .get(floating.active_index)
+                .and_then(|panel_id| layout.panels().get(*panel_id));
+            let fallback_heading = active_panel
+                .map(|panel| {
+                    registry
+                        .get(panel.key())
+                        .map(|descriptor| descriptor.title().to_owned())
+                        .unwrap_or_else(|| panel.key().as_str().to_owned())
+                })
+                .unwrap_or_else(|| "Panel".to_owned());
+            let (heading, message) = active_panel
+                .and_then(|panel| {
+                    registry
+                        .create_content(panel.key())
+                        .ok()
+                        .and_then(|content| {
+                            content
+                                .as_ref()
+                                .as_any()
+                                .downcast_ref::<PlaceholderPanelContent>()
+                                .map(|placeholder| {
+                                    (placeholder.heading.clone(), placeholder.message.clone())
+                                })
+                        })
+                })
+                .unwrap_or((fallback_heading, "Panel placeholder".to_owned()));
+
+            Some((
+                floating.z_order,
+                floating_id,
+                bounds,
+                title_height,
+                tabs,
+                heading,
+                message,
+            ))
+        })
+        .collect();
+    // Later elements paint above earlier ones, matching the model's z-order contract.
+    floating_groups.sort_by_key(|(z_order, ..)| *z_order);
+
+    floating_groups
+        .into_iter()
+        .map(move |(_, floating_id, bounds, title_height, tabs, heading, message)| {
+                let width = bounds.size.width.max(0.0);
+                let height = bounds.size.height.max(0.0);
+                let tab_height = metrics
+                    .tab_strip_height
+                    .max(0.0)
+                    .min((height - title_height).max(0.0));
+                let content_height = (height - title_height - tab_height).max(0.0);
+
+                let tab_elements = tabs.into_iter().map(
+                    |(index, _panel_id, title, active)| {
+                        let activate = on_activate.clone();
+                        div()
+                            .id(format!("floating-tab-{floating_id:?}-{index}"))
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .h(px(tab_height))
+                            .flex()
+                            .items_center()
+                            .px(px(metrics.content_padding))
+                            .bg(rgb(if active {
+                                colors.active_tab
+                            } else {
+                                colors.group_background
+                            }))
+                            .text_color(rgb(if active {
+                                colors.primary_text
+                            } else {
+                                colors.muted_text
+                            }))
+                            .text_size(px(typography.tab_size))
+                            .whitespace_nowrap()
+                            .overflow_hidden()
+                            .text_ellipsis()
+                            .cursor_pointer()
+                            .hover(|style| style.bg(rgb(colors.hover)))
+                            .on_click(move |_, _, app| {
+                                activate(floating_id, index, app)
+                            })
+                            .child(title)
+                    },
+                );
+
+                div()
+                    .id(format!("floating-group-{floating_id:?}"))
+                    .absolute()
+                    .left(px(bounds.origin.x))
+                    .top(px(bounds.origin.y))
+                    .w(px(width))
+                    .h(px(height))
+                    .flex()
+                    .flex_col()
+                    .overflow_hidden()
+                    .bg(rgb(colors.group_background))
+                    .border_1()
+                    .border_color(rgb(colors.border))
+                    .child(
+                        div()
+                            .w_full()
+                            .h(px(title_height))
+                            .flex()
+                            .items_center()
+                            .px(px(metrics.content_padding))
+                            .bg(rgb(colors.dock_background))
+                            .border_1()
+                            .border_color(rgb(colors.border))
+                            .text_size(px(typography.tab_size))
+                            .text_color(rgb(colors.muted_text))
+                            .child(format!("Floating · {heading}")),
+                    )
+                    .child(
+                        div()
+                            .w_full()
+                            .h(px(tab_height))
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .overflow_hidden()
+                            .bg(rgb(colors.group_background))
+                            .border_1()
+                            .border_color(rgb(colors.border))
+                            .children(tab_elements),
+                    )
+                    .child(
+                        div()
+                            .w_full()
+                            .h(px(content_height))
+                            .flex()
+                            .flex_col()
+                            .overflow_hidden()
+                            .px(px(metrics.content_padding))
+                            .py(px(metrics.content_padding))
+                            .bg(rgb(colors.group_background))
+                            .text_color(rgb(colors.primary_text))
+                            .child(
+                                div()
+                                    .w_full()
+                                    .text_size(px(typography.title_size))
+                                    .whitespace_nowrap()
+                                    .overflow_hidden()
+                                    .text_ellipsis()
+                                    .child(heading),
+                            )
+                            .child(
+                                div()
+                                    .w_full()
+                                    .text_size(px(typography.body_size))
+                                    .text_color(rgb(colors.muted_text))
+                                    .whitespace_nowrap()
+                                    .overflow_hidden()
+                                    .text_ellipsis()
+                                    .child(message),
+                            ),
+                    )
+                    .into_any_element()
+        })
+        .collect()
 }
 
 fn group_view_data(

@@ -1,4 +1,4 @@
-use dock_core::{NodeId, PanelId};
+use dock_core::{DropPayload, NodeId, PanelId};
 use gpui::{App, MouseButton, Pixels, Point as GpuiPoint, Window, div, prelude::*, px, rgb};
 use ui::Theme;
 
@@ -30,7 +30,7 @@ pub fn dock_column_view(
     header_height: f32,
     groups: Vec<DockGroupData>,
     on_activate: impl Fn(NodeId, usize, &mut App) + Clone + 'static,
-    on_start_drag: impl Fn(PanelId, GpuiPoint<Pixels>, &mut Window, &mut App) + Clone + 'static,
+    on_start_drag: impl Fn(DropPayload, GpuiPoint<Pixels>, &mut Window, &mut App) + Clone + 'static,
 ) -> impl IntoElement {
     let group_count = groups.len();
     let group_rows = groups.into_iter().enumerate().map(|(index, group)| {
@@ -136,7 +136,7 @@ pub fn tab_strip(
     height: f32,
     tabs: Vec<TabItem>,
     on_activate: impl Fn(NodeId, usize, &mut App) + Clone + 'static,
-    on_start_drag: impl Fn(PanelId, GpuiPoint<Pixels>, &mut Window, &mut App) + Clone + 'static,
+    on_start_drag: impl Fn(DropPayload, GpuiPoint<Pixels>, &mut Window, &mut App) + Clone + 'static,
 ) -> impl IntoElement {
     let colors = theme.colors;
     let metrics = theme.metrics;
@@ -175,7 +175,7 @@ pub fn tab_strip(
             .hover(|style| style.bg(rgb(colors.hover)))
             .on_click(move |_, _, app| activate(group_id, index, app))
             .on_mouse_down(MouseButton::Left, move |_, window, app| {
-                start_drag(panel_id, window.mouse_position(), window, app)
+                start_drag(DropPayload::Panel(panel_id), window.mouse_position(), window, app)
             })
             .child(tab.title)
     });
@@ -191,8 +191,25 @@ pub fn tab_strip(
         .border_1()
         .border_color(rgb(colors.border))
         .children(tab_elements)
-        // Tabs can shrink in a narrow column; this spacer keeps the group menu at the end.
-        .child(div().flex_1().h_full())
+        // The blank area is the explicit capture zone for detaching the entire group.
+        // Individual tabs keep their own Panel drag payloads; this handle uses Group.
+        .child({
+            let start_group_drag = on_start_drag.clone();
+            div()
+                .id(format!("dock-group-drag-handle-{group_id:?}"))
+                .flex_1()
+                .h_full()
+                .cursor_move()
+                .hover(|style| style.bg(rgb(colors.hover)))
+                .on_mouse_down(MouseButton::Left, move |_, window, app| {
+                    start_group_drag(
+                        DropPayload::Group(group_id),
+                        window.mouse_position(),
+                        window,
+                        app,
+                    )
+                })
+        })
         .child(static_button(theme, "≡", colors.group_background))
 }
 
