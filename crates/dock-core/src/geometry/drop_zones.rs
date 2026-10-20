@@ -89,14 +89,12 @@ pub fn compute_drop_zones(
 
     let edge_width = finite_positive(metrics.drop_edge_zone).min(viewport.size.width);
     if can_add_column && edge_width > 0.0 {
-        append_column_edge_zones(layout, rects, &mut zones, viewport, edge_width);
+        append_column_edge_zones(rects, &mut zones, viewport, edge_width);
     }
 
     // Tab insertion zones precede group center/edge zones so dropping between two
     // labels can reorder or insert a tab rather than create a neighboring group.
-    if matches!(payload, DropPayload::Panel(_) | DropPayload::FloatingGroup(_)) {
-        append_tab_insertion_zones(layout, rects, &mut zones, payload, metrics);
-    }
+    append_tab_insertion_zones(layout, rects, &mut zones, payload, metrics);
 
     append_group_zones(layout, rects, payload, &mut zones, metrics);
 
@@ -205,7 +203,6 @@ fn adjusted_tab_index(
 }
 
 fn append_column_edge_zones(
-    layout: &Layout,
     rects: &LayoutRects,
     zones: &mut Vec<DropZoneRect>,
     viewport: Rect,
@@ -278,9 +275,6 @@ fn append_column_edge_zones(
         }
     }
 
-    // Empty dock areas still have a valid outer DockEdge zone above. Column targets
-    // are emitted only for concrete columns present in the model.
-    let _ = layout;
 }
 
 fn append_tab_insertion_zones(
