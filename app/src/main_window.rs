@@ -1,8 +1,8 @@
 use dock_core::{
-    DockCommand, DockMetrics, DockSide, DragCancelReason, DragSession, DragSessionState,
+    ColumnRef, DockCommand, DockMetrics, DockSide, DragCancelReason, DragSession, DragSessionState,
     DropPayload, DropTarget, DropZone, FloatSource, FloatingGroupId, Layout, LayoutRects, Node,
-    NodeId, PanelId, PanelKey, Point as DockPoint, Rect as DockRect, ResizeEdge,
-    Size as DockSize, SplitterKind, SplitterRect, compute_rects, resolve_drop,
+    NodeId, PanelId, PanelKey, Point as DockPoint, Rect as DockRect, ResizeEdge, Size as DockSize,
+    SplitterKind, SplitterRect, compute_rects, resolve_drop,
 };
 use dock_gpui::{DockGroupData, TabItem, dock_column_view, drop_overlay};
 use gpui::{
@@ -24,6 +24,10 @@ pub struct MainWindow {
     drag_session: DragSession,
     floating_interaction: Option<FloatingInteraction>,
     floating_drag: Option<FloatingDragState>,
+    splitter_interaction: Option<SplitterInteraction>,
+    splitter_frame_scheduled: bool,
+    splitter_pending_position: Option<GpuiPoint<Pixels>>,
+    splitter_layout_before: Option<Layout>,
     window_menu_open: bool,
 }
 
@@ -54,6 +58,27 @@ struct FloatingDragState {
     initial_bounds: DockRect,
     current_bounds: DockRect,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum SplitterInteraction {
+    Groups {
+        column: ColumnRef,
+        boundary: usize,
+        last_pointer: DockPoint,
+    },
+    Column {
+        column: ColumnRef,
+        direction: f32,
+        pointer_origin: DockPoint,
+        initial_width: f32,
+    },
+    ColumnBoundary {
+        first: ColumnRef,
+        second: ColumnRef,
+        last_pointer: DockPoint,
+    },
+}
+
 impl MainWindow {
     pub fn new(
         theme: Theme,
@@ -71,6 +96,10 @@ impl MainWindow {
             drag_session: DragSession::new(),
             floating_interaction: None,
             floating_drag: None,
+            splitter_interaction: None,
+            splitter_frame_scheduled: false,
+            splitter_pending_position: None,
+            splitter_layout_before: None,
             window_menu_open: false,
         }
     }
@@ -154,10 +183,10 @@ impl MainWindow {
                 .iter()
                 .find_map(|(floating, group)| group.panels.contains(&panel).then_some(floating))
             {
-                if let Err(error) = self.layout.apply(
-                    DockCommand::RaiseFloating { floating },
-                    &self.metrics,
-                ) {
+                if let Err(error) = self
+                    .layout
+                    .apply(DockCommand::RaiseFloating { floating }, &self.metrics)
+                {
                     eprintln!("Could not raise floating group {floating:?} for tab drag: {error}");
                     return;
                 }
@@ -170,7 +199,19 @@ impl MainWindow {
     }
 
     fn cancel_panel_drag(&mut self, cx: &mut Context<Self>) {
-        if cancel_drag_interaction(&mut self.drag_session, &mut self.floating_drag) {
+        let drag_cancelled =
+            cancel_drag_interaction(&mut self.drag_session, &mut self.floating_drag);
+        let splitter_cancelled = if self.splitter_interaction.take().is_some() {
+            self.splitter_pending_position = None;
+            if let Some(layout) = self.splitter_layout_before.take() {
+                self.layout = layout;
+            }
+            true
+        } else {
+            false
+        };
+
+        if drag_cancelled || splitter_cancelled {
             cx.notify();
         }
     }
@@ -214,10 +255,10 @@ impl MainWindow {
             )
         });
 
-        if let Err(error) = self.layout.apply(
-            DockCommand::RaiseFloating { floating },
-            &self.metrics,
-        ) {
+        if let Err(error) = self
+            .layout
+            .apply(DockCommand::RaiseFloating { floating }, &self.metrics)
+        {
             eprintln!("Could not raise floating group {floating:?}: {error}");
             return;
         }
@@ -253,7 +294,10 @@ impl MainWindow {
     }
 
     fn focus_floating(&mut self, floating: FloatingGroupId, cx: &mut Context<Self>) {
-        match self.layout.apply(DockCommand::RaiseFloating { floating }, &self.metrics) {
+        match self
+            .layout
+            .apply(DockCommand::RaiseFloating { floating }, &self.metrics)
+        {
             Ok(_) => cx.notify(),
             Err(error) => eprintln!("Could not raise floating group {floating:?}: {error}"),
         }
@@ -303,10 +347,7 @@ impl MainWindow {
             geometry.docking_viewport_width.max(0.0),
             geometry.body_height.max(0.0),
         );
-        let delta = DockPoint::new(
-            point.x - pointer_origin.x,
-            point.y - pointer_origin.y,
-        );
+        let delta = DockPoint::new(point.x - pointer_origin.x, point.y - pointer_origin.y);
         let minimum = self.floating_minimum_size(floating);
         let rect = resize_floating_rect(initial_bounds, edge, delta, minimum, viewport);
 
@@ -327,6 +368,202 @@ impl MainWindow {
         } else {
             cx.notify();
         }
+    }
+
+    fn begin_splitter_interaction(
+        &mut self,
+        kind: SplitterKind,
+        index: usize,
+        position: GpuiPoint<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.splitter_interaction.is_some()
+            || self.floating_interaction.is_some()
+            || self.floating_drag.is_some()
+            || matches!(
+                self.drag_session.state(),
+                DragSessionState::Pressed { .. } | DragSessionState::Dragging { .. }
+            )
+        {
+            return;
+        }
+
+        self.focus_handle.focus(window, cx);
+        let geometry = self.window_geometry(window);
+        self.layout.set_canvas_bounds(geometry.rects.canvas);
+        let pointer_origin = self.local_dock_point(position, &geometry);
+        let Some(interaction) = resolve_splitter_interaction(
+            &self.layout,
+            &geometry.rects,
+            kind,
+            index,
+            pointer_origin,
+        ) else {
+            return;
+        };
+
+        self.splitter_layout_before = Some(self.layout.clone());
+        self.splitter_interaction = Some(interaction);
+        self.splitter_pending_position = None;
+        cx.notify();
+    }
+
+    /// Coalesce bursts of mouse-move events so a splitter command runs no more than once
+    /// before the next GPUI frame. The callback consumes the most recent pointer position.
+    fn queue_splitter_pointer_update(
+        &mut self,
+        position: GpuiPoint<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.splitter_interaction.is_none() {
+            return;
+        }
+
+        self.splitter_pending_position = Some(position);
+        if self.splitter_frame_scheduled {
+            return;
+        }
+
+        self.splitter_frame_scheduled = true;
+        cx.on_next_frame(window, |this, window, cx| {
+            this.splitter_frame_scheduled = false;
+            let Some(position) = this.splitter_pending_position.take() else {
+                return;
+            };
+            if this.splitter_interaction.is_some() {
+                this.update_splitter_interaction(position, window, cx);
+            }
+        });
+    }
+
+    fn update_splitter_interaction(
+        &mut self,
+        position: GpuiPoint<Pixels>,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(interaction) = self.splitter_interaction else {
+            return;
+        };
+        let geometry = self.window_geometry(window);
+        self.layout.set_canvas_bounds(geometry.rects.canvas);
+        let point = self.local_dock_point(position, &geometry);
+
+        match interaction {
+            SplitterInteraction::Groups {
+                column,
+                boundary,
+                last_pointer,
+            } => {
+                let delta = point.y - last_pointer.y;
+                if delta.is_finite() && delta.abs() > 0.0001 {
+                    match self.layout.apply(
+                        DockCommand::ResizeGroups {
+                            column,
+                            boundary,
+                            delta,
+                        },
+                        &self.metrics,
+                    ) {
+                        Ok(outcome) => {
+                            if outcome.actual_value.unwrap_or(delta).abs() > 0.0001 {
+                                cx.notify();
+                            }
+                        }
+                        Err(error) => eprintln!("Could not resize dock groups: {error}"),
+                    }
+                }
+                self.splitter_interaction = Some(SplitterInteraction::Groups {
+                    column,
+                    boundary,
+                    last_pointer: point,
+                });
+            }
+            SplitterInteraction::Column {
+                column,
+                direction,
+                pointer_origin,
+                initial_width,
+            } => {
+                let requested_width = initial_width + direction * (point.x - pointer_origin.x);
+                let current_width = self
+                    .layout
+                    .dock_areas()
+                    .iter()
+                    .find(|area| area.side == column.side)
+                    .and_then(|area| area.columns.get(column.index))
+                    .map(|column| column.width);
+
+                if let Some(current_width) = current_width
+                    && requested_width.is_finite()
+                    && (requested_width - current_width).abs() > 0.0001
+                {
+                    match self.layout.apply(
+                        DockCommand::ResizeColumn {
+                            column,
+                            width: requested_width,
+                        },
+                        &self.metrics,
+                    ) {
+                        Ok(outcome) => {
+                            let applied_width = outcome.actual_value.unwrap_or(requested_width);
+                            if (applied_width - current_width).abs() > 0.0001 {
+                                cx.notify();
+                            }
+                        }
+                        Err(error) => eprintln!("Could not resize dock column: {error}"),
+                    }
+                }
+            }
+            SplitterInteraction::ColumnBoundary {
+                first,
+                second,
+                last_pointer,
+            } => {
+                let delta = point.x - last_pointer.x;
+                if delta.is_finite() && delta.abs() > 0.0001 {
+                    match self.layout.apply(
+                        DockCommand::ResizeColumnBoundary {
+                            first,
+                            second,
+                            delta,
+                        },
+                        &self.metrics,
+                    ) {
+                        Ok(outcome) => {
+                            if outcome.actual_value.unwrap_or(delta).abs() > 0.0001 {
+                                cx.notify();
+                            }
+                        }
+                        Err(error) => eprintln!("Could not resize adjacent dock columns: {error}"),
+                    }
+                }
+                self.splitter_interaction = Some(SplitterInteraction::ColumnBoundary {
+                    first,
+                    second,
+                    last_pointer: point,
+                });
+            }
+        }
+    }
+
+    fn finish_splitter_interaction(
+        &mut self,
+        position: GpuiPoint<Pixels>,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.splitter_interaction.is_none() {
+            return;
+        }
+
+        self.splitter_pending_position = None;
+        self.update_splitter_interaction(position, window, cx);
+        self.splitter_interaction = None;
+        self.splitter_layout_before = None;
+        cx.notify();
     }
 
     fn update_panel_drag(
@@ -359,10 +596,8 @@ impl MainWindow {
         };
 
         let target = if let Some(dragging_payload) = dragging_payload {
-            if let (
-                DropPayload::FloatingGroup(floating),
-                Some(drag),
-            ) = (dragging_payload, self.floating_drag)
+            if let (DropPayload::FloatingGroup(floating), Some(drag)) =
+                (dragging_payload, self.floating_drag)
                 && drag.floating == floating
             {
                 let viewport = DockSize::new(
@@ -491,9 +726,9 @@ impl MainWindow {
                             &self.metrics,
                         )
                     }
-                    (DropPayload::Panel(panel), target) => {
-                        self.layout.apply(DockCommand::MovePanel { panel, target }, &self.metrics)
-                    }
+                    (DropPayload::Panel(panel), target) => self
+                        .layout
+                        .apply(DockCommand::MovePanel { panel, target }, &self.metrics),
                     (DropPayload::FloatingGroup(floating), target) => self.layout.apply(
                         DockCommand::DockFloating { floating, target },
                         &self.metrics,
@@ -502,7 +737,7 @@ impl MainWindow {
                         self.floating_drag = None;
                         cx.notify();
                         return;
-                    },
+                    }
                 };
                 if let Err(error) = result {
                     eprintln!("Could not apply floating/dock drop: {error}");
@@ -525,7 +760,10 @@ impl MainWindow {
                         &self.metrics,
                     )
                 {
-                    eprintln!("Could not move floating group {:#?}: {error}", drag.floating);
+                    eprintln!(
+                        "Could not move floating group {:#?}: {error}",
+                        drag.floating
+                    );
                 }
             }
         }
@@ -727,10 +965,16 @@ impl MainWindow {
         }
 
         match self.layout.apply(
-            DockCommand::ActivateFloatingTab { floating, index: tab_index },
+            DockCommand::ActivateFloatingTab {
+                floating,
+                index: tab_index,
+            },
             &self.metrics,
         ) {
-            Ok(_) => match self.layout.apply(DockCommand::RaiseFloating { floating }, &self.metrics) {
+            Ok(_) => match self
+                .layout
+                .apply(DockCommand::RaiseFloating { floating }, &self.metrics)
+            {
                 Ok(_) => cx.notify(),
                 Err(error) => eprintln!("Could not raise floating group {floating:?}: {error}"),
             },
@@ -817,28 +1061,42 @@ impl Render for MainWindow {
         };
 
         let activate_floating_window = weak_window.clone();
-        let on_activate_floating_tab = move |floating: FloatingGroupId,
-                                             tab_index: usize,
-                                             app: &mut App| {
-            if let Err(error) = activate_floating_window.update(app, |this, cx| {
-                this.activate_floating_tab(floating, tab_index, cx);
-            }) {
-                eprintln!("Could not dispatch floating tab activation: {error}");
-            }
-        };
+        let on_activate_floating_tab =
+            move |floating: FloatingGroupId, tab_index: usize, app: &mut App| {
+                if let Err(error) = activate_floating_window.update(app, |this, cx| {
+                    this.activate_floating_tab(floating, tab_index, cx);
+                }) {
+                    eprintln!("Could not dispatch floating tab activation: {error}");
+                }
+            };
 
         let begin_floating_window = weak_window.clone();
-        let on_begin_floating_interaction = move |floating: FloatingGroupId,
-                                                  edge: Option<ResizeEdge>,
-                                                  position: GpuiPoint<Pixels>,
-                                                  window: &mut Window,
-                                                  app: &mut App| {
-            if let Err(error) = begin_floating_window.update(app, |this, cx| {
-                this.begin_floating_interaction(floating, edge, position, window, cx);
-            }) {
-                eprintln!("Could not begin floating interaction: {error}");
-            }
-        };
+        let on_begin_floating_interaction =
+            move |floating: FloatingGroupId,
+                  edge: Option<ResizeEdge>,
+                  position: GpuiPoint<Pixels>,
+                  window: &mut Window,
+                  app: &mut App| {
+                if let Err(error) = begin_floating_window.update(app, |this, cx| {
+                    this.begin_floating_interaction(floating, edge, position, window, cx);
+                }) {
+                    eprintln!("Could not begin floating interaction: {error}");
+                }
+            };
+
+        let begin_splitter_window = weak_window.clone();
+        let on_begin_splitter_interaction =
+            move |kind: SplitterKind,
+                  index: usize,
+                  position: GpuiPoint<Pixels>,
+                  window: &mut Window,
+                  app: &mut App| {
+                if let Err(error) = begin_splitter_window.update(app, |this, cx| {
+                    this.begin_splitter_interaction(kind, index, position, window, cx);
+                }) {
+                    eprintln!("Could not begin splitter interaction: {error}");
+                }
+            };
 
         let focus_floating_window = weak_window.clone();
         let on_focus_floating = move |floating: FloatingGroupId, app: &mut App| {
@@ -853,7 +1111,9 @@ impl Render for MainWindow {
         let on_pointer_move = move |_: &MouseMoveEvent, window: &mut Window, app: &mut App| {
             let position = window.mouse_position();
             if let Err(error) = update_drag_window.update(app, |this, cx| {
-                if this.floating_interaction.is_some() {
+                if this.splitter_interaction.is_some() {
+                    this.queue_splitter_pointer_update(position, window, cx);
+                } else if this.floating_interaction.is_some() {
                     this.update_floating_interaction(position, window, cx);
                 } else {
                     this.update_panel_drag(position, window, cx);
@@ -867,7 +1127,9 @@ impl Render for MainWindow {
         let on_pointer_up = move |_: &MouseUpEvent, window: &mut Window, app: &mut App| {
             let position = window.mouse_position();
             if let Err(error) = finish_drag_window.update(app, |this, cx| {
-                if this.floating_interaction.is_some() {
+                if this.splitter_interaction.is_some() {
+                    this.finish_splitter_interaction(position, window, cx);
+                } else if this.floating_interaction.is_some() {
                     this.update_floating_interaction(position, window, cx);
                     this.floating_interaction = None;
                     cx.notify();
@@ -958,7 +1220,11 @@ impl Render for MainWindow {
                                 on_activate_tab,
                                 on_start_drag.clone(),
                             ))
-                            .children(render_splitter_handles(&self.theme, &rects))
+                            .children(render_splitter_handles(
+                                &self.theme,
+                                &rects,
+                                on_begin_splitter_interaction,
+                            ))
                             .children(render_floating_groups(
                                 &self.theme,
                                 &self.layout,
@@ -983,6 +1249,109 @@ impl Render for MainWindow {
     }
 }
 
+fn resolve_splitter_interaction(
+    layout: &Layout,
+    rects: &LayoutRects,
+    kind: SplitterKind,
+    index: usize,
+    pointer_origin: DockPoint,
+) -> Option<SplitterInteraction> {
+    match kind {
+        SplitterKind::Group => {
+            let mut current_index = 0usize;
+            for area in layout.dock_areas() {
+                for (column_index, column) in area.columns.iter().enumerate() {
+                    for boundary in 0..column.groups.len().saturating_sub(1) {
+                        if current_index == index {
+                            return Some(SplitterInteraction::Groups {
+                                column: ColumnRef::new(area.side, column_index),
+                                boundary,
+                                last_pointer: pointer_origin,
+                            });
+                        }
+                        current_index += 1;
+                    }
+                }
+            }
+            None
+        }
+        SplitterKind::Column => {
+            let splitter = rects.splitters.iter().find(|splitter| {
+                splitter.kind == SplitterKind::Column && splitter.index == index
+            })?;
+            let boundary_x = splitter.bounds.origin.x + splitter.bounds.size.width * 0.5;
+            if !boundary_x.is_finite() {
+                return None;
+            }
+
+            let left_column = rects
+                .columns
+                .iter()
+                .filter(|column| {
+                    column.bounds.size.width > 0.0
+                        && (column.bounds.origin.x + column.bounds.size.width - boundary_x).abs()
+                            <= 0.5
+                })
+                .max_by(|left, right| left.bounds.origin.x.total_cmp(&right.bounds.origin.x));
+            let right_column = rects
+                .columns
+                .iter()
+                .filter(|column| {
+                    column.bounds.size.width > 0.0
+                        && (column.bounds.origin.x - boundary_x).abs() <= 0.5
+                })
+                .min_by(|left, right| left.bounds.origin.x.total_cmp(&right.bounds.origin.x));
+
+            match (left_column, right_column) {
+                (Some(left), Some(right))
+                    if left.side == right.side && right.index == left.index + 1 =>
+                {
+                    Some(SplitterInteraction::ColumnBoundary {
+                        first: ColumnRef::new(left.side, left.index),
+                        second: ColumnRef::new(right.side, right.index),
+                        last_pointer: pointer_origin,
+                    })
+                }
+                (Some(left), None) if left.side == DockSide::Left => {
+                    let column = ColumnRef::new(left.side, left.index);
+                    let initial_width = layout
+                        .dock_areas()
+                        .iter()
+                        .find(|area| area.side == column.side)?
+                        .columns
+                        .get(column.index)?
+                        .width;
+                    Some(SplitterInteraction::Column {
+                        column,
+                        direction: 1.0,
+                        pointer_origin,
+                        initial_width,
+                    })
+                }
+                (None, Some(right)) if right.side == DockSide::Right => {
+                    let column = ColumnRef::new(right.side, right.index);
+                    let initial_width = layout
+                        .dock_areas()
+                        .iter()
+                        .find(|area| area.side == column.side)?
+                        .columns
+                        .get(column.index)?
+                        .width;
+                    Some(SplitterInteraction::Column {
+                        column,
+                        direction: -1.0,
+                        pointer_origin,
+                        initial_width,
+                    })
+                }
+                // A collapsed Canvas can make the left and right outer boundaries
+                // coincide. Do not guess which side the user intended to resize.
+                _ => None,
+            }
+        }
+    }
+}
+
 fn cancel_drag_interaction(
     drag_session: &mut DragSession,
     floating_drag: &mut Option<FloatingDragState>,
@@ -998,7 +1367,14 @@ fn cancel_drag_interaction(
 /// Build transparent splitter hit-zones and their Theme-sized visual handles.
 /// Group splitters already occupy their 4 px layout gap; the column separator is painted
 /// here because column children otherwise touch without a visible boundary.
-fn render_splitter_handles(theme: &Theme, rects: &LayoutRects) -> Vec<AnyElement> {
+fn render_splitter_handles<F>(
+    theme: &Theme,
+    rects: &LayoutRects,
+    on_begin_splitter_interaction: F,
+) -> Vec<AnyElement>
+where
+    F: Fn(SplitterKind, usize, GpuiPoint<Pixels>, &mut Window, &mut App) + Clone + 'static,
+{
     let mut elements = Vec::with_capacity(rects.splitters.len() * 2);
     let colors = theme.colors;
     let thickness = theme.metrics.splitter_thickness;
@@ -1015,27 +1391,12 @@ fn render_splitter_handles(theme: &Theme, rects: &LayoutRects) -> Vec<AnyElement
             continue;
         }
 
-        let handle = div()
-            .id(format!("dock-splitter-hit-{:?}-{}", splitter.kind, splitter.index))
-            .absolute()
-            .left(px(bounds.origin.x))
-            .top(px(bounds.origin.y))
-            .w(px(bounds.size.width))
-            .h(px(bounds.size.height));
-
-        let handle = match splitter.kind {
-            SplitterKind::Group => handle.cursor_ns_resize(),
-            SplitterKind::Column => handle.cursor_col_resize(),
-        };
-        elements.push(handle.into_any_element());
-
+        let kind = splitter.kind;
+        let index = splitter.index;
         if let Some(visible) = splitter_visible_bounds(splitter, thickness) {
             elements.push(
                 div()
-                    .id(format!(
-                        "dock-splitter-visible-{:?}-{}",
-                        splitter.kind, splitter.index
-                    ))
+                    .id(format!("dock-splitter-visible-{:?}-{}", kind, index))
                     .absolute()
                     .left(px(visible.origin.x))
                     .top(px(visible.origin.y))
@@ -1046,6 +1407,28 @@ fn render_splitter_handles(theme: &Theme, rects: &LayoutRects) -> Vec<AnyElement
                     .into_any_element(),
             );
         }
+
+        // Add the transparent hit-zone after the visible line so the larger target owns
+        // clicks and the resize cursor across its full Theme-configured width/height.
+        let on_begin = on_begin_splitter_interaction.clone();
+        let handle = div()
+            .id(format!("dock-splitter-hit-{:?}-{}", kind, index))
+            .absolute()
+            .left(px(bounds.origin.x))
+            .top(px(bounds.origin.y))
+            .w(px(bounds.size.width))
+            .h(px(bounds.size.height));
+        let handle = match kind {
+            SplitterKind::Group => handle.cursor_ns_resize(),
+            SplitterKind::Column => handle.cursor_col_resize(),
+        };
+        elements.push(
+            handle
+                .on_mouse_down(MouseButton::Left, move |_, window, app| {
+                    on_begin(kind, index, window.mouse_position(), window, app);
+                })
+                .into_any_element(),
+        );
     }
 
     elements
@@ -1115,13 +1498,11 @@ fn titlebar_resize_edge(
     }
 }
 
-fn drop_target_rects_for_session(
-    rects: &LayoutRects,
-    state: &DragSessionState,
-) -> LayoutRects {
+fn drop_target_rects_for_session(rects: &LayoutRects, state: &DragSessionState) -> LayoutRects {
     let payload = match state {
-        DragSessionState::Pressed { payload, .. }
-        | DragSessionState::Dragging { payload, .. } => *payload,
+        DragSessionState::Pressed { payload, .. } | DragSessionState::Dragging { payload, .. } => {
+            *payload
+        }
         _ => return rects.clone(),
     };
     drop_target_rects(rects, payload)
@@ -1200,8 +1581,7 @@ fn resize_floating_rect(
     }
     match edge {
         ResizeEdge::Right | ResizeEdge::TopRight | ResizeEdge::BottomRight => {
-            right = (right + delta.x)
-                .clamp((left + min_width).min(viewport_width), viewport_width);
+            right = (right + delta.x).clamp((left + min_width).min(viewport_width), viewport_width);
         }
         _ => {}
     }
@@ -1213,8 +1593,8 @@ fn resize_floating_rect(
     }
     match edge {
         ResizeEdge::Bottom | ResizeEdge::BottomLeft | ResizeEdge::BottomRight => {
-            bottom = (bottom + delta.y)
-                .clamp((top + min_height).min(viewport_height), viewport_height);
+            bottom =
+                (bottom + delta.y).clamp((top + min_height).min(viewport_height), viewport_height);
         }
         _ => {}
     }
@@ -1253,8 +1633,7 @@ fn align_tab_header_rects(
         // tab_width = (remaining_width + both tab paddings) / (tab_count + 1).
         // Include it here so hit targets and insertion markers follow the rendered edges.
         let tab_padding = content_padding.max(0.0);
-        let slot_width =
-            (available_width + tab_padding * 2.0) / (tab_count + 1) as f32;
+        let slot_width = (available_width + tab_padding * 2.0) / (tab_count + 1) as f32;
 
         for header in rects
             .tab_headers
@@ -1565,12 +1944,7 @@ where
         .children(areas)
 }
 
-fn render_floating_groups<
-    OnActivateFloating,
-    OnBeginFloating,
-    OnFocusFloating,
-    OnStartDrag,
->(
+fn render_floating_groups<OnActivateFloating, OnBeginFloating, OnFocusFloating, OnStartDrag>(
     theme: &Theme,
     layout: &Layout,
     registry: &PanelRegistry,
@@ -1582,13 +1956,8 @@ fn render_floating_groups<
 ) -> Vec<AnyElement>
 where
     OnActivateFloating: Fn(FloatingGroupId, usize, &mut App) + Clone + 'static,
-    OnBeginFloating: Fn(
-            FloatingGroupId,
-            Option<ResizeEdge>,
-            GpuiPoint<Pixels>,
-            &mut Window,
-            &mut App,
-        ) + Clone
+    OnBeginFloating: Fn(FloatingGroupId, Option<ResizeEdge>, GpuiPoint<Pixels>, &mut Window, &mut App)
+        + Clone
         + 'static,
     OnFocusFloating: Fn(FloatingGroupId, &mut App) + Clone + 'static,
     OnStartDrag: Fn(DropPayload, GpuiPoint<Pixels>, &mut Window, &mut App) + Clone + 'static,
@@ -1675,7 +2044,8 @@ where
 
     floating_groups
         .into_iter()
-        .map(move |(_, floating_id, bounds, title_height, tabs, heading, message)| {
+        .map(
+            move |(_, floating_id, bounds, title_height, tabs, heading, message)| {
                 let width = bounds.size.width.max(0.0);
                 let height = bounds.size.height.max(0.0);
                 let tab_height = metrics
@@ -1684,48 +2054,44 @@ where
                     .min((height - title_height).max(0.0));
                 let content_height = (height - title_height - tab_height).max(0.0);
 
-                let tab_elements = tabs.into_iter().map(
-                    |(index, panel_id, title, active)| {
-                        let activate = on_activate.clone();
-                        let start_drag = on_start_drag.clone();
-                        div()
-                            .id(format!("floating-tab-{floating_id:?}-{index}"))
-                            .flex_1()
-                            .min_w(px(0.0))
-                            .h(px(tab_height))
-                            .flex()
-                            .items_center()
-                            .px(px(metrics.content_padding))
-                            .bg(rgb(if active {
-                                colors.active_tab
-                            } else {
-                                colors.group_background
-                            }))
-                            .text_color(rgb(if active {
-                                colors.primary_text
-                            } else {
-                                colors.muted_text
-                            }))
-                            .text_size(px(typography.tab_size))
-                            .whitespace_nowrap()
-                            .overflow_hidden()
-                            .text_ellipsis()
-                            .cursor_pointer()
-                            .hover(|style| style.bg(rgb(colors.hover)))
-                            .on_mouse_down(MouseButton::Left, move |_, window, app| {
-                                start_drag(
-                                    DropPayload::Panel(panel_id),
-                                    window.mouse_position(),
-                                    window,
-                                    app,
-                                )
-                            })
-                            .on_click(move |_, _, app| {
-                                activate(floating_id, index, app)
-                            })
-                            .child(title)
-                    },
-                );
+                let tab_elements = tabs.into_iter().map(|(index, panel_id, title, active)| {
+                    let activate = on_activate.clone();
+                    let start_drag = on_start_drag.clone();
+                    div()
+                        .id(format!("floating-tab-{floating_id:?}-{index}"))
+                        .flex_1()
+                        .min_w(px(0.0))
+                        .h(px(tab_height))
+                        .flex()
+                        .items_center()
+                        .px(px(metrics.content_padding))
+                        .bg(rgb(if active {
+                            colors.active_tab
+                        } else {
+                            colors.group_background
+                        }))
+                        .text_color(rgb(if active {
+                            colors.primary_text
+                        } else {
+                            colors.muted_text
+                        }))
+                        .text_size(px(typography.tab_size))
+                        .whitespace_nowrap()
+                        .overflow_hidden()
+                        .text_ellipsis()
+                        .cursor_pointer()
+                        .hover(|style| style.bg(rgb(colors.hover)))
+                        .on_mouse_down(MouseButton::Left, move |_, window, app| {
+                            start_drag(
+                                DropPayload::Panel(panel_id),
+                                window.mouse_position(),
+                                window,
+                                app,
+                            )
+                        })
+                        .on_click(move |_, _, app| activate(floating_id, index, app))
+                        .child(title)
+                });
 
                 div()
                     .id(format!("floating-group-{floating_id:?}"))
@@ -1756,13 +2122,7 @@ where
                             .cursor_move()
                             .hover(|style| style.bg(rgb(colors.hover)))
                             .on_mouse_down(MouseButton::Left, move |_, window, app| {
-                                begin_move(
-                                    floating_id,
-                                    None,
-                                    window.mouse_position(),
-                                    window,
-                                    app,
-                                )
+                                begin_move(floating_id, None, window.mouse_position(), window, app)
                             })
                             .child(format!("Floating · {heading}"))
                     })
@@ -1863,7 +2223,8 @@ where
                             }),
                     )
                     .into_any_element()
-        })
+            },
+        )
         .collect()
 }
 
@@ -1929,8 +2290,9 @@ fn group_view_data(
 #[cfg(test)]
 mod tests {
     use super::{
-        align_tab_header_rects, cancel_drag_interaction, group_view_data, resize_floating_rect,
-        splitter_visible_bounds, titlebar_resize_edge,
+        SplitterInteraction, align_tab_header_rects, cancel_drag_interaction, group_view_data,
+        resize_floating_rect, resolve_splitter_interaction, splitter_visible_bounds,
+        titlebar_resize_edge,
     };
     use crate::{dock_metrics, panels::PanelRegistry};
     use ui::Theme;
@@ -1938,7 +2300,7 @@ mod tests {
     #[test]
     fn escape_cancels_drag_preview_and_discards_floating_preview() {
         use dock_core::{
-            DragCancelReason, DragSession, DragSessionState, DockSide, DropPayload, DropTarget,
+            DockSide, DragCancelReason, DragSession, DragSessionState, DropPayload, DropTarget,
             FloatingGroupId, Point, Rect, Size,
         };
         use slotmap::Key;
@@ -1948,7 +2310,9 @@ mod tests {
         assert!(session.press(DropPayload::FloatingGroup(floating), Point::new(10.0, 10.0)));
         assert!(session.pointer_moved(
             Point::new(20.0, 10.0),
-            Some(DropTarget::DockEdge { side: DockSide::Left }),
+            Some(DropTarget::DockEdge {
+                side: DockSide::Left
+            }),
         ));
         let mut preview = Some(super::FloatingDragState {
             floating,
@@ -1968,6 +2332,82 @@ mod tests {
         assert!(preview.is_none());
         assert!(session.release().is_none());
         assert!(!cancel_drag_interaction(&mut session, &mut preview));
+    }
+
+    #[test]
+    fn splitter_resolver_maps_group_and_canvas_boundary_to_resize_commands() {
+        use dock_core::{ColumnRef, DockSide, Point, Size, SplitterKind};
+
+        let theme = Theme::default();
+        let metrics = dock_metrics::build(&theme);
+        let registry = PanelRegistry::with_builtins().expect("built-in descriptors are valid");
+        let layout = registry
+            .build_initial_photoshop_layout(&metrics)
+            .expect("initial dock layout is valid");
+        let rects = dock_core::compute_rects(&layout, Size::new(1000.0, 600.0), &metrics);
+        let pointer = Point::new(720.0, 200.0);
+
+        assert_eq!(
+            resolve_splitter_interaction(&layout, &rects, SplitterKind::Group, 0, pointer,),
+            Some(SplitterInteraction::Groups {
+                column: ColumnRef::new(DockSide::Right, 0),
+                boundary: 0,
+                last_pointer: pointer,
+            })
+        );
+
+        assert_eq!(
+            resolve_splitter_interaction(&layout, &rects, SplitterKind::Column, 0, pointer,),
+            Some(SplitterInteraction::Column {
+                column: ColumnRef::new(DockSide::Right, 0),
+                direction: -1.0,
+                pointer_origin: pointer,
+                initial_width: layout.dock_areas()[0].columns[0].width,
+            })
+        );
+    }
+
+    #[test]
+    fn splitter_resolver_uses_boundary_resize_for_adjacent_columns() {
+        use dock_core::{
+            ColumnRef, DockCommand, DockSide, Node, Point, Size, SplitSide, SplitterKind,
+        };
+
+        let theme = Theme::default();
+        let metrics = dock_metrics::build(&theme);
+        let registry = PanelRegistry::with_builtins().expect("built-in descriptors are valid");
+        let mut layout = registry
+            .build_initial_photoshop_layout(&metrics)
+            .expect("initial dock layout is valid");
+        let group = layout.dock_areas()[0].columns[0].groups[0];
+        let panel = match layout.nodes().get(group).expect("source group exists") {
+            Node::Tabs(tabs) => tabs.panels[0],
+            Node::Split(_) => panic!("Photoshop dock groups must be tabs"),
+        };
+        layout
+            .apply(
+                DockCommand::SplitGroup {
+                    panel,
+                    group,
+                    side: SplitSide::Right,
+                },
+                &metrics,
+            )
+            .expect("splitting a panel to the right creates an adjacent column");
+
+        let rects = dock_core::compute_rects(&layout, Size::new(1000.0, 600.0), &metrics);
+        let pointer = Point::new(720.0, 200.0);
+        let interaction =
+            resolve_splitter_interaction(&layout, &rects, SplitterKind::Column, 1, pointer);
+
+        assert_eq!(
+            interaction,
+            Some(SplitterInteraction::ColumnBoundary {
+                first: ColumnRef::new(DockSide::Right, 0),
+                second: ColumnRef::new(DockSide::Right, 1),
+                last_pointer: pointer,
+            })
+        );
     }
 
     #[test]
@@ -1992,7 +2432,10 @@ mod tests {
         );
         assert!(
             splitter_visible_bounds(
-                &SplitterRect { kind: SplitterKind::Group, ..splitter },
+                &SplitterRect {
+                    kind: SplitterKind::Group,
+                    ..splitter
+                },
                 4.0,
             )
             .is_none(),
@@ -2017,9 +2460,18 @@ mod tests {
             titlebar_resize_edge(Point::new(397.0, 84.0), bounds, 8.0),
             Some(ResizeEdge::TopRight)
         );
-        assert_eq!(titlebar_resize_edge(Point::new(250.0, 100.0), bounds, 8.0), None);
-        assert_eq!(titlebar_resize_edge(Point::new(250.0, 79.0), bounds, 8.0), None);
-        assert_eq!(titlebar_resize_edge(Point::new(250.0, 84.0), bounds, 0.0), None);
+        assert_eq!(
+            titlebar_resize_edge(Point::new(250.0, 100.0), bounds, 8.0),
+            None
+        );
+        assert_eq!(
+            titlebar_resize_edge(Point::new(250.0, 79.0), bounds, 8.0),
+            None
+        );
+        assert_eq!(
+            titlebar_resize_edge(Point::new(250.0, 84.0), bounds, 0.0),
+            None
+        );
     }
 
     #[test]
@@ -2034,7 +2486,10 @@ mod tests {
             Size::new(180.0, 130.0),
             Size::new(500.0, 400.0),
         );
-        assert_eq!(from_left, Rect::new(Point::new(150.0, 80.0), Size::new(250.0, 200.0)));
+        assert_eq!(
+            from_left,
+            Rect::new(Point::new(150.0, 80.0), Size::new(250.0, 200.0))
+        );
 
         let from_top = resize_floating_rect(
             initial,
@@ -2043,7 +2498,10 @@ mod tests {
             Size::new(180.0, 130.0),
             Size::new(500.0, 400.0),
         );
-        assert_eq!(from_top, Rect::new(Point::new(100.0, 150.0), Size::new(300.0, 130.0)));
+        assert_eq!(
+            from_top,
+            Rect::new(Point::new(100.0, 150.0), Size::new(300.0, 130.0))
+        );
 
         let from_right = resize_floating_rect(
             initial,
@@ -2052,7 +2510,10 @@ mod tests {
             Size::new(180.0, 130.0),
             Size::new(500.0, 400.0),
         );
-        assert_eq!(from_right, Rect::new(Point::new(100.0, 80.0), Size::new(400.0, 200.0)));
+        assert_eq!(
+            from_right,
+            Rect::new(Point::new(100.0, 80.0), Size::new(400.0, 200.0))
+        );
     }
 
     #[test]
@@ -2085,11 +2546,9 @@ mod tests {
             .collect();
         headers.sort_by_key(|header| header.index);
         let inset = theme.metrics.content_padding + 1.0;
-        let available_width =
-            strip.bounds.size.width - inset * 2.0 - theme.metrics.button_size;
+        let available_width = strip.bounds.size.width - inset * 2.0 - theme.metrics.button_size;
         // The two rendered tabs carry horizontal padding; the trailing flex spacer does not.
-        let expected_slot_width =
-            (available_width + theme.metrics.content_padding * 2.0) / 3.0;
+        let expected_slot_width = (available_width + theme.metrics.content_padding * 2.0) / 3.0;
 
         assert!((headers[0].bounds.origin.x - (strip.bounds.origin.x + inset)).abs() < 0.001);
         assert!((headers[0].bounds.size.width - expected_slot_width).abs() < 0.001);

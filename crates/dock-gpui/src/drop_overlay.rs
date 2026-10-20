@@ -127,7 +127,7 @@ fn preview_indicators(
                             )
                         },
                     )]
-                },
+                }
                 DropZone::Bottom => vec![horizontal_edge(column.bounds, false, line_thickness)],
                 DropZone::Center => outline(column.bounds, outline_thickness),
             }
@@ -185,11 +185,7 @@ fn group_splitter_line(
     ))
 }
 
-fn column_splitter_line(
-    rects: &LayoutRects,
-    edge_x: f32,
-    thickness: f32,
-) -> Option<Rect> {
+fn column_splitter_line(rects: &LayoutRects, edge_x: f32, thickness: f32) -> Option<Rect> {
     let splitter = rects.splitters.iter().find(|splitter| {
         splitter.kind == SplitterKind::Column
             && edge_x >= splitter.bounds.origin.x
@@ -341,7 +337,6 @@ mod tests {
         .expect("known valid group should be previewable");
         assert_eq!(outline.len(), 4);
         assert_eq!(outline[0].size.height, 3.0);
-
     }
 
     #[test]

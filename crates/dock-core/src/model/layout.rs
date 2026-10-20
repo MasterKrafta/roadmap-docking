@@ -1295,11 +1295,25 @@ impl Layout {
             });
         }
         let (area_index, column_index) = self.resolve_column_ref(column_ref)?;
-        let available_height = self.canvas.bounds.size.height;
-        if !available_height.is_finite() || available_height <= 0.0 {
+        let canvas_height = self.canvas.bounds.size.height;
+        if !canvas_height.is_finite() || canvas_height <= 0.0 {
             return Err(CommandError::InvalidCommandParameter {
                 parameter: "canvas height".to_owned(),
                 reason: "must be finite and positive before resizing group boundaries".to_owned(),
+            });
+        }
+        // Group ratios describe only the stack beneath the fixed column header and
+        // exclude the splitter gaps. Use the same available span as compute_rects so
+        // pointer deltas translate to matching logical-pixel changes.
+        let group_count = self.dock_areas[area_index].columns[column_index]
+            .groups
+            .len();
+        let splitter_space = metrics.splitter_thickness * group_count.saturating_sub(1) as f32;
+        let available_height = canvas_height - metrics.column_header_height - splitter_space;
+        if !available_height.is_finite() || available_height <= 0.0 {
+            return Err(CommandError::InvalidCommandParameter {
+                parameter: "canvas height".to_owned(),
+                reason: "the group stack must have positive available height before resizing group boundaries".to_owned(),
             });
         }
 
@@ -1642,8 +1656,8 @@ impl Layout {
         }
         // The separator rows consume physical height too; omitting them allowed a
         // direct side-drop command to pass with groups below their minimum allocations.
-        required_height += metrics.splitter_thickness.max(0.0)
-            * non_empty_groups.saturating_sub(1) as f32;
+        required_height +=
+            metrics.splitter_thickness.max(0.0) * non_empty_groups.saturating_sub(1) as f32;
 
         if !required_height.is_finite() || required_height > available + PIXEL_TOLERANCE {
             return Err(CommandError::InvalidCommandParameter {
@@ -1826,8 +1840,7 @@ impl Layout {
                 group,
                 zone: zone @ (DropZone::Top | DropZone::Bottom),
             } => {
-                let Some((side, column_index, group_index)) =
-                    self.find_dock_group_location(group)
+                let Some((side, column_index, group_index)) = self.find_dock_group_location(group)
                 else {
                     return Err(CommandError::UnknownGroup(group));
                 };
@@ -1859,8 +1872,12 @@ impl Layout {
                         reason: "target group ratio must be finite and non-negative".to_owned(),
                     });
                 }
-                if self.dock_areas[area_index].columns[column_index].group_ratios.len()
-                    != self.dock_areas[area_index].columns[column_index].groups.len()
+                if self.dock_areas[area_index].columns[column_index]
+                    .group_ratios
+                    .len()
+                    != self.dock_areas[area_index].columns[column_index]
+                        .groups
+                        .len()
                 {
                     return Err(CommandError::InvalidCommandParameter {
                         parameter: "group_ratios".to_owned(),
@@ -1967,8 +1984,7 @@ impl Layout {
                     group_ratios: vec![1.0],
                 };
 
-                if let Some(area_index) =
-                    self.dock_areas.iter().position(|area| area.side == side)
+                if let Some(area_index) = self.dock_areas.iter().position(|area| area.side == side)
                 {
                     let insert_at = if side == DockSide::Left {
                         0
@@ -1990,8 +2006,7 @@ impl Layout {
                 Ok(vec![source_group, new_group])
             }
             _ => Err(CommandError::InvalidDropTarget(
-                "four-sided MovePanel requires a Group, Column, or DockEdge side target"
-                    .to_owned(),
+                "four-sided MovePanel requires a Group, Column, or DockEdge side target".to_owned(),
             )),
         }
     }
@@ -2757,6 +2772,13 @@ impl Layout {
 
     pub(crate) fn insert_floating_group(&mut self, group: FloatingGroup) -> FloatingGroupId {
         self.floating_groups.insert(group)
+    }
+
+    /// Refresh the viewport-derived Canvas rectangle used by resize command constraints.
+    ///
+    /// This changes transient geometry only and does not advance the persisted layout version.
+    pub fn set_canvas_bounds(&mut self, bounds: crate::geometry::Rect) {
+        self.canvas.bounds = bounds;
     }
 
     pub(crate) fn set_canvas(&mut self, canvas: CanvasState) {
@@ -3799,7 +3821,12 @@ mod tests {
         use crate::command::ColumnRef;
 
         let metrics = metrics();
-        for (requested_delta, expected_delta) in [(500.0_f32, 170.0_f32), (-500.0, -170.0)] {
+        let available_group_height =
+            500.0 - metrics.column_header_height - metrics.splitter_thickness;
+        let maximum_delta = available_group_height * 0.5 - metrics.min_group_height;
+        for (requested_delta, expected_delta) in
+            [(500.0_f32, maximum_delta), (-500.0, -maximum_delta)]
+        {
             let mut layout = initial_layout();
             layout.set_canvas(CanvasState {
                 bounds: Rect::new(Point::new(0.0, 0.0), Size::new(1200.0, 500.0)),
@@ -3818,8 +3845,16 @@ mod tests {
 
             assert!((outcome.actual_value.expect("resize result") - expected_delta).abs() < 1e-3);
             let column = &layout.dock_areas()[0].columns[0];
-            let first_height = column.group_ratios[0] * 500.0;
-            let second_height = column.group_ratios[1] * 500.0;
+            let first_height = column.group_ratios[0] * available_group_height;
+            let second_height = column.group_ratios[1] * available_group_height;
+            assert!(
+                (first_height - (available_group_height * 0.5 + expected_delta)).abs() < 1e-3,
+                "the first group changes by the exact clamped pointer delta"
+            );
+            assert!(
+                (second_height - (available_group_height * 0.5 - expected_delta)).abs() < 1e-3,
+                "the second group changes by the opposite clamped delta"
+            );
             assert!(first_height >= metrics.min_group_height - 1e-3);
             assert!(second_height >= metrics.min_group_height - 1e-3);
             assert!((column.group_ratios.iter().sum::<f32>() - 1.0).abs() < 1e-4);
@@ -4570,18 +4605,38 @@ mod tests {
                             .count()
                     })
                     .sum::<usize>();
-            assert_eq!(placement_count, 1, "{case} must not duplicate or lose the panel");
-            assert!(layout.validate(&metrics).is_ok(), "{case} must leave a valid layout");
+            assert_eq!(
+                placement_count, 1,
+                "{case} must not duplicate or lose the panel"
+            );
+            assert!(
+                layout.validate(&metrics).is_ok(),
+                "{case} must leave a valid layout"
+            );
 
             match case {
                 "group-top" | "group-bottom" => {
                     let column = &layout.dock_areas()[0].columns[0];
-                    let new_index = column.groups.iter().position(|group| *group == panel_group).unwrap();
-                    let target_index = column.groups.iter().position(|group| *group == target_group).unwrap();
+                    let new_index = column
+                        .groups
+                        .iter()
+                        .position(|group| *group == panel_group)
+                        .unwrap();
+                    let target_index = column
+                        .groups
+                        .iter()
+                        .position(|group| *group == target_group)
+                        .unwrap();
                     if case == "group-top" {
-                        assert!(new_index < target_index, "group-top inserts before the target group");
+                        assert!(
+                            new_index < target_index,
+                            "group-top inserts before the target group"
+                        );
                     } else {
-                        assert!(new_index > target_index, "group-bottom inserts after the target group");
+                        assert!(
+                            new_index > target_index,
+                            "group-bottom inserts after the target group"
+                        );
                     }
                 }
                 "column-top" | "column-bottom" => {
@@ -4593,9 +4648,21 @@ mod tests {
                     }
                 }
                 "column-left" | "column-right" => {
-                    let area = layout.dock_areas().iter().find(|area| area.side == DockSide::Right).unwrap();
-                    let new_index = area.columns.iter().position(|column| column.groups.contains(&panel_group)).unwrap();
-                    let target_index = area.columns.iter().position(|column| column.groups.contains(&target_group)).unwrap();
+                    let area = layout
+                        .dock_areas()
+                        .iter()
+                        .find(|area| area.side == DockSide::Right)
+                        .unwrap();
+                    let new_index = area
+                        .columns
+                        .iter()
+                        .position(|column| column.groups.contains(&panel_group))
+                        .unwrap();
+                    let target_index = area
+                        .columns
+                        .iter()
+                        .position(|column| column.groups.contains(&target_group))
+                        .unwrap();
                     if case == "column-left" {
                         assert!(new_index < target_index);
                     } else {
@@ -4603,9 +4670,21 @@ mod tests {
                     }
                 }
                 "edge-left" | "edge-right" => {
-                    let side = if case == "edge-left" { DockSide::Left } else { DockSide::Right };
-                    let area = layout.dock_areas().iter().find(|area| area.side == side).unwrap();
-                    let new_index = area.columns.iter().position(|column| column.groups.contains(&panel_group)).unwrap();
+                    let side = if case == "edge-left" {
+                        DockSide::Left
+                    } else {
+                        DockSide::Right
+                    };
+                    let area = layout
+                        .dock_areas()
+                        .iter()
+                        .find(|area| area.side == side)
+                        .unwrap();
+                    let new_index = area
+                        .columns
+                        .iter()
+                        .position(|column| column.groups.contains(&panel_group))
+                        .unwrap();
                     if case == "edge-left" {
                         assert_eq!(new_index, 0);
                     } else {
@@ -4622,10 +4701,7 @@ mod tests {
         use crate::{CommandError, DockCommand, DropTarget, DropZone};
 
         let metrics = metrics();
-        for (height, target_zone) in [
-            (200.0, DropZone::Top),
-            (246.0, DropZone::Bottom),
-        ] {
+        for (height, target_zone) in [(200.0, DropZone::Top), (246.0, DropZone::Bottom)] {
             let mut layout = initial_layout();
             layout.set_canvas(CanvasState {
                 bounds: Rect::new(Point::new(0.0, 0.0), Size::new(1200.0, height)),
@@ -4636,16 +4712,18 @@ mod tests {
                 Node::Split(_) => panic!("groups must be Tabs"),
             };
             let version = layout.version();
-            let err = layout.apply(
-                DockCommand::MovePanel {
-                    panel,
-                    target: DropTarget::Column {
-                        column: crate::command::ColumnRef::new(DockSide::Right, 0),
-                        zone: target_zone,
+            let err = layout
+                .apply(
+                    DockCommand::MovePanel {
+                        panel,
+                        target: DropTarget::Column {
+                            column: crate::command::ColumnRef::new(DockSide::Right, 0),
+                            zone: target_zone,
+                        },
                     },
-                },
-                &metrics,
-            ).expect_err("a new group cannot fit alongside existing group minimums");
+                    &metrics,
+                )
+                .expect_err("a new group cannot fit alongside existing group minimums");
             assert!(matches!(err, CommandError::InvalidCommandParameter { .. }));
             assert_eq!(layout.version(), version, "rejected drop is atomic");
             assert!(layout.validate(&metrics).is_ok());
@@ -4718,15 +4796,17 @@ mod tests {
             Node::Split(_) => panic!("groups must be Tabs"),
         };
         let version = layout.version();
-        let err = layout.apply(
-            DockCommand::MovePanel {
-                panel,
-                target: DropTarget::DockEdge {
-                    side: DockSide::Left,
+        let err = layout
+            .apply(
+                DockCommand::MovePanel {
+                    panel,
+                    target: DropTarget::DockEdge {
+                        side: DockSide::Left,
+                    },
                 },
-            },
-            &metrics,
-        ).expect_err("new column must preserve the document minimum width");
+                &metrics,
+            )
+            .expect_err("new column must preserve the document minimum width");
         assert!(matches!(err, CommandError::InvalidCommandParameter { .. }));
         assert_eq!(layout.version(), version);
         assert!(layout.validate(&metrics).is_ok());
@@ -4882,7 +4962,13 @@ mod tests {
         assert_eq!(layout.panels().len(), original_panel_count);
         assert_eq!(placed_panels.len(), original_panel_count);
         for panel in original_panel_ids {
-            assert_eq!(placed_panels.iter().filter(|candidate| **candidate == panel).count(), 1);
+            assert_eq!(
+                placed_panels
+                    .iter()
+                    .filter(|candidate| **candidate == panel)
+                    .count(),
+                1
+            );
         }
         assert!(layout.validate(&metrics).is_ok());
     }
@@ -5016,7 +5102,11 @@ mod tests {
         let mut layout = initial_layout();
         let source_group = tab_group_id(&layout, 0, 0);
         let target_group = tab_group_id(&layout, 0, 1);
-        let source_panels = match layout.nodes().get(source_group).expect("source group exists") {
+        let source_panels = match layout
+            .nodes()
+            .get(source_group)
+            .expect("source group exists")
+        {
             Node::Tabs(tabs) => tabs.panels.clone(),
             Node::Split(_) => panic!("Photoshop groups must be Tabs"),
         };
@@ -5050,17 +5140,23 @@ mod tests {
             .iter()
             .enumerate()
             .find_map(|(area_index, area)| {
-                area.columns.iter().enumerate().find_map(|(column_index, column)| {
-                    column
-                        .groups
-                        .iter()
-                        .position(|group| *group == target_group)
-                        .map(|target_index| (area_index, column_index, target_index))
-                })
+                area.columns
+                    .iter()
+                    .enumerate()
+                    .find_map(|(column_index, column)| {
+                        column
+                            .groups
+                            .iter()
+                            .position(|group| *group == target_group)
+                            .map(|target_index| (area_index, column_index, target_index))
+                    })
             })
             .expect("target group remains docked");
         let (area_index, column_index, target_index) = target_location;
-        assert!(target_index > 0, "top split inserts the new group before the target");
+        assert!(
+            target_index > 0,
+            "top split inserts the new group before the target"
+        );
         let column = &layout.dock_areas()[area_index].columns[column_index];
         let new_group = column.groups[target_index - 1];
         let Node::Tabs(docked) = layout.nodes().get(new_group).unwrap() else {
@@ -5074,11 +5170,16 @@ mod tests {
                 .flat_map(|area| area.columns.iter())
                 .flat_map(|column| column.groups.iter())
                 .filter_map(|group| match layout.nodes().get(*group) {
-                    Some(Node::Tabs(tabs)) => Some(tabs.panels.iter().filter(|id| *id == panel).count()),
+                    Some(Node::Tabs(tabs)) => {
+                        Some(tabs.panels.iter().filter(|id| *id == panel).count())
+                    }
                     Some(Node::Split(_)) | None => None,
                 })
                 .sum::<usize>();
-            assert_eq!(occurrences, 1, "each original panel must remain placed exactly once");
+            assert_eq!(
+                occurrences, 1,
+                "each original panel must remain placed exactly once"
+            );
         }
         assert!(layout.validate(&metrics).is_ok());
     }
@@ -5279,11 +5380,19 @@ mod tests {
         let mut layout = initial_layout();
         let source_group = tab_group_id(&layout, 0, 0);
         let target_group = tab_group_id(&layout, 0, 1);
-        let source_panel = match layout.nodes().get(source_group).expect("source group exists") {
+        let source_panel = match layout
+            .nodes()
+            .get(source_group)
+            .expect("source group exists")
+        {
             Node::Tabs(tabs) => tabs.panels[0],
             Node::Split(_) => panic!("Photoshop groups must be Tabs"),
         };
-        let target_panel = match layout.nodes().get(target_group).expect("target group exists") {
+        let target_panel = match layout
+            .nodes()
+            .get(target_group)
+            .expect("target group exists")
+        {
             Node::Tabs(tabs) => tabs.panels[0],
             Node::Split(_) => panic!("Photoshop groups must be Tabs"),
         };
@@ -5300,7 +5409,11 @@ mod tests {
             .expect("source panel should float");
         let source_floating = floating_id_for_panel(&layout, source_panel);
         assert_eq!(
-            layout.floating_groups().get(source_floating).unwrap().panels,
+            layout
+                .floating_groups()
+                .get(source_floating)
+                .unwrap()
+                .panels,
             vec![source_panel]
         );
 
@@ -5336,9 +5449,16 @@ mod tests {
             }
         }
         for floating in layout.floating_groups().values() {
-            occurrences += floating.panels.iter().filter(|id| **id == source_panel).count();
+            occurrences += floating
+                .panels
+                .iter()
+                .filter(|id| **id == source_panel)
+                .count();
         }
-        assert_eq!(occurrences, 1, "the original PanelId must be placed exactly once");
+        assert_eq!(
+            occurrences, 1,
+            "the original PanelId must be placed exactly once"
+        );
         assert!(layout.panels().contains_key(target_panel));
         assert!(layout.validate(&metrics).is_ok());
     }
@@ -5351,7 +5471,11 @@ mod tests {
         let mut layout = initial_layout();
         let source_group = tab_group_id(&layout, 0, 0);
         let target_group = tab_group_id(&layout, 0, 1);
-        let panel = match layout.nodes().get(source_group).expect("source group exists") {
+        let panel = match layout
+            .nodes()
+            .get(source_group)
+            .expect("source group exists")
+        {
             Node::Tabs(tabs) => tabs.panels[0],
             Node::Split(_) => panic!("Photoshop groups must be Tabs"),
         };
@@ -5406,11 +5530,19 @@ mod tests {
         let mut layout = initial_layout();
         let source_group = tab_group_id(&layout, 0, 0);
         let target_group = tab_group_id(&layout, 0, 1);
-        let source_panel = match layout.nodes().get(source_group).expect("source group exists") {
+        let source_panel = match layout
+            .nodes()
+            .get(source_group)
+            .expect("source group exists")
+        {
             Node::Tabs(tabs) => tabs.panels[0],
             Node::Split(_) => panic!("Photoshop groups must be Tabs"),
         };
-        let target_panel = match layout.nodes().get(target_group).expect("target group exists") {
+        let target_panel = match layout
+            .nodes()
+            .get(target_group)
+            .expect("target group exists")
+        {
             Node::Tabs(tabs) => tabs.panels[0],
             Node::Split(_) => panic!("Photoshop groups must be Tabs"),
         };

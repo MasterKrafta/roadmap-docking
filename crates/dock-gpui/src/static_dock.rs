@@ -175,7 +175,12 @@ pub fn tab_strip(
             .hover(|style| style.bg(rgb(colors.hover)))
             .on_click(move |_, _, app| activate(group_id, index, app))
             .on_mouse_down(MouseButton::Left, move |_, window, app| {
-                start_drag(DropPayload::Panel(panel_id), window.mouse_position(), window, app)
+                start_drag(
+                    DropPayload::Panel(panel_id),
+                    window.mouse_position(),
+                    window,
+                    app,
+                )
             })
             .child(tab.title)
     });

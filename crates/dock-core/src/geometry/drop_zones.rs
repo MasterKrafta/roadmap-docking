@@ -410,14 +410,7 @@ fn append_column_end_zones(
             zone: DropZone::Top,
         };
         if valid_target(layout, payload, &top_target, metrics)
-            && can_add_group_to_column(
-                layout,
-                rects,
-                payload,
-                column.side,
-                column.index,
-                metrics,
-            )
+            && can_add_group_to_column(layout, rects, payload, column.side, column.index, metrics)
         {
             let top = (header_bottom - height * 0.5).max(bounds.origin.y);
             let bottom = (header_bottom + height * 0.5).min(column_bottom);
@@ -436,14 +429,7 @@ fn append_column_end_zones(
             zone: DropZone::Bottom,
         };
         if valid_target(layout, payload, &bottom_target, metrics)
-            && can_add_group_to_column(
-                layout,
-                rects,
-                payload,
-                column.side,
-                column.index,
-                metrics,
-            )
+            && can_add_group_to_column(layout, rects, payload, column.side, column.index, metrics)
         {
             push_zone(
                 zones,
@@ -497,19 +483,15 @@ fn append_group_splitter_zones(
                     && splitter.bounds.origin.x == column.bounds.origin.x
                     && splitter.bounds.size.width == column.bounds.size.width
                     && {
-                        let center_y =
-                            splitter.bounds.origin.y + splitter.bounds.size.height * 0.5;
+                        let center_y = splitter.bounds.origin.y + splitter.bounds.size.height * 0.5;
                         center_y >= gap_top && center_y <= gap_bottom
                     }
             }) else {
                 continue;
             };
 
-            let drop_bounds = group_split_drop_bounds(
-                splitter.bounds,
-                previous.bounds,
-                next.bounds,
-            );
+            let drop_bounds =
+                group_split_drop_bounds(splitter.bounds, previous.bounds, next.bounds);
             // Both directions are valid at the same divider: the upper half inserts
             // after the preceding group (Bottom), and the lower half inserts before
             // the following group (Top). Keeping the hit rectangles disjoint gives
@@ -517,7 +499,10 @@ fn append_group_splitter_zones(
             let split_y = drop_bounds.origin.y + drop_bounds.size.height * 0.5;
             let upper_bounds = Rect::new(
                 drop_bounds.origin,
-                Size::new(drop_bounds.size.width, (split_y - drop_bounds.origin.y).max(0.0)),
+                Size::new(
+                    drop_bounds.size.width,
+                    (split_y - drop_bounds.origin.y).max(0.0),
+                ),
             );
             let lower_bounds = Rect::new(
                 Point::new(drop_bounds.origin.x, split_y),
@@ -526,14 +511,8 @@ fn append_group_splitter_zones(
                     (drop_bounds.origin.y + drop_bounds.size.height - split_y).max(0.0),
                 ),
             );
-            let column_can_split = can_add_group_to_column(
-                layout,
-                rects,
-                payload,
-                column.side,
-                column.index,
-                metrics,
-            );
+            let column_can_split =
+                can_add_group_to_column(layout, rects, payload, column.side, column.index, metrics);
 
             let bottom_target = DropTarget::Group {
                 group: previous.group,
@@ -640,8 +619,7 @@ fn append_group_zones(
                 };
                 if valid_target(layout, payload, &target, metrics) {
                     let bottom_zone_top = (column_bottom - height).max(column_bounds.origin.y);
-                    center_bottom =
-                        center_bottom.min(bottom_zone_top - DROP_ZONE_CENTER_GAP);
+                    center_bottom = center_bottom.min(bottom_zone_top - DROP_ZONE_CENTER_GAP);
                 }
             }
         }
@@ -653,8 +631,7 @@ fn append_group_zones(
                 && splitter.bounds.origin.x == bounds.origin.x
                 && splitter.bounds.size.width == bounds.size.width
         }) {
-            let splitter_center_y =
-                splitter.bounds.origin.y + splitter.bounds.size.height * 0.5;
+            let splitter_center_y = splitter.bounds.origin.y + splitter.bounds.size.height * 0.5;
             let split_half_height =
                 HORIZONTAL_DROP_ZONE_MIN_HEIGHT.max(splitter.bounds.size.height) * 0.5;
 
@@ -666,8 +643,7 @@ fn append_group_zones(
                     (splitter_center_y + split_half_height).min(group_center_y)
                         + DROP_ZONE_CENTER_GAP,
                 );
-            } else if splitter_center_y >= group_bottom
-                && splitter.bounds.origin.y <= group_bottom
+            } else if splitter_center_y >= group_bottom && splitter.bounds.origin.y <= group_bottom
             {
                 // A splitter immediately below this group: leave the gap above its hit zone.
                 center_bottom = center_bottom.min(
@@ -1005,8 +981,7 @@ fn can_add_group_to_column(
 
     let mut required_heights = Vec::with_capacity(model_column.groups.len() + 1);
     for group in &model_column.groups {
-        let Some(height) = minimum_group_height_after_drop(layout, *group, payload, metrics)
-        else {
+        let Some(height) = minimum_group_height_after_drop(layout, *group, payload, metrics) else {
             return false;
         };
         if height > 0.0 {
@@ -1020,8 +995,7 @@ fn can_add_group_to_column(
     let group_count = required_heights.len();
     let required_height: f32 = required_heights.iter().sum::<f32>()
         + metrics.splitter_thickness.max(0.0) * group_count.saturating_sub(1) as f32;
-    required_height.is_finite()
-        && required_height <= column.bounds.size.height + 1.0e-3
+    required_height.is_finite() && required_height <= column.bounds.size.height + 1.0e-3
 }
 
 /// The target group's current allocation must fit both sides of the new split.
@@ -1363,12 +1337,11 @@ fn contains(bounds: Rect, point: Point) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        HORIZONTAL_DROP_ZONE_MIN_HEIGHT, compute_drop_zones, contains, resolve_drop,
-    };
+    use super::{HORIZONTAL_DROP_ZONE_MIN_HEIGHT, compute_drop_zones, contains, resolve_drop};
     use crate::{
         ColumnRef, DockCommand, DockMetrics, DockSide, DropPayload, DropTarget, DropZone,
-        FloatSource, Layout, Node, Point, Profile, Rect, Size, SplitSide, SplitterKind, compute_rects,
+        FloatSource, Layout, Node, Point, Profile, Rect, Size, SplitSide, SplitterKind,
+        compute_rects,
     };
     use slotmap::Key;
 
@@ -1444,7 +1417,13 @@ mod tests {
             "top horizontal target is centered on the boundary below the shared column header"
         );
         assert_eq!(
-            resolve_drop(&layout, Point::new(1100.0, 43.0), center_payload, &rects, &metrics),
+            resolve_drop(
+                &layout,
+                Point::new(1100.0, 43.0),
+                center_payload,
+                &rects,
+                &metrics
+            ),
             Some(DropTarget::Column {
                 column,
                 zone: DropZone::Top,
@@ -1452,7 +1431,13 @@ mod tests {
             "the widened column-top target remains active up to its lower edge"
         );
         assert_eq!(
-            resolve_drop(&layout, Point::new(1100.0, 48.0), center_payload, &rects, &metrics),
+            resolve_drop(
+                &layout,
+                Point::new(1100.0, 48.0),
+                center_payload,
+                &rects,
+                &metrics
+            ),
             None,
             "a neutral gap separates the column-top target from Center"
         );
@@ -1484,7 +1469,13 @@ mod tests {
             })
         );
         assert_eq!(
-            resolve_drop(&layout, Point::new(1100.0, 764.0), payload, &rects, &metrics),
+            resolve_drop(
+                &layout,
+                Point::new(1100.0, 764.0),
+                payload,
+                &rects,
+                &metrics
+            ),
             Some(DropTarget::Group {
                 group: next_group,
                 zone: DropZone::Center,
@@ -1492,12 +1483,24 @@ mod tests {
             "the last group's center remains active above the bottom neutral gap"
         );
         assert_eq!(
-            resolve_drop(&layout, Point::new(1100.0, 772.0), payload, &rects, &metrics),
+            resolve_drop(
+                &layout,
+                Point::new(1100.0, 772.0),
+                payload,
+                &rects,
+                &metrics
+            ),
             None,
             "a neutral gap separates Center from the column-bottom target"
         );
         assert_eq!(
-            resolve_drop(&layout, Point::new(1100.0, 778.0), payload, &rects, &metrics),
+            resolve_drop(
+                &layout,
+                Point::new(1100.0, 778.0),
+                payload,
+                &rects,
+                &metrics
+            ),
             Some(DropTarget::Column {
                 column,
                 zone: DropZone::Bottom,
@@ -1632,7 +1635,10 @@ mod tests {
             })
             .expect("group bottom target should be advertised");
         assert_eq!(upper_split_zone.bounds.origin.x, splitter.bounds.origin.x);
-        assert_eq!(upper_split_zone.bounds.size.width, splitter.bounds.size.width);
+        assert_eq!(
+            upper_split_zone.bounds.size.width,
+            splitter.bounds.size.width
+        );
         assert!(
             (upper_split_zone.bounds.origin.y + upper_split_zone.bounds.size.height
                 - splitter_center.y)
@@ -2221,7 +2227,10 @@ mod tests {
             &metrics,
         )
         .expect("free Canvas area should accept a single panel detach");
-        let DropTarget::FreeArea { bounds: panel_bounds } = panel_target else {
+        let DropTarget::FreeArea {
+            bounds: panel_bounds,
+        } = panel_target
+        else {
             panic!("Canvas drop must create a floating group, not a dock target");
         };
         assert_eq!(panel_bounds.origin, Point::new(0.0, 0.0));
@@ -2263,28 +2272,34 @@ mod tests {
         };
         let group_rects = geometry(&group_layout, &metrics);
         let group_payload = DropPayload::Group(group);
-        let DropTarget::FreeArea { bounds: group_bounds } = resolve_drop(
+        let DropTarget::FreeArea {
+            bounds: group_bounds,
+        } = resolve_drop(
             &group_layout,
             Point::new(30.0, 10.0),
             group_payload,
             &group_rects,
             &metrics,
         )
-        .expect("free Canvas area should accept a whole-group detach") else {
+        .expect("free Canvas area should accept a whole-group detach")
+        else {
             panic!("whole-group Canvas drop must resolve to FreeArea");
         };
         assert_eq!(group_bounds.origin, Point::new(0.0, 0.0));
         assert!(group_bounds.origin.x + group_bounds.size.width <= 1280.0);
         assert!(group_bounds.origin.y + group_bounds.size.height <= 800.0);
 
-        let DropTarget::FreeArea { bounds: lower_bounds } = resolve_drop(
+        let DropTarget::FreeArea {
+            bounds: lower_bounds,
+        } = resolve_drop(
             &group_layout,
             Point::new(960.0, 790.0),
             group_payload,
             &group_rects,
             &metrics,
         )
-        .expect("Canvas remains a valid target near its lower edge") else {
+        .expect("Canvas remains a valid target near its lower edge")
+        else {
             panic!("lower-edge group detach must resolve to FreeArea");
         };
         assert!(lower_bounds.origin.x >= 0.0 && lower_bounds.origin.y >= 0.0);

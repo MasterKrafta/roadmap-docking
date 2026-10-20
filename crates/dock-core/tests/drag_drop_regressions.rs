@@ -1,7 +1,7 @@
 use dock_core::{
-    ColumnRef, DockCommand, DockMetrics, DockSide, DropPayload, DropTarget, DropZone,
-    FloatSource, Layout, Node, PanelId, Point, Rect, Size, SplitSide, compute_drop_zones,
-    compute_rects, resolve_drop,
+    ColumnRef, DockCommand, DockMetrics, DockSide, DropPayload, DropTarget, DropZone, FloatSource,
+    Layout, Node, PanelId, Point, Rect, Size, SplitSide, compute_drop_zones, compute_rects,
+    resolve_drop,
 };
 
 fn metrics() -> DockMetrics {
@@ -116,10 +116,7 @@ fn zone_center(bounds: Rect) -> Point {
     )
 }
 
-fn center_of_zone(
-    zones: &[dock_core::DropZoneRect],
-    target: &DropTarget,
-) -> Point {
+fn center_of_zone(zones: &[dock_core::DropZoneRect], target: &DropTarget) -> Point {
     let zone = zones
         .iter()
         .find(|zone| &zone.target == target)
@@ -235,7 +232,10 @@ fn center_top_bottom_left_and_right_drop_targets_keep_photoshop_semantics() {
             } => {
                 let incoming_group = group_for_panel(&candidate, source);
                 assert_ne!(incoming_group, group, "side drop creates a distinct group");
-                assert_ne!(incoming_group, source_group, "empty source group is removed");
+                assert_ne!(
+                    incoming_group, source_group,
+                    "empty source group is removed"
+                );
             }
             DropTarget::Column {
                 column: ColumnRef { side, .. },
@@ -249,7 +249,10 @@ fn center_top_bottom_left_and_right_drop_targets_keep_photoshop_semantics() {
                     .find(|area| area.side == side)
                     .expect("target dock area remains");
                 assert!(
-                    right_area.columns.iter().any(|column| column.groups.contains(&incoming_group)),
+                    right_area
+                        .columns
+                        .iter()
+                        .any(|column| column.groups.contains(&incoming_group)),
                     "lateral drop must place History in a column"
                 );
             }
