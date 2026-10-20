@@ -1196,10 +1196,10 @@ mod tests {
 
         let floating_zone = zones
             .iter()
-            .find(|zone| zone.target == DropTarget::FloatingGroup {
+            .find(|zone| zone.target == (DropTarget::FloatingGroup {
                 floating,
                 zone: DropZone::Center,
-            })
+            }))
             .expect("visible center target exists");
         assert_eq!(floating_zone.bounds, rect(344.0, 232.0, 272.0, 184.0));
 
