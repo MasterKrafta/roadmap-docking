@@ -414,7 +414,7 @@ mod tests {
         assert_eq!(rects.groups[0].bounds.origin.y, 32.0);
         assert_eq!(rects.groups[1].bounds.origin.y, 418.0);
     }
-}
+
     #[test]
     fn split_groups_use_model_ratios_for_height_distribution() {
         let metrics = metrics();
@@ -441,7 +441,7 @@ mod tests {
         assert_eq!(rects.groups[1].bounds.origin.y, 226.0);
         assert_eq!(rects.groups[2].bounds.origin.y, 420.0);
     }
-
+}
 
 #[cfg(test)]
 mod ratio_tests {
