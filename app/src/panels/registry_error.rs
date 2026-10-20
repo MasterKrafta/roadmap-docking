@@ -21,6 +21,7 @@ pub enum RegistryError {
         key: PanelKey,
         target: &'static str,
     },
+    LayoutBuildFailed(String),
 }
 
 impl fmt::Display for RegistryError {
@@ -36,6 +37,9 @@ impl fmt::Display for RegistryError {
             }
             Self::UnsupportedOpenTarget { key, target } => {
                 write!(formatter, "OpenPanel does not support target {target} for panel {key:?}")
+            }
+            Self::LayoutBuildFailed(reason) => {
+                write!(formatter, "could not build initial Photoshop panel layout: {reason}")
             }
         }
     }
