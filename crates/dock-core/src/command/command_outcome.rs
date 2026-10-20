@@ -46,6 +46,7 @@ mod tests {
         assert!(outcome.changed_nodes.is_empty());
         assert_eq!(outcome.version, 7);
         assert!(outcome.inverse.is_none());
+        assert!(outcome.actual_value.is_none());
     }
 
     #[cfg(feature = "serde")]
