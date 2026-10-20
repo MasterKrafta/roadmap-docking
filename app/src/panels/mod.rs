@@ -20,4 +20,4 @@ pub use panel_registry::PanelRegistry;
 pub use placeholder_panel_content::PlaceholderPanelContent;
 pub use registry_error::RegistryError;
 
-use dock_core::PanelKey;
+pub use dock_core::PanelKey;
