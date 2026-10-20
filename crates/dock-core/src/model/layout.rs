@@ -3681,6 +3681,63 @@ mod tests {
     }
 
     #[test]
+    fn move_panel_rejects_tab_that_exceeds_target_floating_minimum_size_atomically() {
+        use crate::{CommandError, DockCommand, DropTarget, DropZone, PanelConstraints, PanelKey, Size};
+
+        let metrics = metrics();
+        let mut layout = initial_layout();
+        let dock_group = tab_group_id(&layout, 0, 0);
+        let target_panel = match layout.nodes().get(dock_group).expect("dock group exists") {
+            Node::Tabs(tabs) => tabs.panels[0],
+            Node::Split(_) => panic!("Photoshop groups must be Tabs"),
+        };
+        layout.apply(
+            DockCommand::Float {
+                source: crate::FloatSource::Panel(target_panel),
+                rect: floating_rect(0.0, 0.0, 300.0, 180.0),
+            },
+            &metrics,
+        ).expect("target floating group should be created");
+        let floating_id = floating_id_for_panel(&layout, target_panel);
+
+        layout.apply(
+            DockCommand::OpenPanel {
+                key: PanelKey::new("wide-tool").expect("valid panel key"),
+                constraints: PanelConstraints::new(
+                    Size::new(420.0, 100.0),
+                    Size::new(480.0, 160.0),
+                    Size::new(800.0, 600.0),
+                    false,
+                ),
+                target: Some(DropTarget::Group { group: dock_group, zone: DropZone::Center }),
+            },
+            &metrics,
+        ).expect("wide panel should open in the dock group");
+        let wide_panel = layout.panels().iter()
+            .find_map(|(id, panel)| (panel.key().as_str() == "wide-tool").then_some(*id))
+            .expect("wide panel instance exists");
+        let floating_before = layout.floating_groups().get(floating_id).expect("floating exists").clone();
+        let version_before = layout.version();
+
+        let error = layout.apply(
+            DockCommand::MovePanel {
+                panel: wide_panel,
+                target: DropTarget::FloatingGroup { floating: floating_id, zone: DropZone::Center },
+            },
+            &metrics,
+        ).expect_err("target floating bounds cannot satisfy the incoming panel minimum width");
+        assert!(matches!(error, CommandError::InvalidCommandParameter { ref parameter, .. }
+            if parameter == "floating rect"));
+        assert_eq!(layout.version(), version_before);
+        assert_eq!(layout.floating_groups().get(floating_id), Some(&floating_before));
+        assert!(matches!(
+            layout.nodes().get(dock_group),
+            Some(Node::Tabs(tabs)) if tabs.panels.contains(&wide_panel)
+        ));
+        assert!(layout.validate(&metrics).is_ok());
+    }
+
+    #[test]
     fn move_panel_transfers_a_tab_between_floating_groups_and_removes_empty_source() {
         use crate::{DockCommand, DropTarget, DropZone, FloatSource};
 
