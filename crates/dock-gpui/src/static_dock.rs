@@ -380,7 +380,7 @@ where
         _ => content.overflow_hidden(),
     };
     content
-        .on_mouse_down(move |_, _, app| on_mouse_down(app))
+        .on_mouse_down(MouseButton::Left, move |_, _, app| on_mouse_down(app))
         .into_any_element()
 }
 
