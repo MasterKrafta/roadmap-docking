@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use dock_core::{DockCommand, DropTarget, PanelConstraints, PanelKey, Size};
+use dock_core::{DockCommand, DropTarget, DropZone, PanelConstraints, PanelKey, Size};
 
 use super::{
     AllowedArea, IconResource, PanelContent, PanelContentFactory, PanelDescriptor, PanelMenuItem,
@@ -113,17 +113,48 @@ impl PanelRegistry {
             .get(key)
             .ok_or_else(|| RegistryError::UnknownPanel(key.clone()))?;
 
+        // R3.3 OpenPanel currently supports default placement, insertion into an
+        // existing group's center, or a tab insertion. Other DropTarget variants are
+        // resolved by drag/move commands and must not be emitted as OpenPanel requests.
         let area = match target.as_ref() {
-            Some(DropTarget::FloatingGroup { .. } | DropTarget::FreeArea { .. }) => {
-                AllowedArea::Floating
-            }
             None
             | Some(
-                DropTarget::Group { .. }
-                | DropTarget::TabInsertion { .. }
-                | DropTarget::Column { .. }
-                | DropTarget::DockEdge { .. },
+                DropTarget::Group {
+                    zone: DropZone::Center,
+                    ..
+                }
+                | DropTarget::TabInsertion { .. },
             ) => AllowedArea::Dock,
+            Some(DropTarget::Group { .. }) => {
+                return Err(RegistryError::UnsupportedOpenTarget {
+                    key: key.clone(),
+                    target: "non-center group zone",
+                });
+            }
+            Some(DropTarget::Column { .. }) => {
+                return Err(RegistryError::UnsupportedOpenTarget {
+                    key: key.clone(),
+                    target: "column edge",
+                });
+            }
+            Some(DropTarget::DockEdge { .. }) => {
+                return Err(RegistryError::UnsupportedOpenTarget {
+                    key: key.clone(),
+                    target: "dock edge",
+                });
+            }
+            Some(DropTarget::FloatingGroup { .. }) => {
+                return Err(RegistryError::UnsupportedOpenTarget {
+                    key: key.clone(),
+                    target: "floating group",
+                });
+            }
+            Some(DropTarget::FreeArea { .. }) => {
+                return Err(RegistryError::UnsupportedOpenTarget {
+                    key: key.clone(),
+                    target: "free area",
+                });
+            }
         };
         if !descriptor.allows(area) {
             return Err(RegistryError::AreaNotAllowed {
@@ -396,11 +427,14 @@ mod tests {
     }
 
     #[test]
-    fn floating_open_command_requires_floating_permission() {
+    fn open_command_rejects_targets_not_supported_by_core_open_panel() {
         let mut registry = PanelRegistry::new();
-        let key = PanelKey::new("custom.dock-only").unwrap();
+        let key = PanelKey::new("custom.dock-and-float").unwrap();
         registry
-            .register(custom_descriptor("custom.dock-only", vec![AllowedArea::Dock]))
+            .register(custom_descriptor(
+                "custom.dock-and-float",
+                vec![AllowedArea::Dock, AllowedArea::Floating],
+            ))
             .unwrap();
 
         assert_eq!(
@@ -410,9 +444,22 @@ mod tests {
                     bounds: Rect::new(Point::new(100.0, 100.0), Size::new(240.0, 160.0)),
                 }),
             ),
-            Err(RegistryError::AreaNotAllowed {
+            Err(RegistryError::UnsupportedOpenTarget {
+                key: key.clone(),
+                target: "free area",
+            })
+        );
+        assert_eq!(
+            registry.open_command(
+                &key,
+                Some(DropTarget::Group {
+                    group: dock_core::NodeId::null(),
+                    zone: DropZone::Top,
+                }),
+            ),
+            Err(RegistryError::UnsupportedOpenTarget {
                 key,
-                area: AllowedArea::Floating,
+                target: "non-center group zone",
             })
         );
     }
