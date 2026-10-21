@@ -1,4 +1,4 @@
-use crate::{DragPayload, DropTarget, Point};
+use crate::{DragHandle, DragPayload, DropTarget, Point};
 
 /// The single semantic drop intent emitted by a successful drag release.
 ///
@@ -11,7 +11,10 @@ use crate::{DragPayload, DropTarget, Point};
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DragDropRequest {
     pub payload: DragPayload,
+    /// Which semantic surface initiated the gesture (tab, group grip, title, or capture zone).
+    pub handle: DragHandle,
     pub origin: Point,
     pub point: Point,
-    pub target: DropTarget,
+    /// Absent for FloatingTitle: releasing a title drag moves the window and needs no dock target.
+    pub target: Option<DropTarget>,
 }
