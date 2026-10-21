@@ -83,3 +83,5 @@ pub use validation_error::ValidationError;
 
 #[cfg(test)]
 mod layout_builder;
+#[cfg(test)]
+mod command_sequence_tests;
