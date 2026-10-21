@@ -168,7 +168,7 @@ fn hidden_chrome_hides_floating_windows_but_preserves_all_layout_state() {
     let visible = layout.compute_rects(viewport(), &metrics).unwrap();
     assert_eq!(visible.floating_groups.len(), 1);
     assert_eq!(visible.floating_groups[0].group, floating_id);
-    assert!(visible.floating_resize_edges.len() > 0);
+    assert!(!visible.floating_resize_edges.is_empty());
 
     for mode in [ChromeMode::DockHidden, ChromeMode::AllHidden] {
         layout
