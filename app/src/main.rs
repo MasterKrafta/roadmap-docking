@@ -20,7 +20,7 @@ fn main() {
         };
 
         if let Err(error) = cx.open_window(window_options, move |_window, cx| {
-            cx.new(|_| StartupWindow { _theme: theme })
+            cx.new(|_| StartupWindow::new(theme))
         }) {
             eprintln!("Could not open the application window: {error}");
             return;
