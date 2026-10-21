@@ -128,16 +128,8 @@ impl LayoutBuilder {
         self.canvas = canvas;
     }
 
-    pub(crate) fn set_version(&mut self, version: u64) {
-        self.version = version;
-    }
-
     pub(crate) fn remove_node(&mut self, id: NodeId) -> Option<Node> {
         self.nodes.remove(id)
-    }
-
-    pub(crate) fn remove_panel_instance(&mut self, id: PanelId) -> Option<PanelInstance> {
-        self.panel_instances.remove(id)
     }
 
     pub(crate) fn node_mut(&mut self, id: NodeId) -> Option<&mut Node> {
@@ -163,8 +155,8 @@ impl LayoutBuilder {
 mod tests {
     use super::LayoutBuilder;
     use crate::{
-        Axis, CanvasState, ColumnMode, DockMetrics, DockSide, GeometryError, Node, NodeId,
-        PanelConstraints, PanelId, PanelKey, Point, Profile, Rect, Size, Split, Tabs,
+        Axis, CanvasState, ColumnMode, DockMetrics, DockSide, Node, NodeId, PanelConstraints,
+        PanelId, PanelKey, Point, Profile, Rect, Size, Tabs,
         ValidationError,
     };
     use proptest::prelude::*;
