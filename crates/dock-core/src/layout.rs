@@ -685,7 +685,6 @@ impl Layout {
                     });
                 }
 
-                let minimums = self.group_minimum_heights(*column, metrics)?;
                 if current.groups.iter().enumerate().any(|(index, group)| {
                     !self.group_is_collapsed(*group)
                         && heights[index] + PIXEL_TOLERANCE < minimums[index]
@@ -766,6 +765,18 @@ impl Layout {
                     None => return Err(CommandError::MissingNode { node: *column }),
                 };
                 let old_width = current.width;
+                if let Some((side, column_index)) = self.main_column_position(*column) {
+                    let main_columns = self.main_columns(side)?;
+                    let canvas_adjacent = match side {
+                        DockSide::Left => column_index + 1 == main_columns.len(),
+                        DockSide::Right => column_index == 0,
+                    };
+                    if !canvas_adjacent {
+                        return Err(CommandError::InvalidTarget {
+                            reason: "interior main columns must be resized through ResizeColumnBoundary",
+                        });
+                    }
+                }
                 let min_width = self.minimum_column_width(*column, metrics)?;
                 let panel_max = self.maximum_column_width(*column)?;
                 let mut max_width = panel_max.unwrap_or(f32::MAX);
@@ -4952,6 +4963,43 @@ mod tests {
         assert_eq!(bounds.origin.x, 760.0);
         assert_eq!(bounds.size.width, metrics.min_canvas_width);
         assert_eq!(canvas_layout.validate(&metrics), Ok(()));
+    }
+
+    #[test]
+    fn c45_resize_column_rejects_interior_main_column_target() {
+        let metrics = DockMetrics::default();
+        let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+        let mut columns = Vec::new();
+        for index in 0..2 {
+            let (_, panel) = builder.panel(
+                PanelKey::new(format!("c45-interior-{index}")).unwrap(),
+                descriptors()[0].1,
+            );
+            let group = builder.tabs(vec![panel], 0, false);
+            columns.push(builder.column(
+                metrics.default_column_width,
+                crate::ColumnMode::Expanded,
+                vec![group],
+                vec![1.0],
+            ));
+        }
+        let root = builder.split(Axis::X, columns.clone(), vec![0.5, 0.5]);
+        builder.main_area(DockSide::Right, root);
+        let mut layout = builder.build();
+        let before = format!("{layout:?}");
+
+        let error = layout.apply(
+            DockCommand::ResizeColumn {
+                column: columns[1],
+                width: 340.0,
+            },
+            &metrics,
+        ).unwrap_err();
+
+        assert!(matches!(error, CommandError::InvalidTarget { .. }));
+        assert_eq!(format!("{layout:?}"), before);
+        assert_eq!(layout.version(), 0);
+        assert_eq!(layout.validate(&metrics), Ok(()));
     }
 
     #[test]
