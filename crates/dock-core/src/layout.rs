@@ -360,8 +360,8 @@ impl Layout {
                         };
                         let active_node = tabs.children.get(tabs.active_index).copied();
                         let moved = tabs.children.remove(source_index);
-                        let insert_index = index.min(tabs.children.len());
-                        tabs.children.insert(insert_index, moved);
+                        let insert_index = if index > source_index { index - 1 } else { index };
+                        tabs.children.insert(insert_index.min(tabs.children.len()), moved);
                         if let Some(active_node) = active_node {
                             if let Some(active_index) = tabs.children.iter().position(|id| *id == active_node) {
                                 tabs.active_index = active_index;
@@ -419,7 +419,8 @@ impl Layout {
                             Some(Node::Column(value)) => value.groups.len(),
                             _ => return Err(CommandError::InvalidTarget { reason: "MoveGroup target changed unexpectedly" }),
                         };
-                        self.insert_group_at_column(*column, *group, (*index).min(new_len), None)?;
+                        let adjusted_index = if *index > source_index { index - 1 } else { *index };
+                        self.insert_group_at_column(*column, *group, adjusted_index.min(new_len), None)?;
                         return Ok(CommandApplication { actual_value: None, inverse, persistent: true });
                     }
                 }
@@ -3149,6 +3150,59 @@ mod tests {
         assert!(matches!(error, CommandError::MissingNode { .. }));
         assert_eq!(layout.version(), before_version);
         assert_eq!(format!("{layout:?}"), before);
+    }
+
+
+    #[test]
+    fn apply_post_operation_validation_failure_rolls_back_the_candidate() {
+        let metrics = DockMetrics::default();
+        let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+        let mut columns = Vec::new();
+
+        for index in 0..metrics.max_columns {
+            let (_, panel) = builder.panel(
+                PanelKey::new(format!("column-panel-{index}")).unwrap(),
+                descriptors()[0].1,
+            );
+            let group = builder.tabs(vec![panel], 0, false);
+            let column = builder.column(
+                metrics.default_column_width,
+                crate::ColumnMode::Expanded,
+                vec![group],
+                vec![1.0],
+            );
+            columns.push(column);
+        }
+
+        let ratios = vec![1.0 / metrics.max_columns as f32; metrics.max_columns];
+        let root = builder.split(Axis::X, columns, ratios);
+        builder.main_area(DockSide::Right, root);
+        let mut layout = builder.build();
+        assert_eq!(layout.validate(&metrics), Ok(()));
+
+        let before = format!("{layout:?}");
+        let error = layout
+            .apply(
+                DockCommand::OpenPanel {
+                    key: PanelKey::new("extra-panel").unwrap(),
+                    constraints: descriptors()[0].1,
+                    target: DropTarget::MainColumn {
+                        side: DockSide::Right,
+                        index: metrics.max_columns,
+                    },
+                },
+                &metrics,
+            )
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            CommandError::InvalidLayout { errors }
+                if errors.iter().any(|error| matches!(error, ValidationError::TooManyColumns { .. }))
+        ));
+        assert_eq!(layout.version(), 0);
+        assert_eq!(format!("{layout:?}"), before);
+        assert_eq!(layout.validate(&metrics), Ok(()));
     }
 
     #[test]
