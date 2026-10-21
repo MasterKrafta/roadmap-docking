@@ -596,10 +596,17 @@ fn layout_tabs(
             // This is the project's chosen overflow UX, not a claim about native
             // Photoshop behavior: reserve a trailing button and expose omitted
             // panel ids so the adapter can build a menu/list.
-            let button_width = metrics.tab_overflow_button_width.min(group_rect.size.width);
-            let visible_width = (group_rect.size.width - button_width).max(0.0);
-            let visible_count = ((visible_width / metrics.min_tab_width).floor() as usize)
+            let requested_button_width = metrics.tab_overflow_button_width.min(group_rect.size.width);
+            let requested_visible_width = (group_rect.size.width - requested_button_width).max(0.0);
+            let visible_count = ((requested_visible_width / metrics.min_tab_width).floor() as usize)
                 .min(tab_count);
+            // When even one minimum-width tab cannot fit beside the button,
+            // let the button occupy the whole strip instead of leaving a blank gap.
+            let (visible_width, button_width) = if visible_count == 0 {
+                (0.0, group_rect.size.width)
+            } else {
+                (requested_visible_width, requested_button_width)
+            };
 
             if visible_count > 0 {
                 let tab_width = visible_width / visible_count as f32;
