@@ -38,6 +38,15 @@ pub enum DockCommand {
         column: NodeId,
         index: usize,
     },
+    /// Move a whole Tabs group to a new main-dock column insertion slot.
+    ///
+    /// When the group is the only group in an existing column on the same side,
+    /// the existing column is reordered instead of creating a duplicate column.
+    MoveGroupToMainColumn {
+        group: NodeId,
+        side: DockSide,
+        index: usize,
+    },
     /// Merge a whole Tabs group into another Tabs group at an exact tab slot.
     /// The source group container is removed; its Panel nodes and instances survive.
     MergeGroup {
@@ -135,6 +144,11 @@ mod tests {
             DockCommand::ReorderTab { group: NodeId::null(), panel: PanelId::null(), to_index: 0 },
             DockCommand::MovePanel { panel: PanelId::null(), target },
             DockCommand::MoveGroup { group: NodeId::null(), column: NodeId::null(), index: 0 },
+            DockCommand::MoveGroupToMainColumn {
+                group: NodeId::null(),
+                side: DockSide::Right,
+                index: 0,
+            },
             DockCommand::MergeGroup {
                 group: NodeId::null(),
                 target_group: NodeId::null(),
@@ -181,7 +195,7 @@ mod tests {
             DockCommand::CloseFlyout,
             DockCommand::SetChrome { mode: ChromeMode::Hidden },
         ];
-        assert_eq!(commands.len(), 25);
+        assert_eq!(commands.len(), 26);
     }
 
     #[cfg(feature = "serde")]
