@@ -560,7 +560,8 @@ impl Layout {
         // Main roots are normalized first. An empty main root removes its
         // DockArea and clears the corresponding side; it never leaves an empty
         // invisible area in the arena.
-        for (index, area_id) in self.main_areas.iter().copied().enumerate() {
+        let main_areas = self.main_areas;
+        for (index, area_id) in main_areas.into_iter().enumerate() {
             let Some(area_id) = area_id else {
                 continue;
             };
@@ -771,6 +772,73 @@ fn ratio_issues(ratios: &[f32], expected_len: usize) -> Vec<&'static str> {
         issues.push("ratios must sum to 1.0 within 1e-4");
     }
     issues
+}
+
+fn is_normalizable_validation_error(error: &ValidationError) -> bool {
+    match error {
+        ValidationError::InvalidSplit { reason, .. } => {
+            *reason == "must contain at least two children" || is_ratio_error(reason)
+        }
+        ValidationError::InvalidTabs { reason, .. } => {
+            *reason == "must contain at least one child"
+                || *reason == "active_index is outside children"
+        }
+        ValidationError::InvalidColumn { reason, .. } => {
+            *reason == "must contain at least one group before normalization"
+                || is_ratio_error(reason)
+        }
+        // All other errors describe broken references, invalid metadata, or
+        // profile constraints that normalization must not guess how to repair.
+        _ => false,
+    }
+}
+
+fn is_ratio_error(reason: &str) -> bool {
+    matches!(
+        reason,
+        "ratio count must match child/group count"
+            | "ratios must be finite and non-negative"
+            | "ratios must sum to 1.0 within 1e-4"
+    )
+}
+
+fn normalized_ratios(ratios: Vec<Option<f32>>) -> Vec<f32> {
+    if ratios.is_empty() {
+        return Vec::new();
+    }
+
+    let values: Option<Vec<f32>> = ratios
+        .into_iter()
+        .collect::<Option<Vec<f32>>>()
+        .filter(|values| values.iter().all(|value| value.is_finite() && *value >= 0.0));
+
+    let Some(values) = values else {
+        return equal_ratios(ratios.len());
+    };
+    let sum: f32 = values.iter().copied().sum();
+    if !sum.is_finite() || sum <= f32::EPSILON {
+        return equal_ratios(values.len());
+    }
+
+    // Leave already-normalized ratios alone to make repeated normalization
+    // exactly idempotent rather than introducing floating-point drift.
+    if (sum - 1.0).abs() <= RATIO_TOLERANCE {
+        return values;
+    }
+
+    let normalized: Vec<f32> = values.iter().map(|value| *value / sum).collect();
+    if normalized.iter().all(|value| value.is_finite()) {
+        normalized
+    } else {
+        equal_ratios(values.len())
+    }
+}
+
+fn equal_ratios(len: usize) -> Vec<f32> {
+    if len == 0 {
+        return Vec::new();
+    }
+    vec![1.0 / len as f32; len]
 }
 
 fn node_children(node: &Node) -> Vec<NodeId> {
