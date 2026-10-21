@@ -1,4 +1,4 @@
-use crate::{DragPayload, Point};
+use crate::{DragCancelReason, DragPayload, DropTarget, Point};
 
 /// State of one UI-independent pointer drag gesture.
 ///
@@ -14,24 +14,26 @@ pub enum DragState {
         origin: Point,
         position: Point,
     },
-    /// Movement crossed the threshold; the payload may be resolved to drop
-    /// zones by the caller.
+    /// Movement crossed the threshold; target is refreshed by the resolver
+    /// after pointer movement. The Layout itself remains untouched.
     Dragging {
         payload: DragPayload,
         origin: Point,
         position: Point,
+        target: Option<DropTarget>,
     },
-    /// Pointer was released after the drag threshold was crossed.
+    /// A valid target was present when the pointer was released.
     Dropped {
         payload: DragPayload,
         origin: Point,
         position: Point,
+        target: DropTarget,
     },
-    /// Gesture was cancelled, including a press/release that never crossed
-    /// the threshold (a click is not a drag).
+    /// Gesture ended without a drop request.
     Cancelled {
         payload: DragPayload,
         origin: Point,
         position: Point,
+        reason: DragCancelReason,
     },
 }
