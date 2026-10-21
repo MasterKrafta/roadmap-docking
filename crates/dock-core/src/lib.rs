@@ -72,6 +72,7 @@ pub mod tab_strip_rect;
 pub mod tabs;
 pub mod validation_error;
 pub mod vertical_overflow;
+pub mod undo_redo_history;
 #[cfg(feature = "serde")]
 pub mod workspace_file;
 #[cfg(feature = "serde")]
@@ -155,6 +156,7 @@ pub use tab_strip_rect::TabStripRect;
 pub use tabs::Tabs;
 pub use validation_error::ValidationError;
 pub use vertical_overflow::VerticalOverflow;
+pub use undo_redo_history::{UndoRedoHistory, DEFAULT_UNDO_LIMIT};
 #[cfg(feature = "serde")]
 pub use workspace_file::{WorkspaceFile, WORKSPACE_FORMAT, WORKSPACE_VERSION};
 #[cfg(feature = "serde")]
@@ -193,3 +195,6 @@ mod flyout_tests;
 
 #[cfg(all(test, feature = "serde"))]
 mod workspace_file_tests;
+
+#[cfg(test)]
+mod history_tests;
