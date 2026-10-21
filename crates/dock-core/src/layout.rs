@@ -415,10 +415,7 @@ impl Layout {
                             Some(Node::Column(value)) => value.groups.len(),
                             _ => return Err(CommandError::InvalidTarget { reason: "MoveGroup target changed unexpectedly" }),
                         };
-                        if *index > new_len {
-                            return Err(CommandError::InvalidValue { field: "index", reason: "group insertion index is outside the column after removal" });
-                        }
-                        self.insert_group_at_column(*column, *group, *index, None)?;
+                        self.insert_group_at_column(*column, *group, (*index).min(new_len), None)?;
                         return Ok(CommandApplication { actual_value: None, inverse, persistent: true });
                     }
                 }
@@ -434,10 +431,7 @@ impl Layout {
                     Some(Node::Column(value)) => value.groups.len(),
                     _ => return Err(CommandError::InvalidTarget { reason: "MoveGroup target changed unexpectedly" }),
                 };
-                if *index > new_len {
-                    return Err(CommandError::InvalidValue { field: "index", reason: "group insertion index is outside the column after removal" });
-                }
-                self.insert_group_at_column(*column, *group, *index, None)?;
+                self.insert_group_at_column(*column, *group, (*index).min(new_len), None)?;
                 Ok(CommandApplication { actual_value: None, inverse, persistent: true })
             }
             DockCommand::SplitGroup { group, target_group, zone, ratio } => {
@@ -907,7 +901,7 @@ impl Layout {
                     groups: vec![group],
                     group_ratios: vec![1.0],
                 }));
-                self.insert_existing_column_at(side, index, column)
+                self.insert_existing_column_at(side, index, column, None)
             }
             DropTarget::RailSlot { column, index } => {
                 let group = self.group_node_for(node)?;
@@ -942,6 +936,7 @@ impl Layout {
         side: DockSide,
         index: usize,
         new_column: NodeId,
+        split_ratio: Option<f32>,
     ) -> Result<(), CommandError> {
         if !matches!(self.nodes.get(new_column), Some(Node::Column(_))) {
             return Err(CommandError::InvalidTarget { reason: "inserted main column is not a Column node" });
@@ -963,9 +958,16 @@ impl Layout {
                     return Err(CommandError::InvalidValue { field: "index", reason: "column insertion index is outside the dock" });
                 }
                 let children = if index == 0 { vec![new_column, area_root] } else { vec![area_root, new_column] };
+                let ratios = match split_ratio {
+                    Some(ratio) if ratio.is_finite() && ratio > 0.0 && ratio < 1.0 => {
+                        if index == 0 { vec![ratio, 1.0 - ratio] } else { vec![1.0 - ratio, ratio] }
+                    }
+                    Some(_) => return Err(CommandError::InvalidValue { field: "ratio", reason: "split ratio must be between zero and one" }),
+                    None => equal_ratios(2),
+                };
                 let split = self.nodes.insert(Node::Split(crate::Split {
                     axis: Axis::X,
-                    ratios: equal_ratios(2),
+                    ratios,
                     children,
                 }));
                 if let Some(area) = self.dock_areas.get_mut(area_id) {
@@ -980,8 +982,26 @@ impl Layout {
                 if split.children.iter().any(|id| !matches!(self.nodes.get(*id), Some(Node::Column(_)))) {
                     return Err(CommandError::InvalidTarget { reason: "main horizontal split contains a non-Column child" });
                 }
+                let old_len = split.children.len();
+                let ratios = if let Some(ratio) = split_ratio {
+                    if !ratio.is_finite() || ratio <= 0.0 || ratio >= 1.0 {
+                        return Err(CommandError::InvalidValue { field: "ratio", reason: "split ratio must be between zero and one" });
+                    }
+                    let mut weights = if ratio_issues(&split.ratios, old_len).is_empty() {
+                        split.ratios.clone()
+                    } else {
+                        equal_ratios(old_len)
+                    };
+                    let target_index = if index < old_len { index } else { old_len - 1 };
+                    let target_weight = weights[target_index];
+                    weights[target_index] = target_weight * (1.0 - ratio);
+                    weights.insert(index, target_weight * ratio);
+                    normalized_ratios(weights.into_iter().map(Some).collect())
+                } else {
+                    equal_ratios(old_len + 1)
+                };
                 split.children.insert(index, new_column);
-                split.ratios = equal_ratios(split.children.len());
+                split.ratios = ratios;
                 if let Some(Node::Split(current)) = self.nodes.get_mut(area_root) {
                     *current = split;
                 }
@@ -1091,7 +1111,7 @@ impl Layout {
                             groups: vec![new_group],
                             group_ratios: vec![1.0],
                         }));
-                        self.insert_existing_column_at(side, insert_at, column)
+                        self.insert_existing_column_at(side, insert_at, column, Some(split_ratio))
                     }
                 }
             } else {
@@ -1197,7 +1217,7 @@ impl Layout {
                     groups: split.children,
                     group_ratios: normalized_ratios(split.ratios.into_iter().map(Some).collect()),
                 }));
-                self.insert_existing_column_at(side, index, column)
+                self.insert_existing_column_at(side, index, column, None)
             }
             (Some(Node::Split(split)), DropTarget::RailSlot { column, index }) if split.axis == Axis::Y => {
                 if split.children.iter().any(|id| !matches!(self.nodes.get(*id), Some(Node::Tabs(_)))) {
