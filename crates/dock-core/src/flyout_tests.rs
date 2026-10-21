@@ -547,7 +547,7 @@ fn successful_same_position_flyout_drop_closes_flyout_without_creating_undo_or_v
 #[test]
 fn cancelled_flyout_panel_drag_leaves_the_source_flyout_open() {
     let metrics = DockMetrics::default();
-    let mut fixture = flyout_drag_fixture();
+    let fixture = flyout_drag_fixture();
     let flyout_before = fixture.layout.flyout();
     let before = fixture.layout.compute_rects(viewport(), &metrics).unwrap();
     let mut session = DragSession::new(&metrics).unwrap();
@@ -572,6 +572,32 @@ fn cancelled_flyout_panel_drag_leaves_the_source_flyout_open() {
     assert_eq!(after.canvas, before.canvas);
     assert_eq!(after.columns, before.columns);
     assert_eq!(after.flyout, before.flyout);
+    assert!(fixture.layout.validate(&metrics).is_ok());
+}
+
+#[test]
+fn rejected_flyout_panel_drop_leaves_the_source_flyout_unchanged() {
+    let metrics = DockMetrics::default();
+    let mut fixture = flyout_drag_fixture();
+    let before = format!("{:?}", fixture.layout);
+    let flyout_before = fixture.layout.flyout();
+    let version_before = fixture.layout.version();
+
+    let result = fixture.layout.apply(
+        DockCommand::MovePanelFromFlyout {
+            panel: fixture.dragged_panel,
+            target: DropTarget::Tabs {
+                group: NodeId::null(),
+                index: 0,
+            },
+        },
+        &metrics,
+    );
+
+    assert!(result.is_err());
+    assert_eq!(format!("{:?}", fixture.layout), before);
+    assert_eq!(fixture.layout.flyout(), flyout_before);
+    assert_eq!(fixture.layout.version(), version_before);
     assert!(fixture.layout.validate(&metrics).is_ok());
 }
 
