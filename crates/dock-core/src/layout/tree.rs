@@ -24,50 +24,45 @@ impl Layout {
         key: &PanelKey,
         metrics: &DockMetrics,
     ) -> Result<DropTarget, CommandError> {
-        if let Some(location) = self.last_dock_locations.get(key).copied() {
-            if let Some(target) = self.target_for_dock_location(location) {
-                if self.validate_drop_target(target, metrics).is_ok() {
-                    return Ok(target);
-                }
-            }
+        if let Some(location) = self.last_dock_locations.get(key).copied()
+            && let Some(target) = self.target_for_dock_location(location)
+            && self.validate_drop_target(target, metrics).is_ok()
+        {
+            return Ok(target);
         }
         self.default_open_target()
     }
 
     pub(super) fn target_for_dock_location(&self, location: LastDockLocation) -> Option<DropTarget> {
-        if let Ok(columns) = self.main_columns(location.side()) {
-            if let Some(column_id) = columns.get(location.column_index()).copied() {
-                if let Some(Node::Column(column)) = self.nodes.get(column_id) {
-                    if let Some(root_group) = column.groups.get(location.group_index()).copied() {
-                        if column.mode.is_rail() {
-                            let order = self.column_display_order(column_id).ok()?;
-                            let index = order.iter().position(|item| {
-                                self.is_descendant_or_same(root_group, item.group)
-                            }).unwrap_or(order.len());
-                            return Some(DropTarget::RailSlot { column: column_id, index });
-                        }
-                        if let Some(group) = self.first_tabs_in_subtree(root_group) {
-                            let child_count = match self.nodes.get(group) {
-                                Some(Node::Tabs(tabs)) => tabs.children.len(),
-                                _ => return None,
-                            };
-                            return Some(DropTarget::Tabs { group, index: child_count });
-                        }
-                    }
-
-                    if !column.groups.is_empty() {
-                        if column.mode.is_rail() {
-                            let index = self.column_display_order(column_id).ok()?.len();
-                            return Some(DropTarget::RailSlot { column: column_id, index });
-                        }
-                        if let Some(last_group) = column.groups.last().copied() {
-                            return Some(DropTarget::GroupEdge {
-                                group: last_group,
-                                zone: DropZone::Bottom,
-                            });
-                        }
-                    }
+        if let Ok(columns) = self.main_columns(location.side())
+            && let Some(column_id) = columns.get(location.column_index()).copied()
+            && let Some(Node::Column(column)) = self.nodes.get(column_id)
+        {
+            if let Some(root_group) = column.groups.get(location.group_index()).copied() {
+                if column.mode.is_rail() {
+                    let order = self.column_display_order(column_id).ok()?;
+                    let index = order.iter().position(|item| {
+                        self.is_descendant_or_same(root_group, item.group)
+                    }).unwrap_or(order.len());
+                    return Some(DropTarget::RailSlot { column: column_id, index });
                 }
+                if let Some(group) = self.first_tabs_in_subtree(root_group) {
+                    let child_count = match self.nodes.get(group) {
+                        Some(Node::Tabs(tabs)) => tabs.children.len(),
+                        _ => return None,
+                    };
+                    return Some(DropTarget::Tabs { group, index: child_count });
+                }
+            }
+
+            if !column.groups.is_empty() && column.mode.is_rail() {
+                let index = self.column_display_order(column_id).ok()?.len();
+                return Some(DropTarget::RailSlot { column: column_id, index });
+            } else if let Some(last_group) = column.groups.last().copied() {
+                return Some(DropTarget::GroupEdge {
+                    group: last_group,
+                    zone: DropZone::Bottom,
+                });
             }
         }
 
@@ -226,10 +221,10 @@ impl Layout {
 
     pub(super) fn main_column_position(&self, column_id: NodeId) -> Option<(DockSide, usize)> {
         for side in [DockSide::Left, DockSide::Right] {
-            if let Ok(columns) = self.main_columns(side) {
-                if let Some(index) = columns.iter().position(|id| *id == column_id) {
-                    return Some((side, index));
-                }
+            if let Ok(columns) = self.main_columns(side)
+                && let Some(index) = columns.iter().position(|id| *id == column_id)
+            {
+                return Some((side, index));
             }
         }
         None
@@ -330,12 +325,12 @@ impl Layout {
         }
 
         for index in 0..self.main_areas.len() {
-            if let Some(area_id) = self.main_areas[index] {
-                if self.dock_areas.get(area_id).is_some_and(|area| area.root == node_id) {
-                    self.main_areas[index] = None;
-                    self.dock_areas.remove(area_id);
-                    return Ok(());
-                }
+            if let Some(area_id) = self.main_areas[index]
+                && self.dock_areas.get(area_id).is_some_and(|area| area.root == node_id)
+            {
+                self.main_areas[index] = None;
+                self.dock_areas.remove(area_id);
+                return Ok(());
             }
         }
         let floating = self.floating_groups.iter().find_map(|(id, group)| {
