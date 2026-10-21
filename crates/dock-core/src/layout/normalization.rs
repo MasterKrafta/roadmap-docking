@@ -96,7 +96,7 @@ impl Layout {
             matches!(
                 self.nodes.get(flyout.column),
                 Some(Node::Column(column))
-                    if column.mode == ColumnMode::IconsOnly
+                    if column.mode.is_rail()
                         && column.groups.contains(&flyout.group)
                         && self.nodes.contains_key(flyout.group)
             )
