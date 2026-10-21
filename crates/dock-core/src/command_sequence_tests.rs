@@ -290,7 +290,7 @@ fn stale_handles_are_rejected_atomically_for_every_id_bearing_command() {
         },
         DockCommand::OpenFlyout {
             column: NodeId::null(),
-            group,
+            panel: PanelId::null(),
         },
     ];
 
@@ -363,7 +363,7 @@ fn existing_but_wrong_node_types_and_forbidden_targets_are_rejected_atomically()
             column: group,
             mode: ColumnMode::IconsOnly,
         },
-        DockCommand::OpenFlyout { column, group },
+        DockCommand::OpenFlyout { column, panel },
         DockCommand::Float {
             node: column,
             bounds: Rect::new(Point::new(20.0, 30.0), Size::new(320.0, 220.0)),
@@ -398,7 +398,7 @@ fn existing_but_wrong_node_types_and_forbidden_targets_are_rejected_atomically()
         &mut layout,
         DockCommand::OpenFlyout {
             column,
-            group: panel_node,
+            panel: PanelId::null(),
         },
         &metrics,
     );
@@ -701,11 +701,12 @@ fn valid_commands(
     }
     for (column, owned_groups, _, mode, _) in &columns {
         if mode.is_rail() {
+            let display_order = layout.column_display_order(*column).unwrap_or_default();
             for group in owned_groups {
-                if matches!(layout.node(*group), Some(Node::Tabs(_))) {
+                if let Some(item) = display_order.iter().find(|item| item.group == *group) {
                     commands.push(DockCommand::OpenFlyout {
                         column: *column,
-                        group: *group,
+                        panel: item.panel,
                     });
                 }
             }
