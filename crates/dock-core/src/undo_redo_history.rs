@@ -78,7 +78,7 @@ impl UndoRedoHistory {
         let outcome = layout.apply(command, metrics)?;
 
         if outcome.new_version != prior_version && self.limit > 0 {
-            self.push_bounded(&mut self.undo, checkpoint);
+            Self::push_bounded(&mut self.undo, checkpoint, self.limit);
             self.redo.clear();
         }
 
@@ -105,7 +105,7 @@ impl UndoRedoHistory {
             return Err(error);
         }
 
-        self.push_bounded(&mut self.redo, redo_checkpoint);
+        Self::push_bounded(&mut self.redo, redo_checkpoint, self.limit);
         Ok(true)
     }
 
@@ -125,7 +125,7 @@ impl UndoRedoHistory {
             return Err(error);
         }
 
-        self.push_bounded(&mut self.undo, undo_checkpoint);
+        Self::push_bounded(&mut self.undo, undo_checkpoint, self.limit);
         Ok(true)
     }
 
@@ -135,9 +135,9 @@ impl UndoRedoHistory {
         self.redo.clear();
     }
 
-    fn push_bounded(&mut self, stack: &mut Vec<Layout>, checkpoint: Layout) {
+    fn push_bounded(stack: &mut Vec<Layout>, checkpoint: Layout, limit: usize) {
         stack.push(checkpoint);
-        if stack.len() > self.limit {
+        if stack.len() > limit {
             stack.remove(0);
         }
     }
