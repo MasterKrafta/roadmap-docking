@@ -1,5 +1,5 @@
 use crate::{
-    Axis, Column, ColumnMode, ColumnRect, ComputeRectsError, DockMetrics, DockSide,
+    Axis, ChromeMode, Column, ColumnMode, ColumnRect, ComputeRectsError, DockMetrics, DockSide,
     FloatingGroupRect, FloatingResizeEdgeRect, FlyoutRect, GeometryError, GroupRect,
     Layout, LayoutRects, Node, NodeId, PanelRect, Point, Rect, ResizeEdge, Size,
     SplitterRect, TabHeaderRect, TabStripRect, Tabs, VerticalOverflow,
@@ -33,8 +33,16 @@ impl Layout {
         self.validate(metrics)
             .map_err(|_| ComputeRectsError::InvalidLayout)?;
 
-        let left_root = self.main_area(DockSide::Left).map(|area| area.root);
-        let right_root = self.main_area(DockSide::Right).map(|area| area.root);
+        // Hidden chrome changes presentation only. Keep the main-dock tree in
+        // Layout, but omit its geometry so the Canvas gets the full viewport.
+        let (left_root, right_root) = if self.chrome().dock_visible() {
+            (
+                self.main_area(DockSide::Left).map(|area| area.root),
+                self.main_area(DockSide::Right).map(|area| area.root),
+            )
+        } else {
+            (None, None)
+        };
         let left_width = match left_root {
             Some(root) => preferred_width(self, root, metrics)?,
             None => 0.0,
@@ -87,8 +95,12 @@ impl Layout {
             layout_node(self, root, area, metrics, &mut output)?;
         }
 
-        if let Some(flyout) = self.flyout() {
-            output.flyout = Some(compute_flyout_rect(self, flyout, viewport, &output)?);
+        // A rail flyout belongs to the dock presentation. Keep its transient
+        // state while hidden, but do not emit geometry until the dock is shown.
+        if self.chrome().dock_visible() {
+            if let Some(flyout) = self.flyout() {
+                output.flyout = Some(compute_flyout_rect(self, flyout, viewport, &output)?);
+            }
         }
 
         // Preserve deterministic back-to-front order in the geometry snapshot.
