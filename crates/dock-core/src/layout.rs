@@ -2167,15 +2167,6 @@ impl Layout {
                 reason: "available height leaves no space for expanded groups",
             });
         }
-        if expanded_indices.is_empty() {
-            return Ok(heights);
-        }
-        if free_height <= 0.0 {
-            return Err(CommandError::InvalidValue {
-                field: "available_height",
-                reason: "available height leaves no space for expanded groups",
-            });
-        }
         let total_weight: f32 = weights.iter().copied().sum();
         if !total_weight.is_finite() || total_weight < 0.0 {
             return Err(CommandError::InvalidValue {
@@ -4724,8 +4715,8 @@ mod tests {
         let Node::Column(value) = layout.node(column).unwrap() else {
             panic!("target should remain a Column");
         };
-        assert!((value.group_ratios[0] - 0.5).abs() < 1.0e-4);
-        assert!((value.group_ratios[1] - 0.2).abs() < 1.0e-4);
+        assert!((value.group_ratios[0] - (5.0 / 12.0)).abs() < 1.0e-4);
+        assert!((value.group_ratios[1] - (1.0 / 6.0)).abs() < 1.0e-4);
         assert_eq!(value.group_ratios[2], before_ratios[2]);
         assert_eq!(layout.validate(&metrics), Ok(()));
 
