@@ -97,10 +97,10 @@ impl Layout {
 
         // A rail flyout belongs to the dock presentation. Keep its transient
         // state while hidden, but do not emit geometry until the dock is shown.
-        if self.chrome().dock_visible() {
-            if let Some(flyout) = self.flyout() {
-                output.flyout = Some(compute_flyout_rect(self, flyout, viewport, &output)?);
-            }
+        if self.chrome().dock_visible()
+            && let Some(flyout) = self.flyout()
+        {
+            output.flyout = Some(compute_flyout_rect(self, flyout, viewport, &output)?);
         }
 
         // Floating windows are part of the dock chrome presentation too.
@@ -492,8 +492,7 @@ fn layout_column(
                 index,
                 Axis::Y,
                 y,
-                rect.size.width,
-                rect.origin.x,
+                rect,
                 metrics,
                 output,
             )?;
@@ -734,8 +733,7 @@ fn layout_split(
                         index,
                         Axis::X,
                         x,
-                        rect.size.height,
-                        rect.origin.y,
+                        rect,
                         metrics,
                         output,
                     )?;
@@ -770,8 +768,7 @@ fn layout_split(
                         index,
                         Axis::Y,
                         y,
-                        rect.size.width,
-                        rect.origin.x,
+                        rect,
                         metrics,
                         output,
                     )?;
@@ -1008,11 +1005,14 @@ fn push_splitter(
     boundary_index: usize,
     axis: Axis,
     boundary: f32,
-    cross_size: f32,
-    cross_origin: f32,
+    parent_rect: Rect,
     metrics: &DockMetrics,
     output: &mut LayoutRects,
 ) -> Result<(), ComputeRectsError> {
+    let (cross_size, cross_origin) = match axis {
+        Axis::X => (parent_rect.size.height, parent_rect.origin.y),
+        Axis::Y => (parent_rect.size.width, parent_rect.origin.x),
+    };
     let rect = match axis {
         Axis::X => Rect::new(
             Point::new(boundary + (metrics.splitter_thickness - metrics.splitter_hit_zone) / 2.0, cross_origin),
