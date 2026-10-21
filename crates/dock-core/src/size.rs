@@ -2,6 +2,7 @@ use crate::GeometryError;
 
 /// A width and height in logical pixels.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Size {
     pub width: f32,
     pub height: f32,
@@ -67,5 +68,13 @@ mod tests {
             Size::new(f32::MAX, 2.0).checked_area(),
             Err(GeometryError::ArithmeticOverflow)
         );
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn size_round_trips_through_serde() {
+        let size = Size::new(720.0, 480.0);
+        let encoded = serde_json::to_string(&size).unwrap();
+        assert_eq!(serde_json::from_str::<Size>(&encoded).unwrap(), size);
     }
 }
