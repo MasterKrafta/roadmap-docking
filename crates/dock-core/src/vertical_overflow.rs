@@ -5,7 +5,9 @@ use crate::{NodeId, Rect};
 ///
 /// The content extent starts at the viewport origin and keeps its width, but
 /// extends downward to the full minimum-size allocation. Adapters may scroll or
-/// clip this content without shrinking any group below its minimum height.
+/// clip this content without shrinking any group below its minimum height. For
+/// main-dock columns, the eventual GPUI adapter should use `viewport` as the
+/// clipping/scrolling region and `content_extent` as the total scrollable size.
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct VerticalOverflow {
