@@ -198,7 +198,7 @@ Layout является единственным владельцем арен �
 - `pointer_up` обрабатывает финальную точку и переданный для этой точки target: `Dropped` возможен только после пересечения порога и при наличии цели; обычный click заканчивается `Cancelled(BelowThreshold)`. Явный `cancel` работает из `Pressed` и `Dragging`. Терминальное состояние можно вернуть в `Idle` через `reset`; нельзя сбросить незавершённый жест.
 - Все точки должны быть конечными числами, а порог — конечным положительным числом. Недопустимые переходы и входы возвращают `DragSessionError` и не меняют состояние. Тесты покрывают точное достижение порога 4 px, configurable threshold, release без отдельного move-события, click без drag, cancellation, reset, invalid coordinates/transitions и payload preservation без UI dependency.
 
-### Drag preview, cancellation and drop request (C6.2)
+### Drag preview, cancellation and drop request
 
 - Во время `Dragging` сессия выдаёт эфемерный `DragPreview { payload, point, target }`. `target` — последний разрешённый для этой точки `DropTarget` или `None`; любое новое pointer-move сбрасывает target, чтобы stale цель не осталась привязана к другой точке. Preview не имеет mutable-ссылки на `Layout` и не меняет persistent model/version.
 - `escape()` и `focus_lost()` завершают active gesture состоянием `Cancelled` с причиной `Escape` или `FocusLost`. Release с `None` target отменяет drag с причиной `NoValidTarget`; pointer-up ниже порога даёт `BelowThreshold`. Все эти ветки возвращают `None` вместо drop request, поэтому state machine не генерирует command.
