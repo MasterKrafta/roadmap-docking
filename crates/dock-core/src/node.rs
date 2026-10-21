@@ -50,6 +50,7 @@ mod tests {
             mode: ColumnMode::Expanded,
             groups: vec![group],
             group_ratios: vec![1.0],
+            last_expanded_width: Some(280.0),
         });
         assert!(matches!(column, Node::Column(_)));
     }
