@@ -3,8 +3,8 @@ use std::collections::{BTreeSet, HashMap};
 use slotmap::SlotMap;
 
 use crate::{
-    Column, DockArea, DockAreaId, DockMetrics, DockSide, FloatingGroup, FloatingGroupId,
-    GeometryError, Layout,
+    Column, ComputeRectsError, DockArea, DockAreaId, DockMetrics, DockSide, FloatingGroup,
+    FloatingGroupId, GeometryError, Layout,
     Node, NodeId, Panel, PanelConstraints, PanelId, PanelInstance, PanelKey, Rect, Size, Split,
     Tabs, WorkspaceDiagnostic, WorkspaceFileError, WorkspaceFloatingGroup, WorkspaceLayout,
     WorkspaceLoadOptions, WorkspaceLoadResult, WorkspaceNode,
@@ -198,6 +198,17 @@ impl WorkspaceFile {
             region
                 .validate_non_empty()
                 .map_err(WorkspaceFileError::InvalidVisibleClientRegion)?;
+            let right = region
+                .checked_right()
+                .map_err(WorkspaceFileError::InvalidVisibleClientRegion)?;
+            let bottom = region
+                .checked_bottom()
+                .map_err(WorkspaceFileError::InvalidVisibleClientRegion)?;
+            if right <= region.origin.x || bottom <= region.origin.y {
+                return Err(WorkspaceFileError::InvalidVisibleClientRegion(
+                    GeometryError::NonPositiveDimension,
+                ));
+            }
             Some(region)
         } else {
             None
@@ -218,21 +229,6 @@ impl WorkspaceFile {
                 return Err(WorkspaceFileError::DuplicatePanelDescriptor {
                     key: key.as_str().to_owned(),
                 });
-            }
-        }
-
-        if let Some(region) = visible_region {
-            for (index, group) in self.layout.floating_groups.iter_mut().enumerate() {
-                let original = group.bounds;
-                let clamped = clamp_floating_bounds(original, region, index)?;
-                if original != clamped {
-                    group.bounds = clamped;
-                    diagnostics.push(WorkspaceDiagnostic::FloatingBoundsClamped {
-                        index,
-                        original,
-                        clamped,
-                    });
-                }
             }
         }
 
@@ -295,6 +291,38 @@ impl WorkspaceFile {
             self.layout.profile,
             self.layout.chrome,
         );
+
+        if let Some(region) = visible_region {
+            let changes = layout
+                .clamp_floating_groups_for_workspace_load(region, metrics)
+                .map_err(|(index, error)| match error {
+                    ComputeRectsError::InsufficientSpace {
+                        axis,
+                        available,
+                        required,
+                    } => WorkspaceFileError::FloatingBoundsInsufficientSpace {
+                        index,
+                        axis,
+                        available,
+                        required,
+                    },
+                    ComputeRectsError::Geometry(reason) => {
+                        WorkspaceFileError::InvalidFloatingBounds { index, reason }
+                    }
+                    ComputeRectsError::InvalidLayout => {
+                        WorkspaceFileError::InvalidRuntimeLayout(format!(
+                            "cannot clamp floating group {index}: its layout references are invalid"
+                        ))
+                    }
+                })?;
+            diagnostics.extend(changes.into_iter().map(
+                |(index, original, clamped)| WorkspaceDiagnostic::FloatingBoundsClamped {
+                    index,
+                    original,
+                    clamped,
+                },
+            ));
+        }
 
         match layout.normalize_for_workspace_load(metrics) {
             Ok(Some(issues)) => diagnostics.push(WorkspaceDiagnostic::LayoutNormalized { issues }),
@@ -366,53 +394,6 @@ fn migrate_v1_node(node: &mut WorkspaceNode) {
         }
         WorkspaceNode::Panel { .. } => {}
     }
-}
-
-fn clamp_floating_bounds(
-    bounds: Rect,
-    visible_region: Rect,
-    index: usize,
-) -> Result<Rect, WorkspaceFileError> {
-    bounds
-        .validate_non_empty()
-        .map_err(|reason| WorkspaceFileError::InvalidFloatingBounds { index, reason })?;
-    let region_right = visible_region
-        .checked_right()
-        .map_err(WorkspaceFileError::InvalidVisibleClientRegion)?;
-    let region_bottom = visible_region
-        .checked_bottom()
-        .map_err(WorkspaceFileError::InvalidVisibleClientRegion)?;
-    if region_right <= visible_region.origin.x || region_bottom <= visible_region.origin.y {
-        return Err(WorkspaceFileError::InvalidVisibleClientRegion(
-            GeometryError::NonPositiveDimension,
-        ));
-    }
-
-    // When a stored floating window is larger than the current client region,
-    // shrink it to fit and report the recovery through FloatingBoundsClamped.
-    let width = bounds.size.width.min(visible_region.size.width);
-    let height = bounds.size.height.min(visible_region.size.height);
-    let max_x = region_right - width;
-    let max_y = region_bottom - height;
-    // f32::clamp panics when its bounds are reversed or non-finite. Extremely
-    // large coordinates can make a positive logical dimension unrepresentable
-    // at that origin, so reject that region instead of risking a panic.
-    if !max_x.is_finite()
-        || !max_y.is_finite()
-        || max_x < visible_region.origin.x
-        || max_y < visible_region.origin.y
-    {
-        return Err(WorkspaceFileError::InvalidVisibleClientRegion(
-            GeometryError::ArithmeticOverflow,
-        ));
-    }
-    let x = bounds.origin.x.clamp(visible_region.origin.x, max_x);
-    let y = bounds.origin.y.clamp(visible_region.origin.y, max_y);
-    let clamped = Rect::new(crate::Point::new(x, y), Size::new(width, height));
-    clamped
-        .validate_non_empty()
-        .map_err(|reason| WorkspaceFileError::InvalidFloatingBounds { index, reason })?;
-    Ok(clamped)
 }
 
 fn node_to_workspace(
