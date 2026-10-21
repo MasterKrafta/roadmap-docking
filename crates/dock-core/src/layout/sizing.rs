@@ -232,8 +232,22 @@ impl Layout {
         match column.mode {
             ColumnMode::IconsOnly => return Ok(metrics.rail_width),
             ColumnMode::IconsAndLabels => return Ok(metrics.min_column_width),
-            ColumnMode::Expanded => {}
+            ColumnMode::Expanded => self.minimum_expanded_column_width(column_id, metrics),
         }
+    }
+
+    pub(super) fn minimum_expanded_column_width(
+        &self,
+        column_id: NodeId,
+        metrics: &DockMetrics,
+    ) -> Result<f32, CommandError> {
+        let column = match self.nodes.get(column_id) {
+            Some(Node::Column(column)) => column,
+            Some(_) => return Err(CommandError::InvalidTarget {
+                reason: "expanded minimum width requires a Column node",
+            }),
+            None => return Err(CommandError::MissingNode { node: column_id }),
+        };
         let mut minimum = metrics.min_column_width;
         for group in &column.groups {
             minimum = minimum.max(self.minimum_node_size(*group, metrics)?.width);
@@ -241,7 +255,10 @@ impl Layout {
         if minimum.is_finite() {
             Ok(minimum)
         } else {
-            Err(CommandError::InvalidValue { field: "width", reason: "minimum column width overflowed" })
+            Err(CommandError::InvalidValue {
+                field: "width",
+                reason: "minimum column width overflowed",
+            })
         }
     }
 
