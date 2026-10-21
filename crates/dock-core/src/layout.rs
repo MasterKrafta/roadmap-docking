@@ -1694,10 +1694,14 @@ impl Layout {
                 self.nodes.remove(root);
                 if let Some(Node::Tabs(target_tabs)) = self.nodes.get_mut(target_group) {
                     let insert_at = index.min(target_tabs.children.len());
+                    let source_active_index = tabs.active_index;
+                    let moving_count = tabs.children.len();
                     for (offset, child) in tabs.children.drain(..).enumerate() {
                         target_tabs.children.insert(insert_at + offset, child);
                     }
-                    target_tabs.active_index = insert_at;
+                    if moving_count > 0 {
+                        target_tabs.active_index = insert_at + source_active_index.min(moving_count - 1);
+                    }
                 } else {
                     return Err(CommandError::InvalidTarget { reason: "tab target changed unexpectedly" });
                 }
@@ -5731,5 +5735,357 @@ mod tests {
         assert_eq!(layout.version(), 0);
         assert_eq!(layout.validate(&metrics), Ok(()));
     }
+
+
+    #[test]
+    fn c46_float_panel_keeps_panel_instance_and_id() {
+        let metrics = DockMetrics::default();
+        let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+        let (moving_panel_id, moving_panel_node) = builder.panel(
+            PanelKey::new("c46-float-panel").unwrap(),
+            descriptors()[0].1,
+        );
+        let (_, sibling_panel_node) = builder.panel(
+            PanelKey::new("c46-float-sibling").unwrap(),
+            descriptors()[0].1,
+        );
+        let source_group = builder.tabs(vec![moving_panel_node, sibling_panel_node], 0, false);
+        let column = builder.column(
+            metrics.default_column_width,
+            crate::ColumnMode::Expanded,
+            vec![source_group],
+            vec![1.0],
+        );
+        builder.main_area(DockSide::Right, column);
+        let mut layout = builder.build();
+        assert_eq!(layout.validate(&metrics), Ok(()));
+
+        layout.apply(
+            DockCommand::Float {
+                node: moving_panel_node,
+                bounds: Rect::new(Point::new(80.0, 60.0), Size::new(320.0, 220.0)),
+            },
+            &metrics,
+        ).unwrap();
+
+        let (floating_id, floating) = layout.floating_groups().next().unwrap();
+        let floating_root = layout.dock_area(floating.area).unwrap().root;
+        assert!(matches!(
+            layout.node(floating_root),
+            Some(Node::Tabs(tabs))
+                if tabs.children == vec![moving_panel_node]
+                    && tabs.active_index == 0
+                    && !tabs.collapsed
+        ));
+        assert!(matches!(
+            layout.node(moving_panel_node),
+            Some(Node::Panel(panel)) if panel.panel_id == moving_panel_id
+        ));
+        assert!(layout.panel_instance(moving_panel_id).is_some());
+        assert_eq!(layout.floating_group(floating_id).unwrap().bounds.size, Size::new(320.0, 220.0));
+        assert!(matches!(
+            layout.node(source_group),
+            Some(Node::Tabs(tabs)) if tabs.children == vec![sibling_panel_node]
+        ));
+        assert_eq!(layout.panel_instances().count(), 2);
+        assert_eq!(layout.validate(&metrics), Ok(()));
+    }
+
+    #[test]
+    fn c46_move_resize_raise_and_center_dock_floating_preserve_source_active_tab() {
+        let metrics = DockMetrics::default();
+        let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+        let (dock_panel, dock_panel_node) = builder.panel(
+            PanelKey::new("c46-center-dock").unwrap(),
+            descriptors()[0].1,
+        );
+        let dock_group = builder.tabs(vec![dock_panel_node], 0, false);
+        let column = builder.column(
+            metrics.default_column_width,
+            crate::ColumnMode::Expanded,
+            vec![dock_group],
+            vec![1.0],
+        );
+        builder.main_area(DockSide::Right, column);
+
+        let (source_panel_a, source_node_a) = builder.panel(
+            PanelKey::new("c46-floating-a").unwrap(),
+            descriptors()[0].1,
+        );
+        let (source_panel_b, source_node_b) = builder.panel(
+            PanelKey::new("c46-floating-b").unwrap(),
+            descriptors()[0].1,
+        );
+        let source_tabs = builder.tabs(vec![source_node_a, source_node_b], 1, true);
+        let source_floating = builder.floating_group(
+            source_tabs,
+            Rect::new(Point::new(20.0, 30.0), Size::new(420.0, 300.0)),
+            1,
+        );
+
+        let (_, other_panel_node) = builder.panel(
+            PanelKey::new("c46-other-floating").unwrap(),
+            descriptors()[0].1,
+        );
+        let other_tabs = builder.tabs(vec![other_panel_node], 0, false);
+        let other_floating = builder.floating_group(
+            other_tabs,
+            Rect::new(Point::new(50.0, 60.0), Size::new(360.0, 240.0)),
+            2,
+        );
+
+        let mut layout = builder.build();
+        assert_eq!(layout.validate(&metrics), Ok(()));
+
+        let moved = layout.apply(
+            DockCommand::MoveFloating {
+                group: source_floating,
+                origin: Point::new(140.0, 150.0),
+            },
+            &metrics,
+        ).unwrap();
+        assert_eq!(
+            layout.floating_group(source_floating).unwrap().bounds.origin,
+            Point::new(140.0, 150.0)
+        );
+        layout.apply(moved.inverse.unwrap(), &metrics).unwrap();
+        assert_eq!(
+            layout.floating_group(source_floating).unwrap().bounds.origin,
+            Point::new(20.0, 30.0)
+        );
+
+        let resized = layout.apply(
+            DockCommand::ResizeFloating {
+                group: source_floating,
+                size: Size::new(10.0, 10.0),
+            },
+            &metrics,
+        ).unwrap();
+        assert_eq!(
+            resized.actual_value,
+            Some(CommandValue::FloatingSize(Size::new(120.0, 80.0)))
+        );
+        assert_eq!(
+            layout.floating_group(source_floating).unwrap().bounds.size,
+            Size::new(120.0, 80.0)
+        );
+        layout.apply(resized.inverse.unwrap(), &metrics).unwrap();
+        assert_eq!(
+            layout.floating_group(source_floating).unwrap().bounds.size,
+            Size::new(420.0, 300.0)
+        );
+
+        layout.apply(DockCommand::RaiseFloating { group: source_floating }, &metrics).unwrap();
+        assert_eq!(layout.floating_group(source_floating).unwrap().z_order, 3);
+        assert_eq!(layout.floating_group(other_floating).unwrap().z_order, 2);
+        assert_eq!(layout.validate(&metrics), Ok(()));
+
+        layout.apply(
+            DockCommand::DockFloating {
+                group: source_floating,
+                target: DropTarget::Tabs { group: dock_group, index: 1 },
+            },
+            &metrics,
+        ).unwrap();
+        assert!(layout.floating_group(source_floating).is_none());
+        assert!(layout.floating_group(other_floating).is_some());
+        assert!(matches!(
+            layout.node(dock_group),
+            Some(Node::Tabs(tabs))
+                if tabs.children == vec![dock_panel_node, source_node_a, source_node_b]
+                    && tabs.active_index == 2
+        ));
+        for panel in [dock_panel, source_panel_a, source_panel_b] {
+            assert!(layout.panel_instance(panel).is_some());
+        }
+        assert_eq!(layout.panel_instances().count(), 4);
+        assert_eq!(layout.validate(&metrics), Ok(()));
+    }
+
+    #[test]
+    fn c46_move_one_panel_between_groups_inside_floating_stack() {
+        let metrics = DockMetrics::default();
+        let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+        let (moving_panel, moving_node) = builder.panel(
+            PanelKey::new("c46-stack-moving").unwrap(),
+            descriptors()[0].1,
+        );
+        let (remaining_panel, remaining_node) = builder.panel(
+            PanelKey::new("c46-stack-remaining").unwrap(),
+            descriptors()[0].1,
+        );
+        let source_group = builder.tabs(vec![moving_node, remaining_node], 0, false);
+        let (target_panel, target_node) = builder.panel(
+            PanelKey::new("c46-stack-target").unwrap(),
+            descriptors()[0].1,
+        );
+        let target_group = builder.tabs(vec![target_node], 0, false);
+        let stack = builder.split(Axis::Y, vec![source_group, target_group], vec![0.6, 0.4]);
+        let floating_id = builder.floating_group(
+            stack,
+            Rect::new(Point::new(40.0, 50.0), Size::new(440.0, 360.0)),
+            1,
+        );
+        let mut layout = builder.build();
+        assert_eq!(layout.validate(&metrics), Ok(()));
+
+        layout.apply(
+            DockCommand::MovePanel {
+                panel: moving_panel,
+                target: DropTarget::Tabs { group: target_group, index: 1 },
+            },
+            &metrics,
+        ).unwrap();
+
+        assert!(matches!(
+            layout.node(source_group),
+            Some(Node::Tabs(tabs))
+                if tabs.children == vec![remaining_node] && tabs.active_index == 0
+        ));
+        assert!(matches!(
+            layout.node(target_group),
+            Some(Node::Tabs(tabs))
+                if tabs.children == vec![target_node, moving_node] && tabs.active_index == 1
+        ));
+        assert!(matches!(
+            layout.node(moving_node),
+            Some(Node::Panel(panel)) if panel.panel_id == moving_panel
+        ));
+        for panel in [moving_panel, remaining_panel, target_panel] {
+            assert!(layout.panel_instance(panel).is_some());
+        }
+        let floating = layout.floating_group(floating_id).unwrap();
+        assert!(matches!(
+            layout.node(layout.dock_area(floating.area).unwrap().root),
+            Some(Node::Split(split)) if split.axis == Axis::Y && split.children == vec![source_group, target_group]
+        ));
+        assert_eq!(layout.panel_instances().count(), 3);
+        assert_eq!(layout.validate(&metrics), Ok(()));
+    }
+
+    #[test]
+    fn c46_move_whole_tabs_group_to_top_of_floating_stack_preserves_tabs_state() {
+        let metrics = DockMetrics::default();
+        let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+        let (moving_panel_a, moving_node_a) = builder.panel(
+            PanelKey::new("c46-whole-a").unwrap(),
+            descriptors()[0].1,
+        );
+        let (moving_panel_b, moving_node_b) = builder.panel(
+            PanelKey::new("c46-whole-b").unwrap(),
+            descriptors()[0].1,
+        );
+        let moving_group = builder.tabs(vec![moving_node_a, moving_node_b], 1, true);
+        let main_column = builder.column(
+            metrics.default_column_width,
+            crate::ColumnMode::Expanded,
+            vec![moving_group],
+            vec![1.0],
+        );
+        builder.main_area(DockSide::Left, main_column);
+
+        let (target_panel, target_node) = builder.panel(
+            PanelKey::new("c46-stack-top-target").unwrap(),
+            descriptors()[0].1,
+        );
+        let target_group = builder.tabs(vec![target_node], 0, false);
+        let floating_id = builder.floating_group(
+            target_group,
+            Rect::new(Point::new(80.0, 90.0), Size::new(420.0, 320.0)),
+            1,
+        );
+        let mut layout = builder.build();
+        assert_eq!(layout.validate(&metrics), Ok(()));
+
+        layout.apply(
+            DockCommand::SplitGroup {
+                group: moving_group,
+                target_group,
+                zone: DropZone::Top,
+                ratio: 0.3,
+            },
+            &metrics,
+        ).unwrap();
+
+        let floating = layout.floating_group(floating_id).unwrap();
+        let root = layout.dock_area(floating.area).unwrap().root;
+        assert!(matches!(
+            layout.node(root),
+            Some(Node::Split(split))
+                if split.axis == Axis::Y
+                    && split.children == vec![moving_group, target_group]
+                    && split.ratios == vec![0.3, 0.7]
+        ));
+        assert!(matches!(
+            layout.node(moving_group),
+            Some(Node::Tabs(tabs))
+                if tabs.children == vec![moving_node_a, moving_node_b]
+                    && tabs.active_index == 1
+                    && tabs.collapsed
+        ));
+        for panel in [moving_panel_a, moving_panel_b, target_panel] {
+            assert!(layout.panel_instance(panel).is_some());
+        }
+        assert!(layout.main_area(DockSide::Left).is_none());
+        assert_eq!(layout.panel_instances().count(), 3);
+        assert_eq!(layout.validate(&metrics), Ok(()));
+    }
+
+    #[test]
+    fn c46_photoshop_rejects_horizontal_split_inside_floating_stack_atomically() {
+        let metrics = DockMetrics::default();
+        let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+        let (_, source_panel) = builder.panel(
+            PanelKey::new("c46-horizontal-source").unwrap(),
+            descriptors()[0].1,
+        );
+        let source_group = builder.tabs(vec![source_panel], 0, false);
+        let source_column = builder.column(
+            metrics.default_column_width,
+            crate::ColumnMode::Expanded,
+            vec![source_group],
+            vec![1.0],
+        );
+        builder.main_area(DockSide::Left, source_column);
+
+        let (_, top_panel) = builder.panel(
+            PanelKey::new("c46-horizontal-top").unwrap(),
+            descriptors()[0].1,
+        );
+        let top_group = builder.tabs(vec![top_panel], 0, false);
+        let (_, bottom_panel) = builder.panel(
+            PanelKey::new("c46-horizontal-bottom").unwrap(),
+            descriptors()[0].1,
+        );
+        let bottom_group = builder.tabs(vec![bottom_panel], 0, false);
+        let stack = builder.split(Axis::Y, vec![top_group, bottom_group], vec![0.5, 0.5]);
+        builder.floating_group(
+            stack,
+            Rect::new(Point::new(60.0, 70.0), Size::new(440.0, 340.0)),
+            1,
+        );
+        let mut layout = builder.build();
+        assert_eq!(layout.validate(&metrics), Ok(()));
+        let before = format!("{layout:?}");
+
+        let error = layout.apply(
+            DockCommand::SplitGroup {
+                group: source_group,
+                target_group: top_group,
+                zone: DropZone::Left,
+                ratio: 0.5,
+            },
+            &metrics,
+        ).unwrap_err();
+
+        assert!(matches!(
+            error,
+            CommandError::InvalidTarget { reason: "horizontal splits are not supported inside a floating stack" }
+        ));
+        assert_eq!(format!("{layout:?}"), before);
+        assert_eq!(layout.version(), 0);
+        assert_eq!(layout.validate(&metrics), Ok(()));
+    }
+
 
 }
