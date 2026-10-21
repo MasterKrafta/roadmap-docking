@@ -82,6 +82,12 @@ pub mod workspace_floating_group;
 pub mod workspace_layout;
 #[cfg(feature = "serde")]
 pub mod workspace_node;
+#[cfg(feature = "serde")]
+pub mod workspace_diagnostic;
+#[cfg(feature = "serde")]
+pub mod workspace_load_options;
+#[cfg(feature = "serde")]
+pub mod workspace_load_result;
 
 pub use allowed_area::AllowedArea;
 pub use axis::Axis;
@@ -159,6 +165,12 @@ pub use workspace_floating_group::WorkspaceFloatingGroup;
 pub use workspace_layout::WorkspaceLayout;
 #[cfg(feature = "serde")]
 pub use workspace_node::WorkspaceNode;
+#[cfg(feature = "serde")]
+pub use workspace_diagnostic::WorkspaceDiagnostic;
+#[cfg(feature = "serde")]
+pub use workspace_load_options::WorkspaceLoadOptions;
+#[cfg(feature = "serde")]
+pub use workspace_load_result::WorkspaceLoadResult;
 
 #[cfg(test)]
 mod layout_builder;
