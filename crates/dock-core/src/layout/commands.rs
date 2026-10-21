@@ -457,6 +457,7 @@ impl Layout {
                             if let Some(Node::Split(current)) = self.nodes.get_mut(area_root) {
                                 *current = split;
                             }
+                            self.remember_subtree_dock_locations(*group);
                             let inverse_index = if source_index > adjusted_index {
                                 source_index + 1
                             } else {
