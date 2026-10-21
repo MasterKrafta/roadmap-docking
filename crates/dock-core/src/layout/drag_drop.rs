@@ -1,0 +1,280 @@
+use super::*;
+use crate::{DragDropAction, DragDropRequest, DragHandle, DragPayload};
+
+impl Layout {
+    /// Resolves a completed drag request to either one command or an explicit
+    /// no-op. It only inspects pure model state; no GPUI pointer/window types
+    /// participate and the Layout is never mutated.
+    pub fn resolve_drag_drop(
+        &self,
+        request: &DragDropRequest,
+        metrics: &DockMetrics,
+    ) -> Result<DragDropAction, CommandError> {
+        metrics.validate().map_err(|_| CommandError::InvalidValue {
+            field: "metrics",
+            reason: "dock metrics are invalid",
+        })?;
+        if !request.origin.is_finite() || !request.point.is_finite() {
+            return Err(CommandError::InvalidValue {
+                field: "pointer",
+                reason: "drag pointer coordinates must be finite",
+            });
+        }
+        if !request.handle.accepts(request.payload) {
+            return Err(CommandError::InvalidTarget {
+                reason: "drag handle does not match the payload kind",
+            });
+        }
+
+        match (request.handle, request.payload) {
+            (DragHandle::FloatingTitle, DragPayload::FloatingGroup { group }) => {
+                if request.target.is_some() {
+                    return Err(CommandError::InvalidTarget {
+                        reason: "floating title drag moves the window and does not use a dock target",
+                    });
+                }
+                let floating = self.floating_group(group).copied().ok_or(
+                    CommandError::MissingFloatingGroup { group },
+                )?;
+                let delta_x = request.point.x - request.origin.x;
+                let delta_y = request.point.y - request.origin.y;
+                let origin = floating.bounds.origin
+                    .checked_offset(delta_x, delta_y)
+                    .map_err(|_| CommandError::InvalidValue {
+                        field: "origin",
+                        reason: "floating title drag produced invalid window coordinates",
+                    })?;
+                if origin == floating.bounds.origin {
+                    return Ok(DragDropAction::NoOp);
+                }
+                Ok(DragDropAction::Command(DockCommand::MoveFloating { group, origin }))
+            }
+            (DragHandle::FloatingCapture, DragPayload::FloatingGroup { group }) => {
+                let target = request.target.ok_or(CommandError::InvalidTarget {
+                    reason: "floating capture drag requires a resolved dock/stack target",
+                })?;
+                self.validate_drop_target(target, metrics)?;
+                let root = self.floating_group(group)
+                    .and_then(|floating| self.dock_area(floating.area))
+                    .map(|area| area.root)
+                    .ok_or(CommandError::MissingFloatingGroup { group })?;
+                if target_node(target).is_some_and(|node| self.is_descendant_or_same(root, node)) {
+                    return Ok(DragDropAction::NoOp);
+                }
+                if matches!(target, DropTarget::FreeArea) {
+                    return Err(CommandError::InvalidTarget {
+                        reason: "a floating capture drag requires a dock/stack target",
+                    });
+                }
+                Ok(DragDropAction::Command(DockCommand::DockFloating { group, target }))
+            }
+            (DragHandle::PanelTab, DragPayload::Panel { panel }) => {
+                if self.panel_instance(panel).is_none() {
+                    return Err(CommandError::MissingPanel { panel });
+                }
+                let panel_node = self.find_panel_node(panel).ok_or(
+                    CommandError::MissingPanel { panel },
+                )?;
+                let target = request.target.ok_or(CommandError::InvalidTarget {
+                    reason: "panel-tab drag requires a resolved drop target",
+                })?;
+                self.validate_drop_target(target, metrics)?;
+
+                if let (Some((source_group, source_index)), DropTarget::Tabs { group, index }) =
+                    (self.tab_parent_index(panel_node), target)
+                {
+                    if source_group == group && (index == source_index || index == source_index + 1) {
+                        return Ok(DragDropAction::NoOp);
+                    }
+                    if source_group == group && index < 2 && index == source_index {
+                        return Ok(DragDropAction::NoOp);
+                    }
+                }
+                if matches!(target, DropTarget::GroupEdge { group, .. }
+                    if self.tab_parent_index(panel_node).is_some_and(|(source, _)| source == group))
+                {
+                    return Ok(DragDropAction::NoOp);
+                }
+
+                // A panel tab remains a panel payload; GroupTabs is reserved for
+                // a group-grip gesture and may never absorb only one dragged tab.
+                if matches!(target, DropTarget::GroupTabs { .. }) {
+                    return Err(CommandError::InvalidTarget {
+                        reason: "panel-tab drag cannot merge a whole group; use a Tabs insertion target",
+                    });
+                }
+                if matches!(target, DropTarget::FreeArea) {
+                    return Err(CommandError::InvalidTarget {
+                        reason: "FreeArea must be converted to Float with explicit bounds",
+                    });
+                }
+                Ok(DragDropAction::Command(DockCommand::MovePanel { panel, target }))
+            }
+            (DragHandle::GroupGrip, DragPayload::Group { group }) => {
+                if !matches!(self.node(group), Some(Node::Tabs(_))) {
+                    return Err(if self.node(group).is_some() {
+                        CommandError::InvalidTarget {
+                            reason: "group-grip drag source must be a Tabs node",
+                        }
+                    } else {
+                        CommandError::MissingNode { node: group }
+                    });
+                }
+                let target = request.target.ok_or(CommandError::InvalidTarget {
+                    reason: "group-grip drag requires a resolved drop target",
+                })?;
+                self.validate_drop_target(target, metrics)?;
+
+                match target {
+                    DropTarget::Tabs { .. } => Err(CommandError::InvalidTarget {
+                        reason: "group grip carries all tabs; use GroupTabs to merge into a tab stack",
+                    }),
+                    DropTarget::GroupTabs { group: target_group, index } => {
+                        if group == target_group {
+                            Ok(DragDropAction::NoOp)
+                        } else {
+                            Ok(DragDropAction::Command(DockCommand::MergeGroup {
+                                group,
+                                target_group,
+                                index,
+                            }))
+                        }
+                    }
+                    DropTarget::GroupEdge { group: target_group, zone } => {
+                        if group == target_group || self.group_edge_is_same_position(group, target_group, zone) {
+                            return Ok(DragDropAction::NoOp);
+                        }
+                        Ok(DragDropAction::Command(DockCommand::SplitGroup {
+                            group,
+                            target_group,
+                            zone,
+                            ratio: 0.5,
+                        }))
+                    }
+                    DropTarget::MainColumn { side, index } => {
+                        let target_columns = self.main_columns(side)?;
+                        if let Some(source_column) = self.find_owner_column(group) {
+                            if let Some((source_side, source_index)) = self.main_column_position(source_column) {
+                                let source_is_sole_group = matches!(
+                                    self.node(source_column),
+                                    Some(Node::Column(column)) if column.groups.as_slice() == [group]
+                                );
+                                if source_side == side && source_is_sole_group
+                                    && (index == source_index || index == source_index + 1)
+                                {
+                                    return Ok(DragDropAction::NoOp);
+                                }
+                            }
+                        }
+                        if index > target_columns.len() {
+                            return Err(CommandError::InvalidValue {
+                                field: "index",
+                                reason: "main-column insertion index is outside the dock",
+                            });
+                        }
+                        Ok(DragDropAction::Command(DockCommand::MoveGroupToMainColumn {
+                            group,
+                            side,
+                            index,
+                        }))
+                    }
+                    DropTarget::ColumnSlot { column, index }
+                    | DropTarget::RailSlot { column, index } => {
+                        if self.find_owner_column(group) == Some(column) {
+                            if let Some(Node::Column(value)) = self.node(column) {
+                                if let Some(source_index) = value.groups.iter().position(|id| *id == group) {
+                                    if index == source_index || index == source_index + 1 {
+                                        return Ok(DragDropAction::NoOp);
+                                    }
+                                }
+                            }
+                        }
+                        Ok(DragDropAction::Command(DockCommand::MoveGroup {
+                            group,
+                            column,
+                            index,
+                        }))
+                    }
+                    DropTarget::FreeArea => Err(CommandError::InvalidTarget {
+                        reason: "FreeArea must be converted to Float with explicit bounds",
+                    }),
+                }
+            }
+            _ => Err(CommandError::InvalidTarget {
+                reason: "drag handle and payload do not describe a supported drag operation",
+            }),
+        }
+    }
+
+    fn group_edge_is_same_position(
+        &self,
+        source_group: NodeId,
+        target_group: NodeId,
+        zone: DropZone,
+    ) -> bool {
+        if source_group == target_group {
+            return true;
+        }
+        if matches!(zone, DropZone::Top | DropZone::Bottom) {
+            let source_parent = self.find_parent(source_group);
+            let target_parent = self.find_parent(target_group);
+            if source_parent.is_some() && source_parent == target_parent {
+                let siblings = match source_parent.and_then(|parent| self.node(parent)) {
+                    Some(Node::Column(column)) => Some(&column.groups),
+                    Some(Node::Split(split)) if split.axis == Axis::Y => Some(&split.children),
+                    _ => None,
+                };
+                if let Some(siblings) = siblings {
+                    if let (Some(source_index), Some(target_index)) = (
+                        siblings.iter().position(|id| *id == source_group),
+                        siblings.iter().position(|id| *id == target_group),
+                    ) {
+                        if (zone == DropZone::Top && source_index + 1 == target_index)
+                            || (zone == DropZone::Bottom && target_index + 1 == source_index)
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        if matches!(zone, DropZone::Left | DropZone::Right) {
+            let Some(source_column) = self.find_owner_column(source_group) else {
+                return false;
+            };
+            let Some(target_column) = self.find_owner_column(target_group) else {
+                return false;
+            };
+            if source_column == target_column {
+                return false;
+            }
+            let source_is_sole_group = matches!(
+                self.node(source_column),
+                Some(Node::Column(column)) if column.groups.as_slice() == [source_group]
+            );
+            if !source_is_sole_group {
+                return false;
+            }
+            let (Some((source_side, source_index)), Some((target_side, target_index))) = (
+                self.main_column_position(source_column),
+                self.main_column_position(target_column),
+            ) else {
+                return false;
+            };
+            return source_side == target_side
+                && ((zone == DropZone::Left && source_index + 1 == target_index)
+                    || (zone == DropZone::Right && target_index + 1 == source_index));
+        }
+        false
+    }
+}
+
+fn target_node(target: DropTarget) -> Option<NodeId> {
+    match target {
+        DropTarget::Tabs { group, .. }
+        | DropTarget::GroupTabs { group, .. }
+        | DropTarget::GroupEdge { group, .. } => Some(group),
+        DropTarget::ColumnSlot { column, .. } | DropTarget::RailSlot { column, .. } => Some(column),
+        DropTarget::MainColumn { .. } | DropTarget::FreeArea => None,
+    }
+}
