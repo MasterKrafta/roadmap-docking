@@ -111,16 +111,24 @@ impl Layout {
                     ));
                     column.width = metrics.min_column_width;
                 }
-                ColumnMode::Expanded
-                    if column.width.is_finite()
-                        && column.width > 0.0
-                        && column.width < metrics.min_column_width =>
-                {
-                    repair_notes.push(format!(
-                        "column {node_id:?}: expanded width raised from {} to minimum {}",
-                        column.width, metrics.min_column_width
-                    ));
-                    column.width = metrics.min_column_width;
+                ColumnMode::Expanded if column.width.is_finite() && column.width > 0.0 => {
+                    if column.width < metrics.min_column_width {
+                        repair_notes.push(format!(
+                            "column {node_id:?}: expanded width raised from {} to minimum {}",
+                            column.width, metrics.min_column_width
+                        ));
+                        column.width = metrics.min_column_width;
+                    }
+                    if column
+                        .last_expanded_width
+                        .is_none_or(|width| !width.is_finite() || width <= 0.0)
+                    {
+                        repair_notes.push(format!(
+                            "column {node_id:?}: missing or invalid last_expanded_width restored from current width {}",
+                            column.width
+                        ));
+                        column.last_expanded_width = Some(column.width);
+                    }
                 }
                 _ => {}
             }
