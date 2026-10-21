@@ -15,7 +15,7 @@ pub struct PanelInstance {
 
 impl PanelInstance {
     /// Creates a panel instance with no remembered layout size.
-    pub const fn new(key: PanelKey, constraints: PanelConstraints) -> Self {
+    pub fn new(key: PanelKey, constraints: PanelConstraints) -> Self {
         Self {
             key,
             constraints,
