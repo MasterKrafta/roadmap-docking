@@ -419,7 +419,7 @@ impl Layout {
                             Some(Node::Column(value)) => value.groups.len(),
                             _ => return Err(CommandError::InvalidTarget { reason: "MoveGroup target changed unexpectedly" }),
                         };
-                        let adjusted_index = if *index > source_index { index - 1 } else { *index };
+                        let adjusted_index = if *index > source_index { *index - 1 } else { *index };
                         self.insert_group_at_column(*column, *group, adjusted_index.min(new_len), None)?;
                         return Ok(CommandApplication { actual_value: None, inverse, persistent: true });
                     }
@@ -3203,6 +3203,27 @@ mod tests {
         assert_eq!(layout.version(), 0);
         assert_eq!(format!("{layout:?}"), before);
         assert_eq!(layout.validate(&metrics), Ok(()));
+    }
+
+
+    #[test]
+    fn apply_version_overflow_rejects_commit_atomically() {
+        let metrics = DockMetrics::default();
+        let mut layout = initial_layout(Profile::Generic);
+        let column_id = layout.main_area(DockSide::Right).unwrap().root;
+        layout.version = u64::MAX;
+        let before = format!("{layout:?}");
+
+        let error = layout
+            .apply(
+                DockCommand::ResizeColumn { column: column_id, width: 320.0 },
+                &metrics,
+            )
+            .unwrap_err();
+
+        assert!(matches!(error, CommandError::InvalidValue { field: "version", .. }));
+        assert_eq!(layout.version(), u64::MAX);
+        assert_eq!(format!("{layout:?}"), before);
     }
 
     #[test]
