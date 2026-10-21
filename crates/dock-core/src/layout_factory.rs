@@ -199,8 +199,10 @@ mod tests {
 
     #[test]
     fn factory_rejects_invalid_metrics_and_constraints() {
-        let mut metrics = DockMetrics::default();
-        metrics.default_column_width = f32::NAN;
+        let metrics = DockMetrics {
+            default_column_width: f32::NAN,
+            ..DockMetrics::default()
+        };
         assert!(create_initial_layout(Profile::Generic, &descriptors(), metrics).is_err());
 
         let mut items = descriptors();
