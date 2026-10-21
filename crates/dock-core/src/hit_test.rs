@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 
 use crate::{
-    ComputeRectsError, DockMetrics, DropTarget, DropZone, FloatingGroupRect, HitResult, Layout,
-    LayoutRects, Node, NodeId, PanelId, Point, Rect,
+    ComputeRectsError, DockMetrics, DropTarget, DropZone, FloatingGroupRect, FlyoutRect, HitResult, Layout,
+    LayoutRects, Node, NodeId, PanelId, Point, Rect, ResizeEdge, Size,
 };
 
 impl Layout {
@@ -68,6 +68,26 @@ impl Layout {
             return Ok(HitResult::FloatingGroup { group: floating.group });
         }
 
+        // The flyout overlays the main dock and Canvas, but floating windows
+        // above it have already received first refusal in the loop above.
+        if let Some(flyout) = rects.flyout {
+            let resize_handle = flyout_resize_hit_rect(flyout, metrics)?;
+            if contains(resize_handle, point)? {
+                return Ok(HitResult::FlyoutResizeEdge {
+                    column: flyout.column,
+                    panel: flyout.panel,
+                    edge: flyout.resize_edge,
+                });
+            }
+            if contains(flyout.rect, point)? {
+                return Ok(HitResult::FlyoutPanel {
+                    column: flyout.column,
+                    group: flyout.group,
+                    panel: flyout.panel,
+                });
+            }
+        }
+
         // Overflow content is larger than its visible viewport. Do not let
         // off-screen main-dock rectangles steal hits outside the client area.
         if let Some(canvas) = rects.canvas {
@@ -100,6 +120,24 @@ impl Layout {
         // Keep unknown points distinct from the central Canvas.
         Ok(HitResult::Miss)
     }
+}
+
+fn flyout_resize_hit_rect(
+    flyout: FlyoutRect,
+    metrics: &DockMetrics,
+) -> Result<Rect, ComputeRectsError> {
+    let half_zone = metrics.splitter_hit_zone * 0.5;
+    let edge_x = match flyout.resize_edge {
+        ResizeEdge::Left => flyout.rect.origin.x,
+        ResizeEdge::Right => flyout.rect.origin.x + flyout.rect.size.width,
+        _ => return Err(ComputeRectsError::InvalidLayout),
+    };
+    let rect = Rect::new(
+        Point::new(edge_x - half_zone, flyout.rect.origin.y),
+        Size::new(metrics.splitter_hit_zone, flyout.rect.size.height),
+    );
+    rect.validate().map_err(ComputeRectsError::Geometry)?;
+    Ok(rect)
 }
 
 fn contains(rect: Rect, point: Point) -> Result<bool, ComputeRectsError> {
