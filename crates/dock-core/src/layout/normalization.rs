@@ -98,7 +98,13 @@ impl Layout {
                 Some(Node::Column(column))
                     if column.mode.is_rail()
                         && column.groups.iter().any(|root| self.is_descendant_or_same(*root, flyout.group))
-                        && self.nodes.contains_key(flyout.group)
+                        && matches!(
+                            self.nodes.get(flyout.group),
+                            Some(Node::Tabs(tabs)) if tabs.children.iter().any(|child| matches!(
+                                self.nodes.get(*child),
+                                Some(Node::Panel(panel)) if panel.panel_id == flyout.panel
+                            ))
+                        )
             )
         });
         if !keep_flyout {
