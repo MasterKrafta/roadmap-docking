@@ -97,7 +97,7 @@ impl WorkspaceFile {
     /// not persisted. This is the strict version-1 loader; migration and
     /// recovery policy are layered on top in the workspace-load stage.
     pub fn into_layout(
-        &self,
+        self,
         descriptors: &[(PanelKey, PanelConstraints)],
         metrics: &DockMetrics,
     ) -> Result<Layout, WorkspaceFileError> {
@@ -123,12 +123,6 @@ impl WorkspaceFile {
                 });
             }
         }
-
-        self.layout.canvas.validate().map_err(|reason| {
-            WorkspaceFileError::InvalidRuntimeLayout(format!(
-                "invalid canvas state: {reason:?}"
-            ))
-        })?;
 
         let mut nodes = SlotMap::<NodeId, Node>::with_key();
         let mut panel_instances = SlotMap::<PanelId, PanelInstance>::with_key();
