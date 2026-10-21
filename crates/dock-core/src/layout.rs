@@ -975,7 +975,7 @@ impl Layout {
             }
             DropTarget::RailSlot { column, index } => {
                 let group = self.group_node_for(node)?;
-                self.insert_group_at_column(column, group, index, edge_ratio)
+                self.insert_group_at_column(column, group, index, None)
             }
         }
     }
@@ -1006,7 +1006,7 @@ impl Layout {
         side: DockSide,
         index: usize,
         new_column: NodeId,
-        split_ratio: Option<f32>,
+        split_ratio: Option<(f32, usize)>,
     ) -> Result<(), CommandError> {
         if !matches!(self.nodes.get(new_column), Some(Node::Column(_))) {
             return Err(CommandError::InvalidTarget { reason: "inserted main column is not a Column node" });
@@ -1029,8 +1029,15 @@ impl Layout {
                 }
                 let children = if index == 0 { vec![new_column, area_root] } else { vec![area_root, new_column] };
                 let ratios = match split_ratio {
-                    Some(ratio) if ratio.is_finite() && ratio > 0.0 && ratio < 1.0 => {
+                    Some((ratio, target_index))
+                        if target_index == 0 && ratio.is_finite() && ratio > 0.0 && ratio < 1.0 =>
+                    {
                         if index == 0 { vec![ratio, 1.0 - ratio] } else { vec![1.0 - ratio, ratio] }
+                    }
+                    Some((_, target_index)) if target_index != 0 => {
+                        return Err(CommandError::InvalidTarget {
+                            reason: "split ratio target does not identify the existing column",
+                        });
                     }
                     Some(_) => return Err(CommandError::InvalidValue { field: "ratio", reason: "split ratio must be between zero and one" }),
                     None => equal_ratios(2),
@@ -1053,16 +1060,20 @@ impl Layout {
                     return Err(CommandError::InvalidTarget { reason: "main horizontal split contains a non-Column child" });
                 }
                 let old_len = split.children.len();
-                let ratios = if let Some(ratio) = split_ratio {
+                let ratios = if let Some((ratio, target_index)) = split_ratio {
                     if !ratio.is_finite() || ratio <= 0.0 || ratio >= 1.0 {
                         return Err(CommandError::InvalidValue { field: "ratio", reason: "split ratio must be between zero and one" });
+                    }
+                    if target_index >= old_len || index > old_len {
+                        return Err(CommandError::InvalidTarget {
+                            reason: "split ratio target or column insertion index is outside the dock",
+                        });
                     }
                     let mut weights = if ratio_issues(&split.ratios, old_len).is_empty() {
                         split.ratios.clone()
                     } else {
                         equal_ratios(old_len)
                     };
-                    let target_index = if index < old_len { index } else { old_len - 1 };
                     let target_weight = weights[target_index];
                     weights[target_index] = target_weight * (1.0 - ratio);
                     weights.insert(index, target_weight * ratio);
@@ -1087,7 +1098,7 @@ impl Layout {
         column_id: NodeId,
         group_id: NodeId,
         index: usize,
-        split_ratio: Option<f32>,
+        split_ratio: Option<(f32, usize)>,
     ) -> Result<(), CommandError> {
         if group_id == column_id {
             return Err(CommandError::InvalidTarget { reason: "a column cannot contain itself" });
@@ -1105,25 +1116,25 @@ impl Layout {
         }
         let mut groups = column.groups.clone();
         groups.insert(index, group_id);
-        let ratios = if let Some(ratio) = split_ratio {
+        let ratios = if let Some((ratio, target_index)) = split_ratio {
             if !ratio.is_finite() || ratio <= 0.0 || ratio >= 1.0 {
                 return Err(CommandError::InvalidValue { field: "ratio", reason: "split ratio must be between zero and one" });
             }
             let old_len = column.groups.len();
-            if old_len == 0 {
-                vec![1.0]
-            } else {
-                let mut weights = if ratio_issues(&column.group_ratios, old_len).is_empty() {
-                    column.group_ratios.clone()
-                } else {
-                    equal_ratios(old_len)
-                };
-                let target_index = if index < old_len { index } else { old_len - 1 };
-                let target_weight = weights[target_index];
-                weights[target_index] = target_weight * (1.0 - ratio);
-                weights.insert(index, target_weight * ratio);
-                normalized_ratios(weights.into_iter().map(Some).collect())
+            if target_index >= old_len {
+                return Err(CommandError::InvalidTarget {
+                    reason: "split ratio target does not identify an existing group",
+                });
             }
+            let mut weights = if ratio_issues(&column.group_ratios, old_len).is_empty() {
+                column.group_ratios.clone()
+            } else {
+                equal_ratios(old_len)
+            };
+            let target_weight = weights[target_index];
+            weights[target_index] = target_weight * (1.0 - ratio);
+            weights.insert(index, target_weight * ratio);
+            normalized_ratios(weights.into_iter().map(Some).collect())
         } else {
             equal_ratios(groups.len())
         };
@@ -1168,7 +1179,7 @@ impl Layout {
                             CommandError::InvalidTarget { reason: "target group is not in its owning column" },
                         )?;
                         let index = if zone == DropZone::Top { target_index } else { target_index + 1 };
-                        self.insert_group_at_column(column_id, new_group, index, Some(split_ratio))
+                        self.insert_group_at_column(column_id, new_group, index, Some((split_ratio, target_index)))
                     }
                     DropZone::Left | DropZone::Right => {
                         let (side, column_index) = self.main_column_position(column_id).ok_or(
@@ -1181,7 +1192,7 @@ impl Layout {
                             groups: vec![new_group],
                             group_ratios: vec![1.0],
                         }));
-                        self.insert_existing_column_at(side, insert_at, column, Some(split_ratio))
+                        self.insert_existing_column_at(side, insert_at, column, Some((split_ratio, column_index)))
                     }
                 }
             } else {
