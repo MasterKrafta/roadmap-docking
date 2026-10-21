@@ -134,8 +134,6 @@ impl Layout {
         groups.sort_by(|(_, left), (_, right)| right.z_order.cmp(&left.z_order));
         groups
     }
-
-
 }
 
 mod commands;
