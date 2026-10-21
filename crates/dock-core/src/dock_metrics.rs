@@ -165,24 +165,34 @@ mod tests {
 
     #[test]
     fn rejects_non_finite_and_non_positive_metrics() {
-        let mut metrics = DockMetrics::default();
-        metrics.drag_threshold = f32::NAN;
+        let metrics = DockMetrics {
+            drag_threshold: f32::NAN,
+            ..DockMetrics::default()
+        };
         assert!(metrics.validate().is_err());
 
-        let mut metrics = DockMetrics::default();
-        metrics.min_canvas_width = 0.0;
+        let metrics = DockMetrics {
+            min_canvas_width: 0.0,
+            ..DockMetrics::default()
+        };
         assert!(metrics.validate().is_err());
 
-        let mut metrics = DockMetrics::default();
-        metrics.splitter_thickness = f32::INFINITY;
+        let metrics = DockMetrics {
+            splitter_thickness: f32::INFINITY,
+            ..DockMetrics::default()
+        };
         assert!(metrics.validate().is_err());
 
-        let mut metrics = DockMetrics::default();
-        metrics.min_tab_width = f32::NAN;
+        let metrics = DockMetrics {
+            min_tab_width: f32::NAN,
+            ..DockMetrics::default()
+        };
         assert!(metrics.validate().is_err());
 
-        let mut metrics = DockMetrics::default();
-        metrics.tab_overflow_button_width = 0.0;
+        let metrics = DockMetrics {
+            tab_overflow_button_width: 0.0,
+            ..DockMetrics::default()
+        };
         assert!(metrics.validate().is_err());
     }
 
@@ -210,16 +220,22 @@ mod tests {
 
     #[test]
     fn rejects_contradictory_relationships() {
-        let mut metrics = DockMetrics::default();
-        metrics.min_column_width = 300.0;
+        let metrics = DockMetrics {
+            min_column_width: 300.0,
+            ..DockMetrics::default()
+        };
         assert!(metrics.validate().is_err());
 
-        let mut metrics = DockMetrics::default();
-        metrics.collapsed_group_height = metrics.min_group_height + 1.0;
+        let metrics = DockMetrics {
+            collapsed_group_height: DockMetrics::default().min_group_height + 1.0,
+            ..DockMetrics::default()
+        };
         assert!(metrics.validate().is_err());
 
-        let mut metrics = DockMetrics::default();
-        metrics.max_columns = 0;
+        let metrics = DockMetrics {
+            max_columns: 0,
+            ..DockMetrics::default()
+        };
         assert!(metrics.validate().is_err());
     }
 }
