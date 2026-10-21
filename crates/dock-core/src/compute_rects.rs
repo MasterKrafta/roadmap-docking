@@ -240,34 +240,60 @@ fn layout_tabs(
     metrics: &DockMetrics,
     output: &mut LayoutRects,
 ) -> Result<(), ComputeRectsError> {
-    output.groups.push(GroupRect::new(id, rect));
-    push_group_drop_zones(id, rect, metrics, output)?;
-
     let collapsed = tabs.collapsed;
+    let collapsed_height = metrics.collapsed_group_height.max(metrics.tab_strip_height);
+    let expanded_minimum = metrics
+        .min_group_height
+        .max(metrics.header_height + metrics.tab_strip_height);
+    let minimum_height = if collapsed { collapsed_height } else { expanded_minimum };
+    if !minimum_height.is_finite() {
+        return Err(ComputeRectsError::Geometry(GeometryError::ArithmeticOverflow));
+    }
+    if rect.size.height < minimum_height {
+        return Err(ComputeRectsError::InsufficientSpace {
+            axis: Axis::Y,
+            available: rect.size.height,
+            required: minimum_height,
+        });
+    }
+
+    // A collapsed Tabs group remains strip-sized even when its parent container
+    // (for example a floating window) is taller than the collapsed group.
+    let group_rect = if collapsed {
+        Rect::new(
+            rect.origin,
+            Size::new(rect.size.width, collapsed_height),
+        )
+    } else {
+        rect
+    };
+    output.groups.push(GroupRect::new(id, group_rect));
+    push_group_drop_zones(id, group_rect, metrics, output)?;
+
     let strip_height = if collapsed {
-        metrics.tab_strip_height.min(rect.size.height)
+        group_rect.size.height
     } else {
         metrics.tab_strip_height
     };
     let strip_y = if collapsed {
-        rect.origin.y
+        group_rect.origin.y
     } else {
-        rect.origin.y + metrics.header_height
+        group_rect.origin.y + metrics.header_height
     };
     let strip_rect = Rect::new(
-        Point::new(rect.origin.x, strip_y),
-        Size::new(rect.size.width, strip_height),
+        Point::new(group_rect.origin.x, strip_y),
+        Size::new(group_rect.size.width, strip_height),
     );
     strip_rect.validate().map_err(ComputeRectsError::Geometry)?;
     output.tab_strips.push(TabStripRect::new(id, strip_rect));
 
     if !tabs.children.is_empty() {
-        let tab_width = rect.size.width / tabs.children.len() as f32;
+        let tab_width = group_rect.size.width / tabs.children.len() as f32;
         for (index, child_id) in tabs.children.iter().enumerate() {
             if let Some(Node::Panel(panel)) = layout.node(*child_id) {
-                let x = rect.origin.x + tab_width * index as f32;
+                let x = group_rect.origin.x + tab_width * index as f32;
                 let width = if index + 1 == tabs.children.len() {
-                    (rect.origin.x + rect.size.width) - x
+                    (group_rect.origin.x + group_rect.size.width) - x
                 } else {
                     tab_width
                 };
@@ -289,12 +315,12 @@ fn layout_tabs(
         return Ok(());
     }
 
-    let content_y = rect.origin.y + metrics.header_height + metrics.tab_strip_height;
-    let content_height = (rect.size.height - metrics.header_height - metrics.tab_strip_height)
+    let content_y = group_rect.origin.y + metrics.header_height + metrics.tab_strip_height;
+    let content_height = (group_rect.size.height - metrics.header_height - metrics.tab_strip_height)
         .max(0.0);
     let content_rect = Rect::new(
-        Point::new(rect.origin.x, content_y),
-        Size::new(rect.size.width, content_height),
+        Point::new(group_rect.origin.x, content_y),
+        Size::new(group_rect.size.width, content_height),
     );
     if let Some(active_child) = tabs.active_child() {
         layout_node(layout, active_child, content_rect, metrics, output)?;
