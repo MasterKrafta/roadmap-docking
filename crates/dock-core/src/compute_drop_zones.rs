@@ -289,8 +289,24 @@ impl Layout {
                             )),
                     };
                     if let Some((left_target, right_target)) = targets {
-                        push_zone(&mut zones, left_target, DropZone::ColumnLeft, left_rect)?;
-                        push_zone(&mut zones, right_target, DropZone::ColumnRight, right_rect)?;
+                        let left_is_noop = match &left_target {
+                            DropTarget::GroupEdge { group, zone } => {
+                                group_edge_is_noop(self, source, *group, *zone)
+                            }
+                            _ => false,
+                        };
+                        let right_is_noop = match &right_target {
+                            DropTarget::GroupEdge { group, zone } => {
+                                group_edge_is_noop(self, source, *group, *zone)
+                            }
+                            _ => false,
+                        };
+                        if !left_is_noop {
+                            push_zone(&mut zones, left_target, DropZone::ColumnLeft, left_rect)?;
+                        }
+                        if !right_is_noop {
+                            push_zone(&mut zones, right_target, DropZone::ColumnRight, right_rect)?;
+                        }
                     }
                 }
             }
@@ -486,7 +502,15 @@ impl Layout {
                         }),
                 };
                 if let Some(target) = target {
-                    push_zone(&mut zones, target, zone, rect)?;
+                    let is_noop = match target {
+                        DropTarget::GroupEdge { group, zone } => {
+                            group_edge_is_noop(self, source, group, zone)
+                        }
+                        _ => false,
+                    };
+                    if !is_noop {
+                        push_zone(&mut zones, target, zone, rect)?;
+                    }
                 }
             }
         }
@@ -1047,7 +1071,7 @@ mod tests {
                 && zone.zone == DropZone::TabInsertion
         }));
         assert!(zones.iter().any(|zone| {
-            zone.target == DropTarget::Tabs { group: target_group, index: 2 }
+            zone.target == DropTarget::Tabs { group: target_group, index: 1 }
                 && zone.zone == DropZone::TabInsertion
         }));
         assert!(zones.iter().any(|zone| {
