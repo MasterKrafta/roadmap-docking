@@ -52,7 +52,7 @@ impl Layout {
                 crate::Size::new(floating.rect.size.width, title_height),
             );
             if contains(title, point)? {
-                return Ok(HitResult::FloatingGroup { group: floating.group });
+                return Ok(HitResult::FloatingTitle { group: floating.group });
             }
 
             if let Some((nodes, panels)) = floating_subtree(self, floating.group)? {
@@ -334,7 +334,7 @@ mod tests {
 
         assert_eq!(
             layout.hit_test(Point::new(140.0, 112.0), &rects, &metrics).unwrap(),
-            HitResult::FloatingGroup { group: floating }
+            HitResult::FloatingTitle { group: floating }
         );
     }
 
