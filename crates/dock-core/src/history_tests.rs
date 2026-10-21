@@ -2,9 +2,8 @@ use slotmap::Key;
 
 use crate::layout_builder::LayoutBuilder;
 use crate::{
-    Axis, CanvasState, ChromeMode, ColumnMode, DockCommand, DockMetrics, DockSide, DockArea,
-    DropTarget, Layout, Node, PanelConstraints, PanelId, PanelKey, Point, Profile, Rect, Size,
-    UndoRedoHistory,
+    ChromeMode, ColumnMode, DockCommand, DockMetrics, DockSide, DropTarget, Layout,
+    PanelConstraints, PanelId, PanelKey, Point, Profile, Rect, Size, UndoRedoHistory,
 };
 
 fn key(value: &str) -> PanelKey {
