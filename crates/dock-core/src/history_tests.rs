@@ -412,6 +412,44 @@ fn new_persistent_command_after_undo_discards_redo_branch() {
 }
 
 #[test]
+fn undo_and_redo_never_revive_stale_panel_ids() {
+    let metrics = DockMetrics::default();
+    let mut fixture = fixture();
+    let mut history = UndoRedoHistory::new();
+    let panel_key = key("fresh-history-panel");
+
+    history
+        .apply(
+            &mut fixture.layout,
+            DockCommand::OpenPanel {
+                key: panel_key.clone(),
+                constraints: constraints(),
+                target: Some(DropTarget::Tabs {
+                    group: fixture.group_a,
+                    index: 2,
+                }),
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    let old_id = fixture.layout.panel_instances()
+        .find(|(_, instance)| instance.key == panel_key)
+        .map(|(id, _)| id)
+        .expect("opened panel instance must exist");
+    assert!(history.undo(&mut fixture.layout, &metrics).unwrap());
+    assert!(fixture.layout.panel_instance(old_id).is_none());
+
+    assert!(history.redo(&mut fixture.layout, &metrics).unwrap());
+    let new_id = fixture.layout.panel_instances()
+        .find(|(_, instance)| instance.key == panel_key)
+        .map(|(id, _)| id)
+        .expect("redone panel instance must exist");
+    assert_ne!(old_id, new_id, "redo must allocate a fresh runtime key");
+    assert!(fixture.layout.panel_instance(old_id).is_none());
+}
+
+#[test]
 fn history_limit_is_bounded() {
     let metrics = DockMetrics::default();
     let mut fixture = fixture();
