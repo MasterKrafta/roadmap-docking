@@ -4695,6 +4695,22 @@ mod tests {
         assert_eq!(format!("{layout:?}"), before);
         assert_eq!(layout.version(), 0);
 
+        let too_short = layout.apply(
+            DockCommand::ResizeGroups {
+                column,
+                boundary_index: 0,
+                delta: 10.0,
+                available_height: 10.0,
+            },
+            &metrics,
+        ).unwrap_err();
+        assert!(matches!(
+            too_short,
+            CommandError::InvalidValue { field: "available_height", .. }
+        ));
+        assert_eq!(format!("{layout:?}"), before);
+        assert_eq!(layout.version(), 0);
+
         let expanded_boundary = layout.apply(
             DockCommand::ResizeGroups {
                 column,
