@@ -106,7 +106,7 @@ pub enum DockCommand {
     /// Dock a floating group at an explicit destination.
     DockFloating { group: FloatingGroupId, target: DropTarget },
     /// Collapse or expand a Tabs group while preserving its children, active tab,
-    /// and owning column's ratio weights (the last expanded size distribution).
+    /// and its parent container's existing size/ratio state.
     ///
     /// UI adapters recognize double-clicks on a tab header or unused tab-strip
     /// space and submit this command through `Layout::apply`. Gesture recognition
