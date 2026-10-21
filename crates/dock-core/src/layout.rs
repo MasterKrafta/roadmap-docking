@@ -6,8 +6,8 @@ use crate::{
     command_application::CommandApplication, Axis, CanvasState, ChromeMode, ColumnMode,
     CommandError, CommandOutcome, CommandValue, DockArea, DockAreaId, DockAreaKind, DockCommand,
     DockMetrics, DockSide, DropTarget, DropZone, FloatingGroup, FloatingGroupId, FlyoutState,
-    GeometryError, LastDockLocation, Node, NodeId, PanelId, PanelInstance, PanelKey, Profile, Rect, Size,
-    ValidationError,
+    GeometryError, LastDockLocation, Node, NodeId, PanelId, PanelInstance, PanelKey, Profile, Rect,
+    Size, ValidationError,
 };
 
 const RATIO_TOLERANCE: f32 = 1.0e-4;
@@ -3797,7 +3797,7 @@ mod tests {
                 if tabs.children.len() == 2 && tabs.active_index == 1
                     && matches!(layout.node(tabs.children[1]), Some(Node::Panel(panel)) if panel.panel_id == moving_id)
         ));
-        assert_eq!(layout.panel_instance(moving_id).is_some(), true);
+        assert!(layout.panel_instance(moving_id).is_some());
         assert_eq!(layout.panel_instances().count(), 3);
         assert!(layout.floating_group(floating_id).is_some());
         assert_eq!(layout.validate(&metrics), Ok(()));
@@ -3876,7 +3876,7 @@ mod tests {
         assert!(layout.panel_instance(panel_a).is_none());
         assert!(layout.panel_instance(panel_b).is_none());
         assert_eq!(layout.panel_instances().count(), 1);
-        assert_eq!(layout.panel_instance(panel_c).is_some(), true);
+        assert!(layout.panel_instance(panel_c).is_some());
         assert_eq!(
             layout.last_dock_location(&key_a),
             Some(crate::LastDockLocation::new(DockSide::Right, 0, 0))
@@ -3935,10 +3935,31 @@ mod tests {
         assert_eq!(layout.panel_instances().count(), 3);
         assert_eq!(layout.validate(&metrics), Ok(()));
 
+        let default_key = PanelKey::new("c43-default-placement").unwrap();
         let mut empty = Layout::new(Profile::Photoshop);
         empty.apply(
             DockCommand::OpenPanel {
-                key: PanelKey::new("c43-default-placement").unwrap(),
+                key: default_key.clone(),
+                constraints: descriptors()[0].1,
+                target: None,
+            },
+            &metrics,
+        ).unwrap();
+        let default_panel_id = empty.panel_instances().find_map(|(id, instance)| {
+            (instance.key == default_key).then_some(id)
+        }).unwrap();
+        empty.apply(DockCommand::ClosePanel { panel: default_panel_id }, &metrics).unwrap();
+        assert!(empty.main_area(DockSide::Right).is_none());
+        assert_eq!(
+            empty.last_dock_location(&default_key),
+            Some(crate::LastDockLocation::new(DockSide::Right, 0, 0))
+        );
+
+        // The former group/column no longer exists, so reopening must use the
+        // right-dock profile fallback rather than a stale NodeId.
+        empty.apply(
+            DockCommand::OpenPanel {
+                key: default_key,
                 constraints: descriptors()[0].1,
                 target: None,
             },
@@ -3980,6 +4001,7 @@ mod tests {
             &metrics,
         ).unwrap();
         assert_eq!(layout.panel_instances().count(), 2);
+        assert!(layout.panel_instance(singleton_id).is_some());
         assert!(matches!(layout.node(group), Some(Node::Tabs(tabs)) if tabs.active_index == 0));
         assert_eq!(layout.version(), 1);
         assert!(first.inverse.is_some());
