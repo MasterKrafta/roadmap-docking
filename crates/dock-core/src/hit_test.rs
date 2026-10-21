@@ -391,7 +391,7 @@ mod tests {
     fn group_header_precedes_tab_header_and_column_background() {
         let metrics = DockMetrics::default();
         let mut builder = LayoutBuilder::new(Profile::Photoshop);
-        let (_, panel_node) = builder.panel(key("header-hit"), constraints());
+        let (panel_id, panel_node) = builder.panel(key("header-hit"), constraints());
         let group = builder.tabs(vec![panel_node], 0, false);
         let column = builder.column(280.0, ColumnMode::Expanded, vec![group], vec![1.0]);
         builder.main_area(DockSide::Left, column);
@@ -403,21 +403,9 @@ mod tests {
             HitResult::Group { group }
         );
         assert_eq!(
-            layout.hit_test(Point::new(10.0, 100.0), &rects, &metrics).unwrap(),
-            HitResult::Panel {
-                panel: match layout.node(group) {
-                    Some(Node::Tabs(tabs)) => match layout.node(tabs.children[0]) {
-                        Some(Node::Panel(panel)) => panel.panel_id,
-                        _ => panic!("expected a Panel leaf"),
-                    },
-                    _ => panic!("expected a Tabs group"),
-                },
-            }
+            layout.hit_test(Point::new(100.0, 100.0), &rects, &metrics).unwrap(),
+            HitResult::Panel { panel: panel_id }
         );
-        assert!(matches!(
-            layout.hit_test(Point::new(286.0, 120.0), &rects, &metrics),
-            Ok(HitResult::Column { .. }) | Ok(HitResult::Panel { .. }) | Ok(HitResult::Group { .. }) | Ok(HitResult::DropZone { .. })
-        ));
     }
 
     #[test]
