@@ -383,7 +383,6 @@ fn right_side_flyout_resizes_toward_canvas_from_its_left_edge() {
 
 struct FlyoutDragFixture {
     layout: Layout,
-    source_column: NodeId,
     source_group: NodeId,
     dragged_panel: PanelId,
     target_group: NodeId,
@@ -428,7 +427,6 @@ fn flyout_drag_fixture() -> FlyoutDragFixture {
 
     FlyoutDragFixture {
         layout,
-        source_column,
         source_group,
         dragged_panel,
         target_group,
@@ -498,6 +496,52 @@ fn flyout_panel_drag_keeps_source_open_until_successful_drop_then_closes_it() {
         fixture.layout.node(*child),
         Some(Node::Panel(panel)) if panel.panel_id == fixture.dragged_panel
     )));
+}
+
+#[test]
+fn successful_same_position_flyout_drop_closes_flyout_without_creating_undo_or_version() {
+    let metrics = DockMetrics::default();
+    let mut fixture = flyout_drag_fixture();
+    let tree_before = tree_snapshot(&fixture.layout);
+    let flyout_before = fixture.layout.flyout();
+    let version = fixture.layout.version();
+    let target = DropTarget::Tabs {
+        group: fixture.source_group,
+        index: 0,
+    };
+    let mut session = DragSession::new(&metrics).unwrap();
+
+    session
+        .pointer_down_with_handle(
+            DragPayload::Panel { panel: fixture.dragged_panel },
+            DragHandle::FlyoutPanel,
+            Point::new(40.0, 40.0),
+        )
+        .unwrap();
+    session.pointer_move(Point::new(45.0, 40.0)).unwrap();
+    let request = session
+        .pointer_up(Point::new(80.0, 60.0), Some(target))
+        .unwrap()
+        .unwrap();
+
+    let action = fixture.layout.resolve_drag_drop(&request, &metrics).unwrap();
+    assert_eq!(
+        action,
+        DragDropAction::Command(DockCommand::MovePanelFromFlyout {
+            panel: fixture.dragged_panel,
+            target,
+        }),
+    );
+    let DragDropAction::Command(command) = action else {
+        panic!("valid flyout release must have an explicit terminal action");
+    };
+    let outcome = fixture.layout.apply(command, &metrics).unwrap();
+
+    assert_transient_outcome(&outcome, version);
+    assert_eq!(fixture.layout.flyout(), None);
+    assert_eq!(tree_snapshot(&fixture.layout), tree_before);
+    assert_ne!(flyout_before, fixture.layout.flyout());
+    assert!(fixture.layout.validate(&metrics).is_ok());
 }
 
 #[test]
