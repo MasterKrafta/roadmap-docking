@@ -228,15 +228,6 @@ fn group_self_drop_and_same_column_slot_are_noops_without_version_increment() {
 
     let outcome = layout.apply(DockCommand::MoveGroup { group, column, index: 0 }, &metrics).unwrap();
     assert_eq!(outcome.new_version, version);
-    let column_outcome = layout.apply(
-        DockCommand::MoveGroupToMainColumn {
-            group,
-            side: DockSide::Left,
-            index: 0,
-        },
-        &metrics,
-    ).unwrap();
-    assert_eq!(column_outcome.new_version, version);
     assert_eq!(layout.version(), version);
     assert_eq!(tabs(&layout, group).collapsed, true);
 }
@@ -276,6 +267,45 @@ fn group_drag_to_main_column_becomes_one_command_and_preserves_tabs_state() {
     };
     assert_eq!(new_column.groups, vec![source]);
     assert_eq!(layout.node(target_column).is_some(), true);
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
+fn sole_group_column_same_position_is_a_noop_command() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+    let (_, panel_node) = builder.panel(key("sole-column-panel"), constraints());
+    let group = builder.tabs(vec![panel_node], 0, true);
+    let column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![group],
+        vec![1.0],
+    );
+    builder.main_area(DockSide::Left, column);
+    let mut layout = builder.build();
+    let version = layout.version();
+
+    let request = DragDropRequest {
+        payload: DragPayload::Group { group },
+        handle: DragHandle::GroupGrip,
+        origin: Point::ZERO,
+        point: Point::new(4.0, 0.0),
+        target: Some(DropTarget::MainColumn { side: DockSide::Left, index: 0 }),
+    };
+    assert_eq!(layout.resolve_drag_drop(&request, &metrics).unwrap(), DragDropAction::NoOp);
+
+    let outcome = layout.apply(
+        DockCommand::MoveGroupToMainColumn {
+            group,
+            side: DockSide::Left,
+            index: 0,
+        },
+        &metrics,
+    ).unwrap();
+    assert_eq!(outcome.new_version, version);
+    assert_eq!(layout.version(), version);
+    assert_eq!(tabs(&layout, group).collapsed, true);
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
 
