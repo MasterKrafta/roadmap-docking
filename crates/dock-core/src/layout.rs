@@ -6,8 +6,8 @@ use crate::{
     command_application::CommandApplication, Axis, CanvasState, ChromeMode, ColumnMode,
     CommandError, CommandOutcome, CommandValue, DockArea, DockAreaId, DockAreaKind, DockCommand,
     DockMetrics, DockSide, DropTarget, DropZone, FloatingGroup, FloatingGroupId, FlyoutState,
-    GeometryError, LastDockLocation, Node, NodeId, PanelId, PanelInstance, PanelKey, Profile, Rect,
-    Size, ValidationError,
+    GeometryError, LastDockLocation, Node, NodeId, PanelId, PanelInstance, PanelKey, Point, Profile,
+    Rect, Size, ValidationError,
 };
 
 const RATIO_TOLERANCE: f32 = 1.0e-4;
@@ -620,91 +620,203 @@ impl Layout {
                 });
                 Ok(CommandApplication { actual_value: None, inverse, persistent: true })
             }
-            DockCommand::ResizeGroups { column, ratios } => {
+            DockCommand::ResizeGroups {
+                column,
+                boundary_index,
+                delta,
+                available_height,
+            } => {
+                if !delta.is_finite() {
+                    return Err(CommandError::InvalidValue {
+                        field: "delta",
+                        reason: "group boundary delta must be finite",
+                    });
+                }
+                if !available_height.is_finite() || *available_height <= 0.0 {
+                    return Err(CommandError::InvalidValue {
+                        field: "available_height",
+                        reason: "available group height must be finite and positive",
+                    });
+                }
                 let current = match self.nodes.get(*column) {
-                    Some(Node::Column(column)) => column.group_ratios.clone(),
-                    Some(_) => return Err(CommandError::InvalidTarget { reason: "ResizeGroups target must be a Column node" }),
+                    Some(Node::Column(value)) => value.clone(),
+                    Some(_) => return Err(CommandError::InvalidTarget {
+                        reason: "ResizeGroups target must be a Column node",
+                    }),
                     None => return Err(CommandError::MissingNode { node: *column }),
                 };
-                let group_count = match self.nodes.get(*column) {
-                    Some(Node::Column(column)) => column.groups.len(),
-                    _ => 0,
-                };
-                if ratios.len() != group_count {
-                    return Err(CommandError::InvalidValue { field: "ratios", reason: "ratio count must match group count" });
+                if *boundary_index + 1 >= current.groups.len() {
+                    return Err(CommandError::InvalidTarget {
+                        reason: "group boundary index does not identify adjacent groups",
+                    });
                 }
-                if let Some(reason) = ratio_issues(ratios, group_count).first() {
-                    return Err(CommandError::InvalidValue { field: "ratios", reason: *reason });
+                let left_group = current.groups[*boundary_index];
+                let right_group = current.groups[*boundary_index + 1];
+                if self.group_is_collapsed(left_group) || self.group_is_collapsed(right_group) {
+                    return Ok(CommandApplication {
+                        actual_value: Some(CommandValue::GroupBoundaryDelta(0.0)),
+                        inverse: None,
+                        persistent: true,
+                    });
                 }
-                if current == *ratios {
-                    return Ok(CommandApplication::persistent());
+
+                let minimums = self.group_minimum_heights(*column, metrics)?;
+                let mut heights = self.group_heights_for_available_height(
+                    *column,
+                    *available_height,
+                    metrics,
+                )?;
+                let lower_delta = minimums[*boundary_index] - heights[*boundary_index];
+                let upper_delta = heights[*boundary_index + 1] - minimums[*boundary_index + 1];
+                if lower_delta > upper_delta {
+                    return Err(CommandError::InvalidValue {
+                        field: "available_height",
+                        reason: "available height cannot satisfy adjacent group minimums",
+                    });
                 }
-                if let Some(Node::Column(column)) = self.nodes.get_mut(*column) {
-                    column.group_ratios = ratios.clone();
+                let actual_delta = (*delta).clamp(lower_delta, upper_delta);
+                if actual_delta == 0.0 {
+                    return Ok(CommandApplication {
+                        actual_value: Some(CommandValue::GroupBoundaryDelta(0.0)),
+                        inverse: None,
+                        persistent: true,
+                    });
+                }
+
+                heights[*boundary_index] += actual_delta;
+                heights[*boundary_index + 1] -= actual_delta;
+                let new_ratios = self.group_ratios_from_heights(
+                    *column,
+                    &heights,
+                    *available_height,
+                    metrics,
+                )?;
+                if new_ratios == current.group_ratios {
+                    return Ok(CommandApplication {
+                        actual_value: Some(CommandValue::GroupBoundaryDelta(actual_delta)),
+                        inverse: None,
+                        persistent: true,
+                    });
+                }
+                if let Some(Node::Column(value)) = self.nodes.get_mut(*column) {
+                    value.group_ratios = new_ratios;
                 }
                 Ok(CommandApplication {
-                    actual_value: Some(CommandValue::GroupRatios(ratios.clone())),
-                    inverse: Some(DockCommand::ResizeGroups { column: *column, ratios: current }),
+                    actual_value: Some(CommandValue::GroupBoundaryDelta(actual_delta)),
+                    inverse: Some(DockCommand::ResizeGroups {
+                        column: *column,
+                        boundary_index: *boundary_index,
+                        delta: -actual_delta,
+                        available_height: *available_height,
+                    }),
                     persistent: true,
                 })
             }
             DockCommand::ResizeColumn { column, width } => {
                 if !width.is_finite() || *width <= 0.0 {
-                    return Err(CommandError::InvalidValue { field: "width", reason: "width must be finite and positive" });
+                    return Err(CommandError::InvalidValue {
+                        field: "width",
+                        reason: "width must be finite and positive",
+                    });
                 }
                 let current = match self.nodes.get(*column) {
                     Some(Node::Column(column)) => column.clone(),
-                    Some(_) => return Err(CommandError::InvalidTarget { reason: "ResizeColumn target must be a Column node" }),
+                    Some(_) => return Err(CommandError::InvalidTarget {
+                        reason: "ResizeColumn target must be a Column node",
+                    }),
                     None => return Err(CommandError::MissingNode { node: *column }),
                 };
                 let old_width = current.width;
                 let min_width = self.minimum_column_width(*column, metrics)?;
+                let panel_max = self.maximum_column_width(*column)?;
+                let mut max_width = panel_max.unwrap_or(f32::MAX);
+
+                // When the canvas has a measured remainder, resizing an outer
+                // main-dock column consumes or returns that remainder. Preserve
+                // the mandatory min_canvas_width rather than letting the UI
+                // render a canvas narrower than Core's own invariant.
+                if let Some((_, _)) = self.main_column_position(*column) {
+                    if let Some(bounds) = self.canvas.last_known_bounds {
+                        let room = (bounds.size.width - metrics.min_canvas_width).max(0.0);
+                        let canvas_cap = old_width + room;
+                        if canvas_cap.is_finite() {
+                            max_width = max_width.min(canvas_cap);
+                        }
+                    }
+                }
+                if max_width < min_width {
+                    return Err(CommandError::InvalidValue {
+                        field: "width",
+                        reason: "column minimum width exceeds its effective maximum width",
+                    });
+                }
                 let actual_width = match current.mode {
                     ColumnMode::IconsOnly => metrics.rail_width,
-                    ColumnMode::Expanded => width.max(min_width),
+                    ColumnMode::Expanded => width.clamp(min_width, max_width),
                 };
                 if !actual_width.is_finite() || actual_width <= 0.0 {
-                    return Err(CommandError::InvalidValue { field: "width", reason: "effective width is not finite and positive" });
+                    return Err(CommandError::InvalidValue {
+                        field: "width",
+                        reason: "effective width is not finite and positive",
+                    });
                 }
-                if let Some(Node::Column(column)) = self.nodes.get_mut(*column) {
-                    column.width = actual_width;
+                let actual_delta = actual_width - old_width;
+                if actual_delta != 0.0 {
+                    if let Some(Node::Column(column)) = self.nodes.get_mut(*column) {
+                        column.width = actual_width;
+                    }
+                    self.adjust_canvas_for_column_resize(*column, actual_delta, metrics)?;
+                    self.sync_main_column_ratios(*column)?;
                 }
-                self.sync_main_column_ratios(*column)?;
                 Ok(CommandApplication {
                     actual_value: Some(CommandValue::ColumnWidth(actual_width)),
-                    inverse: (actual_width != old_width).then_some(DockCommand::ResizeColumn { column: *column, width: old_width }),
+                    inverse: (actual_delta != 0.0).then_some(DockCommand::ResizeColumn {
+                        column: *column,
+                        width: old_width,
+                    }),
                     persistent: true,
                 })
             }
             DockCommand::ResizeColumnBoundary { side, boundary_index, delta } => {
                 if !delta.is_finite() {
-                    return Err(CommandError::InvalidValue { field: "delta", reason: "delta must be finite" });
+                    return Err(CommandError::InvalidValue {
+                        field: "delta",
+                        reason: "column boundary delta must be finite",
+                    });
                 }
                 let columns = self.main_columns(*side)?;
                 if *boundary_index >= columns.len().saturating_sub(1) {
-                    return Err(CommandError::InvalidTarget { reason: "column boundary index does not identify adjacent columns" });
+                    return Err(CommandError::InvalidTarget {
+                        reason: "column boundary index does not identify adjacent columns",
+                    });
                 }
                 let left_id = columns[*boundary_index];
                 let right_id = columns[*boundary_index + 1];
                 let left = match self.nodes.get(left_id) {
                     Some(Node::Column(column)) => column.clone(),
-                    _ => return Err(CommandError::InvalidTarget { reason: "main dock contains a non-Column child" }),
+                    _ => return Err(CommandError::InvalidTarget {
+                        reason: "main dock contains a non-Column child",
+                    }),
                 };
                 let right = match self.nodes.get(right_id) {
                     Some(Node::Column(column)) => column.clone(),
-                    _ => return Err(CommandError::InvalidTarget { reason: "main dock contains a non-Column child" }),
+                    _ => return Err(CommandError::InvalidTarget {
+                        reason: "main dock contains a non-Column child",
+                    }),
                 };
                 let actual_delta = if left.mode == ColumnMode::IconsOnly || right.mode == ColumnMode::IconsOnly {
                     0.0
                 } else {
                     let left_min = self.minimum_column_width(left_id, metrics)?;
                     let right_min = self.minimum_column_width(right_id, metrics)?;
-                    let lower_delta = left_min - left.width;
-                    let upper_delta = right.width - right_min;
+                    let left_max = self.maximum_column_width(left_id)?.unwrap_or(f32::INFINITY);
+                    let right_max = self.maximum_column_width(right_id)?.unwrap_or(f32::INFINITY);
+                    let lower_delta = (left_min - left.width).max(right.width - right_max);
+                    let upper_delta = (right.width - right_min).min(left_max - left.width);
                     if lower_delta > upper_delta {
                         return Err(CommandError::InvalidValue {
                             field: "delta",
-                            reason: "adjacent columns cannot be resized within their minimum widths",
+                            reason: "adjacent columns have incompatible min/max width constraints",
                         });
                     }
                     (*delta).clamp(lower_delta, upper_delta)
@@ -712,8 +824,11 @@ impl Layout {
                 if actual_delta != 0.0 {
                     let new_left = left.width + actual_delta;
                     let new_right = right.width - actual_delta;
-                    if !new_left.is_finite() || !new_right.is_finite() {
-                        return Err(CommandError::InvalidValue { field: "delta", reason: "resized column width overflowed" });
+                    if !new_left.is_finite() || !new_right.is_finite() || new_left <= 0.0 || new_right <= 0.0 {
+                        return Err(CommandError::InvalidValue {
+                            field: "delta",
+                            reason: "resized column width is not finite and positive",
+                        });
                     }
                     if let Some(Node::Column(column)) = self.nodes.get_mut(left_id) {
                         column.width = new_left;
@@ -733,7 +848,50 @@ impl Layout {
                     persistent: true,
                 })
             }
-            DockCommand::ResetColumnRatios { side } => {
+            DockCommand::ResetColumnRatios { column, available_height } => {
+                if !available_height.is_finite() || *available_height <= 0.0 {
+                    return Err(CommandError::InvalidValue {
+                        field: "available_height",
+                        reason: "available group height must be finite and positive",
+                    });
+                }
+                let current = match self.nodes.get(*column) {
+                    Some(Node::Column(value)) => value.clone(),
+                    Some(_) => return Err(CommandError::InvalidTarget {
+                        reason: "ResetColumnRatios target must be a Column node",
+                    }),
+                    None => return Err(CommandError::MissingNode { node: *column }),
+                };
+                if current.groups.iter().all(|group| self.group_is_collapsed(*group)) {
+                    return Ok(CommandApplication::persistent());
+                }
+                let heights = self.equal_group_heights(
+                    *column,
+                    *available_height,
+                    metrics,
+                )?;
+                let ratios = self.group_ratios_from_heights(
+                    *column,
+                    &heights,
+                    *available_height,
+                    metrics,
+                )?;
+                if ratios == current.group_ratios {
+                    return Ok(CommandApplication::persistent());
+                }
+                if let Some(Node::Column(value)) = self.nodes.get_mut(*column) {
+                    value.group_ratios = ratios.clone();
+                }
+                Ok(CommandApplication {
+                    actual_value: Some(CommandValue::GroupRatios(ratios)),
+                    inverse: Some(DockCommand::SetGroupRatios {
+                        column: *column,
+                        ratios: current.group_ratios,
+                    }),
+                    persistent: true,
+                })
+            }
+            DockCommand::ResetMainColumnRatios { side } => {
                 let Some(area) = self.main_area(*side).copied() else {
                     return Ok(CommandApplication::persistent());
                 };
@@ -749,9 +907,49 @@ impl Layout {
                         }
                         Ok(CommandApplication::persistent())
                     }
-                    Some(_) => Err(CommandError::InvalidTarget { reason: "main dock root is not a horizontal column split" }),
-                    None => Err(CommandError::InvalidTarget { reason: "main dock root is missing" }),
+                    Some(_) => Err(CommandError::InvalidTarget {
+                        reason: "main dock root is not a horizontal column split",
+                    }),
+                    None => Err(CommandError::InvalidTarget {
+                        reason: "main dock root is missing",
+                    }),
                 }
+            }
+            DockCommand::SetGroupRatios { column, ratios } => {
+                let current = match self.nodes.get(*column) {
+                    Some(Node::Column(value)) => value.group_ratios.clone(),
+                    Some(_) => return Err(CommandError::InvalidTarget {
+                        reason: "SetGroupRatios target must be a Column node",
+                    }),
+                    None => return Err(CommandError::MissingNode { node: *column }),
+                };
+                let count = match self.nodes.get(*column) {
+                    Some(Node::Column(value)) => value.groups.len(),
+                    _ => 0,
+                };
+                if ratios.len() != count {
+                    return Err(CommandError::InvalidValue {
+                        field: "ratios",
+                        reason: "ratio count must match group count",
+                    });
+                }
+                if let Some(reason) = ratio_issues(ratios, count).first() {
+                    return Err(CommandError::InvalidValue { field: "ratios", reason: *reason });
+                }
+                if current == *ratios {
+                    return Ok(CommandApplication::persistent());
+                }
+                if let Some(Node::Column(value)) = self.nodes.get_mut(*column) {
+                    value.group_ratios = ratios.clone();
+                }
+                Ok(CommandApplication {
+                    actual_value: Some(CommandValue::GroupRatios(ratios.clone())),
+                    inverse: Some(DockCommand::SetGroupRatios {
+                        column: *column,
+                        ratios: current,
+                    }),
+                    persistent: true,
+                })
             }
             DockCommand::Float { node, bounds } => {
                 if !self.nodes.contains_key(*node) {
@@ -1838,6 +2036,186 @@ impl Layout {
         Ok(())
     }
 
+    fn group_is_collapsed(&self, group_id: NodeId) -> bool {
+        matches!(self.nodes.get(group_id), Some(Node::Tabs(tabs)) if tabs.collapsed)
+    }
+
+    fn group_minimum_heights(
+        &self,
+        column_id: NodeId,
+        metrics: &DockMetrics,
+    ) -> Result<Vec<f32>, CommandError> {
+        let column = match self.nodes.get(column_id) {
+            Some(Node::Column(column)) => column,
+            Some(_) => return Err(CommandError::InvalidTarget {
+                reason: "group height constraints require a Column node",
+            }),
+            None => return Err(CommandError::MissingNode { node: column_id }),
+        };
+        column.groups.iter().map(|group| {
+            if self.group_is_collapsed(*group) {
+                Ok(0.0)
+            } else {
+                Ok(metrics.min_group_height.max(self.minimum_node_size(*group, metrics)?.height))
+            }
+        }).collect()
+    }
+
+    fn group_heights_for_available_height(
+        &self,
+        column_id: NodeId,
+        available_height: f32,
+        metrics: &DockMetrics,
+    ) -> Result<Vec<f32>, CommandError> {
+        let column = match self.nodes.get(column_id) {
+            Some(Node::Column(column)) => column,
+            Some(_) => return Err(CommandError::InvalidTarget {
+                reason: "group height calculation requires a Column node",
+            }),
+            None => return Err(CommandError::MissingNode { node: column_id }),
+        };
+        let mut heights = vec![0.0; column.groups.len()];
+        let mut expanded_indices = Vec::new();
+        let mut weights = Vec::new();
+        let mut fixed_height = 0.0_f32;
+        for (index, group) in column.groups.iter().copied().enumerate() {
+            if self.group_is_collapsed(group) {
+                heights[index] = metrics.collapsed_group_height;
+                fixed_height += metrics.collapsed_group_height;
+            } else {
+                expanded_indices.push(index);
+                weights.push(column.group_ratios[index]);
+            }
+        }
+        let free_height = available_height - fixed_height;
+        if !free_height.is_finite() || free_height <= 0.0 {
+            return Err(CommandError::InvalidValue {
+                field: "available_height",
+                reason: "available height cannot fit collapsed groups and expanded content",
+            });
+        }
+        let minimums = self.group_minimum_heights(column_id, metrics)?;
+        let expanded_minimums: Vec<f32> = expanded_indices.iter().map(|index| minimums[*index]).collect();
+        let expanded_heights = distribute_heights_with_minimums(free_height, &expanded_minimums, &weights)?;
+        for (index, height) in expanded_indices.into_iter().zip(expanded_heights) {
+            heights[index] = height;
+        }
+        Ok(heights)
+    }
+
+    fn equal_group_heights(
+        &self,
+        column_id: NodeId,
+        available_height: f32,
+        metrics: &DockMetrics,
+    ) -> Result<Vec<f32>, CommandError> {
+        let column = match self.nodes.get(column_id) {
+            Some(Node::Column(column)) => column,
+            Some(_) => return Err(CommandError::InvalidTarget {
+                reason: "group height reset requires a Column node",
+            }),
+            None => return Err(CommandError::MissingNode { node: column_id }),
+        };
+        let mut heights = vec![0.0; column.groups.len()];
+        let mut expanded_indices = Vec::new();
+        let mut fixed_height = 0.0_f32;
+        for (index, group) in column.groups.iter().copied().enumerate() {
+            if self.group_is_collapsed(group) {
+                heights[index] = metrics.collapsed_group_height;
+                fixed_height += metrics.collapsed_group_height;
+            } else {
+                expanded_indices.push(index);
+            }
+        }
+        if expanded_indices.is_empty() {
+            return Ok(heights);
+        }
+        let free_height = available_height - fixed_height;
+        let all_minimums = self.group_minimum_heights(column_id, metrics)?;
+        let minimums: Vec<f32> = expanded_indices.iter().map(|index| all_minimums[*index]).collect();
+        let equal_weights = vec![1.0; expanded_indices.len()];
+        let expanded_heights = distribute_heights_with_minimums(free_height, &minimums, &equal_weights)?;
+        for (index, height) in expanded_indices.into_iter().zip(expanded_heights) {
+            heights[index] = height;
+        }
+        Ok(heights)
+    }
+
+    fn group_ratios_from_heights(
+        &self,
+        column_id: NodeId,
+        heights: &[f32],
+        available_height: f32,
+        metrics: &DockMetrics,
+    ) -> Result<Vec<f32>, CommandError> {
+        let column = match self.nodes.get(column_id) {
+            Some(Node::Column(column)) => column,
+            Some(_) => return Err(CommandError::InvalidTarget {
+                reason: "group ratio calculation requires a Column node",
+            }),
+            None => return Err(CommandError::MissingNode { node: column_id }),
+        };
+        if heights.len() != column.groups.len() {
+            return Err(CommandError::InvalidValue {
+                field: "heights",
+                reason: "group height count must match group count",
+            });
+        }
+        let expanded_height: f32 = column.groups.iter().enumerate()
+            .filter(|(_, group)| !self.group_is_collapsed(**group))
+            .map(|(index, _)| heights[index])
+            .sum();
+        let mut ratios = vec![0.0; column.groups.len()];
+        if expanded_height <= 0.0 {
+            return Ok(column.group_ratios.clone());
+        }
+        for (index, group) in column.groups.iter().copied().enumerate() {
+            if !self.group_is_collapsed(group) {
+                ratios[index] = heights[index] / expanded_height;
+            }
+        }
+        let _ = (available_height, metrics);
+        Ok(normalized_ratios(ratios.into_iter().map(Some).collect()))
+    }
+
+    fn adjust_canvas_for_column_resize(
+        &mut self,
+        column_id: NodeId,
+        width_delta: f32,
+        metrics: &DockMetrics,
+    ) -> Result<(), CommandError> {
+        let Some((side, _)) = self.main_column_position(column_id) else {
+            return Ok(());
+        };
+        let Some(bounds) = self.canvas.last_known_bounds else {
+            // The UI geometry pass will compute the canvas remainder once it
+            // has a measured parent viewport.
+            return Ok(());
+        };
+        let new_width = bounds.size.width - width_delta;
+        let new_origin = Point::new(
+            if side == DockSide::Left {
+                bounds.origin.x + width_delta
+            } else {
+                bounds.origin.x
+            },
+            bounds.origin.y,
+        );
+        if !new_width.is_finite() || new_width + PIXEL_TOLERANCE < metrics.min_canvas_width {
+            return Err(CommandError::InvalidValue {
+                field: "width",
+                reason: "column resize would leave the canvas below min_canvas_width",
+            });
+        }
+        let new_bounds = Rect::new(new_origin, Size::new(new_width, bounds.size.height));
+        new_bounds.validate_non_empty().map_err(|error| CommandError::InvalidValue {
+            field: "canvas_bounds",
+            reason: geometry_error_reason(error),
+        })?;
+        self.canvas.last_known_bounds = Some(new_bounds);
+        Ok(())
+    }
+
     fn minimum_column_width(
         &self,
         column_id: NodeId,
@@ -1860,6 +2238,38 @@ impl Layout {
         } else {
             Err(CommandError::InvalidValue { field: "width", reason: "minimum column width overflowed" })
         }
+    }
+
+    fn maximum_column_width(
+        &self,
+        column_id: NodeId,
+    ) -> Result<Option<f32>, CommandError> {
+        let column = match self.nodes.get(column_id) {
+            Some(Node::Column(column)) => column,
+            Some(_) => return Err(CommandError::InvalidTarget {
+                reason: "column max-width calculation requires a Column node",
+            }),
+            None => return Err(CommandError::MissingNode { node: column_id }),
+        };
+        if column.mode == ColumnMode::IconsOnly {
+            return Ok(Some(column.width));
+        }
+
+        let mut maximum: Option<f32> = None;
+        for group in &column.groups {
+            for panel_node in self.panel_nodes_in_subtree(*group) {
+                let Some(Node::Panel(panel)) = self.nodes.get(panel_node) else {
+                    continue;
+                };
+                let instance = self.panel_instances.get(panel.panel_id).ok_or(
+                    CommandError::MissingPanel { panel: panel.panel_id },
+                )?;
+                if let Some(max_size) = instance.constraints.max_size {
+                    maximum = Some(maximum.map_or(max_size.width, |current| current.min(max_size.width)));
+                }
+            }
+        }
+        Ok(maximum)
     }
 
     fn minimum_node_size(
@@ -2609,6 +3019,89 @@ impl Layout {
             flyout: None,
         }
     }
+}
+
+fn distribute_heights_with_minimums(
+    available_height: f32,
+    minimums: &[f32],
+    weights: &[f32],
+) -> Result<Vec<f32>, CommandError> {
+    if !available_height.is_finite() || available_height <= 0.0 {
+        return Err(CommandError::InvalidValue {
+            field: "available_height",
+            reason: "available group height must be finite and positive",
+        });
+    }
+    if minimums.len() != weights.len() {
+        return Err(CommandError::InvalidValue {
+            field: "weights",
+            reason: "group weights must match expanded group count",
+        });
+    }
+    if minimums.iter().any(|value| !value.is_finite() || *value <= 0.0)
+        || weights.iter().any(|value| !value.is_finite() || *value < 0.0)
+    {
+        return Err(CommandError::InvalidValue {
+            field: "weights",
+            reason: "group minimums must be positive and weights finite/non-negative",
+        });
+    }
+    if minimums.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let minimum_total: f32 = minimums.iter().sum();
+    if !minimum_total.is_finite() || minimum_total > available_height + PIXEL_TOLERANCE {
+        return Err(CommandError::InvalidValue {
+            field: "available_height",
+            reason: "available height is below the sum of expanded group minimums",
+        });
+    }
+
+    let mut result = vec![0.0; minimums.len()];
+    let mut active: Vec<usize> = (0..minimums.len()).collect();
+    let mut remaining = available_height;
+    while !active.is_empty() {
+        let weight_sum: f32 = active.iter().map(|index| weights[*index]).sum();
+        let equal_share = weight_sum <= f32::EPSILON;
+        let proposed: Vec<(usize, f32)> = active.iter().map(|index| {
+            let height = if equal_share {
+                remaining / active.len() as f32
+            } else {
+                remaining * weights[*index] / weight_sum
+            };
+            (*index, height)
+        }).collect();
+        let mut constrained = Vec::new();
+        for (index, height) in proposed {
+            if height + PIXEL_TOLERANCE < minimums[index] {
+                result[index] = minimums[index];
+                remaining -= minimums[index];
+                constrained.push(index);
+            }
+        }
+        if constrained.is_empty() {
+            let weight_sum: f32 = active.iter().map(|index| weights[*index]).sum();
+            let equal_share = weight_sum <= f32::EPSILON;
+            for index in &active {
+                result[*index] = if equal_share {
+                    remaining / active.len() as f32
+                } else {
+                    remaining * weights[*index] / weight_sum
+                };
+            }
+            break;
+        }
+        active.retain(|index| !constrained.contains(index));
+    }
+
+    if result.iter().any(|height| !height.is_finite() || *height <= 0.0) {
+        return Err(CommandError::InvalidValue {
+            field: "available_height",
+            reason: "computed group heights are not finite and positive",
+        });
+    }
+    Ok(result)
 }
 
 fn side_index(side: DockSide) -> usize {
