@@ -1,6 +1,6 @@
 use crate::layout_builder::LayoutBuilder;
 use crate::{
-    Axis, ColumnMode, DockMetrics, DockSide, HitResult, PanelConstraints, PanelId, PanelKey,
+    ColumnMode, DockMetrics, DockSide, HitResult, PanelConstraints, PanelId, PanelKey,
     Point, Profile, Rect, Size,
 };
 
