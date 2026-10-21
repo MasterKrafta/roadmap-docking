@@ -236,7 +236,7 @@ mod tests {
             DockCommand::DismissFlyout,
             DockCommand::SetFlyoutAutoCollapse { enabled: true },
             DockCommand::ResizeFlyout { panel: PanelId::null(), width: 280.0 },
-            DockCommand::SetChrome { mode: ChromeMode::Hidden },
+            DockCommand::SetChrome { mode: ChromeMode::AllHidden },
         ];
         assert_eq!(commands.len(), 31);
     }
