@@ -184,6 +184,10 @@ impl DragSession {
         Self::validate_position(position)?;
 
         let current_state = self.state;
+        let handle = self.handle.unwrap_or_else(|| match current_state {
+            DragState::Pressed { payload, .. } | DragState::Dragging { payload, .. } => DragHandle::default_for(payload),
+            DragState::Idle | DragState::Dropped { .. } | DragState::Cancelled { .. } => DragHandle::PanelTab,
+        });
         let request = match current_state {
             DragState::Pressed { payload, origin, .. } => {
                 if !Self::threshold_reached(origin, position, self.threshold) {
@@ -196,12 +200,13 @@ impl DragSession {
                     return Ok(None);
                 }
 
-                Self::finish_release(payload, self.handle.unwrap_or_else(|| DragHandle::default_for(payload)), origin, position, resolved_target, &mut self.state)
+                Self::finish_release(payload, handle, origin, position, resolved_target, &mut self.state)
             }
             DragState::Dragging {
                 payload, origin, ..
             } => Self::finish_release(
                 payload,
+                handle,
                 origin,
                 position,
                 resolved_target,
