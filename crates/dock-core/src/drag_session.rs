@@ -372,16 +372,16 @@ mod tests {
         create_initial_layout(Profile::Photoshop, &descriptors, DockMetrics::default()).unwrap()
     }
 
-    fn layout_snapshot(
-        layout: &Layout,
-    ) -> (
+    type LayoutSnapshot = (
         u64,
         String,
         Vec<(NodeId, String)>,
         Vec<(PanelId, String)>,
         Vec<(DockAreaId, String)>,
         Vec<(FloatingGroupId, String)>,
-    ) {
+    );
+
+    fn layout_snapshot(layout: &Layout) -> LayoutSnapshot {
         (
             layout.version(),
             format!(
@@ -600,8 +600,10 @@ mod tests {
 
     #[test]
     fn threshold_uses_euclidean_logical_distance_and_is_configurable() {
-        let mut metrics = DockMetrics::default();
-        metrics.drag_threshold = 5.0;
+        let metrics = DockMetrics {
+            drag_threshold: 5.0,
+            ..DockMetrics::default()
+        };
         let mut session = DragSession::new(&metrics).unwrap();
 
         assert_eq!(session.threshold(), 5.0);
@@ -661,8 +663,10 @@ mod tests {
 
     #[test]
     fn invalid_positions_threshold_and_transitions_are_rejected_without_mutation() {
-        let mut metrics = DockMetrics::default();
-        metrics.drag_threshold = f32::NAN;
+        let metrics = DockMetrics {
+            drag_threshold: f32::NAN,
+            ..DockMetrics::default()
+        };
         assert_eq!(
             DragSession::new(&metrics),
             Err(DragSessionError::InvalidThreshold)
