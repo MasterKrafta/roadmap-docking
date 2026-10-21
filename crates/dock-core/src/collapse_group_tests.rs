@@ -329,6 +329,32 @@ fn reexpand_after_resize_and_reorder_restores_saved_weights_with_current_viewpor
             "group height should follow retained ratio within current viewport constraints",
         );
     }
+
+    // A smaller current viewport may force the ratios away from their ideal
+    // proportions, but must keep each expanded group above its content minimum.
+    let small_rects = layout
+        .compute_rects(viewport(1200.0, 400.0), &metrics)
+        .unwrap();
+    let minimum_group_height = metrics
+        .min_group_height
+        .max(metrics.header_height + metrics.tab_strip_height + constraints().min_size.height);
+    let small_height_for = |group| {
+        small_rects
+            .groups
+            .iter()
+            .find(|rect| rect.group == group)
+            .unwrap()
+            .rect
+            .size
+            .height
+    };
+    assert!(groups
+        .iter()
+        .all(|group| small_height_for(*group) >= minimum_group_height - 1.0e-3));
+    assert!(
+        (groups.iter().map(|group| small_height_for(*group)).sum::<f32>() - 392.0).abs()
+            < 1.0e-3
+    );
     assert!(layout.validate(&metrics).is_ok());
 }
 
