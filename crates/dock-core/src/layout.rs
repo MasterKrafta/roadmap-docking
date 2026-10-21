@@ -881,12 +881,29 @@ mod tests {
         };
         tabs.children.push(group_id);
 
+        let orphan_panel = layout
+            .nodes
+            .insert(Node::Panel(Panel::new(PanelId::null())));
+
         let errors = layout.validate(&DockMetrics::default()).unwrap_err();
         assert!(errors.iter().any(|error| matches!(
             error,
             ValidationError::MissingNode { missing, .. } if *missing == NodeId::null()
         )));
         assert!(errors.iter().any(|error| matches!(error, ValidationError::NodeCycle { .. })));
+        assert!(errors.iter().any(|error| matches!(
+            error,
+            ValidationError::MultipleParents { node, .. } if *node == group_id
+        )));
+        assert!(errors.iter().any(|error| matches!(
+            error,
+            ValidationError::UnreachableNode { node } if *node == orphan_panel
+        )));
+        assert!(errors.iter().any(|error| matches!(
+            error,
+            ValidationError::MissingPanelInstance { node, panel }
+                if *node == orphan_panel && *panel == PanelId::null()
+        )));
     }
 
     #[test]
