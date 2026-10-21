@@ -227,6 +227,11 @@ fn stale_handles_are_rejected_atomically_for_every_id_bearing_command() {
             column,
             index: 0,
         },
+        DockCommand::MoveGroupToMainColumn {
+            group: NodeId::null(),
+            side: DockSide::Right,
+            index: 0,
+        },
         DockCommand::SplitGroup {
             group: NodeId::null(),
             target_group: group,
@@ -319,6 +324,11 @@ fn existing_but_wrong_node_types_and_forbidden_targets_are_rejected_atomically()
         DockCommand::MoveGroup {
             group,
             column: group,
+            index: 0,
+        },
+        DockCommand::MoveGroupToMainColumn {
+            group: column,
+            side: DockSide::Right,
             index: 0,
         },
         DockCommand::SplitGroup {
