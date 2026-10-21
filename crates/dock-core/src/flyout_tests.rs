@@ -1,6 +1,7 @@
 //! C7.3 regression coverage for transient flyout state, geometry and dismissal.
 
 use crate::layout_builder::LayoutBuilder;
+use slotmap::Key;
 use crate::{
     ColumnMode, DockCommand, DockMetrics, DockSide, DragDropAction, DragHandle, DragPayload,
     DragSession, DragState, DropTarget, FlyoutState, HitResult, Layout, Node, NodeId,
