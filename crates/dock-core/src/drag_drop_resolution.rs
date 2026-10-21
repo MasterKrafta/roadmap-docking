@@ -223,6 +223,57 @@ fn panel_tab_may_split_from_its_own_group_edge() {
 }
 
 #[test]
+fn panel_and_group_free_area_drops_require_adapter_bounds_and_resolve_to_float() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+    let (panel, p0) = builder.panel(key("free-area-panel"), constraints());
+    let (_, p1) = builder.panel(key("free-area-sibling"), constraints());
+    let group = builder.tabs(vec![p0, p1], 1, true);
+    let column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![group],
+        vec![1.0],
+    );
+    builder.main_area(DockSide::Left, column);
+    let layout = builder.build();
+    let floating_bounds = bounds(500.0, 120.0);
+
+    let panel_request = DragDropRequest {
+        payload: DragPayload::Panel { panel },
+        handle: DragHandle::PanelTab,
+        origin: Point::ZERO,
+        point: Point::new(8.0, 0.0),
+        target: Some(DropTarget::FreeArea),
+        floating_bounds: Some(floating_bounds),
+    };
+    assert_eq!(
+        layout.resolve_drag_drop(&panel_request, &metrics).unwrap(),
+        DragDropAction::Command(DockCommand::Float {
+            node: p0,
+            bounds: floating_bounds,
+        })
+    );
+
+    let group_request = DragDropRequest {
+        payload: DragPayload::Group { group },
+        handle: DragHandle::GroupGrip,
+        origin: Point::ZERO,
+        point: Point::new(8.0, 0.0),
+        target: Some(DropTarget::FreeArea),
+        floating_bounds: Some(floating_bounds),
+    };
+    assert_eq!(
+        layout.resolve_drag_drop(&group_request, &metrics).unwrap(),
+        DragDropAction::Command(DockCommand::Float {
+            node: group,
+            bounds: floating_bounds,
+        })
+    );
+    assert_eq!(layout.version(), 0);
+}
+
+#[test]
 fn group_self_drop_and_same_column_slot_are_noops_without_version_increment() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
