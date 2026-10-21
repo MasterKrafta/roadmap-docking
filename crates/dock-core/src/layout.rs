@@ -685,12 +685,7 @@ impl Layout {
 
                 heights[*boundary_index] += actual_delta;
                 heights[*boundary_index + 1] -= actual_delta;
-                let new_ratios = self.group_ratios_from_heights(
-                    *column,
-                    &heights,
-                    *available_height,
-                    metrics,
-                )?;
+                let new_ratios = self.group_ratios_from_heights(*column, &heights)?;
                 if new_ratios == current.group_ratios {
                     return Ok(CommandApplication {
                         actual_value: Some(CommandValue::GroupBoundaryDelta(0.0)),
@@ -703,7 +698,7 @@ impl Layout {
                 }
                 Ok(CommandApplication {
                     actual_value: Some(CommandValue::GroupBoundaryDelta(actual_delta)),
-                    inverse: Some(DockCommand::SetGroupRatios {
+                    inverse: Some(DockCommand::RestoreGroupRatios {
                         column: *column,
                         ratios: current.group_ratios,
                     }),
@@ -875,12 +870,7 @@ impl Layout {
                     *available_height,
                     metrics,
                 )?;
-                let ratios = self.group_ratios_from_heights(
-                    *column,
-                    &heights,
-                    *available_height,
-                    metrics,
-                )?;
+                let ratios = self.group_ratios_from_heights(*column, &heights)?;
                 if ratios == current.group_ratios {
                     return Ok(CommandApplication::persistent());
                 }
@@ -889,7 +879,7 @@ impl Layout {
                 }
                 Ok(CommandApplication {
                     actual_value: Some(CommandValue::GroupRatios(ratios)),
-                    inverse: Some(DockCommand::SetGroupRatios {
+                    inverse: Some(DockCommand::RestoreGroupRatios {
                         column: *column,
                         ratios: current.group_ratios,
                     }),
@@ -920,11 +910,11 @@ impl Layout {
                     }),
                 }
             }
-            DockCommand::SetGroupRatios { column, ratios } => {
+            DockCommand::RestoreGroupRatios { column, ratios } => {
                 let current = match self.nodes.get(*column) {
                     Some(Node::Column(value)) => value.group_ratios.clone(),
                     Some(_) => return Err(CommandError::InvalidTarget {
-                        reason: "SetGroupRatios target must be a Column node",
+                        reason: "RestoreGroupRatios target must be a Column node",
                     }),
                     None => return Err(CommandError::MissingNode { node: *column }),
                 };
@@ -949,7 +939,7 @@ impl Layout {
                 }
                 Ok(CommandApplication {
                     actual_value: Some(CommandValue::GroupRatios(ratios.clone())),
-                    inverse: Some(DockCommand::SetGroupRatios {
+                    inverse: Some(DockCommand::RestoreGroupRatios {
                         column: *column,
                         ratios: current,
                     }),
@@ -2159,8 +2149,6 @@ impl Layout {
         &self,
         column_id: NodeId,
         heights: &[f32],
-        available_height: f32,
-        metrics: &DockMetrics,
     ) -> Result<Vec<f32>, CommandError> {
         let column = match self.nodes.get(column_id) {
             Some(Node::Column(column)) => column,
@@ -2188,7 +2176,6 @@ impl Layout {
                 ratios[index] = heights[index] / expanded_height;
             }
         }
-        let _ = (available_height, metrics);
         Ok(normalized_ratios(ratios.into_iter().map(Some).collect()))
     }
 
