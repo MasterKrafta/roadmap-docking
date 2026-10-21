@@ -245,10 +245,11 @@ impl Layout {
                 };
                 let moved = current.children.remove(from_index);
                 current.children.insert(*to_index, moved);
-                if let Some(active_node) = active_node {
-                    if let Some(active_index) = current.children.iter().position(|id| *id == active_node) {
-                        current.active_index = active_index;
-                    }
+                if let Some(active_node) = active_node
+                    && let Some(active_index) =
+                        current.children.iter().position(|id| *id == active_node)
+                {
+                    current.active_index = active_index;
                 }
                 Ok(CommandApplication {
                     actual_value: None,
@@ -330,10 +331,11 @@ impl Layout {
                         let moved = tabs.children.remove(source_index);
                         let insert_index = if index > source_index { index - 1 } else { index };
                         tabs.children.insert(insert_index.min(tabs.children.len()), moved);
-                        if let Some(active_node) = active_node {
-                            if let Some(active_index) = tabs.children.iter().position(|id| *id == active_node) {
-                                tabs.active_index = active_index;
-                            }
+                        if let Some(active_node) = active_node
+                            && let Some(active_index) =
+                                tabs.children.iter().position(|id| *id == active_node)
+                        {
+                            tabs.active_index = active_index;
                         }
                         return Ok(CommandApplication {
                             actual_value: None,
@@ -358,10 +360,10 @@ impl Layout {
                 });
                 if let DropTarget::RailSlot { column, index } = *target {
                     let order = self.column_display_order(column)?;
-                    if let Some(source_index) = order.iter().position(|item| item.panel == *panel) {
-                        if index == source_index || index == source_index + 1 {
-                            return Ok(CommandApplication::persistent());
-                        }
+                    if let Some(source_index) = order.iter().position(|item| item.panel == *panel)
+                        && (index == source_index || index == source_index + 1)
+                    {
+                        return Ok(CommandApplication::persistent());
                     }
                     self.remember_panel_dock_location(panel_node);
                     let moved = self.insert_panel_for_rail_slot(panel_node, column, index, metrics)?;
@@ -383,19 +385,18 @@ impl Layout {
                 // reveal action: the target becomes expanded after a successful
                 // insertion. Same-group reorder/no-op paths returned above, so
                 // a self-drop cannot implicitly change collapse state.
-                if self.profile == crate::Profile::Photoshop {
-                    if let DropTarget::Tabs { group: target_group, .. } = *target {
-                        if let Some(Node::Tabs(tabs)) = self.nodes.get_mut(target_group) {
-                            tabs.collapsed = false;
-                        }
-                    }
+                if self.profile == crate::Profile::Photoshop
+                    && let DropTarget::Tabs { group: target_group, .. } = *target
+                    && let Some(Node::Tabs(tabs)) = self.nodes.get_mut(target_group)
+                {
+                    tabs.collapsed = false;
                 }
 
                 self.remember_panel_dock_location(panel_node);
                 Ok(CommandApplication { actual_value: None, inverse, persistent: true })
             }
             DockCommand::MoveGroup { group, column, index } => {
-                let _ = match self.nodes.get(*group) {
+                match self.nodes.get(*group) {
                     Some(Node::Tabs(_)) => {}
                     Some(_) => return Err(CommandError::InvalidTarget { reason: "MoveGroup source must be a Tabs node" }),
                     None => return Err(CommandError::MissingNode { node: *group }),
@@ -495,9 +496,10 @@ impl Layout {
                 // If this group already owns a single-group main column on the
                 // destination side, move/reorder that column itself. An insertion
                 // slot immediately before or after it represents its current place.
-                if source_is_sole_group {
-                    if let Some((source_side, source_index)) = source_position {
-                        if source_side == *side {
+                if source_is_sole_group
+                    && let Some((source_side, source_index)) = source_position
+                    && source_side == *side
+                {
                             if *index == source_index || *index == source_index + 1 {
                                 return Ok(CommandApplication::persistent());
                             }
@@ -558,8 +560,6 @@ impl Layout {
                                 }),
                                 persistent: true,
                             });
-                        }
-                    }
                 }
 
                 let inverse = match (source_column, source_group_index, source_position) {
@@ -610,10 +610,10 @@ impl Layout {
                     // target also reveals that target in the Photoshop profile.
                     // This is inside the transaction candidate, so an invalid
                     // merge still leaves the live Layout unchanged.
-                    if self.profile == crate::Profile::Photoshop {
-                        if let Some(Node::Tabs(tabs)) = self.nodes.get_mut(*target_group) {
-                            tabs.collapsed = false;
-                        }
+                    if self.profile == crate::Profile::Photoshop
+                        && let Some(Node::Tabs(tabs)) = self.nodes.get_mut(*target_group)
+                    {
+                        tabs.collapsed = false;
                     }
                 }
                 self.merge_group_into_tabs(*group, *target_group, *index)?;
