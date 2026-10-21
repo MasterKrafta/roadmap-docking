@@ -645,13 +645,18 @@ impl Layout {
                     }),
                     None => return Err(CommandError::MissingNode { node: *column }),
                 };
-                if *boundary_index + 1 >= current.groups.len() {
+                if *boundary_index >= current.groups.len().saturating_sub(1) {
                     return Err(CommandError::InvalidTarget {
                         reason: "group boundary index does not identify adjacent groups",
                     });
                 }
                 let left_group = current.groups[*boundary_index];
                 let right_group = current.groups[*boundary_index + 1];
+                let mut heights = self.group_heights_for_available_height(
+                    *column,
+                    *available_height,
+                    metrics,
+                )?;
                 if self.group_is_collapsed(left_group) || self.group_is_collapsed(right_group) {
                     return Ok(CommandApplication {
                         actual_value: Some(CommandValue::GroupBoundaryDelta(0.0)),
@@ -661,11 +666,6 @@ impl Layout {
                 }
 
                 let minimums = self.group_minimum_heights(*column, metrics)?;
-                let mut heights = self.group_heights_for_available_height(
-                    *column,
-                    *available_height,
-                    metrics,
-                )?;
                 let lower_delta = minimums[*boundary_index] - heights[*boundary_index];
                 let upper_delta = heights[*boundary_index + 1] - minimums[*boundary_index + 1];
                 if lower_delta > upper_delta {
@@ -693,7 +693,7 @@ impl Layout {
                 )?;
                 if new_ratios == current.group_ratios {
                     return Ok(CommandApplication {
-                        actual_value: Some(CommandValue::GroupBoundaryDelta(actual_delta)),
+                        actual_value: Some(CommandValue::GroupBoundaryDelta(0.0)),
                         inverse: None,
                         persistent: true,
                     });
@@ -860,6 +860,13 @@ impl Layout {
                     }),
                     None => return Err(CommandError::MissingNode { node: *column }),
                 };
+                // Validate the supplied height against fixed collapsed strips
+                // and expanded minimums even when the reset itself becomes a no-op.
+                let _current_heights = self.group_heights_for_available_height(
+                    *column,
+                    *available_height,
+                    metrics,
+                )?;
                 if current.groups.iter().all(|group| self.group_is_collapsed(*group)) {
                     return Ok(CommandApplication::persistent());
                 }
@@ -2086,10 +2093,19 @@ impl Layout {
             }
         }
         let free_height = available_height - fixed_height;
-        if !free_height.is_finite() || free_height <= 0.0 {
+        if !free_height.is_finite() || free_height < 0.0 {
             return Err(CommandError::InvalidValue {
                 field: "available_height",
-                reason: "available height cannot fit collapsed groups and expanded content",
+                reason: "available height cannot fit the fixed collapsed groups",
+            });
+        }
+        if expanded_indices.is_empty() {
+            return Ok(heights);
+        }
+        if free_height <= 0.0 {
+            return Err(CommandError::InvalidValue {
+                field: "available_height",
+                reason: "available height leaves no space for expanded groups",
             });
         }
         let minimums = self.group_minimum_heights(column_id, metrics)?;
