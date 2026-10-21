@@ -77,7 +77,7 @@ pub enum DockCommand {
     /// Restore an exact previously captured group-ratio vector (undo/history).
     ///
     /// Interactive resizing should use ResizeGroups or ResetColumnRatios.
-    SetGroupRatios { column: NodeId, ratios: Vec<f32> },
+    RestoreGroupRatios { column: NodeId, ratios: Vec<f32> },
     /// Detach a Panel or Tabs node into a floating group at these bounds.
     Float { node: NodeId, bounds: Rect },
     /// Move a floating window by setting its new origin.
@@ -150,7 +150,7 @@ mod tests {
                 available_height: 480.0,
             },
             DockCommand::ResetMainColumnRatios { side: DockSide::Right },
-            DockCommand::SetGroupRatios { column: NodeId::null(), ratios: vec![1.0] },
+            DockCommand::RestoreGroupRatios { column: NodeId::null(), ratios: vec![1.0] },
             DockCommand::Float {
                 node: NodeId::null(),
                 bounds: Rect::new(Point::ZERO, Size::new(400.0, 300.0)),
