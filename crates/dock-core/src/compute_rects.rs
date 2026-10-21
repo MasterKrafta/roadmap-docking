@@ -589,9 +589,10 @@ fn push_resize_edges(
 mod tests {
     use super::{ComputeRectsError, PIXEL_TOLERANCE};
     use crate::{
-        Axis, ColumnMode, DockMetrics, DockSide, LayoutBuilder, PanelConstraints, PanelKey,
-        Point, Profile, Rect, Size,
+        Axis, ColumnMode, DockMetrics, DockSide, PanelConstraints, PanelKey, Point, Profile,
+        Rect, Size,
     };
+    use crate::layout_builder::LayoutBuilder;
 
     fn constraints() -> PanelConstraints {
         PanelConstraints::new(
