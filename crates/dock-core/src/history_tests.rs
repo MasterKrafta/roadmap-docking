@@ -450,6 +450,33 @@ fn undo_and_redo_never_revive_stale_panel_ids() {
 }
 
 #[test]
+fn failed_undo_keeps_layout_and_history_entry_unchanged() {
+    let metrics = DockMetrics::default();
+    let mut fixture = fixture();
+    let mut history = UndoRedoHistory::new();
+    history
+        .apply(
+            &mut fixture.layout,
+            DockCommand::ResizeColumn {
+                column: fixture.column,
+                width: 320.0,
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    let current = persistent_shape(&fixture.layout);
+    let mut invalid_metrics = metrics;
+    invalid_metrics.min_canvas_width = f32::NAN;
+    assert!(history.undo(&mut fixture.layout, &invalid_metrics).is_err());
+    assert_eq!(persistent_shape(&fixture.layout), current);
+    assert_eq!(history.undo_len(), 1);
+
+    assert!(history.undo(&mut fixture.layout, &metrics).unwrap());
+    assert!(!history.can_undo());
+}
+
+#[test]
 fn history_limit_is_bounded() {
     let metrics = DockMetrics::default();
     let mut fixture = fixture();
