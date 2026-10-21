@@ -762,7 +762,7 @@ mod tests {
         FloatingGroupId, Node, NodeId, Panel, PanelConstraints, PanelId, PanelInstance, PanelKey,
         Point, Profile, Rect, Size, Split, Tabs, ValidationError,
     };
-    use slotmap::SlotMap;
+    use slotmap::{Key, SlotMap};
 
     fn descriptors() -> Vec<(PanelKey, PanelConstraints)> {
         ["layers", "color", "properties", "history"]
