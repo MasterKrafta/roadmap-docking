@@ -1,5 +1,5 @@
 use super::*;
-use crate::{DragDropAction, DragDropRequest, DragHandle, DragPayload};
+use crate::{AllowedArea, DragDropAction, DragDropRequest, DragHandle, DragPayload};
 
 impl Layout {
     /// Resolves a completed drag request to either one command or an explicit
@@ -54,6 +54,11 @@ impl Layout {
                 let target = request.target.ok_or(CommandError::InvalidTarget {
                     reason: "floating capture drag requires a resolved dock/stack target",
                 })?;
+                if matches!(target, DropTarget::FreeArea) {
+                    return Err(CommandError::InvalidTarget {
+                        reason: "a floating capture drag requires a dock/stack target",
+                    });
+                }
                 self.validate_drop_target(target, metrics)?;
                 let root = self.floating_group(group)
                     .and_then(|floating| self.dock_area(floating.area))
@@ -61,11 +66,6 @@ impl Layout {
                     .ok_or(CommandError::MissingFloatingGroup { group })?;
                 if target_node(target).is_some_and(|node| self.is_descendant_or_same(root, node)) {
                     return Ok(DragDropAction::NoOp);
-                }
-                if matches!(target, DropTarget::FreeArea) {
-                    return Err(CommandError::InvalidTarget {
-                        reason: "a floating capture drag requires a dock/stack target",
-                    });
                 }
                 let moving_panels = self.panel_ids_in_subtree(root);
                 self.validate_panel_ids_allowed_for_target(&moving_panels, target)?;
@@ -81,6 +81,20 @@ impl Layout {
                 let target = request.target.ok_or(CommandError::InvalidTarget {
                     reason: "panel-tab drag requires a resolved drop target",
                 })?;
+                if matches!(target, DropTarget::FreeArea) {
+                    let bounds = request.floating_bounds.ok_or(CommandError::InvalidTarget {
+                        reason: "FreeArea Float requests require explicit window bounds",
+                    })?;
+                    bounds.validate_non_empty().map_err(|_| CommandError::InvalidValue {
+                        field: "bounds",
+                        reason: "floating bounds must be finite and positive",
+                    })?;
+                    self.validate_panel_ids_allowed_for_area(&[panel], AllowedArea::FLOATING)?;
+                    return Ok(DragDropAction::Command(DockCommand::Float {
+                        node: panel_node,
+                        bounds,
+                    }));
+                }
                 self.validate_drop_target(target, metrics)?;
 
                 if let (Some((source_group, source_index)), DropTarget::Tabs { group, index }) =
@@ -138,11 +152,6 @@ impl Layout {
                         reason: "panel-tab drag cannot merge a whole group; use a Tabs insertion target",
                     });
                 }
-                if matches!(target, DropTarget::FreeArea) {
-                    return Err(CommandError::InvalidTarget {
-                        reason: "FreeArea must be converted to Float with explicit bounds",
-                    });
-                }
                 self.validate_panel_ids_allowed_for_target(&[panel], target)?;
                 Ok(DragDropAction::Command(DockCommand::MovePanel { panel, target }))
             }
@@ -159,13 +168,24 @@ impl Layout {
                 let target = request.target.ok_or(CommandError::InvalidTarget {
                     reason: "group-grip drag requires a resolved drop target",
                 })?;
-                self.validate_drop_target(target, metrics)?;
-
                 if matches!(target, DropTarget::FreeArea) {
-                    return Err(CommandError::InvalidTarget {
-                        reason: "FreeArea must be converted to Float with explicit bounds",
-                    });
+                    let bounds = request.floating_bounds.ok_or(CommandError::InvalidTarget {
+                        reason: "FreeArea Float requests require explicit window bounds",
+                    })?;
+                    bounds.validate_non_empty().map_err(|_| CommandError::InvalidValue {
+                        field: "bounds",
+                        reason: "floating bounds must be finite and positive",
+                    })?;
+                    self.validate_panel_ids_allowed_for_area(
+                        &self.panel_ids_in_subtree(group),
+                        AllowedArea::FLOATING,
+                    )?;
+                    return Ok(DragDropAction::Command(DockCommand::Float {
+                        node: group,
+                        bounds,
+                    }));
                 }
+                self.validate_drop_target(target, metrics)?;
                 self.validate_panel_ids_allowed_for_target(&self.panel_ids_in_subtree(group), target)?;
 
                 match target {
