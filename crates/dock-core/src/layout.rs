@@ -652,7 +652,7 @@ impl Layout {
                 }
                 let left_group = current.groups[*boundary_index];
                 let right_group = current.groups[*boundary_index + 1];
-                let mut heights = self.group_heights_for_available_height(
+                let heights = self.group_heights_for_available_height(
                     *column,
                     *available_height,
                     metrics,
@@ -666,16 +666,18 @@ impl Layout {
                 }
 
                 let minimums = self.group_minimum_heights(*column, metrics)?;
-                let lower_delta = minimums[*boundary_index] - heights[*boundary_index];
-                let upper_delta = heights[*boundary_index + 1] - minimums[*boundary_index + 1];
+                let left_index = *boundary_index;
+                let right_index = left_index + 1;
+                let lower_delta = minimums[left_index] - heights[left_index];
+                let upper_delta = heights[right_index] - minimums[right_index];
                 if lower_delta > upper_delta {
                     return Err(CommandError::InvalidValue {
                         field: "available_height",
                         reason: "available height cannot satisfy adjacent group minimums",
                     });
                 }
-                let actual_delta = (*delta).clamp(lower_delta, upper_delta);
-                if actual_delta == 0.0 {
+                let requested_delta = (*delta).clamp(lower_delta, upper_delta);
+                if requested_delta == 0.0 {
                     return Ok(CommandApplication {
                         actual_value: Some(CommandValue::GroupBoundaryDelta(0.0)),
                         inverse: None,
@@ -683,10 +685,48 @@ impl Layout {
                     });
                 }
 
-                heights[*boundary_index] += actual_delta;
-                heights[*boundary_index + 1] -= actual_delta;
-                let new_ratios = self.group_ratios_from_heights(*column, &heights)?;
-                if new_ratios == current.group_ratios {
+                // Preserve every ratio outside the chosen pair. A monotonic
+                // search finds the pair's new split weight even when another
+                // group is pinned at its minimum by the current available height.
+                let pair_weight = current.group_ratios[left_index] + current.group_ratios[right_index];
+                if pair_weight <= f32::EPSILON {
+                    return Ok(CommandApplication {
+                        actual_value: Some(CommandValue::GroupBoundaryDelta(0.0)),
+                        inverse: None,
+                        persistent: true,
+                    });
+                }
+                let target_left_height = heights[left_index] + requested_delta;
+                let mut low_weight = 0.0_f32;
+                let mut high_weight = pair_weight;
+                let mut new_ratios = current.group_ratios.clone();
+                for _ in 0..48 {
+                    let left_weight = low_weight + (high_weight - low_weight) * 0.5;
+                    new_ratios[left_index] = left_weight;
+                    new_ratios[right_index] = pair_weight - left_weight;
+                    let trial_heights = self.group_heights_for_ratios(
+                        *column,
+                        &new_ratios,
+                        *available_height,
+                        metrics,
+                    )?;
+                    if trial_heights[left_index] < target_left_height {
+                        low_weight = left_weight;
+                    } else {
+                        high_weight = left_weight;
+                    }
+                }
+                let left_weight = low_weight + (high_weight - low_weight) * 0.5;
+                new_ratios[left_index] = left_weight;
+                new_ratios[right_index] = pair_weight - left_weight;
+                let final_heights = self.group_heights_for_ratios(
+                    *column,
+                    &new_ratios,
+                    *available_height,
+                    metrics,
+                )?;
+                let actual_delta = final_heights[left_index] - heights[left_index];
+                if actual_delta == 0.0 || new_ratios == current.group_ratios {
                     return Ok(CommandApplication {
                         actual_value: Some(CommandValue::GroupBoundaryDelta(0.0)),
                         inverse: None,
@@ -2062,6 +2102,23 @@ impl Layout {
         available_height: f32,
         metrics: &DockMetrics,
     ) -> Result<Vec<f32>, CommandError> {
+        let ratios = match self.nodes.get(column_id) {
+            Some(Node::Column(column)) => column.group_ratios.clone(),
+            Some(_) => return Err(CommandError::InvalidTarget {
+                reason: "group height calculation requires a Column node",
+            }),
+            None => return Err(CommandError::MissingNode { node: column_id }),
+        };
+        self.group_heights_for_ratios(column_id, &ratios, available_height, metrics)
+    }
+
+    fn group_heights_for_ratios(
+        &self,
+        column_id: NodeId,
+        ratios: &[f32],
+        available_height: f32,
+        metrics: &DockMetrics,
+    ) -> Result<Vec<f32>, CommandError> {
         let column = match self.nodes.get(column_id) {
             Some(Node::Column(column)) => column,
             Some(_) => return Err(CommandError::InvalidTarget {
@@ -2069,6 +2126,12 @@ impl Layout {
             }),
             None => return Err(CommandError::MissingNode { node: column_id }),
         };
+        if ratios.len() != column.groups.len() {
+            return Err(CommandError::InvalidValue {
+                field: "ratios",
+                reason: "ratio count must match group count",
+            });
+        }
         let mut heights = vec![0.0; column.groups.len()];
         let mut expanded_indices = Vec::new();
         let mut weights = Vec::new();
@@ -2079,7 +2142,7 @@ impl Layout {
                 fixed_height += metrics.collapsed_group_height;
             } else {
                 expanded_indices.push(index);
-                weights.push(column.group_ratios[index]);
+                weights.push(ratios[index]);
             }
         }
         let free_height = available_height - fixed_height;
@@ -4603,7 +4666,7 @@ mod tests {
         };
         let (_, panel_a) = builder.panel(PanelKey::new("c45-group-a").unwrap(), constraints(120.0, 500.0));
         let (_, panel_b) = builder.panel(PanelKey::new("c45-group-b").unwrap(), constraints(100.0, 500.0));
-        let (_, panel_c) = builder.panel(PanelKey::new("c45-group-c").unwrap(), constraints(80.0, 500.0));
+        let (_, panel_c) = builder.panel(PanelKey::new("c45-group-c").unwrap(), constraints(250.0, 500.0));
         let group_a = builder.tabs(vec![panel_a], 0, false);
         let group_b = builder.tabs(vec![panel_b], 0, false);
         let group_c = builder.tabs(vec![panel_c], 0, false);
@@ -4631,12 +4694,15 @@ mod tests {
             &metrics,
         ).unwrap();
 
-        assert_eq!(outcome.actual_value, Some(CommandValue::GroupBoundaryDelta(80.0)));
+        assert!(matches!(
+            outcome.actual_value,
+            Some(CommandValue::GroupBoundaryDelta(delta)) if (delta - 50.0).abs() < 1.0e-3
+        ));
         let Node::Column(value) = layout.node(column).unwrap() else {
             panic!("target should remain a Column");
         };
-        assert!((value.group_ratios[0] - (320.0 / 600.0)).abs() < 1.0e-4);
-        assert!((value.group_ratios[1] - (100.0 / 600.0)).abs() < 1.0e-4);
+        assert!((value.group_ratios[0] - 0.5).abs() < 1.0e-4);
+        assert!((value.group_ratios[1] - 0.2).abs() < 1.0e-4);
         assert_eq!(value.group_ratios[2], before_ratios[2]);
         assert_eq!(layout.validate(&metrics), Ok(()));
 
