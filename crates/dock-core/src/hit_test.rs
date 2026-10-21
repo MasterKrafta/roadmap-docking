@@ -486,10 +486,10 @@ mod tests {
     }
 
     #[test]
-    fn collapsed_tab_strip_is_hit_without_inventing_a_group_header() {
+    fn collapsed_tab_header_is_hit_without_inventing_a_group_header() {
         let metrics = DockMetrics::default();
         let mut builder = LayoutBuilder::new(Profile::Photoshop);
-        let (_, panel_node) = builder.panel(key("collapsed-hit"), constraints());
+        let (panel_id, panel_node) = builder.panel(key("collapsed-hit"), constraints());
         let group = builder.tabs(vec![panel_node], 0, true);
         let column = builder.column(280.0, ColumnMode::Expanded, vec![group], vec![1.0]);
         builder.main_area(DockSide::Left, column);
@@ -498,7 +498,7 @@ mod tests {
 
         assert_eq!(
             layout.hit_test(Point::new(100.0, 10.0), &rects, &metrics).unwrap(),
-            HitResult::TabStrip { group }
+            HitResult::TabHeader { group, panel: panel_id, index: 0 }
         );
     }
 }
