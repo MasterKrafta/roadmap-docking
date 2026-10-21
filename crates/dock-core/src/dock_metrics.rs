@@ -139,6 +139,30 @@ mod tests {
         assert_eq!(DockMetrics::default().rail_width, 36.0);
     }
 
+    #[cfg(feature = "serde")]
+    #[test]
+    fn legacy_metrics_deserialize_with_default_tab_overflow_values() {
+        let legacy = r#"{
+            "default_column_width": 280.0,
+            "min_column_width": 200.0,
+            "rail_width": 36.0,
+            "splitter_thickness": 4.0,
+            "splitter_hit_zone": 8.0,
+            "edge_drop_width": 24.0,
+            "drag_threshold": 4.0,
+            "min_group_height": 80.0,
+            "collapsed_group_height": 28.0,
+            "header_height": 28.0,
+            "tab_strip_height": 28.0,
+            "min_canvas_width": 320.0,
+            "max_columns": 4
+        }"#;
+        let metrics: DockMetrics = serde_json::from_str(legacy).unwrap();
+        assert_eq!(metrics.min_tab_width, 72.0);
+        assert_eq!(metrics.tab_overflow_button_width, 28.0);
+        assert_eq!(metrics.validate(), Ok(()));
+    }
+
     #[test]
     fn rejects_non_finite_and_non_positive_metrics() {
         let mut metrics = DockMetrics::default();
