@@ -24,6 +24,15 @@ app ──▶ dock-core
 - Canvas остаётся защищённой областью вне dock. Toolbar, меню и Options bar не являются панелями docking.
 - `platform-api` и `platform-windows` пока оставлены без фиктивных интерфейсов — это будет задача R8.1.
 
+## Контракт workspace serialization
+
+- Единственный публичный формат файла рабочего пространства — JSON. Текущий envelope содержит `format: "roadmap-docking-workspace"` и `version: 1`; формат или версия должны проверяться до восстановления.
+- Сериализуется DTO из `WorkspaceFile`, а не внутренний `Layout` и не отдельные arena-backed структуры. Дерево хранится рекурсивно: в файле нет runtime `NodeId`, `PanelId`, `DockAreaId` или `FloatingGroupId`; panel leaf ссылается на стабильный `PanelKey`.
+- Сохраняются профиль, предпочтение видимости chrome, известные bounds Canvas, структура Split/Tabs/Column, отношения групп и их ratios, активный индекс и collapse state вкладок, режим/ширина колонки и последняя expanded width, layout-only размер панели, bounds и z-order floating-групп.
+- `PanelConstraints` принадлежат app-owned registry и при загрузке разрешаются по `PanelKey`; они не копируются в файл. Загрузка создаёт новые SlotMap arenas и проверяет полученный `Layout` текущими метриками.
+- Flyout selection, runtime version, session-only `LastDockLocation`, UI/scroll handles и panel content state в workspace JSON не входят. Содержимое панели и её scroll/selection state — отдельный app-owned канал.
+- Версионированный DTO и строгий JSON loader — основа для следующего этапа миграции/восстановления; политика recovery, старые версии и частичное восстановление относятся к C8.2.
+
 ## Ограничения реализации
 
 - Один собственный `struct`/`enum` на файл. `lib.rs` и `mod.rs` содержат только объявления модулей и re-export.
