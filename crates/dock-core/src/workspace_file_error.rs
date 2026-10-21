@@ -1,4 +1,4 @@
-use crate::{GeometryError, Rect, ValidationError};
+use crate::{GeometryError, ValidationError};
 
 /// Errors returned by the strict version-1 workspace JSON boundary.
 #[derive(Debug, thiserror::Error)]
