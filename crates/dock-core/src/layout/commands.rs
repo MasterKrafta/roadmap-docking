@@ -306,6 +306,19 @@ impl Layout {
                 self.remember_panel_dock_location(panel_node);
                 self.detach_node(panel_node)?;
                 self.insert_node_for_target(panel_node, *target, metrics, Some(0.5))?;
+
+                // In the Photoshop profile a center/tab drop is an explicit
+                // reveal action: the target becomes expanded after a successful
+                // insertion. Same-group reorder/no-op paths returned above, so
+                // a self-drop cannot implicitly change collapse state.
+                if self.profile == crate::Profile::Photoshop {
+                    if let DropTarget::Tabs { group: target_group, .. } = *target {
+                        if let Some(Node::Tabs(tabs)) = self.nodes.get_mut(target_group) {
+                            tabs.collapsed = false;
+                        }
+                    }
+                }
+
                 self.remember_panel_dock_location(panel_node);
                 Ok(CommandApplication { actual_value: None, inverse, persistent: true })
             }
@@ -519,6 +532,16 @@ impl Layout {
                     self.validate_drop_target(target, metrics)?;
                     let moving_panels = self.panel_ids_in_subtree(*group);
                     self.validate_panel_ids_allowed_for_target(&moving_panels, target)?;
+
+                    // Dropping a whole group into the center of a collapsed
+                    // target also reveals that target in the Photoshop profile.
+                    // This is inside the transaction candidate, so an invalid
+                    // merge still leaves the live Layout unchanged.
+                    if self.profile == crate::Profile::Photoshop {
+                        if let Some(Node::Tabs(tabs)) = self.nodes.get_mut(*target_group) {
+                            tabs.collapsed = false;
+                        }
+                    }
                 }
                 self.merge_group_into_tabs(*group, *target_group, *index)?;
                 if group == target_group {
