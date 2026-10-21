@@ -55,12 +55,11 @@ impl Layout {
                 return Ok(HitResult::FloatingTitle { group: floating.group });
             }
 
-            if let Some((nodes, panels)) = floating_subtree(self, floating.group)? {
-                if let Some(hit) = hit_layout_geometry(
-                    self, point, rects, metrics, &nodes, &panels, true,
-                )? {
-                    return Ok(hit);
-                }
+            if let Some((nodes, panels)) = floating_subtree(self, floating.group)?
+                && let Some(hit) =
+                    hit_layout_geometry(self, point, rects, metrics, &nodes, &panels, true)?
+            {
+                return Ok(hit);
             }
 
             // A floating window is opaque for hit dispatch purposes: even blank
