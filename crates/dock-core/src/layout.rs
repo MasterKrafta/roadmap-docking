@@ -31,6 +31,7 @@ pub struct Layout {
     version: u64,
     chrome: ChromeMode,
     flyout: Option<FlyoutState>,
+    flyout_auto_collapse: bool,
 }
 
 impl Layout {
@@ -48,6 +49,7 @@ impl Layout {
             version: 0,
             chrome: ChromeMode::Visible,
             flyout: None,
+            flyout_auto_collapse: true,
         }
     }
 
@@ -69,6 +71,11 @@ impl Layout {
 
     pub const fn flyout(&self) -> Option<FlyoutState> {
         self.flyout
+    }
+
+    /// Whether passive dismissal and clicking the selected rail icon close a flyout.
+    pub const fn flyout_auto_collapse_enabled(&self) -> bool {
+        self.flyout_auto_collapse
     }
 
     pub fn node(&self, id: NodeId) -> Option<&Node> {
