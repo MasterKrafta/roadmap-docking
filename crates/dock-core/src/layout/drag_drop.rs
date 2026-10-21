@@ -86,15 +86,47 @@ impl Layout {
                     if source_group == group && (index == source_index || index == source_index + 1) {
                         return Ok(DragDropAction::NoOp);
                     }
-                    if source_group == group && index < 2 && index == source_index {
-                        return Ok(DragDropAction::NoOp);
+                }
+                if let Some((source_group, _)) = self.tab_parent_index(panel_node) {
+                    let source_group_has_only_panel = matches!(
+                        self.node(source_group),
+                        Some(Node::Tabs(tabs)) if tabs.children.len() == 1
+                    );
+                    if source_group_has_only_panel {
+                        if let Some(source_column) = self.find_owner_column(source_group) {
+                            let source_column_has_only_group = matches!(
+                                self.node(source_column),
+                                Some(Node::Column(column)) if column.groups.len() == 1 && column.groups[0] == source_group
+                            );
+                            if source_column_has_only_group {
+                                if let Some((source_side, source_index)) = self.main_column_position(source_column) {
+                                    match target {
+                                        DropTarget::MainColumn { side, index }
+                                            if side == source_side && (index == source_index || index == source_index + 1) =>
+                                        {
+                                            return Ok(DragDropAction::NoOp);
+                                        }
+                                        DropTarget::ColumnSlot { column, index }
+                                        | DropTarget::RailSlot { column, index }
+                                            if column == source_column
+                                                && self.node(column).is_some_and(|node| matches!(
+                                                    node,
+                                                    Node::Column(value) if value.groups.len() == 1
+                                                        && (index == 0 || index == 1)
+                                                )) =>
+                                        {
+                                            return Ok(DragDropAction::NoOp);
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
-                if matches!(target, DropTarget::GroupEdge { group, .. }
-                    if self.tab_parent_index(panel_node).is_some_and(|(source, _)| source == group))
-                {
-                    return Ok(DragDropAction::NoOp);
-                }
+                // Moving a tab to its own group's edge can be a valid split:
+                // the panel leaves its Tabs node and becomes a new adjacent group.
+                // Only an insertion at the current tab slot is a no-op.
 
                 // A panel tab remains a panel payload; GroupTabs is reserved for
                 // a group-grip gesture and may never absorb only one dragged tab.
