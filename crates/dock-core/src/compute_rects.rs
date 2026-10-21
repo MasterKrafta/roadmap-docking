@@ -1093,10 +1093,10 @@ mod tests {
     }
 
     #[test]
-    fn icon_rail_uses_rail_width_and_emits_group_targets_only() {
+    fn icon_rail_uses_rail_width_and_emits_flattened_panel_targets() {
         let metrics = DockMetrics::default();
         let mut builder = LayoutBuilder::new(Profile::Photoshop);
-        let (_, panel_node) = builder.panel(key("icon-rail-panel"), constraints());
+        let (panel, panel_node) = builder.panel(key("icon-rail-panel"), constraints());
         let group = builder.tabs(vec![panel_node], 0, false);
         let column = builder.column(metrics.rail_width, ColumnMode::IconsOnly, vec![group], vec![1.0]);
         builder.main_area(DockSide::Left, column);
@@ -1107,7 +1107,10 @@ mod tests {
         assert_eq!(rects.columns[0].rect.size.width, metrics.rail_width);
         assert_eq!(rects.groups[0].rect.size.height, metrics.collapsed_group_height);
         assert!(rects.tab_strips.is_empty());
-        assert!(rects.tab_headers.is_empty());
+        assert_eq!(rects.tab_headers.len(), 1);
+        assert_eq!(rects.tab_headers[0].panel, panel);
+        assert_eq!(rects.tab_headers[0].index, 0);
+        assert_eq!(rects.tab_headers[0].rect.size.height, metrics.collapsed_group_height);
         assert!(rects.panels.is_empty());
         assert!(matches!(
             layout.node(column),
