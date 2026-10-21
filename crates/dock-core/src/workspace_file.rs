@@ -328,10 +328,43 @@ impl Layout {
 }
 
 fn migrate_v1_to_v2(mut file: WorkspaceFile) -> WorkspaceFile {
-    // The first versioned schema used this same layout DTO. Version 2 keeps the
-    // structural shape while making migration explicit and diagnosable.
+    // V1 could omit last_expanded_width. For an Expanded column, current width
+    // is an unambiguous fallback; a rail width cannot reveal the former width.
+    for root in [&mut file.layout.left, &mut file.layout.right] {
+        if let Some(root) = root {
+            migrate_v1_node(root);
+        }
+    }
+    for floating in &mut file.layout.floating_groups {
+        migrate_v1_node(&mut floating.root);
+    }
     file.version = WORKSPACE_VERSION;
     file
+}
+
+fn migrate_v1_node(node: &mut WorkspaceNode) {
+    match node {
+        WorkspaceNode::Split { children, .. } | WorkspaceNode::Tabs { children, .. } => {
+            for child in children {
+                migrate_v1_node(child);
+            }
+        }
+        WorkspaceNode::Column {
+            width,
+            mode,
+            groups,
+            last_expanded_width,
+            ..
+        } => {
+            if *mode == crate::ColumnMode::Expanded && last_expanded_width.is_none() {
+                *last_expanded_width = Some(*width);
+            }
+            for group in groups {
+                migrate_v1_node(group);
+            }
+        }
+        WorkspaceNode::Panel { .. } => {}
+    }
 }
 
 fn clamp_floating_bounds(
