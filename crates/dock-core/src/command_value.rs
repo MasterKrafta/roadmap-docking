@@ -12,7 +12,9 @@ pub enum CommandValue {
     ColumnWidth(f32),
     /// Effective signed movement of a main-column boundary, in logical pixels.
     ColumnBoundaryDelta(f32),
-    /// Ratios of groups after a constrained resize.
+    /// Effective signed movement of a boundary between adjacent groups.
+    GroupBoundaryDelta(f32),
+    /// Ratios of groups after a constrained resize or reset.
     GroupRatios(Vec<f32>),
     /// Effective floating-window size after constraints.
     FloatingSize(Size),
@@ -32,6 +34,10 @@ mod tests {
         assert_ne!(
             CommandValue::ColumnWidth(280.0),
             CommandValue::ColumnBoundaryDelta(280.0)
+        );
+        assert_eq!(
+            CommandValue::GroupBoundaryDelta(12.0),
+            CommandValue::GroupBoundaryDelta(12.0)
         );
         assert_eq!(
             CommandValue::FloatingSize(Size::new(400.0, 300.0)),
