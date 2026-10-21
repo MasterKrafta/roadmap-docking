@@ -53,6 +53,33 @@ impl Layout {
         }
     }
 
+    #[cfg(feature = "serde")]
+    pub(crate) fn from_workspace_parts(
+        nodes: SlotMap<NodeId, Node>,
+        panel_instances: SlotMap<PanelId, PanelInstance>,
+        dock_areas: SlotMap<DockAreaId, DockArea>,
+        main_areas: [Option<DockAreaId>; 2],
+        floating_groups: SlotMap<FloatingGroupId, FloatingGroup>,
+        canvas: CanvasState,
+        profile: Profile,
+        chrome: ChromeMode,
+    ) -> Self {
+        Self {
+            nodes,
+            panel_instances,
+            dock_areas,
+            main_areas,
+            floating_groups,
+            last_dock_locations: HashMap::new(),
+            canvas,
+            profile,
+            version: 0,
+            chrome,
+            flyout: None,
+            flyout_auto_collapse: true,
+        }
+    }
+
     pub const fn profile(&self) -> Profile {
         self.profile
     }
