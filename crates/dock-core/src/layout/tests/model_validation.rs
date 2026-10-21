@@ -39,13 +39,13 @@ fn clone_preserves_runtime_handles_and_read_only_views() {
         CanvasState::default(),
         Profile::Generic,
         7,
-        ChromeMode::Hidden,
+        ChromeMode::AllHidden,
     );
     let cloned = layout.clone();
 
     assert_eq!(cloned.main_area(DockSide::Left).unwrap().root, root);
     assert_eq!(cloned.version(), 7);
-    assert_eq!(cloned.chrome(), ChromeMode::Hidden);
+    assert_eq!(cloned.chrome(), ChromeMode::AllHidden);
 }
 
 #[test]
