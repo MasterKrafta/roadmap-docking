@@ -1,4 +1,4 @@
-use crate::{DragHandle, DragPayload, DropTarget, Point};
+use crate::{DragHandle, DragPayload, DropTarget, Point, Rect};
 
 /// The single semantic drop intent emitted by a successful drag release.
 ///
@@ -17,4 +17,7 @@ pub struct DragDropRequest {
     pub point: Point,
     /// Absent for FloatingTitle: releasing a title drag moves the window and needs no dock target.
     pub target: Option<DropTarget>,
+    /// Optional bounds supplied by the adapter for a FreeArea/Float request.
+    /// DragSession leaves this empty because it does not own render geometry.
+    pub floating_bounds: Option<Rect>,
 }
