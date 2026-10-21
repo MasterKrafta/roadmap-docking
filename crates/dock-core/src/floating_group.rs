@@ -30,11 +30,14 @@ impl FloatingGroup {
 #[cfg(test)]
 mod tests {
     use crate::{DockAreaId, FloatingGroup, GeometryError, Point, Rect, Size};
+    use slotmap::SlotMap;
 
     #[test]
     fn accepts_finite_positive_bounds() {
+        let mut areas = SlotMap::<DockAreaId, ()>::with_key();
+        let area = areas.insert(());
         let group = FloatingGroup::new(
-            DockAreaId::null(),
+            area,
             Rect::new(Point::new(12.0, 18.0), Size::new(640.0, 480.0)),
             3,
         );
@@ -43,15 +46,17 @@ mod tests {
 
     #[test]
     fn rejects_empty_or_non_finite_bounds() {
+        let mut areas = SlotMap::<DockAreaId, ()>::with_key();
+        let area = areas.insert(());
         let empty = FloatingGroup::new(
-            DockAreaId::null(),
+            area,
             Rect::new(Point::ZERO, Size::ZERO),
             0,
         );
         assert_eq!(empty.validate(), Err(GeometryError::NonPositiveDimension));
 
         let invalid = FloatingGroup::new(
-            DockAreaId::null(),
+            area,
             Rect::new(Point::ZERO, Size::new(f32::INFINITY, 100.0)),
             0,
         );
