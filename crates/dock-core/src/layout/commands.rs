@@ -376,6 +376,136 @@ impl Layout {
                 self.remember_subtree_dock_locations(*group);
                 Ok(CommandApplication { actual_value: None, inverse, persistent: true })
             }
+            DockCommand::MoveGroupToMainColumn { group, side, index } => {
+                if !matches!(self.nodes.get(*group), Some(Node::Tabs(_))) {
+                    return Err(if self.nodes.contains_key(*group) {
+                        CommandError::InvalidTarget { reason: "MoveGroupToMainColumn source must be a Tabs node" }
+                    } else {
+                        CommandError::MissingNode { node: *group }
+                    });
+                }
+
+                let target_columns = self.main_columns(*side)?;
+                if *index > target_columns.len() {
+                    return Err(CommandError::InvalidValue {
+                        field: "index",
+                        reason: "main-column insertion index is outside the dock",
+                    });
+                }
+
+                let moving_panels = self.panel_ids_in_subtree(*group);
+                self.validate_panel_ids_allowed_for_area(&moving_panels, AllowedArea::MAIN_DOCK)?;
+
+                let source_column = self.find_owner_column(*group);
+                let source_position = source_column.and_then(|column| self.main_column_position(column));
+                let source_group_index = source_column.and_then(|column| match self.nodes.get(column) {
+                    Some(Node::Column(value)) => value.groups.iter().position(|id| id == group),
+                    _ => None,
+                });
+                let source_is_sole_group = source_column.is_some_and(|column| {
+                    matches!(self.nodes.get(column), Some(Node::Column(value))
+                        if value.groups.len() == 1 && value.groups[0] == *group)
+                });
+
+                // If this group already owns a single-group main column on the
+                // destination side, move/reorder that column itself. An insertion
+                // slot immediately before or after it represents its current place.
+                if source_is_sole_group {
+                    if let Some((source_side, source_index)) = source_position {
+                        if source_side == *side {
+                            if *index == source_index || *index == source_index + 1 {
+                                return Ok(CommandApplication::persistent());
+                            }
+
+                            let area_root = self.main_area(*side).map(|area| area.root).ok_or(
+                                CommandError::InvalidTarget {
+                                    reason: "destination main dock area disappeared",
+                                },
+                            )?;
+                            let Some(Node::Split(mut split)) = self.nodes.get(area_root).cloned() else {
+                                // A single-column dock has only its current slot;
+                                // a valid out-of-range insertion was rejected above.
+                                return Ok(CommandApplication::persistent());
+                            };
+                            if split.axis != Axis::X || !split.children.contains(&source_column.unwrap()) {
+                                return Err(CommandError::InvalidTarget {
+                                    reason: "main dock column order must be represented by Split(X)",
+                                });
+                            }
+                            let Some(ratio_index) = split.children.iter().position(|id| Some(*id) == source_column) else {
+                                return Err(CommandError::InvalidTarget {
+                                    reason: "source column is absent from the main dock split",
+                                });
+                            };
+                            if ratio_index >= split.ratios.len() {
+                                return Err(CommandError::InvalidTarget {
+                                    reason: "main dock column ratio is missing",
+                                });
+                            }
+
+                            let moved_column = split.children.remove(ratio_index);
+                            let moved_ratio = split.ratios.remove(ratio_index);
+                            let adjusted_index = if *index > source_index { *index - 1 } else { *index };
+                            if adjusted_index > split.children.len() {
+                                return Err(CommandError::InvalidValue {
+                                    field: "index",
+                                    reason: "adjusted main-column insertion index is outside the dock",
+                                });
+                            }
+                            split.children.insert(adjusted_index, moved_column);
+                            split.ratios.insert(adjusted_index, moved_ratio);
+                            if let Some(Node::Split(current)) = self.nodes.get_mut(area_root) {
+                                *current = split;
+                            }
+
+                            return Ok(CommandApplication {
+                                actual_value: None,
+                                inverse: Some(DockCommand::MoveGroupToMainColumn {
+                                    group: *group,
+                                    side: *side,
+                                    index: source_index,
+                                }),
+                                persistent: true,
+                            });
+                        }
+                    }
+                }
+
+                let inverse = match (source_column, source_group_index, source_position) {
+                    (Some(column), Some(group_index), _) if matches!(
+                        self.nodes.get(column),
+                        Some(Node::Column(value)) if value.groups.len() > 1
+                    ) => Some(DockCommand::MoveGroup {
+                        group: *group,
+                        column,
+                        index: group_index,
+                    }),
+                    (_, _, Some((source_side, source_index))) => {
+                        Some(DockCommand::MoveGroupToMainColumn {
+                            group: *group,
+                            side: source_side,
+                            index: source_index,
+                        })
+                    }
+                    _ => None,
+                };
+
+                self.remember_subtree_dock_locations(*group);
+                self.detach_node(*group)?;
+                let new_column = self.nodes.insert(Node::Column(crate::Column {
+                    width: metrics.default_column_width,
+                    mode: ColumnMode::Expanded,
+                    groups: vec![*group],
+                    group_ratios: vec![1.0],
+                }));
+                self.insert_existing_column_at(*side, *index, new_column, None)?;
+                self.remember_subtree_dock_locations(*group);
+                Ok(CommandApplication {
+                    actual_value: None,
+                    inverse,
+                    persistent: true,
+                })
+            }
             DockCommand::MergeGroup { group, target_group, index } => {
                 let panel_nodes = self.panel_nodes_in_subtree(*group);
                 if group != target_group {
