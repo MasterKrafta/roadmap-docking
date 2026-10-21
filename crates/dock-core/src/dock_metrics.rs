@@ -5,6 +5,7 @@
 /// re-declaring these constants.
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct DockMetrics {
     pub default_column_width: f32,
     pub min_column_width: f32,
@@ -17,6 +18,10 @@ pub struct DockMetrics {
     pub collapsed_group_height: f32,
     pub header_height: f32,
     pub tab_strip_height: f32,
+    /// Minimum width retained by each visible tab before overflow is used.
+    pub min_tab_width: f32,
+    /// Width reserved for the implementation-specific hidden-tabs menu button.
+    pub tab_overflow_button_width: f32,
     pub min_canvas_width: f32,
     pub max_columns: usize,
 }
@@ -36,6 +41,8 @@ impl DockMetrics {
             ("collapsed_group_height", self.collapsed_group_height),
             ("header_height", self.header_height),
             ("tab_strip_height", self.tab_strip_height),
+            ("min_tab_width", self.min_tab_width),
+            ("tab_overflow_button_width", self.tab_overflow_button_width),
             ("min_canvas_width", self.min_canvas_width),
         ];
 
@@ -53,6 +60,8 @@ impl DockMetrics {
                     "collapsed_group_height" => "collapsed_group_height must be finite",
                     "header_height" => "header_height must be finite",
                     "tab_strip_height" => "tab_strip_height must be finite",
+                    "min_tab_width" => "min_tab_width must be finite",
+                    "tab_overflow_button_width" => "tab_overflow_button_width must be finite",
                     _ => "min_canvas_width must be finite",
                 });
             }
@@ -69,6 +78,8 @@ impl DockMetrics {
                     "collapsed_group_height" => "collapsed_group_height must be positive",
                     "header_height" => "header_height must be positive",
                     "tab_strip_height" => "tab_strip_height must be positive",
+                    "min_tab_width" => "min_tab_width must be positive",
+                    "tab_overflow_button_width" => "tab_overflow_button_width must be positive",
                     _ => "min_canvas_width must be positive",
                 });
             }
@@ -110,6 +121,8 @@ impl Default for DockMetrics {
             // 28 px is a provisional placeholder for each.
             header_height: 28.0,
             tab_strip_height: 28.0,
+            min_tab_width: 72.0,
+            tab_overflow_button_width: 28.0,
             min_canvas_width: 320.0,
             max_columns: 4,
         }
