@@ -101,21 +101,22 @@ impl Layout {
             let Some(root) = self.dock_areas.get(group.area).map(|area| area.root) else {
                 return Err((index, crate::ComputeRectsError::InvalidLayout));
             };
+            let original = group.bounds;
             let clamped = crate::compute_rects::clamp_floating_bounds(
                 self,
                 root,
-                group.bounds,
+                original,
                 client_area,
                 metrics,
             )
             .map_err(|error| (index, error))?;
 
-            if clamped != group.bounds {
+            if clamped != original {
                 let Some(group) = self.floating_groups.get_mut(id) else {
                     return Err((index, crate::ComputeRectsError::InvalidLayout));
                 };
                 group.bounds = clamped;
-                changes.push((index, group.bounds, clamped));
+                changes.push((index, original, clamped));
             }
         }
         Ok(changes)
