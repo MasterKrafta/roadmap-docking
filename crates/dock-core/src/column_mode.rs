@@ -4,12 +4,13 @@
 pub enum ColumnMode {
     /// Full-width column with expanded group headers and contents.
     Expanded,
-    /// Compact rail showing each panel icon and its label.
+    /// Compact rail showing each panel icon and its label. The fixed width is
+    /// `DockMetrics::min_column_width`.
     ///
     /// Groups and tabs are flattened for presentation only; the model tree is
     /// kept intact so expanding the column restores the same tab stacks.
     IconsAndLabels,
-    /// Narrow icon-only rail.
+    /// Narrow icon-only rail with width `DockMetrics::rail_width`.
     ///
     /// Groups and tabs are flattened for presentation only; the model tree is
     /// kept intact so expanding the column restores the same tab stacks.
