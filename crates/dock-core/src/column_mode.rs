@@ -37,7 +37,6 @@ mod tests {
         assert!(ColumnMode::IconsOnly.is_rail());
     }
 
-
     #[cfg(feature = "serde")]
     #[test]
     fn all_column_modes_round_trip_through_serde() {
