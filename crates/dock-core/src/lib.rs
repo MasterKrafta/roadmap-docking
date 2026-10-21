@@ -31,6 +31,7 @@ pub mod flyout_state;
 pub mod geometry_error;
 pub mod group_rect;
 pub mod hit_result;
+pub mod hit_test;
 pub mod last_dock_location;
 pub mod layout;
 pub mod layout_factory;
