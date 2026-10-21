@@ -931,13 +931,13 @@ impl Layout {
                 // main-dock column consumes or returns that remainder. Preserve
                 // the mandatory min_canvas_width rather than letting the UI
                 // render a canvas narrower than Core's own invariant.
-                if let Some((_, _)) = self.main_column_position(*column) {
-                    if let Some(bounds) = self.canvas.last_known_bounds {
-                        let room = (bounds.size.width - metrics.min_canvas_width).max(0.0);
-                        let canvas_cap = old_width + room;
-                        if canvas_cap.is_finite() {
-                            max_width = max_width.min(canvas_cap);
-                        }
+                if self.main_column_position(*column).is_some()
+                    && let Some(bounds) = self.canvas.last_known_bounds
+                {
+                    let room = (bounds.size.width - metrics.min_canvas_width).max(0.0);
+                    let canvas_cap = old_width + room;
+                    if canvas_cap.is_finite() {
+                        max_width = max_width.min(canvas_cap);
                     }
                 }
                 if max_width < min_width {
@@ -1138,7 +1138,7 @@ impl Layout {
                     });
                 }
                 if let Some(reason) = ratio_issues(ratios, count).first() {
-                    return Err(CommandError::InvalidValue { field: "ratios", reason: *reason });
+                    return Err(CommandError::InvalidValue { field: "ratios", reason });
                 }
                 if current == *ratios {
                     return Ok(CommandApplication::persistent());
@@ -1646,16 +1646,16 @@ impl Layout {
             return Ok(AllowedArea::FLOATING);
         }
 
-        if let Some(column_id) = self.find_owner_column(group) {
-            if self.main_column_position(column_id).is_some() {
-                return match self.nodes.get(column_id) {
-                    Some(Node::Column(column)) if column.mode.is_rail() => {
-                        Ok(AllowedArea::ICON_RAIL)
-                    }
-                    Some(Node::Column(_)) => Ok(AllowedArea::MAIN_DOCK),
-                    _ => Err(CommandError::InvalidTarget { reason: "drop group owner is not a Column" }),
-                };
-            }
+        if let Some(column_id) = self.find_owner_column(group)
+            && self.main_column_position(column_id).is_some()
+        {
+            return match self.nodes.get(column_id) {
+                Some(Node::Column(column)) if column.mode.is_rail() => {
+                    Ok(AllowedArea::ICON_RAIL)
+                }
+                Some(Node::Column(_)) => Ok(AllowedArea::MAIN_DOCK),
+                _ => Err(CommandError::InvalidTarget { reason: "drop group owner is not a Column" }),
+            };
         }
 
         for side in [DockSide::Left, DockSide::Right] {
@@ -1680,7 +1680,7 @@ impl Layout {
     pub(super) fn validate_drop_target(
         &self,
         target: DropTarget,
-        metrics: &DockMetrics,
+        _metrics: &DockMetrics,
     ) -> Result<(), CommandError> {
         match target {
             DropTarget::Tabs { group, index } => match self.nodes.get(group) {
@@ -1806,10 +1806,7 @@ impl Layout {
                 Some(_) => Err(CommandError::InvalidTarget { reason: "rail target must be a Column node" }),
                 None => Err(CommandError::MissingNode { node: column }),
             },
-        }.and_then(|()| {
-            let _ = metrics;
-            Ok(())
-        })
+        }
     }
 
     pub(super) fn insert_panel_for_rail_slot(
@@ -2387,12 +2384,11 @@ impl Layout {
                 if split.children.iter().any(|id| !matches!(self.nodes.get(*id), Some(Node::Tabs(_)))) {
                     return Err(CommandError::InvalidTarget { reason: "floating stack contains a non-Tabs group" });
                 }
-                let mut insert_at = self.rail_slot_group_index(column, index)?;
+                let insert_at = self.rail_slot_group_index(column, index)?;
                 self.detach_node(root)?;
                 self.nodes.remove(root);
-                for child in split.children {
+                for (insert_at, child) in (insert_at..).zip(split.children) {
                     self.insert_group_at_column(column, child, insert_at, None)?;
-                    insert_at += 1;
                 }
                 Ok(())
             }
@@ -2405,10 +2401,8 @@ impl Layout {
                 }
                 self.detach_node(root)?;
                 self.nodes.remove(root);
-                let mut insert_at = index;
-                for child in split.children {
+                for (insert_at, child) in (index..).zip(split.children) {
                     self.insert_group_at_column(column, child, insert_at, None)?;
-                    insert_at += 1;
                 }
                 Ok(())
             }
