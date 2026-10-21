@@ -64,6 +64,35 @@ fn tabs(layout: &Layout, id: NodeId) -> &Tabs {
 }
 
 #[test]
+fn floating_title_and_capture_handles_are_explicit_and_payload_checked() {
+    let metrics = DockMetrics::default();
+    let (_, floating_id, _) = floating_layout();
+    let mut session = DragSession::new(&metrics).unwrap();
+
+    assert_eq!(
+        session.pointer_down_with_handle(
+            DragPayload::FloatingGroup { group: floating_id },
+            DragHandle::GroupGrip,
+            Point::ZERO,
+        ),
+        Err(DragSessionError::PayloadHandleMismatch)
+    );
+    assert_eq!(session.state(), crate::DragState::Idle);
+
+    session.pointer_down_with_handle(
+        DragPayload::FloatingGroup { group: floating_id },
+        DragHandle::FloatingCapture,
+        Point::ZERO,
+    ).unwrap();
+    session.pointer_move(Point::new(4.0, 0.0)).unwrap();
+    assert_eq!(
+        session.set_drop_target(None),
+        Ok(())
+    );
+    assert!(session.preview().unwrap().target.is_none());
+}
+
+#[test]
 fn floating_title_drag_resolves_to_window_move_without_any_drop_target() {
     let metrics = DockMetrics::default();
     let (mut layout, floating_id, _) = floating_layout();
