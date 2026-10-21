@@ -371,7 +371,9 @@ fn undo_clears_transient_flyout_and_preserves_session_preference() {
         )
         .unwrap();
 
-    assert!(fixture.layout.flyout().is_none());
+    // SetChrome does not itself mutate the transient flyout selection, but
+    // checkpoints omit it and undo must not reopen it.
+    assert!(fixture.layout.flyout().is_some());
     assert!(history.undo(&mut fixture.layout, &metrics).unwrap());
     assert!(fixture.layout.flyout().is_none());
     assert!(!fixture.layout.flyout_auto_collapse_enabled());
