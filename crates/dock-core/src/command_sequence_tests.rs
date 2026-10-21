@@ -912,6 +912,7 @@ fn logical_snapshot(layout: &Layout) -> String {
     parts.join("\n")
 }
 
+#[cfg(feature = "serde")]
 fn floating_group_for_panel(layout: &Layout, wanted_panel: PanelId) -> crate::FloatingGroupId {
     layout
         .floating_groups()
@@ -969,6 +970,7 @@ fn reordered_id_layout() -> Layout {
     builder.build()
 }
 
+#[cfg(feature = "serde")]
 fn apply_and_record(
     layout: &mut Layout,
     journal: &mut Vec<DockCommand>,
