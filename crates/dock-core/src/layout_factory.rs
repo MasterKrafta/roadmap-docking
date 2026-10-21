@@ -3,9 +3,9 @@ use std::collections::HashSet;
 use slotmap::SlotMap;
 
 use crate::{
-    Axis, CanvasState, ChromeMode, Column, ColumnMode, DockArea, DockAreaId, DockMetrics,
-    DockSide, FloatingGroup, FloatingGroupId, Layout, Node, NodeId, Panel, PanelConstraints,
-    PanelId, PanelInstance, PanelKey, Profile, Size, Split, Tabs,
+    CanvasState, ChromeMode, Column, ColumnMode, DockArea, DockAreaId, DockMetrics, DockSide,
+    FloatingGroup, FloatingGroupId, Layout, Node, NodeId, Panel, PanelConstraints, PanelId,
+    PanelInstance, PanelKey, Profile, Size, Tabs,
 };
 
 const REQUIRED_PANEL_KEYS: [&str; 4] = ["layers", "color", "properties", "history"];
