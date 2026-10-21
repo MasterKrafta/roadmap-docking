@@ -5,7 +5,7 @@ use crate::{
 /// Semantic result of hit-testing a point against a LayoutRects snapshot.
 ///
 /// The result contains model handles and interaction meaning only. Pointer
-/// events, views, windows, and GPUI entities belong to the adapter layer.
+/// events, views, windows, and platform-specific objects belong to the adapter layer.
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum HitResult {
