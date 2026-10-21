@@ -105,7 +105,12 @@ pub enum DockCommand {
     RaiseFloating { group: FloatingGroupId },
     /// Dock a floating group at an explicit destination.
     DockFloating { group: FloatingGroupId, target: DropTarget },
-    /// Expand or collapse a tab group.
+    /// Collapse or expand a Tabs group while preserving its children, active tab,
+    /// and owning column's ratio weights (the last expanded size distribution).
+    ///
+    /// UI adapters recognize double-clicks on a tab header or unused tab-strip
+    /// space and submit this command through `Layout::apply`. Gesture recognition
+    /// and view-only state changes do not belong to Core.
     CollapseGroup { group: NodeId, collapsed: bool },
     /// Change a column between expanded and icon-only modes.
     SetColumnMode { column: NodeId, mode: ColumnMode },
