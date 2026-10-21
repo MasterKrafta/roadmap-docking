@@ -57,7 +57,8 @@ pub enum DockCommand {
         delta: f32,
         available_height: f32,
     },
-    /// Set a column's requested width in logical pixels.
+    /// Set a column's requested width in logical pixels at the canvas-facing
+    /// outer edge of a main dock. Interior main columns use ResizeColumnBoundary.
     ResizeColumn { column: NodeId, width: f32 },
     /// Move a boundary between adjacent main columns by a signed logical-pixel
     /// delta. Boundary index zero is between column zero and column one.
