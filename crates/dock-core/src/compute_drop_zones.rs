@@ -380,7 +380,13 @@ impl Layout {
             if let Some(center_group) = center_group {
                 let is_self = matches!(source, DropSource::Group { .. })
                     && contains_node(self, source_root, center_group.group);
-                if !is_self {
+                let panel_already_in_group = match source {
+                    DropSource::Panel { panel } => panel_node(self, panel)
+                        .and_then(|node_id| direct_parent(self, node_id))
+                        == Some(center_group.group),
+                    DropSource::Group { .. } => false,
+                };
+                if !is_self && !panel_already_in_group {
                     let tabs = match self.node(center_group.group) {
                         Some(Node::Tabs(tabs)) => tabs,
                         _ => continue,
@@ -1070,6 +1076,27 @@ mod tests {
             zone.target == DropTarget::MainColumn { side: DockSide::Left, index: 0 }
                 && zone.zone == DropZone::DockEdge
         }));
+        let left_drop_edge = zones.iter().find(|zone| {
+            zone.target == DropTarget::MainColumn { side: DockSide::Left, index: 0 }
+                && zone.zone == DropZone::ColumnLeft
+        }).unwrap();
+        assert_eq!(left_drop_edge.rect.size.width, 24.0);
+
+        let mut wide_metrics = metrics;
+        wide_metrics.edge_drop_width = 32.0;
+        let wide_rects = layout.compute_rects(viewport(), &wide_metrics).unwrap();
+        let wide_zones = layout.compute_drop_zones(
+            DropSource::Panel { panel: source_panel },
+            &wide_rects,
+            &wide_metrics,
+        ).unwrap();
+        let wide_left = wide_zones.iter().find(|zone| {
+            zone.target == DropTarget::MainColumn { side: DockSide::Left, index: 0 }
+                && zone.zone == DropZone::ColumnLeft
+        }).unwrap();
+        assert_eq!(wide_left.rect.size.width, 32.0);
+        assert_eq!(wide_metrics.splitter_thickness, 4.0);
+        assert_eq!(wide_metrics.splitter_hit_zone, 8.0);
         assert_ne!(source_panel, target_panel);
     }
 
@@ -1145,6 +1172,148 @@ mod tests {
         }));
         assert!(zones.iter().any(|zone| zone.target == DropTarget::FreeArea && zone.zone == DropZone::FreeArea));
         assert!(layout.floating_group(float_id).is_some());
+    }
+
+    #[test]
+    fn command_application_revalidates_allowed_area_even_for_forged_targets() {
+        let metrics = DockMetrics::default();
+        let mut builder = LayoutBuilder::new(Profile::Photoshop);
+        let (source_panel, source_node) = builder.panel(
+            key("command-area-source"),
+            constraints().with_allowed_areas(AllowedArea::MAIN_DOCK),
+        );
+        let source_group = builder.tabs(vec![source_node], 0, false);
+        let source_column = builder.column(280.0, ColumnMode::Expanded, vec![source_group], vec![1.0]);
+        builder.main_area(DockSide::Right, source_column);
+
+        let (_, rail_node) = builder.panel(key("command-area-rail"), constraints());
+        let rail_group = builder.tabs(vec![rail_node], 0, true);
+        let rail = builder.column(metrics.rail_width, ColumnMode::IconsOnly, vec![rail_group], vec![1.0]);
+        builder.main_area(DockSide::Left, rail);
+
+        let (_, float_node) = builder.panel(
+            key("command-area-float"),
+            constraints().with_allowed_areas(AllowedArea::FLOATING),
+        );
+        let float_group = builder.tabs(vec![float_node], 0, false);
+        let float_id = builder.floating_group(
+            float_group,
+            Rect::new(Point::new(450.0, 140.0), Size::new(400.0, 300.0)),
+            1,
+        );
+
+        let mut layout = builder.build();
+        for target in [
+            DropTarget::Tabs { group: float_group, index: 1 },
+            DropTarget::RailSlot { column: rail, index: 1 },
+        ] {
+            let before = format!("{layout:?}");
+            let version = layout.version();
+            assert!(layout.apply(DockCommand::MovePanel { panel: source_panel, target }, &metrics).is_err());
+            assert_eq!(format!("{layout:?}"), before);
+            assert_eq!(layout.version(), version);
+        }
+
+        for command in [
+            DockCommand::MoveGroup { group: source_group, column: rail, index: 1 },
+            DockCommand::SetColumnMode { column: source_column, mode: ColumnMode::IconsOnly },
+            DockCommand::DockFloating {
+                group: float_id,
+                target: DropTarget::Tabs { group: source_group, index: 1 },
+            },
+            DockCommand::Float {
+                node: source_group,
+                bounds: Rect::new(Point::new(500.0, 200.0), Size::new(400.0, 300.0)),
+            },
+        ] {
+            let before = format!("{layout:?}");
+            let version = layout.version();
+            assert!(layout.apply(command, &metrics).is_err());
+            assert_eq!(format!("{layout:?}"), before);
+            assert_eq!(layout.version(), version);
+        }
+
+        let before = format!("{layout:?}");
+        let version = layout.version();
+        assert!(layout.apply(DockCommand::OpenPanel {
+            key: key("forged-floating-only"),
+            constraints: constraints().with_allowed_areas(AllowedArea::FLOATING),
+            target: Some(DropTarget::Tabs { group: source_group, index: 1 }),
+        }, &metrics).is_err());
+        assert_eq!(format!("{layout:?}"), before);
+        assert_eq!(layout.version(), version);
+    }
+
+    #[test]
+    fn command_application_revalidates_stale_target_ids() {
+        let metrics = DockMetrics::default();
+        let mut builder = LayoutBuilder::new(Profile::Photoshop);
+        let (source_panel, source_node) = builder.panel(key("stale-source"), constraints());
+        let source_group = builder.tabs(vec![source_node], 0, false);
+        let (_, stale_node) = builder.panel(key("stale-target"), constraints());
+        let stale_group = builder.tabs(vec![stale_node], 0, false);
+        let column = builder.column(280.0, ColumnMode::Expanded, vec![source_group, stale_group], vec![0.5, 0.5]);
+        builder.main_area(DockSide::Left, column);
+        let mut layout = builder.build();
+
+        layout.apply(DockCommand::CloseGroup { group: stale_group }, &metrics).unwrap();
+        assert!(layout.node(stale_group).is_none());
+        let before = format!("{layout:?}");
+        let version = layout.version();
+        assert!(layout.apply(
+            DockCommand::MovePanel {
+                panel: source_panel,
+                target: DropTarget::Tabs { group: stale_group, index: 0 },
+            },
+            &metrics,
+        ).is_err());
+        assert_eq!(format!("{layout:?}"), before);
+        assert_eq!(layout.version(), version);
+        assert_eq!(layout.validate(&metrics), Ok(()));
+    }
+
+    #[test]
+    fn generic_floating_group_exposes_horizontal_split_targets() {
+        let metrics = DockMetrics::default();
+        let mut builder = LayoutBuilder::new(Profile::Generic);
+        let (_, source_node) = builder.panel(key("generic-floating-source"), constraints());
+        let source_group = builder.tabs(vec![source_node], 0, false);
+        builder.main_area(DockSide::Left, source_group);
+
+        let (_, target_node) = builder.panel(key("generic-floating-target"), constraints());
+        let target_group = builder.tabs(vec![target_node], 0, false);
+        builder.floating_group(
+            target_group,
+            Rect::new(Point::new(500.0, 120.0), Size::new(420.0, 320.0)),
+            1,
+        );
+
+        let layout = builder.build();
+        let rects = layout.compute_rects(viewport(), &metrics).unwrap();
+        let zones = layout.compute_drop_zones(
+            DropSource::Group { group: source_group },
+            &rects,
+            &metrics,
+        ).unwrap();
+
+        for (zone_kind, edge) in [(DropZone::Left, DropZone::Left), (DropZone::Right, DropZone::Right)] {
+            assert!(zones.iter().any(|zone| {
+                zone.zone == zone_kind
+                    && zone.target == DropTarget::GroupEdge { group: target_group, zone: edge }
+            }));
+        }
+        let left = zones.iter().find(|zone| {
+            zone.zone == DropZone::Left
+                && zone.target == DropTarget::GroupEdge { group: target_group, zone: DropZone::Left }
+        }).unwrap();
+        let point = Point::new(
+            left.rect.origin.x + left.rect.size.width / 2.0,
+            left.rect.origin.y + left.rect.size.height / 2.0,
+        );
+        assert_eq!(
+            layout.resolve_drop(point, DropSource::Group { group: source_group }, &rects, &metrics).unwrap(),
+            Some(DropTarget::GroupEdge { group: target_group, zone: DropZone::Left })
+        );
     }
 
     #[test]
@@ -1289,7 +1458,7 @@ mod tests {
             Rect::new(Point::new(500.0, 120.0), Size::new(420.0, 320.0)),
             2,
         );
-        let layout = builder.build();
+        let mut layout = builder.build();
         let rects = layout.compute_rects(viewport(), &metrics).unwrap();
         let zones = layout.compute_drop_zones(DropSource::Panel { panel: source_panel }, &rects, &metrics).unwrap();
         assert!(!zones.iter().any(|zone| {
@@ -1300,6 +1469,17 @@ mod tests {
                 && matches!(zone.target, DropTarget::MainColumn { .. } | DropTarget::GroupEdge { zone: DropZone::Left, .. })
         }));
         assert_ne!(source_float, crate::FloatingGroupId::null());
+
+        let before = format!("{layout:?}");
+        let version = layout.version();
+        assert!(layout.apply(DockCommand::SplitGroup {
+            group: main_group,
+            target_group: source_group,
+            zone: DropZone::Left,
+            ratio: 0.5,
+        }, &metrics).is_err());
+        assert_eq!(format!("{layout:?}"), before);
+        assert_eq!(layout.version(), version);
     }
 
     #[test]

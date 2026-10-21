@@ -141,6 +141,28 @@ mod tests {
     }
 
     #[test]
+    fn drop_edge_width_is_independent_from_visual_and_hit_splitter_metrics() {
+        let mut metrics = DockMetrics::default();
+        assert_eq!(metrics.edge_drop_width, 24.0);
+        assert_eq!(metrics.splitter_thickness, 4.0);
+        assert_eq!(metrics.splitter_hit_zone, 8.0);
+
+        // These dimensions have separate jobs. Changing the edge drop affordance
+        // must not rewrite the visible splitter or the splitter's hit area.
+        metrics.edge_drop_width = 32.0;
+        assert_eq!(metrics.validate(), Ok(()));
+        assert_eq!(metrics.edge_drop_width, 32.0);
+        assert_eq!(metrics.splitter_thickness, 4.0);
+        assert_eq!(metrics.splitter_hit_zone, 8.0);
+
+        metrics.splitter_hit_zone = 12.0;
+        assert_eq!(metrics.validate(), Ok(()));
+        assert_eq!(metrics.edge_drop_width, 32.0);
+        assert_eq!(metrics.splitter_thickness, 4.0);
+        assert_eq!(metrics.splitter_hit_zone, 12.0);
+    }
+
+    #[test]
     fn rejects_contradictory_relationships() {
         let mut metrics = DockMetrics::default();
         metrics.min_column_width = 300.0;

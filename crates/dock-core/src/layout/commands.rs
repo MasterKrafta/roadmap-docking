@@ -1,5 +1,6 @@
 use super::*;
 use super::helpers::*;
+use crate::AllowedArea;
 
 impl Layout {
     /// Applies one command transactionally. All edits happen on a candidate copy;
@@ -142,6 +143,7 @@ impl Layout {
                     None => self.resolve_open_target(key, metrics)?,
                 };
                 self.validate_drop_target(resolved_target, metrics)?;
+                self.validate_constraints_allowed_for_target(*constraints, resolved_target)?;
                 let panel_id = self.panel_instances.insert(PanelInstance::new(key.clone(), *constraints));
                 let panel_node = self.nodes.insert(Node::Panel(crate::Panel::new(panel_id)));
                 self.insert_node_for_target(panel_node, resolved_target, metrics, Some(0.5))?;
@@ -257,6 +259,7 @@ impl Layout {
                 }
                 let panel_node = self.find_panel_node(*panel).ok_or(CommandError::MissingPanel { panel: *panel })?;
                 self.validate_drop_target(*target, metrics)?;
+                self.validate_panel_ids_allowed_for_target(&[*panel], *target)?;
                 if let (Some((source_group, source_index)), DropTarget::Tabs { group: target_group, index }) =
                     (self.tab_parent_index(panel_node), *target)
                 {
@@ -320,6 +323,9 @@ impl Layout {
                 if *index > target_groups.len() {
                     return Err(CommandError::InvalidValue { field: "index", reason: "group insertion index is outside the column" });
                 }
+                let target_area = self.allowed_area_for_column_target(*column)?;
+                let moving_panels = self.panel_ids_in_subtree(*group);
+                self.validate_panel_ids_allowed_for_area(&moving_panels, target_area)?;
                 let source_parent = self.find_parent(*group);
                 if source_parent == Some(*column) {
                     let source_index = target_groups.iter().position(|id| id == group);
@@ -372,6 +378,12 @@ impl Layout {
             }
             DockCommand::MergeGroup { group, target_group, index } => {
                 let panel_nodes = self.panel_nodes_in_subtree(*group);
+                if group != target_group {
+                    let target = DropTarget::GroupTabs { group: *target_group, index: *index };
+                    self.validate_drop_target(target, metrics)?;
+                    let moving_panels = self.panel_ids_in_subtree(*group);
+                    self.validate_panel_ids_allowed_for_target(&moving_panels, target)?;
+                }
                 self.merge_group_into_tabs(*group, *target_group, *index)?;
                 if group == target_group {
                     return Ok(CommandApplication::persistent());
@@ -402,7 +414,12 @@ impl Layout {
                         CommandError::MissingNode { node: *target_group }
                     });
                 }
-                self.validate_drop_target(DropTarget::GroupEdge { group: *target_group, zone: *zone }, metrics)?;
+                let target = DropTarget::GroupEdge { group: *target_group, zone: *zone };
+                self.validate_drop_target(target, metrics)?;
+                if group != target_group {
+                    let moving_panels = self.panel_ids_in_subtree(*group);
+                    self.validate_panel_ids_allowed_for_target(&moving_panels, target)?;
+                }
                 if group == target_group {
                     return Ok(CommandApplication::persistent());
                 }
@@ -914,6 +931,8 @@ impl Layout {
                     field: "bounds",
                     reason: geometry_error_reason(error),
                 })?;
+                let moving_panels = self.panel_ids_in_subtree(*node);
+                self.validate_panel_ids_allowed_for_area(&moving_panels, AllowedArea::FLOATING)?;
                 if self.profile == Profile::Photoshop
                     && !matches!(self.nodes.get(*node), Some(Node::Panel(_)) | Some(Node::Tabs(_)))
                 {
@@ -1024,7 +1043,10 @@ impl Layout {
                 let root = self.floating_groups.get(*group).and_then(|floating| {
                     self.dock_areas.get(floating.area).map(|area| area.root)
                 }).ok_or(CommandError::MissingFloatingGroup { group: *group })?;
+                self.validate_drop_target(*target, metrics)?;
                 let panel_nodes = self.panel_nodes_in_subtree(root);
+                let moving_panels = self.panel_ids_in_subtree(root);
+                self.validate_panel_ids_allowed_for_target(&moving_panels, *target)?;
                 self.dock_floating_group(*group, *target, metrics)?;
                 for panel_node in panel_nodes {
                     self.remember_panel_dock_location(panel_node);
@@ -1058,6 +1080,14 @@ impl Layout {
                 if current.mode == *mode {
                     return Ok(CommandApplication::persistent());
                 }
+                let destination_area = match *mode {
+                    ColumnMode::IconsOnly => AllowedArea::ICON_RAIL,
+                    ColumnMode::Expanded => AllowedArea::MAIN_DOCK,
+                };
+                let moving_panels: Vec<_> = current.groups.iter()
+                    .flat_map(|group| self.panel_ids_in_subtree(*group))
+                    .collect();
+                self.validate_panel_ids_allowed_for_area(&moving_panels, destination_area)?;
                 let width = match *mode {
                     ColumnMode::IconsOnly => metrics.rail_width,
                     ColumnMode::Expanded if current.mode == ColumnMode::IconsOnly => {
@@ -1184,6 +1214,149 @@ impl Layout {
         Ok(())
     }
 
+    pub(super) fn panel_ids_in_subtree(&self, root: NodeId) -> Vec<PanelId> {
+        self.panel_nodes_in_subtree(root)
+            .into_iter()
+            .filter_map(|node_id| match self.nodes.get(node_id) {
+                Some(Node::Panel(panel)) => Some(panel.panel_id),
+                _ => None,
+            })
+            .collect()
+    }
+
+    pub(super) fn validate_constraints_allowed_for_target(
+        &self,
+        constraints: crate::PanelConstraints,
+        target: DropTarget,
+    ) -> Result<(), CommandError> {
+        let area = self.allowed_area_for_target(target)?;
+        if constraints.allows_area(area) {
+            Ok(())
+        } else {
+            Err(CommandError::InvalidTarget {
+                reason: allowed_area_rejection_reason(area),
+            })
+        }
+    }
+
+    pub(super) fn validate_panel_ids_allowed_for_target(
+        &self,
+        panels: &[PanelId],
+        target: DropTarget,
+    ) -> Result<(), CommandError> {
+        let area = self.allowed_area_for_target(target)?;
+        self.validate_panel_ids_allowed_for_area(panels, area)
+    }
+
+    pub(super) fn validate_panel_ids_allowed_for_area(
+        &self,
+        panels: &[PanelId],
+        area: AllowedArea,
+    ) -> Result<(), CommandError> {
+        for panel in panels {
+            let instance = self.panel_instance(*panel)
+                .ok_or(CommandError::MissingPanel { panel: *panel })?;
+            if !instance.constraints.allows_area(area) {
+                return Err(CommandError::InvalidTarget {
+                    reason: allowed_area_rejection_reason(area),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn allowed_area_for_target(
+        &self,
+        target: DropTarget,
+    ) -> Result<AllowedArea, CommandError> {
+        match target {
+            DropTarget::Tabs { group, .. }
+            | DropTarget::GroupTabs { group, .. }
+            | DropTarget::GroupEdge { group, .. } => self.allowed_area_for_group_target(group),
+            DropTarget::MainColumn { .. } | DropTarget::ColumnSlot { .. } => Ok(AllowedArea::MAIN_DOCK),
+            DropTarget::RailSlot { .. } => Ok(AllowedArea::ICON_RAIL),
+            DropTarget::FreeArea => Ok(AllowedArea::FLOATING),
+        }
+    }
+
+    fn allowed_area_for_column_target(
+        &self,
+        column_id: NodeId,
+    ) -> Result<AllowedArea, CommandError> {
+        let column = match self.nodes.get(column_id) {
+            Some(Node::Column(column)) => column,
+            Some(_) => return Err(CommandError::InvalidTarget { reason: "group destination must be a Column node" }),
+            None => return Err(CommandError::MissingNode { node: column_id }),
+        };
+
+        if self.find_floating_root_containing(column_id).is_some() {
+            return Ok(AllowedArea::FLOATING);
+        }
+
+        for side in [DockSide::Left, DockSide::Right] {
+            if self.main_area(side).is_some_and(|area| self.is_descendant_or_same(area.root, column_id)) {
+                return Ok(if column.mode == ColumnMode::IconsOnly {
+                    AllowedArea::ICON_RAIL
+                } else {
+                    AllowedArea::MAIN_DOCK
+                });
+            }
+        }
+
+        Err(CommandError::InvalidTarget {
+            reason: "group destination column is not attached to a main or floating dock area",
+        })
+    }
+
+    fn allowed_area_for_group_target(
+        &self,
+        group: NodeId,
+    ) -> Result<AllowedArea, CommandError> {
+        if !matches!(self.nodes.get(group), Some(Node::Tabs(_))) {
+            return Err(if self.nodes.contains_key(group) {
+                CommandError::InvalidTarget { reason: "drop group target must be a Tabs node" }
+            } else {
+                CommandError::MissingNode { node: group }
+            });
+        }
+
+        // Floating membership takes precedence because Generic layouts may contain
+        // arbitrary nested Split trees inside a floating area.
+        if self.find_floating_root_containing(group).is_some() {
+            return Ok(AllowedArea::FLOATING);
+        }
+
+        if let Some(column_id) = self.find_owner_column(group) {
+            if self.main_column_position(column_id).is_some() {
+                return match self.nodes.get(column_id) {
+                    Some(Node::Column(column)) if column.mode == ColumnMode::IconsOnly => {
+                        Ok(AllowedArea::ICON_RAIL)
+                    }
+                    Some(Node::Column(_)) => Ok(AllowedArea::MAIN_DOCK),
+                    _ => Err(CommandError::InvalidTarget { reason: "drop group owner is not a Column" }),
+                };
+            }
+        }
+
+        for side in [DockSide::Left, DockSide::Right] {
+            if self.main_area(side).is_some_and(|area| self.is_descendant_or_same(area.root, group)) {
+                return Ok(AllowedArea::MAIN_DOCK);
+            }
+        }
+
+        Err(CommandError::InvalidTarget {
+            reason: "drop target is not attached to a main or floating dock area",
+        })
+    }
+
+    fn is_group_in_icon_rail(&self, group: NodeId) -> bool {
+        let Some(column_id) = self.find_owner_column(group) else {
+            return false;
+        };
+        self.main_column_position(column_id).is_some()
+            && matches!(self.nodes.get(column_id), Some(Node::Column(column)) if column.mode == ColumnMode::IconsOnly)
+    }
+
     pub(super) fn validate_drop_target(
         &self,
         target: DropTarget,
@@ -1191,6 +1364,9 @@ impl Layout {
     ) -> Result<(), CommandError> {
         match target {
             DropTarget::Tabs { group, index } => match self.nodes.get(group) {
+                Some(Node::Tabs(_)) if self.is_group_in_icon_rail(group) => Err(CommandError::InvalidTarget {
+                    reason: "tab insertion target is an icon rail slot; use RailSlot",
+                }),
                 Some(Node::Tabs(tabs)) if index <= tabs.children.len() => Ok(()),
                 Some(Node::Tabs(_)) => Err(CommandError::InvalidValue {
                     field: "index",
@@ -1200,6 +1376,9 @@ impl Layout {
                 None => Err(CommandError::MissingNode { node: group }),
             },
             DropTarget::GroupTabs { group, index } => match self.nodes.get(group) {
+                Some(Node::Tabs(_)) if self.is_group_in_icon_rail(group) => Err(CommandError::InvalidTarget {
+                    reason: "group-merge target is an icon rail slot; use RailSlot",
+                }),
                 Some(Node::Tabs(tabs)) if index <= tabs.children.len() => Ok(()),
                 Some(Node::Tabs(_)) => Err(CommandError::InvalidValue {
                     field: "index",
@@ -1211,6 +1390,11 @@ impl Layout {
             DropTarget::GroupEdge { group, zone } => {
                 if !matches!(zone, DropZone::Left | DropZone::Right | DropZone::Top | DropZone::Bottom) {
                     return Err(CommandError::InvalidTarget { reason: "group-edge target requires a cardinal edge zone" });
+                }
+                if self.is_group_in_icon_rail(group) {
+                    return Err(CommandError::InvalidTarget {
+                        reason: "group-edge target is an icon rail slot; use RailSlot",
+                    });
                 }
                 match self.nodes.get(group) {
                     Some(Node::Tabs(_)) => {}
@@ -1284,6 +1468,9 @@ impl Layout {
             DropTarget::RailSlot { column, index } => match self.nodes.get(column) {
                 Some(Node::Column(value)) if value.mode != ColumnMode::IconsOnly => {
                     Err(CommandError::InvalidTarget { reason: "rail insertion target must use IconsOnly mode" })
+                }
+                Some(Node::Column(_)) if self.main_column_position(column).is_none() => {
+                    Err(CommandError::InvalidTarget { reason: "rail insertion target must belong to a main dock column" })
                 }
                 Some(Node::Column(value)) if index <= value.groups.len() => Ok(()),
                 Some(Node::Column(_)) => Err(CommandError::InvalidValue {
@@ -1793,4 +1980,16 @@ impl Layout {
     }
 
 
+}
+
+fn allowed_area_rejection_reason(area: AllowedArea) -> &'static str {
+    if area == AllowedArea::MAIN_DOCK {
+        "panel constraints disallow the main dock area"
+    } else if area == AllowedArea::FLOATING {
+        "panel constraints disallow floating areas"
+    } else if area == AllowedArea::ICON_RAIL {
+        "panel constraints disallow icon rails"
+    } else {
+        "panel constraints disallow the requested dock area"
+    }
 }
