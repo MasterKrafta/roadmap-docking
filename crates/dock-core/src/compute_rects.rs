@@ -1440,7 +1440,7 @@ mod tests {
 
         // The model remains unchanged; these configurable presentation metrics
         // affect only the computed geometry snapshot.
-        assert_eq!(layout.node(column).is_some(), true);
+        assert!(layout.node(column).is_some());
         assert_eq!(metrics.header_height, 31.5);
         assert_eq!(metrics.tab_strip_height, 20.25);
         assert_eq!(metrics.splitter_thickness, 3.5);
