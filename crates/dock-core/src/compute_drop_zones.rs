@@ -320,7 +320,7 @@ impl Layout {
             };
             let is_main_column = left_columns.iter().any(|(id, _)| *id == column_id)
                 || right_columns.iter().any(|(id, _)| *id == column_id);
-            if column.mode != ColumnMode::IconsOnly || !is_main_column {
+            if !column.mode.is_rail() || !is_main_column {
                 continue;
             }
             if !source_allows(self, &source_panels, AllowedArea::ICON_RAIL) {
@@ -1421,6 +1421,33 @@ mod tests {
         let (_, second_node) = builder.panel(key("rail-second"), constraints());
         let second = builder.tabs(vec![second_node], 0, true);
         let rail = builder.column(metrics.rail_width, ColumnMode::IconsOnly, vec![first, second], vec![0.5, 0.5]);
+        builder.main_area(DockSide::Left, rail);
+        let layout = builder.build();
+        let rects = layout.compute_rects(viewport(), &metrics).unwrap();
+        let zones = layout.compute_drop_zones(DropSource::Panel { panel: source_panel }, &rects, &metrics).unwrap();
+
+        for index in 0..=2 {
+            assert!(zones.iter().any(|zone| {
+                zone.target == DropTarget::RailSlot { column: rail, index }
+                    && zone.zone == DropZone::RailInsertion
+            }));
+        }
+    }
+
+    #[test]
+    fn labeled_rail_targets_flattened_insertion_order() {
+        let metrics = DockMetrics::default();
+        let mut builder = LayoutBuilder::new(Profile::Photoshop);
+        let (source_panel, source_node) = builder.panel(key("rail-source"), constraints());
+        let source_group = builder.tabs(vec![source_node], 0, false);
+        let source_column = builder.column(280.0, ColumnMode::Expanded, vec![source_group], vec![1.0]);
+        builder.main_area(DockSide::Right, source_column);
+
+        let (_, first_node) = builder.panel(key("rail-first"), constraints());
+        let first = builder.tabs(vec![first_node], 0, true);
+        let (_, second_node) = builder.panel(key("rail-second"), constraints());
+        let second = builder.tabs(vec![second_node], 0, true);
+        let rail = builder.column(metrics.min_column_width, ColumnMode::IconsAndLabels, vec![first, second], vec![0.5, 0.5]);
         builder.main_area(DockSide::Left, rail);
         let layout = builder.build();
         let rects = layout.compute_rects(viewport(), &metrics).unwrap();
