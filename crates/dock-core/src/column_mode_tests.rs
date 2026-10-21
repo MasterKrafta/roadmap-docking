@@ -147,8 +147,8 @@ fn mode_switches_preserve_column_tree_tab_order_active_tabs_and_collapse_state()
 #[test]
 fn both_rail_modes_use_group_then_tab_flattening_for_layout_and_hit_testing() {
     let metrics = DockMetrics::default();
-    let expected = expected_order(&fixture());
     let mut fixture = fixture();
+    let expected = expected_order(&fixture);
 
     for mode in [ColumnMode::IconsAndLabels, ColumnMode::IconsOnly] {
         fixture
