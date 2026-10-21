@@ -878,8 +878,9 @@ impl Layout {
                     });
                 }
                 let actual_width = match current.mode {
-                    ColumnMode::IconsOnly => metrics.rail_width,
                     ColumnMode::Expanded => width.clamp(min_width, max_width),
+                    ColumnMode::IconsAndLabels => metrics.min_column_width,
+                    ColumnMode::IconsOnly => metrics.rail_width,
                 };
                 if !actual_width.is_finite() || actual_width <= 0.0 {
                     return Err(CommandError::InvalidValue {
@@ -931,7 +932,7 @@ impl Layout {
                         reason: "main dock contains a non-Column child",
                     }),
                 };
-                let actual_delta = if left.mode == ColumnMode::IconsOnly || right.mode == ColumnMode::IconsOnly {
+                let actual_delta = if left.mode.is_rail() || right.mode.is_rail() {
                     0.0
                 } else {
                     let left_min = self.minimum_column_width(left_id, metrics)?;
@@ -1239,9 +1240,10 @@ impl Layout {
                 if current.mode == *mode {
                     return Ok(CommandApplication::persistent());
                 }
-                let destination_area = match *mode {
-                    ColumnMode::IconsOnly => AllowedArea::ICON_RAIL,
-                    ColumnMode::Expanded => AllowedArea::MAIN_DOCK,
+                let destination_area = if mode.is_rail() {
+                    AllowedArea::ICON_RAIL
+                } else {
+                    AllowedArea::MAIN_DOCK
                 };
                 let moving_panels: Vec<_> = current.groups.iter()
                     .flat_map(|group| self.panel_ids_in_subtree(*group))
@@ -1249,7 +1251,8 @@ impl Layout {
                 self.validate_panel_ids_allowed_for_area(&moving_panels, destination_area)?;
                 let width = match *mode {
                     ColumnMode::IconsOnly => metrics.rail_width,
-                    ColumnMode::Expanded if current.mode == ColumnMode::IconsOnly => {
+                    ColumnMode::IconsAndLabels => metrics.min_column_width,
+                    ColumnMode::Expanded if current.mode.is_rail() => {
                         metrics.default_column_width.max(self.minimum_column_width(*column, metrics)?)
                     }
                     ColumnMode::Expanded => current.width.max(self.minimum_column_width(*column, metrics)?),
@@ -1264,8 +1267,8 @@ impl Layout {
             DockCommand::OpenFlyout { column, group } => {
                 let groups = match self.nodes.get(*column) {
                     Some(Node::Column(value)) => {
-                        if value.mode != ColumnMode::IconsOnly {
-                            return Err(CommandError::InvalidTarget { reason: "flyout column must be in IconsOnly mode" });
+                        if !value.mode.is_rail() {
+                            return Err(CommandError::InvalidTarget { reason: "flyout column must use a rail mode" });
                         }
                         value.groups.clone()
                     }
@@ -1454,7 +1457,7 @@ impl Layout {
 
         for side in [DockSide::Left, DockSide::Right] {
             if self.main_area(side).is_some_and(|area| self.is_descendant_or_same(area.root, column_id)) {
-                return Ok(if column.mode == ColumnMode::IconsOnly {
+                return Ok(if column.mode.is_rail() {
                     AllowedArea::ICON_RAIL
                 } else {
                     AllowedArea::MAIN_DOCK
@@ -1488,7 +1491,7 @@ impl Layout {
         if let Some(column_id) = self.find_owner_column(group) {
             if self.main_column_position(column_id).is_some() {
                 return match self.nodes.get(column_id) {
-                    Some(Node::Column(column)) if column.mode == ColumnMode::IconsOnly => {
+                    Some(Node::Column(column)) if column.mode.is_rail() => {
                         Ok(AllowedArea::ICON_RAIL)
                     }
                     Some(Node::Column(_)) => Ok(AllowedArea::MAIN_DOCK),
@@ -1513,7 +1516,7 @@ impl Layout {
             return false;
         };
         self.main_column_position(column_id).is_some()
-            && matches!(self.nodes.get(column_id), Some(Node::Column(column)) if column.mode == ColumnMode::IconsOnly)
+            && matches!(self.nodes.get(column_id), Some(Node::Column(column)) if column.mode.is_rail())
     }
 
     pub(super) fn validate_drop_target(
@@ -1606,8 +1609,8 @@ impl Layout {
                 }
             }
             DropTarget::ColumnSlot { column, index } => match self.nodes.get(column) {
-                Some(Node::Column(value)) if value.mode == ColumnMode::IconsOnly => {
-                    Err(CommandError::InvalidTarget { reason: "expanded-column insertion target cannot be an icon rail; use RailSlot" })
+                Some(Node::Column(value)) if value.mode.is_rail() => {
+                    Err(CommandError::InvalidTarget { reason: "expanded-column insertion target cannot be a rail; use RailSlot" })
                 }
                 Some(Node::Column(value)) if self.main_column_position(column).is_none() => {
                     let _ = value;
@@ -1625,8 +1628,8 @@ impl Layout {
                 reason: "FreeArea must be resolved by Float with explicit window bounds",
             }),
             DropTarget::RailSlot { column, index } => match self.nodes.get(column) {
-                Some(Node::Column(value)) if value.mode != ColumnMode::IconsOnly => {
-                    Err(CommandError::InvalidTarget { reason: "rail insertion target must use IconsOnly mode" })
+                Some(Node::Column(value)) if !value.mode.is_rail() => {
+                    Err(CommandError::InvalidTarget { reason: "rail insertion target must use a rail mode" })
                 }
                 Some(Node::Column(_)) if self.main_column_position(column).is_none() => {
                     Err(CommandError::InvalidTarget { reason: "rail insertion target must belong to a main dock column" })
