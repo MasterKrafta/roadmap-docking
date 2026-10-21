@@ -574,7 +574,7 @@ fn valid_commands(
         }
     }
 
-    for (source_column, source_groups, _, _, _) in &columns {
+    for (_, source_groups, _, _, _) in &columns {
         for source_group in source_groups {
             for (target_column, target_groups, _, _, _) in &columns {
                 for index in 0..=target_groups.len() {
