@@ -291,6 +291,43 @@ fn safe_ratio_repair_is_normalized_and_reported() {
 }
 
 #[test]
+fn out_of_range_active_tab_is_clamped_to_last_child_and_reported() {
+    let metrics = DockMetrics::default();
+    let (layout, descriptors) = sample_layout();
+    let mut file = WorkspaceFile::from_layout(&layout).unwrap();
+    let Some(WorkspaceNode::Column { groups, .. }) = file.layout.right.as_mut() else {
+        panic!("main root must serialize as a column");
+    };
+    let Some(WorkspaceNode::Tabs { active_index, .. }) = groups.first_mut() else {
+        panic!("column group must serialize as tabs");
+    };
+    *active_index = 99;
+    let json = serde_json::to_string(&file).unwrap();
+
+    let report = WorkspaceFile::load_json(
+        &json,
+        &descriptors,
+        &metrics,
+        WorkspaceLoadOptions::default(),
+    )
+    .unwrap();
+
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        matches!(diagnostic, WorkspaceDiagnostic::LayoutNormalized { issues }
+            if issues.iter().any(|issue| issue.contains("active_index is outside children")))
+    }));
+    let root = report.layout.main_area(DockSide::Right).unwrap().root;
+    let Some(crate::Node::Column(column)) = report.layout.node(root) else {
+        panic!("main root must remain a column");
+    };
+    let Some(crate::Node::Tabs(tabs)) = report.layout.node(column.groups[0]) else {
+        panic!("first group must remain tabs");
+    };
+    assert_eq!(tabs.active_index, tabs.children.len() - 1);
+    assert!(report.layout.validate(&metrics).is_ok());
+}
+
+#[test]
 fn invalid_profile_specific_tree_is_reported_instead_of_guessed_at() {
     let metrics = DockMetrics::default();
     let (layout, descriptors) = sample_layout();
