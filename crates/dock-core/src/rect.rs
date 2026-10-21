@@ -5,6 +5,7 @@ use crate::{GeometryError, Point, Size};
 /// The top and left edges are inclusive; the right and bottom edges are
 /// exclusive: [x, x + width) × [y, y + height).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Rect {
     pub origin: Point,
     pub size: Size,
@@ -135,5 +136,13 @@ mod tests {
             empty.validate_non_empty(),
             Err(GeometryError::NonPositiveDimension)
         );
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn rect_round_trips_through_serde() {
+        let rect = Rect::new(Point::new(5.0, 7.0), Size::new(100.0, 60.0));
+        let encoded = serde_json::to_string(&rect).unwrap();
+        assert_eq!(serde_json::from_str::<Rect>(&encoded).unwrap(), rect);
     }
 }
