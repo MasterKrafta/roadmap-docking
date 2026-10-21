@@ -270,10 +270,11 @@ fn target_in_scope(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{ComputeRectsError, GeometryError, HitResult, Point, Rect, ResizeEdge};
     use crate::layout_builder::LayoutBuilder;
     use crate::{
-        Axis, ColumnMode, DockMetrics, DockSide, PanelConstraints, PanelKey, Profile, Size,
+        Axis, ColumnMode, DockMetrics, DockSide, DropTarget, PanelConstraints, PanelKey, Profile,
+        Size,
     };
 
     fn constraints() -> PanelConstraints {
@@ -327,7 +328,7 @@ mod tests {
     }
 
     #[test]
-    fn frontmost_floating_window_wins_overlap_and_blank_window_blocks_underlay() {
+    fn frontmost_floating_window_wins_overlap_and_zone_hits_do_not_leak() {
         let metrics = DockMetrics::default();
         let mut builder = LayoutBuilder::new(Profile::Photoshop);
         let (lower_panel, lower_node) = builder.panel(key("lower-window"), constraints());
@@ -352,7 +353,7 @@ mod tests {
         );
         assert_ne!(lower_panel, upper_panel);
 
-        // A blank point in the front window must not hit the lower window.
+        // The front window's drop zone wins over the overlapping lower window.
         assert_eq!(
             layout.hit_test(Point::new(390.0, 280.0), &rects, &metrics).unwrap(),
             HitResult::DropZone {
