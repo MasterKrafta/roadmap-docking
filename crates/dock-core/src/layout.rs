@@ -137,6 +137,7 @@ impl Layout {
 }
 
 mod commands;
+mod column_display_order;
 mod drag_drop;
 mod tree;
 mod sizing;
