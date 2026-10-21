@@ -182,9 +182,9 @@ fn version_one_workspace_migrates_to_current_version_with_diagnostic() {
     assert!(matches!(
         migrated.layout.right,
         Some(WorkspaceNode::Column {
-            last_expanded_width: Some(280.0),
+            last_expanded_width: Some(width),
             ..
-        })
+        }) if width == 280.0
     ));
 
     let report = WorkspaceFile::load_json(
