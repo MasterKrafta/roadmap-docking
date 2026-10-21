@@ -176,6 +176,14 @@ mod tests {
         let mut metrics = DockMetrics::default();
         metrics.splitter_thickness = f32::INFINITY;
         assert!(metrics.validate().is_err());
+
+        let mut metrics = DockMetrics::default();
+        metrics.min_tab_width = f32::NAN;
+        assert!(metrics.validate().is_err());
+
+        let mut metrics = DockMetrics::default();
+        metrics.tab_overflow_button_width = 0.0;
+        assert!(metrics.validate().is_err());
     }
 
     #[test]
