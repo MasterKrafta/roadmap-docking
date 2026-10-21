@@ -163,9 +163,14 @@ fn versioned_json_round_trip_preserves_structure_without_runtime_keys() {
 fn version_one_workspace_migrates_to_current_version_with_diagnostic() {
     let metrics = DockMetrics::default();
     let (layout, descriptors) = sample_layout();
-    let mut file = WorkspaceFile::from_layout(&layout).unwrap();
-    file.version = 1;
-    let old_json = serde_json::to_string(&file).unwrap();
+    let file = WorkspaceFile::from_layout(&layout).unwrap();
+    let mut legacy: serde_json::Value = serde_json::to_value(&file).unwrap();
+    legacy["version"] = serde_json::json!(1);
+    legacy["layout"]["right"]
+        .as_object_mut()
+        .unwrap()
+        .remove("last_expanded_width");
+    let old_json = legacy.to_string();
 
     let (migrated, parse_diagnostics) =
         WorkspaceFile::from_json_with_diagnostics(&old_json).unwrap();
@@ -174,6 +179,13 @@ fn version_one_workspace_migrates_to_current_version_with_diagnostic() {
         from: 1,
         to: WORKSPACE_VERSION,
     }));
+    assert!(matches!(
+        migrated.layout.right,
+        Some(WorkspaceNode::Column {
+            last_expanded_width: Some(280.0),
+            ..
+        })
+    ));
 
     let report = WorkspaceFile::load_json(
         &old_json,
