@@ -1336,6 +1336,16 @@ impl Layout {
                     None => return Err(CommandError::MissingNode { node: *column }),
                 }
 
+                let belongs_to_main_dock = [DockSide::Left, DockSide::Right]
+                    .into_iter()
+                    .filter_map(|side| self.main_area(side).map(|area| area.root))
+                    .any(|root| self.is_descendant_or_same(root, *column));
+                if !belongs_to_main_dock {
+                    return Err(CommandError::InvalidTarget {
+                        reason: "flyout column must belong to a main dock",
+                    });
+                }
+
                 let item = self.column_display_order(*column)?
                     .into_iter()
                     .find(|item| item.panel == *panel)
