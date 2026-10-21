@@ -494,7 +494,7 @@ impl Layout {
     /// Input adapters should test the first returned window before the rest.
     pub fn floating_groups_in_hit_test_order(&self) -> Vec<(FloatingGroupId, &FloatingGroup)> {
         let mut groups: Vec<_> = self.floating_groups.iter().collect();
-        groups.sort_by(|(_, left), (_, right)| right.z_order.cmp(&left.z_order));
+        groups.sort_by_key(|(_, group)| std::cmp::Reverse(group.z_order));
         groups
     }
 }
