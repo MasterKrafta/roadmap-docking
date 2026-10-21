@@ -126,7 +126,7 @@ fn is_group_in_icon_rail(layout: &Layout, group: NodeId) -> bool {
         .into_iter()
         .flat_map(|side| main_columns(layout, side))
         .any(|(_, groups, _, mode, _)| {
-            mode == ColumnMode::IconsOnly && groups.contains(&group)
+            mode.is_rail() && groups.contains(&group)
         })
 }
 
@@ -700,7 +700,7 @@ fn valid_commands(
         });
     }
     for (column, owned_groups, _, mode, _) in &columns {
-        if *mode == ColumnMode::IconsOnly {
+        if mode.is_rail() {
             for group in owned_groups {
                 if matches!(layout.node(*group), Some(Node::Tabs(_))) {
                     commands.push(DockCommand::OpenFlyout {
@@ -757,7 +757,7 @@ fn valid_commands(
                             },
                         });
                         for (column, groups, _, mode, _) in &target_columns {
-                            if *mode == ColumnMode::IconsOnly {
+                            if mode.is_rail() {
                                 commands.push(DockCommand::DockFloating {
                                     group: floating_id,
                                     target: DropTarget::RailSlot {
