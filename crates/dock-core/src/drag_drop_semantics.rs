@@ -575,7 +575,8 @@ fn drop_request_keeps_group_grip_semantics_distinct_from_panel_tab_drag() {
             origin: Point::ZERO,
             point: Point::new(12.0, 8.0),
             target: Some(target),
-        }
+        floating_bounds: None,
+}
     );
     assert!(matches!(request.payload, DragPayload::Group { group: id } if id == group));
     assert!(!matches!(request.payload, DragPayload::Panel { .. }));
