@@ -413,13 +413,22 @@ impl Layout {
                         if *index == source_index || *index == source_index + 1 {
                             return Ok(CommandApplication::persistent());
                         }
-                        let inverse = Some(DockCommand::MoveGroup { group: *group, column: *column, index: source_index });
+                        let adjusted_index = if *index > source_index { *index - 1 } else { *index };
+                        let inverse_index = if source_index > adjusted_index {
+                            source_index + 1
+                        } else {
+                            source_index
+                        };
+                        let inverse = Some(DockCommand::MoveGroup {
+                            group: *group,
+                            column: *column,
+                            index: inverse_index,
+                        });
                         self.detach_node(*group)?;
                         let new_len = match self.nodes.get(*column) {
                             Some(Node::Column(value)) => value.groups.len(),
                             _ => return Err(CommandError::InvalidTarget { reason: "MoveGroup target changed unexpectedly" }),
                         };
-                        let adjusted_index = if *index > source_index { *index - 1 } else { *index };
                         self.insert_group_at_column(*column, *group, adjusted_index.min(new_len), None)?;
                         return Ok(CommandApplication { actual_value: None, inverse, persistent: true });
                     }
@@ -490,9 +499,33 @@ impl Layout {
                     }
                     _ => None,
                 });
-                let inverse = source_index.map(|(column, index)| DockCommand::MoveGroup { group: *group, column, index });
                 self.detach_node(*group)?;
                 self.insert_group_edge(*group, *target_group, *zone, Some(*ratio), metrics)?;
+                let inverse = source_index.and_then(|(column, original_index)| {
+                    let restore_index = if self.find_owner_column(*group) == Some(column) {
+                        match self.nodes.get(column) {
+                            Some(Node::Column(column_data)) => column_data
+                                .groups
+                                .iter()
+                                .position(|id| id == group)
+                                .map(|current_index| {
+                                    if original_index > current_index {
+                                        original_index + 1
+                                    } else {
+                                        original_index
+                                    }
+                                }),
+                            _ => None,
+                        }
+                    } else {
+                        Some(original_index)
+                    };
+                    restore_index.map(|index| DockCommand::MoveGroup {
+                        group: *group,
+                        column,
+                        index,
+                    })
+                });
                 Ok(CommandApplication { actual_value: None, inverse, persistent: true })
             }
             DockCommand::ResizeGroups { column, ratios } => {
@@ -3243,6 +3276,45 @@ mod tests {
         assert!(matches!(error, CommandError::InvalidValue { field: "width", .. }));
         assert_eq!(layout.version(), 0);
         assert_eq!(format!("{layout:?}"), before);
+    }
+
+
+    #[test]
+    fn apply_move_group_reorders_with_an_inverse_that_restores_the_original_order() {
+        let metrics = DockMetrics::default();
+        let mut layout = initial_layout(Profile::Generic);
+        let column_id = layout.main_area(DockSide::Right).unwrap().root;
+        let (first_group, second_group) = match layout.node(column_id).unwrap() {
+            Node::Column(column) => (column.groups[0], column.groups[1]),
+            _ => panic!("initial main root must be a Column"),
+        };
+
+        let moved = layout
+            .apply(
+                DockCommand::MoveGroup {
+                    group: first_group,
+                    column: column_id,
+                    index: 2,
+                },
+                &metrics,
+            )
+            .unwrap();
+        let groups_after_move = match layout.node(column_id).unwrap() {
+            Node::Column(column) => column.groups.clone(),
+            _ => panic!("main root must remain a Column"),
+        };
+        assert_eq!(groups_after_move, vec![second_group, first_group]);
+        assert_eq!(layout.version(), 1);
+
+        let inverse = moved.inverse.expect("a same-column move has a safe inverse");
+        layout.apply(inverse, &metrics).unwrap();
+        let groups_after_inverse = match layout.node(column_id).unwrap() {
+            Node::Column(column) => column.groups.clone(),
+            _ => panic!("main root must remain a Column"),
+        };
+        assert_eq!(groups_after_inverse, vec![first_group, second_group]);
+        assert_eq!(layout.version(), 2);
+        assert_eq!(layout.validate(&metrics), Ok(()));
     }
 
     #[test]
