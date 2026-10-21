@@ -229,8 +229,10 @@ impl Layout {
             Some(_) => return Err(CommandError::InvalidTarget { reason: "target must be a Column node" }),
             None => return Err(CommandError::MissingNode { node: column_id }),
         };
-        if column.mode == ColumnMode::IconsOnly {
-            return Ok(metrics.rail_width);
+        match column.mode {
+            ColumnMode::IconsOnly => return Ok(metrics.rail_width),
+            ColumnMode::IconsAndLabels => return Ok(metrics.min_column_width),
+            ColumnMode::Expanded => {}
         }
         let mut minimum = metrics.min_column_width;
         for group in &column.groups {
@@ -254,7 +256,7 @@ impl Layout {
             }),
             None => return Err(CommandError::MissingNode { node: column_id }),
         };
-        if column.mode == ColumnMode::IconsOnly {
+        if column.mode.is_rail() {
             return Ok(Some(column.width));
         }
 
