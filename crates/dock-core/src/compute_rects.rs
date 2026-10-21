@@ -1235,6 +1235,29 @@ mod tests {
     }
 
     #[test]
+    fn vertical_split_reports_content_extent_when_child_minimums_do_not_fit() {
+        let metrics = DockMetrics::default();
+        let mut builder = LayoutBuilder::new(Profile::Generic);
+        let mut children = Vec::new();
+        for name in ["split-top", "split-bottom"] {
+            let (_, panel_node) = builder.panel(key(name), constraints());
+            children.push(builder.tabs(vec![panel_node], 0, false));
+        }
+        let root = builder.split(Axis::Y, children, vec![0.5, 0.5]);
+        builder.main_area(DockSide::Left, root);
+        let layout = builder.build();
+
+        let rects = layout.compute_rects(viewport(1000.0, 120.0), &metrics).unwrap();
+
+        assert_eq!(rects.vertical_overflow.len(), 1);
+        assert_eq!(rects.vertical_overflow[0].owner, root);
+        assert_eq!(rects.vertical_overflow[0].viewport.size.height, 120.0);
+        assert_eq!(rects.vertical_overflow[0].content_extent.size.height, 236.0);
+        assert_eq!(rects.panels.len(), 2);
+        assert!(rects.panels.iter().all(|panel| panel.rect.size.height == 60.0));
+    }
+
+    #[test]
     fn non_finite_viewport_is_rejected_without_emitting_non_finite_rectangles() {
         let layout = LayoutBuilder::new(Profile::Photoshop).build();
         let metrics = DockMetrics::default();
