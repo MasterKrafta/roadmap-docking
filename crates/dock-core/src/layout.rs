@@ -135,7 +135,7 @@ impl Layout {
             }
         }
 
-        let mut panel_placements: HashMap<PanelId, (NodeId, usize)> = HashMap::new();
+        let mut panel_placements: HashMap<PanelId, NodeId> = HashMap::new();
 
         for (node_id, node) in self.nodes.iter() {
             match node {
@@ -187,15 +187,14 @@ impl Layout {
                             panel: panel.panel_id,
                         });
                     }
-                    if let Some((first_node, count)) = panel_placements.get_mut(&panel.panel_id) {
-                        *count += 1;
+                    if let Some(first_node) = panel_placements.get(&panel.panel_id) {
                         errors.push(ValidationError::DuplicatePanelPlacement {
                             panel: panel.panel_id,
                             first_node: *first_node,
                             second_node: node_id,
                         });
                     } else {
-                        panel_placements.insert(panel.panel_id, (node_id, 1));
+                        panel_placements.insert(panel.panel_id, node_id);
                     }
                 }
                 Node::Column(column) => {
@@ -276,7 +275,7 @@ impl Layout {
 
             let key = instance.key.clone();
             let singleton = instance.constraints.singleton;
-            if let Some((first_id, first_singleton)) = singleton_by_key.get(&key) {
+            if let Some((first_id, first_singleton)) = singleton_by_key.get_mut(&key) {
                 if singleton || *first_singleton {
                     errors.push(ValidationError::DuplicateSingletonPanel {
                         key,
@@ -284,6 +283,7 @@ impl Layout {
                         second: panel_id,
                     });
                 }
+                *first_singleton |= singleton;
             } else {
                 singleton_by_key.insert(key, (panel_id, singleton));
             }
