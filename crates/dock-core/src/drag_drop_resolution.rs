@@ -151,6 +151,38 @@ fn panel_self_and_same_tab_position_resolve_to_noop() {
 }
 
 #[test]
+fn panel_tab_may_split_from_its_own_group_edge() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+    let (panel, p0) = builder.panel(key("own-edge-panel"), constraints());
+    let (_, p1) = builder.panel(key("own-edge-sibling"), constraints());
+    let group = builder.tabs(vec![p0, p1], 0, false);
+    let column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![group],
+        vec![1.0],
+    );
+    builder.main_area(DockSide::Left, column);
+    let layout = builder.build();
+    let request = DragDropRequest {
+        payload: DragPayload::Panel { panel },
+        handle: DragHandle::PanelTab,
+        origin: Point::ZERO,
+        point: Point::new(4.0, 0.0),
+        target: Some(DropTarget::GroupEdge { group, zone: crate::DropZone::Bottom }),
+    };
+
+    assert_eq!(
+        layout.resolve_drag_drop(&request, &metrics).unwrap(),
+        DragDropAction::Command(DockCommand::MovePanel {
+            panel,
+            target: DropTarget::GroupEdge { group, zone: crate::DropZone::Bottom },
+        })
+    );
+}
+
+#[test]
 fn group_self_drop_and_same_column_slot_are_noops_without_version_increment() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
@@ -216,7 +248,7 @@ fn group_drag_to_main_column_becomes_one_command_and_preserves_tabs_state() {
     let DragDropAction::Command(command) = action else { panic!("main column action"); };
     layout.apply(command, &metrics).unwrap();
     assert_eq!(tabs(&layout, source), &original);
-    assert!(layout.main_area(DockSide::Left).is_some());
+    assert!(layout.main_area(DockSide::Left).is_none());
     let Some(Node::Split(split)) = layout.main_area(DockSide::Right).and_then(|area| layout.node(area.root)) else {
         panic!("main-dock insertion produces a horizontal split");
     };
