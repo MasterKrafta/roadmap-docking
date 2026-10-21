@@ -415,6 +415,30 @@ fn floating_bounds_are_clamped_to_current_visible_client_region() {
 }
 
 #[test]
+fn client_region_smaller_than_floating_minimum_is_reported_not_shrunk_below_minimum() {
+    let metrics = DockMetrics::default();
+    let (layout, descriptors) = sample_layout();
+    let file = WorkspaceFile::from_layout(&layout);
+
+    assert!(matches!(
+        file.unwrap().into_layout_with_options(
+            &descriptors,
+            &metrics,
+            WorkspaceLoadOptions::new(Some(Rect::new(
+                Point::ZERO,
+                Size::new(1.0, 1.0),
+            ))),
+        ),
+        Err(WorkspaceFileError::FloatingBoundsInsufficientSpace {
+            axis: crate::Axis::X,
+            available: 1.0,
+            required,
+            ..
+        }) if required >= constraints().min_size.width
+    ));
+}
+
+#[test]
 fn stale_profile_rail_width_is_repaired_and_reported() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
