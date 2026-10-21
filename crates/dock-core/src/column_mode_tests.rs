@@ -542,3 +542,29 @@ fn reopening_a_singleton_from_the_window_menu_activates_it_and_opens_rail_flyout
     assert_eq!(fixture.layout.version(), version);
     assert_eq!(fixture.layout.panel_instances().count(), panel_count);
 }
+
+
+#[test]
+fn nested_generic_rail_groups_can_open_flyouts() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Generic);
+    let (panel, panel_node) = builder.panel(key("generic-nested-rail"), constraints());
+    let group = builder.tabs(vec![panel_node], 0, false);
+    let split = builder.split(crate::Axis::Y, vec![group], vec![1.0]);
+    let column = builder.column(
+        metrics.rail_width,
+        ColumnMode::IconsOnly,
+        vec![split],
+        vec![1.0],
+    );
+    builder.main_area(DockSide::Left, column);
+    let mut layout = builder.build();
+
+    layout.apply(
+        DockCommand::OpenPanelFlyout { column, panel },
+        &metrics,
+    ).unwrap();
+
+    assert_eq!(layout.flyout().unwrap().group, group);
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
