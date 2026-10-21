@@ -2476,9 +2476,10 @@ fn geometry_error_reason(error: GeometryError) -> &'static str {
 mod tests {
     use super::Layout;
     use crate::{
-        Axis, CanvasState, ChromeMode, DockArea, DockAreaId, DockMetrics, DockSide, FloatingGroup,
-        FloatingGroupId, Node, NodeId, Panel, PanelConstraints, PanelId, PanelInstance, PanelKey,
-        Point, Profile, Rect, Size, Split, Tabs, ValidationError,
+        Axis, CanvasState, ChromeMode, CommandError, CommandValue, DockArea, DockAreaId,
+        DockCommand, DockMetrics, DockSide, DropTarget, FloatingGroup, FloatingGroupId, Node,
+        NodeId, Panel, PanelConstraints, PanelId, PanelInstance, PanelKey, Point, Profile, Rect,
+        Size, Split, Tabs, ValidationError,
     };
     use slotmap::{Key, SlotMap};
 
@@ -3007,6 +3008,146 @@ mod tests {
         assert_eq!(layout.dock_areas().count(), 0);
         assert_eq!(layout.floating_groups().count(), 0);
         assert_eq!(layout.validate(&DockMetrics::default()), Ok(()));
+    }
+
+
+    #[test]
+    fn apply_commits_a_successful_change_and_increments_version_once() {
+        let metrics = DockMetrics::default();
+        let mut layout = initial_layout(Profile::Generic);
+        let column_id = layout.main_area(DockSide::Right).unwrap().root;
+        let old_width = match layout.node(column_id).unwrap() {
+            Node::Column(column) => column.width,
+            _ => panic!("initial main root must be a Column"),
+        };
+
+        let outcome = layout
+            .apply(
+                DockCommand::ResizeColumn { column: column_id, width: old_width + 24.0 },
+                &metrics,
+            )
+            .unwrap();
+
+        assert_eq!(layout.version(), 1);
+        assert_eq!(outcome.new_version, 1);
+        assert!(outcome.changed_nodes.contains(&column_id));
+        assert_eq!(outcome.actual_value, Some(CommandValue::ColumnWidth(old_width + 24.0)));
+        assert!(outcome.inverse.is_some());
+        assert_eq!(layout.validate(&metrics), Ok(()));
+
+        // Repeating the same effective value is a no-op and must not add a version.
+        let no_op = layout
+            .apply(
+                DockCommand::ResizeColumn { column: column_id, width: old_width + 24.0 },
+                &metrics,
+            )
+            .unwrap();
+        assert_eq!(layout.version(), 1);
+        assert_eq!(no_op.new_version, 1);
+        assert!(no_op.changed_nodes.is_empty());
+        assert!(no_op.inverse.is_none());
+    }
+
+    #[test]
+    fn apply_rejection_leaves_layout_and_version_unchanged() {
+        let metrics = DockMetrics::default();
+        let mut layout = initial_layout(Profile::Generic);
+        let before = format!("{layout:?}");
+        let before_version = layout.version();
+
+        let error = layout
+            .apply(
+                DockCommand::ResizeColumn { column: NodeId::null(), width: 300.0 },
+                &metrics,
+            )
+            .unwrap_err();
+
+        assert!(matches!(error, CommandError::MissingNode { .. }));
+        assert_eq!(layout.version(), before_version);
+        assert_eq!(format!("{layout:?}"), before);
+    }
+
+    #[test]
+    fn apply_invalid_value_is_rejected_without_panicking_or_mutating_state() {
+        let metrics = DockMetrics::default();
+        let mut layout = initial_layout(Profile::Generic);
+        let column_id = layout.main_area(DockSide::Right).unwrap().root;
+        let before = format!("{layout:?}");
+
+        let error = layout
+            .apply(
+                DockCommand::ResizeColumn { column: column_id, width: f32::NAN },
+                &metrics,
+            )
+            .unwrap_err();
+
+        assert!(matches!(error, CommandError::InvalidValue { field: "width", .. }));
+        assert_eq!(layout.version(), 0);
+        assert_eq!(format!("{layout:?}"), before);
+    }
+
+    #[test]
+    fn apply_drop_of_panel_at_its_current_tab_slot_is_a_no_op() {
+        let metrics = DockMetrics::default();
+        let mut layout = initial_layout(Profile::Generic);
+        let root = layout.main_area(DockSide::Right).unwrap().root;
+        let group = match layout.node(root).unwrap() {
+            Node::Column(column) => column.groups[0],
+            _ => panic!("initial main root must be a Column"),
+        };
+        let panel_id = match layout.node(group).unwrap() {
+            Node::Tabs(tabs) => match layout.node(tabs.children[0]).unwrap() {
+                Node::Panel(panel) => panel.panel_id,
+                _ => panic!("tab entry must be a Panel"),
+            },
+            _ => panic!("column group must be Tabs"),
+        };
+        let before = format!("{layout:?}");
+
+        let outcome = layout
+            .apply(
+                DockCommand::MovePanel {
+                    panel: panel_id,
+                    target: DropTarget::Tabs { group, index: 0 },
+                },
+                &metrics,
+            )
+            .unwrap();
+
+        assert_eq!(outcome.new_version, 0);
+        assert!(outcome.changed_nodes.is_empty());
+        assert!(outcome.inverse.is_none());
+        assert_eq!(layout.version(), 0);
+        assert_eq!(format!("{layout:?}"), before);
+    }
+
+    #[test]
+    fn apply_transient_flyout_does_not_increment_persistent_version() {
+        let metrics = DockMetrics::default();
+        let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+        let (_, panel) = builder.panel(
+            PanelKey::new("layers").unwrap(),
+            descriptors()[0].1,
+        );
+        let group = builder.tabs(vec![panel], 0, false);
+        let column = builder.column(
+            metrics.rail_width,
+            crate::ColumnMode::IconsOnly,
+            vec![group],
+            vec![1.0],
+        );
+        builder.main_area(DockSide::Right, column);
+        let mut layout = builder.build();
+
+        let outcome = layout
+            .apply(DockCommand::OpenFlyout { column, group }, &metrics)
+            .unwrap();
+
+        assert_eq!(layout.flyout(), Some(crate::FlyoutState::new(column, group)));
+        assert_eq!(layout.version(), 0);
+        assert_eq!(outcome.new_version, 0);
+        assert!(outcome.inverse.is_none());
+        assert!(outcome.changed_nodes.is_empty());
     }
 
 }
