@@ -4,6 +4,7 @@
 
 pub mod axis;
 pub mod chrome_mode;
+pub mod column;
 pub mod column_mode;
 pub mod dock_area_id;
 pub mod dock_area_kind;
@@ -12,6 +13,7 @@ pub mod dock_profile;
 pub mod dock_side;
 pub mod floating_group_id;
 pub mod geometry_error;
+pub mod node;
 pub mod node_id;
 pub mod panel;
 pub mod panel_id;
@@ -27,6 +29,7 @@ pub mod tabs;
 
 pub use axis::Axis;
 pub use chrome_mode::ChromeMode;
+pub use column::Column;
 pub use column_mode::ColumnMode;
 pub use dock_area_id::DockAreaId;
 pub use dock_area_kind::DockAreaKind;
@@ -35,6 +38,7 @@ pub use dock_profile::DockProfile;
 pub use dock_side::DockSide;
 pub use floating_group_id::FloatingGroupId;
 pub use geometry_error::GeometryError;
+pub use node::Node;
 pub use node_id::NodeId;
 pub use panel::Panel;
 pub use panel_id::PanelId;
