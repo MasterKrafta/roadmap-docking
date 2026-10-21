@@ -507,7 +507,7 @@ fn valid_commands(
         DockCommand::CloseFlyout,
         DockCommand::SetChrome {
             mode: if layout.chrome() == ChromeMode::Visible {
-                ChromeMode::Hidden
+                ChromeMode::AllHidden
             } else {
                 ChromeMode::Visible
             },
@@ -1229,7 +1229,7 @@ fn c47_serialized_command_journal_replays_to_equivalent_logical_layout() {
         &mut recorded,
         &mut journal,
         DockCommand::SetChrome {
-            mode: ChromeMode::Hidden,
+            mode: ChromeMode::AllHidden,
         },
         &metrics,
     );
