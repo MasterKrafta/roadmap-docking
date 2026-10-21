@@ -72,6 +72,16 @@ pub mod tab_strip_rect;
 pub mod tabs;
 pub mod validation_error;
 pub mod vertical_overflow;
+#[cfg(feature = "serde")]
+pub mod workspace_file;
+#[cfg(feature = "serde")]
+pub mod workspace_file_error;
+#[cfg(feature = "serde")]
+pub mod workspace_floating_group;
+#[cfg(feature = "serde")]
+pub mod workspace_layout;
+#[cfg(feature = "serde")]
+pub mod workspace_node;
 
 pub use allowed_area::AllowedArea;
 pub use axis::Axis;
@@ -139,6 +149,16 @@ pub use tab_strip_rect::TabStripRect;
 pub use tabs::Tabs;
 pub use validation_error::ValidationError;
 pub use vertical_overflow::VerticalOverflow;
+#[cfg(feature = "serde")]
+pub use workspace_file::{WorkspaceFile, WORKSPACE_FORMAT, WORKSPACE_VERSION};
+#[cfg(feature = "serde")]
+pub use workspace_file_error::WorkspaceFileError;
+#[cfg(feature = "serde")]
+pub use workspace_floating_group::WorkspaceFloatingGroup;
+#[cfg(feature = "serde")]
+pub use workspace_layout::WorkspaceLayout;
+#[cfg(feature = "serde")]
+pub use workspace_node::WorkspaceNode;
 
 #[cfg(test)]
 mod layout_builder;
@@ -158,3 +178,6 @@ mod collapse_group_tests;
 mod column_mode_tests;
 #[cfg(test)]
 mod flyout_tests;
+
+#[cfg(all(test, feature = "serde"))]
+mod workspace_file_tests;
