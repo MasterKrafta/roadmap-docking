@@ -3,10 +3,9 @@ use std::collections::HashMap;
 use slotmap::SlotMap;
 
 use crate::{
-    CanvasState, ChromeMode, Column, DockArea, DockAreaId, DockMetrics, DockSide, FloatingGroup,
-    FloatingGroupId, Layout, Node, NodeId, Panel, PanelConstraints, PanelId, PanelInstance, PanelKey,
-    PanelState, Profile, Split, Tabs, ValidationError, WorkspaceFileError, WorkspaceFloatingGroup,
-    WorkspaceLayout, WorkspaceNode,
+    Column, DockArea, DockAreaId, DockMetrics, DockSide, FloatingGroup, FloatingGroupId, Layout,
+    Node, NodeId, Panel, PanelConstraints, PanelId, PanelInstance, PanelKey, Split, Tabs,
+    WorkspaceFileError, WorkspaceFloatingGroup, WorkspaceLayout, WorkspaceNode,
 };
 
 /// Marker identifying this file as a Roadmap Docking workspace.
