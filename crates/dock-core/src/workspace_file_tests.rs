@@ -458,12 +458,20 @@ fn invalid_visible_region_returns_an_error() {
     let (layout, descriptors) = sample_layout();
     let file = WorkspaceFile::from_layout(&layout).unwrap();
 
-    assert!(matches!(
-        file.into_layout_with_options(
-            &descriptors,
-            &metrics,
-            WorkspaceLoadOptions::new(Some(Rect::ZERO)),
-        ),
-        Err(WorkspaceFileError::InvalidVisibleClientRegion(_))
-    ));
+    for region in [
+        Rect::ZERO,
+        // Width is positive and finite, but adding it at this magnitude does
+        // not advance the f32 edge; clamping must return an error, not panic.
+        Rect::new(Point::new(f32::MAX, 0.0), Size::new(1.0, 100.0)),
+    ] {
+        let fresh_file = WorkspaceFile::from_layout(&layout).unwrap();
+        assert!(matches!(
+            fresh_file.into_layout_with_options(
+                &descriptors,
+                &metrics,
+                WorkspaceLoadOptions::new(Some(region)),
+            ),
+            Err(WorkspaceFileError::InvalidVisibleClientRegion(_))
+        ));
+    }
 }
