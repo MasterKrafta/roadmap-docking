@@ -46,8 +46,17 @@ pub enum DockCommand {
         zone: DropZone,
         ratio: f32,
     },
-    /// Resize the ordered vertical groups within one column.
-    ResizeGroups { column: NodeId, ratios: Vec<f32> },
+    /// Move one boundary between adjacent groups by a signed logical-pixel delta.
+    ///
+    /// available_height is the height available to the groups after splitter
+    /// gaps are removed; Core uses it to enforce minimum expanded heights and
+    /// the fixed height of collapsed groups.
+    ResizeGroups {
+        column: NodeId,
+        boundary_index: usize,
+        delta: f32,
+        available_height: f32,
+    },
     /// Set a column's requested width in logical pixels.
     ResizeColumn { column: NodeId, width: f32 },
     /// Move a boundary between adjacent main columns by a signed logical-pixel
@@ -57,8 +66,18 @@ pub enum DockCommand {
         boundary_index: usize,
         delta: f32,
     },
-    /// Reset the horizontal ratios of the main columns on one dock side.
-    ResetColumnRatios { side: DockSide },
+    /// Reset group-height ratios in one column, sharing free height among
+    /// expanded groups only. Collapsed groups keep their fixed collapsed height.
+    ResetColumnRatios {
+        column: NodeId,
+        available_height: f32,
+    },
+    /// Reset horizontal width ratios for the main columns on one dock side.
+    ResetMainColumnRatios { side: DockSide },
+    /// Restore an exact previously captured group-ratio vector (undo/history).
+    ///
+    /// Interactive resizing should use ResizeGroups or ResetColumnRatios.
+    SetGroupRatios { column: NodeId, ratios: Vec<f32> },
     /// Detach a Panel or Tabs node into a floating group at these bounds.
     Float { node: NodeId, bounds: Rect },
     /// Move a floating window by setting its new origin.
@@ -114,14 +133,24 @@ mod tests {
                 zone: DropZone::Bottom,
                 ratio: 0.5,
             },
-            DockCommand::ResizeGroups { column: NodeId::null(), ratios: vec![0.5, 0.5] },
+            DockCommand::ResizeGroups {
+                column: NodeId::null(),
+                boundary_index: 0,
+                delta: 12.0,
+                available_height: 480.0,
+            },
             DockCommand::ResizeColumn { column: NodeId::null(), width: 280.0 },
             DockCommand::ResizeColumnBoundary {
                 side: DockSide::Right,
                 boundary_index: 0,
                 delta: 12.0,
             },
-            DockCommand::ResetColumnRatios { side: DockSide::Right },
+            DockCommand::ResetColumnRatios {
+                column: NodeId::null(),
+                available_height: 480.0,
+            },
+            DockCommand::ResetMainColumnRatios { side: DockSide::Right },
+            DockCommand::SetGroupRatios { column: NodeId::null(), ratios: vec![1.0] },
             DockCommand::Float {
                 node: NodeId::null(),
                 bounds: Rect::new(Point::ZERO, Size::new(400.0, 300.0)),
@@ -139,7 +168,7 @@ mod tests {
             DockCommand::CloseFlyout,
             DockCommand::SetChrome { mode: ChromeMode::Hidden },
         ];
-        assert_eq!(commands.len(), 22);
+        assert_eq!(commands.len(), 24);
     }
 
     #[cfg(feature = "serde")]
