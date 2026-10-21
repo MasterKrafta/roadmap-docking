@@ -142,11 +142,11 @@ impl Layout {
         command: &DockCommand,
         metrics: &DockMetrics,
     ) -> Result<CommandOutcome, CommandError> {
-        self.validate(metrics).map_err(CommandError::InvalidLayout)?;
+        self.validate(metrics).map_err(|errors| CommandError::InvalidLayout { errors })?;
 
         let mut candidate = self.clone();
         let applied = candidate.apply_command(command, metrics)?;
-        candidate.normalize_in_place(metrics).map_err(CommandError::InvalidLayout)?;
+        candidate.normalize_in_place(metrics).map_err(|errors| CommandError::InvalidLayout { errors })?;
 
         if candidate.same_state(self) {
             return Ok(CommandOutcome {
@@ -2136,6 +2136,16 @@ impl Layout {
         candidate.normalize_in_place(metrics)?;
         *self = candidate;
         Ok(())
+    }
+
+    /// Crate-visible entry point for tests in sibling modules. This does not
+    /// expose normalization in production builds or to downstream UI code.
+    #[cfg(test)]
+    pub(crate) fn normalize_for_test(
+        &mut self,
+        metrics: &DockMetrics,
+    ) -> Result<(), Vec<ValidationError>> {
+        self.normalize(metrics)
     }
 
     fn normalize_in_place(
