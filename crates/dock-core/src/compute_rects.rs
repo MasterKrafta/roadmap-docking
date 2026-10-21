@@ -556,7 +556,7 @@ fn layout_split(
                     Size::new(rect.size.width, allocation.sizes[index]),
                 );
                 layout_node(layout, *child, child_rect, metrics, output)?;
-                y += heights[index];
+                y += allocation.sizes[index];
                 if index + 1 < split.children.len() {
                     push_splitter(
                         id,
