@@ -1,6 +1,6 @@
 use crate::{
-    ChromeMode, ColumnMode, DockSide, DropTarget, DropZone, FloatingGroupId,
-    PanelConstraints, PanelId, PanelKey, Point, NodeId, Rect, Size,
+    ChromeMode, ColumnMode, DockSide, DropTarget, DropZone, FloatingGroupId, NodeId,
+    PanelConstraints, PanelId, PanelKey, Point, Rect, Size,
 };
 
 /// A requested change to persistent docking state or an explicitly declared
@@ -122,10 +122,13 @@ mod tests {
             DockCommand::ResetColumnRatios { side: DockSide::Right },
             DockCommand::Float {
                 node: NodeId::null(),
-                bounds: Rect::new(crate::Point::ZERO, Size::new(400.0, 300.0)),
+                bounds: Rect::new(Point::ZERO, Size::new(400.0, 300.0)),
             },
             DockCommand::MoveFloating { group: FloatingGroupId::null(), origin: Point::ZERO },
-            DockCommand::ResizeFloating { group: FloatingGroupId::null(), size: Size::new(500.0, 400.0) },
+            DockCommand::ResizeFloating {
+                group: FloatingGroupId::null(),
+                size: Size::new(500.0, 400.0),
+            },
             DockCommand::RaiseFloating { group: FloatingGroupId::null() },
             DockCommand::DockFloating { group: FloatingGroupId::null(), target },
             DockCommand::CollapseGroup { group: NodeId::null(), collapsed: true },
