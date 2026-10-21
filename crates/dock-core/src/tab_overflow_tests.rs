@@ -26,7 +26,8 @@ fn two_or_more_tabs_layout(
     let mut panel_nodes = Vec::with_capacity(tab_count);
 
     for index in 0..tab_count {
-        let (panel, node) = builder.panel(key(format!("overflow-tab-{index}")), constraints());
+        let panel_key = format!("overflow-tab-{index}");
+        let (panel, node) = builder.panel(key(&panel_key), constraints());
         panel_ids.push(panel);
         panel_nodes.push(node);
     }
