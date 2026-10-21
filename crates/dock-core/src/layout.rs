@@ -6,7 +6,7 @@ use crate::{
     Axis, CanvasState, ChromeMode, ColumnMode, CommandError, CommandOutcome, CommandValue,
     DockArea, DockAreaId, DockAreaKind, DockCommand, DockMetrics, DockSide, DropTarget, DropZone,
     FloatingGroup, FloatingGroupId, FlyoutState, GeometryError, Node, NodeId, PanelConstraints,
-    PanelId, PanelInstance, PanelKey, Profile, Rect, Size, ValidationError,
+    PanelId, PanelInstance, Profile, Rect, Size, ValidationError,
 };
 
 const RATIO_TOLERANCE: f32 = 1.0e-4;
@@ -506,7 +506,7 @@ impl Layout {
                     return Err(CommandError::InvalidValue { field: "ratios", reason: "ratio count must match group count" });
                 }
                 if let Some(reason) = ratio_issues(ratios, group_count).first() {
-                    return Err(CommandError::InvalidValue { field: "ratios", reason });
+                    return Err(CommandError::InvalidValue { field: "ratios", reason: *reason });
                 }
                 if current == *ratios {
                     return Ok(CommandApplication::persistent());
@@ -552,7 +552,7 @@ impl Layout {
                     return Err(CommandError::InvalidValue { field: "delta", reason: "delta must be finite" });
                 }
                 let columns = self.main_columns(*side)?;
-                if *boundary_index + 1 >= columns.len() {
+                if *boundary_index >= columns.len().saturating_sub(1) {
                     return Err(CommandError::InvalidTarget { reason: "column boundary index does not identify adjacent columns" });
                 }
                 let left_id = columns[*boundary_index];
@@ -584,19 +584,18 @@ impl Layout {
                     if let Some(Node::Column(column)) = self.nodes.get_mut(right_id) {
                         column.width = new_right;
                     }
-                    let total: f32 = columns.iter().filter_map(|id| match self.nodes.get(*id) {
+                    let widths: Vec<f32> = columns.iter().filter_map(|id| match self.nodes.get(*id) {
                         Some(Node::Column(column)) => Some(column.width),
                         _ => None,
-                    }).sum();
+                    }).collect();
+                    let total: f32 = widths.iter().copied().sum();
                     if !total.is_finite() || total <= 0.0 {
                         return Err(CommandError::InvalidValue { field: "delta", reason: "total dock column width overflowed" });
                     }
+                    let ratios: Vec<f32> = widths.iter().map(|width| *width / total).collect();
                     if let Some(area) = self.main_area(*side).copied() {
                         if let Some(Node::Split(split)) = self.nodes.get_mut(area.root) {
-                            split.ratios = columns.iter().map(|id| match self.nodes.get(*id) {
-                                Some(Node::Column(column)) => column.width / total,
-                                _ => 0.0,
-                            }).collect();
+                            split.ratios = ratios;
                         }
                     }
                 }
@@ -1234,8 +1233,7 @@ impl Layout {
                 }
                 Ok(())
             }
-            (Some(Node::Split(_)), _,) => {
-                let _ = self;
+            (Some(Node::Split(_)), _) => {
                 Err(CommandError::InvalidTarget {
                     reason: "floating split stacks can only be docked into a main column or icon rail",
                 })
@@ -2193,7 +2191,7 @@ impl Layout {
             flyout: None,
         }
     }
-
+}
 
 #[derive(Clone, Debug)]
 struct CommandApplication {
@@ -2210,8 +2208,6 @@ impl CommandApplication {
     fn transient() -> Self {
         Self { actual_value: None, inverse: None, persistent: false }
     }
-}
-
 }
 
 fn side_index(side: DockSide) -> usize {
