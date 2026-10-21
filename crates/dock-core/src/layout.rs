@@ -137,6 +137,7 @@ impl Layout {
 }
 
 mod commands;
+mod drag_drop;
 mod tree;
 mod sizing;
 mod validation;
