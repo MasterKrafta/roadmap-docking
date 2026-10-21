@@ -8,11 +8,12 @@ use crate::{
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum DockCommand {
-    /// Open a panel instance at the requested destination.
+    /// Open a panel instance at an explicit destination, or use its last
+    /// runtime dock location and then the profile default when target is None.
     OpenPanel {
         key: PanelKey,
         constraints: PanelConstraints,
-        target: DropTarget,
+        target: Option<DropTarget>,
     },
     /// Close one panel instance.
     ClosePanel { panel: PanelId },
@@ -100,7 +101,7 @@ mod tests {
         );
         let target = DropTarget::RailSlot { column: NodeId::null(), index: 1 };
         let commands = [
-            DockCommand::OpenPanel { key, constraints, target },
+            DockCommand::OpenPanel { key, constraints, target: Some(target) },
             DockCommand::ClosePanel { panel: PanelId::null() },
             DockCommand::CloseGroup { group: NodeId::null() },
             DockCommand::ActivateTab { group: NodeId::null(), panel: PanelId::null() },
