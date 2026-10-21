@@ -48,7 +48,7 @@ pub use floating_group_id::FloatingGroupId;
 pub use flyout_state::FlyoutState;
 pub use geometry_error::GeometryError;
 pub use layout::Layout;
-pub use layout_factory::{baseline_panel_constraints, create_initial_layout};
+pub use layout_factory::create_initial_layout;
 pub use node::Node;
 pub use node_id::NodeId;
 pub use panel::Panel;
