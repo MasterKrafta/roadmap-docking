@@ -3,11 +3,11 @@ use std::collections::{HashMap, HashSet};
 use slotmap::SlotMap;
 
 use crate::{
-    command_application::CommandApplication, Axis, CanvasState, ChromeMode, ColumnMode,
+    command_application::CommandApplication, Axis, CanvasState, ChromeMode, Column, ColumnMode,
     CommandError, CommandOutcome, CommandValue, DockArea, DockAreaId, DockAreaKind, DockCommand,
     DockMetrics, DockSide, DropTarget, DropZone, FloatingGroup, FloatingGroupId, FlyoutState,
-    GeometryError, LastDockLocation, Node, NodeId, PanelId, PanelInstance, PanelKey, Point, Profile,
-    Rect, Size, ValidationError,
+    GeometryError, LastDockLocation, Node, NodeId, Panel, PanelId, PanelInstance, PanelKey, Point,
+    Profile, Rect, Size, Split, Tabs, ValidationError,
 };
 
 const RATIO_TOLERANCE: f32 = 1.0e-4;
