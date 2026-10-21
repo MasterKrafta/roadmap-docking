@@ -107,22 +107,19 @@ pub fn create_initial_layout(
     ))
 }
 
-/// A convenient baseline set of layout constraints for tests and examples.
-///
-/// Production app code should usually pass constraints from its registry.
-pub fn baseline_panel_constraints() -> PanelConstraints {
-    PanelConstraints::new(
-        Size::new(120.0, 80.0),
-        Size::new(280.0, 220.0),
-        None,
-        false,
-    )
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{baseline_panel_constraints, create_initial_layout};
+    use super::create_initial_layout;
     use crate::{Column, DockMetrics, DockSide, Node, PanelConstraints, PanelKey, Profile, Size};
+
+    fn baseline_panel_constraints() -> PanelConstraints {
+        PanelConstraints::new(
+            Size::new(120.0, 80.0),
+            Size::new(280.0, 220.0),
+            None,
+            false,
+        )
+    }
 
     fn descriptors() -> Vec<(PanelKey, PanelConstraints)> {
         ["layers", "color", "properties", "history"]
