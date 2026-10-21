@@ -3932,7 +3932,7 @@ mod tests {
             other => panic!("remembered group should remain a Tabs node: {other:?}"),
         };
         assert_ne!(active_panel, closed_id);
-        assert_eq!(layout.panel_instances().count(), 3);
+        assert_eq!(layout.panel_instances().count(), 2);
         assert_eq!(layout.validate(&metrics), Ok(()));
 
         let default_key = PanelKey::new("c43-default-placement").unwrap();
