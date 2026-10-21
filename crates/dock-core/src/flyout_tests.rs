@@ -113,6 +113,20 @@ fn opening_switching_and_closing_flyouts_only_changes_temporary_display_state() 
     assert_eq!(*fixture.layout.canvas(), canvas_before);
     assert_eq!(fixture.layout.compute_rects(viewport(), &metrics).unwrap(), rects_before);
 
+    let reopened = fixture
+        .layout
+        .apply(
+            DockCommand::OpenFlyout {
+                column: fixture.column,
+                panel: fixture.first_panel,
+            },
+            &metrics,
+        )
+        .unwrap();
+    assert_transient_outcome(&reopened, version);
+    assert_eq!(fixture.layout.flyout().unwrap().panel, fixture.first_panel);
+    assert_eq!(tree_snapshot(&fixture.layout), tree_before);
+
     // Opening a different icon replaces the one flyout instead of stacking another.
     let switched = fixture
         .layout
