@@ -53,14 +53,13 @@ impl PanelConstraints {
             return Err(GeometryError::InconsistentConstraints);
         }
 
-        if let Some(max_size) = self.max_size {
-            if self.preferred_size.width > max_size.width
+        if let Some(max_size) = self.max_size
+            && (self.preferred_size.width > max_size.width
                 || self.preferred_size.height > max_size.height
                 || self.min_size.width > max_size.width
-                || self.min_size.height > max_size.height
-            {
-                return Err(GeometryError::InconsistentConstraints);
-            }
+                || self.min_size.height > max_size.height)
+        {
+            return Err(GeometryError::InconsistentConstraints);
         }
 
         Ok(())
