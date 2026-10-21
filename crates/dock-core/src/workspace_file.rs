@@ -3,7 +3,8 @@ use std::collections::{BTreeSet, HashMap};
 use slotmap::SlotMap;
 
 use crate::{
-    Column, DockArea, DockAreaId, DockMetrics, DockSide, FloatingGroup, FloatingGroupId, Layout,
+    Column, DockArea, DockAreaId, DockMetrics, DockSide, FloatingGroup, FloatingGroupId,
+    GeometryError, Layout,
     Node, NodeId, Panel, PanelConstraints, PanelId, PanelInstance, PanelKey, Rect, Size, Split,
     Tabs, WorkspaceDiagnostic, WorkspaceFileError, WorkspaceFloatingGroup, WorkspaceLayout,
     WorkspaceLoadOptions, WorkspaceLoadResult, WorkspaceNode,
@@ -381,6 +382,11 @@ fn clamp_floating_bounds(
     let region_bottom = visible_region
         .checked_bottom()
         .map_err(WorkspaceFileError::InvalidVisibleClientRegion)?;
+    if region_right <= visible_region.origin.x || region_bottom <= visible_region.origin.y {
+        return Err(WorkspaceFileError::InvalidVisibleClientRegion(
+            GeometryError::NonPositiveDimension,
+        ));
+    }
 
     // When a stored floating window is larger than the current client region,
     // shrink it to fit and report the recovery through FloatingBoundsClamped.
@@ -388,6 +394,18 @@ fn clamp_floating_bounds(
     let height = bounds.size.height.min(visible_region.size.height);
     let max_x = region_right - width;
     let max_y = region_bottom - height;
+    // f32::clamp panics when its bounds are reversed or non-finite. Extremely
+    // large coordinates can make a positive logical dimension unrepresentable
+    // at that origin, so reject that region instead of risking a panic.
+    if !max_x.is_finite()
+        || !max_y.is_finite()
+        || max_x < visible_region.origin.x
+        || max_y < visible_region.origin.y
+    {
+        return Err(WorkspaceFileError::InvalidVisibleClientRegion(
+            GeometryError::ArithmeticOverflow,
+        ));
+    }
     let x = bounds.origin.x.clamp(visible_region.origin.x, max_x);
     let y = bounds.origin.y.clamp(visible_region.origin.y, max_y);
     let clamped = Rect::new(crate::Point::new(x, y), Size::new(width, height));
