@@ -378,11 +378,15 @@ impl Layout {
                         });
                     }
                 }
-                let inverse = self.tab_parent_index(panel_node).map(|(group, index)| {
-                    DockCommand::MovePanel {
+                let inverse = self.tab_parent_index(panel_node).and_then(|(group, index)| {
+                    let source_group_has_other_tabs = matches!(
+                        self.nodes.get(group),
+                        Some(Node::Tabs(tabs)) if tabs.children.len() > 1
+                    );
+                    source_group_has_other_tabs.then_some(DockCommand::MovePanel {
                         panel: *panel,
                         target: DropTarget::Tabs { group, index },
-                    }
+                    })
                 });
                 self.detach_node(panel_node)?;
                 self.insert_node_for_target(panel_node, *target, metrics, Some(0.5))?;
@@ -420,7 +424,9 @@ impl Layout {
                     }
                 }
                 let source_column = source_parent.and_then(|parent| match self.nodes.get(parent) {
-                    Some(Node::Column(column)) => column.groups.iter().position(|id| *id == *group).map(|index| (parent, index)),
+                    Some(Node::Column(column)) if column.groups.len() > 1 => {
+                        column.groups.iter().position(|id| *id == *group).map(|index| (parent, index))
+                    }
                     _ => None,
                 });
                 let inverse = source_column.map(|(source_column, source_index)| {
@@ -478,7 +484,9 @@ impl Layout {
                 }
                 let source_column = self.find_owner_column(*group);
                 let source_index = source_column.and_then(|column| match self.nodes.get(column) {
-                    Some(Node::Column(column_data)) => column_data.groups.iter().position(|id| id == group).map(|index| (column, index)),
+                    Some(Node::Column(column_data)) if column_data.groups.len() > 1 => {
+                        column_data.groups.iter().position(|id| id == group).map(|index| (column, index))
+                    }
                     _ => None,
                 });
                 let inverse = source_index.map(|(column, index)| DockCommand::MoveGroup { group: *group, column, index });
@@ -835,10 +843,38 @@ impl Layout {
                 Some(_) => Err(CommandError::InvalidTarget { reason: "tab target must be a Tabs node" }),
                 None => Err(CommandError::MissingNode { node: group }),
             },
-            DropTarget::GroupEdge { group, .. } => match self.nodes.get(group) {
-                Some(Node::Tabs(_)) => Ok(()),
-                Some(_) => Err(CommandError::InvalidTarget { reason: "group-edge target must be a Tabs node" }),
-                None => Err(CommandError::MissingNode { node: group }),
+            DropTarget::GroupEdge { group, zone } => {
+                match self.nodes.get(group) {
+                    Some(Node::Tabs(_)) => {}
+                    Some(_) => return Err(CommandError::InvalidTarget { reason: "group-edge target must be a Tabs node" }),
+                    None => return Err(CommandError::MissingNode { node: group }),
+                }
+                if self.profile == Profile::Photoshop {
+                    match zone {
+                        DropZone::Left | DropZone::Right => {
+                            let Some(column) = self.find_owner_column(group) else {
+                                return Err(CommandError::InvalidTarget {
+                                    reason: "horizontal group splits require a main-dock column",
+                                });
+                            };
+                            if self.main_column_position(column).is_none() {
+                                return Err(CommandError::InvalidTarget {
+                                    reason: "horizontal group splits require a column in a main dock",
+                                });
+                            }
+                        }
+                        DropZone::Top | DropZone::Bottom => {
+                            if self.find_owner_column(group).is_none()
+                                && self.find_floating_root_containing(group).is_none()
+                            {
+                                return Err(CommandError::InvalidTarget {
+                                    reason: "vertical group splits require a column or floating stack",
+                                });
+                            }
+                        }
+                    }
+                }
+                Ok(())
             },
             DropTarget::MainColumn { side, index } => {
                 let columns = self.main_columns(side)?;
