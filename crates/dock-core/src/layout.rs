@@ -4794,9 +4794,11 @@ mod tests {
         let Node::Column(value) = layout.node(column).unwrap() else {
             panic!("target should remain a Column");
         };
-        assert_eq!(value.group_ratios[0], 0.0);
-        assert!((value.group_ratios[1] - (392.0 / 472.0)).abs() < 1.0e-4);
-        assert!((value.group_ratios[2] - (80.0 / 472.0)).abs() < 1.0e-4);
+        let expected_weight_delta = 156.0 * 0.5 / 472.0;
+        assert_eq!(value.group_ratios[0], 0.5);
+        assert!((value.group_ratios[1] - (0.25 + expected_weight_delta)).abs() < 1.0e-4);
+        assert!((value.group_ratios[2] - (0.25 - expected_weight_delta)).abs() < 1.0e-4);
+        assert!((value.group_ratios.iter().sum::<f32>() - 1.0).abs() < 1.0e-4);
         assert_eq!(layout.validate(&metrics), Ok(()));
     }
 
