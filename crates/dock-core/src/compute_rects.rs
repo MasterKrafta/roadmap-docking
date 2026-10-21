@@ -323,10 +323,16 @@ fn layout_column(
         }
 
         let mut y = rect.origin.y;
-        for group_id in &column.groups {
+        let mut item_index = 0usize;
+        while item_index < display_order.len() {
+            let group_id = display_order[item_index].group;
             let group_start = y;
             let mut item_count = 0usize;
-            for item in display_order.iter().filter(|item| item.group == *group_id) {
+
+            while item_index < display_order.len()
+                && display_order[item_index].group == group_id
+            {
+                let item = display_order[item_index];
                 let item_rect = Rect::new(
                     Point::new(rect.origin.x, y),
                     Size::new(rect.size.width, slot_height),
@@ -340,16 +346,15 @@ fn layout_column(
                 ));
                 y += slot_height;
                 item_count += 1;
+                item_index += 1;
             }
 
-            if item_count > 0 {
-                let group_rect = Rect::new(
-                    Point::new(rect.origin.x, group_start),
-                    Size::new(rect.size.width, slot_height * item_count as f32),
-                );
-                group_rect.validate().map_err(ComputeRectsError::Geometry)?;
-                output.groups.push(GroupRect::new(*group_id, group_rect));
-            }
+            let group_rect = Rect::new(
+                Point::new(rect.origin.x, group_start),
+                Size::new(rect.size.width, slot_height * item_count as f32),
+            );
+            group_rect.validate().map_err(ComputeRectsError::Geometry)?;
+            output.groups.push(GroupRect::new(group_id, group_rect));
         }
         return Ok(());
     }
