@@ -1125,6 +1125,200 @@ mod tests {
     }
 
     #[test]
+    fn golden_rects_for_1280_by_800_cover_both_docks_columns_groups_and_splitters() {
+        let metrics = DockMetrics::default();
+        let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+        let (_, upper_panel_node) = builder.panel(key("golden-1280-left-upper"), constraints());
+        let upper_group = builder.tabs(vec![upper_panel_node], 0, false);
+        let (_, lower_panel_node) = builder.panel(key("golden-1280-left-lower"), constraints());
+        let lower_group = builder.tabs(vec![lower_panel_node], 0, false);
+        let first_column = builder.column(
+            240.0,
+            ColumnMode::Expanded,
+            vec![upper_group, lower_group],
+            vec![0.5, 0.5],
+        );
+
+        let (_, middle_panel_node) = builder.panel(key("golden-1280-left-middle"), constraints());
+        let middle_group = builder.tabs(vec![middle_panel_node], 0, false);
+        let second_column = builder.column(
+            300.0,
+            ColumnMode::Expanded,
+            vec![middle_group],
+            vec![1.0],
+        );
+        let left_root = builder.split(
+            Axis::X,
+            vec![first_column, second_column],
+            vec![0.5, 0.5],
+        );
+        builder.main_area(DockSide::Left, left_root);
+
+        let (_, right_panel_node) = builder.panel(key("golden-1280-right"), constraints());
+        let right_group = builder.tabs(vec![right_panel_node], 0, false);
+        let right_column = builder.column(
+            220.0,
+            ColumnMode::Expanded,
+            vec![right_group],
+            vec![1.0],
+        );
+        builder.main_area(DockSide::Right, right_column);
+
+        let layout = builder.build();
+        let rects = layout.compute_rects(viewport(1280.0, 800.0), &metrics).unwrap();
+
+        // Manual golden values: left dock = 240 + 4 + 300 = 544 px;
+        // right dock = 220 px; Canvas gets the exact 516 px remainder.
+        assert_eq!(
+            rects.canvas,
+            Some(Rect::new(Point::new(544.0, 0.0), Size::new(516.0, 800.0)))
+        );
+        assert_eq!(rects.columns.len(), 3);
+        assert_eq!(
+            rects.columns.iter().map(|item| item.rect).collect::<Vec<_>>(),
+            vec![
+                Rect::new(Point::ZERO, Size::new(240.0, 800.0)),
+                Rect::new(Point::new(244.0, 0.0), Size::new(300.0, 800.0)),
+                Rect::new(Point::new(1060.0, 0.0), Size::new(220.0, 800.0)),
+            ]
+        );
+
+        assert_eq!(rects.groups.len(), 4);
+        assert_eq!(
+            rects.groups.iter().map(|item| item.rect).collect::<Vec<_>>(),
+            vec![
+                Rect::new(Point::ZERO, Size::new(240.0, 398.0)),
+                Rect::new(Point::new(0.0, 402.0), Size::new(240.0, 398.0)),
+                Rect::new(Point::new(244.0, 0.0), Size::new(300.0, 800.0)),
+                Rect::new(Point::new(1060.0, 0.0), Size::new(220.0, 800.0)),
+            ]
+        );
+
+        // Hit rectangles intentionally use the 8 px splitter hit zone,
+        // centered around each 4 px visual splitter.
+        assert_eq!(rects.splitters.len(), 2);
+        assert_eq!(rects.splitters[0].owner, first_column);
+        assert_eq!(rects.splitters[0].boundary_index, 0);
+        assert_eq!(rects.splitters[0].axis, Axis::Y);
+        assert_eq!(
+            rects.splitters[0].rect,
+            Rect::new(Point::new(0.0, 396.0), Size::new(240.0, 8.0))
+        );
+        assert_eq!(rects.splitters[1].owner, left_root);
+        assert_eq!(rects.splitters[1].boundary_index, 0);
+        assert_eq!(rects.splitters[1].axis, Axis::X);
+        assert_eq!(
+            rects.splitters[1].rect,
+            Rect::new(Point::new(238.0, 0.0), Size::new(8.0, 800.0))
+        );
+
+        assert_eq!(rects.panels.len(), 4);
+        assert_eq!(
+            rects.panels.iter().map(|item| item.rect).collect::<Vec<_>>(),
+            vec![
+                Rect::new(Point::new(0.0, 56.0), Size::new(240.0, 342.0)),
+                Rect::new(Point::new(0.0, 458.0), Size::new(240.0, 342.0)),
+                Rect::new(Point::new(244.0, 56.0), Size::new(300.0, 744.0)),
+                Rect::new(Point::new(1060.0, 56.0), Size::new(220.0, 744.0)),
+            ]
+        );
+        assert!(rects.vertical_overflow.is_empty());
+        assert!(rects.drop_zones.is_empty());
+    }
+
+    #[test]
+    fn fractional_logical_viewport_preserves_dpi_independent_geometry_and_reports_small_height_overflow() {
+        let metrics = DockMetrics::default();
+        let mut builder = LayoutBuilder::new(Profile::Photoshop);
+        let (_, panel_node) = builder.panel(key("fractional-logical-panel"), constraints());
+        let group = builder.tabs(vec![panel_node], 0, false);
+        let column = builder.column(
+            200.25,
+            ColumnMode::Expanded,
+            vec![group],
+            vec![1.0],
+        );
+        builder.main_area(DockSide::Left, column);
+        let layout = builder.build();
+
+        // Geometry remains in logical px: non-integral viewport origins, widths,
+        // and heights are preserved exactly instead of rounded for a display DPI.
+        let viewport = Rect::new(
+            Point::new(12.25, 7.5),
+            Size::new(520.75, 196.5),
+        );
+        let rects = layout.compute_rects(viewport, &metrics).unwrap();
+        assert_eq!(
+            rects.canvas,
+            Some(Rect::new(
+                Point::new(212.5, 7.5),
+                Size::new(320.5, 196.5),
+            ))
+        );
+        assert_eq!(
+            rects.columns[0].rect,
+            Rect::new(
+                Point::new(12.25, 7.5),
+                Size::new(200.25, 196.5),
+            )
+        );
+        assert_eq!(
+            rects.groups[0].rect,
+            Rect::new(
+                Point::new(12.25, 7.5),
+                Size::new(200.25, 196.5),
+            )
+        );
+        assert_eq!(
+            rects.panels[0].rect,
+            Rect::new(
+                Point::new(12.25, 63.5),
+                Size::new(200.25, 140.5),
+            )
+        );
+        assert!(rects.vertical_overflow.is_empty());
+
+        // A stack 0.5 logical px below its content minimum reports overflow;
+        // content is not compressed below the panel's declared 140 px minimum.
+        let short_viewport = Rect::new(
+            Point::new(12.25, 7.5),
+            Size::new(520.75, 195.5),
+        );
+        let short_rects = layout.compute_rects(short_viewport, &metrics).unwrap();
+        assert_eq!(short_rects.vertical_overflow.len(), 1);
+        assert_eq!(short_rects.vertical_overflow[0].owner, column);
+        assert_eq!(
+            short_rects.vertical_overflow[0].viewport,
+            Rect::new(
+                Point::new(12.25, 7.5),
+                Size::new(200.25, 195.5),
+            )
+        );
+        assert_eq!(
+            short_rects.vertical_overflow[0].content_extent,
+            Rect::new(
+                Point::new(12.25, 7.5),
+                Size::new(200.25, 196.0),
+            )
+        );
+        assert_eq!(short_rects.groups[0].rect.size.height, 196.0);
+        assert_eq!(short_rects.panels[0].rect.size.height, 140.0);
+
+        // Crossing the minimum Canvas width by 0.25 logical px must fail,
+        // rather than shrinking either dock or the Canvas.
+        let too_narrow = Rect::new(
+            Point::new(12.25, 7.5),
+            Size::new(520.0, 196.5),
+        );
+        assert!(matches!(
+            layout.compute_rects(too_narrow, &metrics),
+            Err(ComputeRectsError::InsufficientCanvasWidth { available, minimum })
+                if available == 319.75 && minimum == metrics.min_canvas_width
+        ));
+    }
+
+    #[test]
     fn floating_bounds_clamp_to_client_area_respect_minimums_and_sort_by_z() {
         let metrics = DockMetrics::default();
         let mut builder = LayoutBuilder::new(Profile::Photoshop);
