@@ -912,6 +912,21 @@ fn logical_snapshot(layout: &Layout) -> String {
     parts.join("\n")
 }
 
+fn floating_group_for_panel(layout: &Layout, wanted_panel: PanelId) -> crate::FloatingGroupId {
+    layout
+        .floating_groups()
+        .find_map(|(floating_id, floating)| {
+            let area = layout.dock_area(floating.area)?;
+            let nodes = nodes_in_subtree(layout, area.root);
+            nodes
+                .iter()
+                .any(|node_id| {
+                    matches!(layout.node(*node_id), Some(Node::Panel(panel)) if panel.panel_id == wanted_panel)
+                })
+                .then_some(floating_id)
+        })
+        .expect("floating group contains the requested panel")
+}
 fn panel_id_for_key(layout: &Layout, wanted: &str) -> PanelId {
     layout
         .panel_instances()
@@ -1173,6 +1188,14 @@ fn c47_serialized_command_journal_replays_to_equivalent_logical_layout() {
         &mut journal,
         DockCommand::RaiseFloating {
             group: first_floating,
+        },
+        &metrics,
+    );
+    apply_and_record(
+        &mut recorded,
+        &mut journal,
+        DockCommand::SetChrome {
+            mode: ChromeMode::Hidden,
         },
         &metrics,
     );
