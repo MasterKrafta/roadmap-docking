@@ -1078,8 +1078,8 @@ fn c47_serialized_command_journal_replays_to_equivalent_logical_layout() {
         &metrics,
     );
 
-    // Float the one remaining tab, then mutate and dock the new floating root.
-    // The generated FloatingGroupId is recorded in the command journal too.
+    // Float the remaining panel, then dock it back. This also exercises
+    // generation changes when a removed FloatingGroup slot is reused.
     let remaining_panel_node = tab_groups(&recorded)
         .into_iter()
         .find(|(group, _, _, _)| *group == first_group)
@@ -1095,40 +1095,12 @@ fn c47_serialized_command_journal_replays_to_equivalent_logical_layout() {
         &metrics,
     );
 
-    let (floating_id, floating) = recorded
-        .floating_groups()
-        .next()
-        .expect("Float created one floating window");
-    let original_origin = floating.bounds.origin;
-    apply_and_record(
-        &mut recorded,
-        &mut journal,
-        DockCommand::MoveFloating {
-            group: floating_id,
-            origin: Point::new(original_origin.x + 18.0, original_origin.y + 12.0),
-        },
-        &metrics,
-    );
-    apply_and_record(
-        &mut recorded,
-        &mut journal,
-        DockCommand::ResizeFloating {
-            group: floating_id,
-            size: Size::new(360.0, 260.0),
-        },
-        &metrics,
-    );
-    apply_and_record(
-        &mut recorded,
-        &mut journal,
-        DockCommand::RaiseFloating { group: floating_id },
-        &metrics,
-    );
+    let temporary_floating_id = recorded.floating_groups().next().unwrap().0;
     apply_and_record(
         &mut recorded,
         &mut journal,
         DockCommand::DockFloating {
-            group: floating_id,
+            group: temporary_floating_id,
             target: DropTarget::Tabs {
                 group: second_group,
                 index: 3,
@@ -1136,11 +1108,71 @@ fn c47_serialized_command_journal_replays_to_equivalent_logical_layout() {
         },
         &metrics,
     );
+
+    // Leave two windows floating in the final state so the semantic snapshot
+    // compares their bounds and z-order without comparing FloatingGroupIds.
     apply_and_record(
         &mut recorded,
         &mut journal,
-        DockCommand::SetChrome {
-            mode: ChromeMode::Hidden,
+        DockCommand::Float {
+            node: remaining_panel_node,
+            bounds: Rect::new(Point::new(220.0, 120.0), Size::new(320.0, 220.0)),
+        },
+        &metrics,
+    );
+    apply_and_record(
+        &mut recorded,
+        &mut journal,
+        DockCommand::Float {
+            node: initial_children[0],
+            bounds: Rect::new(Point::new(420.0, 180.0), Size::new(300.0, 240.0)),
+        },
+        &metrics,
+    );
+
+    let first_floating = floating_group_for_panel(&recorded, second_panel);
+    let second_floating = floating_group_for_panel(&recorded, first_panel);
+    apply_and_record(
+        &mut recorded,
+        &mut journal,
+        DockCommand::MoveFloating {
+            group: first_floating,
+            origin: Point::new(238.0, 132.0),
+        },
+        &metrics,
+    );
+    apply_and_record(
+        &mut recorded,
+        &mut journal,
+        DockCommand::ResizeFloating {
+            group: first_floating,
+            size: Size::new(360.0, 260.0),
+        },
+        &metrics,
+    );
+    apply_and_record(
+        &mut recorded,
+        &mut journal,
+        DockCommand::MoveFloating {
+            group: second_floating,
+            origin: Point::new(450.0, 195.0),
+        },
+        &metrics,
+    );
+    apply_and_record(
+        &mut recorded,
+        &mut journal,
+        DockCommand::ResizeFloating {
+            group: second_floating,
+            size: Size::new(340.0, 250.0),
+        },
+        &metrics,
+    );
+    apply_and_record(
+        &mut recorded,
+        &mut journal,
+        DockCommand::RaiseFloating {
+            group: first_floating,
         },
         &metrics,
     );
