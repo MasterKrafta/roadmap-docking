@@ -335,6 +335,7 @@ mod tests {
         layout: &Layout,
     ) -> (
         u64,
+        String,
         Vec<(NodeId, String)>,
         Vec<(PanelId, String)>,
         Vec<(DockAreaId, String)>,
@@ -342,6 +343,13 @@ mod tests {
     ) {
         (
             layout.version(),
+            format!(
+                "{:?}|{:?}|{:?}|{:?}",
+                layout.profile(),
+                layout.chrome(),
+                layout.canvas(),
+                layout.flyout()
+            ),
             layout
                 .nodes()
                 .map(|(id, node)| (id, format!("{node:?}")))
