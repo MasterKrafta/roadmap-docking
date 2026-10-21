@@ -4737,6 +4737,25 @@ mod tests {
             Some(Node::Column(value)) if value.group_ratios == before_ratios
         ));
         assert_eq!(layout.validate(&metrics), Ok(()));
+
+        let min_clamp = layout.apply(
+            DockCommand::ResizeGroups {
+                column,
+                boundary_index: 0,
+                delta: -500.0,
+                available_height: 600.0,
+            },
+            &metrics,
+        ).unwrap();
+        assert!(matches!(
+            min_clamp.actual_value,
+            Some(CommandValue::GroupBoundaryDelta(delta)) if (delta + 80.0).abs() < 1.0e-3
+        ));
+        assert!(matches!(
+            layout.node(column),
+            Some(Node::Column(value)) if (value.group_ratios[0] - 0.2).abs() < 1.0e-4
+        ));
+        assert_eq!(layout.validate(&metrics), Ok(()));
     }
 
     #[test]
@@ -4798,10 +4817,10 @@ mod tests {
             },
             &metrics,
         ).unwrap();
-        assert_eq!(
+        assert!(matches!(
             expanded_boundary.actual_value,
-            Some(CommandValue::GroupBoundaryDelta(156.0))
-        );
+            Some(CommandValue::GroupBoundaryDelta(delta)) if (delta - 156.0).abs() < 1.0e-3
+        ));
         let Node::Column(value) = layout.node(column).unwrap() else {
             panic!("target should remain a Column");
         };
