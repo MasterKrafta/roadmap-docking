@@ -36,7 +36,7 @@ Layout является единственным владельцем арен �
 ### Границы состояния
 
 - Persistent layout включает дерево, экземпляры панелей, dock areas, floating bounds/z-order, Canvas bounds/защиту, профиль, версию и persistent chrome visibility.
-- Flyout, drag preview и другие transient UI-состояния хранятся отдельно от persistent дерева и сами по себе не создают undo-записи.
+- `CanvasState` обязателен и находится вне дерева; он может помнить последние измеренные bounds Canvas, но не хранит состояние документа/сцены. Flyout, drag preview и другие transient UI-состояния хранятся отдельно от persistent дерева и сами по себе не создают undo-записи. Текущий `FlyoutState` лишь ссылается на Column и группу, не создаёт дополнительные узлы и не сериализуется.
 - `PanelState` may remember layout-only metadata such as `last_known_size`; it must not store content state.
 - Состояние содержимого панели принадлежит app/panel implementation, а не Core.
 - dock-core не зависит от GPUI, Theme, платформы, окон, представлений, UI handles, scroll handles или фабрик содержимого. PanelDescriptor, иконки, фабрики и источники меню принадлежат app.
