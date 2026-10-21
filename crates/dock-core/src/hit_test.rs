@@ -462,10 +462,11 @@ mod tests {
             layout.hit_test(Point::new(139.999, 40.0), &rects, &metrics).unwrap(),
             HitResult::TabHeader { group, panel: left_panel, index: 0 }
         );
-        assert_eq!(
-            layout.hit_test(Point::new(140.0, 40.0), &rects, &metrics).unwrap(),
-            HitResult::TabHeader { group, panel: right_panel, index: 1 }
-        );
+        let boundary = Point::new(140.0, 40.0);
+        let expected = HitResult::TabHeader { group, panel: right_panel, index: 1 };
+        for _ in 0..3 {
+            assert_eq!(layout.hit_test(boundary, &rects, &metrics).unwrap(), expected);
+        }
     }
 
     #[test]
