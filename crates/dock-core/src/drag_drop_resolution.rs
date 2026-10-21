@@ -282,6 +282,7 @@ fn floating_capture_resolves_to_dock_floating_but_self_drop_is_noop() {
     let (_, p0) = builder.panel(key("capture-source-a"), constraints());
     let (_, p1) = builder.panel(key("capture-source-b"), constraints());
     let floating_tabs = builder.tabs(vec![p0, p1], 1, true);
+    let original_floating_tabs = vec![p0, p1];
     let floating = builder.floating_group(floating_tabs, bounds(100.0, 200.0), 1);
     let (_, p2) = builder.panel(key("capture-target"), constraints());
     let main_tabs = builder.tabs(vec![p2], 0, false);
@@ -307,6 +308,8 @@ fn floating_capture_resolves_to_dock_floating_but_self_drop_is_noop() {
     layout.apply(command, &metrics).unwrap();
     assert_eq!(layout.floating_groups().count(), 0);
     assert_tabs_state(&layout, main_tabs, 2, false);
+    let Node::Tabs(merged) = layout.node(main_tabs).unwrap() else { panic!("target remains Tabs"); };
+    assert_eq!(merged.children, vec![p2, original_floating_tabs[0], original_floating_tabs[1]]);
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
 
