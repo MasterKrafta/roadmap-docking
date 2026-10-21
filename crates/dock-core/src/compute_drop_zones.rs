@@ -276,28 +276,22 @@ impl Layout {
                     Size::new(edge_width, column_rect.size.height),
                 );
                 if may_add_column {
-                    let left_target = match source {
-                        DropSource::Panel { .. } => DropTarget::MainColumn { side, index },
-                        DropSource::Group { .. } => {
-                            if let Some(group) = edge_group_for_column(self, *column_id, false) {
-                                DropTarget::GroupEdge { group, zone: DropZone::Left }
-                            } else {
-                                DropTarget::MainColumn { side, index }
-                            }
-                        }
+                    let targets = match source {
+                        DropSource::Panel { .. } => Some((
+                            DropTarget::MainColumn { side, index },
+                            DropTarget::MainColumn { side, index: index + 1 },
+                        )),
+                        DropSource::Group { .. } => edge_group_for_column(self, *column_id, false)
+                            .zip(edge_group_for_column(self, *column_id, true))
+                            .map(|(left_group, right_group)| (
+                                DropTarget::GroupEdge { group: left_group, zone: DropZone::Left },
+                                DropTarget::GroupEdge { group: right_group, zone: DropZone::Right },
+                            )),
                     };
-                    let right_target = match source {
-                        DropSource::Panel { .. } => DropTarget::MainColumn { side, index: index + 1 },
-                        DropSource::Group { .. } => {
-                            if let Some(group) = edge_group_for_column(self, *column_id, true) {
-                                DropTarget::GroupEdge { group, zone: DropZone::Right }
-                            } else {
-                                DropTarget::MainColumn { side, index: index + 1 }
-                            }
-                        }
-                    };
-                    push_zone(&mut zones, left_target, DropZone::ColumnLeft, left_rect)?;
-                    push_zone(&mut zones, right_target, DropZone::ColumnRight, right_rect)?;
+                    if let Some((left_target, right_target)) = targets {
+                        push_zone(&mut zones, left_target, DropZone::ColumnLeft, left_rect)?;
+                        push_zone(&mut zones, right_target, DropZone::ColumnRight, right_rect)?;
+                    }
                 }
             }
         }
@@ -308,7 +302,9 @@ impl Layout {
             let Some(Node::Column(column)) = self.node(column_id) else {
                 continue;
             };
-            if column.mode != ColumnMode::IconsOnly || main_side_for_node(self, column_id).is_none() {
+            let is_main_column = left_columns.iter().any(|(id, _)| *id == column_id)
+                || right_columns.iter().any(|(id, _)| *id == column_id);
+            if column.mode != ColumnMode::IconsOnly || !is_main_column {
                 continue;
             }
             if !source_allows(self, &source_panels, AllowedArea::ICON_RAIL) {
@@ -325,7 +321,7 @@ impl Layout {
                     &mut zones,
                     DropTarget::RailSlot { column: column_id, index: 0 },
                     DropZone::RailInsertion,
-                    *column_rect,
+                    column_rect.rect,
                 )?;
             } else {
                 for (index, group) in groups.iter().enumerate() {
@@ -483,17 +479,11 @@ impl Layout {
                         side,
                         index: if is_left { 0 } else { columns.len() },
                     }),
-                    DropSource::Group { .. } => Some(
-                        edge_group_for_dock_edge(self, columns, is_left)
-                            .map(|group| DropTarget::GroupEdge {
-                                group,
-                                zone: if is_left { DropZone::Left } else { DropZone::Right },
-                            })
-                            .unwrap_or(DropTarget::MainColumn {
-                                side,
-                                index: if is_left { 0 } else { columns.len() },
-                            }),
-                    )
+                    DropSource::Group { .. } => edge_group_for_dock_edge(self, columns, is_left)
+                        .map(|group| DropTarget::GroupEdge {
+                            group,
+                            zone: if is_left { DropZone::Left } else { DropZone::Right },
+                        }),
                 };
                 if let Some(target) = target {
                     push_zone(&mut zones, target, zone, rect)?;
@@ -742,15 +732,23 @@ fn main_columns(
     let Some(root) = layout.main_area(side).map(|area| area.root) else {
         return Vec::new();
     };
-    let mut result: Vec<_> = rects.columns.iter()
-        .filter(|column| matches!(layout.node(column.column), Some(Node::Column(_)))
-            && contains_node(layout, root, column.column))
-        .map(|column| (column.column, column.rect))
-        .collect();
-    result.sort_by(|left, right| {
-        left.1.origin.x.partial_cmp(&right.1.origin.x).unwrap_or(std::cmp::Ordering::Equal)
-    });
-    result
+    // Only root Columns or direct Column children of a horizontal main Split
+    // are valid MainColumn/ColumnSlot/RailSlot targets in the command model.
+    let column_ids: Vec<NodeId> = match layout.node(root) {
+        Some(Node::Column(_)) => vec![root],
+        Some(Node::Split(split))
+            if split.axis == crate::Axis::X
+                && split.children.iter().all(|child| matches!(layout.node(*child), Some(Node::Column(_)))) =>
+        {
+            split.children.clone()
+        }
+        _ => return Vec::new(),
+    };
+    column_ids.into_iter().filter_map(|column_id| {
+        rects.columns.iter()
+            .find(|column| column.column == column_id)
+            .map(|column| (column_id, column.rect))
+    }).collect()
 }
 
 fn group_main_column(
