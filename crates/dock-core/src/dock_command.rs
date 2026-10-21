@@ -49,6 +49,7 @@ pub enum DockCommand {
     },
     /// Merge a whole Tabs group into another Tabs group at an exact tab slot.
     /// The source group container is removed; its Panel nodes and instances survive.
+    /// In the Photoshop profile, a successful merge also expands a collapsed target.
     MergeGroup {
         group: NodeId,
         target_group: NodeId,
