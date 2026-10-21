@@ -917,9 +917,10 @@ pub(crate) fn clamp_floating_bounds(
         });
     }
 
-    // Geometry is clamped only in the returned snapshot. Persistent model bounds
-    // are untouched; an oversized stored window is fit to the client area only
-    // when doing so still respects its subtree's minimum size.
+    // This helper does not mutate the model. Geometry snapshots may use the
+    // returned rectangle transiently; workspace recovery may commit it after
+    // reporting the change. Oversized windows are fit only when the subtree's
+    // minimum size remains satisfied.
     let width = bounds.size.width.max(minimum.width).min(client_area.size.width);
     let height = bounds.size.height.max(minimum.height).min(client_area.size.height);
     if width < minimum.width || height < minimum.height {
