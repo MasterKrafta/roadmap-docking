@@ -55,6 +55,7 @@ pub mod tab_header_rect;
 pub mod tab_strip_rect;
 pub mod tabs;
 pub mod validation_error;
+pub mod vertical_overflow;
 
 pub use axis::Axis;
 pub use canvas_state::CanvasState;
@@ -107,6 +108,7 @@ pub use tab_header_rect::TabHeaderRect;
 pub use tab_strip_rect::TabStripRect;
 pub use tabs::Tabs;
 pub use validation_error::ValidationError;
+pub use vertical_overflow::VerticalOverflow;
 
 #[cfg(test)]
 mod layout_builder;
