@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use crate::{
-    ComputeRectsError, DockMetrics, DropTarget, FloatingGroupRect, HitResult, Layout,
+    ComputeRectsError, DockMetrics, DropTarget, DropZone, FloatingGroupRect, HitResult, Layout,
     LayoutRects, Node, NodeId, PanelId, Point, Rect,
 };
 
@@ -222,13 +222,26 @@ fn hit_layout_geometry(
 
     // Drop zones are semantic overlays on group bodies and win over panel
     // content, but never over resize, splitter or tab-header hit regions.
-    for zone in rects.drop_zones.iter().rev() {
-        if target_in_scope(zone.target, scope_nodes, include_only) && contains(zone.rect, point)? {
-            return Ok(Some(HitResult::DropZone {
-                target: zone.target,
-                zone: zone.zone,
-            }));
+    // Use the same explicit priority as resolve_drop when zones overlap.
+    let mut best_drop_zone = None;
+    for (index, zone) in rects.drop_zones.iter().enumerate().rev() {
+        if !target_in_scope(zone.target, scope_nodes, include_only) || !contains(zone.rect, point)? {
+            continue;
         }
+        let priority = drop_zone_priority(zone.zone);
+        let replace = best_drop_zone
+            .as_ref()
+            .map(|(best_priority, _, _)| priority < *best_priority)
+            .unwrap_or(true);
+        if replace {
+            best_drop_zone = Some((priority, index, zone));
+        }
+    }
+    if let Some((_, _, zone)) = best_drop_zone {
+        return Ok(Some(HitResult::DropZone {
+            target: zone.target,
+            zone: zone.zone,
+        }));
     }
 
     for panel in rects.panels.iter().rev() {
@@ -272,11 +285,31 @@ fn target_in_scope(
     include_only: bool,
 ) -> bool {
     let target_node = match target {
-        DropTarget::Tabs { group, .. } | DropTarget::GroupEdge { group, .. } => Some(group),
-        DropTarget::RailSlot { column, .. } => Some(column),
-        DropTarget::MainColumn { .. } => None,
+        DropTarget::Tabs { group, .. }
+        | DropTarget::GroupTabs { group, .. }
+        | DropTarget::GroupEdge { group, .. } => Some(group),
+        DropTarget::ColumnSlot { column, .. } | DropTarget::RailSlot { column, .. } => Some(column),
+        DropTarget::MainColumn { .. } | DropTarget::FreeArea => {
+            return !include_only;
+        }
     };
     target_node.is_some_and(|node| node_in_scope(node, scope_nodes, include_only))
+}
+
+fn drop_zone_priority(zone: DropZone) -> u8 {
+    match zone {
+        DropZone::RailInsertion => 0,
+        DropZone::TabInsertion => 1,
+        DropZone::DockEdge => 2,
+        DropZone::ColumnLeft | DropZone::ColumnRight => 3,
+        DropZone::ColumnEnd => 4,
+        DropZone::FloatingTop | DropZone::FloatingBottom => 5,
+        DropZone::Top | DropZone::Bottom => 6,
+        DropZone::Left | DropZone::Right => 7,
+        DropZone::FloatingCenter => 8,
+        DropZone::Center => 9,
+        DropZone::FreeArea => 10,
+    }
 }
 
 #[cfg(test)]
@@ -284,7 +317,7 @@ mod tests {
     use super::{ComputeRectsError, HitResult, Point, Rect};
     use crate::layout_builder::LayoutBuilder;
     use crate::{
-        Axis, ColumnMode, DockMetrics, DockSide, DropTarget, GeometryError, PanelConstraints,
+        Axis, ColumnMode, DockMetrics, DockSide, DropSource, DropTarget, GeometryError, PanelConstraints,
         PanelKey, Profile, ResizeEdge, Size,
     };
 
@@ -364,12 +397,20 @@ mod tests {
         );
         assert_ne!(lower_panel, upper_panel);
 
-        // The front window's drop zone wins over the overlapping lower window.
+        // Drop zones are contextual: compute them for the dragged panel and
+        // keep the front window's target from leaking through to the lower one.
+        let drop_zones = layout.compute_drop_zones(
+            DropSource::Panel { panel: lower_panel },
+            &rects,
+            &metrics,
+        ).unwrap();
+        let mut drag_rects = rects.clone();
+        drag_rects.drop_zones = drop_zones;
         assert_eq!(
-            layout.hit_test(Point::new(390.0, 280.0), &rects, &metrics).unwrap(),
+            layout.hit_test(Point::new(390.0, 280.0), &drag_rects, &metrics).unwrap(),
             HitResult::DropZone {
                 target: DropTarget::GroupEdge { group: upper_group, zone: crate::DropZone::Bottom },
-                zone: crate::DropZone::Bottom,
+                zone: crate::DropZone::FloatingBottom,
             }
         );
         assert_ne!(lower, upper);

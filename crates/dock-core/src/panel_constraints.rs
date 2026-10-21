@@ -1,4 +1,4 @@
-use crate::{GeometryError, Size};
+use crate::{AllowedArea, GeometryError, Size};
 
 /// Size constraints copied from a panel descriptor when a panel is opened.
 ///
@@ -11,6 +11,9 @@ pub struct PanelConstraints {
     pub preferred_size: Size,
     pub max_size: Option<Size>,
     pub singleton: bool,
+    /// Permitted destination classes for drop-target filtering.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub allowed_areas: AllowedArea,
 }
 
 impl PanelConstraints {
@@ -20,11 +23,24 @@ impl PanelConstraints {
         max_size: Option<Size>,
         singleton: bool,
     ) -> Self {
-        Self { min_size, preferred_size, max_size, singleton }
+        Self { min_size, preferred_size, max_size, singleton, allowed_areas: AllowedArea::ANY }
     }
 
-    /// Checks that all configured dimensions are positive and consistently ordered.
+    /// Returns the same constraints with an explicit area policy.
+    pub const fn with_allowed_areas(mut self, allowed_areas: AllowedArea) -> Self {
+        self.allowed_areas = allowed_areas;
+        self
+    }
+
+    pub const fn allows_area(self, area: AllowedArea) -> bool {
+        self.allowed_areas.contains(area)
+    }
+
+    /// Checks that all configured dimensions and area policy are valid.
     pub fn validate(self) -> Result<(), GeometryError> {
+        if !self.allowed_areas.is_valid() {
+            return Err(GeometryError::InconsistentConstraints);
+        }
         self.min_size.validate_positive()?;
         self.preferred_size.validate_positive()?;
         if let Some(max_size) = self.max_size {

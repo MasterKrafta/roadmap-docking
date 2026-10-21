@@ -38,6 +38,13 @@ pub enum DockCommand {
         column: NodeId,
         index: usize,
     },
+    /// Merge a whole Tabs group into another Tabs group at an exact tab slot.
+    /// The source group container is removed; its Panel nodes and instances survive.
+    MergeGroup {
+        group: NodeId,
+        target_group: NodeId,
+        index: usize,
+    },
     /// Place a group adjacent to another group, applying the requested split
     /// ratio. The zone determines the split orientation and ordering.
     SplitGroup {
@@ -128,6 +135,11 @@ mod tests {
             DockCommand::ReorderTab { group: NodeId::null(), panel: PanelId::null(), to_index: 0 },
             DockCommand::MovePanel { panel: PanelId::null(), target },
             DockCommand::MoveGroup { group: NodeId::null(), column: NodeId::null(), index: 0 },
+            DockCommand::MergeGroup {
+                group: NodeId::null(),
+                target_group: NodeId::null(),
+                index: 0,
+            },
             DockCommand::SplitGroup {
                 group: NodeId::null(),
                 target_group: NodeId::null(),
@@ -169,7 +181,7 @@ mod tests {
             DockCommand::CloseFlyout,
             DockCommand::SetChrome { mode: ChromeMode::Hidden },
         ];
-        assert_eq!(commands.len(), 24);
+        assert_eq!(commands.len(), 25);
     }
 
     #[cfg(feature = "serde")]

@@ -1,6 +1,6 @@
 use crate::{
-    Axis, Column, ColumnMode, ColumnRect, ComputeRectsError, DockMetrics, DockSide, DropTarget,
-    DropZone, DropZoneRect, FloatingGroupRect, FloatingResizeEdgeRect, GeometryError, GroupRect,
+    Axis, Column, ColumnMode, ColumnRect, ComputeRectsError, DockMetrics, DockSide,
+    FloatingGroupRect, FloatingResizeEdgeRect, GeometryError, GroupRect,
     Layout, LayoutRects, Node, NodeId, PanelRect, Point, Rect, ResizeEdge, Size,
     SplitterRect, TabHeaderRect, TabStripRect, Tabs, VerticalOverflow,
 };
@@ -66,6 +66,7 @@ impl Layout {
         canvas.validate().map_err(ComputeRectsError::Geometry)?;
 
         let mut output = LayoutRects {
+            viewport: Some(viewport),
             canvas: Some(canvas),
             ..LayoutRects::default()
         };
@@ -404,7 +405,6 @@ fn layout_tabs(
         rect
     };
     output.groups.push(GroupRect::new(id, group_rect));
-    push_group_drop_zones(id, group_rect, metrics, output)?;
 
     let strip_height = if collapsed {
         group_rect.size.height
@@ -812,50 +812,6 @@ fn push_splitter(
     Ok(())
 }
 
-fn push_group_drop_zones(
-    group: NodeId,
-    rect: Rect,
-    metrics: &DockMetrics,
-    output: &mut LayoutRects,
-) -> Result<(), ComputeRectsError> {
-    let x_band = metrics.edge_drop_width.min(rect.size.width / 2.0);
-    let y_band = metrics.edge_drop_width.min(rect.size.height / 2.0);
-    let side_height = (rect.size.height - 2.0 * y_band).max(0.0);
-    let zones = [
-        (
-            DropZone::Left,
-            Rect::new(
-                Point::new(rect.origin.x, rect.origin.y + y_band),
-                Size::new(x_band, side_height),
-            ),
-        ),
-        (
-            DropZone::Right,
-            Rect::new(
-                Point::new(rect.origin.x + rect.size.width - x_band, rect.origin.y + y_band),
-                Size::new(x_band, side_height),
-            ),
-        ),
-        (DropZone::Top, Rect::new(rect.origin, Size::new(rect.size.width, y_band))),
-        (
-            DropZone::Bottom,
-            Rect::new(
-                Point::new(rect.origin.x, rect.origin.y + rect.size.height - y_band),
-                Size::new(rect.size.width, y_band),
-            ),
-        ),
-    ];
-    for (zone, zone_rect) in zones {
-        zone_rect.validate().map_err(ComputeRectsError::Geometry)?;
-        output.drop_zones.push(DropZoneRect {
-            target: DropTarget::GroupEdge { group, zone },
-            zone,
-            rect: zone_rect,
-        });
-    }
-    Ok(())
-}
-
 fn push_resize_edges(
     group: crate::FloatingGroupId,
     rect: Rect,
@@ -1044,7 +1000,7 @@ mod tests {
         assert_eq!(rects.panels.len(), 1);
         assert_eq!(rects.panels[0].panel, active_panel);
         assert_eq!(rects.panels[0].rect.origin.y, metrics.header_height + metrics.tab_strip_height);
-        assert_eq!(rects.drop_zones.len(), 4);
+        assert!(rects.drop_zones.is_empty());
     }
 
     #[test]
@@ -1162,16 +1118,7 @@ mod tests {
             Rect::new(Point::new(0.0, 56.0), Size::new(280.0, 544.0))
         );
         assert!(rects.splitters.is_empty());
-        assert_eq!(rects.drop_zones.len(), 4);
-        assert_eq!(
-            rects.drop_zones.iter().map(|zone| zone.rect).collect::<Vec<_>>(),
-            vec![
-                Rect::new(Point::new(0.0, 24.0), Size::new(24.0, 552.0)),
-                Rect::new(Point::new(256.0, 24.0), Size::new(24.0, 552.0)),
-                Rect::new(Point::ZERO, Size::new(280.0, 24.0)),
-                Rect::new(Point::new(0.0, 576.0), Size::new(280.0, 24.0)),
-            ]
-        );
+        assert!(rects.drop_zones.is_empty());
         assert!(rects.vertical_overflow.is_empty());
         assert!(layout.node(column).is_some());
         assert!(layout.node(group).is_some());

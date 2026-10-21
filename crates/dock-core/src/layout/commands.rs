@@ -250,6 +250,11 @@ impl Layout {
                 })
             }
             DockCommand::MovePanel { panel, target } => {
+                if matches!(target, DropTarget::GroupTabs { .. }) {
+                    return Err(CommandError::InvalidTarget {
+                        reason: "GroupTabs target is only valid when merging a whole Tabs group",
+                    });
+                }
                 let panel_node = self.find_panel_node(*panel).ok_or(CommandError::MissingPanel { panel: *panel })?;
                 self.validate_drop_target(*target, metrics)?;
                 if let (Some((source_group, source_index)), DropTarget::Tabs { group: target_group, index }) =
@@ -364,6 +369,14 @@ impl Layout {
                 self.insert_group_at_column(*column, *group, (*index).min(new_len), None)?;
                 self.remember_subtree_dock_locations(*group);
                 Ok(CommandApplication { actual_value: None, inverse, persistent: true })
+            }
+            DockCommand::MergeGroup { group, target_group, index } => {
+                let panel_nodes = self.panel_nodes_in_subtree(*group);
+                self.merge_group_into_tabs(*group, *target_group, *index)?;
+                for panel_node in panel_nodes {
+                    self.remember_panel_dock_location(panel_node);
+                }
+                Ok(CommandApplication::persistent())
             }
             DockCommand::SplitGroup { group, target_group, zone, ratio } => {
                 if !ratio.is_finite() || *ratio <= 0.0 || *ratio >= 1.0 {
@@ -1101,6 +1114,73 @@ impl Layout {
         }
     }
 
+    pub(super) fn merge_group_into_tabs(
+        &mut self,
+        group: NodeId,
+        target_group: NodeId,
+        index: usize,
+    ) -> Result<(), CommandError> {
+        if group == target_group {
+            return match self.nodes.get(group) {
+                Some(Node::Tabs(_)) => Ok(()),
+                Some(_) => Err(CommandError::InvalidTarget {
+                    reason: "MergeGroup source must be a Tabs node",
+                }),
+                None => Err(CommandError::MissingNode { node: group }),
+            };
+        }
+        let (source_children, source_active) = match self.nodes.get(group) {
+            Some(Node::Tabs(tabs)) if !tabs.children.is_empty() => {
+                (tabs.children.clone(), tabs.active_index)
+            }
+            Some(Node::Tabs(_)) => return Err(CommandError::InvalidTarget {
+                reason: "cannot merge an empty source group",
+            }),
+            Some(_) => return Err(CommandError::InvalidTarget {
+                reason: "MergeGroup source must be a Tabs node",
+            }),
+            None => return Err(CommandError::MissingNode { node: group }),
+        };
+        let target_len = match self.nodes.get(target_group) {
+            Some(Node::Tabs(tabs)) => tabs.children.len(),
+            Some(_) => return Err(CommandError::InvalidTarget {
+                reason: "MergeGroup target must be a Tabs node",
+            }),
+            None => return Err(CommandError::MissingNode { node: target_group }),
+        };
+        if index > target_len {
+            return Err(CommandError::InvalidValue {
+                field: "index",
+                reason: "group-tab insertion index is outside the target group",
+            });
+        }
+        if self.is_descendant_or_same(group, target_group)
+            || self.is_descendant_or_same(target_group, group)
+        {
+            return Err(CommandError::InvalidTarget {
+                reason: "cannot merge ancestor or descendant Tabs groups",
+            });
+        }
+
+        self.detach_node(group)?;
+        if let Some(Node::Tabs(source)) = self.nodes.get_mut(group) {
+            source.children.clear();
+            source.active_index = 0;
+        }
+        self.nodes.remove(group);
+
+        let Some(Node::Tabs(target)) = self.nodes.get_mut(target_group) else {
+            return Err(CommandError::InvalidTarget {
+                reason: "MergeGroup target changed unexpectedly",
+            });
+        };
+        for (offset, child) in source_children.iter().copied().enumerate() {
+            target.children.insert(index + offset, child);
+        }
+        target.active_index = index + source_active.min(source_children.len() - 1);
+        Ok(())
+    }
+
     pub(super) fn validate_drop_target(
         &self,
         target: DropTarget,
@@ -1116,7 +1196,19 @@ impl Layout {
                 Some(_) => Err(CommandError::InvalidTarget { reason: "tab target must be a Tabs node" }),
                 None => Err(CommandError::MissingNode { node: group }),
             },
+            DropTarget::GroupTabs { group, index } => match self.nodes.get(group) {
+                Some(Node::Tabs(tabs)) if index <= tabs.children.len() => Ok(()),
+                Some(Node::Tabs(_)) => Err(CommandError::InvalidValue {
+                    field: "index",
+                    reason: "group-tab insertion index is outside the group",
+                }),
+                Some(_) => Err(CommandError::InvalidTarget { reason: "group-tab target must be a Tabs node" }),
+                None => Err(CommandError::MissingNode { node: group }),
+            },
             DropTarget::GroupEdge { group, zone } => {
+                if !matches!(zone, DropZone::Left | DropZone::Right | DropZone::Top | DropZone::Bottom) {
+                    return Err(CommandError::InvalidTarget { reason: "group-edge target requires a cardinal edge zone" });
+                }
                 match self.nodes.get(group) {
                     Some(Node::Tabs(_)) => {}
                     Some(_) => return Err(CommandError::InvalidTarget { reason: "group-edge target must be a Tabs node" }),
@@ -1149,6 +1241,9 @@ impl Layout {
                                 });
                             }
                         }
+                        _ => return Err(CommandError::InvalidTarget {
+                            reason: "group-edge target requires a cardinal edge zone",
+                        }),
                     }
                 }
                 Ok(())
@@ -1164,6 +1259,25 @@ impl Layout {
                     })
                 }
             }
+            DropTarget::ColumnSlot { column, index } => match self.nodes.get(column) {
+                Some(Node::Column(value)) if value.mode == ColumnMode::IconsOnly => {
+                    Err(CommandError::InvalidTarget { reason: "expanded-column insertion target cannot be an icon rail; use RailSlot" })
+                }
+                Some(Node::Column(value)) if self.main_column_position(column).is_none() => {
+                    let _ = value;
+                    Err(CommandError::InvalidTarget { reason: "column insertion target must belong to a main dock" })
+                }
+                Some(Node::Column(value)) if index <= value.groups.len() => Ok(()),
+                Some(Node::Column(_)) => Err(CommandError::InvalidValue {
+                    field: "index",
+                    reason: "column group insertion index is outside the column",
+                }),
+                Some(_) => Err(CommandError::InvalidTarget { reason: "column slot target must be a Column node" }),
+                None => Err(CommandError::MissingNode { node: column }),
+            },
+            DropTarget::FreeArea => Err(CommandError::InvalidTarget {
+                reason: "FreeArea must be resolved by Float with explicit window bounds",
+            }),
             DropTarget::RailSlot { column, index } => match self.nodes.get(column) {
                 Some(Node::Column(value)) if value.mode != ColumnMode::IconsOnly => {
                     Err(CommandError::InvalidTarget { reason: "rail insertion target must use IconsOnly mode" })
@@ -1202,6 +1316,9 @@ impl Layout {
                 tabs.active_index = index;
                 Ok(())
             }
+            DropTarget::GroupTabs { .. } => Err(CommandError::InvalidTarget {
+                reason: "whole Tabs groups must be merged through MergeGroup",
+            }),
             DropTarget::GroupEdge { group, zone } => {
                 let group_node = self.group_node_for(node)?;
                 self.insert_group_edge(group_node, group, zone, edge_ratio, metrics)
@@ -1216,10 +1333,17 @@ impl Layout {
                 }));
                 self.insert_existing_column_at(side, index, column, None)
             }
+            DropTarget::ColumnSlot { column, index } => {
+                let group = self.group_node_for(node)?;
+                self.insert_group_at_column(column, group, index, None)
+            }
             DropTarget::RailSlot { column, index } => {
                 let group = self.group_node_for(node)?;
                 self.insert_group_at_column(column, group, index, None)
             }
+            DropTarget::FreeArea => Err(CommandError::InvalidTarget {
+                reason: "FreeArea must be resolved by Float with explicit window bounds",
+            }),
         }
     }
 
@@ -1441,6 +1565,7 @@ impl Layout {
                         }));
                         self.insert_existing_column_at(side, insert_at, column, Some((split_ratio, column_index)))
                     }
+                    _ => Err(CommandError::InvalidTarget { reason: "group-edge target requires a cardinal edge zone" }),
                 }
             } else {
                 let floating_root = self.find_floating_root_containing(target_group).ok_or(
@@ -1501,6 +1626,7 @@ impl Layout {
                             }
                         }
                     }
+                    _ => Err(CommandError::InvalidTarget { reason: "group-edge target requires a cardinal edge zone" }),
                 }
             }
         } else {
@@ -1508,14 +1634,17 @@ impl Layout {
             let axis = match zone {
                 DropZone::Left | DropZone::Right => Axis::X,
                 DropZone::Top | DropZone::Bottom => Axis::Y,
+                _ => return Err(CommandError::InvalidTarget { reason: "group-edge target requires a cardinal edge zone" }),
             };
             let children = match zone {
                 DropZone::Left | DropZone::Top => vec![new_group, target_group],
                 DropZone::Right | DropZone::Bottom => vec![target_group, new_group],
+                _ => return Err(CommandError::InvalidTarget { reason: "group-edge target requires a cardinal edge zone" }),
             };
             let ratios = match zone {
                 DropZone::Left | DropZone::Top => vec![split_ratio, 1.0 - split_ratio],
                 DropZone::Right | DropZone::Bottom => vec![1.0 - split_ratio, split_ratio],
+                _ => return Err(CommandError::InvalidTarget { reason: "group-edge target requires a cardinal edge zone" }),
             };
             let split = self.nodes.insert(Node::Split(crate::Split { axis, children, ratios }));
             if let Some(parent) = parent {
@@ -1540,7 +1669,9 @@ impl Layout {
             reason: "floating group references a missing dock area",
         })?.root;
         self.validate_drop_target(target, metrics)?;
-        if let DropTarget::Tabs { group: target_group, .. } = target {
+        if let DropTarget::Tabs { group: target_group, .. }
+            | DropTarget::GroupTabs { group: target_group, .. } = target
+        {
             if self.is_descendant_or_same(root, target_group) {
                 return Ok(());
             }
@@ -1566,6 +1697,22 @@ impl Layout {
                 self.insert_existing_column_at(side, index, column, None)
             }
             (Some(Node::Split(split)), DropTarget::RailSlot { column, index }) if split.axis == Axis::Y => {
+                if split.children.iter().any(|id| !matches!(self.nodes.get(*id), Some(Node::Tabs(_)))) {
+                    return Err(CommandError::InvalidTarget { reason: "floating stack contains a non-Tabs group" });
+                }
+                self.detach_node(root)?;
+                self.nodes.remove(root);
+                let mut insert_at = index;
+                for child in split.children {
+                    self.insert_group_at_column(column, child, insert_at, None)?;
+                    insert_at += 1;
+                }
+                Ok(())
+            }
+            (Some(Node::Tabs(_)), DropTarget::GroupTabs { group: target_group, index }) => {
+                self.merge_group_into_tabs(root, target_group, index)
+            }
+            (Some(Node::Split(split)), DropTarget::ColumnSlot { column, index }) if split.axis == Axis::Y => {
                 if split.children.iter().any(|id| !matches!(self.nodes.get(*id), Some(Node::Tabs(_)))) {
                     return Err(CommandError::InvalidTarget { reason: "floating stack contains a non-Tabs group" });
                 }

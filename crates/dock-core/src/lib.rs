@@ -2,6 +2,7 @@
 
 //! UI-independent data model and behavior for docking layouts.
 
+pub mod allowed_area;
 pub mod axis;
 pub mod canvas_state;
 pub mod chrome_mode;
@@ -9,6 +10,7 @@ pub mod column;
 pub mod column_mode;
 pub mod column_rect;
 pub mod compute_rects;
+pub mod compute_drop_zones;
 pub mod compute_rects_error;
 pub(crate) mod command_application;
 pub mod command_error;
@@ -20,6 +22,7 @@ pub mod dock_area_kind;
 pub mod dock_command;
 pub mod dock_metrics;
 pub mod dock_side;
+pub mod drop_source;
 pub mod drop_target;
 pub mod drop_zone;
 pub mod drop_zone_rect;
@@ -58,6 +61,7 @@ pub mod tabs;
 pub mod validation_error;
 pub mod vertical_overflow;
 
+pub use allowed_area::AllowedArea;
 pub use axis::Axis;
 pub use canvas_state::CanvasState;
 pub use chrome_mode::ChromeMode;
@@ -74,6 +78,7 @@ pub use dock_area_kind::DockAreaKind;
 pub use dock_command::DockCommand;
 pub use dock_metrics::DockMetrics;
 pub use dock_side::DockSide;
+pub use drop_source::DropSource;
 pub use drop_target::DropTarget;
 pub use drop_zone::DropZone;
 pub use drop_zone_rect::DropZoneRect;

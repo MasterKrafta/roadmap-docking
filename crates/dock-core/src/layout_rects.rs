@@ -11,6 +11,10 @@ use crate::{
 #[derive(Clone, Debug, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct LayoutRects {
+    /// Full logical-pixel viewport supplied to compute_rects.
+    /// `None` means this snapshot has not been computed yet.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub viewport: Option<Rect>,
     /// Canvas rectangle left after main docks consume their logical widths.
     /// `None` means this snapshot has not been computed yet.
     pub canvas: Option<Rect>,
@@ -34,6 +38,7 @@ mod tests {
     #[test]
     fn default_geometry_snapshot_has_empty_collections() {
         let rects = LayoutRects::default();
+        assert!(rects.viewport.is_none());
         assert!(rects.canvas.is_none());
         assert!(rects.columns.is_empty());
         assert!(rects.groups.is_empty());

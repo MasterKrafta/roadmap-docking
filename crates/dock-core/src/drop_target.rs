@@ -1,24 +1,27 @@
 use crate::{DockSide, DropZone, NodeId};
 
-/// A fully specified destination for a docking operation.
+/// A semantic destination resolved by the geometry/drop-target pipeline.
 ///
-/// Indexes are insertion slots: zero is before the first item, and the current
-/// item count means append. Rail drops use a dedicated target so inserting
-/// between icons never depends on pointer proximity or inferred ordering.
+/// Insertion indices are slots: zero is before the first item and the current
+/// item count means append. FreeArea is a UI hint; apply it with DockCommand::Float
+/// and concrete bounds, not with a docking command.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum DropTarget {
-    /// Insert a panel as a tab in this group at the exact tab index.
+    /// Insert one panel as a tab in an existing group at the exact tab index.
     Tabs { group: NodeId, index: usize },
+    /// Merge all tabs from a dragged group into another Tabs group.
+    GroupTabs { group: NodeId, index: usize },
     /// Place a new group at an edge of an existing group.
     GroupEdge { group: NodeId, zone: DropZone },
-    /// Insert a main-dock column at an exact position on the given side.
+    /// Insert a new main-dock column at an exact position on the given side.
     MainColumn { side: DockSide, index: usize },
-    /// Insert a new group into an icon rail at the exact group slot.
-    ///
-    /// The target column must be in IconsOnly mode. This is intentionally
-    /// separate from GroupEdge, which targets the edge of a group body.
+    /// Insert a group into an expanded main-dock column at an exact group slot.
+    ColumnSlot { column: NodeId, index: usize },
+    /// Insert a group into an icon rail at an exact slot in flattened rail order.
     RailSlot { column: NodeId, index: usize },
+    /// The central Canvas is empty drop area; adapter should create floating bounds.
+    FreeArea,
 }
 
 #[cfg(test)]
@@ -28,10 +31,14 @@ mod tests {
     use crate::{DockSide, DropZone, NodeId};
 
     #[test]
-    fn targets_preserve_explicit_positions() {
+    fn targets_preserve_explicit_positions_and_semantics() {
         assert_ne!(
             DropTarget::MainColumn { side: DockSide::Right, index: 1 },
             DropTarget::MainColumn { side: DockSide::Right, index: 2 }
+        );
+        assert_ne!(
+            DropTarget::ColumnSlot { column: NodeId::null(), index: 1 },
+            DropTarget::ColumnSlot { column: NodeId::null(), index: 2 }
         );
         assert_ne!(
             DropTarget::RailSlot { column: NodeId::null(), index: 1 },
@@ -41,6 +48,11 @@ mod tests {
             DropTarget::GroupEdge { group: NodeId::null(), zone: DropZone::Top },
             DropTarget::GroupEdge { group: NodeId::null(), zone: DropZone::Bottom }
         );
+        assert_ne!(
+            DropTarget::Tabs { group: NodeId::null(), index: 0 },
+            DropTarget::GroupTabs { group: NodeId::null(), index: 0 }
+        );
+        let _free_area = DropTarget::FreeArea;
     }
 
     #[cfg(feature = "serde")]
