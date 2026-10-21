@@ -373,6 +373,9 @@ impl Layout {
             DockCommand::MergeGroup { group, target_group, index } => {
                 let panel_nodes = self.panel_nodes_in_subtree(*group);
                 self.merge_group_into_tabs(*group, *target_group, *index)?;
+                if group == target_group {
+                    return Ok(CommandApplication::persistent());
+                }
                 for panel_node in panel_nodes {
                     self.remember_panel_dock_location(panel_node);
                 }

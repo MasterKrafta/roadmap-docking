@@ -543,7 +543,8 @@ impl Layout {
             return best_containing_zone(&zones, point, |zone| {
                 matches!(
                     zone.zone,
-                    DropZone::FloatingCenter | DropZone::FloatingTop | DropZone::FloatingBottom | DropZone::TabInsertion
+                    DropZone::FloatingCenter | DropZone::FloatingTop | DropZone::FloatingBottom
+                        | DropZone::TabInsertion | DropZone::Left | DropZone::Right
                 ) && target_node(zone.target)
                     .map(|node| contains_node(self, area.root, node))
                     .unwrap_or(false)
@@ -1082,7 +1083,20 @@ mod tests {
         let second = builder.tabs(vec![second_node], 0, false);
         let column = builder.column(280.0, ColumnMode::Expanded, vec![first, second], vec![0.5, 0.5]);
         builder.main_area(DockSide::Left, column);
-        let layout = builder.build();
+        let mut layout = builder.build();
+        let before_self_drop = format!("{layout:?}");
+        let before_version = layout.version();
+        layout.apply(
+            DockCommand::MergeGroup {
+                group: first,
+                target_group: first,
+                index: 0,
+            },
+            &metrics,
+        ).unwrap();
+        assert_eq!(format!("{layout:?}"), before_self_drop);
+        assert_eq!(layout.version(), before_version);
+
         let rects = layout.compute_rects(viewport(), &metrics).unwrap();
         let zones = layout.compute_drop_zones(DropSource::Group { group: first }, &rects, &metrics).unwrap();
 
