@@ -660,75 +660,71 @@ impl Layout {
                 // column placement is a no-op when the moving group is the
                 // source column's only group. Do not replace the Column node or
                 // perturb ratios for a drop that leaves the tree unchanged.
-                if matches!(zone, DropZone::Left | DropZone::Right) {
-                    if let (Some(source_column), Some(target_column)) = (
+                if matches!(zone, DropZone::Left | DropZone::Right)
+                    && let (Some(source_column), Some(target_column)) = (
                         self.find_owner_column(*group),
                         self.find_owner_column(*target_group),
-                    ) {
-                        let source_is_single_group_column = matches!(
-                            self.nodes.get(source_column),
-                            Some(Node::Column(column))
-                                if column.groups.len() == 1 && column.groups[0] == *group
-                        );
-                        if source_is_single_group_column {
-                            if let (Some((source_side, source_index)), Some((target_side, target_index))) = (
-                                self.main_column_position(source_column),
-                                self.main_column_position(target_column),
-                            ) {
-                                let already_at_requested_edge = source_side == target_side
-                                    && ((*zone == DropZone::Left && source_index + 1 == target_index)
-                                        || (*zone == DropZone::Right && target_index + 1 == source_index));
-                                if already_at_requested_edge {
-                                    return Ok(CommandApplication::persistent());
-                                }
-                            }
+                    )
+                {
+                    let source_is_single_group_column = matches!(
+                        self.nodes.get(source_column),
+                        Some(Node::Column(column))
+                            if column.groups.len() == 1 && column.groups[0] == *group
+                    );
+                    if source_is_single_group_column
+                        && let (
+                            Some((source_side, source_index)),
+                            Some((target_side, target_index)),
+                        ) = (
+                            self.main_column_position(source_column),
+                            self.main_column_position(target_column),
+                        )
+                    {
+                        let already_at_requested_edge = source_side == target_side
+                            && ((*zone == DropZone::Left && source_index + 1 == target_index)
+                                || (*zone == DropZone::Right && target_index + 1 == source_index));
+                        if already_at_requested_edge {
+                            return Ok(CommandApplication::persistent());
                         }
                     }
                 }
 
-                if let Some(source_column) = self.find_owner_column(*group) {
-                    if self.find_owner_column(*target_group) == Some(source_column) {
-                        let groups = match self.nodes.get(source_column) {
-                            Some(Node::Column(column)) => column.groups.clone(),
-                            _ => Vec::new(),
-                        };
-                        let source_index = groups.iter().position(|id| id == group);
-                        let target_index = groups.iter().position(|id| id == target_group);
-                        if let (Some(source_index), Some(target_index)) = (source_index, target_index) {
-                            if (*zone == DropZone::Top && source_index + 1 == target_index)
-                                || (*zone == DropZone::Bottom && target_index + 1 == source_index)
-                            {
-                                return Ok(CommandApplication::persistent());
-                            }
-                        }
+                if let Some(source_column) = self.find_owner_column(*group)
+                    && self.find_owner_column(*target_group) == Some(source_column)
+                {
+                    let groups = match self.nodes.get(source_column) {
+                        Some(Node::Column(column)) => column.groups.clone(),
+                        _ => Vec::new(),
+                    };
+                    let source_index = groups.iter().position(|id| id == group);
+                    let target_index = groups.iter().position(|id| id == target_group);
+                    if let (Some(source_index), Some(target_index)) = (source_index, target_index)
+                        && ((*zone == DropZone::Top && source_index + 1 == target_index)
+                            || (*zone == DropZone::Bottom && target_index + 1 == source_index))
+                    {
+                        return Ok(CommandApplication::persistent());
                     }
                 }
                 // A floating vertical stack has the same neighboring no-op
                 // rule as a Column's ordered group list.
-                if matches!(zone, DropZone::Top | DropZone::Bottom) {
-                    if let (Some(source_parent), Some(target_parent)) = (
+                if matches!(zone, DropZone::Top | DropZone::Bottom)
+                    && let (Some(source_parent), Some(target_parent)) = (
                         self.find_parent(*group),
                         self.find_parent(*target_group),
-                    ) {
-                        if source_parent == target_parent {
-                            if let Some(Node::Split(split)) = self.nodes.get(source_parent) {
-                                if split.axis == Axis::Y {
-                                    let source_index = split.children.iter().position(|id| id == group);
-                                    let target_index = split.children.iter().position(|id| id == target_group);
-                                    if let (Some(source_index), Some(target_index)) =
-                                        (source_index, target_index)
-                                    {
-                                        let already_at_requested_edge =
-                                            (*zone == DropZone::Top && source_index + 1 == target_index)
-                                                || (*zone == DropZone::Bottom
-                                                    && target_index + 1 == source_index);
-                                        if already_at_requested_edge {
-                                            return Ok(CommandApplication::persistent());
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                    )
+                    && source_parent == target_parent
+                    && let Some(Node::Split(split)) = self.nodes.get(source_parent)
+                    && split.axis == Axis::Y
+                {
+                    let source_index = split.children.iter().position(|id| id == group);
+                    let target_index = split.children.iter().position(|id| id == target_group);
+                    if let (Some(source_index), Some(target_index)) =
+                        (source_index, target_index)
+                        && ((*zone == DropZone::Top && source_index + 1 == target_index)
+                            || (*zone == DropZone::Bottom
+                                && target_index + 1 == source_index))
+                    {
+                        return Ok(CommandApplication::persistent());
                     }
                 }
 
