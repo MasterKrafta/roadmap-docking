@@ -27,6 +27,10 @@ pub enum HitResult {
         panel: PanelId,
         index: usize,
     },
+    /// Button that exposes tabs omitted from the visible tab headers.
+    TabOverflowButton {
+        group: NodeId,
+    },
     Panel {
         panel: PanelId,
     },
@@ -95,6 +99,11 @@ mod tests {
             zone: DropZone::Bottom,
         };
         assert!(matches!(hit, HitResult::DropZone { zone: DropZone::Bottom, .. }));
+
+        let hit = HitResult::TabOverflowButton {
+            group: NodeId::null(),
+        };
+        assert!(matches!(hit, HitResult::TabOverflowButton { group } if group == NodeId::null()));
 
         let hit = HitResult::FloatingResizeEdge {
             group: crate::FloatingGroupId::null(),
