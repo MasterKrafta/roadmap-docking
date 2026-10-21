@@ -1609,11 +1609,13 @@ mod tests {
 
     #[test]
     fn configurable_metrics_drive_header_strip_and_splitter_geometry() {
-        let mut metrics = DockMetrics::default();
-        metrics.header_height = 31.5;
-        metrics.tab_strip_height = 20.25;
-        metrics.splitter_thickness = 3.5;
-        metrics.splitter_hit_zone = 9.0;
+        let metrics = DockMetrics {
+            header_height: 31.5,
+            tab_strip_height: 20.25,
+            splitter_thickness: 3.5,
+            splitter_hit_zone: 9.0,
+            ..DockMetrics::default()
+        };
         assert_eq!(metrics.validate(), Ok(()));
 
         let mut builder = LayoutBuilder::new(Profile::Photoshop);
