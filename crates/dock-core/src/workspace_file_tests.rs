@@ -202,6 +202,38 @@ fn version_one_workspace_migrates_to_current_version_with_diagnostic() {
 }
 
 #[test]
+fn current_schema_missing_expanded_width_is_repaired_with_diagnostic() {
+    let metrics = DockMetrics::default();
+    let (layout, descriptors) = sample_layout();
+    let file = WorkspaceFile::from_layout(&layout).unwrap();
+    let mut value: serde_json::Value = serde_json::to_value(&file).unwrap();
+    value["layout"]["right"]
+        .as_object_mut()
+        .unwrap()
+        .remove("last_expanded_width");
+    let json = value.to_string();
+
+    let report = WorkspaceFile::load_json(
+        &json,
+        &descriptors,
+        &metrics,
+        WorkspaceLoadOptions::default(),
+    )
+    .unwrap();
+
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        matches!(diagnostic, WorkspaceDiagnostic::LayoutNormalized { issues }
+            if issues.iter().any(|issue| issue.contains("last_expanded_width restored")))
+    }));
+    let root = report.layout.main_area(DockSide::Right).unwrap().root;
+    let Some(crate::Node::Column(column)) = report.layout.node(root) else {
+        panic!("main root must be a column");
+    };
+    assert_eq!(column.last_expanded_width, Some(280.0));
+    assert!(report.layout.validate(&metrics).is_ok());
+}
+
+#[test]
 fn unsupported_file_versions_and_malformed_json_return_errors() {
     let (layout, descriptors) = sample_layout();
     let mut file = WorkspaceFile::from_layout(&layout).unwrap();
