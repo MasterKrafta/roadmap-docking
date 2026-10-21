@@ -7,6 +7,8 @@ pub enum DragSessionError {
     SessionNotIdle,
     #[error("there is no active pointer gesture")]
     NoActiveGesture,
+    #[error("a drop target can only be assigned while dragging")]
+    NotDragging,
     #[error("an active gesture cannot be reset before it is dropped or cancelled")]
     CannotResetActiveGesture,
     #[error("pointer coordinates must be finite")]
