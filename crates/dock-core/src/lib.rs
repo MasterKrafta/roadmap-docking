@@ -28,6 +28,8 @@ pub mod drop_zone;
 pub mod drop_zone_rect;
 pub mod drag_payload;
 pub mod drag_cancel_reason;
+pub mod drag_drop_action;
+pub mod drag_handle;
 pub mod drag_drop_request;
 pub mod drag_preview;
 pub mod drag_session;
@@ -91,6 +93,8 @@ pub use drop_zone::DropZone;
 pub use drop_zone_rect::DropZoneRect;
 pub use drag_payload::DragPayload;
 pub use drag_cancel_reason::DragCancelReason;
+pub use drag_drop_action::DragDropAction;
+pub use drag_handle::DragHandle;
 pub use drag_drop_request::DragDropRequest;
 pub use drag_preview::DragPreview;
 pub use drag_session::DragSession;
@@ -134,5 +138,7 @@ pub use vertical_overflow::VerticalOverflow;
 mod layout_builder;
 #[cfg(test)]
 mod drag_drop_semantics;
+#[cfg(test)]
+mod drag_drop_resolution;
 #[cfg(test)]
 mod command_sequence_tests;
