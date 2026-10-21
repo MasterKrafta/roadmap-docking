@@ -550,7 +550,13 @@ fn nested_generic_rail_groups_can_open_flyouts() {
     let mut builder = LayoutBuilder::new(Profile::Generic);
     let (panel, panel_node) = builder.panel(key("generic-nested-rail"), constraints());
     let group = builder.tabs(vec![panel_node], 0, false);
-    let split = builder.split(crate::Axis::Y, vec![group], vec![1.0]);
+    let (_, other_panel_node) = builder.panel(key("generic-nested-rail-other"), constraints());
+    let other_group = builder.tabs(vec![other_panel_node], 0, false);
+    let split = builder.split(
+        crate::Axis::Y,
+        vec![group, other_group],
+        vec![0.5, 0.5],
+    );
     let column = builder.column(
         metrics.rail_width,
         ColumnMode::IconsOnly,
