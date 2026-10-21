@@ -4,6 +4,7 @@
 /// Photoshop reference/design. UI code should consume this object rather than
 /// re-declaring these constants.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct DockMetrics {
     pub default_column_width: f32,
     pub min_column_width: f32,
