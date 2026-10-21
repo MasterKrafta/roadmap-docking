@@ -685,40 +685,46 @@ impl Layout {
                     });
                 }
 
-                // Preserve every ratio outside the chosen pair. A monotonic
-                // search finds the pair's new split weight even when another
-                // group is pinned at its minimum by the current available height.
-                let pair_weight = current.group_ratios[left_index] + current.group_ratios[right_index];
-                if pair_weight <= f32::EPSILON {
+                let minimums = self.group_minimum_heights(*column, metrics)?;
+                if current.groups.iter().enumerate().any(|(index, group)| {
+                    !self.group_is_collapsed(*group)
+                        && heights[index] + PIXEL_TOLERANCE < minimums[index]
+                }) {
+                    return Err(CommandError::InvalidValue {
+                        field: "available_height",
+                        reason: "current group ratios place an expanded group below its minimum; reset ratios before resizing",
+                    });
+                }
+
+                // Ratios are weights among expanded groups. Transfer weight only
+                // between this pair so every non-adjacent group's ratio remains
+                // unchanged and the pair keeps its combined weight.
+                let expanded_weight_sum: f32 = current.groups.iter().enumerate()
+                    .filter(|(_, group)| !self.group_is_collapsed(**group))
+                    .map(|(index, _)| current.group_ratios[index])
+                    .sum();
+                let expanded_height: f32 = current.groups.iter().enumerate()
+                    .filter(|(_, group)| !self.group_is_collapsed(**group))
+                    .map(|(index, _)| heights[index])
+                    .sum();
+                if expanded_weight_sum <= f32::EPSILON || expanded_height <= 0.0 {
                     return Ok(CommandApplication {
                         actual_value: Some(CommandValue::GroupBoundaryDelta(0.0)),
                         inverse: None,
                         persistent: true,
                     });
                 }
-                let target_left_height = heights[left_index] + requested_delta;
-                let mut low_weight = 0.0_f32;
-                let mut high_weight = pair_weight;
+
+                let weight_delta = requested_delta * expanded_weight_sum / expanded_height;
                 let mut new_ratios = current.group_ratios.clone();
-                for _ in 0..48 {
-                    let left_weight = low_weight + (high_weight - low_weight) * 0.5;
-                    new_ratios[left_index] = left_weight;
-                    new_ratios[right_index] = pair_weight - left_weight;
-                    let trial_heights = self.group_heights_for_ratios(
-                        *column,
-                        &new_ratios,
-                        *available_height,
-                        metrics,
-                    )?;
-                    if trial_heights[left_index] < target_left_height {
-                        low_weight = left_weight;
-                    } else {
-                        high_weight = left_weight;
-                    }
+                new_ratios[left_index] += weight_delta;
+                new_ratios[right_index] -= weight_delta;
+                if new_ratios[left_index] < 0.0 || new_ratios[right_index] < 0.0 {
+                    return Err(CommandError::InvalidValue {
+                        field: "delta",
+                        reason: "constrained resize produced a negative group weight",
+                    });
                 }
-                let left_weight = low_weight + (high_weight - low_weight) * 0.5;
-                new_ratios[left_index] = left_weight;
-                new_ratios[right_index] = pair_weight - left_weight;
                 let final_heights = self.group_heights_for_ratios(
                     *column,
                     &new_ratios,
@@ -2161,11 +2167,28 @@ impl Layout {
                 reason: "available height leaves no space for expanded groups",
             });
         }
-        let minimums = self.group_minimum_heights(column_id, metrics)?;
-        let expanded_minimums: Vec<f32> = expanded_indices.iter().map(|index| minimums[*index]).collect();
-        let expanded_heights = distribute_heights_with_minimums(free_height, &expanded_minimums, &weights)?;
-        for (index, height) in expanded_indices.into_iter().zip(expanded_heights) {
-            heights[index] = height;
+        if expanded_indices.is_empty() {
+            return Ok(heights);
+        }
+        if free_height <= 0.0 {
+            return Err(CommandError::InvalidValue {
+                field: "available_height",
+                reason: "available height leaves no space for expanded groups",
+            });
+        }
+        let total_weight: f32 = weights.iter().copied().sum();
+        if !total_weight.is_finite() || total_weight < 0.0 {
+            return Err(CommandError::InvalidValue {
+                field: "ratios",
+                reason: "expanded group weights must have a finite sum",
+            });
+        }
+        for (index, weight) in expanded_indices.into_iter().zip(weights) {
+            heights[index] = if total_weight <= f32::EPSILON {
+                free_height / column.groups.iter().filter(|group| !self.group_is_collapsed(**group)).count() as f32
+            } else {
+                free_height * weight / total_weight
+            };
         }
         Ok(heights)
     }
@@ -4674,7 +4697,7 @@ mod tests {
             metrics.default_column_width,
             crate::ColumnMode::Expanded,
             vec![group_a, group_b, group_c],
-            vec![0.4, 0.3, 0.3],
+            vec![1.0 / 3.0, 0.25, 5.0 / 12.0],
         );
         builder.main_area(DockSide::Right, column);
         let mut layout = builder.build();
