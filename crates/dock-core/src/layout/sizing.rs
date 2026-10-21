@@ -315,8 +315,18 @@ impl Layout {
                 }
                 Size::new(width, height)
             }
+            Node::Column(column) if column.mode.is_rail() => {
+                let width = match column.mode {
+                    ColumnMode::Expanded => column.width,
+                    ColumnMode::IconsAndLabels => metrics.min_column_width,
+                    ColumnMode::IconsOnly => metrics.rail_width,
+                };
+                let slot_count = self.column_display_order(node_id)?.len();
+                let slot_height = metrics.collapsed_group_height.max(metrics.tab_strip_height);
+                Size::new(width, slot_height * slot_count as f32)
+            }
             Node::Column(column) => {
-                let mut width = if column.mode == ColumnMode::IconsOnly { metrics.rail_width } else { metrics.min_column_width };
+                let mut width = metrics.min_column_width;
                 let mut height = 0.0;
                 for group in &column.groups {
                     let child_size = self.minimum_node_size(*group, metrics)?;
