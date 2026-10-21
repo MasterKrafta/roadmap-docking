@@ -142,13 +142,13 @@ fn compute_flyout_rect(
             (
                 ResizeEdge::Right,
                 rail_right,
-                viewport.checked_right().map_err(ComputeRectsError::Geometry)? - rail_right,
+                canvas.size.width,
             )
         } else if rail.rect.origin.x >= canvas_right {
             (
                 ResizeEdge::Left,
                 rail.rect.origin.x,
-                rail.rect.origin.x - viewport.origin.x,
+                canvas.size.width,
             )
         } else {
             // Flyouts are anchored to main-dock rails, not floating columns.
