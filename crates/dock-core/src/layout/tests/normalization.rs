@@ -212,6 +212,7 @@ fn normalize_removes_an_empty_column_and_its_main_area() {
         mode: crate::ColumnMode::Expanded,
         groups: Vec::new(),
         group_ratios: Vec::new(),
+        last_expanded_width: Some(DockMetrics::default().default_column_width),
     }));
     let mut areas = SlotMap::<DockAreaId, DockArea>::with_key();
     let area = areas.insert(DockArea::main(DockSide::Right, root));
