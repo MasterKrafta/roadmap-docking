@@ -5,8 +5,6 @@ use crate::{
     SplitterRect, TabHeaderRect, TabStripRect, Tabs,
 };
 
-const PIXEL_TOLERANCE: f32 = 1.0e-3;
-
 impl Layout {
     /// Resolves the validated model into a snapshot of logical-pixel rectangles.
     ///
@@ -164,6 +162,35 @@ fn layout_column(
 ) -> Result<(), ComputeRectsError> {
     output.columns.push(ColumnRect::new(id, rect));
     if column.groups.is_empty() {
+        return Ok(());
+    }
+
+    // An icon rail exposes one fixed hit target per group, not tab strips or
+    // panel content. The model's expanded width remains untouched.
+    if column.mode == ColumnMode::IconsOnly {
+        let slot_height = metrics.collapsed_group_height.max(metrics.tab_strip_height);
+        let required = slot_height * column.groups.len() as f32;
+        if !required.is_finite() {
+            return Err(ComputeRectsError::Geometry(GeometryError::ArithmeticOverflow));
+        }
+        if rect.size.height < required {
+            return Err(ComputeRectsError::InsufficientSpace {
+                axis: Axis::Y,
+                available: rect.size.height,
+                required,
+            });
+        }
+        let mut y = rect.origin.y;
+        for group_id in &column.groups {
+            output.groups.push(GroupRect::new(
+                *group_id,
+                Rect::new(
+                    Point::new(rect.origin.x, y),
+                    Size::new(rect.size.width, slot_height),
+                ),
+            ));
+            y += slot_height;
+        }
         return Ok(());
     }
 
@@ -564,15 +591,17 @@ fn push_resize_edges(
     let bottom = rect.origin.y + rect.size.height - height;
     let right_edge = rect.origin.x + rect.size.width;
     let bottom_edge = rect.origin.y + rect.size.height;
+    // Corners precede edges so an adapter can prioritize corner resizing when
+    // the hit regions overlap.
     let edges = [
-        (ResizeEdge::Left, Rect::new(Point::new(left, top), Size::new(width, rect.size.height))),
-        (ResizeEdge::Right, Rect::new(Point::new(right, top), Size::new(width, rect.size.height))),
-        (ResizeEdge::Top, Rect::new(Point::new(left, top), Size::new(rect.size.width, height))),
-        (ResizeEdge::Bottom, Rect::new(Point::new(left, bottom), Size::new(rect.size.width, height))),
         (ResizeEdge::TopLeft, Rect::new(Point::new(left, top), Size::new(width, height))),
         (ResizeEdge::TopRight, Rect::new(Point::new(right, top), Size::new(width, height))),
         (ResizeEdge::BottomLeft, Rect::new(Point::new(left, bottom), Size::new(width, height))),
         (ResizeEdge::BottomRight, Rect::new(Point::new(right, bottom), Size::new(width, height))),
+        (ResizeEdge::Left, Rect::new(Point::new(left, top), Size::new(width, rect.size.height))),
+        (ResizeEdge::Right, Rect::new(Point::new(right, top), Size::new(width, rect.size.height))),
+        (ResizeEdge::Top, Rect::new(Point::new(left, top), Size::new(rect.size.width, height))),
+        (ResizeEdge::Bottom, Rect::new(Point::new(left, bottom), Size::new(rect.size.width, height))),
     ];
     // Keep checked edge calculations explicit so arithmetic overflow is rejected.
     if !right_edge.is_finite() || !bottom_edge.is_finite() {
@@ -587,12 +616,14 @@ fn push_resize_edges(
 
 #[cfg(test)]
 mod tests {
-    use super::{ComputeRectsError, PIXEL_TOLERANCE};
+    use super::ComputeRectsError;
     use crate::{
         Axis, ColumnMode, DockMetrics, DockSide, PanelConstraints, PanelKey, Point, Profile,
-        Rect, Size,
+        Node, Rect, Size,
     };
     use crate::layout_builder::LayoutBuilder;
+
+    const PIXEL_TOLERANCE: f32 = 1.0e-3;
 
     fn constraints() -> PanelConstraints {
         PanelConstraints::new(
@@ -718,6 +749,29 @@ mod tests {
         assert_eq!(rects.panels[0].panel, panel);
         assert_eq!(rects.panels[0].rect.origin.x, bounds.origin.x);
         assert_eq!(rects.panels[0].rect.origin.y, bounds.origin.y + metrics.header_height + metrics.tab_strip_height);
+    }
+
+    #[test]
+    fn icon_rail_uses_rail_width_without_mutating_logical_column_width() {
+        let metrics = DockMetrics::default();
+        let mut builder = LayoutBuilder::new(Profile::Photoshop);
+        let (_, panel_node) = builder.panel(key("icon-rail-panel"), constraints());
+        let group = builder.tabs(vec![panel_node], 0, false);
+        let column = builder.column(280.0, ColumnMode::IconsOnly, vec![group], vec![1.0]);
+        builder.main_area(DockSide::Left, column);
+        let layout = builder.build();
+
+        let rects = layout.compute_rects(viewport(1000.0, 500.0), &metrics).unwrap();
+
+        assert_eq!(rects.columns[0].rect.size.width, metrics.rail_width);
+        assert_eq!(rects.groups[0].rect.size.height, metrics.collapsed_group_height);
+        assert!(rects.tab_strips.is_empty());
+        assert!(rects.tab_headers.is_empty());
+        assert!(rects.panels.is_empty());
+        assert!(matches!(
+            layout.node(column),
+            Some(Node::Column(column)) if column.width == 280.0
+        ));
     }
 
     #[test]
