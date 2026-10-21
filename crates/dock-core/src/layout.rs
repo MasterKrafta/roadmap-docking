@@ -3,9 +3,10 @@ use std::collections::{HashMap, HashSet};
 use slotmap::SlotMap;
 
 use crate::{
-    Axis, CanvasState, ChromeMode, ColumnMode, DockArea, DockAreaId, DockAreaKind,
-    DockMetrics, DockSide, FloatingGroup, FloatingGroupId, FlyoutState, GeometryError, Node,
-    NodeId, PanelId, PanelInstance, Profile, ValidationError,
+    Axis, CanvasState, ChromeMode, ColumnMode, CommandError, CommandOutcome, CommandValue,
+    DockArea, DockAreaId, DockAreaKind, DockCommand, DockMetrics, DockSide, DropTarget, DropZone,
+    FloatingGroup, FloatingGroupId, FlyoutState, GeometryError, Node, NodeId, PanelConstraints,
+    PanelId, PanelInstance, PanelKey, Profile, Rect, Size, ValidationError,
 };
 
 const RATIO_TOLERANCE: f32 = 1.0e-4;
@@ -106,6 +107,1448 @@ impl Layout {
     pub fn floating_groups(&self) -> impl Iterator<Item = (FloatingGroupId, &FloatingGroup)> {
         self.floating_groups.iter()
     }
+
+
+    /// Applies one command transactionally. All edits happen on a candidate copy;
+    /// the live layout is replaced only after normalization and validation succeed.
+    pub fn apply(
+        &mut self,
+        command: DockCommand,
+        metrics: &DockMetrics,
+    ) -> Result<CommandOutcome, CommandError> {
+        tracing::debug!(?command, version = self.version, "applying layout command");
+        let prior_version = self.version;
+        let result = self.apply_transaction(&command, metrics);
+        match &result {
+            Ok(outcome) if outcome.new_version != prior_version => {
+                tracing::info!(
+                    ?command,
+                    old_version = prior_version,
+                    new_version = outcome.new_version,
+                    "layout command committed"
+                );
+            }
+            Ok(_) => {
+                tracing::debug!(?command, version = prior_version, "layout command accepted without version change");
+            }
+            Err(error) => {
+                tracing::warn!(?command, ?error, version = prior_version, "layout command rejected");
+            }
+        }
+        result
+    }
+
+    fn apply_transaction(
+        &mut self,
+        command: &DockCommand,
+        metrics: &DockMetrics,
+    ) -> Result<CommandOutcome, CommandError> {
+        self.validate(metrics).map_err(CommandError::InvalidLayout)?;
+
+        let mut candidate = self.clone();
+        let applied = candidate.apply_command(command, metrics)?;
+        candidate.normalize_in_place(metrics).map_err(CommandError::InvalidLayout)?;
+
+        if candidate.same_state(self) {
+            return Ok(CommandOutcome {
+                changed_nodes: Vec::new(),
+                new_version: self.version,
+                actual_value: applied.actual_value,
+                inverse: None,
+            });
+        }
+
+        if !applied.persistent {
+            candidate.version = self.version;
+            *self = candidate;
+            return Ok(CommandOutcome {
+                changed_nodes: Vec::new(),
+                new_version: self.version,
+                actual_value: applied.actual_value,
+                inverse: None,
+            });
+        }
+
+        let next_version = self.version.checked_add(1).ok_or(CommandError::InvalidValue {
+            field: "version",
+            reason: "layout version overflow",
+        })?;
+        let changed_nodes = self.changed_node_ids(&candidate);
+        candidate.version = next_version;
+        *self = candidate;
+
+        Ok(CommandOutcome {
+            changed_nodes,
+            new_version: next_version,
+            actual_value: applied.actual_value,
+            inverse: applied.inverse,
+        })
+    }
+
+    fn apply_command(
+        &mut self,
+        command: &DockCommand,
+        metrics: &DockMetrics,
+    ) -> Result<CommandApplication, CommandError> {
+        match command {
+            DockCommand::OpenPanel { key, constraints, target } => {
+                constraints.validate().map_err(|error| CommandError::InvalidValue {
+                    field: "constraints",
+                    reason: geometry_error_reason(error),
+                })?;
+                self.validate_drop_target(*target, metrics)?;
+
+                if let Some((existing_id, _)) = self.panel_instances.iter().find(|(_, instance)| {
+                    instance.key == *key && (constraints.singleton || instance.constraints.singleton)
+                }) {
+                    let panel_node = self.find_panel_node(existing_id).ok_or(
+                        CommandError::MissingPanel { panel: existing_id },
+                    )?;
+                    let (group, _) = self.tab_parent_index(panel_node).ok_or(
+                        CommandError::InvalidTarget {
+                            reason: "existing singleton panel is not inside a Tabs node",
+                        },
+                    )?;
+                    let tabs = match self.nodes.get(group) {
+                        Some(Node::Tabs(tabs)) => tabs,
+                        _ => return Err(CommandError::InvalidTarget {
+                            reason: "existing singleton panel parent is not a Tabs node",
+                        }),
+                    };
+                    let previous_active = tabs
+                        .children
+                        .get(tabs.active_index)
+                        .and_then(|id| match self.nodes.get(*id) {
+                            Some(Node::Panel(panel)) => Some(panel.panel_id),
+                            _ => None,
+                        });
+                    let Some(index) = tabs.children.iter().position(|id| *id == panel_node) else {
+                        return Err(CommandError::InvalidTarget {
+                            reason: "existing singleton panel is not a child of its Tabs node",
+                        });
+                    };
+                    if let Some(Node::Tabs(tabs)) = self.nodes.get_mut(group) {
+                        tabs.active_index = index;
+                    }
+                    let inverse = previous_active.map(|panel| DockCommand::ActivateTab { group, panel });
+                    return Ok(CommandApplication {
+                        actual_value: None,
+                        inverse,
+                        persistent: true,
+                    });
+                }
+
+                let panel_id = self.panel_instances.insert(PanelInstance::new(key.clone(), *constraints));
+                let panel_node = self.nodes.insert(Node::Panel(crate::Panel::new(panel_id)));
+                self.insert_node_for_target(panel_node, *target, metrics, Some(0.5))?;
+                Ok(CommandApplication {
+                    actual_value: None,
+                    inverse: Some(DockCommand::ClosePanel { panel: panel_id }),
+                    persistent: true,
+                })
+            }
+            DockCommand::ClosePanel { panel } => {
+                if !self.panel_instances.contains_key(*panel) {
+                    return Err(CommandError::MissingPanel { panel: *panel });
+                }
+                let node = self.find_panel_node(*panel).ok_or(CommandError::MissingPanel { panel: *panel })?;
+                self.detach_node(node)?;
+                self.remove_subtree(node);
+                Ok(CommandApplication::persistent())
+            }
+            DockCommand::CloseGroup { group } => {
+                match self.nodes.get(*group) {
+                    Some(Node::Tabs(_)) => {}
+                    Some(_) => return Err(CommandError::InvalidTarget {
+                        reason: "CloseGroup target must be a Tabs node",
+                    }),
+                    None => return Err(CommandError::MissingNode { node: *group }),
+                }
+                self.detach_node(*group)?;
+                self.remove_subtree(*group);
+                Ok(CommandApplication::persistent())
+            }
+            DockCommand::ActivateTab { group, panel } => {
+                let tabs = match self.nodes.get(*group) {
+                    Some(Node::Tabs(tabs)) => tabs.clone(),
+                    Some(_) => return Err(CommandError::InvalidTarget {
+                        reason: "ActivateTab target must be a Tabs node",
+                    }),
+                    None => return Err(CommandError::MissingNode { node: *group }),
+                };
+                let panel_node = self.find_panel_node(*panel).ok_or(CommandError::MissingPanel { panel: *panel })?;
+                let Some(index) = tabs.children.iter().position(|id| *id == panel_node) else {
+                    return Err(CommandError::InvalidTarget {
+                        reason: "panel is not a tab in the specified group",
+                    });
+                };
+                let previous = tabs.children.get(tabs.active_index).and_then(|id| match self.nodes.get(*id) {
+                    Some(Node::Panel(panel)) => Some(panel.panel_id),
+                    _ => None,
+                });
+                if index == tabs.active_index {
+                    return Ok(CommandApplication::persistent());
+                }
+                if let Some(Node::Tabs(tabs)) = self.nodes.get_mut(*group) {
+                    tabs.active_index = index;
+                }
+                Ok(CommandApplication {
+                    actual_value: None,
+                    inverse: previous.map(|panel| DockCommand::ActivateTab { group: *group, panel }),
+                    persistent: true,
+                })
+            }
+            DockCommand::ReorderTab { group, panel, to_index } => {
+                let tabs = match self.nodes.get(*group) {
+                    Some(Node::Tabs(tabs)) => tabs.clone(),
+                    Some(_) => return Err(CommandError::InvalidTarget {
+                        reason: "ReorderTab target must be a Tabs node",
+                    }),
+                    None => return Err(CommandError::MissingNode { node: *group }),
+                };
+                let panel_node = self.find_panel_node(*panel).ok_or(CommandError::MissingPanel { panel: *panel })?;
+                let Some(from_index) = tabs.children.iter().position(|id| *id == panel_node) else {
+                    return Err(CommandError::InvalidTarget {
+                        reason: "panel is not a tab in the specified group",
+                    });
+                };
+                if *to_index >= tabs.children.len() {
+                    return Err(CommandError::InvalidValue {
+                        field: "to_index",
+                        reason: "tab index is outside the group",
+                    });
+                }
+                if from_index == *to_index {
+                    return Ok(CommandApplication::persistent());
+                }
+                let active_node = tabs.children.get(tabs.active_index).copied();
+                let Some(Node::Tabs(current)) = self.nodes.get_mut(*group) else {
+                    return Err(CommandError::InvalidTarget { reason: "Tabs node changed unexpectedly" });
+                };
+                let moved = current.children.remove(from_index);
+                current.children.insert(*to_index, moved);
+                if let Some(active_node) = active_node {
+                    if let Some(active_index) = current.children.iter().position(|id| *id == active_node) {
+                        current.active_index = active_index;
+                    }
+                }
+                Ok(CommandApplication {
+                    actual_value: None,
+                    inverse: Some(DockCommand::ReorderTab {
+                        group: *group,
+                        panel: *panel,
+                        to_index: from_index,
+                    }),
+                    persistent: true,
+                })
+            }
+            DockCommand::MovePanel { panel, target } => {
+                let panel_node = self.find_panel_node(*panel).ok_or(CommandError::MissingPanel { panel: *panel })?;
+                self.validate_drop_target(*target, metrics)?;
+                if let (Some((source_group, source_index)), DropTarget::Tabs { group: target_group, index }) =
+                    (self.tab_parent_index(panel_node), target)
+                {
+                    if source_group == *target_group
+                        && (*index == source_index || *index == source_index + 1)
+                    {
+                        return Ok(CommandApplication::persistent());
+                    }
+                    if source_group == *target_group {
+                        let tabs = match self.nodes.get_mut(source_group) {
+                            Some(Node::Tabs(tabs)) => tabs,
+                            _ => return Err(CommandError::InvalidTarget { reason: "panel parent is not a Tabs node" }),
+                        };
+                        let active_node = tabs.children.get(tabs.active_index).copied();
+                        let moved = tabs.children.remove(source_index);
+                        let insert_index = (*index).min(tabs.children.len());
+                        tabs.children.insert(insert_index, moved);
+                        if let Some(active_node) = active_node {
+                            if let Some(active_index) = tabs.children.iter().position(|id| *id == active_node) {
+                                tabs.active_index = active_index;
+                            }
+                        }
+                        return Ok(CommandApplication {
+                            actual_value: None,
+                            inverse: Some(DockCommand::ReorderTab {
+                                group: source_group,
+                                panel: *panel,
+                                to_index: source_index,
+                            }),
+                            persistent: true,
+                        });
+                    }
+                }
+                let inverse = self.tab_parent_index(panel_node).map(|(group, index)| {
+                    DockCommand::MovePanel {
+                        panel: *panel,
+                        target: DropTarget::Tabs { group, index },
+                    }
+                });
+                self.detach_node(panel_node)?;
+                self.insert_node_for_target(panel_node, *target, metrics, Some(0.5))?;
+                Ok(CommandApplication { actual_value: None, inverse, persistent: true })
+            }
+            DockCommand::MoveGroup { group, column, index } => {
+                let _ = match self.nodes.get(*group) {
+                    Some(Node::Tabs(_)) => {}
+                    Some(_) => return Err(CommandError::InvalidTarget { reason: "MoveGroup source must be a Tabs node" }),
+                    None => return Err(CommandError::MissingNode { node: *group }),
+                };
+                let target_groups = match self.nodes.get(*column) {
+                    Some(Node::Column(column)) => column.groups.clone(),
+                    Some(_) => return Err(CommandError::InvalidTarget { reason: "MoveGroup target must be a Column node" }),
+                    None => return Err(CommandError::MissingNode { node: *column }),
+                };
+                if *index > target_groups.len() {
+                    return Err(CommandError::InvalidValue { field: "index", reason: "group insertion index is outside the column" });
+                }
+                let source_parent = self.find_parent(*group);
+                if source_parent == Some(*column) {
+                    let source_index = target_groups.iter().position(|id| id == group);
+                    if let Some(source_index) = source_index {
+                        if *index == source_index || *index == source_index + 1 {
+                            return Ok(CommandApplication::persistent());
+                        }
+                        let inverse = Some(DockCommand::MoveGroup { group: *group, column: *column, index: source_index });
+                        self.detach_node(*group)?;
+                        let new_len = match self.nodes.get(*column) {
+                            Some(Node::Column(value)) => value.groups.len(),
+                            _ => return Err(CommandError::InvalidTarget { reason: "MoveGroup target changed unexpectedly" }),
+                        };
+                        if *index > new_len {
+                            return Err(CommandError::InvalidValue { field: "index", reason: "group insertion index is outside the column after removal" });
+                        }
+                        self.insert_group_at_column(*column, *group, *index, None)?;
+                        return Ok(CommandApplication { actual_value: None, inverse, persistent: true });
+                    }
+                }
+                let source_column = source_parent.and_then(|parent| match self.nodes.get(parent) {
+                    Some(Node::Column(column)) => column.groups.iter().position(|id| *id == *group).map(|index| (parent, index)),
+                    _ => None,
+                });
+                let inverse = source_column.map(|(source_column, source_index)| {
+                    DockCommand::MoveGroup { group: *group, column: source_column, index: source_index }
+                });
+                self.detach_node(*group)?;
+                let new_len = match self.nodes.get(*column) {
+                    Some(Node::Column(value)) => value.groups.len(),
+                    _ => return Err(CommandError::InvalidTarget { reason: "MoveGroup target changed unexpectedly" }),
+                };
+                if *index > new_len {
+                    return Err(CommandError::InvalidValue { field: "index", reason: "group insertion index is outside the column after removal" });
+                }
+                self.insert_group_at_column(*column, *group, *index, None)?;
+                Ok(CommandApplication { actual_value: None, inverse, persistent: true })
+            }
+            DockCommand::SplitGroup { group, target_group, zone, ratio } => {
+                if !ratio.is_finite() || *ratio <= 0.0 || *ratio >= 1.0 {
+                    return Err(CommandError::InvalidValue {
+                        field: "ratio",
+                        reason: "split ratio must be finite and strictly between 0 and 1",
+                    });
+                }
+                if group == target_group {
+                    return Ok(CommandApplication::persistent());
+                }
+                if !matches!(self.nodes.get(*group), Some(Node::Tabs(_))) {
+                    return Err(if self.nodes.contains_key(*group) {
+                        CommandError::InvalidTarget { reason: "SplitGroup source must be a Tabs node" }
+                    } else {
+                        CommandError::MissingNode { node: *group }
+                    });
+                }
+                if !matches!(self.nodes.get(*target_group), Some(Node::Tabs(_))) {
+                    return Err(if self.nodes.contains_key(*target_group) {
+                        CommandError::InvalidTarget { reason: "SplitGroup target must be a Tabs node" }
+                    } else {
+                        CommandError::MissingNode { node: *target_group }
+                    });
+                }
+                self.validate_drop_target(DropTarget::GroupEdge { group: *target_group, zone: *zone }, metrics)?;
+                if let Some(source_column) = self.find_owner_column(*group) {
+                    if self.find_owner_column(*target_group) == Some(source_column) {
+                        let groups = match self.nodes.get(source_column) {
+                            Some(Node::Column(column)) => column.groups.clone(),
+                            _ => Vec::new(),
+                        };
+                        let source_index = groups.iter().position(|id| id == group);
+                        let target_index = groups.iter().position(|id| id == target_group);
+                        if let (Some(source_index), Some(target_index)) = (source_index, target_index) {
+                            if (*zone == DropZone::Top && source_index + 1 == target_index)
+                                || (*zone == DropZone::Bottom && target_index + 1 == source_index)
+                            {
+                                return Ok(CommandApplication::persistent());
+                            }
+                        }
+                    }
+                }
+                let source_column = self.find_owner_column(*group);
+                let source_index = source_column.and_then(|column| match self.nodes.get(column) {
+                    Some(Node::Column(column_data)) => column_data.groups.iter().position(|id| id == group).map(|index| (column, index)),
+                    _ => None,
+                });
+                let inverse = source_index.map(|(column, index)| DockCommand::MoveGroup { group: *group, column, index });
+                self.detach_node(*group)?;
+                self.insert_group_edge(*group, *target_group, *zone, Some(*ratio), metrics)?;
+                Ok(CommandApplication { actual_value: None, inverse, persistent: true })
+            }
+            DockCommand::ResizeGroups { column, ratios } => {
+                let current = match self.nodes.get(*column) {
+                    Some(Node::Column(column)) => column.group_ratios.clone(),
+                    Some(_) => return Err(CommandError::InvalidTarget { reason: "ResizeGroups target must be a Column node" }),
+                    None => return Err(CommandError::MissingNode { node: *column }),
+                };
+                let group_count = match self.nodes.get(*column) {
+                    Some(Node::Column(column)) => column.groups.len(),
+                    _ => 0,
+                };
+                if ratios.len() != group_count {
+                    return Err(CommandError::InvalidValue { field: "ratios", reason: "ratio count must match group count" });
+                }
+                if let Some(reason) = ratio_issues(ratios, group_count).first() {
+                    return Err(CommandError::InvalidValue { field: "ratios", reason });
+                }
+                if current == *ratios {
+                    return Ok(CommandApplication::persistent());
+                }
+                if let Some(Node::Column(column)) = self.nodes.get_mut(*column) {
+                    column.group_ratios = ratios.clone();
+                }
+                Ok(CommandApplication {
+                    actual_value: Some(CommandValue::GroupRatios(ratios.clone())),
+                    inverse: Some(DockCommand::ResizeGroups { column: *column, ratios: current }),
+                    persistent: true,
+                })
+            }
+            DockCommand::ResizeColumn { column, width } => {
+                if !width.is_finite() || *width <= 0.0 {
+                    return Err(CommandError::InvalidValue { field: "width", reason: "width must be finite and positive" });
+                }
+                let current = match self.nodes.get(*column) {
+                    Some(Node::Column(column)) => column.clone(),
+                    Some(_) => return Err(CommandError::InvalidTarget { reason: "ResizeColumn target must be a Column node" }),
+                    None => return Err(CommandError::MissingNode { node: *column }),
+                };
+                let old_width = current.width;
+                let min_width = self.minimum_column_width(*column, metrics)?;
+                let actual_width = match current.mode {
+                    ColumnMode::IconsOnly => metrics.rail_width,
+                    ColumnMode::Expanded => width.max(min_width),
+                };
+                if !actual_width.is_finite() || actual_width <= 0.0 {
+                    return Err(CommandError::InvalidValue { field: "width", reason: "effective width is not finite and positive" });
+                }
+                if let Some(Node::Column(column)) = self.nodes.get_mut(*column) {
+                    column.width = actual_width;
+                }
+                Ok(CommandApplication {
+                    actual_value: Some(CommandValue::ColumnWidth(actual_width)),
+                    inverse: (actual_width != old_width).then_some(DockCommand::ResizeColumn { column: *column, width: old_width }),
+                    persistent: true,
+                })
+            }
+            DockCommand::ResizeColumnBoundary { side, boundary_index, delta } => {
+                if !delta.is_finite() {
+                    return Err(CommandError::InvalidValue { field: "delta", reason: "delta must be finite" });
+                }
+                let columns = self.main_columns(*side)?;
+                if *boundary_index + 1 >= columns.len() {
+                    return Err(CommandError::InvalidTarget { reason: "column boundary index does not identify adjacent columns" });
+                }
+                let left_id = columns[*boundary_index];
+                let right_id = columns[*boundary_index + 1];
+                let left = match self.nodes.get(left_id) {
+                    Some(Node::Column(column)) => column.clone(),
+                    _ => return Err(CommandError::InvalidTarget { reason: "main dock contains a non-Column child" }),
+                };
+                let right = match self.nodes.get(right_id) {
+                    Some(Node::Column(column)) => column.clone(),
+                    _ => return Err(CommandError::InvalidTarget { reason: "main dock contains a non-Column child" }),
+                };
+                let left_min = self.minimum_column_width(left_id, metrics)?;
+                let right_min = self.minimum_column_width(right_id, metrics)?;
+                let actual_delta = if left.mode == ColumnMode::IconsOnly || right.mode == ColumnMode::IconsOnly {
+                    0.0
+                } else {
+                    delta.clamp(left_min - left.width, right.width - right_min)
+                };
+                if actual_delta != 0.0 {
+                    let new_left = left.width + actual_delta;
+                    let new_right = right.width - actual_delta;
+                    if !new_left.is_finite() || !new_right.is_finite() {
+                        return Err(CommandError::InvalidValue { field: "delta", reason: "resized column width overflowed" });
+                    }
+                    if let Some(Node::Column(column)) = self.nodes.get_mut(left_id) {
+                        column.width = new_left;
+                    }
+                    if let Some(Node::Column(column)) = self.nodes.get_mut(right_id) {
+                        column.width = new_right;
+                    }
+                    let total: f32 = columns.iter().filter_map(|id| match self.nodes.get(*id) {
+                        Some(Node::Column(column)) => Some(column.width),
+                        _ => None,
+                    }).sum();
+                    if !total.is_finite() || total <= 0.0 {
+                        return Err(CommandError::InvalidValue { field: "delta", reason: "total dock column width overflowed" });
+                    }
+                    if let Some(area) = self.main_area(*side).copied() {
+                        if let Some(Node::Split(split)) = self.nodes.get_mut(area.root) {
+                            split.ratios = columns.iter().map(|id| match self.nodes.get(*id) {
+                                Some(Node::Column(column)) => column.width / total,
+                                _ => 0.0,
+                            }).collect();
+                        }
+                    }
+                }
+                Ok(CommandApplication {
+                    actual_value: Some(CommandValue::ColumnBoundaryDelta(actual_delta)),
+                    inverse: (actual_delta != 0.0).then_some(DockCommand::ResizeColumnBoundary {
+                        side: *side,
+                        boundary_index: *boundary_index,
+                        delta: -actual_delta,
+                    }),
+                    persistent: true,
+                })
+            }
+            DockCommand::ResetColumnRatios { side } => {
+                let Some(area) = self.main_area(*side).copied() else {
+                    return Ok(CommandApplication::persistent());
+                };
+                match self.nodes.get(area.root) {
+                    Some(Node::Column(_)) => return Ok(CommandApplication::persistent()),
+                    Some(Node::Split(split)) if split.axis == Axis::X => {
+                        let equal = equal_ratios(split.children.len());
+                        if split.ratios == equal {
+                            return Ok(CommandApplication::persistent());
+                        }
+                        if let Some(Node::Split(split)) = self.nodes.get_mut(area.root) {
+                            split.ratios = equal;
+                        }
+                        Ok(CommandApplication::persistent())
+                    }
+                    Some(_) => Err(CommandError::InvalidTarget { reason: "main dock root is not a horizontal column split" }),
+                    None => Err(CommandError::InvalidTarget { reason: "main dock root is missing" }),
+                }
+            }
+            DockCommand::Float { node, bounds } => {
+                if !self.nodes.contains_key(*node) {
+                    return Err(CommandError::MissingNode { node: *node });
+                }
+                bounds.validate_non_empty().map_err(|error| CommandError::InvalidValue {
+                    field: "bounds",
+                    reason: geometry_error_reason(error),
+                })?;
+                if self.profile == Profile::Photoshop
+                    && !matches!(self.nodes.get(*node), Some(Node::Panel(_) | Node::Tabs(_)))
+                {
+                    return Err(CommandError::UnsupportedForProfile {
+                        profile: self.profile,
+                        reason: "only a panel or tab group can become a floating root",
+                    });
+                }
+                let next_z = self.next_floating_z_order()?;
+                let panel_root = matches!(self.nodes.get(*node), Some(Node::Panel(_)));
+                self.detach_node(*node)?;
+                let root = if panel_root && self.profile == Profile::Photoshop {
+                    self.nodes.insert(Node::Tabs(crate::Tabs {
+                        children: vec![*node],
+                        active_index: 0,
+                        collapsed: false,
+                    }))
+                } else {
+                    *node
+                };
+                let area_id = self.dock_areas.insert(DockArea::floating(root));
+                self.floating_groups.insert(FloatingGroup::new(area_id, *bounds, next_z));
+                Ok(CommandApplication::persistent())
+            }
+            DockCommand::MoveFloating { group, origin } => {
+                if !origin.is_finite() {
+                    return Err(CommandError::InvalidValue { field: "origin", reason: "origin coordinates must be finite" });
+                }
+                let floating = self.floating_groups.get(*group).copied().ok_or(
+                    CommandError::MissingFloatingGroup { group: *group },
+                )?;
+                let bounds = Rect::new(*origin, floating.bounds.size);
+                bounds.validate_non_empty().map_err(|error| CommandError::InvalidValue {
+                    field: "origin",
+                    reason: geometry_error_reason(error),
+                })?;
+                if floating.bounds.origin == *origin {
+                    return Ok(CommandApplication::persistent());
+                }
+                if let Some(value) = self.floating_groups.get_mut(*group) {
+                    value.bounds.origin = *origin;
+                }
+                Ok(CommandApplication {
+                    actual_value: None,
+                    inverse: Some(DockCommand::MoveFloating { group: *group, origin: floating.bounds.origin }),
+                    persistent: true,
+                })
+            }
+            DockCommand::ResizeFloating { group, size } => {
+                size.validate_positive().map_err(|error| CommandError::InvalidValue {
+                    field: "size",
+                    reason: geometry_error_reason(error),
+                })?;
+                let floating = self.floating_groups.get(*group).copied().ok_or(
+                    CommandError::MissingFloatingGroup { group: *group },
+                )?;
+                let root = self.dock_areas.get(floating.area).ok_or(CommandError::InvalidTarget {
+                    reason: "floating group references a missing dock area",
+                })?.root;
+                let minimum = self.minimum_node_size(root, metrics)?;
+                let actual = Size::new(size.width.max(minimum.width), size.height.max(minimum.height));
+                let new_bounds = Rect::new(floating.bounds.origin, actual);
+                new_bounds.validate_non_empty().map_err(|error| CommandError::InvalidValue {
+                    field: "size",
+                    reason: geometry_error_reason(error),
+                })?;
+                if actual == floating.bounds.size {
+                    return Ok(CommandApplication {
+                        actual_value: Some(CommandValue::FloatingSize(actual)),
+                        inverse: None,
+                        persistent: true,
+                    });
+                }
+                if let Some(value) = self.floating_groups.get_mut(*group) {
+                    value.bounds = new_bounds;
+                }
+                Ok(CommandApplication {
+                    actual_value: Some(CommandValue::FloatingSize(actual)),
+                    inverse: Some(DockCommand::ResizeFloating { group: *group, size: floating.bounds.size }),
+                    persistent: true,
+                })
+            }
+            DockCommand::RaiseFloating { group } => {
+                let current = self.floating_groups.get(*group).copied().ok_or(
+                    CommandError::MissingFloatingGroup { group: *group },
+                )?;
+                let max_other = self.floating_groups.iter()
+                    .filter(|(other_id, _)| *other_id != *group)
+                    .map(|(_, value)| value.z_order)
+                    .max();
+                if max_other.is_none_or(|max| current.z_order > max) {
+                    return Ok(CommandApplication::persistent());
+                }
+                let max_z = self.floating_groups.iter().map(|(_, value)| value.z_order).max().unwrap_or(-1);
+                let next_z = max_z.checked_add(1).ok_or(CommandError::InvalidValue {
+                    field: "z_order",
+                    reason: "floating z-order overflow",
+                })?;
+                if let Some(value) = self.floating_groups.get_mut(*group) {
+                    value.z_order = next_z;
+                }
+                Ok(CommandApplication::persistent())
+            }
+            DockCommand::DockFloating { group, target } => {
+                self.dock_floating_group(*group, *target, metrics)?;
+                Ok(CommandApplication::persistent())
+            }
+            DockCommand::CollapseGroup { group, collapsed } => {
+                let old = match self.nodes.get(*group) {
+                    Some(Node::Tabs(tabs)) => tabs.collapsed,
+                    Some(_) => return Err(CommandError::InvalidTarget { reason: "CollapseGroup target must be a Tabs node" }),
+                    None => return Err(CommandError::MissingNode { node: *group }),
+                };
+                if old == *collapsed {
+                    return Ok(CommandApplication::persistent());
+                }
+                if let Some(Node::Tabs(tabs)) = self.nodes.get_mut(*group) {
+                    tabs.collapsed = *collapsed;
+                }
+                Ok(CommandApplication {
+                    actual_value: None,
+                    inverse: Some(DockCommand::CollapseGroup { group: *group, collapsed: old }),
+                    persistent: true,
+                })
+            }
+            DockCommand::SetColumnMode { column, mode } => {
+                let current = match self.nodes.get(*column) {
+                    Some(Node::Column(column)) => column.clone(),
+                    Some(_) => return Err(CommandError::InvalidTarget { reason: "SetColumnMode target must be a Column node" }),
+                    None => return Err(CommandError::MissingNode { node: *column }),
+                };
+                if current.mode == *mode {
+                    return Ok(CommandApplication::persistent());
+                }
+                let width = match mode {
+                    ColumnMode::IconsOnly => metrics.rail_width,
+                    ColumnMode::Expanded if current.mode == ColumnMode::IconsOnly => {
+                        metrics.default_column_width.max(self.minimum_column_width(*column, metrics)?)
+                    }
+                    ColumnMode::Expanded => current.width.max(self.minimum_column_width(*column, metrics)?),
+                };
+                if let Some(Node::Column(value)) = self.nodes.get_mut(*column) {
+                    value.mode = *mode;
+                    value.width = width;
+                }
+                Ok(CommandApplication::persistent())
+            }
+            DockCommand::OpenFlyout { column, group } => {
+                let groups = match self.nodes.get(*column) {
+                    Some(Node::Column(value)) => {
+                        if value.mode != ColumnMode::IconsOnly {
+                            return Err(CommandError::InvalidTarget { reason: "flyout column must be in IconsOnly mode" });
+                        }
+                        value.groups.clone()
+                    }
+                    Some(_) => return Err(CommandError::InvalidTarget { reason: "OpenFlyout target must be a Column node" }),
+                    None => return Err(CommandError::MissingNode { node: *column }),
+                };
+                if !groups.contains(group) {
+                    return Err(CommandError::InvalidTarget { reason: "flyout group is not a member of the column" });
+                }
+                if !matches!(self.nodes.get(*group), Some(Node::Tabs(_))) {
+                    return Err(CommandError::InvalidTarget { reason: "flyout target must be a Tabs node" });
+                }
+                if self.flyout == Some(FlyoutState::new(*column, *group)) {
+                    return Ok(CommandApplication::transient());
+                }
+                self.flyout = Some(FlyoutState::new(*column, *group));
+                Ok(CommandApplication::transient())
+            }
+            DockCommand::CloseFlyout => {
+                if self.flyout.is_none() {
+                    return Ok(CommandApplication::transient());
+                }
+                self.flyout = None;
+                Ok(CommandApplication::transient())
+            }
+            DockCommand::SetChrome { mode } => {
+                let old = self.chrome;
+                if old == *mode {
+                    return Ok(CommandApplication::persistent());
+                }
+                self.chrome = *mode;
+                Ok(CommandApplication {
+                    actual_value: None,
+                    inverse: Some(DockCommand::SetChrome { mode: old }),
+                    persistent: true,
+                })
+            }
+        }
+    }
+
+    fn validate_drop_target(
+        &self,
+        target: DropTarget,
+        metrics: &DockMetrics,
+    ) -> Result<(), CommandError> {
+        match target {
+            DropTarget::Tabs { group, index } => match self.nodes.get(group) {
+                Some(Node::Tabs(tabs)) if index <= tabs.children.len() => Ok(()),
+                Some(Node::Tabs(_)) => Err(CommandError::InvalidValue {
+                    field: "index",
+                    reason: "tab insertion index is outside the group",
+                }),
+                Some(_) => Err(CommandError::InvalidTarget { reason: "tab target must be a Tabs node" }),
+                None => Err(CommandError::MissingNode { node: group }),
+            },
+            DropTarget::GroupEdge { group, .. } => match self.nodes.get(group) {
+                Some(Node::Tabs(_)) => Ok(()),
+                Some(_) => Err(CommandError::InvalidTarget { reason: "group-edge target must be a Tabs node" }),
+                None => Err(CommandError::MissingNode { node: group }),
+            },
+            DropTarget::MainColumn { side, index } => {
+                let columns = self.main_columns(side)?;
+                if index <= columns.len() {
+                    Ok(())
+                } else {
+                    Err(CommandError::InvalidValue {
+                        field: "index",
+                        reason: "main column insertion index is outside the dock",
+                    })
+                }
+            }
+            DropTarget::RailSlot { column, index } => match self.nodes.get(column) {
+                Some(Node::Column(value)) if value.mode != ColumnMode::IconsOnly => {
+                    Err(CommandError::InvalidTarget { reason: "rail insertion target must use IconsOnly mode" })
+                }
+                Some(Node::Column(value)) if index <= value.groups.len() => Ok(()),
+                Some(Node::Column(_)) => Err(CommandError::InvalidValue {
+                    field: "index",
+                    reason: "rail insertion index is outside the column",
+                }),
+                Some(_) => Err(CommandError::InvalidTarget { reason: "rail target must be a Column node" }),
+                None => Err(CommandError::MissingNode { node: column }),
+            },
+        }.and_then(|()| {
+            let _ = metrics;
+            Ok(())
+        })
+    }
+
+    fn insert_node_for_target(
+        &mut self,
+        node: NodeId,
+        target: DropTarget,
+        metrics: &DockMetrics,
+        edge_ratio: Option<f32>,
+    ) -> Result<(), CommandError> {
+        self.validate_drop_target(target, metrics)?;
+        match target {
+            DropTarget::Tabs { group, index } => {
+                if !matches!(self.nodes.get(node), Some(Node::Panel(_))) {
+                    return Err(CommandError::InvalidTarget { reason: "Tabs target accepts a Panel leaf; move a group to a group or column target" });
+                }
+                let Some(Node::Tabs(tabs)) = self.nodes.get_mut(group) else {
+                    return Err(CommandError::InvalidTarget { reason: "tab target changed unexpectedly" });
+                };
+                tabs.children.insert(index, node);
+                tabs.active_index = index;
+                Ok(())
+            }
+            DropTarget::GroupEdge { group, zone } => {
+                let group_node = self.group_node_for(node)?;
+                self.insert_group_edge(group_node, group, zone, edge_ratio, metrics)
+            }
+            DropTarget::MainColumn { side, index } => {
+                let group = self.group_node_for(node)?;
+                let column = self.nodes.insert(Node::Column(crate::Column {
+                    width: metrics.default_column_width,
+                    mode: ColumnMode::Expanded,
+                    groups: vec![group],
+                    group_ratios: vec![1.0],
+                }));
+                self.insert_existing_column_at(side, index, column)
+            }
+            DropTarget::RailSlot { column, index } => {
+                let group = self.group_node_for(node)?;
+                self.insert_group_at_column(column, group, index, edge_ratio)
+            }
+        }
+    }
+
+    fn group_node_for(&mut self, node: NodeId) -> Result<NodeId, CommandError> {
+        match self.nodes.get(node) {
+            Some(Node::Tabs(_)) => Ok(node),
+            Some(Node::Panel(_)) => Ok(self.nodes.insert(Node::Tabs(crate::Tabs {
+                children: vec![node],
+                active_index: 0,
+                collapsed: false,
+            }))),
+            Some(_) if self.profile == Profile::Generic => Ok(self.nodes.insert(Node::Tabs(crate::Tabs {
+                children: vec![node],
+                active_index: 0,
+                collapsed: false,
+            }))),
+            Some(_) => Err(CommandError::UnsupportedForProfile {
+                profile: self.profile,
+                reason: "Photoshop columns and floating stacks can contain Tabs groups or Panel leaves only",
+            }),
+            None => Err(CommandError::MissingNode { node }),
+        }
+    }
+
+    fn insert_existing_column_at(
+        &mut self,
+        side: DockSide,
+        index: usize,
+        new_column: NodeId,
+    ) -> Result<(), CommandError> {
+        if !matches!(self.nodes.get(new_column), Some(Node::Column(_))) {
+            return Err(CommandError::InvalidTarget { reason: "inserted main column is not a Column node" });
+        }
+        let Some(area_id) = self.main_areas[side_index(side)] else {
+            if index != 0 {
+                return Err(CommandError::InvalidValue { field: "index", reason: "first column on an empty dock must use index zero" });
+            }
+            let area_id = self.dock_areas.insert(DockArea::main(side, new_column));
+            self.main_areas[side_index(side)] = Some(area_id);
+            return Ok(());
+        };
+        let area_root = self.dock_areas.get(area_id).ok_or(CommandError::InvalidTarget {
+            reason: "main dock side references a missing area",
+        })?.root;
+        match self.nodes.get(area_root).cloned() {
+            Some(Node::Column(_)) => {
+                if index > 1 {
+                    return Err(CommandError::InvalidValue { field: "index", reason: "column insertion index is outside the dock" });
+                }
+                let children = if index == 0 { vec![new_column, area_root] } else { vec![area_root, new_column] };
+                let split = self.nodes.insert(Node::Split(crate::Split {
+                    axis: Axis::X,
+                    ratios: equal_ratios(2),
+                    children,
+                }));
+                if let Some(area) = self.dock_areas.get_mut(area_id) {
+                    area.root = split;
+                }
+                Ok(())
+            }
+            Some(Node::Split(mut split)) if split.axis == Axis::X => {
+                if index > split.children.len() {
+                    return Err(CommandError::InvalidValue { field: "index", reason: "column insertion index is outside the dock" });
+                }
+                if split.children.iter().any(|id| !matches!(self.nodes.get(*id), Some(Node::Column(_)))) {
+                    return Err(CommandError::InvalidTarget { reason: "main horizontal split contains a non-Column child" });
+                }
+                split.children.insert(index, new_column);
+                split.ratios = equal_ratios(split.children.len());
+                if let Some(Node::Split(current)) = self.nodes.get_mut(area_root) {
+                    *current = split;
+                }
+                Ok(())
+            }
+            Some(_) => Err(CommandError::InvalidTarget { reason: "main dock root must be a Column or Split(X) of Columns" }),
+            None => Err(CommandError::InvalidTarget { reason: "main dock root is missing" }),
+        }
+    }
+
+    fn insert_group_at_column(
+        &mut self,
+        column_id: NodeId,
+        group_id: NodeId,
+        index: usize,
+        split_ratio: Option<f32>,
+    ) -> Result<(), CommandError> {
+        if group_id == column_id {
+            return Err(CommandError::InvalidTarget { reason: "a column cannot contain itself" });
+        }
+        let column = match self.nodes.get(column_id) {
+            Some(Node::Column(column)) => column.clone(),
+            Some(_) => return Err(CommandError::InvalidTarget { reason: "group insertion target must be a Column node" }),
+            None => return Err(CommandError::MissingNode { node: column_id }),
+        };
+        if index > column.groups.len() {
+            return Err(CommandError::InvalidValue { field: "index", reason: "group insertion index is outside the column" });
+        }
+        if column.groups.contains(&group_id) {
+            return Err(CommandError::InvalidTarget { reason: "group is already in the target column" });
+        }
+        let mut groups = column.groups.clone();
+        groups.insert(index, group_id);
+        let ratios = if let Some(ratio) = split_ratio {
+            if !ratio.is_finite() || ratio <= 0.0 || ratio >= 1.0 {
+                return Err(CommandError::InvalidValue { field: "ratio", reason: "split ratio must be between zero and one" });
+            }
+            let old_len = column.groups.len();
+            if old_len == 0 {
+                vec![1.0]
+            } else {
+                let mut weights = if ratio_issues(&column.group_ratios, old_len).is_empty() {
+                    column.group_ratios.clone()
+                } else {
+                    equal_ratios(old_len)
+                };
+                let target_index = if index < old_len { index } else { old_len - 1 };
+                let target_weight = weights[target_index];
+                weights[target_index] = target_weight * (1.0 - ratio);
+                weights.insert(index, target_weight * ratio);
+                normalized_ratios(weights.into_iter().map(Some).collect())
+            }
+        } else {
+            equal_ratios(groups.len())
+        };
+        let Some(Node::Column(column)) = self.nodes.get_mut(column_id) else {
+            return Err(CommandError::InvalidTarget { reason: "target column changed unexpectedly" });
+        };
+        column.groups = groups;
+        column.group_ratios = ratios;
+        Ok(())
+    }
+
+    fn insert_group_edge(
+        &mut self,
+        new_group: NodeId,
+        target_group: NodeId,
+        zone: DropZone,
+        ratio: Option<f32>,
+        metrics: &DockMetrics,
+    ) -> Result<(), CommandError> {
+        if new_group == target_group {
+            return Ok(());
+        }
+        if !matches!(self.nodes.get(new_group), Some(Node::Tabs(_)))
+            || !matches!(self.nodes.get(target_group), Some(Node::Tabs(_)))
+        {
+            return Err(CommandError::InvalidTarget { reason: "group-edge operations require Tabs nodes" });
+        }
+        let split_ratio = ratio.unwrap_or(0.5);
+        if !split_ratio.is_finite() || split_ratio <= 0.0 || split_ratio >= 1.0 {
+            return Err(CommandError::InvalidValue { field: "ratio", reason: "split ratio must be between zero and one" });
+        }
+
+        if self.profile == Profile::Photoshop {
+            if let Some(column_id) = self.find_owner_column(target_group) {
+                match zone {
+                    DropZone::Top | DropZone::Bottom => {
+                        let groups = match self.nodes.get(column_id) {
+                            Some(Node::Column(column)) => column.groups.clone(),
+                            _ => return Err(CommandError::InvalidTarget { reason: "target group has no owning column" }),
+                        };
+                        let target_index = groups.iter().position(|id| *id == target_group).ok_or(
+                            CommandError::InvalidTarget { reason: "target group is not in its owning column" },
+                        )?;
+                        let index = if zone == DropZone::Top { target_index } else { target_index + 1 };
+                        self.insert_group_at_column(column_id, new_group, index, Some(split_ratio))
+                    }
+                    DropZone::Left | DropZone::Right => {
+                        let (side, column_index) = self.main_column_position(column_id).ok_or(
+                            CommandError::InvalidTarget { reason: "horizontal group splits require a column in a main dock" },
+                        )?;
+                        let insert_at = if zone == DropZone::Left { column_index } else { column_index + 1 };
+                        let column = self.nodes.insert(Node::Column(crate::Column {
+                            width: metrics.default_column_width,
+                            mode: ColumnMode::Expanded,
+                            groups: vec![new_group],
+                            group_ratios: vec![1.0],
+                        }));
+                        self.insert_existing_column_at(side, insert_at, column)
+                    }
+                }
+            } else {
+                let floating_root = self.find_floating_root_containing(target_group).ok_or(
+                    CommandError::InvalidTarget { reason: "target group is not in a Photoshop column or floating stack" },
+                )?;
+                match zone {
+                    DropZone::Left | DropZone::Right => Err(CommandError::InvalidTarget {
+                        reason: "horizontal splits are not supported inside a floating stack",
+                    }),
+                    DropZone::Top | DropZone::Bottom => {
+                        if floating_root == target_group {
+                            let (children, ratios) = if zone == DropZone::Top {
+                                (vec![new_group, target_group], vec![split_ratio, 1.0 - split_ratio])
+                            } else {
+                                (vec![target_group, new_group], vec![1.0 - split_ratio, split_ratio])
+                            };
+                            let split = self.nodes.insert(Node::Split(crate::Split {
+                                axis: Axis::Y,
+                                children,
+                                ratios,
+                            }));
+                            self.set_area_root(target_group, split)?;
+                            Ok(())
+                        } else {
+                            let parent = self.find_parent(target_group).ok_or(
+                                CommandError::InvalidTarget { reason: "floating group parent was not found" },
+                            )?;
+                            match self.nodes.get(parent) {
+                                Some(Node::Split(split)) if split.axis == Axis::Y && split.children.contains(&target_group) => {
+                                    let target_index = split.children.iter().position(|id| *id == target_group).unwrap_or(0);
+                                    let insert_at = if zone == DropZone::Top { target_index } else { target_index + 1 };
+                                    let Some(Node::Split(split)) = self.nodes.get_mut(parent) else {
+                                        return Err(CommandError::InvalidTarget { reason: "floating stack changed unexpectedly" });
+                                    };
+                                    split.children.insert(insert_at, new_group);
+                                    split.ratios = equal_ratios(split.children.len());
+                                    Ok(())
+                                }
+                                _ => Err(CommandError::InvalidTarget { reason: "floating stack must be a vertical Split of Tabs" }),
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            let parent = self.find_parent(target_group);
+            let axis = match zone {
+                DropZone::Left | DropZone::Right => Axis::X,
+                DropZone::Top | DropZone::Bottom => Axis::Y,
+            };
+            let children = match zone {
+                DropZone::Left | DropZone::Top => vec![new_group, target_group],
+                DropZone::Right | DropZone::Bottom => vec![target_group, new_group],
+            };
+            let ratios = match zone {
+                DropZone::Left | DropZone::Top => vec![split_ratio, 1.0 - split_ratio],
+                DropZone::Right | DropZone::Bottom => vec![1.0 - split_ratio, split_ratio],
+            };
+            let split = self.nodes.insert(Node::Split(crate::Split { axis, children, ratios }));
+            if let Some(parent) = parent {
+                self.replace_child(parent, target_group, split)?;
+            } else {
+                self.set_area_root(target_group, split)?;
+            }
+            Ok(())
+        }
+    }
+
+    fn dock_floating_group(
+        &mut self,
+        group_id: FloatingGroupId,
+        target: DropTarget,
+        metrics: &DockMetrics,
+    ) -> Result<(), CommandError> {
+        let floating = self.floating_groups.get(group_id).copied().ok_or(
+            CommandError::MissingFloatingGroup { group: group_id },
+        )?;
+        let root = self.dock_areas.get(floating.area).ok_or(CommandError::InvalidTarget {
+            reason: "floating group references a missing dock area",
+        })?.root;
+        self.validate_drop_target(target, metrics)?;
+        if let DropTarget::Tabs { group: target_group, .. } = target {
+            if self.is_descendant_or_same(root, target_group) {
+                return Ok(());
+            }
+            if matches!(self.nodes.get(root), Some(Node::Split(split)) if split.axis == Axis::Y) {
+                return Err(CommandError::InvalidTarget {
+                    reason: "a floating stack cannot be merged into a tab strip; target a dock column or rail slot",
+                });
+            }
+        }
+        match (self.nodes.get(root).cloned(), target) {
+            (Some(Node::Split(split)), DropTarget::MainColumn { side, index }) if split.axis == Axis::Y => {
+                if split.children.iter().any(|id| !matches!(self.nodes.get(*id), Some(Node::Tabs(_)))) {
+                    return Err(CommandError::InvalidTarget { reason: "floating stack contains a non-Tabs group" });
+                }
+                self.detach_node(root)?;
+                self.nodes.remove(root);
+                let column = self.nodes.insert(Node::Column(crate::Column {
+                    width: metrics.default_column_width,
+                    mode: ColumnMode::Expanded,
+                    groups: split.children,
+                    group_ratios: normalized_ratios(split.ratios.into_iter().map(Some).collect()),
+                }));
+                self.insert_existing_column_at(side, index, column)
+            }
+            (Some(Node::Split(split)), DropTarget::RailSlot { column, index }) if split.axis == Axis::Y => {
+                if split.children.iter().any(|id| !matches!(self.nodes.get(*id), Some(Node::Tabs(_)))) {
+                    return Err(CommandError::InvalidTarget { reason: "floating stack contains a non-Tabs group" });
+                }
+                self.detach_node(root)?;
+                self.nodes.remove(root);
+                let mut insert_at = index;
+                for child in split.children {
+                    self.insert_group_at_column(column, child, insert_at, None)?;
+                    insert_at += 1;
+                }
+                Ok(())
+            }
+            (Some(Node::Tabs(mut tabs)), DropTarget::Tabs { group: target_group, index }) => {
+                self.detach_node(root)?;
+                if let Some(Node::Tabs(old_root)) = self.nodes.get_mut(root) {
+                    old_root.children.clear();
+                    old_root.active_index = 0;
+                }
+                self.nodes.remove(root);
+                if let Some(Node::Tabs(target_tabs)) = self.nodes.get_mut(target_group) {
+                    let insert_at = index.min(target_tabs.children.len());
+                    for (offset, child) in tabs.children.drain(..).enumerate() {
+                        target_tabs.children.insert(insert_at + offset, child);
+                    }
+                    target_tabs.active_index = insert_at;
+                } else {
+                    return Err(CommandError::InvalidTarget { reason: "tab target changed unexpectedly" });
+                }
+                Ok(())
+            }
+            (Some(Node::Split(_)), _,) => {
+                let _ = self;
+                Err(CommandError::InvalidTarget {
+                    reason: "floating split stacks can only be docked into a main column or icon rail",
+                })
+            }
+            (Some(_), _) => {
+                self.detach_node(root)?;
+                self.insert_node_for_target(root, target, metrics, Some(0.5))
+            }
+            (None, _) => Err(CommandError::MissingNode { node: root }),
+        }
+    }
+
+    fn main_columns(&self, side: DockSide) -> Result<Vec<NodeId>, CommandError> {
+        let Some(area) = self.main_area(side) else {
+            return Ok(Vec::new());
+        };
+        match self.nodes.get(area.root) {
+            Some(Node::Column(_)) => Ok(vec![area.root]),
+            Some(Node::Split(split)) if split.axis == Axis::X => {
+                if split.children.iter().any(|id| !matches!(self.nodes.get(*id), Some(Node::Column(_)))) {
+                    return Err(CommandError::InvalidTarget { reason: "main horizontal split must contain only Column nodes" });
+                }
+                Ok(split.children.clone())
+            }
+            Some(_) => Err(CommandError::InvalidTarget { reason: "main dock root must be a Column or Split(X) of Columns" }),
+            None => Err(CommandError::InvalidTarget { reason: "main dock root is missing" }),
+        }
+    }
+
+    fn find_panel_node(&self, panel_id: PanelId) -> Option<NodeId> {
+        self.nodes.iter().find_map(|(id, node)| match node {
+            Node::Panel(panel) if panel.panel_id == panel_id => Some(id),
+            _ => None,
+        })
+    }
+
+    fn tab_parent_index(&self, node_id: NodeId) -> Option<(NodeId, usize)> {
+        let parent = self.find_parent(node_id)?;
+        match self.nodes.get(parent) {
+            Some(Node::Tabs(tabs)) => tabs.children.iter().position(|id| *id == node_id).map(|index| (parent, index)),
+            _ => None,
+        }
+    }
+
+    fn find_parent(&self, child: NodeId) -> Option<NodeId> {
+        self.nodes.iter().find_map(|(parent, node)| {
+            node_children(node).contains(&child).then_some(parent)
+        })
+    }
+
+    fn find_owner_column(&self, group: NodeId) -> Option<NodeId> {
+        self.nodes.iter().find_map(|(id, node)| match node {
+            Node::Column(column) if column.groups.contains(&group) => Some(id),
+            _ => None,
+        })
+    }
+
+    fn main_column_position(&self, column_id: NodeId) -> Option<(DockSide, usize)> {
+        for side in [DockSide::Left, DockSide::Right] {
+            if let Ok(columns) = self.main_columns(side) {
+                if let Some(index) = columns.iter().position(|id| *id == column_id) {
+                    return Some((side, index));
+                }
+            }
+        }
+        None
+    }
+
+    fn find_floating_root_containing(&self, node_id: NodeId) -> Option<NodeId> {
+        self.floating_groups.values().find_map(|group| {
+            let root = self.dock_areas.get(group.area)?.root;
+            self.is_descendant_or_same(root, node_id).then_some(root)
+        })
+    }
+
+    fn is_descendant_or_same(&self, root: NodeId, target: NodeId) -> bool {
+        if root == target {
+            return true;
+        }
+        let Some(node) = self.nodes.get(root) else {
+            return false;
+        };
+        node_children(node).into_iter().any(|child| self.is_descendant_or_same(child, target))
+    }
+
+    fn replace_child(
+        &mut self,
+        parent: NodeId,
+        old_child: NodeId,
+        new_child: NodeId,
+    ) -> Result<(), CommandError> {
+        let Some(parent_node) = self.nodes.get_mut(parent) else {
+            return Err(CommandError::MissingNode { node: parent });
+        };
+        let replaced = match parent_node {
+            Node::Split(split) => split.children.iter_mut().find(|id| **id == old_child).map(|id| *id = new_child).is_some(),
+            Node::Tabs(tabs) => tabs.children.iter_mut().find(|id| **id == old_child).map(|id| *id = new_child).is_some(),
+            Node::Column(column) => column.groups.iter_mut().find(|id| **id == old_child).map(|id| *id = new_child).is_some(),
+            Node::Panel(_) => false,
+        };
+        if replaced {
+            Ok(())
+        } else {
+            Err(CommandError::InvalidTarget { reason: "target node is not a child of the expected parent" })
+        }
+    }
+
+    fn set_area_root(&mut self, old_root: NodeId, new_root: NodeId) -> Result<(), CommandError> {
+        if let Some(area) = self.dock_areas.values_mut().find(|area| area.root == old_root) {
+            area.root = new_root;
+            return Ok(());
+        }
+        Err(CommandError::InvalidTarget { reason: "target node is not a registered dock-area root" })
+    }
+
+    fn detach_node(&mut self, node_id: NodeId) -> Result<(), CommandError> {
+        if !self.nodes.contains_key(node_id) {
+            return Err(CommandError::MissingNode { node: node_id });
+        }
+        if let Some(parent) = self.find_parent(node_id) {
+            let Some(parent_node) = self.nodes.get_mut(parent) else {
+                return Err(CommandError::MissingNode { node: parent });
+            };
+            match parent_node {
+                Node::Split(split) => {
+                    if let Some(index) = split.children.iter().position(|id| *id == node_id) {
+                        split.children.remove(index);
+                        if index < split.ratios.len() {
+                            split.ratios.remove(index);
+                        }
+                    }
+                }
+                Node::Tabs(tabs) => {
+                    let active_node = tabs.children.get(tabs.active_index).copied();
+                    if let Some(index) = tabs.children.iter().position(|id| *id == node_id) {
+                        tabs.children.remove(index);
+                        if index < tabs.children.len() {
+                            if active_node == Some(node_id) {
+                                tabs.active_index = index;
+                            } else if let Some(active_node) = active_node {
+                                tabs.active_index = tabs.children.iter().position(|id| *id == active_node).unwrap_or(index);
+                            } else {
+                                tabs.active_index = index.min(tabs.children.len().saturating_sub(1));
+                            }
+                        } else {
+                            tabs.active_index = tabs.children.len().saturating_sub(1);
+                        }
+                    }
+                }
+                Node::Column(column) => {
+                    if let Some(index) = column.groups.iter().position(|id| *id == node_id) {
+                        column.groups.remove(index);
+                        if index < column.group_ratios.len() {
+                            column.group_ratios.remove(index);
+                        }
+                    }
+                }
+                Node::Panel(_) => return Err(CommandError::InvalidTarget { reason: "Panel leaves cannot own child nodes" }),
+            }
+            return Ok(());
+        }
+
+        for index in 0..self.main_areas.len() {
+            if let Some(area_id) = self.main_areas[index] {
+                if self.dock_areas.get(area_id).is_some_and(|area| area.root == node_id) {
+                    self.main_areas[index] = None;
+                    self.dock_areas.remove(area_id);
+                    return Ok(());
+                }
+            }
+        }
+        let floating = self.floating_groups.iter().find_map(|(id, group)| {
+            self.dock_areas.get(group.area).is_some_and(|area| area.root == node_id).then_some((id, group.area))
+        });
+        if let Some((group_id, area_id)) = floating {
+            self.floating_groups.remove(group_id);
+            self.dock_areas.remove(area_id);
+            return Ok(());
+        }
+        Err(CommandError::InvalidTarget { reason: "node is not attached to a registered dock area or parent" })
+    }
+
+    fn remove_subtree(&mut self, node_id: NodeId) {
+        let Some(node) = self.nodes.get(node_id).cloned() else {
+            return;
+        };
+        for child in node_children(&node) {
+            self.remove_subtree(child);
+        }
+        if let Node::Panel(panel) = node {
+            self.panel_instances.remove(panel.panel_id);
+        }
+        self.nodes.remove(node_id);
+    }
+
+    fn minimum_column_width(
+        &self,
+        column_id: NodeId,
+        metrics: &DockMetrics,
+    ) -> Result<f32, CommandError> {
+        let column = match self.nodes.get(column_id) {
+            Some(Node::Column(column)) => column,
+            Some(_) => return Err(CommandError::InvalidTarget { reason: "target must be a Column node" }),
+            None => return Err(CommandError::MissingNode { node: column_id }),
+        };
+        if column.mode == ColumnMode::IconsOnly {
+            return Ok(metrics.rail_width);
+        }
+        let mut minimum = metrics.min_column_width;
+        for group in &column.groups {
+            minimum = minimum.max(self.minimum_node_size(*group, metrics)?.width);
+        }
+        if minimum.is_finite() {
+            Ok(minimum)
+        } else {
+            Err(CommandError::InvalidValue { field: "width", reason: "minimum column width overflowed" })
+        }
+    }
+
+    fn minimum_node_size(
+        &self,
+        node_id: NodeId,
+        metrics: &DockMetrics,
+    ) -> Result<Size, CommandError> {
+        let node = self.nodes.get(node_id).ok_or(CommandError::MissingNode { node: node_id })?;
+        let size = match node {
+            Node::Panel(panel) => self.panel_instances.get(panel.panel_id).ok_or(
+                CommandError::MissingPanel { panel: panel.panel_id },
+            )?.constraints.min_size,
+            Node::Tabs(tabs) => {
+                let mut width: f32 = 0.0;
+                let mut height: f32 = 0.0;
+                for child in &tabs.children {
+                    let child_size = self.minimum_node_size(*child, metrics)?;
+                    width = width.max(child_size.width);
+                    height = height.max(child_size.height);
+                }
+                Size::new(width, height)
+            }
+            Node::Split(split) => {
+                let mut width: f32 = 0.0;
+                let mut height: f32 = 0.0;
+                for child in &split.children {
+                    let child_size = self.minimum_node_size(*child, metrics)?;
+                    match split.axis {
+                        Axis::X => {
+                            width += child_size.width;
+                            height = height.max(child_size.height);
+                        }
+                        Axis::Y => {
+                            width = width.max(child_size.width);
+                            height += child_size.height;
+                        }
+                    }
+                }
+                Size::new(width, height)
+            }
+            Node::Column(column) => {
+                let mut width = if column.mode == ColumnMode::IconsOnly { metrics.rail_width } else { metrics.min_column_width };
+                let mut height = 0.0;
+                for group in &column.groups {
+                    let child_size = self.minimum_node_size(*group, metrics)?;
+                    width = width.max(child_size.width);
+                    height += child_size.height;
+                }
+                Size::new(width, height)
+            }
+        };
+        if size.is_finite() && size.width > 0.0 && size.height > 0.0 {
+            Ok(size)
+        } else {
+            Err(CommandError::InvalidValue { field: "size", reason: "computed minimum size is not finite and positive" })
+        }
+    }
+
+    fn next_floating_z_order(&self) -> Result<i32, CommandError> {
+        match self.floating_groups.values().map(|group| group.z_order).max() {
+            Some(value) => value.checked_add(1).ok_or(CommandError::InvalidValue {
+                field: "z_order",
+                reason: "floating z-order overflow",
+            }),
+            None => Ok(0),
+        }
+    }
+
+    fn same_state(&self, other: &Self) -> bool {
+        self.nodes.iter().eq(other.nodes.iter())
+            && self.panel_instances.iter().eq(other.panel_instances.iter())
+            && self.dock_areas.iter().eq(other.dock_areas.iter())
+            && self.main_areas == other.main_areas
+            && self.floating_groups.iter().eq(other.floating_groups.iter())
+            && self.canvas == other.canvas
+            && self.profile == other.profile
+            && self.version == other.version
+            && self.chrome == other.chrome
+            && self.flyout == other.flyout
+    }
+
+    fn changed_node_ids(&self, other: &Self) -> Vec<NodeId> {
+        let mut changed = Vec::new();
+        for (id, node) in self.nodes.iter() {
+            if other.nodes.get(id) != Some(node) {
+                changed.push(id);
+            }
+        }
+        for (id, _) in other.nodes.iter() {
+            if !self.nodes.contains_key(id) {
+                changed.push(id);
+            }
+        }
+        changed
+    }
+
 
     /// Validates the entire model and returns every detected issue.
     ///
@@ -537,7 +1980,7 @@ impl Layout {
     /// nodes with one child collapse into that child, while a non-empty Column
     /// remains a Column even with one group. The operation refuses to guess how
     /// to repair broken links, cycles, shared children, or missing panel instances.
-    pub fn normalize(&mut self, metrics: &DockMetrics) -> Result<(), Vec<ValidationError>> {
+    fn normalize(&mut self, metrics: &DockMetrics) -> Result<(), Vec<ValidationError>> {
         let mut candidate = self.clone();
         candidate.normalize_in_place(metrics)?;
         *self = candidate;
@@ -750,6 +2193,25 @@ impl Layout {
             flyout: None,
         }
     }
+
+
+#[derive(Clone, Debug)]
+struct CommandApplication {
+    actual_value: Option<CommandValue>,
+    inverse: Option<DockCommand>,
+    persistent: bool,
+}
+
+impl CommandApplication {
+    fn persistent() -> Self {
+        Self { actual_value: None, inverse: None, persistent: true }
+    }
+
+    fn transient() -> Self {
+        Self { actual_value: None, inverse: None, persistent: false }
+    }
+}
+
 }
 
 fn side_index(side: DockSide) -> usize {
