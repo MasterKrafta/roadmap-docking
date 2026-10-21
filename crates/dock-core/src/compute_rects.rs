@@ -808,12 +808,12 @@ mod tests {
     }
 
     #[test]
-    fn icon_rail_uses_rail_width_without_mutating_logical_column_width() {
+    fn icon_rail_uses_rail_width_and_emits_group_targets_only() {
         let metrics = DockMetrics::default();
         let mut builder = LayoutBuilder::new(Profile::Photoshop);
         let (_, panel_node) = builder.panel(key("icon-rail-panel"), constraints());
         let group = builder.tabs(vec![panel_node], 0, false);
-        let column = builder.column(280.0, ColumnMode::IconsOnly, vec![group], vec![1.0]);
+        let column = builder.column(metrics.rail_width, ColumnMode::IconsOnly, vec![group], vec![1.0]);
         builder.main_area(DockSide::Left, column);
         let layout = builder.build();
 
@@ -826,7 +826,8 @@ mod tests {
         assert!(rects.panels.is_empty());
         assert!(matches!(
             layout.node(column),
-            Some(Node::Column(column)) if column.width == 280.0
+            Some(Node::Column(column))
+                if column.mode == ColumnMode::IconsOnly && column.width == metrics.rail_width
         ));
     }
 
