@@ -1,6 +1,6 @@
 use crate::{
     DockMetrics, DragCancelReason, DragDropRequest, DragPayload, DragPreview,
-    DragSessionError, DragState, DropTarget, Point,
+    DragHandle, DragSessionError, DragState, DropTarget, Point,
 };
 
 /// A deterministic, UI-independent drag gesture state machine.
@@ -15,6 +15,7 @@ use crate::{
 pub struct DragSession {
     state: DragState,
     threshold: f32,
+    handle: Option<DragHandle>,
 }
 
 impl DragSession {
@@ -28,6 +29,7 @@ impl DragSession {
         Ok(Self {
             state: DragState::Idle,
             threshold,
+            handle: None,
         })
     }
 
@@ -47,8 +49,25 @@ impl DragSession {
         payload: DragPayload,
         position: Point,
     ) -> Result<(), DragSessionError> {
+        self.pointer_down_with_handle(payload, DragHandle::default_for(payload), position)
+    }
+
+    /// Starts a gesture from an explicit interaction surface.
+    ///
+    /// In particular, adapters must use FloatingTitle for the title bar and
+    /// FloatingCapture for a dedicated dock/stack capture area. The same
+    /// FloatingGroup payload has different release semantics for these handles.
+    pub fn pointer_down_with_handle(
+        &mut self,
+        payload: DragPayload,
+        handle: DragHandle,
+        position: Point,
+    ) -> Result<(), DragSessionError> {
         if !matches!(self.state, DragState::Idle) {
             return Err(DragSessionError::SessionNotIdle);
+        }
+        if !handle.accepts(payload) {
+            return Err(DragSessionError::PayloadHandleMismatch);
         }
         Self::validate_position(position)?;
 
@@ -57,6 +76,7 @@ impl DragSession {
             origin: position,
             position,
         };
+        self.handle = Some(handle);
         Ok(())
     }
 
@@ -110,6 +130,9 @@ impl DragSession {
         &mut self,
         target: Option<DropTarget>,
     ) -> Result<(), DragSessionError> {
+        if self.handle == Some(DragHandle::FloatingTitle) {
+            return Err(DragSessionError::NotDockingDrag);
+        }
         match self.state {
             DragState::Dragging {
                 payload,
@@ -173,7 +196,7 @@ impl DragSession {
                     return Ok(None);
                 }
 
-                Self::finish_release(payload, origin, position, resolved_target, &mut self.state)
+                Self::finish_release(payload, self.handle.unwrap_or_else(|| DragHandle::default_for(payload)), origin, position, resolved_target, &mut self.state)
             }
             DragState::Dragging {
                 payload, origin, ..
@@ -244,6 +267,7 @@ impl DragSession {
             }
             DragState::Idle | DragState::Dropped { .. } | DragState::Cancelled { .. } => {
                 self.state = DragState::Idle;
+                self.handle = None;
                 Ok(())
             }
         }
@@ -251,19 +275,27 @@ impl DragSession {
 
     fn finish_release(
         payload: DragPayload,
+        handle: DragHandle,
         origin: Point,
         position: Point,
         target: Option<DropTarget>,
         state: &mut DragState,
     ) -> Option<DragDropRequest> {
-        let Some(target) = target else {
-            *state = DragState::Cancelled {
-                payload,
-                origin,
-                position,
-                reason: DragCancelReason::NoValidTarget,
+        // A title drag is a window move, not a docking operation, so it emits
+        // a request even when the pointer is released over no DropTarget.
+        let target = if handle == DragHandle::FloatingTitle {
+            None
+        } else {
+            let Some(target) = target else {
+                *state = DragState::Cancelled {
+                    payload,
+                    origin,
+                    position,
+                    reason: DragCancelReason::NoValidTarget,
+                };
+                return None;
             };
-            return None;
+            Some(target)
         };
 
         *state = DragState::Dropped {
@@ -274,6 +306,7 @@ impl DragSession {
         };
         Some(DragDropRequest {
             payload,
+            handle,
             origin,
             point: position,
             target,
@@ -301,7 +334,7 @@ mod tests {
 
     use super::DragSession;
     use crate::{
-        create_initial_layout, DockAreaId, DockMetrics, DragCancelReason, DragDropRequest,
+        create_initial_layout, DockAreaId, DockMetrics, DragCancelReason, DragDropRequest, DragHandle,
         DragPayload, DragPreview, DragSessionError, DragState, DropTarget, FloatingGroupId,
         Layout, Node, NodeId, PanelConstraints, PanelId, PanelKey, Point, Profile, Size,
     };
@@ -461,9 +494,10 @@ mod tests {
             request,
             DragDropRequest {
                 payload,
+                handle: DragHandle::PanelTab,
                 origin: Point::ZERO,
                 point: Point::new(8.0, 2.0),
-                target,
+                target: Some(target),
             }
         );
         assert_eq!(
@@ -472,7 +506,7 @@ mod tests {
                 payload,
                 origin: Point::ZERO,
                 position: Point::new(8.0, 2.0),
-                target,
+                target: Some(target),
             }
         );
         assert_eq!(
@@ -552,7 +586,7 @@ mod tests {
             .unwrap()
             .expect("release point crosses threshold");
         assert_eq!(request.point, Point::new(0.0, 4.0));
-        assert_eq!(request.target, DropTarget::FreeArea);
+        assert_eq!(request.target, Some(DropTarget::FreeArea));
     }
 
     #[test]
