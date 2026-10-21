@@ -334,6 +334,44 @@ fn floating_bounds_are_clamped_to_current_visible_client_region() {
 }
 
 #[test]
+fn stale_profile_rail_width_is_repaired_and_reported() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+    let (_, panel_node) = builder.panel(key("layers"), constraints());
+    let group = builder.tabs(vec![panel_node], 0, false);
+    let rail = builder.column(
+        metrics.rail_width + 12.0,
+        ColumnMode::IconsOnly,
+        vec![group],
+        vec![1.0],
+    );
+    builder.main_area(DockSide::Right, rail);
+    let layout = builder.build();
+    let file = WorkspaceFile::from_layout(&layout).unwrap();
+    let json = serde_json::to_string(&file).unwrap();
+
+    let report = WorkspaceFile::load_json(
+        &json,
+        &[(key("layers"), constraints())],
+        &metrics,
+        WorkspaceLoadOptions::default(),
+    )
+    .unwrap();
+
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        matches!(diagnostic, WorkspaceDiagnostic::LayoutNormalized { issues }
+            if issues.iter().any(|issue| issue.contains("IconsOnly width reset")))
+    }));
+    let root = report.layout.main_area(DockSide::Right).unwrap().root;
+    let Some(crate::Node::Column(column)) = report.layout.node(root) else {
+        panic!("restored rail must stay a column");
+    };
+    assert_eq!(column.mode, ColumnMode::IconsOnly);
+    assert_eq!(column.width, metrics.rail_width);
+    assert!(report.layout.validate(&metrics).is_ok());
+}
+
+#[test]
 fn invalid_visible_region_returns_an_error() {
     let metrics = DockMetrics::default();
     let (layout, descriptors) = sample_layout();
