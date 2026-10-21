@@ -1034,20 +1034,23 @@ mod tests {
         let mut builder = LayoutBuilder::new(Profile::Photoshop);
         let (panel, panel_node) = builder.panel(key("floating-panel"), constraints());
         let group = builder.tabs(vec![panel_node], 0, false);
-        let bounds = Rect::new(Point::new(-30.0, 45.0), Size::new(360.0, 260.0));
-        let floating = builder.floating_group(group, bounds, 9);
+        let model_bounds = Rect::new(Point::new(-30.0, 45.0), Size::new(360.0, 260.0));
+        let floating = builder.floating_group(group, model_bounds, 9);
         let layout = builder.build();
 
         let rects = layout.compute_rects(viewport(1000.0, 700.0), &metrics).unwrap();
 
+        let expected_bounds = Rect::new(Point::new(0.0, 45.0), Size::new(360.0, 260.0));
         assert_eq!(rects.floating_groups.len(), 1);
         assert_eq!(rects.floating_groups[0].group, floating);
-        assert_eq!(rects.floating_groups[0].rect, bounds);
+        assert_eq!(rects.floating_groups[0].rect, expected_bounds);
         assert_eq!(rects.floating_groups[0].z_order, 9);
         assert_eq!(rects.floating_resize_edges.len(), 8);
         assert_eq!(rects.panels[0].panel, panel);
-        assert_eq!(rects.panels[0].rect.origin.x, bounds.origin.x);
-        assert_eq!(rects.panels[0].rect.origin.y, bounds.origin.y + metrics.header_height + metrics.tab_strip_height);
+        assert_eq!(rects.panels[0].rect.origin.x, expected_bounds.origin.x);
+        assert_eq!(rects.panels[0].rect.origin.y, expected_bounds.origin.y + metrics.header_height + metrics.tab_strip_height);
+        // Viewport clamping applies to geometry output, not persistent model bounds.
+        assert_eq!(layout.floating_group(floating).unwrap().bounds, model_bounds);
     }
 
     #[test]
@@ -1094,6 +1097,127 @@ mod tests {
     }
 
     #[test]
+    fn golden_rects_for_single_left_column_are_exact_and_deterministic() {
+        let metrics = DockMetrics::default();
+        let mut builder = LayoutBuilder::new(Profile::Photoshop);
+        let (panel, panel_node) = builder.panel(key("golden-panel"), constraints());
+        let group = builder.tabs(vec![panel_node], 0, false);
+        let column = builder.column(280.0, ColumnMode::Expanded, vec![group], vec![1.0]);
+        builder.main_area(DockSide::Left, column);
+        let layout = builder.build();
+        let viewport = viewport(1000.0, 600.0);
+
+        let rects = layout.compute_rects(viewport, &metrics).unwrap();
+        assert_eq!(layout.compute_rects(viewport, &metrics).unwrap(), rects);
+
+        assert_eq!(
+            rects.canvas,
+            Some(Rect::new(Point::new(280.0, 0.0), Size::new(720.0, 600.0)))
+        );
+        assert_eq!(rects.columns.len(), 1);
+        assert_eq!(
+            rects.columns[0].rect,
+            Rect::new(Point::ZERO, Size::new(280.0, 600.0))
+        );
+        assert_eq!(rects.groups.len(), 1);
+        assert_eq!(
+            rects.groups[0].rect,
+            Rect::new(Point::ZERO, Size::new(280.0, 600.0))
+        );
+        assert_eq!(rects.tab_strips.len(), 1);
+        assert_eq!(
+            rects.tab_strips[0].rect,
+            Rect::new(Point::new(0.0, 28.0), Size::new(280.0, 28.0))
+        );
+        assert_eq!(rects.tab_headers.len(), 1);
+        assert_eq!(rects.tab_headers[0].panel, panel);
+        assert_eq!(rects.tab_headers[0].index, 0);
+        assert_eq!(
+            rects.tab_headers[0].rect,
+            Rect::new(Point::new(0.0, 28.0), Size::new(280.0, 28.0))
+        );
+        assert_eq!(rects.panels.len(), 1);
+        assert_eq!(rects.panels[0].panel, panel);
+        assert_eq!(
+            rects.panels[0].rect,
+            Rect::new(Point::new(0.0, 56.0), Size::new(280.0, 544.0))
+        );
+        assert!(rects.splitters.is_empty());
+        assert_eq!(rects.drop_zones.len(), 4);
+        assert_eq!(
+            rects.drop_zones.iter().map(|zone| zone.rect).collect::<Vec<_>>(),
+            vec![
+                Rect::new(Point::new(0.0, 24.0), Size::new(24.0, 552.0)),
+                Rect::new(Point::new(256.0, 24.0), Size::new(24.0, 552.0)),
+                Rect::new(Point::ZERO, Size::new(280.0, 24.0)),
+                Rect::new(Point::new(0.0, 576.0), Size::new(280.0, 24.0)),
+            ]
+        );
+        assert!(rects.vertical_overflow.is_empty());
+        assert!(layout.node(column).is_some());
+        assert!(layout.node(group).is_some());
+    }
+
+    #[test]
+    fn floating_bounds_clamp_to_client_area_respect_minimums_and_sort_by_z() {
+        let metrics = DockMetrics::default();
+        let mut builder = LayoutBuilder::new(Profile::Photoshop);
+        let mut ids = Vec::new();
+        for (name, z_order, origin, size) in [
+            ("float-high", 3, Point::new(-100.0, 650.0), Size::new(420.0, 360.0)),
+            ("float-low", 1, Point::new(900.0, -50.0), Size::new(420.0, 360.0)),
+            ("float-mid", 2, Point::new(30.0, 40.0), Size::new(100.0, 80.0)),
+        ] {
+            let constraints = if name == "float-mid" {
+                PanelConstraints::new(
+                    Size::new(160.0, 100.0),
+                    Size::new(180.0, 140.0),
+                    Some(Size::new(800.0, 600.0)),
+                    false,
+                )
+            } else {
+                constraints()
+            };
+            let (_, panel_node) = builder.panel(key(name), constraints);
+            let group = builder.tabs(vec![panel_node], 0, false);
+            ids.push(builder.floating_group(
+                group,
+                Rect::new(origin, size),
+                z_order,
+            ));
+        }
+        let layout = builder.build();
+        let client = Rect::new(Point::new(10.0, 20.0), Size::new(1000.0, 700.0));
+
+        let rects = layout.compute_rects(client, &metrics).unwrap();
+
+        assert_eq!(
+            rects.floating_groups.iter().map(|item| item.z_order).collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
+        assert_eq!(rects.floating_groups[0].group, ids[1]);
+        assert_eq!(
+            rects.floating_groups[0].rect,
+            Rect::new(Point::new(590.0, 20.0), Size::new(420.0, 360.0))
+        );
+        assert_eq!(rects.floating_groups[1].group, ids[2]);
+        assert_eq!(
+            rects.floating_groups[1].rect,
+            Rect::new(Point::new(30.0, 40.0), Size::new(160.0, 156.0))
+        );
+        assert_eq!(rects.floating_groups[2].group, ids[0]);
+        assert_eq!(
+            rects.floating_groups[2].rect,
+            Rect::new(Point::new(10.0, 360.0), Size::new(420.0, 360.0))
+        );
+        let small_panel = layout.floating_group(ids[2]).unwrap().bounds;
+        assert_eq!(small_panel.size, Size::new(100.0, 80.0));
+        assert_eq!(layout.floating_group(ids[0]).unwrap().bounds.origin, Point::new(-100.0, 650.0));
+        assert_eq!(rects.floating_resize_edges.len(), 24);
+        assert!(rects.vertical_overflow.is_empty());
+    }
+
+    #[test]
     fn refuses_to_shrink_canvas_below_its_minimum_without_overflow_policy() {
         let metrics = DockMetrics::default();
         let mut builder = LayoutBuilder::new(Profile::Photoshop);
@@ -1116,7 +1240,7 @@ mod tests {
     }
 
     #[test]
-    fn refuses_group_stack_smaller_than_minimum_heights() {
+    fn minimum_group_stack_reports_scroll_extent_instead_of_compressing_content() {
         let metrics = DockMetrics::default();
         let mut builder = LayoutBuilder::new(Profile::Photoshop);
         let mut groups = Vec::new();
@@ -1128,9 +1252,17 @@ mod tests {
         builder.main_area(DockSide::Left, column);
         let layout = builder.build();
 
-        assert!(matches!(
-            layout.compute_rects(viewport(1000.0, 120.0), &metrics),
-            Err(ComputeRectsError::InsufficientSpace { axis: Axis::Y, .. })
-        ));
+        let rects = layout.compute_rects(viewport(1000.0, 120.0), &metrics).unwrap();
+        let overflow = rects.vertical_overflow.as_slice();
+        assert_eq!(overflow.len(), 1);
+        assert_eq!(overflow[0].owner, column);
+        assert_eq!(overflow[0].viewport, viewport(280.0, 120.0));
+        assert_eq!(overflow[0].content_extent.origin, Point::ZERO);
+        assert_eq!(overflow[0].content_extent.size, Size::new(280.0, 268.0));
+        assert_eq!(rects.groups.len(), 3);
+        assert_eq!(rects.groups[0].rect.size.height, metrics.collapsed_group_height);
+        assert_eq!(rects.groups[1].rect.size.height, 116.0);
+        assert_eq!(rects.groups[2].rect.size.height, 116.0);
+        assert!(rects.panels.iter().all(|panel| panel.rect.size.height >= constraints().min_size.height));
     }
 }
