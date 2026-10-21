@@ -16,6 +16,7 @@ pub struct CommandOutcome {
 
 #[cfg(test)]
 mod tests {
+    use slotmap::Key;
     use super::CommandOutcome;
     use crate::{CommandValue, DockCommand, NodeId};
 
