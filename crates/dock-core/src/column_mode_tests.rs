@@ -255,7 +255,6 @@ fn expanded_mode_returns_group_tab_strip_and_active_panel_geometry_again() {
     );
 }
 
-
 #[test]
 fn rail_modes_can_open_flyouts_and_expanding_closes_the_stale_flyout() {
     let metrics = DockMetrics::default();
@@ -298,7 +297,6 @@ fn rail_modes_can_open_flyouts_and_expanding_closes_the_stale_flyout() {
     assert_eq!(fixture.layout.flyout(), None);
     assert!(fixture.layout.validate(&metrics).is_ok());
 }
-
 
 #[test]
 fn expanding_a_rail_restores_enough_width_for_panel_minimums() {
