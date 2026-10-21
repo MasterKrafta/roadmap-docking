@@ -6,6 +6,12 @@ pub(crate) struct StartupWindow {
     _theme: Theme,
 }
 
+impl StartupWindow {
+    pub(crate) fn new(theme: Theme) -> Self {
+        Self { _theme: theme }
+    }
+}
+
 impl Render for StartupWindow {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         use gpui::ParentElement;
