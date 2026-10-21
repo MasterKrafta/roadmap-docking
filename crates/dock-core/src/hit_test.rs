@@ -110,10 +110,10 @@ impl Layout {
             return Ok(hit);
         }
 
-        if let Some(canvas) = rects.canvas {
-            if contains(canvas, point)? {
-                return Ok(HitResult::Canvas);
-            }
+        if let Some(canvas) = rects.canvas
+            && contains(canvas, point)?
+        {
+            return Ok(HitResult::Canvas);
         }
 
         // Keep unknown points distinct from the central Canvas.
@@ -145,7 +145,7 @@ fn contains(rect: Rect, point: Point) -> Result<bool, ComputeRectsError> {
 
 fn floating_front_to_back(floating: &[FloatingGroupRect]) -> Vec<FloatingGroupRect> {
     let mut ordered = floating.to_vec();
-    ordered.sort_by(|left, right| right.z_order.cmp(&left.z_order));
+    ordered.sort_by_key(|item| std::cmp::Reverse(item.z_order));
     ordered
 }
 
@@ -173,10 +173,12 @@ fn collect_subtree(
     Ok(())
 }
 
+type FloatingSubtree = (HashSet<NodeId>, HashSet<PanelId>);
+
 fn floating_subtree(
     layout: &Layout,
     id: crate::FloatingGroupId,
-) -> Result<Option<(HashSet<NodeId>, HashSet<PanelId>)>, ComputeRectsError> {
+) -> Result<Option<FloatingSubtree>, ComputeRectsError> {
     let Some(floating) = layout.floating_group(id) else {
         return Ok(None);
     };
