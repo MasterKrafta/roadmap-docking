@@ -1,17 +1,19 @@
-use crate::NodeId;
+use crate::{NodeId, PanelId};
 
-/// Transient reference to a group opened from a collapsed column rail.
+/// Transient selection shown in a column rail's flyout.
 ///
-/// This state is intentionally not serialized and does not create or modify
-/// persistent tree nodes by itself.
+/// The selected panel is display state: opening a flyout must not change the
+/// owning Tabs node's persistent active_index. group identifies the tab stack
+/// that owns the panel and is retained for flyout geometry and validation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct FlyoutState {
     pub column: NodeId,
     pub group: NodeId,
+    pub panel: PanelId,
 }
 
 impl FlyoutState {
-    pub const fn new(column: NodeId, group: NodeId) -> Self {
-        Self { column, group }
+    pub const fn new(column: NodeId, group: NodeId, panel: PanelId) -> Self {
+        Self { column, group, panel }
     }
 }
