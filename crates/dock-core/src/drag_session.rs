@@ -160,7 +160,8 @@ impl DragSession {
     ) -> Result<Option<DragDropRequest>, DragSessionError> {
         Self::validate_position(position)?;
 
-        let request = match self.state {
+        let current_state = self.state;
+        let request = match current_state {
             DragState::Pressed { payload, origin, .. } => {
                 if !Self::threshold_reached(origin, position, self.threshold) {
                     self.state = DragState::Cancelled {
