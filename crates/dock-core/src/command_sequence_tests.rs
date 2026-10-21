@@ -222,6 +222,14 @@ fn stale_handles_are_rejected_atomically_for_every_id_bearing_command() {
             panel: PanelId::null(),
             target,
         },
+        DockCommand::MovePanelFromFlyout {
+            panel: PanelId::null(),
+            target,
+        },
+        DockCommand::FloatPanelFromFlyout {
+            panel: PanelId::null(),
+            bounds,
+        },
         DockCommand::MoveGroup {
             group: NodeId::null(),
             column,
@@ -298,9 +306,9 @@ fn stale_handles_are_rejected_atomically_for_every_id_bearing_command() {
         assert_rejected_atomically(&mut layout, command, &metrics);
     }
 
-    // CloseFlyout, SetChrome and ResetMainColumnRatios have no runtime ID
-    // argument. Their legal no-op paths are covered separately by command and
-    // sequence tests instead of manufacturing a stale-handle failure.
+    // Flyout completion commands are exercised through drag/drop tests;
+    // CloseFlyout, DismissFlyout, policy changes and ResetMainColumnRatios are
+    // covered through their explicit no-op and transition tests.
 }
 
 #[test]
