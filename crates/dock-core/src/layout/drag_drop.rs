@@ -71,7 +71,14 @@ impl Layout {
                 self.validate_panel_ids_allowed_for_target(&moving_panels, target)?;
                 Ok(DragDropAction::Command(DockCommand::DockFloating { group, target }))
             }
-            (DragHandle::PanelTab, DragPayload::Panel { panel }) => {
+            (DragHandle::PanelTab | DragHandle::FlyoutPanel, DragPayload::Panel { panel }) => {
+                if request.handle == DragHandle::FlyoutPanel
+                    && !self.flyout().is_some_and(|flyout| flyout.panel == panel)
+                {
+                    return Err(CommandError::InvalidTarget {
+                        reason: "flyout panel drag must start from the currently open flyout",
+                    });
+                }
                 if self.panel_instance(panel).is_none() {
                     return Err(CommandError::MissingPanel { panel });
                 }
@@ -90,10 +97,12 @@ impl Layout {
                         reason: "floating bounds must be finite and positive",
                     })?;
                     self.validate_panel_ids_allowed_for_area(&[panel], AllowedArea::FLOATING)?;
-                    return Ok(DragDropAction::Command(DockCommand::Float {
-                        node: panel_node,
-                        bounds,
-                    }));
+                    let command = if request.handle == DragHandle::FlyoutPanel {
+                        DockCommand::FloatPanelFromFlyout { panel, bounds }
+                    } else {
+                        DockCommand::Float { node: panel_node, bounds }
+                    };
+                    return Ok(DragDropAction::Command(command));
                 }
                 self.validate_drop_target(target, metrics)?;
 
@@ -101,7 +110,11 @@ impl Layout {
                     (self.tab_parent_index(panel_node), target)
                 {
                     if source_group == group && (index == source_index || index == source_index + 1) {
-                        return Ok(DragDropAction::NoOp);
+                        return Ok(if request.handle == DragHandle::FlyoutPanel {
+                            DragDropAction::Command(DockCommand::MovePanelFromFlyout { panel, target })
+                        } else {
+                            DragDropAction::NoOp
+                        });
                     }
                 }
                 if let Some((source_group, _)) = self.tab_parent_index(panel_node) {
@@ -121,7 +134,11 @@ impl Layout {
                                         DropTarget::MainColumn { side, index }
                                             if side == source_side && (index == source_index || index == source_index + 1) =>
                                         {
-                                            return Ok(DragDropAction::NoOp);
+                                            return Ok(if request.handle == DragHandle::FlyoutPanel {
+                                                DragDropAction::Command(DockCommand::MovePanelFromFlyout { panel, target })
+                                            } else {
+                                                DragDropAction::NoOp
+                                            });
                                         }
                                         DropTarget::ColumnSlot { column, index }
                                         | DropTarget::RailSlot { column, index }
@@ -153,7 +170,12 @@ impl Layout {
                     });
                 }
                 self.validate_panel_ids_allowed_for_target(&[panel], target)?;
-                Ok(DragDropAction::Command(DockCommand::MovePanel { panel, target }))
+                let command = if request.handle == DragHandle::FlyoutPanel {
+                    DockCommand::MovePanelFromFlyout { panel, target }
+                } else {
+                    DockCommand::MovePanel { panel, target }
+                };
+                Ok(DragDropAction::Command(command))
             }
             (DragHandle::GroupGrip, DragPayload::Group { group }) => {
                 if !matches!(self.node(group), Some(Node::Tabs(_))) {
