@@ -1,5 +1,5 @@
 use crate::{
-    Axis, ChromeMode, Column, ColumnMode, ColumnRect, ComputeRectsError, DockMetrics, DockSide,
+    Axis, Column, ColumnMode, ColumnRect, ComputeRectsError, DockMetrics, DockSide,
     FloatingGroupRect, FloatingResizeEdgeRect, FlyoutRect, GeometryError, GroupRect,
     Layout, LayoutRects, Node, NodeId, PanelRect, Point, Rect, ResizeEdge, Size,
     SplitterRect, TabHeaderRect, TabStripRect, Tabs, VerticalOverflow,
