@@ -80,6 +80,22 @@ impl Layout {
         }
     }
 
+    #[cfg(feature = "serde")]
+    pub(crate) fn normalize_for_workspace_load(
+        &mut self,
+        metrics: &DockMetrics,
+    ) -> Result<Option<Vec<String>>, Vec<ValidationError>> {
+        let issues = match self.validate(metrics) {
+            Ok(()) => return Ok(None),
+            Err(issues) => issues,
+        };
+        let diagnostic_issues = issues.iter().map(ToString::to_string).collect();
+        let mut candidate = self.clone();
+        candidate.normalize_in_place(metrics)?;
+        *self = candidate;
+        Ok(Some(diagnostic_issues))
+    }
+
     pub const fn profile(&self) -> Profile {
         self.profile
     }
