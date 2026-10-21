@@ -141,6 +141,8 @@ pub use vertical_overflow::VerticalOverflow;
 #[cfg(test)]
 mod layout_builder;
 #[cfg(test)]
+mod chrome_tests;
+#[cfg(test)]
 mod drag_drop_semantics;
 #[cfg(test)]
 mod drag_drop_resolution;
