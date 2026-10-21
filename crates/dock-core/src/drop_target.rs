@@ -23,6 +23,7 @@ pub enum DropTarget {
 
 #[cfg(test)]
 mod tests {
+    use slotmap::Key;
     use super::DropTarget;
     use crate::{DockSide, DropZone, NodeId};
 
