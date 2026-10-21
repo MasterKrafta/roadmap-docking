@@ -9,4 +9,6 @@ pub enum GeometryError {
     NonPositiveDimension,
     /// Arithmetic overflowed into a non-finite floating-point result.
     ArithmeticOverflow,
+    /// Minimum, preferred, and maximum constraints contradict one another.
+    InconsistentConstraints,
 }
