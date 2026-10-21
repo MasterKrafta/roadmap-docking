@@ -21,7 +21,8 @@ mod tests {
     #[test]
     fn a_tabs_node_references_panel_nodes_by_id() {
         let mut nodes = SlotMap::<NodeId, Node>::with_key();
-        let panel_id = PanelId::null();
+        let mut panels = SlotMap::<PanelId, ()>::with_key();
+        let panel_id = panels.insert(());
         let panel_node = nodes.insert(Node::Panel(Panel::new(panel_id)));
         let tabs_node = nodes.insert(Node::Tabs(Tabs {
             children: vec![panel_node],
@@ -36,8 +37,11 @@ mod tests {
     #[test]
     fn column_remains_a_special_node_with_one_group() {
         let mut nodes = SlotMap::<NodeId, Node>::with_key();
+        let mut panels = SlotMap::<PanelId, ()>::with_key();
+        let panel_id = panels.insert(());
+        let panel_node = nodes.insert(Node::Panel(Panel::new(panel_id)));
         let group = nodes.insert(Node::Tabs(Tabs {
-            children: vec![NodeId::null()],
+            children: vec![panel_node],
             active_index: 0,
             collapsed: false,
         }));
