@@ -30,6 +30,7 @@ pub enum CommandError {
 
 #[cfg(test)]
 mod tests {
+    use slotmap::Key;
     use super::CommandError;
     use crate::{NodeId, Profile};
 
