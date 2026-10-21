@@ -1,8 +1,8 @@
 use crate::layout_builder::LayoutBuilder;
 use crate::{
-    Axis, Column, ColumnMode, DockCommand, DockMetrics, DockSide, DragDropRequest, DragPayload,
+    Axis, ColumnMode, DockCommand, DockMetrics, DockSide, DragDropRequest, DragPayload,
     DragSession, DropTarget, DropZone, FloatingGroupId, Layout, Node, NodeId, PanelConstraints,
-    PanelId, PanelKey, Point, Profile, Rect, Size, Tabs,
+    PanelKey, Point, Profile, Rect, Size, Tabs,
 };
 
 fn key(value: &str) -> PanelKey {
