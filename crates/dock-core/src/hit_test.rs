@@ -248,6 +248,16 @@ fn hit_layout_geometry(
         }
     }
 
+    // Overflow buttons are explicit interactive geometry and take priority
+    // over ordinary tab/header fallback areas in their strip.
+    for overflow in rects.tab_overflows.iter().rev() {
+        if node_in_scope(overflow.group, scope_nodes, include_only)
+            && contains(overflow.button_rect, point)?
+        {
+            return Ok(Some(HitResult::TabOverflowButton { group: overflow.group }));
+        }
+    }
+
     for tab in rects.tab_headers.iter().rev() {
         if node_in_scope(tab.group, scope_nodes, include_only) && contains(tab.rect, point)? {
             return Ok(Some(HitResult::TabHeader {
