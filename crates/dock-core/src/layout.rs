@@ -188,6 +188,37 @@ impl Layout {
         Ok(Some(diagnostic_issues))
     }
 
+    /// Captures a session-only history checkpoint without transient flyout UI.
+    pub(crate) fn history_snapshot(&self) -> Self {
+        let mut snapshot = self.clone();
+        snapshot.flyout = None;
+        snapshot
+    }
+
+    /// Restores a previously validated history checkpoint as a new model revision.
+    ///
+    /// The model revision is monotonic even though the persistent state moves
+    /// backward/forward. Transient flyout state is not restored, and the current
+    /// flyout auto-collapse preference remains session-local.
+    pub(crate) fn restore_history_snapshot(
+        &mut self,
+        snapshot: &Self,
+        metrics: &DockMetrics,
+    ) -> Result<(), CommandError> {
+        let next_version = self.version.checked_add(1).ok_or(CommandError::InvalidValue {
+            field: "version",
+            reason: "layout version overflow",
+        })?;
+
+        let mut candidate = snapshot.clone();
+        candidate.flyout = None;
+        candidate.flyout_auto_collapse = self.flyout_auto_collapse;
+        candidate.version = next_version;
+        candidate.validate(metrics).map_err(|errors| CommandError::InvalidLayout { errors })?;
+        *self = candidate;
+        Ok(())
+    }
+
     pub const fn profile(&self) -> Profile {
         self.profile
     }
