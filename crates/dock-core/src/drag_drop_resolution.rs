@@ -1,7 +1,7 @@
 use crate::layout_builder::LayoutBuilder;
 use crate::{
     Axis, ColumnMode, DockCommand, DockMetrics, DockSide, DragDropAction, DragDropRequest,
-    DragHandle, DragPayload, DragSession, DragSessionError, DropTarget, FloatingGroupId, Layout, Node, NodeId, PanelConstraints, PanelId, PanelKey, Point, Profile,
+    DragHandle, DragPayload, DragSession, DragSessionError, DropTarget, FloatingGroupId, Layout, Node, NodeId, PanelConstraints, PanelKey, Point, Profile,
     Rect, Size, Tabs,
 };
 
