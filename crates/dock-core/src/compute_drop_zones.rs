@@ -1,5 +1,5 @@
 use crate::{
-    AllowedArea, ColumnMode, ComputeRectsError, DockMetrics, DockSide, DropSource, DropTarget,
+    AllowedArea, ComputeRectsError, DockMetrics, DockSide, DropSource, DropTarget,
     DropZone, DropZoneRect, FloatingGroupId, Layout, LayoutRects, Node, NodeId, PanelId, Point,
     Profile, Rect, Size,
 };
@@ -710,8 +710,8 @@ fn target_area(layout: &Layout, target: NodeId) -> Option<AllowedArea> {
 
 fn is_rail_group(layout: &Layout, group: NodeId) -> bool {
     matches!(
-        direct_parent(layout, group).and_then(|parent| layout.node(parent)),
-        Some(Node::Column(column)) if column.mode == ColumnMode::IconsOnly
+        owner_column(layout, group).and_then(|column| layout.node(column)),
+        Some(Node::Column(column)) if column.mode.is_rail()
     )
 }
 
@@ -1459,6 +1459,13 @@ mod tests {
                     && zone.zone == DropZone::RailInsertion
             }));
         }
+
+        assert!(!zones.iter().any(|zone| match zone.target {
+            DropTarget::Tabs { group, .. }
+            | DropTarget::GroupTabs { group, .. }
+            | DropTarget::GroupEdge { group, .. } => group == first || group == second,
+            _ => false,
+        }));
     }
 
     #[test]
