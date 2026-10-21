@@ -3,10 +3,10 @@ use std::collections::{HashMap, HashSet};
 use slotmap::SlotMap;
 
 use crate::{
-    Axis, CanvasState, ChromeMode, ColumnMode, CommandError, CommandOutcome, CommandValue,
-    DockArea, DockAreaId, DockAreaKind, DockCommand, DockMetrics, DockSide, DropTarget, DropZone,
-    FloatingGroup, FloatingGroupId, FlyoutState, GeometryError, Node, NodeId, PanelId, PanelInstance,
-    Profile, Rect, Size, ValidationError,
+    command_application::CommandApplication, Axis, CanvasState, ChromeMode, ColumnMode,
+    CommandError, CommandOutcome, CommandValue, DockArea, DockAreaId, DockAreaKind, DockCommand,
+    DockMetrics, DockSide, DropTarget, DropZone, FloatingGroup, FloatingGroupId, FlyoutState,
+    GeometryError, Node, NodeId, PanelId, PanelInstance, Profile, Rect, Size, ValidationError,
 };
 
 const RATIO_TOLERANCE: f32 = 1.0e-4;
@@ -2308,23 +2308,6 @@ impl Layout {
             chrome,
             flyout: None,
         }
-    }
-}
-
-#[derive(Clone, Debug)]
-struct CommandApplication {
-    actual_value: Option<CommandValue>,
-    inverse: Option<DockCommand>,
-    persistent: bool,
-}
-
-impl CommandApplication {
-    fn persistent() -> Self {
-        Self { actual_value: None, inverse: None, persistent: true }
-    }
-
-    fn transient() -> Self {
-        Self { actual_value: None, inverse: None, persistent: false }
     }
 }
 
