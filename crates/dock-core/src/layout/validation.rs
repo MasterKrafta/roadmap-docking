@@ -114,6 +114,15 @@ impl Layout {
                                     reason: "expanded width is below min_column_width",
                                 });
                             }
+                            ColumnMode::IconsAndLabels
+                                if (column.width - metrics.min_column_width).abs()
+                                    > PIXEL_TOLERANCE =>
+                            {
+                                errors.push(ValidationError::InvalidColumn {
+                                    node: node_id,
+                                    reason: "IconsAndLabels width must equal min_column_width",
+                                });
+                            }
                             ColumnMode::IconsOnly
                                 if (column.width - metrics.rail_width).abs()
                                     > PIXEL_TOLERANCE =>
@@ -345,11 +354,11 @@ impl Layout {
                     reason: "references a missing column node",
                 }),
                 Some(Node::Column(column)) => {
-                    if column.mode != ColumnMode::IconsOnly {
+                    if !column.mode.is_rail() {
                         errors.push(ValidationError::InvalidFlyout {
                             column: flyout.column,
                             group: flyout.group,
-                            reason: "flyout column must be in IconsOnly mode",
+                            reason: "flyout column must use a rail mode",
                         });
                     }
                     if !column.groups.contains(&flyout.group) {
