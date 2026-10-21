@@ -14,7 +14,7 @@ pub struct TabOverflowRect {
 }
 
 impl TabOverflowRect {
-    pub const fn new(group: NodeId, button_rect: Rect, hidden_tabs: Vec<PanelId>) -> Self {
+    pub fn new(group: NodeId, button_rect: Rect, hidden_tabs: Vec<PanelId>) -> Self {
         Self {
             group,
             button_rect,
