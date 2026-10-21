@@ -108,56 +108,57 @@ impl Layout {
 
                 if let (Some((source_group, source_index)), DropTarget::Tabs { group, index }) =
                     (self.tab_parent_index(panel_node), target)
+                    && source_group == group
+                    && (index == source_index || index == source_index + 1)
                 {
-                    if source_group == group && (index == source_index || index == source_index + 1) {
-                        return Ok(if request.handle == DragHandle::FlyoutPanel {
-                            DragDropAction::Command(DockCommand::MovePanelFromFlyout { panel, target })
-                        } else {
-                            DragDropAction::NoOp
-                        });
-                    }
+                    return Ok(if request.handle == DragHandle::FlyoutPanel {
+                        DragDropAction::Command(DockCommand::MovePanelFromFlyout { panel, target })
+                    } else {
+                        DragDropAction::NoOp
+                    });
                 }
                 if let Some((source_group, _)) = self.tab_parent_index(panel_node) {
                     let source_group_has_only_panel = matches!(
                         self.node(source_group),
                         Some(Node::Tabs(tabs)) if tabs.children.len() == 1
                     );
-                    if source_group_has_only_panel {
-                        if let Some(source_column) = self.find_owner_column(source_group) {
-                            let source_column_has_only_group = matches!(
-                                self.node(source_column),
-                                Some(Node::Column(column)) if column.groups.len() == 1 && column.groups[0] == source_group
-                            );
-                            if source_column_has_only_group {
-                                if let Some((source_side, source_index)) = self.main_column_position(source_column) {
-                                    match target {
-                                        DropTarget::MainColumn { side, index }
-                                            if side == source_side && (index == source_index || index == source_index + 1) =>
-                                        {
-                                            return Ok(if request.handle == DragHandle::FlyoutPanel {
-                                                DragDropAction::Command(DockCommand::MovePanelFromFlyout { panel, target })
-                                            } else {
-                                                DragDropAction::NoOp
-                                            });
-                                        }
-                                        DropTarget::ColumnSlot { column, index }
-                                        | DropTarget::RailSlot { column, index }
-                                            if column == source_column
-                                                && self.node(column).is_some_and(|node| matches!(
-                                                    node,
-                                                    Node::Column(value) if value.groups.len() == 1
-                                                        && (index == 0 || index == 1)
-                                                )) =>
-                                        {
-                                            return Ok(if request.handle == DragHandle::FlyoutPanel {
-                                                DragDropAction::Command(DockCommand::MovePanelFromFlyout { panel, target })
-                                            } else {
-                                                DragDropAction::NoOp
-                                            });
-                                        }
-                                        _ => {}
-                                    }
+                    if source_group_has_only_panel
+                        && let Some(source_column) = self.find_owner_column(source_group)
+                    {
+                        let source_column_has_only_group = matches!(
+                            self.node(source_column),
+                            Some(Node::Column(column)) if column.groups.len() == 1 && column.groups[0] == source_group
+                        );
+                        if source_column_has_only_group
+                            && let Some((source_side, source_index)) =
+                                self.main_column_position(source_column)
+                        {
+                            match target {
+                                DropTarget::MainColumn { side, index }
+                                    if side == source_side && (index == source_index || index == source_index + 1) =>
+                                {
+                                    return Ok(if request.handle == DragHandle::FlyoutPanel {
+                                        DragDropAction::Command(DockCommand::MovePanelFromFlyout { panel, target })
+                                    } else {
+                                        DragDropAction::NoOp
+                                    });
                                 }
+                                DropTarget::ColumnSlot { column, index }
+                                | DropTarget::RailSlot { column, index }
+                                    if column == source_column
+                                        && self.node(column).is_some_and(|node| matches!(
+                                            node,
+                                            Node::Column(value) if value.groups.len() == 1
+                                                && (index == 0 || index == 1)
+                                        )) =>
+                                {
+                                    return Ok(if request.handle == DragHandle::FlyoutPanel {
+                                        DragDropAction::Command(DockCommand::MovePanelFromFlyout { panel, target })
+                                    } else {
+                                        DragDropAction::NoOp
+                                    });
+                                }
+                                _ => {}
                             }
                         }
                     }
@@ -242,17 +243,18 @@ impl Layout {
                     }
                     DropTarget::MainColumn { side, index } => {
                         let target_columns = self.main_columns(side)?;
-                        if let Some(source_column) = self.find_owner_column(group) {
-                            if let Some((source_side, source_index)) = self.main_column_position(source_column) {
-                                let source_is_sole_group = matches!(
-                                    self.node(source_column),
-                                    Some(Node::Column(column)) if column.groups.len() == 1 && column.groups[0] == group
-                                );
-                                if source_side == side && source_is_sole_group
-                                    && (index == source_index || index == source_index + 1)
-                                {
-                                    return Ok(DragDropAction::NoOp);
-                                }
+                        if let Some(source_column) = self.find_owner_column(group)
+                            && let Some((source_side, source_index)) =
+                                self.main_column_position(source_column)
+                        {
+                            let source_is_sole_group = matches!(
+                                self.node(source_column),
+                                Some(Node::Column(column)) if column.groups.len() == 1 && column.groups[0] == group
+                            );
+                            if source_side == side && source_is_sole_group
+                                && (index == source_index || index == source_index + 1)
+                            {
+                                return Ok(DragDropAction::NoOp);
                             }
                         }
                         if index > target_columns.len() {
@@ -268,14 +270,13 @@ impl Layout {
                         }))
                     }
                     DropTarget::ColumnSlot { column, index } => {
-                        if self.find_owner_column(group) == Some(column) {
-                            if let Some(Node::Column(value)) = self.node(column) {
-                                if let Some(source_index) = value.groups.iter().position(|id| *id == group) {
-                                    if index == source_index || index == source_index + 1 {
-                                        return Ok(DragDropAction::NoOp);
-                                    }
-                                }
-                            }
+                        if self.find_owner_column(group) == Some(column)
+                            && let Some(Node::Column(value)) = self.node(column)
+                            && let Some(source_index) =
+                                value.groups.iter().position(|id| *id == group)
+                            && (index == source_index || index == source_index + 1)
+                        {
+                            return Ok(DragDropAction::NoOp);
                         }
                         Ok(DragDropAction::Command(DockCommand::MoveGroup {
                             group,
@@ -285,14 +286,13 @@ impl Layout {
                     }
                     DropTarget::RailSlot { column, index } => {
                         let group_index = self.rail_slot_group_index(column, index)?;
-                        if self.find_owner_column(group) == Some(column) {
-                            if let Some(Node::Column(value)) = self.node(column) {
-                                if let Some(source_index) = value.groups.iter().position(|id| *id == group) {
-                                    if group_index == source_index || group_index == source_index + 1 {
-                                        return Ok(DragDropAction::NoOp);
-                                    }
-                                }
-                            }
+                        if self.find_owner_column(group) == Some(column)
+                            && let Some(Node::Column(value)) = self.node(column)
+                            && let Some(source_index) =
+                                value.groups.iter().position(|id| *id == group)
+                            && (group_index == source_index || group_index == source_index + 1)
+                        {
+                            return Ok(DragDropAction::NoOp);
                         }
                         Ok(DragDropAction::Command(DockCommand::MoveGroup {
                             group,
