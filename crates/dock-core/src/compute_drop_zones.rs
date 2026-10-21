@@ -518,10 +518,9 @@ impl Layout {
         // A free Canvas is a Float command hint, never a fake tab/column destination.
         if source_allows(self, &source_panels, AllowedArea::FLOATING)
             && !source_is_floating_root(self, source_root)
+            && let Some(canvas) = rects.canvas
         {
-            if let Some(canvas) = rects.canvas {
-                push_zone(&mut zones, DropTarget::FreeArea, DropZone::FreeArea, canvas)?;
-            }
+            push_zone(&mut zones, DropTarget::FreeArea, DropZone::FreeArea, canvas)?;
         }
 
         Ok(zones)
@@ -929,8 +928,9 @@ fn group_edge_is_noop(
     }
     let source_parent = direct_parent(layout, source_group);
     let target_parent = direct_parent(layout, target_group);
-    if source_parent.is_some() && source_parent == target_parent {
-        let parent = source_parent.unwrap();
+    if let (Some(parent), Some(target_parent)) = (source_parent, target_parent)
+        && parent == target_parent
+    {
         let siblings = match layout.node(parent) {
             Some(Node::Column(column)) => Some(&column.groups),
             Some(Node::Split(split)) if split.axis == crate::Axis::Y => Some(&split.children),
@@ -939,12 +939,11 @@ fn group_edge_is_noop(
         if let Some(siblings) = siblings {
             let source_index = siblings.iter().position(|id| *id == source_group);
             let target_index = siblings.iter().position(|id| *id == target_group);
-            if let (Some(source_index), Some(target_index)) = (source_index, target_index) {
-                if (zone == DropZone::Top && source_index + 1 == target_index)
-                    || (zone == DropZone::Bottom && target_index + 1 == source_index)
-                {
-                    return true;
-                }
+            if let (Some(source_index), Some(target_index)) = (source_index, target_index)
+                && ((zone == DropZone::Top && source_index + 1 == target_index)
+                    || (zone == DropZone::Bottom && target_index + 1 == source_index))
+            {
+                return true;
             }
         }
     }
