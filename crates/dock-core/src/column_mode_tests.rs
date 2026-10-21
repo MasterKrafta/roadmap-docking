@@ -254,3 +254,47 @@ fn expanded_mode_returns_group_tab_strip_and_active_panel_geometry_again() {
         "only the pre-existing active panel of each expanded group is shown",
     );
 }
+
+
+#[test]
+fn rail_modes_can_open_flyouts_and_expanding_closes_the_stale_flyout() {
+    let metrics = DockMetrics::default();
+    let mut fixture = fixture();
+
+    fixture
+        .layout
+        .apply(
+            DockCommand::SetColumnMode {
+                column: fixture.column,
+                mode: ColumnMode::IconsAndLabels,
+            },
+            &metrics,
+        )
+        .unwrap();
+    fixture
+        .layout
+        .apply(
+            DockCommand::OpenFlyout {
+                column: fixture.column,
+                group: fixture.groups[0],
+            },
+            &metrics,
+        )
+        .unwrap();
+    assert!(fixture.layout.flyout().is_some());
+    assert!(fixture.layout.validate(&metrics).is_ok());
+
+    fixture
+        .layout
+        .apply(
+            DockCommand::SetColumnMode {
+                column: fixture.column,
+                mode: ColumnMode::Expanded,
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    assert_eq!(fixture.layout.flyout(), None);
+    assert!(fixture.layout.validate(&metrics).is_ok());
+}
