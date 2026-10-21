@@ -315,7 +315,8 @@ impl DragSession {
             origin,
             point: position,
             target,
-        })
+        floating_bounds: None,
+})
     }
 
     fn validate_position(position: Point) -> Result<(), DragSessionError> {
@@ -503,7 +504,8 @@ mod tests {
                 origin: Point::ZERO,
                 point: Point::new(8.0, 2.0),
                 target: Some(target),
-            }
+            floating_bounds: None,
+}
         );
         assert_eq!(
             session.state(),
