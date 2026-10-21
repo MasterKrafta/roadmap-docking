@@ -1279,11 +1279,12 @@ mod tests {
         );
         assert!(rects.vertical_overflow.is_empty());
 
-        // A stack 0.5 logical px below its content minimum reports overflow;
-        // content is not compressed below the panel's declared 140 px minimum.
+        // The panel's declared minimum height is 60 px, so the expanded group
+        // minimum is header 28 + tab strip 28 + content 60 = 116 logical px.
+        // A viewport 0.5 px below that minimum must report overflow.
         let short_viewport = Rect::new(
             Point::new(12.25, 7.5),
-            Size::new(520.75, 195.5),
+            Size::new(520.75, 115.5),
         );
         let short_rects = layout.compute_rects(short_viewport, &metrics).unwrap();
         assert_eq!(short_rects.vertical_overflow.len(), 1);
@@ -1292,18 +1293,18 @@ mod tests {
             short_rects.vertical_overflow[0].viewport,
             Rect::new(
                 Point::new(12.25, 7.5),
-                Size::new(200.25, 195.5),
+                Size::new(200.25, 115.5),
             )
         );
         assert_eq!(
             short_rects.vertical_overflow[0].content_extent,
             Rect::new(
                 Point::new(12.25, 7.5),
-                Size::new(200.25, 196.0),
+                Size::new(200.25, 116.0),
             )
         );
-        assert_eq!(short_rects.groups[0].rect.size.height, 196.0);
-        assert_eq!(short_rects.panels[0].rect.size.height, 140.0);
+        assert_eq!(short_rects.groups[0].rect.size.height, 116.0);
+        assert_eq!(short_rects.panels[0].rect.size.height, 60.0);
 
         // Crossing the minimum Canvas width by 0.25 logical px must fail,
         // rather than shrinking either dock or the Canvas.
