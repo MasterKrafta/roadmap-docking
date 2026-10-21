@@ -396,7 +396,7 @@ impl Layout {
                 *current = restored_group;
             } else {
                 candidate.floating_groups.insert(restored_group);
-            }
+            };
         }
 
         candidate.last_dock_locations = snapshot.last_dock_locations.clone();
