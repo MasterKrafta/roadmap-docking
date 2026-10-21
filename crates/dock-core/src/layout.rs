@@ -605,19 +605,19 @@ impl Layout {
                     Some(Node::Column(column)) => column.clone(),
                     _ => return Err(CommandError::InvalidTarget { reason: "main dock contains a non-Column child" }),
                 };
-                let left_min = self.minimum_column_width(left_id, metrics)?;
-                let right_min = self.minimum_column_width(right_id, metrics)?;
-                let lower_delta = left_min - left.width;
-                let upper_delta = right.width - right_min;
-                if lower_delta > upper_delta {
-                    return Err(CommandError::InvalidValue {
-                        field: "delta",
-                        reason: "adjacent columns cannot be resized within their minimum widths",
-                    });
-                }
                 let actual_delta = if left.mode == ColumnMode::IconsOnly || right.mode == ColumnMode::IconsOnly {
                     0.0
                 } else {
+                    let left_min = self.minimum_column_width(left_id, metrics)?;
+                    let right_min = self.minimum_column_width(right_id, metrics)?;
+                    let lower_delta = left_min - left.width;
+                    let upper_delta = right.width - right_min;
+                    if lower_delta > upper_delta {
+                        return Err(CommandError::InvalidValue {
+                            field: "delta",
+                            reason: "adjacent columns cannot be resized within their minimum widths",
+                        });
+                    }
                     (*delta).clamp(lower_delta, upper_delta)
                 };
                 if actual_delta != 0.0 {
