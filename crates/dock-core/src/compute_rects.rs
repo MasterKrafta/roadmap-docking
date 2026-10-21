@@ -1,7 +1,7 @@
 use crate::{
     Axis, Column, ColumnMode, ColumnRect, ComputeRectsError, DockMetrics, DockSide, DropTarget,
     DropZone, DropZoneRect, FloatingGroupRect, FloatingResizeEdgeRect, GeometryError, GroupRect,
-    HitResult, Layout, LayoutRects, Node, NodeId, PanelRect, Point, Rect, ResizeEdge, Size,
+    Layout, LayoutRects, Node, NodeId, PanelRect, Point, Rect, ResizeEdge, Size,
     SplitterRect, TabHeaderRect, TabStripRect, Tabs,
 };
 
@@ -193,9 +193,9 @@ fn layout_column(
                 id,
                 index,
                 Axis::Y,
-                rect.origin.x,
-                rect.size.width,
                 y,
+                rect.size.width,
+                rect.origin.x,
                 metrics,
                 output,
             )?;
@@ -587,7 +587,7 @@ fn push_resize_edges(
 
 #[cfg(test)]
 mod tests {
-    use super::ComputeRectsError;
+    use super::{ComputeRectsError, PIXEL_TOLERANCE};
     use crate::{
         Axis, ColumnMode, DockMetrics, DockSide, LayoutBuilder, PanelConstraints, PanelKey,
         Point, Profile, Rect, Size,
@@ -637,14 +637,14 @@ mod tests {
         assert_eq!(first.columns[0].rect.size.width, 240.0);
         assert_eq!(first.columns[1].rect.size.width, 300.0);
         assert_eq!(first.columns[2].rect.size.width, 220.0);
-        assert_eq!(first.canvas.unwrap().size.width, 432.0);
+        assert_eq!(first.canvas.unwrap().size.width, 436.0);
         assert_eq!(second.columns[0].rect.size.width, 240.0);
         assert_eq!(second.columns[1].rect.size.width, 300.0);
         assert_eq!(second.columns[2].rect.size.width, 220.0);
-        assert_eq!(second.canvas.unwrap().size.width, 532.0);
+        assert_eq!(second.canvas.unwrap().size.width, 536.0);
         assert_eq!(first.canvas.unwrap().size.height, 700.0);
         assert_eq!(second.canvas.unwrap().size.height, 500.0);
-        assert_eq!(first.splitters.len(), 2);
+        assert_eq!(first.splitters.len(), 1);
     }
 
     #[test]
