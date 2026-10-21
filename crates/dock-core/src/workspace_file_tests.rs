@@ -1,7 +1,8 @@
 use crate::layout_builder::LayoutBuilder;
 use crate::{
-    CanvasState, ChromeMode, ColumnMode, DockMetrics, DockSide, Layout, PanelConstraints, PanelKey,
-    PanelState, Point, Profile, Rect, Size, WorkspaceFile, WorkspaceFileError, WorkspaceNode,
+    Axis, CanvasState, ChromeMode, ColumnMode, DockMetrics, DockSide, Layout, PanelConstraints,
+    PanelKey, PanelState, Point, Profile, Rect, Size, WorkspaceDiagnostic, WorkspaceFile,
+    WorkspaceFileError, WorkspaceLoadOptions, WorkspaceNode, WORKSPACE_VERSION,
 };
 
 fn key(value: &str) -> PanelKey {
@@ -46,11 +47,22 @@ fn sample_layout() -> (Layout, Vec<(PanelKey, PanelConstraints)>) {
     (builder.build(), descriptors)
 }
 
+fn find_column_mut(node: &mut WorkspaceNode) -> Option<&mut Vec<f32>> {
+    match node {
+        WorkspaceNode::Column { group_ratios, .. } => Some(group_ratios),
+        WorkspaceNode::Split { children, .. } | WorkspaceNode::Tabs { children, .. } => {
+            children.iter_mut().find_map(find_column_mut)
+        }
+        WorkspaceNode::Panel { .. } => None,
+    }
+}
+
 #[test]
 fn versioned_json_round_trip_preserves_structure_without_runtime_keys() {
     let metrics = DockMetrics::default();
     let (layout, descriptors) = sample_layout();
     let mut file = WorkspaceFile::from_layout(&layout).unwrap();
+    assert_eq!(file.version, WORKSPACE_VERSION);
 
     file.layout.chrome = ChromeMode::DockHidden;
     file.layout.canvas = CanvasState::new(Some(Rect::new(
@@ -71,7 +83,7 @@ fn versioned_json_round_trip_preserves_structure_without_runtime_keys() {
 
     let json = file.to_json_pretty().unwrap();
     assert!(json.contains("\"format\": \"roadmap-docking-workspace\""));
-    assert!(json.contains("\"version\": 1"));
+    assert!(json.contains(&format!("\"version\": {WORKSPACE_VERSION}")));
     assert!(json.contains("\"type\": \"column\""));
     assert!(json.contains("\"key\": \"layers\""));
     assert!(!json.contains("NodeId"));
@@ -81,7 +93,9 @@ fn versioned_json_round_trip_preserves_structure_without_runtime_keys() {
 
     let decoded = WorkspaceFile::from_json(&json).unwrap();
     assert_eq!(decoded, file);
-    let restored = decoded.into_layout(&descriptors, &metrics).unwrap();
+    let report = decoded.into_layout(&descriptors, &metrics).unwrap();
+    assert!(report.diagnostics.is_empty());
+    let restored = report.layout;
 
     assert_eq!(restored.profile(), Profile::Photoshop);
     assert_eq!(restored.chrome(), ChromeMode::DockHidden);
@@ -146,8 +160,38 @@ fn versioned_json_round_trip_preserves_structure_without_runtime_keys() {
 }
 
 #[test]
-fn unsupported_file_versions_are_rejected_before_layout_rebuild() {
-    let (layout, _) = sample_layout();
+fn version_one_workspace_migrates_to_current_version_with_diagnostic() {
+    let metrics = DockMetrics::default();
+    let (layout, descriptors) = sample_layout();
+    let mut file = WorkspaceFile::from_layout(&layout).unwrap();
+    file.version = 1;
+    let old_json = serde_json::to_string(&file).unwrap();
+
+    let (migrated, parse_diagnostics) =
+        WorkspaceFile::from_json_with_diagnostics(&old_json).unwrap();
+    assert_eq!(migrated.version, WORKSPACE_VERSION);
+    assert!(parse_diagnostics.contains(&WorkspaceDiagnostic::SchemaMigrated {
+        from: 1,
+        to: WORKSPACE_VERSION,
+    }));
+
+    let report = WorkspaceFile::load_json(
+        &old_json,
+        &descriptors,
+        &metrics,
+        WorkspaceLoadOptions::default(),
+    )
+    .unwrap();
+    assert!(report.diagnostics.contains(&WorkspaceDiagnostic::SchemaMigrated {
+        from: 1,
+        to: WORKSPACE_VERSION,
+    }));
+    assert_eq!(report.layout.validate(&metrics), Ok(()));
+}
+
+#[test]
+fn unsupported_file_versions_and_malformed_json_return_errors() {
+    let (layout, descriptors) = sample_layout();
     let mut file = WorkspaceFile::from_layout(&layout).unwrap();
     file.version = 99;
     let json = serde_json::to_string(&file).unwrap();
@@ -156,19 +200,151 @@ fn unsupported_file_versions_are_rejected_before_layout_rebuild() {
         WorkspaceFile::from_json(&json),
         Err(WorkspaceFileError::UnsupportedVersion {
             found: 99,
-            supported: 1
+            supported: WORKSPACE_VERSION,
         })
+    ));
+    assert!(matches!(
+        WorkspaceFile::load_json(
+            "{not json",
+            &descriptors,
+            &DockMetrics::default(),
+            WorkspaceLoadOptions::default(),
+        ),
+        Err(WorkspaceFileError::Json(_))
     ));
 }
 
 #[test]
-fn missing_panel_descriptor_is_reported_without_inventing_constraints() {
+fn unknown_panel_keys_are_preserved_as_placeholders_with_warning() {
     let metrics = DockMetrics::default();
-    let (layout, _) = sample_layout();
+    let (layout, descriptors) = sample_layout();
+    let file = WorkspaceFile::from_layout(&layout).unwrap();
+    let known_descriptors = descriptors
+        .into_iter()
+        .filter(|(panel_key, _)| panel_key.as_str() != "history")
+        .collect::<Vec<_>>();
+    let json = file.to_json_pretty().unwrap();
+
+    let report = WorkspaceFile::load_json(
+        &json,
+        &known_descriptors,
+        &metrics,
+        WorkspaceLoadOptions::default(),
+    )
+    .unwrap();
+
+    assert!(report.diagnostics.contains(
+        &WorkspaceDiagnostic::UnknownPanelKeyPreserved {
+            key: "history".to_owned()
+        }
+    ));
+    assert!(report.layout.validate(&metrics).is_ok());
+    assert_eq!(
+        report
+            .layout
+            .panel_instances()
+            .map(|(_, panel)| panel.key.as_str())
+            .filter(|panel_key| *panel_key == "history")
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn safe_ratio_repair_is_normalized_and_reported() {
+    let metrics = DockMetrics::default();
+    let (layout, descriptors) = sample_layout();
+    let mut file = WorkspaceFile::from_layout(&layout).unwrap();
+    let root = file.layout.right.as_mut().unwrap();
+    *find_column_mut(root).expect("main root has a column") = vec![0.25];
+    let json = serde_json::to_string(&file).unwrap();
+
+    let report = WorkspaceFile::load_json(
+        &json,
+        &descriptors,
+        &metrics,
+        WorkspaceLoadOptions::default(),
+    )
+    .unwrap();
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        matches!(diagnostic, WorkspaceDiagnostic::LayoutNormalized { issues }
+            if issues.iter().any(|issue| issue.contains("ratios must sum to 1.0")))
+    }));
+    assert!(report.layout.validate(&metrics).is_ok());
+    let root = report.layout.main_area(DockSide::Right).unwrap().root;
+    let Some(crate::Node::Column(column)) = report.layout.node(root) else {
+        panic!("main root must remain a column after safe normalization");
+    };
+    assert_eq!(column.group_ratios, vec![1.0]);
+}
+
+#[test]
+fn invalid_profile_specific_tree_is_reported_instead_of_guessed_at() {
+    let metrics = DockMetrics::default();
+    let (layout, descriptors) = sample_layout();
+    let mut file = WorkspaceFile::from_layout(&layout).unwrap();
+    file.layout.right = Some(WorkspaceNode::Split {
+        axis: Axis::Y,
+        children: vec![WorkspaceNode::Tabs {
+            children: vec![WorkspaceNode::Panel {
+                key: key("layers"),
+                state: PanelState::default(),
+            }],
+            active_index: 0,
+            collapsed: false,
+        }],
+        ratios: vec![1.0],
+    });
+
+    let result = WorkspaceFile::load_json(
+        &serde_json::to_string(&file).unwrap(),
+        &descriptors,
+        &metrics,
+        WorkspaceLoadOptions::default(),
+    );
+    assert!(matches!(result, Err(WorkspaceFileError::InvalidLayout(_))));
+}
+
+#[test]
+fn floating_bounds_are_clamped_to_current_visible_client_region() {
+    let metrics = DockMetrics::default();
+    let (layout, descriptors) = sample_layout();
+    let file = WorkspaceFile::from_layout(&layout).unwrap();
+    let region = Rect::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
+
+    let report = WorkspaceFile::load_json(
+        &file.to_json_pretty().unwrap(),
+        &descriptors,
+        &metrics,
+        WorkspaceLoadOptions::new(Some(region)),
+    )
+    .unwrap();
+
+    let expected = Rect::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
+    assert!(report.diagnostics.contains(
+        &WorkspaceDiagnostic::FloatingBoundsClamped {
+            index: 0,
+            original: Rect::new(Point::new(44.0, 55.0), Size::new(420.0, 320.0)),
+            clamped: expected,
+        }
+    ));
+    let floating = report.layout.floating_groups_in_paint_order();
+    assert_eq!(floating[0].1.bounds, expected);
+    assert!(report.layout.validate(&metrics).is_ok());
+}
+
+#[test]
+fn invalid_visible_region_returns_an_error() {
+    let metrics = DockMetrics::default();
+    let (layout, descriptors) = sample_layout();
     let file = WorkspaceFile::from_layout(&layout).unwrap();
 
     assert!(matches!(
-        file.into_layout(&[], &metrics),
-        Err(WorkspaceFileError::MissingPanelDescriptor { key }) if key == "layers"
+        file.into_layout_with_options(
+            &descriptors,
+            &metrics,
+            WorkspaceLoadOptions::new(Some(Rect::ZERO)),
+        ),
+        Err(WorkspaceFileError::InvalidVisibleClientRegion(_))
     ));
 }
