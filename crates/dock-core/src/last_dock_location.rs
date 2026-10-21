@@ -4,7 +4,7 @@ use crate::DockSide;
 ///
 /// This stores ordinal coordinates rather than NodeId handles, because closing
 /// the panel may delete its former Tabs group or Column. It intentionally does
-/// not implement Serde; workspace persistence is a separate future decision.
+/// not implement Serde; workspace persistence is a separate session-only preference excluded from the workspace file.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LastDockLocation {
     side: DockSide,
