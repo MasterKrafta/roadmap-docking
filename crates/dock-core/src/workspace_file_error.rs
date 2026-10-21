@@ -1,6 +1,6 @@
 use crate::{GeometryError, ValidationError};
 
-/// Errors returned by the strict version-1 workspace JSON boundary.
+/// Errors returned by parsing, migrating, and recovering the versioned workspace JSON boundary.
 #[derive(Debug, thiserror::Error)]
 pub enum WorkspaceFileError {
     #[error("invalid workspace JSON: {0}")]
