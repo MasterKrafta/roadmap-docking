@@ -5009,6 +5009,51 @@ mod tests {
         assert_eq!(layout.validate(&metrics), Ok(()));
     }
 
+
+    #[test]
+    fn c45_column_boundary_and_ratio_reset_reject_non_finite_or_non_positive_inputs() {
+        let metrics = DockMetrics::default();
+        let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+        let (_, panel_a) = builder.panel(PanelKey::new("c45-invalid-a").unwrap(), descriptors()[0].1);
+        let (_, panel_b) = builder.panel(PanelKey::new("c45-invalid-b").unwrap(), descriptors()[0].1);
+        let group_a = builder.tabs(vec![panel_a], 0, false);
+        let group_b = builder.tabs(vec![panel_b], 0, false);
+        let column = builder.column(
+            metrics.default_column_width,
+            crate::ColumnMode::Expanded,
+            vec![group_a, group_b],
+            vec![0.5, 0.5],
+        );
+        builder.main_area(DockSide::Right, column);
+        let mut layout = builder.build();
+        let before = format!("{layout:?}");
+
+        for delta in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let error = layout.apply(
+                DockCommand::ResizeColumnBoundary {
+                    side: DockSide::Right,
+                    boundary_index: 0,
+                    delta,
+                },
+                &metrics,
+            ).unwrap_err();
+            assert!(matches!(error, CommandError::InvalidValue { field: "delta", .. }));
+            assert_eq!(format!("{layout:?}"), before);
+            assert_eq!(layout.version(), 0);
+        }
+
+        for available_height in [f32::NAN, f32::INFINITY, 0.0, -10.0] {
+            let error = layout.apply(
+                DockCommand::ResetColumnRatios { column, available_height },
+                &metrics,
+            ).unwrap_err();
+            assert!(matches!(error, CommandError::InvalidValue { field: "available_height", .. }));
+            assert_eq!(format!("{layout:?}"), before);
+            assert_eq!(layout.version(), 0);
+        }
+        assert_eq!(layout.validate(&metrics), Ok(()));
+    }
+
     #[test]
     fn c44_horizontal_split_creates_a_neighbor_column_with_semantic_order() {
         let metrics = DockMetrics::default();
