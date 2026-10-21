@@ -466,10 +466,12 @@ fn failed_undo_keeps_layout_and_history_entry_unchanged() {
         .unwrap();
 
     let current = persistent_shape(&fixture.layout);
+    let current_version = fixture.layout.version();
     let mut invalid_metrics = metrics;
     invalid_metrics.min_canvas_width = f32::NAN;
     assert!(history.undo(&mut fixture.layout, &invalid_metrics).is_err());
     assert_eq!(persistent_shape(&fixture.layout), current);
+    assert_eq!(fixture.layout.version(), current_version);
     assert_eq!(history.undo_len(), 1);
 
     assert!(history.undo(&mut fixture.layout, &metrics).unwrap());
