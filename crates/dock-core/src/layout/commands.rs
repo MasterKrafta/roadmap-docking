@@ -1261,6 +1261,11 @@ impl Layout {
                     value.mode = *mode;
                     value.width = width;
                 }
+                if !mode.is_rail()
+                    && self.flyout.is_some_and(|flyout| flyout.column == *column)
+                {
+                    self.flyout = None;
+                }
                 self.sync_main_column_ratios(*column)?;
                 Ok(CommandApplication::persistent())
             }
