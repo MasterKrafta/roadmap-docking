@@ -1,0 +1,35 @@
+use crate::{GeometryError, ValidationError};
+
+/// Errors returned by the strict version-1 workspace JSON boundary.
+#[derive(Debug, thiserror::Error)]
+pub enum WorkspaceFileError {
+    #[error("invalid workspace JSON: {0}")]
+    Json(String),
+
+    #[error("unsupported workspace format '{found}'")]
+    UnsupportedFormat { found: String },
+
+    #[error("workspace version {found} is unsupported; this build supports version {supported}")]
+    UnsupportedVersion { found: u32, supported: u32 },
+
+    #[error("invalid dock metrics: {0}")]
+    InvalidMetrics(&'static str),
+
+    #[error("duplicate panel descriptor key '{key}'")]
+    DuplicatePanelDescriptor { key: String },
+
+    #[error("panel descriptor '{key}' has invalid constraints: {reason:?}")]
+    InvalidPanelDescriptor {
+        key: String,
+        reason: GeometryError,
+    },
+
+    #[error("workspace references panel key '{key}' but no descriptor is registered")]
+    MissingPanelDescriptor { key: String },
+
+    #[error("cannot create workspace file from layout: {0}")]
+    InvalidRuntimeLayout(String),
+
+    #[error("workspace layout violates core invariants: {0:?}")]
+    InvalidLayout(Vec<ValidationError>),
+}
