@@ -1241,6 +1241,10 @@ impl Layout {
                     return Ok(CommandApplication::persistent());
                 }
                 let destination_area = if mode.is_rail() {
+                    // Rail geometry represents each Tabs child as a stable panel
+                    // entry, so reject malformed/non-tab columns before changing
+                    // the mode instead of committing a layout that cannot render.
+                    self.column_display_order(*column)?;
                     AllowedArea::ICON_RAIL
                 } else {
                     AllowedArea::MAIN_DOCK
