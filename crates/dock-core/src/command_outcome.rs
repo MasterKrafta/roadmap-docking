@@ -10,7 +10,9 @@ pub struct CommandOutcome {
     pub new_version: u64,
     /// Effective value when a requested resize was constrained.
     pub actual_value: Option<CommandValue>,
-    /// Best-effort inverse command for undo; None when no safe inverse is known.
+    /// Best-effort inverse command for consumers that use command-based undo.
+    /// Session UndoRedoHistory instead records full persistent-state checkpoints,
+    /// so it does not depend on this field being present.
     pub inverse: Option<DockCommand>,
 }
 
