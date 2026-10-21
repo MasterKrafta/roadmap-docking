@@ -304,9 +304,9 @@ fn group_self_drop_and_same_column_slot_are_noops_without_version_increment() {
     for index in [0, 1] {
         let slot_request = DragDropRequest {
             target: Some(DropTarget::ColumnSlot { column, index }),
+            floating_bounds: None,
             ..self_request
-        floating_bounds: None,
-};
+        };
         assert_eq!(layout.resolve_drag_drop(&slot_request, &metrics).unwrap(), DragDropAction::NoOp);
     }
 
