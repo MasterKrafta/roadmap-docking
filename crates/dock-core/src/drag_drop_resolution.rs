@@ -117,6 +117,15 @@ fn floating_title_released_at_its_original_point_is_a_noop_without_version_chang
 
     assert_eq!(layout.resolve_drag_drop(&request, &metrics).unwrap(), DragDropAction::NoOp);
     assert_eq!(layout.version(), version);
+    let outcome = layout.apply(
+        DockCommand::MoveFloating {
+            group: floating_id,
+            origin: Point::new(100.0, 200.0),
+        },
+        &metrics,
+    ).unwrap();
+    assert_eq!(outcome.new_version, version);
+    assert_eq!(layout.version(), version);
     assert_eq!(layout.floating_group(floating_id).unwrap().bounds.origin, Point::new(100.0, 200.0));
 }
 
@@ -219,6 +228,15 @@ fn group_self_drop_and_same_column_slot_are_noops_without_version_increment() {
 
     let outcome = layout.apply(DockCommand::MoveGroup { group, column, index: 0 }, &metrics).unwrap();
     assert_eq!(outcome.new_version, version);
+    let column_outcome = layout.apply(
+        DockCommand::MoveGroupToMainColumn {
+            group,
+            side: DockSide::Left,
+            index: 0,
+        },
+        &metrics,
+    ).unwrap();
+    assert_eq!(column_outcome.new_version, version);
     assert_eq!(layout.version(), version);
     assert_eq!(tabs(&layout, group).collapsed, true);
 }
