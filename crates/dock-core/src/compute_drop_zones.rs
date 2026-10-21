@@ -1460,6 +1460,18 @@ mod tests {
             resolved,
             Some(DropTarget::GroupEdge { group, zone: DropZone::Bottom }) if group == upper_group
         ));
+        for _ in 0..4 {
+            assert_eq!(
+                layout.resolve_drop(
+                    inside,
+                    DropSource::Panel { panel: source_panel },
+                    &rects,
+                    &metrics,
+                ).unwrap(),
+                resolved,
+                "drop resolution must be deterministic for identical geometry and input"
+            );
+        }
         assert_ne!(lower_group, upper_group);
         assert!(layout.resolve_drop(Point::new(f32::NAN, 0.0), DropSource::Panel { panel: source_panel }, &rects, &metrics).is_err());
     }
