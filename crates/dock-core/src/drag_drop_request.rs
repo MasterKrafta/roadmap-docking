@@ -11,7 +11,7 @@ use crate::{DragHandle, DragPayload, DropTarget, Point, Rect};
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DragDropRequest {
     pub payload: DragPayload,
-    /// Which semantic surface initiated the gesture (tab, group grip, title, or capture zone).
+    /// Which semantic surface initiated the gesture (tab, flyout panel, group grip, title, or capture zone).
     pub handle: DragHandle,
     pub origin: Point,
     pub point: Point,
