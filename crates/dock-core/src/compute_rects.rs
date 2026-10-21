@@ -1058,8 +1058,8 @@ fn push_resize_edges(
 mod tests {
     use super::ComputeRectsError;
     use crate::{
-        Axis, ColumnMode, DockMetrics, DockSide, PanelConstraints, PanelKey, Point, Profile,
-        Node, Rect, Size,
+        Axis, ColumnMode, DockMetrics, DockSide, LayoutRects, PanelConstraints, PanelKey,
+        Point, Profile, Node, Rect, Size,
     };
     use crate::layout_builder::LayoutBuilder;
 
@@ -1826,4 +1826,157 @@ mod tests {
         assert_eq!(rects.groups[2].rect.size.height, 116.0);
         assert!(rects.panels.iter().all(|panel| panel.rect.size.height >= constraints().min_size.height));
     }
+
+    fn assert_snapshot_rectangles_are_valid(rects: &LayoutRects) {
+        let mut all = Vec::new();
+        all.extend(rects.viewport);
+        all.extend(rects.canvas);
+        all.extend(rects.columns.iter().map(|item| item.rect));
+        all.extend(rects.groups.iter().map(|item| item.rect));
+        all.extend(rects.tab_strips.iter().map(|item| item.rect));
+        all.extend(rects.tab_headers.iter().map(|item| item.rect));
+        all.extend(rects.tab_overflows.iter().map(|item| item.button_rect));
+        all.extend(rects.panels.iter().map(|item| item.rect));
+        all.extend(rects.splitters.iter().map(|item| item.rect));
+        all.extend(rects.floating_groups.iter().map(|item| item.rect));
+        all.extend(rects.floating_resize_edges.iter().map(|item| item.rect));
+        all.extend(rects.flyout.map(|item| item.rect));
+        all.extend(rects.drop_zones.iter().map(|item| item.rect));
+        for overflow in &rects.vertical_overflow {
+            all.push(overflow.viewport);
+            all.push(overflow.content_extent);
+        }
+
+        for rect in all {
+            assert_eq!(rect.validate(), Ok(()), "invalid emitted geometry: {rect:?}");
+            assert!(rect.size.width >= 0.0, "negative width: {rect:?}");
+            assert!(rect.size.height >= 0.0, "negative height: {rect:?}");
+        }
+    }
+
+    #[test]
+    fn empty_layout_at_minimum_canvas_width_returns_full_valid_canvas() {
+        let metrics = DockMetrics::default();
+        let layout = LayoutBuilder::new(Profile::Photoshop).build();
+        let window = Rect::new(
+            Point::new(5.0, 9.0),
+            Size::new(metrics.min_canvas_width, 1.0),
+        );
+
+        let rects = layout.compute_rects(window, &metrics).unwrap();
+
+        assert_eq!(rects.canvas, Some(window));
+        assert!(rects.columns.is_empty());
+        assert!(rects.groups.is_empty());
+        assert!(rects.tab_headers.is_empty());
+        assert!(rects.tab_overflows.is_empty());
+        assert!(rects.panels.is_empty());
+        assert!(rects.floating_groups.is_empty());
+        assert!(rects.vertical_overflow.is_empty());
+        assert_snapshot_rectangles_are_valid(&rects);
+    }
+
+    #[test]
+    fn narrow_window_fails_at_canvas_minimum_instead_of_emitting_negative_rectangles() {
+        let metrics = DockMetrics::default();
+        let mut builder = LayoutBuilder::new(Profile::Photoshop);
+        let (_, panel_node) = builder.panel(key("narrow-canvas-boundary"), constraints());
+        let group = builder.tabs(vec![panel_node], 0, false);
+        let column = builder.column(280.0, ColumnMode::Expanded, vec![group], vec![1.0]);
+        builder.main_area(DockSide::Left, column);
+        let layout = builder.build();
+
+        // 280 px of dock plus the 319 px canvas leaves the Canvas one pixel
+        // below its declared minimum of 320 logical px.
+        assert!(matches!(
+            layout.compute_rects(viewport(599.0, 120.0), &metrics),
+            Err(ComputeRectsError::InsufficientCanvasWidth {
+                available,
+                minimum,
+            }) if available == 319.0 && minimum == metrics.min_canvas_width
+        ));
+
+        let rects = layout.compute_rects(viewport(600.0, 120.0), &metrics).unwrap();
+        assert_eq!(
+            rects.canvas,
+            Some(Rect::new(Point::new(280.0, 0.0), Size::new(320.0, 120.0)))
+        );
+        assert_snapshot_rectangles_are_valid(&rects);
+    }
+
+    #[test]
+    fn very_short_column_preserves_panel_minimum_and_reports_full_overflow_extent() {
+        let metrics = DockMetrics::default();
+        let mut builder = LayoutBuilder::new(Profile::Photoshop);
+        let (_, panel_node) = builder.panel(key("short-window-panel"), constraints());
+        let group = builder.tabs(vec![panel_node], 0, false);
+        let column = builder.column(280.0, ColumnMode::Expanded, vec![group], vec![1.0]);
+        builder.main_area(DockSide::Left, column);
+        let layout = builder.build();
+        let short_window = viewport(1000.0, 1.0);
+
+        let rects = layout.compute_rects(short_window, &metrics).unwrap();
+
+        let minimum_group_height =
+            metrics.header_height + metrics.tab_strip_height + constraints().min_size.height;
+        assert_eq!(rects.vertical_overflow.len(), 1);
+        assert_eq!(rects.vertical_overflow[0].owner, column);
+        assert_eq!(rects.vertical_overflow[0].viewport.size.height, 1.0);
+        assert_eq!(
+            rects.vertical_overflow[0].content_extent.size.height,
+            minimum_group_height
+        );
+        assert_eq!(rects.groups[0].rect.size.height, minimum_group_height);
+        assert_eq!(rects.panels[0].rect.size.height, constraints().min_size.height);
+        assert!(rects.groups[0].rect.size.height >= metrics.min_group_height);
+        assert_snapshot_rectangles_are_valid(&rects);
+    }
+
+    #[test]
+    fn short_icon_rail_reports_full_scroll_extent_without_compressing_slots() {
+        let metrics = DockMetrics::default();
+        let mut builder = LayoutBuilder::new(Profile::Photoshop);
+        let mut groups = Vec::new();
+        for index in 0..3 {
+            let (_, panel_node) =
+                builder.panel(key(&format!("short-rail-{index}")), constraints());
+            groups.push(builder.tabs(vec![panel_node], 0, false));
+        }
+        let column = builder.column(
+            metrics.rail_width,
+            ColumnMode::IconsOnly,
+            groups.clone(),
+            vec![1.0 / 3.0; 3],
+        );
+        builder.main_area(DockSide::Left, column);
+        let layout = builder.build();
+
+        let rects = layout.compute_rects(viewport(1000.0, 20.0), &metrics).unwrap();
+        let slot_height = metrics.collapsed_group_height.max(metrics.tab_strip_height);
+
+        assert_eq!(rects.vertical_overflow.len(), 1);
+        assert_eq!(rects.vertical_overflow[0].owner, column);
+        assert_eq!(rects.vertical_overflow[0].content_extent.size.height, slot_height * 3.0);
+        assert_eq!(rects.tab_headers.len(), 3);
+        assert!(rects.tab_headers.iter().all(|tab| tab.rect.size.height == slot_height));
+        assert_snapshot_rectangles_are_valid(&rects);
+    }
+
+    #[test]
+    fn zero_sized_viewport_is_rejected_before_any_geometry_is_produced() {
+        let metrics = DockMetrics::default();
+        let layout = LayoutBuilder::new(Profile::Photoshop).build();
+
+        for window in [
+            Rect::new(Point::ZERO, Size::new(0.0, 100.0)),
+            Rect::new(Point::ZERO, Size::new(100.0, 0.0)),
+            Rect::new(Point::ZERO, Size::ZERO),
+        ] {
+            assert!(matches!(
+                layout.compute_rects(window, &metrics),
+                Err(ComputeRectsError::Geometry(_))
+            ));
+        }
+    }
+
 }
