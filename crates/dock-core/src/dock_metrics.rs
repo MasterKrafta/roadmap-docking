@@ -123,6 +123,7 @@ mod tests {
     #[test]
     fn provisional_defaults_are_valid() {
         assert_eq!(DockMetrics::default().validate(), Ok(()));
+        assert_eq!(DockMetrics::default().rail_width, 36.0);
     }
 
     #[test]

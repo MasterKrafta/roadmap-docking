@@ -241,8 +241,7 @@ impl Layout {
                             index,
                         }))
                     }
-                    DropTarget::ColumnSlot { column, index }
-                    | DropTarget::RailSlot { column, index } => {
+                    DropTarget::ColumnSlot { column, index } => {
                         if self.find_owner_column(group) == Some(column) {
                             if let Some(Node::Column(value)) = self.node(column) {
                                 if let Some(source_index) = value.groups.iter().position(|id| *id == group) {
@@ -256,6 +255,23 @@ impl Layout {
                             group,
                             column,
                             index,
+                        }))
+                    }
+                    DropTarget::RailSlot { column, index } => {
+                        let group_index = self.rail_slot_group_index(column, index)?;
+                        if self.find_owner_column(group) == Some(column) {
+                            if let Some(Node::Column(value)) = self.node(column) {
+                                if let Some(source_index) = value.groups.iter().position(|id| *id == group) {
+                                    if group_index == source_index || group_index == source_index + 1 {
+                                        return Ok(DragDropAction::NoOp);
+                                    }
+                                }
+                            }
+                        }
+                        Ok(DragDropAction::Command(DockCommand::MoveGroup {
+                            group,
+                            column,
+                            index: group_index,
                         }))
                     }
                     DropTarget::FreeArea => Err(CommandError::InvalidTarget {

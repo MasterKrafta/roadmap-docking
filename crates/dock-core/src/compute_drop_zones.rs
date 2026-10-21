@@ -238,7 +238,7 @@ impl Layout {
                 let Some(Node::Column(column)) = self.node(*column_id) else {
                     continue;
                 };
-                if column.mode == ColumnMode::IconsOnly {
+                if column.mode.is_rail() {
                     continue;
                 }
                 if !source_allows(self, &source_panels, AllowedArea::MAIN_DOCK) {
@@ -326,13 +326,13 @@ impl Layout {
             if !source_allows(self, &source_panels, AllowedArea::ICON_RAIL) {
                 continue;
             }
-            let mut groups: Vec<_> = rects.groups.iter()
-                .filter(|group| column.groups.contains(&group.group))
+            let mut icons: Vec<_> = rects.tab_headers.iter()
+                .filter(|icon| column.groups.iter().any(|root| self.is_descendant_or_same(*root, icon.group)))
                 .collect();
-            groups.sort_by(|left, right| {
+            icons.sort_by(|left, right| {
                 left.rect.origin.y.partial_cmp(&right.rect.origin.y).unwrap_or(std::cmp::Ordering::Equal)
             });
-            if groups.is_empty() {
+            if icons.is_empty() {
                 push_zone(
                     &mut zones,
                     DropTarget::RailSlot { column: column_id, index: 0 },
@@ -340,21 +340,21 @@ impl Layout {
                     column_rect.rect,
                 )?;
             } else {
-                for (index, group) in groups.iter().enumerate() {
-                    let top_height = group.rect.size.height / 2.0;
+                for (index, icon) in icons.iter().enumerate() {
+                    let top_height = icon.rect.size.height / 2.0;
                     push_zone(
                         &mut zones,
                         DropTarget::RailSlot { column: column_id, index },
                         DropZone::RailInsertion,
-                        Rect::new(group.rect.origin, Size::new(group.rect.size.width, top_height)),
+                        Rect::new(icon.rect.origin, Size::new(icon.rect.size.width, top_height)),
                     )?;
                     push_zone(
                         &mut zones,
                         DropTarget::RailSlot { column: column_id, index: index + 1 },
                         DropZone::RailInsertion,
                         Rect::new(
-                            Point::new(group.rect.origin.x, group.rect.origin.y + top_height),
-                            Size::new(group.rect.size.width, group.rect.size.height - top_height),
+                            Point::new(icon.rect.origin.x, icon.rect.origin.y + top_height),
+                            Size::new(icon.rect.size.width, icon.rect.size.height - top_height),
                         ),
                     )?;
                 }

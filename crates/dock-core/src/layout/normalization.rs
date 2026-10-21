@@ -97,7 +97,7 @@ impl Layout {
                 self.nodes.get(flyout.column),
                 Some(Node::Column(column))
                     if column.mode.is_rail()
-                        && column.groups.contains(&flyout.group)
+                        && column.groups.iter().any(|root| self.is_descendant_or_same(*root, flyout.group))
                         && self.nodes.contains_key(flyout.group)
             )
         });

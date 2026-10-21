@@ -359,3 +359,186 @@ fn expanding_a_rail_restores_enough_width_for_panel_minimums() {
     assert_eq!(rects.panels.len(), 1);
     assert_eq!(rects.panels[0].panel, panel);
 }
+
+#[test]
+fn expanded_width_is_saved_while_rail_widths_are_active() {
+    let metrics = DockMetrics::default();
+    let mut fixture = fixture();
+    fixture.layout.apply(
+        DockCommand::ResizeColumn { column: fixture.column, width: 333.0 },
+        &metrics,
+    ).unwrap();
+
+    for mode in [ColumnMode::IconsOnly, ColumnMode::IconsAndLabels, ColumnMode::IconsOnly] {
+        fixture.layout.apply(
+            DockCommand::SetColumnMode { column: fixture.column, mode },
+            &metrics,
+        ).unwrap();
+        let Node::Column(column) = fixture.layout.node(fixture.column).unwrap() else {
+            panic!("expected Column node");
+        };
+        assert_eq!(column.width, if mode == ColumnMode::IconsOnly {
+            metrics.rail_width
+        } else {
+            metrics.min_column_width
+        });
+        assert_eq!(column.last_expanded_width, Some(333.0));
+    }
+    fixture.layout.apply(
+        DockCommand::SetColumnMode { column: fixture.column, mode: ColumnMode::Expanded },
+        &metrics,
+    ).unwrap();
+    let Node::Column(column) = fixture.layout.node(fixture.column).unwrap() else {
+        panic!("expected Column node");
+    };
+    assert_eq!(column.width, 333.0);
+    assert_eq!(column.last_expanded_width, Some(333.0));
+    assert!(fixture.layout.validate(&metrics).is_ok());
+}
+
+#[test]
+fn rail_slots_use_flat_icon_indices_and_move_the_existing_panel_node() {
+    let metrics = DockMetrics::default();
+    let mut fixture = fixture();
+    fixture.layout.apply(
+        DockCommand::SetColumnMode { column: fixture.column, mode: ColumnMode::IconsOnly },
+        &metrics,
+    ).unwrap();
+
+    let panel = fixture.panels[1];
+    let original_node = fixture.layout.nodes().find_map(|(id, node)| {
+        matches!(node, Node::Panel(value) if value.panel_id == panel).then_some(id)
+    }).unwrap();
+    let node_count = fixture.layout.nodes().count();
+    let panel_count = fixture.layout.panel_instances().count();
+
+    fixture.layout.apply(
+        DockCommand::MovePanel {
+            panel,
+            target: crate::DropTarget::RailSlot { column: fixture.column, index: 4 },
+        },
+        &metrics,
+    ).unwrap();
+
+    assert_eq!(fixture.layout.nodes().count(), node_count);
+    assert_eq!(fixture.layout.panel_instances().count(), panel_count);
+    let matching_nodes = fixture.layout.nodes().filter_map(|(id, node)| {
+        matches!(node, Node::Panel(value) if value.panel_id == panel).then_some(id)
+    }).collect::<Vec<_>>();
+    assert_eq!(matching_nodes, vec![original_node]);
+    assert_eq!(
+        fixture.layout.column_display_order(fixture.column).unwrap()
+            .iter().map(|item| item.panel).collect::<Vec<_>>(),
+        vec![fixture.panels[0], fixture.panels[2], fixture.panels[3], panel, fixture.panels[4]],
+    );
+    assert_eq!(fixture.layout.column_display_order(fixture.column).unwrap()[3].group, fixture.groups[2]);
+    assert!(fixture.layout.validate(&metrics).is_ok());
+}
+
+#[test]
+fn crossing_a_rail_group_boundary_places_the_same_panel_in_a_new_group() {
+    let metrics = DockMetrics::default();
+    let mut fixture = fixture();
+    fixture.layout.apply(
+        DockCommand::SetColumnMode { column: fixture.column, mode: ColumnMode::IconsOnly },
+        &metrics,
+    ).unwrap();
+    let panel = fixture.panels[0];
+    let panel_node = fixture.layout.nodes().find_map(|(id, node)| {
+        matches!(node, Node::Panel(value) if value.panel_id == panel).then_some(id)
+    }).unwrap();
+    let original_instances = fixture.layout.panel_instances().count();
+
+    fixture.layout.apply(
+        DockCommand::MovePanel {
+            panel,
+            target: crate::DropTarget::RailSlot { column: fixture.column, index: 3 },
+        },
+        &metrics,
+    ).unwrap();
+
+    let Node::Column(column) = fixture.layout.node(fixture.column).unwrap() else {
+        panic!("expected Column node");
+    };
+    assert_eq!(column.groups.len(), 4);
+    assert_eq!(column.groups[0], fixture.groups[0]);
+    assert_eq!(column.groups[1], fixture.groups[1]);
+    assert_eq!(column.groups[3], fixture.groups[2]);
+    let new_group = column.groups[2];
+    let Node::Tabs(tabs) = fixture.layout.node(new_group).unwrap() else {
+        panic!("rail boundary crossing must create a Tabs group");
+    };
+    assert_eq!(tabs.children, vec![panel_node]);
+    assert_eq!(tabs.active_index, 0);
+    assert_eq!(fixture.layout.panel_instances().count(), original_instances);
+    assert_eq!(fixture.layout.column_display_order(fixture.column).unwrap()
+        .iter().filter(|item| item.panel == panel).count(), 1);
+    assert!(fixture.layout.validate(&metrics).is_ok());
+}
+
+#[test]
+fn clicking_a_rail_icon_activates_its_panel_and_opens_the_group_flyout() {
+    let metrics = DockMetrics::default();
+    let mut fixture = fixture();
+    fixture.layout.apply(
+        DockCommand::SetColumnMode { column: fixture.column, mode: ColumnMode::IconsOnly },
+        &metrics,
+    ).unwrap();
+    let panel = fixture.panels[0];
+    fixture.layout.apply(
+        DockCommand::OpenPanelFlyout { column: fixture.column, panel },
+        &metrics,
+    ).unwrap();
+
+    let Node::Tabs(tabs) = fixture.layout.node(fixture.groups[0]).unwrap() else {
+        panic!("expected source Tabs group");
+    };
+    assert_eq!(tabs.active_index, 0);
+    assert_eq!(fixture.layout.flyout().unwrap().column, fixture.column);
+    assert_eq!(fixture.layout.flyout().unwrap().group, fixture.groups[0]);
+    assert!(fixture.layout.validate(&metrics).is_ok());
+}
+
+#[test]
+fn reopening_a_singleton_from_the_window_menu_activates_it_and_opens_rail_flyout() {
+    let metrics = DockMetrics::default();
+    let mut fixture = fixture();
+    fixture.layout.apply(
+        DockCommand::SetColumnMode { column: fixture.column, mode: ColumnMode::IconsAndLabels },
+        &metrics,
+    ).unwrap();
+    let panel_count = fixture.layout.panel_instances().count();
+    let singleton_constraints = PanelConstraints::new(
+        Size::new(80.0, 60.0),
+        Size::new(180.0, 140.0),
+        Some(Size::new(800.0, 600.0)),
+        true,
+    );
+
+    fixture.layout.apply(
+        DockCommand::OpenPanel {
+            key: key("rail-a0"),
+            constraints: singleton_constraints,
+            target: None,
+        },
+        &metrics,
+    ).unwrap();
+    let Node::Tabs(tabs) = fixture.layout.node(fixture.groups[0]).unwrap() else {
+        panic!("expected source Tabs group");
+    };
+    assert_eq!(tabs.active_index, 0);
+    assert_eq!(fixture.layout.panel_instances().count(), panel_count);
+    assert_eq!(fixture.layout.flyout().unwrap().group, fixture.groups[0]);
+
+    let version = fixture.layout.version();
+    fixture.layout.apply(
+        DockCommand::OpenPanel {
+            key: key("rail-a0"),
+            constraints: singleton_constraints,
+            target: None,
+        },
+        &metrics,
+    ).unwrap();
+    assert_eq!(fixture.layout.version(), version);
+    assert_eq!(fixture.layout.panel_instances().count(), panel_count);
+}

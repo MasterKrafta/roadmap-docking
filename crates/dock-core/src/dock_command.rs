@@ -120,6 +120,8 @@ pub enum DockCommand {
     SetColumnMode { column: NodeId, mode: ColumnMode },
     /// Show a transient flyout for a group belonging to an icon rail.
     OpenFlyout { column: NodeId, group: NodeId },
+    /// Open the flyout for a specific rail icon and make that panel active.
+    OpenPanelFlyout { column: NodeId, panel: PanelId },
     /// Close the current transient flyout, if any.
     CloseFlyout,
     /// Set visibility of application chrome without rewriting the dock tree.
@@ -201,10 +203,11 @@ mod tests {
             DockCommand::CollapseGroup { group: NodeId::null(), collapsed: true },
             DockCommand::SetColumnMode { column: NodeId::null(), mode: ColumnMode::IconsOnly },
             DockCommand::OpenFlyout { column: NodeId::null(), group: NodeId::null() },
+            DockCommand::OpenPanelFlyout { column: NodeId::null(), panel: PanelId::null() },
             DockCommand::CloseFlyout,
             DockCommand::SetChrome { mode: ChromeMode::Hidden },
         ];
-        assert_eq!(commands.len(), 26);
+        assert_eq!(commands.len(), 27);
     }
 
     #[cfg(feature = "serde")]

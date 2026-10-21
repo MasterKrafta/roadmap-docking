@@ -10,4 +10,7 @@ pub struct Column {
     pub mode: ColumnMode,
     pub groups: Vec<NodeId>,
     pub group_ratios: Vec<f32>,
+    /// Last user-selected width while expanded; rail width is presentation-only.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub last_expanded_width: Option<f32>,
 }

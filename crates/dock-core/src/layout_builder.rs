@@ -100,6 +100,7 @@ impl LayoutBuilder {
             mode,
             groups,
             group_ratios,
+            last_expanded_width: (mode == ColumnMode::Expanded).then_some(width),
         }))
     }
 

@@ -262,7 +262,7 @@ impl Layout {
         }
     }
 
-    pub(super) fn maximum_column_width(
+    pub(super) fn maximum_expanded_column_width(
         &self,
         column_id: NodeId,
     ) -> Result<Option<f32>, CommandError> {
@@ -273,10 +273,6 @@ impl Layout {
             }),
             None => return Err(CommandError::MissingNode { node: column_id }),
         };
-        if column.mode.is_rail() {
-            return Ok(Some(column.width));
-        }
-
         let mut maximum: Option<f32> = None;
         for group in &column.groups {
             for panel_node in self.panel_nodes_in_subtree(*group) {
@@ -294,6 +290,22 @@ impl Layout {
         Ok(maximum)
     }
 
+    pub(super) fn maximum_column_width(
+        &self,
+        column_id: NodeId,
+    ) -> Result<Option<f32>, CommandError> {
+        let column = match self.nodes.get(column_id) {
+            Some(Node::Column(column)) => column,
+            Some(_) => return Err(CommandError::InvalidTarget {
+                reason: "column max-width calculation requires a Column node",
+            }),
+            None => return Err(CommandError::MissingNode { node: column_id }),
+        };
+        if column.mode.is_rail() {
+            return Ok(Some(column.width));
+        }
+        self.maximum_expanded_column_width(column_id)
+    }
     pub(super) fn minimum_node_size(
         &self,
         node_id: NodeId,

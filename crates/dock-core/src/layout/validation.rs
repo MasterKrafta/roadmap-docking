@@ -136,6 +136,15 @@ impl Layout {
                         }
                     }
 
+                    if let Some(width) = column.last_expanded_width {
+                        if !width.is_finite() || width <= 0.0 {
+                            errors.push(ValidationError::InvalidColumn {
+                                node: node_id,
+                                reason: "last_expanded_width must be finite and positive",
+                            });
+                        }
+                    }
+
                     if column.groups.is_empty() {
                         errors.push(ValidationError::InvalidColumn {
                             node: node_id,

@@ -92,18 +92,14 @@ impl Layout {
                 })?;
 
                 // Re-opening an existing singleton activates it instead of toggling
-                // it closed. Its previous placement is authoritative, so a fresh
-                // target is not needed and may no longer exist.
+                // it closed. If it lives in a rail, the Window menu also reveals its flyout.
                 if let Some((existing_id, _)) = self.panel_instances.iter().find(|(_, instance)| {
                     instance.key == *key && (constraints.singleton || instance.constraints.singleton)
                 }) {
                     let panel_node = self.find_panel_node(existing_id).ok_or(
                         CommandError::MissingPanel { panel: existing_id },
                     )?;
-                    let Some((group, _)) = self.tab_parent_index(panel_node) else {
-                        // A single Panel may be the root of a Generic floating/main
-                        // area. It is already open and visible; there is no tab index
-                        // to change, so treat this as an accepted no-op.
+                    let Some((group, index)) = self.tab_parent_index(panel_node) else {
                         return Ok(CommandApplication::persistent());
                     };
                     let tabs = match self.nodes.get(group) {
@@ -119,23 +115,32 @@ impl Layout {
                             Some(Node::Panel(panel)) => Some(panel.panel_id),
                             _ => None,
                         });
-                    let Some(index) = tabs.children.iter().position(|id| *id == panel_node) else {
+                    if !tabs.children.iter().any(|id| *id == panel_node) {
                         return Err(CommandError::InvalidTarget {
                             reason: "existing singleton panel is not a child of its Tabs node",
                         });
-                    };
-                    if index == tabs.active_index {
-                        return Ok(CommandApplication::persistent());
                     }
-                    if let Some(Node::Tabs(tabs)) = self.nodes.get_mut(group) {
-                        tabs.active_index = index;
+                    let was_active = index == tabs.active_index;
+                    if !was_active {
+                        if let Some(Node::Tabs(tabs)) = self.nodes.get_mut(group) {
+                            tabs.active_index = index;
+                        }
                     }
-                    let inverse = previous_active.map(|panel| DockCommand::ActivateTab { group, panel });
-                    return Ok(CommandApplication {
-                        actual_value: None,
-                        inverse,
-                        persistent: true,
-                    });
+                    let previous_flyout = self.flyout;
+                    if let Some(column) = self.rail_column_for_group(group) {
+                        self.flyout = Some(crate::FlyoutState::new(column, group));
+                    }
+                    if !was_active {
+                        return Ok(CommandApplication {
+                            actual_value: None,
+                            inverse: previous_active.map(|panel| DockCommand::ActivateTab { group, panel }),
+                            persistent: true,
+                        });
+                    }
+                    if self.flyout != previous_flyout {
+                        return Ok(CommandApplication::transient());
+                    }
+                    return Ok(CommandApplication::persistent());
                 }
 
                 let resolved_target = match *target {
@@ -146,7 +151,11 @@ impl Layout {
                 self.validate_constraints_allowed_for_target(*constraints, resolved_target)?;
                 let panel_id = self.panel_instances.insert(PanelInstance::new(key.clone(), *constraints));
                 let panel_node = self.nodes.insert(Node::Panel(crate::Panel::new(panel_id)));
-                self.insert_node_for_target(panel_node, resolved_target, metrics, Some(0.5))?;
+                if let DropTarget::RailSlot { column, index } = resolved_target {
+                    self.insert_panel_for_rail_slot(panel_node, column, index, metrics)?;
+                } else {
+                    self.insert_node_for_target(panel_node, resolved_target, metrics, Some(0.5))?;
+                }
                 self.remember_panel_dock_location(panel_node);
                 Ok(CommandApplication {
                     actual_value: None,
@@ -303,6 +312,25 @@ impl Layout {
                         target: DropTarget::Tabs { group, index },
                     })
                 });
+                if let DropTarget::RailSlot { column, index } = *target {
+                    let order = self.column_display_order(column)?;
+                    if let Some(source_index) = order.iter().position(|item| item.panel == *panel) {
+                        if index == source_index || index == source_index + 1 {
+                            return Ok(CommandApplication::persistent());
+                        }
+                    }
+                    self.remember_panel_dock_location(panel_node);
+                    let moved = self.insert_panel_for_rail_slot(panel_node, column, index, metrics)?;
+                    if !moved {
+                        return Ok(CommandApplication::persistent());
+                    }
+                    self.remember_panel_dock_location(panel_node);
+                    return Ok(CommandApplication {
+                        actual_value: None,
+                        inverse,
+                        persistent: true,
+                    });
+                }
                 self.remember_panel_dock_location(panel_node);
                 self.detach_node(panel_node)?;
                 self.insert_node_for_target(panel_node, *target, metrics, Some(0.5))?;
@@ -516,6 +544,7 @@ impl Layout {
                     mode: ColumnMode::Expanded,
                     groups: vec![*group],
                     group_ratios: vec![1.0],
+                    last_expanded_width: Some(metrics.default_column_width),
                 }));
                 self.insert_existing_column_at(*side, *index, new_column, None)?;
                 self.remember_subtree_dock_locations(*group);
@@ -892,6 +921,9 @@ impl Layout {
                 if actual_delta != 0.0 {
                     if let Some(Node::Column(column)) = self.nodes.get_mut(*column) {
                         column.width = actual_width;
+                        if current.mode == ColumnMode::Expanded {
+                            column.last_expanded_width = Some(actual_width);
+                        }
                     }
                     self.adjust_canvas_for_column_resize(*column, actual_delta, metrics)?;
                     self.sync_main_column_ratios(*column)?;
@@ -960,9 +992,11 @@ impl Layout {
                     }
                     if let Some(Node::Column(column)) = self.nodes.get_mut(left_id) {
                         column.width = new_left;
+                        column.last_expanded_width = Some(new_left);
                     }
                     if let Some(Node::Column(column)) = self.nodes.get_mut(right_id) {
                         column.width = new_right;
+                        column.last_expanded_width = Some(new_right);
                     }
                     self.sync_main_column_ratios(left_id)?;
                 }
@@ -1257,15 +1291,30 @@ impl Layout {
                     ColumnMode::IconsOnly => metrics.rail_width,
                     ColumnMode::IconsAndLabels => metrics.min_column_width,
                     ColumnMode::Expanded if current.mode.is_rail() => {
-                        metrics
-                            .default_column_width
-                            .max(self.minimum_expanded_column_width(*column, metrics)?)
+                        let minimum = self.minimum_expanded_column_width(*column, metrics)?;
+                        let maximum = self.maximum_expanded_column_width(*column)?.unwrap_or(f32::MAX);
+                        if maximum < minimum {
+                            return Err(CommandError::InvalidValue {
+                                field: "width",
+                                reason: "expanded column minimum width exceeds its panel maximum",
+                            });
+                        }
+                        current.last_expanded_width
+                            .unwrap_or(metrics.default_column_width)
+                            .clamp(minimum, maximum)
                     }
                     ColumnMode::Expanded => current.width.max(self.minimum_column_width(*column, metrics)?),
                 };
                 if let Some(Node::Column(value)) = self.nodes.get_mut(*column) {
                     value.mode = *mode;
                     value.width = width;
+                    value.last_expanded_width = if current.mode == ColumnMode::Expanded && mode.is_rail() {
+                        Some(current.width)
+                    } else if *mode == ColumnMode::Expanded {
+                        Some(width)
+                    } else {
+                        current.last_expanded_width
+                    };
                 }
                 if !mode.is_rail()
                     && self.flyout.is_some_and(|flyout| flyout.column == *column)
@@ -1286,7 +1335,7 @@ impl Layout {
                     Some(_) => return Err(CommandError::InvalidTarget { reason: "OpenFlyout target must be a Column node" }),
                     None => return Err(CommandError::MissingNode { node: *column }),
                 };
-                if !groups.contains(group) {
+                if !groups.iter().any(|root| self.is_descendant_or_same(*root, *group)) {
                     return Err(CommandError::InvalidTarget { reason: "flyout group is not a member of the column" });
                 }
                 if !matches!(self.nodes.get(*group), Some(Node::Tabs(_))) {
@@ -1296,6 +1345,68 @@ impl Layout {
                     return Ok(CommandApplication::transient());
                 }
                 self.flyout = Some(FlyoutState::new(*column, *group));
+                Ok(CommandApplication::transient())
+            }
+            DockCommand::OpenPanelFlyout { column, panel } => {
+                match self.nodes.get(*column) {
+                    Some(Node::Column(value)) if value.mode.is_rail() => {}
+                    Some(Node::Column(_)) => return Err(CommandError::InvalidTarget {
+                        reason: "panel flyout requires a rail column",
+                    }),
+                    Some(_) => return Err(CommandError::InvalidTarget {
+                        reason: "OpenPanelFlyout target must be a Column node",
+                    }),
+                    None => return Err(CommandError::MissingNode { node: *column }),
+                }
+                let item = self.column_display_order(*column)?
+                    .into_iter()
+                    .find(|item| item.panel == *panel)
+                    .ok_or(CommandError::InvalidTarget {
+                        reason: "panel does not have an icon in the requested rail",
+                    })?;
+                let group = item.group;
+                let previous_active = match self.nodes.get(group) {
+                    Some(Node::Tabs(tabs)) => tabs.children.get(tabs.active_index).and_then(|id| {
+                        match self.nodes.get(*id) {
+                            Some(Node::Panel(value)) => Some(value.panel_id),
+                            _ => None,
+                        }
+                    }),
+                    Some(_) => return Err(CommandError::InvalidTarget {
+                        reason: "panel icon parent is not a Tabs node",
+                    }),
+                    None => return Err(CommandError::MissingNode { node: group }),
+                };
+                let active_panel = match self.nodes.get(group) {
+                    Some(Node::Tabs(tabs)) => tabs.children.get(tabs.active_index).and_then(|id| {
+                        match self.nodes.get(*id) {
+                            Some(Node::Panel(value)) => Some(value.panel_id),
+                            _ => None,
+                        }
+                    }),
+                    _ => None,
+                };
+                let active_changed = active_panel != Some(*panel);
+                if active_changed {
+                    let Some(Node::Tabs(tabs)) = self.nodes.get_mut(group) else {
+                        return Err(CommandError::InvalidTarget {
+                            reason: "panel icon parent changed unexpectedly",
+                        });
+                    };
+                    tabs.active_index = item.tab_index;
+                }
+                let previous_flyout = self.flyout;
+                self.flyout = Some(crate::FlyoutState::new(*column, group));
+                if active_changed {
+                    return Ok(CommandApplication {
+                        actual_value: None,
+                        inverse: previous_active.map(|panel| DockCommand::ActivateTab { group, panel }),
+                        persistent: true,
+                    });
+                }
+                if previous_flyout != self.flyout {
+                    return Ok(CommandApplication::transient());
+                }
                 Ok(CommandApplication::transient())
             }
             DockCommand::CloseFlyout => {
@@ -1645,11 +1756,17 @@ impl Layout {
                 Some(Node::Column(_)) if self.main_column_position(column).is_none() => {
                     Err(CommandError::InvalidTarget { reason: "rail insertion target must belong to a main dock column" })
                 }
-                Some(Node::Column(value)) if index <= value.groups.len() => Ok(()),
-                Some(Node::Column(_)) => Err(CommandError::InvalidValue {
-                    field: "index",
-                    reason: "rail insertion index is outside the column",
-                }),
+                Some(Node::Column(_)) => {
+                    let count = self.column_display_order(column)?.len();
+                    if index <= count {
+                        Ok(())
+                    } else {
+                        Err(CommandError::InvalidValue {
+                            field: "index",
+                            reason: "rail insertion index is outside the flattened icon order",
+                        })
+                    }
+                },
                 Some(_) => Err(CommandError::InvalidTarget { reason: "rail target must be a Column node" }),
                 None => Err(CommandError::MissingNode { node: column }),
             },
@@ -1657,6 +1774,168 @@ impl Layout {
             let _ = metrics;
             Ok(())
         })
+    }
+
+    pub(super) fn insert_panel_for_rail_slot(
+        &mut self,
+        panel_node: NodeId,
+        column_id: NodeId,
+        index: usize,
+        metrics: &DockMetrics,
+    ) -> Result<bool, CommandError> {
+        self.validate_drop_target(DropTarget::RailSlot { column: column_id, index }, metrics)?;
+        let panel_id = match self.nodes.get(panel_node) {
+            Some(Node::Panel(panel)) => panel.panel_id,
+            Some(_) => return Err(CommandError::InvalidTarget {
+                reason: "rail icon insertion accepts a Panel node",
+            }),
+            None => return Err(CommandError::MissingNode { node: panel_node }),
+        };
+        let order = self.column_display_order(column_id)?;
+        if index > order.len() {
+            return Err(CommandError::InvalidValue {
+                field: "index",
+                reason: "rail insertion index is outside the flattened icon order",
+            });
+        }
+        let source_parent = self.tab_parent_index(panel_node);
+        let source_group = source_parent.map(|(group, _)| group);
+        let source_display_index = order.iter().position(|item| item.panel == panel_id);
+        if source_display_index.is_some_and(|source| index == source || index == source + 1) {
+            return Ok(false);
+        }
+
+        // Between icons of one Tabs group means reorder; crossing its boundary
+        // means placing the Panel in a new Tabs group at that column position.
+        let target_tabs = if index > 0
+            && index < order.len()
+            && order[index - 1].group == order[index].group
+        {
+            Some((order[index].group, order[index].tab_index))
+        } else if index == 0
+            && source_group.is_some()
+            && order.first().is_some_and(|item| Some(item.group) == source_group)
+        {
+            Some((order[0].group, 0))
+        } else if index == order.len()
+            && source_group.is_some()
+            && order.last().is_some_and(|item| Some(item.group) == source_group)
+        {
+            let group = order.last().map(|item| item.group).ok_or(CommandError::InvalidTarget {
+                reason: "cannot resolve the final icon group",
+            })?;
+            let len = match self.nodes.get(group) {
+                Some(Node::Tabs(tabs)) => tabs.children.len(),
+                _ => return Err(CommandError::InvalidTarget {
+                    reason: "rail icon group must be a Tabs node",
+                }),
+            };
+            Some((group, len))
+        } else {
+            None
+        };
+
+        if let Some((target_group, target_index)) = target_tabs {
+            let target_len = match self.nodes.get(target_group) {
+                Some(Node::Tabs(tabs)) => tabs.children.len(),
+                Some(_) => return Err(CommandError::InvalidTarget {
+                    reason: "rail icon insertion target must be a Tabs node",
+                }),
+                None => return Err(CommandError::MissingNode { node: target_group }),
+            };
+            if target_index > target_len {
+                return Err(CommandError::InvalidValue {
+                    field: "index",
+                    reason: "rail tab insertion index is outside the target group",
+                });
+            }
+            if source_group == Some(target_group) {
+                let (_, source_index) = source_parent.ok_or(CommandError::InvalidTarget {
+                    reason: "rail reorder source has no Tabs parent",
+                })?;
+                let (active_node, children) = match self.nodes.get(target_group) {
+                    Some(Node::Tabs(tabs)) => (
+                        tabs.children.get(tabs.active_index).copied(),
+                        tabs.children.clone(),
+                    ),
+                    _ => return Err(CommandError::InvalidTarget {
+                        reason: "rail reorder parent is not a Tabs node",
+                    }),
+                };
+                let mut reordered = children;
+                let moved = reordered.remove(source_index);
+                let insert_at = if target_index > source_index { target_index - 1 } else { target_index };
+                reordered.insert(insert_at.min(reordered.len()), moved);
+                let active_index = active_node
+                    .and_then(|active| reordered.iter().position(|node| *node == active))
+                    .unwrap_or(insert_at.min(reordered.len().saturating_sub(1)));
+                if let Some(Node::Tabs(tabs)) = self.nodes.get_mut(target_group) {
+                    tabs.children = reordered;
+                    tabs.active_index = active_index;
+                }
+                return Ok(true);
+            }
+
+            if self.find_parent(panel_node).is_some()
+                || self.dock_areas.values().any(|area| area.root == panel_node)
+            {
+                self.detach_node(panel_node)?;
+            }
+            let Some(Node::Tabs(tabs)) = self.nodes.get_mut(target_group) else {
+                return Err(CommandError::InvalidTarget {
+                    reason: "rail insertion target changed unexpectedly",
+                });
+            };
+            let insert_at = target_index.min(tabs.children.len());
+            tabs.children.insert(insert_at, panel_node);
+            tabs.active_index = insert_at;
+            if self.profile == Profile::Photoshop {
+                tabs.collapsed = false;
+            }
+            return Ok(true);
+        }
+
+        let group_index = self.rail_slot_group_index(column_id, index)?;
+        if self.find_parent(panel_node).is_some()
+            || self.dock_areas.values().any(|area| area.root == panel_node)
+        {
+            self.detach_node(panel_node)?;
+        }
+        let group = self.group_node_for(panel_node)?;
+        self.insert_group_at_column(column_id, group, group_index, None)?;
+        Ok(true)
+    }
+
+    pub(super) fn rail_slot_group_index(
+        &self,
+        column_id: NodeId,
+        index: usize,
+    ) -> Result<usize, CommandError> {
+        let column = match self.nodes.get(column_id) {
+            Some(Node::Column(column)) if column.mode.is_rail() => column,
+            Some(Node::Column(_)) => return Err(CommandError::InvalidTarget {
+                reason: "rail group insertion requires a rail-mode column",
+            }),
+            Some(_) => return Err(CommandError::InvalidTarget {
+                reason: "rail group insertion target must be a Column node",
+            }),
+            None => return Err(CommandError::MissingNode { node: column_id }),
+        };
+        let order = self.column_display_order(column_id)?;
+        if index > order.len() {
+            return Err(CommandError::InvalidValue {
+                field: "index",
+                reason: "rail insertion index is outside the flattened icon order",
+            });
+        }
+        if index == order.len() {
+            return Ok(column.groups.len());
+        }
+        let target_group = order[index].group;
+        column.groups.iter().position(|root| self.is_descendant_or_same(*root, target_group))
+            .ok_or(CommandError::InvalidTarget {
+                reason: "rail icon group is not attached to the target column",
+            })
     }
 
     pub(super) fn insert_node_for_target(
@@ -1693,6 +1972,7 @@ impl Layout {
                     mode: ColumnMode::Expanded,
                     groups: vec![group],
                     group_ratios: vec![1.0],
+                    last_expanded_width: Some(metrics.default_column_width),
                 }));
                 self.insert_existing_column_at(side, index, column, None)
             }
@@ -1701,8 +1981,14 @@ impl Layout {
                 self.insert_group_at_column(column, group, index, None)
             }
             DropTarget::RailSlot { column, index } => {
-                let group = self.group_node_for(node)?;
-                self.insert_group_at_column(column, group, index, None)
+                if matches!(self.nodes.get(node), Some(Node::Panel(_))) {
+                    self.insert_panel_for_rail_slot(node, column, index, metrics)?;
+                    Ok(())
+                } else {
+                    let group_index = self.rail_slot_group_index(column, index)?;
+                    let group = self.group_node_for(node)?;
+                    self.insert_group_at_column(column, group, group_index, None)
+                }
             }
             DropTarget::FreeArea => Err(CommandError::InvalidTarget {
                 reason: "FreeArea must be resolved by Float with explicit window bounds",
@@ -1925,6 +2211,7 @@ impl Layout {
                             mode: ColumnMode::Expanded,
                             groups: vec![new_group],
                             group_ratios: vec![1.0],
+                            last_expanded_width: Some(metrics.default_column_width),
                         }));
                         self.insert_existing_column_at(side, insert_at, column, Some((split_ratio, column_index)))
                     }
@@ -2056,6 +2343,7 @@ impl Layout {
                     mode: ColumnMode::Expanded,
                     groups: split.children,
                     group_ratios: normalized_ratios(split.ratios.into_iter().map(Some).collect()),
+                    last_expanded_width: Some(metrics.default_column_width),
                 }));
                 self.insert_existing_column_at(side, index, column, None)
             }
@@ -2063,9 +2351,9 @@ impl Layout {
                 if split.children.iter().any(|id| !matches!(self.nodes.get(*id), Some(Node::Tabs(_)))) {
                     return Err(CommandError::InvalidTarget { reason: "floating stack contains a non-Tabs group" });
                 }
+                let mut insert_at = self.rail_slot_group_index(column, index)?;
                 self.detach_node(root)?;
                 self.nodes.remove(root);
-                let mut insert_at = index;
                 for child in split.children {
                     self.insert_group_at_column(column, child, insert_at, None)?;
                     insert_at += 1;

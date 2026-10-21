@@ -38,8 +38,15 @@ impl Layout {
         if let Ok(columns) = self.main_columns(location.side()) {
             if let Some(column_id) = columns.get(location.column_index()).copied() {
                 if let Some(Node::Column(column)) = self.nodes.get(column_id) {
-                    if let Some(group) = column.groups.get(location.group_index()).copied() {
-                        if let Some(group) = self.first_tabs_in_subtree(group) {
+                    if let Some(root_group) = column.groups.get(location.group_index()).copied() {
+                        if column.mode.is_rail() {
+                            let order = self.column_display_order(column_id).ok()?;
+                            let index = order.iter().position(|item| {
+                                self.is_descendant_or_same(root_group, item.group)
+                            }).unwrap_or(order.len());
+                            return Some(DropTarget::RailSlot { column: column_id, index });
+                        }
+                        if let Some(group) = self.first_tabs_in_subtree(root_group) {
                             let child_count = match self.nodes.get(group) {
                                 Some(Node::Tabs(tabs)) => tabs.children.len(),
                                 _ => return None,
@@ -49,11 +56,9 @@ impl Layout {
                     }
 
                     if !column.groups.is_empty() {
-                        if column.mode == ColumnMode::IconsOnly {
-                            return Some(DropTarget::RailSlot {
-                                column: column_id,
-                                index: location.group_index().min(column.groups.len()),
-                            });
+                        if column.mode.is_rail() {
+                            let index = self.column_display_order(column_id).ok()?.len();
+                            return Some(DropTarget::RailSlot { column: column_id, index });
                         }
                         if let Some(last_group) = column.groups.last().copied() {
                             return Some(DropTarget::GroupEdge {
@@ -198,6 +203,18 @@ impl Layout {
     pub(super) fn find_owner_column(&self, group: NodeId) -> Option<NodeId> {
         self.nodes.iter().find_map(|(id, node)| match node {
             Node::Column(column) if column.groups.contains(&group) => Some(id),
+            _ => None,
+        })
+    }
+
+    pub(super) fn rail_column_for_group(&self, group_id: NodeId) -> Option<NodeId> {
+        self.nodes.iter().find_map(|(column_id, node)| match node {
+            Node::Column(column)
+                if column.mode.is_rail()
+                    && column.groups.iter().any(|root| self.is_descendant_or_same(*root, group_id)) =>
+            {
+                Some(column_id)
+            }
             _ => None,
         })
     }
