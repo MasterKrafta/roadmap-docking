@@ -148,3 +148,5 @@ mod command_sequence_tests;
 mod collapse_group_tests;
 #[cfg(test)]
 mod column_mode_tests;
+#[cfg(test)]
+mod flyout_tests;
