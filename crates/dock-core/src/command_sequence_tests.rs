@@ -6,8 +6,6 @@
 
 use std::collections::HashSet;
 
-use proptest::prelude::*;
-
 use crate::layout_builder::LayoutBuilder;
 use crate::{
     Axis, ChromeMode, ColumnMode, DockCommand, DockMetrics, DockSide,
