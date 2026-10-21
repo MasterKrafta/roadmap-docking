@@ -212,15 +212,15 @@ mod tests {
         builder.build()
     }
 
-    fn snapshot(
-        layout: &crate::Layout,
-    ) -> (
+    type BuilderSnapshot = (
         Vec<(NodeId, String)>,
         Vec<(PanelId, String)>,
         Option<NodeId>,
         usize,
         usize,
-    ) {
+    );
+
+    fn snapshot(layout: &crate::Layout) -> BuilderSnapshot {
         (
             layout
                 .nodes()
