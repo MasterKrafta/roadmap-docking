@@ -125,5 +125,11 @@ mod tests {
         };
         let encoded = serde_json::to_string(&hit).unwrap();
         assert_eq!(serde_json::from_str::<HitResult>(&encoded).unwrap(), hit);
+
+        let overflow = HitResult::TabOverflowButton {
+            group: NodeId::null(),
+        };
+        let encoded = serde_json::to_string(&overflow).unwrap();
+        assert_eq!(serde_json::from_str::<HitResult>(&encoded).unwrap(), overflow);
     }
 }
