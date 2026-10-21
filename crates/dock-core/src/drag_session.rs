@@ -54,9 +54,11 @@ impl DragSession {
 
     /// Starts a gesture from an explicit interaction surface.
     ///
-    /// In particular, adapters must use FloatingTitle for the title bar and
-    /// FloatingCapture for a dedicated dock/stack capture area. The same
-    /// FloatingGroup payload has different release semantics for these handles.
+    /// In particular, adapters must use FlyoutPanel for panel content inside an open
+    /// rail flyout, FloatingTitle for the title bar, and FloatingCapture for a dedicated
+    /// dock/stack capture area. DragSession never mutates Layout, so the source flyout
+    /// stays visible until the adapter applies a terminal drop command; cancellation
+    /// emits no request and leaves it untouched.
     pub fn pointer_down_with_handle(
         &mut self,
         payload: DragPayload,
