@@ -3,9 +3,9 @@ use std::collections::{HashMap, HashSet};
 use slotmap::SlotMap;
 
 use crate::{
-    Axis, CanvasState, ChromeMode, Column, ColumnMode, DockArea, DockAreaId, DockAreaKind,
-    DockMetrics, DockSide, FloatingGroup, FloatingGroupId, FlyoutState, GeometryError, Layout as
-    LayoutAlias, Node, NodeId, Panel, PanelId, PanelInstance, Profile, Split, Tabs, ValidationError,
+    Axis, CanvasState, ChromeMode, ColumnMode, DockArea, DockAreaId, DockAreaKind,
+    DockMetrics, DockSide, FloatingGroup, FloatingGroupId, FlyoutState, GeometryError, Node,
+    NodeId, PanelId, PanelInstance, Profile, ValidationError,
 };
 
 const RATIO_TOLERANCE: f32 = 1.0e-4;
@@ -137,7 +137,7 @@ impl Layout {
 
         let mut panel_placements: HashMap<PanelId, (NodeId, usize)> = HashMap::new();
 
-        for (node_id, node) in &self.nodes {
+        for (node_id, node) in self.nodes.iter() {
             match node {
                 Node::Split(split) => {
                     if split.children.len() < 2 {
@@ -263,7 +263,7 @@ impl Layout {
         }
 
         let mut singleton_by_key: HashMap<crate::PanelKey, (PanelId, bool)> = HashMap::new();
-        for (panel_id, instance) in &self.panel_instances {
+        for (panel_id, instance) in self.panel_instances.iter() {
             if let Err(reason) = instance.validate() {
                 errors.push(ValidationError::InvalidPanelInstance {
                     panel: panel_id,
@@ -295,7 +295,7 @@ impl Layout {
         let mut roots = Vec::new();
         let mut photoshop_main_columns = 0usize;
 
-        for (area_id, area) in &self.dock_areas {
+        for (area_id, area) in self.dock_areas.iter() {
             if let Err(reason) = area.validate_metadata() {
                 errors.push(ValidationError::InvalidDockArea {
                     area: area_id,
@@ -360,7 +360,7 @@ impl Layout {
         let mut groups_by_area: HashMap<DockAreaId, Vec<FloatingGroupId>> = HashMap::new();
         let mut groups_by_z: HashMap<i32, FloatingGroupId> = HashMap::new();
 
-        for (group_id, group) in &self.floating_groups {
+        for (group_id, group) in self.floating_groups.iter() {
             if let Err(reason) = group.validate() {
                 errors.push(ValidationError::InvalidFloatingGroup {
                     group: group_id,
@@ -427,7 +427,7 @@ impl Layout {
             }
         }
 
-        for (area_id, _) in &self.dock_areas {
+        for (area_id, _) in self.dock_areas.iter() {
             if !registered_areas.contains(&area_id) {
                 errors.push(ValidationError::UnreferencedDockArea { area: area_id });
             }
@@ -491,7 +491,7 @@ impl Layout {
         }
         let mut graph_visited = HashSet::new();
         let mut visiting = HashSet::new();
-        for (node_id, _) in &self.nodes {
+        for (node_id, _) in self.nodes.iter() {
             inspect_graph(
                 &self.nodes,
                 node_id,
@@ -758,10 +758,9 @@ fn geometry_error_reason(error: GeometryError) -> &'static str {
 mod tests {
     use super::Layout;
     use crate::{
-        Axis, CanvasState, ChromeMode, Column, ColumnMode, DockArea, DockAreaId, DockMetrics,
-        DockSide, FloatingGroup, FloatingGroupId, GeometryError, Layout as LayoutType, Node, NodeId,
-        Panel, PanelConstraints, PanelId, PanelInstance, PanelKey, Point, Profile, Rect, Size,
-        Split, Tabs, ValidationError,
+        Axis, CanvasState, ChromeMode, DockArea, DockAreaId, DockMetrics, DockSide, FloatingGroup,
+        FloatingGroupId, Node, NodeId, Panel, PanelConstraints, PanelId, PanelInstance, PanelKey,
+        Point, Profile, Rect, Size, Split, Tabs, ValidationError,
     };
     use slotmap::SlotMap;
 
@@ -946,8 +945,6 @@ mod tests {
     #[test]
     fn floating_bounds_and_duplicate_z_order_are_validated() {
         let mut nodes = SlotMap::<NodeId, Node>::with_key();
-        let panel_id = PanelId::null();
-        let _ = panel_id;
         let root = nodes.insert(Node::Tabs(Tabs {
             children: Vec::new(),
             active_index: 0,
