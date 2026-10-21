@@ -43,11 +43,13 @@ impl DockArea {
 
 #[cfg(test)]
 mod tests {
-    use crate::{DockArea, DockSide, DockAreaKind, NodeId};
+    use crate::{DockArea, DockAreaKind, DockSide, NodeId};
+    use slotmap::SlotMap;
 
     #[test]
     fn constructors_keep_kind_and_side_consistent() {
-        let root = NodeId::null();
+        let mut nodes = SlotMap::<NodeId, ()>::with_key();
+        let root = nodes.insert(());
         let main = DockArea::main(DockSide::Left, root);
         assert_eq!(main.kind, DockAreaKind::Main);
         assert_eq!(main.side, Some(DockSide::Left));
