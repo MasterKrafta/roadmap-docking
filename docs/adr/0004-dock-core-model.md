@@ -178,6 +178,9 @@ Layout является единственным владельцем арен �
 - Отдельный дробный fixture сохраняет origin/size с дробными logical px без округления. Он проверяет одноколоночный dock, точную границу min_canvas_width, отказ для слишком узкого viewport и vertical overflow, если viewport короче минимума группы на 0.5 px.
 - Регрессии для обеих сторон одновременно дополнительно покрываются тестом ширин колонок; maximum-column suppression проверяется pure-тестом drop zones. Floating bounds проверяются возле/за всеми client-area краями с явными ожидаемыми clamp-координатами, а короткие колонки и Split проверяют scroll extent без сжатия ниже minimums.
 - Core намеренно работает в logical px и не принимает scale factor. Масштабирование DPI и округление в physical px остаются ответственностью rendering adapter; любые округления в pure geometry считаются regression, а не способом подгонять golden значения.
+- Тестовый render-boundary helper проверяет snapping по краям прямоугольника при scale factor 1.0, 1.25, 1.5 и 2.0; исходный `LayoutRects` при этом остаётся неизменным и идентичным при повторных расчётах. Helper существует только в тестах и не добавляет DPI-арифметику в production core.
+- Отдельный regression test задаёт нестандартные `header_height`, `tab_strip_height`, `splitter_thickness` и `splitter_hit_zone` и сверяет рассчитанные координаты по ручным значениям. Ширина drop edge также проверяется изменением `DockMetrics.edge_drop_width`, чтобы значения метрик не фиксировались внутри coordinate arithmetic.
+- Golden geometry вычисляется повторно и сравнивается как целый snapshot; drop resolver повторно вызывается с одинаковой точкой/моделью и обязан возвращать ту же цель. Pure hit-test regression отдельно повторяет одинаковый запрос и сверяет тот же `HitResult`.
 
 ## Последствия
 
