@@ -115,16 +115,16 @@ impl Layout {
                             Some(Node::Panel(panel)) => Some(panel.panel_id),
                             _ => None,
                         });
-                    if !tabs.children.iter().any(|id| *id == panel_node) {
+                    if !tabs.children.contains(&panel_node) {
                         return Err(CommandError::InvalidTarget {
                             reason: "existing singleton panel is not a child of its Tabs node",
                         });
                     }
                     let was_active = index == tabs.active_index;
-                    if !was_active {
-                        if let Some(Node::Tabs(tabs)) = self.nodes.get_mut(group) {
-                            tabs.active_index = index;
-                        }
+                    if !was_active
+                        && let Some(Node::Tabs(tabs)) = self.nodes.get_mut(group)
+                    {
+                        tabs.active_index = index;
                     }
                     let previous_flyout = self.flyout;
                     if let Some(column) = self.rail_column_for_group(group) {
@@ -1104,7 +1104,7 @@ impl Layout {
                     return Ok(CommandApplication::persistent());
                 };
                 match self.nodes.get(area.root) {
-                    Some(Node::Column(_)) => return Ok(CommandApplication::persistent()),
+                    Some(Node::Column(_)) => Ok(CommandApplication::persistent()),
                     Some(Node::Split(split)) if split.axis == Axis::X => {
                         let equal = equal_ratios(split.children.len());
                         if split.ratios == equal {
