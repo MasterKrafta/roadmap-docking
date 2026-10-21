@@ -7,11 +7,11 @@
 use std::collections::HashSet;
 
 use proptest::prelude::*;
-use slotmap::Key;
 
+use crate::layout_builder::LayoutBuilder;
 use crate::{
-    Axis, ChromeMode, ColumnMode, CommandError, DockCommand, DockMetrics, DockSide,
-    DropTarget, DropZone, Layout, LayoutBuilder, Node, NodeId, PanelConstraints, PanelId,
+    Axis, ChromeMode, ColumnMode, DockCommand, DockMetrics, DockSide,
+    DropTarget, DropZone, Layout, Node, NodeId, PanelConstraints, PanelId,
     PanelKey, Point, Profile, Rect, Size,
 };
 
@@ -615,7 +615,9 @@ fn valid_commands(
     }
 
     for (column, owned_groups, _, _, ratios) in &columns {
-        let height = 1000.0 + owned_groups.len() as f32 * 200.0;
+        let height = 1000.0
+            + owned_groups.len() as f32
+                * (metrics.min_group_height + metrics.collapsed_group_height + 1.0);
         commands.push(DockCommand::ResetColumnRatios {
             column: *column,
             available_height: height,
@@ -656,11 +658,7 @@ fn valid_commands(
         }
     }
 
-    for (_, _, _, mode, _) in &columns {
-        let (column, _, _, _, _) = columns
-            .iter()
-            .find(|(_, _, _, current_mode, _)| current_mode == mode)
-            .unwrap();
+    for (column, _, _, mode, _) in &columns {
         commands.push(DockCommand::SetColumnMode {
             column: *column,
             mode: if *mode == ColumnMode::Expanded {
@@ -734,12 +732,14 @@ fn valid_commands(
     }
 
     // The list is always non-empty due to CloseFlyout and SetChrome.
-    let _ = metrics;
     commands
 }
 
 #[cfg(test)]
 mod tests {
+    use proptest::prelude::*;
+    use slotmap::Key;
+
     use super::*;
 
     proptest! {
