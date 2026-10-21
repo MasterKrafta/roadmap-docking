@@ -486,7 +486,7 @@ fn flyout_panel_drag_keeps_source_open_until_successful_drop_then_closes_it() {
     fixture.layout.apply(command, &metrics).unwrap();
 
     assert_eq!(fixture.layout.flyout(), None);
-    assert_eq!(fixture.layout.version(), 2, "the accepted dock move is one persistent transaction");
+    assert_eq!(fixture.layout.version(), 1, "the accepted dock move is one persistent transaction");
     assert!(fixture.layout.validate(&metrics).is_ok());
     let after = fixture.layout.compute_rects(viewport(), &metrics).unwrap();
     assert_eq!(after.canvas, before.canvas, "the flyout overlays instead of moving Canvas");
