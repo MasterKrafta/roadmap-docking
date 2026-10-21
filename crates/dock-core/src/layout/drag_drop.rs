@@ -14,6 +14,7 @@ impl Layout {
             field: "metrics",
             reason: "dock metrics are invalid",
         })?;
+        self.validate(metrics).map_err(|errors| CommandError::InvalidLayout { errors })?;
         if !request.origin.is_finite() || !request.point.is_finite() {
             return Err(CommandError::InvalidValue {
                 field: "pointer",
@@ -66,6 +67,8 @@ impl Layout {
                         reason: "a floating capture drag requires a dock/stack target",
                     });
                 }
+                let moving_panels = self.panel_ids_in_subtree(root);
+                self.validate_panel_ids_allowed_for_target(&moving_panels, target)?;
                 Ok(DragDropAction::Command(DockCommand::DockFloating { group, target }))
             }
             (DragHandle::PanelTab, DragPayload::Panel { panel }) => {
@@ -140,6 +143,7 @@ impl Layout {
                         reason: "FreeArea must be converted to Float with explicit bounds",
                     });
                 }
+                self.validate_panel_ids_allowed_for_target(&[panel], target)?;
                 Ok(DragDropAction::Command(DockCommand::MovePanel { panel, target }))
             }
             (DragHandle::GroupGrip, DragPayload::Group { group }) => {
@@ -156,6 +160,13 @@ impl Layout {
                     reason: "group-grip drag requires a resolved drop target",
                 })?;
                 self.validate_drop_target(target, metrics)?;
+
+                if matches!(target, DropTarget::FreeArea) {
+                    return Err(CommandError::InvalidTarget {
+                        reason: "FreeArea must be converted to Float with explicit bounds",
+                    });
+                }
+                self.validate_panel_ids_allowed_for_target(&self.panel_ids_in_subtree(group), target)?;
 
                 match target {
                     DropTarget::Tabs { .. } => Err(CommandError::InvalidTarget {
@@ -189,7 +200,7 @@ impl Layout {
                             if let Some((source_side, source_index)) = self.main_column_position(source_column) {
                                 let source_is_sole_group = matches!(
                                     self.node(source_column),
-                                    Some(Node::Column(column)) if column.groups.as_slice() == [group]
+                                    Some(Node::Column(column)) if column.groups.len() == 1 && column.groups[0] == group
                                 );
                                 if source_side == side && source_is_sole_group
                                     && (index == source_index || index == source_index + 1)
@@ -282,7 +293,7 @@ impl Layout {
             }
             let source_is_sole_group = matches!(
                 self.node(source_column),
-                Some(Node::Column(column)) if column.groups.as_slice() == [source_group]
+                Some(Node::Column(column)) if column.groups.len() == 1 && column.groups[0] == source_group
             );
             if !source_is_sole_group {
                 return false;
