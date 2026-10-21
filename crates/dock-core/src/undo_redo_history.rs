@@ -67,7 +67,9 @@ impl UndoRedoHistory {
     }
 
     /// Applies a command and records the prior state only if a persistent
-    /// revision was successfully committed.
+    /// revision was successfully committed. UI adapters should use this method
+    /// for user-triggered actions that belong in Undo/Redo; calling Layout::apply
+    /// directly intentionally bypasses session history.
     pub fn apply(
         &mut self,
         layout: &mut Layout,
