@@ -85,12 +85,54 @@ impl Layout {
         &mut self,
         metrics: &DockMetrics,
     ) -> Result<Option<Vec<String>>, Vec<ValidationError>> {
-        let issues = match self.validate(metrics) {
-            Ok(()) => return Ok(None),
-            Err(issues) => issues,
-        };
-        let diagnostic_issues = issues.iter().map(ToString::to_string).collect();
+        let original_issues = self.validate(metrics).err().unwrap_or_default();
         let mut candidate = self.clone();
+        let mut repair_notes = Vec::new();
+
+        // Column presentation mode uniquely determines rail width. Correcting
+        // a stale width is deterministic; an invalid expanded width is repaired
+        // only when it is finite and positive, since otherwise intent is unclear.
+        for (node_id, node) in candidate.nodes.iter_mut() {
+            let Node::Column(column) = node else {
+                continue;
+            };
+            match column.mode {
+                ColumnMode::IconsOnly if column.width != metrics.rail_width => {
+                    repair_notes.push(format!(
+                        "column {node_id:?}: IconsOnly width reset from {} to {}",
+                        column.width, metrics.rail_width
+                    ));
+                    column.width = metrics.rail_width;
+                }
+                ColumnMode::IconsAndLabels if column.width != metrics.min_column_width => {
+                    repair_notes.push(format!(
+                        "column {node_id:?}: IconsAndLabels width reset from {} to {}",
+                        column.width, metrics.min_column_width
+                    ));
+                    column.width = metrics.min_column_width;
+                }
+                ColumnMode::Expanded
+                    if column.width.is_finite()
+                        && column.width > 0.0
+                        && column.width < metrics.min_column_width =>
+                {
+                    repair_notes.push(format!(
+                        "column {node_id:?}: expanded width raised from {} to minimum {}",
+                        column.width, metrics.min_column_width
+                    ));
+                    column.width = metrics.min_column_width;
+                }
+                _ => {}
+            }
+        }
+
+        let mut diagnostic_issues: Vec<String> =
+            original_issues.iter().map(ToString::to_string).collect();
+        diagnostic_issues.extend(repair_notes);
+
+        if original_issues.is_empty() && diagnostic_issues.is_empty() {
+            return Ok(None);
+        }
         candidate.normalize_in_place(metrics)?;
         *self = candidate;
         Ok(Some(diagnostic_issues))
