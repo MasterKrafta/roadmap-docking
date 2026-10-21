@@ -1434,10 +1434,10 @@ impl Layout {
     }
 
     fn target_for_dock_location(&self, location: LastDockLocation) -> Option<DropTarget> {
-        if let Ok(columns) = self.main_columns(location.side) {
-            if let Some(column_id) = columns.get(location.column_index).copied() {
+        if let Ok(columns) = self.main_columns(location.side()) {
+            if let Some(column_id) = columns.get(location.column_index()).copied() {
                 if let Some(Node::Column(column)) = self.nodes.get(column_id) {
-                    if let Some(group) = column.groups.get(location.group_index).copied() {
+                    if let Some(group) = column.groups.get(location.group_index()).copied() {
                         if let Some(group) = self.first_tabs_in_subtree(group) {
                             let child_count = match self.nodes.get(group) {
                                 Some(Node::Tabs(tabs)) => tabs.children.len(),
@@ -1451,7 +1451,7 @@ impl Layout {
                         if column.mode == ColumnMode::IconsOnly {
                             return Some(DropTarget::RailSlot {
                                 column: column_id,
-                                index: location.group_index.min(column.groups.len()),
+                                index: location.group_index().min(column.groups.len()),
                             });
                         }
                         if let Some(last_group) = column.groups.last().copied() {
@@ -1467,7 +1467,7 @@ impl Layout {
 
         // Generic-profile trees need not have Column nodes. In that case the
         // closest stable preference is the first tab group under the same side.
-        let area = self.main_area(location.side)?;
+        let area = self.main_area(location.side())?;
         let group = self.first_tabs_in_subtree(area.root)?;
         let index = match self.nodes.get(group) {
             Some(Node::Tabs(tabs)) => tabs.children.len(),
