@@ -1253,7 +1253,9 @@ impl Layout {
                     ColumnMode::IconsOnly => metrics.rail_width,
                     ColumnMode::IconsAndLabels => metrics.min_column_width,
                     ColumnMode::Expanded if current.mode.is_rail() => {
-                        metrics.default_column_width.max(self.minimum_column_width(*column, metrics)?)
+                        metrics
+                            .default_column_width
+                            .max(self.minimum_expanded_column_width(*column, metrics)?)
                     }
                     ColumnMode::Expanded => current.width.max(self.minimum_column_width(*column, metrics)?),
                 };
