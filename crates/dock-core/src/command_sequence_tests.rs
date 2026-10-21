@@ -6,6 +6,8 @@
 
 use std::collections::HashSet;
 
+use slotmap::Key;
+
 use crate::layout_builder::LayoutBuilder;
 use crate::{
     Axis, ChromeMode, ColumnMode, DockCommand, DockMetrics, DockSide,
@@ -736,7 +738,6 @@ fn valid_commands(
 #[cfg(test)]
 mod tests {
     use proptest::prelude::*;
-    use slotmap::Key;
 
     use super::*;
 
@@ -765,10 +766,10 @@ mod tests {
                     "current-state command {command:?} was rejected: {:?}",
                     result.err()
                 );
-                prop_assert_eq!(
-                    layout.validate(&metrics),
-                    Ok(()),
-                    "Layout invalid after successful command {command:?}"
+                prop_assert!(
+                    layout.validate(&metrics).is_ok(),
+                    "Layout invalid after successful command {:?}",
+                    command
                 );
             }
         }
