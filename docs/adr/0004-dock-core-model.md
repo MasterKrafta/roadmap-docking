@@ -134,6 +134,7 @@ Layout является единственным владельцем арен �
 
 - Каждый результат размещения имеет свой файл и содержит только Rust-данные/модельные handles и `Rect`: `LayoutRects`, `ColumnRect`, `GroupRect`, `TabStripRect`, `TabHeaderRect`, `PanelRect`, `SplitterRect`, `FloatingGroupRect`, `FloatingResizeEdgeRect`, `DropZoneRect`, `HitResult`.
 - `LayoutRects` — контейнер результатов geometry pass для основных областей, колонок, групп, tab strip/header, содержимого панелей, splitter, floating windows/resize handles и drop zones. Отдельные записи сохраняют ID и индекс, необходимые для преобразования hit в семантическую команду.
+- `FloatingGroupRect` сохраняет `z_order` рядом с bounds, чтобы геометрический снимок мог передавать тот же порядок отрисовки/hit-test, что и модель.
 - `HitResult` — tagged enum с семантическими вариантами для column/group/tab strip/tab header/panel/splitter/floating group/resize edge/drop zone и miss. Он не хранит GPUI entity, view, mouse event или platform window.
 - `ResizeEdge` — отдельный pure-data enum для четырёх сторон и четырёх углов плавающего окна; геометрические типы и результаты допускают optional Serde feature и не вводят зависимость от UI/GPUI.
 
