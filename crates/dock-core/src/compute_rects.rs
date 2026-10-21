@@ -1895,6 +1895,15 @@ mod tests {
                 minimum,
             }) if available == 319.0 && minimum == metrics.min_canvas_width
         ));
+        // A window narrower than the dock must fail before constructing a
+        // Canvas with negative width.
+        assert!(matches!(
+            layout.compute_rects(viewport(200.0, 120.0), &metrics),
+            Err(ComputeRectsError::InsufficientCanvasWidth {
+                available,
+                minimum,
+            }) if available == -80.0 && minimum == metrics.min_canvas_width
+        ));
 
         let rects = layout.compute_rects(viewport(600.0, 120.0), &metrics).unwrap();
         assert_eq!(
