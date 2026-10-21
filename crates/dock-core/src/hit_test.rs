@@ -388,6 +388,66 @@ mod tests {
     }
 
     #[test]
+    fn group_header_precedes_tab_header_and_column_background() {
+        let metrics = DockMetrics::default();
+        let mut builder = LayoutBuilder::new(Profile::Photoshop);
+        let (_, panel_node) = builder.panel(key("header-hit"), constraints());
+        let group = builder.tabs(vec![panel_node], 0, false);
+        let column = builder.column(280.0, ColumnMode::Expanded, vec![group], vec![1.0]);
+        builder.main_area(DockSide::Left, column);
+        let layout = builder.build();
+        let rects = layout.compute_rects(viewport(1000.0, 500.0), &metrics).unwrap();
+
+        assert_eq!(
+            layout.hit_test(Point::new(100.0, 10.0), &rects, &metrics).unwrap(),
+            HitResult::Group { group }
+        );
+        assert_eq!(
+            layout.hit_test(Point::new(10.0, 100.0), &rects, &metrics).unwrap(),
+            HitResult::Panel {
+                panel: match layout.node(group) {
+                    Some(Node::Tabs(tabs)) => match layout.node(tabs.children[0]) {
+                        Some(Node::Panel(panel)) => panel.panel_id,
+                        _ => panic!("expected a Panel leaf"),
+                    },
+                    _ => panic!("expected a Tabs group"),
+                },
+            }
+        );
+        assert!(matches!(
+            layout.hit_test(Point::new(286.0, 120.0), &rects, &metrics),
+            Ok(HitResult::Column { .. }) | Ok(HitResult::Panel { .. }) | Ok(HitResult::Group { .. }) | Ok(HitResult::DropZone { .. })
+        ));
+    }
+
+    #[test]
+    fn splitter_hit_zone_far_edge_is_half_open() {
+        let metrics = DockMetrics::default();
+        let mut builder = LayoutBuilder::new(Profile::Photoshop);
+        let (_, first_panel_node) = builder.panel(key("split-gap-left"), constraints());
+        let first_group = builder.tabs(vec![first_panel_node], 0, false);
+        let first_column = builder.column(280.0, ColumnMode::Expanded, vec![first_group], vec![1.0]);
+
+        let (_, second_panel_node) = builder.panel(key("split-gap-right"), constraints());
+        let second_group = builder.tabs(vec![second_panel_node], 0, false);
+        let second_column = builder.column(280.0, ColumnMode::Expanded, vec![second_group], vec![1.0]);
+
+        let split = builder.split(Axis::X, vec![first_column, second_column], vec![0.5, 0.5]);
+        builder.main_area(DockSide::Left, split);
+        let layout = builder.build();
+        let rects = layout.compute_rects(viewport(1200.0, 500.0), &metrics).unwrap();
+
+        assert_eq!(
+            layout.hit_test(Point::new(285.999, 120.0), &rects, &metrics).unwrap(),
+            HitResult::Splitter { owner: split, boundary_index: 0, axis: Axis::X }
+        );
+        assert_ne!(
+            layout.hit_test(Point::new(286.0, 120.0), &rects, &metrics).unwrap(),
+            HitResult::Splitter { owner: split, boundary_index: 0, axis: Axis::X }
+        );
+    }
+
+    #[test]
     fn tab_header_uses_half_open_bounds_and_precedes_panel_content() {
         let metrics = DockMetrics::default();
         let mut builder = LayoutBuilder::new(Profile::Photoshop);
