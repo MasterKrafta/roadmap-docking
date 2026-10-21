@@ -1,18 +1,19 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use slotmap::SlotMap;
 
 use crate::{
     Column, DockArea, DockAreaId, DockMetrics, DockSide, FloatingGroup, FloatingGroupId, Layout,
-    Node, NodeId, Panel, PanelConstraints, PanelId, PanelInstance, PanelKey, Split, Tabs,
-    WorkspaceFileError, WorkspaceFloatingGroup, WorkspaceLayout, WorkspaceNode,
+    Node, NodeId, Panel, PanelConstraints, PanelId, PanelInstance, PanelKey, Point, Rect, Size, Split,
+    Tabs, WorkspaceDiagnostic, WorkspaceFileError, WorkspaceFloatingGroup, WorkspaceLayout,
+    WorkspaceLoadOptions, WorkspaceLoadResult, WorkspaceNode,
 };
 
 /// Marker identifying this file as a Roadmap Docking workspace.
 pub const WORKSPACE_FORMAT: &str = "roadmap-docking-workspace";
 
 /// Current public workspace JSON schema version.
-pub const WORKSPACE_VERSION: u32 = 1;
+pub const WORKSPACE_VERSION: u32 = 2;
 
 /// Versioned, JSON-encoded persistent workspace boundary.
 ///
@@ -76,12 +77,60 @@ impl WorkspaceFile {
         }))
     }
 
-    /// Parses a workspace file and rejects unsupported format/version headers.
+    /// Parses a workspace file and migrates supported older versions.
+    ///
+    /// This convenience method returns the upgraded file. Use
+    /// `from_json_with_diagnostics` or `load_json` when migration warnings
+    /// must be presented to the user or logged.
     pub fn from_json(json: &str) -> Result<Self, WorkspaceFileError> {
-        let file: Self = serde_json::from_str(json)
+        Self::from_json_with_diagnostics(json).map(|(file, _diagnostics)| file)
+    }
+
+    /// Parses the JSON envelope and returns any schema migration diagnostics.
+    pub fn from_json_with_diagnostics(
+        json: &str,
+    ) -> Result<(Self, Vec<WorkspaceDiagnostic>), WorkspaceFileError> {
+        let value: serde_json::Value = serde_json::from_str(json)
             .map_err(|error| WorkspaceFileError::Json(error.to_string()))?;
+
+        let format = value
+            .get("format")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| WorkspaceFileError::Json("missing string field 'format'".to_owned()))?;
+        if format != WORKSPACE_FORMAT {
+            return Err(WorkspaceFileError::UnsupportedFormat {
+                found: format.to_owned(),
+            });
+        }
+
+        let version_u64 = value
+            .get("version")
+            .and_then(serde_json::Value::as_u64)
+            .ok_or_else(|| WorkspaceFileError::Json("missing non-negative integer field 'version'".to_owned()))?;
+        let version = u32::try_from(version_u64).map_err(|_| {
+            WorkspaceFileError::Json("workspace version is outside the supported integer range".to_owned())
+        })?;
+        if !matches!(version, 1 | WORKSPACE_VERSION) {
+            return Err(WorkspaceFileError::UnsupportedVersion {
+                found: version,
+                supported: WORKSPACE_VERSION,
+            });
+        }
+
+        // Version 1 and 2 share the same structural DTO. The explicit v1
+        // migration establishes the compatibility seam for future shape changes.
+        let mut file: Self = serde_json::from_value(value)
+            .map_err(|error| WorkspaceFileError::Json(error.to_string()))?;
+        let mut diagnostics = Vec::new();
+        if file.version == 1 {
+            file = migrate_v1_to_v2(file);
+            diagnostics.push(WorkspaceDiagnostic::SchemaMigrated {
+                from: 1,
+                to: WORKSPACE_VERSION,
+            });
+        }
         file.validate_header()?;
-        Ok(file)
+        Ok((file, diagnostics))
     }
 
     /// Encodes this workspace as the canonical pretty-printed JSON file.
@@ -91,20 +140,67 @@ impl WorkspaceFile {
             .map_err(|error| WorkspaceFileError::Json(error.to_string()))
     }
 
-    /// Rebuilds fresh runtime arenas using the application's panel descriptors.
+    /// Restores a validated layout, preserving unknown panel kinds as placeholders.
     ///
-    /// Panel constraints come from the app-owned registry and are deliberately
-    /// not persisted. This is the strict version-1 loader; migration and
-    /// recovery policy are layered on top in the workspace-load stage.
+    /// Without load options, floating bounds are left unchanged because Core
+    /// cannot infer the active monitor or the current client region.
     pub fn into_layout(
         self,
         descriptors: &[(PanelKey, PanelConstraints)],
         metrics: &DockMetrics,
-    ) -> Result<Layout, WorkspaceFileError> {
+    ) -> Result<WorkspaceLoadResult, WorkspaceFileError> {
+        self.into_layout_with_options(descriptors, metrics, WorkspaceLoadOptions::default())
+    }
+
+    /// Restores a layout, optionally clamping floating bounds to a client region.
+    pub fn into_layout_with_options(
+        self,
+        descriptors: &[(PanelKey, PanelConstraints)],
+        metrics: &DockMetrics,
+        options: WorkspaceLoadOptions,
+    ) -> Result<WorkspaceLoadResult, WorkspaceFileError> {
+        self.into_layout_with_diagnostics(descriptors, metrics, options, Vec::new())
+    }
+
+    /// Full load pipeline: parse, migrate, rebuild fresh arenas, normalize safely,
+    /// and return diagnostics in a single report.
+    pub fn load_json(
+        json: &str,
+        descriptors: &[(PanelKey, PanelConstraints)],
+        metrics: &DockMetrics,
+        options: WorkspaceLoadOptions,
+    ) -> Result<WorkspaceLoadResult, WorkspaceFileError> {
+        let (file, diagnostics) = Self::from_json_with_diagnostics(json)?;
+        file.into_layout_with_diagnostics(descriptors, metrics, options, diagnostics)
+    }
+
+    fn into_layout_with_diagnostics(
+        mut self,
+        descriptors: &[(PanelKey, PanelConstraints)],
+        metrics: &DockMetrics,
+        options: WorkspaceLoadOptions,
+        mut diagnostics: Vec<WorkspaceDiagnostic>,
+    ) -> Result<WorkspaceLoadResult, WorkspaceFileError> {
+        if self.version == 1 {
+            self = migrate_v1_to_v2(self);
+            diagnostics.push(WorkspaceDiagnostic::SchemaMigrated {
+                from: 1,
+                to: WORKSPACE_VERSION,
+            });
+        }
         self.validate_header()?;
         metrics
             .validate()
             .map_err(WorkspaceFileError::InvalidMetrics)?;
+
+        let visible_region = if let Some(region) = options.visible_client_region {
+            region
+                .validate_non_empty()
+                .map_err(WorkspaceFileError::InvalidVisibleClientRegion)?;
+            Some(region)
+        } else {
+            None
+        };
 
         let mut descriptors_by_key = HashMap::<String, PanelConstraints>::new();
         for (key, constraints) in descriptors {
@@ -124,11 +220,27 @@ impl WorkspaceFile {
             }
         }
 
+        if let Some(region) = visible_region {
+            for (index, group) in self.layout.floating_groups.iter_mut().enumerate() {
+                let original = group.bounds;
+                let clamped = clamp_floating_bounds(original, region, index)?;
+                if original != clamped {
+                    group.bounds = clamped;
+                    diagnostics.push(WorkspaceDiagnostic::FloatingBoundsClamped {
+                        index,
+                        original,
+                        clamped,
+                    });
+                }
+            }
+        }
+
         let mut nodes = SlotMap::<NodeId, Node>::with_key();
         let mut panel_instances = SlotMap::<PanelId, PanelInstance>::with_key();
         let mut dock_areas = SlotMap::<DockAreaId, DockArea>::with_key();
         let mut main_areas = [None, None];
         let mut floating_groups = SlotMap::<FloatingGroupId, FloatingGroup>::with_key();
+        let mut unknown_panel_keys = BTreeSet::new();
 
         for (side, root) in [
             (DockSide::Left, self.layout.left.as_ref()),
@@ -140,6 +252,8 @@ impl WorkspaceFile {
             let root_id = restore_node(
                 root,
                 &descriptors_by_key,
+                metrics,
+                &mut unknown_panel_keys,
                 &mut nodes,
                 &mut panel_instances,
             )?;
@@ -155,6 +269,8 @@ impl WorkspaceFile {
             let root = restore_node(
                 &group.root,
                 &descriptors_by_key,
+                metrics,
+                &mut unknown_panel_keys,
                 &mut nodes,
                 &mut panel_instances,
             )?;
@@ -162,7 +278,13 @@ impl WorkspaceFile {
             floating_groups.insert(FloatingGroup::new(area_id, group.bounds, group.z_order));
         }
 
-        let layout = Layout::from_workspace_parts(
+        diagnostics.extend(
+            unknown_panel_keys
+                .into_iter()
+                .map(|key| WorkspaceDiagnostic::UnknownPanelKeyPreserved { key }),
+        );
+
+        let mut layout = Layout::from_workspace_parts(
             nodes,
             panel_instances,
             dock_areas,
@@ -172,10 +294,14 @@ impl WorkspaceFile {
             self.layout.profile,
             self.layout.chrome,
         );
-        layout
-            .validate(metrics)
-            .map_err(WorkspaceFileError::InvalidLayout)?;
-        Ok(layout)
+
+        match layout.normalize_for_workspace_load(metrics) {
+            Ok(Some(issues)) => diagnostics.push(WorkspaceDiagnostic::LayoutNormalized { issues }),
+            Ok(None) => {}
+            Err(issues) => return Err(WorkspaceFileError::InvalidLayout(issues)),
+        }
+
+        Ok(WorkspaceLoadResult { layout, diagnostics })
     }
 
     fn validate_header(&self) -> Result<(), WorkspaceFileError> {
@@ -199,6 +325,43 @@ impl Layout {
     pub fn to_workspace_file(&self) -> Result<WorkspaceFile, WorkspaceFileError> {
         WorkspaceFile::from_layout(self)
     }
+}
+
+fn migrate_v1_to_v2(mut file: WorkspaceFile) -> WorkspaceFile {
+    // The first versioned schema used this same layout DTO. Version 2 keeps the
+    // structural shape while making migration explicit and diagnosable.
+    file.version = WORKSPACE_VERSION;
+    file
+}
+
+fn clamp_floating_bounds(
+    bounds: Rect,
+    visible_region: Rect,
+    index: usize,
+) -> Result<Rect, WorkspaceFileError> {
+    bounds
+        .validate_non_empty()
+        .map_err(|reason| WorkspaceFileError::InvalidFloatingBounds { index, reason })?;
+    let region_right = visible_region
+        .checked_right()
+        .map_err(WorkspaceFileError::InvalidVisibleClientRegion)?;
+    let region_bottom = visible_region
+        .checked_bottom()
+        .map_err(WorkspaceFileError::InvalidVisibleClientRegion)?;
+
+    // When a stored floating window is larger than the current client region,
+    // shrink it to fit and report the recovery through FloatingBoundsClamped.
+    let width = bounds.size.width.min(visible_region.size.width);
+    let height = bounds.size.height.min(visible_region.size.height);
+    let max_x = region_right - width;
+    let max_y = region_bottom - height;
+    let x = bounds.origin.x.clamp(visible_region.origin.x, max_x);
+    let y = bounds.origin.y.clamp(visible_region.origin.y, max_y);
+    let clamped = Rect::new(crate::Point::new(x, y), Size::new(width, height));
+    clamped
+        .validate_non_empty()
+        .map_err(|reason| WorkspaceFileError::InvalidFloatingBounds { index, reason })?;
+    Ok(clamped)
 }
 
 fn node_to_workspace(
@@ -258,6 +421,8 @@ fn node_to_workspace(
 fn restore_node(
     workspace_node: &WorkspaceNode,
     descriptors: &HashMap<String, PanelConstraints>,
+    metrics: &DockMetrics,
+    unknown_panel_keys: &mut BTreeSet<String>,
     nodes: &mut SlotMap<NodeId, Node>,
     panel_instances: &mut SlotMap<PanelId, PanelInstance>,
 ) -> Result<NodeId, WorkspaceFileError> {
@@ -269,7 +434,11 @@ fn restore_node(
         } => {
             let child_ids = children
                 .iter()
-                .map(|child| restore_node(child, descriptors, nodes, panel_instances))
+                .map(|child| {
+                    restore_node(
+                        child, descriptors, metrics, unknown_panel_keys, nodes, panel_instances,
+                    )
+                })
                 .collect::<Result<_, _>>()?;
             Node::Split(Split {
                 axis: *axis,
@@ -284,7 +453,11 @@ fn restore_node(
         } => {
             let child_ids = children
                 .iter()
-                .map(|child| restore_node(child, descriptors, nodes, panel_instances))
+                .map(|child| {
+                    restore_node(
+                        child, descriptors, metrics, unknown_panel_keys, nodes, panel_instances,
+                    )
+                })
                 .collect::<Result<_, _>>()?;
             Node::Tabs(Tabs {
                 children: child_ids,
@@ -293,11 +466,10 @@ fn restore_node(
             })
         }
         WorkspaceNode::Panel { key, state } => {
-            let constraints = descriptors.get(key.as_str()).copied().ok_or_else(|| {
-                WorkspaceFileError::MissingPanelDescriptor {
-                    key: key.as_str().to_owned(),
-                }
-            })?;
+            let constraints = descriptors.get(key.as_str()).copied().unwrap_or_else(|| {
+                unknown_panel_keys.insert(key.as_str().to_owned());
+                placeholder_constraints(metrics)
+            });
             let panel_id = panel_instances.insert(PanelInstance::with_state(
                 key.clone(),
                 constraints,
@@ -314,7 +486,11 @@ fn restore_node(
         } => {
             let group_ids = groups
                 .iter()
-                .map(|group| restore_node(group, descriptors, nodes, panel_instances))
+                .map(|group| {
+                    restore_node(
+                        group, descriptors, metrics, unknown_panel_keys, nodes, panel_instances,
+                    )
+                })
                 .collect::<Result<_, _>>()?;
             Node::Column(Column {
                 width: *width,
@@ -326,4 +502,9 @@ fn restore_node(
         }
     };
     Ok(nodes.insert(node))
+}
+
+fn placeholder_constraints(metrics: &DockMetrics) -> PanelConstraints {
+    let placeholder_size = Size::new(metrics.min_column_width, metrics.min_group_height);
+    PanelConstraints::new(placeholder_size, placeholder_size, None, false)
 }
