@@ -2,7 +2,8 @@
 
 use crate::layout_builder::LayoutBuilder;
 use crate::{
-    ColumnMode, DockCommand, DockMetrics, DockSide, FlyoutState, HitResult, Layout, Node, NodeId,
+    ColumnMode, DockCommand, DockMetrics, DockSide, DragDropAction, DragHandle, DragPayload,
+    DragSession, DragState, DropTarget, FlyoutState, HitResult, Layout, Node, NodeId,
     PanelConstraints, PanelId, PanelKey, Point, Profile, Rect, ResizeEdge, Size,
 };
 
@@ -378,6 +379,197 @@ fn right_side_flyout_resizes_toward_canvas_from_its_left_edge() {
         HitResult::FlyoutResizeEdge { column, panel, edge: ResizeEdge::Left }
             if column == fixture.column && panel == fixture.first_panel
     ));
+}
+
+struct FlyoutDragFixture {
+    layout: Layout,
+    source_column: NodeId,
+    source_group: NodeId,
+    dragged_panel: PanelId,
+    target_group: NodeId,
+}
+
+fn flyout_drag_fixture() -> FlyoutDragFixture {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+    let (dragged_panel, dragged_node) = builder.panel(key("flyout-drag-source"), constraints());
+    let (_, remaining_node) = builder.panel(key("flyout-drag-remaining"), constraints());
+    let source_group = builder.tabs(vec![dragged_node, remaining_node], 0, false);
+    let source_column = builder.column(
+        metrics.rail_width,
+        ColumnMode::IconsOnly,
+        vec![source_group],
+        vec![1.0],
+    );
+    builder.main_area(DockSide::Left, source_column);
+
+    let (_, target_node) = builder.panel(key("flyout-drag-target"), constraints());
+    let target_group = builder.tabs(vec![target_node], 0, false);
+    let target_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![target_group],
+        vec![1.0],
+    );
+    builder.main_area(DockSide::Right, target_column);
+
+    let mut layout = builder.build();
+    layout
+        .apply(
+            DockCommand::OpenFlyout {
+                column: source_column,
+                panel: dragged_panel,
+            },
+            &metrics,
+        )
+        .unwrap();
+    assert_eq!(layout.validate(&metrics), Ok(()));
+
+    FlyoutDragFixture {
+        layout,
+        source_column,
+        source_group,
+        dragged_panel,
+        target_group,
+    }
+}
+
+#[test]
+fn flyout_panel_drag_keeps_source_open_until_successful_drop_then_closes_it() {
+    let metrics = DockMetrics::default();
+    let mut fixture = flyout_drag_fixture();
+    let flyout_before = fixture.layout.flyout().unwrap();
+    let before = fixture.layout.compute_rects(viewport(), &metrics).unwrap();
+    let target = DropTarget::Tabs {
+        group: fixture.target_group,
+        index: 1,
+    };
+    let mut session = DragSession::new(&metrics).unwrap();
+    let origin = Point::new(40.0, 40.0);
+
+    session
+        .pointer_down_with_handle(
+            DragPayload::Panel { panel: fixture.dragged_panel },
+            DragHandle::FlyoutPanel,
+            origin,
+        )
+        .unwrap();
+    assert_eq!(fixture.layout.flyout(), Some(flyout_before));
+
+    session.pointer_move(Point::new(45.0, 40.0)).unwrap();
+    assert!(matches!(session.state(), DragState::Dragging { .. }));
+    assert_eq!(fixture.layout.flyout(), Some(flyout_before));
+    let during = fixture.layout.compute_rects(viewport(), &metrics).unwrap();
+    assert_eq!(during.canvas, before.canvas);
+    assert_eq!(during.columns, before.columns);
+    assert_eq!(during.flyout, before.flyout);
+
+    let request = session
+        .pointer_up(Point::new(500.0, 240.0), Some(target))
+        .unwrap()
+        .expect("valid release emits exactly one drop request");
+    assert_eq!(request.handle, DragHandle::FlyoutPanel);
+    assert_eq!(fixture.layout.flyout(), Some(flyout_before));
+
+    let action = fixture.layout.resolve_drag_drop(&request, &metrics).unwrap();
+    assert_eq!(
+        action,
+        DragDropAction::Command(DockCommand::MovePanelFromFlyout {
+            panel: fixture.dragged_panel,
+            target,
+        }),
+    );
+    let DragDropAction::Command(command) = action else {
+        panic!("a valid flyout-panel drop must produce one explicit command");
+    };
+    fixture.layout.apply(command, &metrics).unwrap();
+
+    assert_eq!(fixture.layout.flyout(), None);
+    assert_eq!(fixture.layout.version(), 2, "the accepted dock move is one persistent transaction");
+    assert!(fixture.layout.validate(&metrics).is_ok());
+    let after = fixture.layout.compute_rects(viewport(), &metrics).unwrap();
+    assert_eq!(after.canvas, before.canvas, "the flyout overlays instead of moving Canvas");
+    assert_eq!(after.columns, before.columns, "the flyout overlay does not resize dock columns");
+    let Node::Tabs(target_tabs) = fixture.layout.node(fixture.target_group).unwrap() else {
+        panic!("target should remain a tab group");
+    };
+    assert!(target_tabs.children.iter().any(|child| matches!(
+        fixture.layout.node(*child),
+        Some(Node::Panel(panel)) if panel.panel_id == fixture.dragged_panel
+    )));
+}
+
+#[test]
+fn cancelled_flyout_panel_drag_leaves_the_source_flyout_open() {
+    let metrics = DockMetrics::default();
+    let mut fixture = flyout_drag_fixture();
+    let flyout_before = fixture.layout.flyout();
+    let before = fixture.layout.compute_rects(viewport(), &metrics).unwrap();
+    let mut session = DragSession::new(&metrics).unwrap();
+    let origin = Point::new(40.0, 40.0);
+
+    session
+        .pointer_down_with_handle(
+            DragPayload::Panel { panel: fixture.dragged_panel },
+            DragHandle::FlyoutPanel,
+            origin,
+        )
+        .unwrap();
+    session.pointer_move(Point::new(45.0, 40.0)).unwrap();
+    session.escape().unwrap();
+
+    assert!(matches!(
+        session.state(),
+        DragState::Cancelled { .. }
+    ));
+    assert_eq!(fixture.layout.flyout(), flyout_before);
+    let after = fixture.layout.compute_rects(viewport(), &metrics).unwrap();
+    assert_eq!(after.canvas, before.canvas);
+    assert_eq!(after.columns, before.columns);
+    assert_eq!(after.flyout, before.flyout);
+    assert!(fixture.layout.validate(&metrics).is_ok());
+}
+
+#[test]
+fn flyout_panel_drop_to_free_area_floats_panel_and_closes_flyout() {
+    let metrics = DockMetrics::default();
+    let mut fixture = flyout_drag_fixture();
+    let mut session = DragSession::new(&metrics).unwrap();
+
+    session
+        .pointer_down_with_handle(
+            DragPayload::Panel { panel: fixture.dragged_panel },
+            DragHandle::FlyoutPanel,
+            Point::new(40.0, 40.0),
+        )
+        .unwrap();
+    session.pointer_move(Point::new(45.0, 40.0)).unwrap();
+    let mut request = session
+        .pointer_up(Point::new(650.0, 340.0), Some(DropTarget::FreeArea))
+        .unwrap()
+        .unwrap();
+    request.floating_bounds = Some(Rect::new(
+        Point::new(520.0, 180.0),
+        Size::new(420.0, 280.0),
+    ));
+
+    let action = fixture.layout.resolve_drag_drop(&request, &metrics).unwrap();
+    assert_eq!(
+        action,
+        DragDropAction::Command(DockCommand::FloatPanelFromFlyout {
+            panel: fixture.dragged_panel,
+            bounds: request.floating_bounds.unwrap(),
+        }),
+    );
+    let DragDropAction::Command(command) = action else {
+        panic!("a valid FreeArea drop must produce one explicit float command");
+    };
+    fixture.layout.apply(command, &metrics).unwrap();
+
+    assert_eq!(fixture.layout.flyout(), None);
+    assert_eq!(fixture.layout.floating_groups().count(), 1);
+    assert!(fixture.layout.validate(&metrics).is_ok());
 }
 
 #[test]
