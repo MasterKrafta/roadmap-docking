@@ -156,7 +156,7 @@ mod tests {
     use super::LayoutBuilder;
     use crate::{
         Axis, CanvasState, ColumnMode, DockMetrics, DockSide, Node, NodeId, PanelConstraints,
-        PanelId, PanelKey, Point, Profile, Rect, Size, Tabs,
+        PanelId, PanelKey, Point, Profile, Rect, Size,
         ValidationError,
     };
     use proptest::prelude::*;
@@ -394,7 +394,7 @@ mod tests {
         let mut layout = builder.build();
 
         assert_eq!(layout.validate(&DockMetrics::default()), Ok(()));
-        layout.normalize(&DockMetrics::default()).unwrap();
+        layout.normalize_for_test(&DockMetrics::default()).unwrap();
         let root = layout.main_area(DockSide::Right).unwrap().root;
         assert!(matches!(layout.node(root), Some(Node::Column(column)) if column.groups.len() == 1));
     }
@@ -410,7 +410,7 @@ mod tests {
 
         let errors = layout.validate(&DockMetrics::default()).unwrap_err();
         assert!(errors.iter().any(|error| matches!(error, ValidationError::InvalidTabs { .. })));
-        layout.normalize(&DockMetrics::default()).unwrap();
+        layout.normalize_for_test(&DockMetrics::default()).unwrap();
         assert_eq!(layout.nodes().count(), 0);
         assert!(layout.main_area(DockSide::Right).is_none());
         assert_eq!(layout.validate(&DockMetrics::default()), Ok(()));
@@ -420,9 +420,9 @@ mod tests {
     fn normalize_is_idempotent_after_invalid_ratios_are_repaired() {
         let mut layout = generated_layout(&[2, 1, 3], vec![0.1, 0.1, 0.1, 0.7]);
         assert!(layout.validate(&DockMetrics::default()).is_err());
-        layout.normalize(&DockMetrics::default()).unwrap();
+        layout.normalize_for_test(&DockMetrics::default()).unwrap();
         let after_first = snapshot(&layout);
-        layout.normalize(&DockMetrics::default()).unwrap();
+        layout.normalize_for_test(&DockMetrics::default()).unwrap();
         assert_eq!(snapshot(&layout), after_first);
     }
 
@@ -446,11 +446,11 @@ mod tests {
         ) {
             let mut layout = generated_layout(&group_sizes, ratios);
             for _ in 0..normalize_passes {
-                prop_assert_eq!(layout.normalize(&DockMetrics::default()), Ok(()));
+                prop_assert_eq!(layout.normalize_for_test(&DockMetrics::default()), Ok(()));
                 prop_assert_eq!(layout.validate(&DockMetrics::default()), Ok(()));
             }
             let normalized = snapshot(&layout);
-            layout.normalize(&DockMetrics::default()).unwrap();
+            layout.normalize_for_test(&DockMetrics::default()).unwrap();
             prop_assert_eq!(snapshot(&layout), normalized);
         }
     }
