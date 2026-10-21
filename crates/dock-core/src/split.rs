@@ -1,4 +1,4 @@
-use crate::{NodeId, SplitAxis};
+use crate::{Axis, NodeId};
 
 /// An ordered split of child nodes along one axis.
 ///
@@ -7,7 +7,7 @@ use crate::{NodeId, SplitAxis};
 /// represented before they are accepted.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Split {
-    pub axis: SplitAxis,
+    pub axis: Axis,
     pub children: Vec<NodeId>,
     pub ratios: Vec<f32>,
 }
