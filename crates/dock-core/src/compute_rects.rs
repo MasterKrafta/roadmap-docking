@@ -785,6 +785,25 @@ mod tests {
     }
 
     #[test]
+    fn floating_collapsed_group_stays_strip_sized_inside_window_bounds() {
+        let metrics = DockMetrics::default();
+        let mut builder = LayoutBuilder::new(Profile::Photoshop);
+        let (panel, panel_node) = builder.panel(key("floating-collapsed"), constraints());
+        let group = builder.tabs(vec![panel_node], 0, true);
+        let bounds = Rect::new(Point::new(20.0, 30.0), Size::new(360.0, 260.0));
+        builder.floating_group(group, bounds, 2);
+        let layout = builder.build();
+
+        let rects = layout.compute_rects(viewport(1000.0, 700.0), &metrics).unwrap();
+
+        assert_eq!(rects.floating_groups[0].rect, bounds);
+        assert_eq!(rects.groups[0].rect.size.height, metrics.collapsed_group_height);
+        assert_eq!(rects.tab_strips[0].rect.size.height, metrics.collapsed_group_height);
+        assert!(rects.panels.is_empty());
+        assert!(layout.panel_instance(panel).is_some());
+    }
+
+    #[test]
     fn icon_rail_uses_rail_width_without_mutating_logical_column_width() {
         let metrics = DockMetrics::default();
         let mut builder = LayoutBuilder::new(Profile::Photoshop);
