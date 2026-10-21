@@ -82,6 +82,7 @@ pub enum DockCommand {
 
 #[cfg(test)]
 mod tests {
+    use slotmap::Key;
     use super::DockCommand;
     use crate::{
         ChromeMode, ColumnMode, DockSide, DropTarget, DropZone, FloatingGroupId, NodeId,
