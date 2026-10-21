@@ -27,6 +27,7 @@ app ──▶ dock-core
 ## Контракт workspace serialization
 
 - Единственный публичный формат файла рабочего пространства — JSON. Текущий envelope содержит `format: "roadmap-docking-workspace"` и `version: 1`; формат или версия должны проверяться до восстановления.
+- Workspace serialization API и JSON-зависимость включаются только явным feature `dock-core/serde`; по умолчанию feature выключен.
 - Сериализуется DTO из `WorkspaceFile`, а не внутренний `Layout` и не отдельные arena-backed структуры. Дерево хранится рекурсивно: в файле нет runtime `NodeId`, `PanelId`, `DockAreaId` или `FloatingGroupId`; panel leaf ссылается на стабильный `PanelKey`.
 - Сохраняются профиль, предпочтение видимости chrome, известные bounds Canvas, структура Split/Tabs/Column, отношения групп и их ratios, активный индекс и collapse state вкладок, режим/ширина колонки и последняя expanded width, layout-only размер панели, bounds и z-order floating-групп.
 - `PanelConstraints` принадлежат app-owned registry и при загрузке разрешаются по `PanelKey`; они не копируются в файл. Загрузка создаёт новые SlotMap arenas и проверяет полученный `Layout` текущими метриками.
