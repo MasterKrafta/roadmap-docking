@@ -68,6 +68,17 @@ impl Layout {
             return Ok(HitResult::FloatingGroup { group: floating.group });
         }
 
+        // Overflow content is larger than its visible viewport. Do not let
+        // off-screen main-dock rectangles steal hits outside the client area.
+        if let Some(canvas) = rects.canvas {
+            let viewport_bottom = canvas
+                .checked_bottom()
+                .map_err(ComputeRectsError::Geometry)?;
+            if point.y < canvas.origin.y || point.y >= viewport_bottom {
+                return Ok(HitResult::Miss);
+            }
+        }
+
         if let Some(hit) = hit_layout_geometry(
             self,
             point,
@@ -454,6 +465,28 @@ mod tests {
         assert_eq!(
             layout.hit_test(Point::new(140.0, 40.0), &rects, &metrics).unwrap(),
             HitResult::TabHeader { group, panel: right_panel, index: 1 }
+        );
+    }
+
+    #[test]
+    fn vertical_overflow_content_is_not_hit_outside_its_viewport() {
+        let metrics = DockMetrics::default();
+        let mut builder = LayoutBuilder::new(Profile::Photoshop);
+        let mut groups = Vec::new();
+        for index in 0..3 {
+            let (_, panel_node) = builder.panel(key(&format!("offscreen-{index}")), constraints());
+            groups.push(builder.tabs(vec![panel_node], 0, index == 0));
+        }
+        let column = builder.column(280.0, ColumnMode::Expanded, groups, vec![0.2, 0.3, 0.5]);
+        builder.main_area(DockSide::Left, column);
+        let layout = builder.build();
+        let rects = layout.compute_rects(viewport(1000.0, 120.0), &metrics).unwrap();
+
+        assert!(!rects.vertical_overflow.is_empty());
+        assert!(rects.panels.iter().any(|panel| panel.rect.origin.y + panel.rect.size.height > 120.0));
+        assert_eq!(
+            layout.hit_test(Point::new(100.0, 130.0), &rects, &metrics).unwrap(),
+            HitResult::Miss
         );
     }
 
