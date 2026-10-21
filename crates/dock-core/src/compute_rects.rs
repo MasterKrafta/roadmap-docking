@@ -2,7 +2,7 @@ use crate::{
     Axis, Column, ColumnMode, ColumnRect, ComputeRectsError, DockMetrics, DockSide,
     FloatingGroupRect, FloatingResizeEdgeRect, FlyoutRect, GeometryError, GroupRect,
     Layout, LayoutRects, Node, NodeId, PanelRect, Point, Rect, ResizeEdge, Size,
-    SplitterRect, TabHeaderRect, TabStripRect, Tabs, VerticalOverflow,
+    SplitterRect, TabHeaderRect, TabOverflowRect, TabStripRect, Tabs, VerticalOverflow,
 };
 
 struct StackAllocation {
@@ -564,25 +564,83 @@ fn layout_tabs(
     output.tab_strips.push(TabStripRect::new(id, strip_rect));
 
     if !tabs.children.is_empty() {
-        let tab_width = group_rect.size.width / tabs.children.len() as f32;
-        for (index, child_id) in tabs.children.iter().enumerate() {
-            if let Some(Node::Panel(panel)) = layout.node(*child_id) {
-                let x = group_rect.origin.x + tab_width * index as f32;
-                let width = if index + 1 == tabs.children.len() {
-                    (group_rect.origin.x + group_rect.size.width) - x
-                } else {
-                    tab_width
-                };
-                let header_rect = Rect::new(
-                    Point::new(x, strip_y),
-                    Size::new(width, strip_height),
-                );
-                output.tab_headers.push(TabHeaderRect::new(
-                    id,
-                    panel.panel_id,
-                    index,
-                    header_rect,
-                ));
+        let tab_count = tabs.children.len();
+        let needs_overflow = tab_count as f64 * f64::from(metrics.min_tab_width)
+            > f64::from(group_rect.size.width);
+
+        if !needs_overflow {
+            // All tabs remain visible and share the strip width. This naturally
+            // compresses headers as more tabs are added, down to min_tab_width.
+            let tab_width = group_rect.size.width / tab_count as f32;
+            for (index, child_id) in tabs.children.iter().enumerate() {
+                if let Some(Node::Panel(panel)) = layout.node(*child_id) {
+                    let x = group_rect.origin.x + tab_width * index as f32;
+                    let width = if index + 1 == tab_count {
+                        (group_rect.origin.x + group_rect.size.width) - x
+                    } else {
+                        tab_width
+                    };
+                    let header_rect = Rect::new(
+                        Point::new(x, strip_y),
+                        Size::new(width, strip_height),
+                    );
+                    output.tab_headers.push(TabHeaderRect::new(
+                        id,
+                        panel.panel_id,
+                        index,
+                        header_rect,
+                    ));
+                }
+            }
+        } else {
+            // This is the project's chosen overflow UX, not a claim about native
+            // Photoshop behavior: reserve a trailing button and expose omitted
+            // panel ids so the adapter can build a menu/list.
+            let button_width = metrics.tab_overflow_button_width.min(group_rect.size.width);
+            let visible_width = (group_rect.size.width - button_width).max(0.0);
+            let visible_count = ((visible_width / metrics.min_tab_width).floor() as usize)
+                .min(tab_count);
+
+            if visible_count > 0 {
+                let tab_width = visible_width / visible_count as f32;
+                for (index, child_id) in tabs.children.iter().take(visible_count).enumerate() {
+                    if let Some(Node::Panel(panel)) = layout.node(*child_id) {
+                        let x = group_rect.origin.x + tab_width * index as f32;
+                        let width = if index + 1 == visible_count {
+                            (group_rect.origin.x + visible_width) - x
+                        } else {
+                            tab_width
+                        };
+                        let header_rect = Rect::new(
+                            Point::new(x, strip_y),
+                            Size::new(width, strip_height),
+                        );
+                        output.tab_headers.push(TabHeaderRect::new(
+                            id,
+                            panel.panel_id,
+                            index,
+                            header_rect,
+                        ));
+                    }
+                }
+            }
+
+            let button_rect = Rect::new(
+                Point::new(group_rect.origin.x + visible_width, strip_y),
+                Size::new(button_width, strip_height),
+            );
+            button_rect.validate().map_err(ComputeRectsError::Geometry)?;
+            let hidden_tabs = tabs
+                .children
+                .iter()
+                .skip(visible_count)
+                .filter_map(|child_id| match layout.node(*child_id) {
+                    Some(Node::Panel(panel)) => Some(panel.panel_id),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            if !hidden_tabs.is_empty() {
+                output.tab_overflows.push(TabOverflowRect::new(id, button_rect, hidden_tabs));
             }
         }
     }
