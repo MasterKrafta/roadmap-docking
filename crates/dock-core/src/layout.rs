@@ -3359,45 +3359,58 @@ mod tests {
 
 
     #[test]
-    fn apply_move_group_reorders_with_an_inverse_that_restores_the_original_order() {
+    fn apply_move_group_reorders_preserving_ratios_and_inverse_restores_order() {
         let metrics = DockMetrics::default();
-        let mut layout = initial_layout(Profile::Generic);
-        let column_id = layout.main_area(DockSide::Right).unwrap().root;
-        let (first_group, second_group) = match layout.node(column_id).unwrap() {
-            Node::Column(column) => (column.groups[0], column.groups[1]),
-            _ => panic!("initial main root must be a Column"),
-        };
+        let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Generic);
+        let mut groups = Vec::new();
+
+        for index in 0..3 {
+            let (_, panel) = builder.panel(
+                PanelKey::new(format!("move-group-panel-{index}")).unwrap(),
+                descriptors()[0].1,
+            );
+            groups.push(builder.tabs(vec![panel], 0, false));
+        }
+        let column_id = builder.column(
+            metrics.default_column_width,
+            crate::ColumnMode::Expanded,
+            groups.clone(),
+            vec![0.2, 0.5, 0.3],
+        );
+        builder.main_area(DockSide::Right, column_id);
+        let mut layout = builder.build();
+        assert_eq!(layout.validate(&metrics), Ok(()));
 
         let moved = layout
             .apply(
                 DockCommand::MoveGroup {
-                    group: first_group,
+                    group: groups[0],
                     column: column_id,
-                    index: 2,
+                    index: 3,
                 },
                 &metrics,
             )
             .unwrap();
-        let groups_after_move = match layout.node(column_id).unwrap() {
-            Node::Column(column) => column.groups.clone(),
-            _ => panic!("main root must remain a Column"),
-        };
-        assert_eq!(groups_after_move, vec![second_group, first_group]);
+        assert!(matches!(
+            layout.node(column_id),
+            Some(Node::Column(column))
+                if column.groups == vec![groups[1], groups[2], groups[0]]
+                    && column.group_ratios == vec![0.5, 0.3, 0.2]
+        ));
         assert_eq!(layout.version(), 1);
 
-        let inverse = moved.inverse.expect("a same-column move has a safe inverse");
-        layout.apply(inverse, &metrics).unwrap();
-        let groups_after_inverse = match layout.node(column_id).unwrap() {
-            Node::Column(column) => column.groups.clone(),
-            _ => panic!("main root must remain a Column"),
-        };
-        assert_eq!(groups_after_inverse, vec![first_group, second_group]);
+        layout.apply(moved.inverse.expect("forward move has a safe inverse"), &metrics).unwrap();
+        assert!(matches!(
+            layout.node(column_id),
+            Some(Node::Column(column))
+                if column.groups == groups && column.group_ratios == vec![0.2, 0.5, 0.3]
+        ));
         assert_eq!(layout.version(), 2);
 
         let moved_backwards = layout
             .apply(
                 DockCommand::MoveGroup {
-                    group: second_group,
+                    group: groups[2],
                     column: column_id,
                     index: 0,
                 },
@@ -3406,12 +3419,15 @@ mod tests {
             .unwrap();
         assert!(matches!(
             layout.node(column_id),
-            Some(Node::Column(column)) if column.groups == vec![second_group, first_group]
+            Some(Node::Column(column))
+                if column.groups == vec![groups[2], groups[0], groups[1]]
+                    && column.group_ratios == vec![0.3, 0.2, 0.5]
         ));
         layout.apply(moved_backwards.inverse.expect("backward move has a safe inverse"), &metrics).unwrap();
         assert!(matches!(
             layout.node(column_id),
-            Some(Node::Column(column)) if column.groups == vec![first_group, second_group]
+            Some(Node::Column(column))
+                if column.groups == groups && column.group_ratios == vec![0.2, 0.5, 0.3]
         ));
         assert_eq!(layout.version(), 4);
         assert_eq!(layout.validate(&metrics), Ok(()));
