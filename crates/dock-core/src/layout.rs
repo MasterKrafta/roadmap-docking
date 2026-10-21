@@ -787,6 +787,8 @@ fn is_normalizable_validation_error(error: &ValidationError) -> bool {
             *reason == "must contain at least one group before normalization"
                 || is_ratio_error(reason)
         }
+        // Flyout is transient and may be closed if the persistent tree changes.
+        ValidationError::InvalidFlyout { .. } => true,
         // All other errors describe broken references, invalid metadata, or
         // profile constraints that normalization must not guess how to repair.
         _ => false,
@@ -1480,6 +1482,73 @@ mod tests {
             unreachable!();
         };
         assert_eq!(column.groups.last().copied(), Some(root));
+    }
+
+
+    #[test]
+    fn normalize_removes_an_empty_column_and_its_main_area() {
+        let mut nodes = SlotMap::<NodeId, Node>::with_key();
+        let root = nodes.insert(Node::Column(crate::Column {
+            width: DockMetrics::default().default_column_width,
+            mode: crate::ColumnMode::Expanded,
+            groups: Vec::new(),
+            group_ratios: Vec::new(),
+        }));
+        let mut areas = SlotMap::<DockAreaId, DockArea>::with_key();
+        let area = areas.insert(DockArea::main(DockSide::Right, root));
+        let mut layout = Layout::from_parts(
+            nodes,
+            SlotMap::<PanelId, PanelInstance>::with_key(),
+            areas,
+            [None, Some(area)],
+            SlotMap::<FloatingGroupId, FloatingGroup>::with_key(),
+            CanvasState::default(),
+            Profile::Photoshop,
+            0,
+            ChromeMode::Visible,
+        );
+
+        layout.normalize(&DockMetrics::default()).unwrap();
+        assert!(layout.main_area(DockSide::Right).is_none());
+        assert_eq!(layout.nodes().count(), 0);
+        assert_eq!(layout.dock_areas().count(), 0);
+        assert_eq!(layout.validate(&DockMetrics::default()), Ok(()));
+    }
+
+    #[test]
+    fn normalize_removes_empty_floating_root_group_and_area() {
+        let mut nodes = SlotMap::<NodeId, Node>::with_key();
+        let root = nodes.insert(Node::Tabs(Tabs {
+            children: Vec::new(),
+            active_index: 0,
+            collapsed: false,
+        }));
+        let mut areas = SlotMap::<DockAreaId, DockArea>::with_key();
+        let area = areas.insert(DockArea::floating(root));
+        let mut floating = SlotMap::<FloatingGroupId, FloatingGroup>::with_key();
+        let group = floating.insert(FloatingGroup::new(
+            area,
+            Rect::new(Point::new(40.0, 50.0), Size::new(400.0, 300.0)),
+            1,
+        ));
+        let mut layout = Layout::from_parts(
+            nodes,
+            SlotMap::<PanelId, PanelInstance>::with_key(),
+            areas,
+            [None, None],
+            floating,
+            CanvasState::default(),
+            Profile::Generic,
+            0,
+            ChromeMode::Visible,
+        );
+
+        layout.normalize(&DockMetrics::default()).unwrap();
+        assert!(layout.floating_group(group).is_none());
+        assert_eq!(layout.nodes().count(), 0);
+        assert_eq!(layout.dock_areas().count(), 0);
+        assert_eq!(layout.floating_groups().count(), 0);
+        assert_eq!(layout.validate(&DockMetrics::default()), Ok(()));
     }
 
 }
