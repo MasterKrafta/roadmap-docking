@@ -1,6 +1,6 @@
 use crate::{
     ColumnRect, DropZoneRect, FloatingGroupRect, FloatingResizeEdgeRect, GroupRect,
-    PanelRect, SplitterRect, TabHeaderRect, TabStripRect,
+    PanelRect, Rect, SplitterRect, TabHeaderRect, TabStripRect,
 };
 
 /// Complete pure-data geometry snapshot produced by the geometry pass.
@@ -11,6 +11,9 @@ use crate::{
 #[derive(Clone, Debug, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct LayoutRects {
+    /// Canvas rectangle left after main docks consume their logical widths.
+    /// `None` means this snapshot has not been computed yet.
+    pub canvas: Option<Rect>,
     pub columns: Vec<ColumnRect>,
     pub groups: Vec<GroupRect>,
     pub tab_strips: Vec<TabStripRect>,
@@ -29,6 +32,7 @@ mod tests {
     #[test]
     fn default_geometry_snapshot_has_empty_collections() {
         let rects = LayoutRects::default();
+        assert!(rects.canvas.is_none());
         assert!(rects.columns.is_empty());
         assert!(rects.groups.is_empty());
         assert!(rects.tab_strips.is_empty());
