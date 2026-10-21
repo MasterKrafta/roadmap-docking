@@ -7,6 +7,10 @@
 pub enum DragHandle {
     /// One tab header; moves/reorders a single Panel.
     PanelTab,
+    /// A panel surface in a rail flyout; the source flyout remains visible during the gesture.
+    ///
+    /// A completed valid drop closes that source flyout; cancelled gestures leave it open.
+    FlyoutPanel,
     /// A group's grip/header; moves the whole Tabs node.
     GroupGrip,
     /// A floating window title bar; moves window bounds, never docks it.
@@ -29,6 +33,7 @@ impl DragHandle {
         matches!(
             (self, payload),
             (Self::PanelTab, crate::DragPayload::Panel { .. })
+                | (Self::FlyoutPanel, crate::DragPayload::Panel { .. })
                 | (Self::GroupGrip, crate::DragPayload::Group { .. })
                 | (Self::FloatingTitle, crate::DragPayload::FloatingGroup { .. })
                 | (Self::FloatingCapture, crate::DragPayload::FloatingGroup { .. })
