@@ -25,7 +25,10 @@ mod tests {
 
     #[test]
     fn command_values_keep_their_kind() {
-        assert_eq!(CommandValue::ColumnWidth(280.0), CommandValue::ColumnWidth(280.0));
+        assert!(matches!(
+            CommandValue::ColumnWidth(280.0),
+            CommandValue::ColumnWidth(value) if value == 280.0
+        ));
         assert_ne!(
             CommandValue::ColumnWidth(280.0),
             CommandValue::ColumnBoundaryDelta(280.0)
