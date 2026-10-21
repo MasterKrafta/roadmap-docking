@@ -118,6 +118,14 @@ Layout является единственным владельцем арен �
 - Для однозначного порядка рендеринга `floating_groups_in_paint_order()` возвращает окна по возрастающему z_order (back-to-front), а `floating_groups_in_hit_test_order()` — по убыванию (front-to-back). Layout validation запрещает повторяющиеся z_order; `RaiseFloating` назначает уровень выше текущего максимума.
 - Дополнительные regression-тесты проверяют удаление floating area при успешном переносе последней панели, сохранение исходного area при отказе DockFloating, отсутствие экранного clamping в модели, обратный порядок paint/hit-test и merge одной floating-группы в другую без потери PanelId/PanelInstance.
 
+### Последовательности команд и негативные сценарии (C4.7)
+
+- Команды, имеющие runtime handles, проверяются с отсутствующими `NodeId`, `PanelId` или `FloatingGroupId`. Для каждого отказа сравнивается полное debug-представление Layout и `version` до/после; после rollback исходный Layout обязан проходить `validate`.
+- Отдельная матрица проверяет ID существующего, но неверного типа узла и запрещённые назначения: rail drop в Expanded column, tab/group-команды с Column вместо Tabs, flyout для не принадлежащей rail группе и docking floating-окна в несовместимую цель.
+- Drop/move на ту же группу или ту же позицию считается допустимым no-op: версия не изменяется, inverse отсутствует, Layout остаётся валидным.
+- Property-тест `generated_command_sequences_from_current_ids_remain_valid` использует `proptest`: строит до 35 команд на последовательность, на каждом шаге заново получает доступные IDs из текущего Layout и формирует только применимые команды. После каждого успешного `apply` проверяется `validate`; неожиданная ошибка generated-команды валит property.
+- Ограничения размеров и количества колонок опираются также на focused regressions C4.4/C4.5: `c44_stale_horizontal_drop_at_column_limit_is_rejected_atomically`, `c45_resize_column_clamps_min_and_max_and_canvas_gets_remainder`, `c45_resize_rejects_non_finite_or_non_positive_inputs_atomically`, а также тесты невозможности разместить группы при недостаточной доступной высоте.
+
 ### Геометрия
 
 Все координаты и размеры — логические px в f32. NaN и бесконечности запрещены. Допуск сравнения пикселей — 1e-3, ratios — 1e-4. Округление до физических пикселей выполняет rendering adapter на границе UI.
