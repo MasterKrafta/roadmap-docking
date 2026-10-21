@@ -6,7 +6,8 @@ use crate::{
     command_application::CommandApplication, Axis, CanvasState, ChromeMode, ColumnMode,
     CommandError, CommandOutcome, CommandValue, DockArea, DockAreaId, DockAreaKind, DockCommand,
     DockMetrics, DockSide, DropTarget, DropZone, FloatingGroup, FloatingGroupId, FlyoutState,
-    GeometryError, Node, NodeId, PanelId, PanelInstance, Profile, Rect, Size, ValidationError,
+    GeometryError, LastDockLocation, Node, NodeId, PanelId, PanelInstance, PanelKey, Profile, Rect, Size,
+    ValidationError,
 };
 
 const RATIO_TOLERANCE: f32 = 1.0e-4;
@@ -24,6 +25,7 @@ pub struct Layout {
     dock_areas: SlotMap<DockAreaId, DockArea>,
     main_areas: [Option<DockAreaId>; 2],
     floating_groups: SlotMap<FloatingGroupId, FloatingGroup>,
+    last_dock_locations: HashMap<PanelKey, LastDockLocation>,
     canvas: CanvasState,
     profile: Profile,
     version: u64,
@@ -40,6 +42,7 @@ impl Layout {
             dock_areas: SlotMap::with_key(),
             main_areas: [None, None],
             floating_groups: SlotMap::with_key(),
+            last_dock_locations: HashMap::new(),
             canvas: CanvasState::default(),
             profile,
             version: 0,
@@ -74,6 +77,12 @@ impl Layout {
 
     pub fn panel_instance(&self, id: PanelId) -> Option<&PanelInstance> {
         self.panel_instances.get(id)
+    }
+
+    /// Returns the last known main-dock placement for a panel key in this
+    /// runtime session. This preference is intentionally not workspace state.
+    pub fn last_dock_location(&self, key: &PanelKey) -> Option<LastDockLocation> {
+        self.last_dock_locations.get(key).copied()
     }
 
     pub fn dock_area(&self, id: DockAreaId) -> Option<&DockArea> {
@@ -195,19 +204,22 @@ impl Layout {
                     field: "constraints",
                     reason: geometry_error_reason(error),
                 })?;
-                self.validate_drop_target(*target, metrics)?;
 
+                // Re-opening an existing singleton activates it instead of toggling
+                // it closed. Its previous placement is authoritative, so a fresh
+                // target is not needed and may no longer exist.
                 if let Some((existing_id, _)) = self.panel_instances.iter().find(|(_, instance)| {
                     instance.key == *key && (constraints.singleton || instance.constraints.singleton)
                 }) {
                     let panel_node = self.find_panel_node(existing_id).ok_or(
                         CommandError::MissingPanel { panel: existing_id },
                     )?;
-                    let (group, _) = self.tab_parent_index(panel_node).ok_or(
-                        CommandError::InvalidTarget {
-                            reason: "existing singleton panel is not inside a Tabs node",
-                        },
-                    )?;
+                    let Some((group, _)) = self.tab_parent_index(panel_node) else {
+                        // A single Panel may be the root of a Generic floating/main
+                        // area. It is already open and visible; there is no tab index
+                        // to change, so treat this as an accepted no-op.
+                        return Ok(CommandApplication::persistent());
+                    };
                     let tabs = match self.nodes.get(group) {
                         Some(Node::Tabs(tabs)) => tabs,
                         _ => return Err(CommandError::InvalidTarget {
@@ -226,6 +238,9 @@ impl Layout {
                             reason: "existing singleton panel is not a child of its Tabs node",
                         });
                     };
+                    if index == tabs.active_index {
+                        return Ok(CommandApplication::persistent());
+                    }
                     if let Some(Node::Tabs(tabs)) = self.nodes.get_mut(group) {
                         tabs.active_index = index;
                     }
@@ -237,9 +252,15 @@ impl Layout {
                     });
                 }
 
+                let resolved_target = match *target {
+                    Some(target) => target,
+                    None => self.resolve_open_target(key, metrics)?,
+                };
+                self.validate_drop_target(resolved_target, metrics)?;
                 let panel_id = self.panel_instances.insert(PanelInstance::new(key.clone(), *constraints));
                 let panel_node = self.nodes.insert(Node::Panel(crate::Panel::new(panel_id)));
-                self.insert_node_for_target(panel_node, *target, metrics, Some(0.5))?;
+                self.insert_node_for_target(panel_node, resolved_target, metrics, Some(0.5))?;
+                self.remember_panel_dock_location(panel_node);
                 Ok(CommandApplication {
                     actual_value: None,
                     inverse: Some(DockCommand::ClosePanel { panel: panel_id }),
@@ -251,6 +272,7 @@ impl Layout {
                     return Err(CommandError::MissingPanel { panel: *panel });
                 }
                 let node = self.find_panel_node(*panel).ok_or(CommandError::MissingPanel { panel: *panel })?;
+                self.remember_panel_dock_location(node);
                 self.detach_node(node)?;
                 self.remove_subtree(node);
                 Ok(CommandApplication::persistent())
@@ -263,6 +285,7 @@ impl Layout {
                     }),
                     None => return Err(CommandError::MissingNode { node: *group }),
                 }
+                self.remember_subtree_dock_locations(*group);
                 self.detach_node(*group)?;
                 self.remove_subtree(*group);
                 Ok(CommandApplication::persistent())
@@ -387,8 +410,10 @@ impl Layout {
                         target: DropTarget::Tabs { group, index },
                     })
                 });
+                self.remember_panel_dock_location(panel_node);
                 self.detach_node(panel_node)?;
                 self.insert_node_for_target(panel_node, *target, metrics, Some(0.5))?;
+                self.remember_panel_dock_location(panel_node);
                 Ok(CommandApplication { actual_value: None, inverse, persistent: true })
             }
             DockCommand::MoveGroup { group, column, index } => {
@@ -681,6 +706,7 @@ impl Layout {
                 }
                 let next_z = self.next_floating_z_order()?;
                 let panel_root = matches!(self.nodes.get(*node), Some(Node::Panel(_)));
+                self.remember_subtree_dock_locations(*node);
                 self.detach_node(*node)?;
                 let root = if panel_root && self.profile == Profile::Photoshop {
                     self.nodes.insert(Node::Tabs(crate::Tabs {
@@ -775,7 +801,14 @@ impl Layout {
                 Ok(CommandApplication::persistent())
             }
             DockCommand::DockFloating { group, target } => {
+                let root = self.floating_groups.get(*group).and_then(|floating| {
+                    self.dock_areas.get(floating.area).map(|area| area.root)
+                }).ok_or(CommandError::MissingFloatingGroup { group: *group })?;
+                let panel_nodes = self.panel_nodes_in_subtree(root);
                 self.dock_floating_group(*group, *target, metrics)?;
+                for panel_node in panel_nodes {
+                    self.remember_panel_dock_location(panel_node);
+                }
                 Ok(CommandApplication::persistent())
             }
             DockCommand::CollapseGroup { group, collapsed } => {
@@ -1385,6 +1418,161 @@ impl Layout {
         }
     }
 
+    fn resolve_open_target(
+        &self,
+        key: &PanelKey,
+        metrics: &DockMetrics,
+    ) -> Result<DropTarget, CommandError> {
+        if let Some(location) = self.last_dock_locations.get(key).copied() {
+            if let Some(target) = self.target_for_dock_location(location) {
+                if self.validate_drop_target(target, metrics).is_ok() {
+                    return Ok(target);
+                }
+            }
+        }
+        self.default_open_target()
+    }
+
+    fn target_for_dock_location(&self, location: LastDockLocation) -> Option<DropTarget> {
+        if let Ok(columns) = self.main_columns(location.side) {
+            if let Some(column_id) = columns.get(location.column_index).copied() {
+                if let Some(Node::Column(column)) = self.nodes.get(column_id) {
+                    if let Some(group) = column.groups.get(location.group_index).copied() {
+                        if let Some(group) = self.first_tabs_in_subtree(group) {
+                            let child_count = match self.nodes.get(group) {
+                                Some(Node::Tabs(tabs)) => tabs.children.len(),
+                                _ => return None,
+                            };
+                            return Some(DropTarget::Tabs { group, index: child_count });
+                        }
+                    }
+
+                    if !column.groups.is_empty() {
+                        if column.mode == ColumnMode::IconsOnly {
+                            return Some(DropTarget::RailSlot {
+                                column: column_id,
+                                index: location.group_index.min(column.groups.len()),
+                            });
+                        }
+                        if let Some(last_group) = column.groups.last().copied() {
+                            return Some(DropTarget::GroupEdge {
+                                group: last_group,
+                                zone: DropZone::Bottom,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Generic-profile trees need not have Column nodes. In that case the
+        // closest stable preference is the first tab group under the same side.
+        let area = self.main_area(location.side)?;
+        let group = self.first_tabs_in_subtree(area.root)?;
+        let index = match self.nodes.get(group) {
+            Some(Node::Tabs(tabs)) => tabs.children.len(),
+            _ => return None,
+        };
+        Some(DropTarget::Tabs { group, index })
+    }
+
+    fn default_open_target(&self) -> Result<DropTarget, CommandError> {
+        // Both built-in profiles default to the right dock. Panel-kind-specific
+        // placement remains app/descriptor policy and can be supplied explicitly.
+        let side = match self.profile {
+            Profile::Generic | Profile::Photoshop => DockSide::Right,
+        };
+        if let Some(area) = self.main_area(side) {
+            if let Some(group) = self.first_tabs_in_subtree(area.root) {
+                let index = match self.nodes.get(group) {
+                    Some(Node::Tabs(tabs)) => tabs.children.len(),
+                    _ => return Err(CommandError::InvalidTarget {
+                        reason: "profile default placement did not resolve to a Tabs node",
+                    }),
+                };
+                return Ok(DropTarget::Tabs { group, index });
+            }
+            return Err(CommandError::InvalidTarget {
+                reason: "profile default placement has no compatible tab group on the right dock",
+            });
+        }
+        Ok(DropTarget::MainColumn { side, index: 0 })
+    }
+
+    fn first_tabs_in_subtree(&self, root: NodeId) -> Option<NodeId> {
+        match self.nodes.get(root)? {
+            Node::Tabs(_) => Some(root),
+            node => node_children(node)
+                .into_iter()
+                .find_map(|child| self.first_tabs_in_subtree(child)),
+        }
+    }
+
+    fn panel_nodes_in_subtree(&self, root: NodeId) -> Vec<NodeId> {
+        let mut panels = Vec::new();
+        self.collect_panel_nodes(root, &mut panels);
+        panels
+    }
+
+    fn collect_panel_nodes(&self, root: NodeId, panels: &mut Vec<NodeId>) {
+        let Some(node) = self.nodes.get(root) else {
+            return;
+        };
+        if matches!(node, Node::Panel(_)) {
+            panels.push(root);
+            return;
+        }
+        for child in node_children(node) {
+            self.collect_panel_nodes(child, panels);
+        }
+    }
+
+    fn remember_subtree_dock_locations(&mut self, root: NodeId) {
+        for panel_node in self.panel_nodes_in_subtree(root) {
+            self.remember_panel_dock_location(panel_node);
+        }
+    }
+
+    fn remember_panel_dock_location(&mut self, panel_node: NodeId) {
+        let Some(Node::Panel(panel)) = self.nodes.get(panel_node) else {
+            return;
+        };
+        let Some(instance) = self.panel_instances.get(panel.panel_id) else {
+            return;
+        };
+        let key = instance.key.clone();
+        if let Some(location) = self.dock_location_for_node(panel_node) {
+            self.last_dock_locations.insert(key, location);
+        }
+    }
+
+    fn dock_location_for_node(&self, node_id: NodeId) -> Option<LastDockLocation> {
+        for side in [DockSide::Left, DockSide::Right] {
+            let Some(area) = self.main_area(side) else {
+                continue;
+            };
+            if !self.is_descendant_or_same(area.root, node_id) {
+                continue;
+            }
+            if let Ok(columns) = self.main_columns(side) {
+                for (column_index, column_id) in columns.iter().copied().enumerate() {
+                    let Some(Node::Column(column)) = self.nodes.get(column_id) else {
+                        continue;
+                    };
+                    if let Some(group_index) = column.groups.iter().position(|group| {
+                        self.is_descendant_or_same(*group, node_id)
+                    }) {
+                        return Some(LastDockLocation::new(side, column_index, group_index));
+                    }
+                }
+            }
+            // The Generic profile may use a tree without Column nodes. It still
+            // remembers the side; indices zero are the deterministic fallback.
+            return Some(LastDockLocation::new(side, 0, 0));
+        }
+        None
+    }
+
     fn find_panel_node(&self, panel_id: PanelId) -> Option<NodeId> {
         self.nodes.iter().find_map(|(id, node)| match node {
             Node::Panel(panel) if panel.panel_id == panel_id => Some(id),
@@ -1681,6 +1869,7 @@ impl Layout {
             && self.dock_areas.iter().eq(other.dock_areas.iter())
             && self.main_areas == other.main_areas
             && self.floating_groups.iter().eq(other.floating_groups.iter())
+            && self.last_dock_locations == other.last_dock_locations
             && self.canvas == other.canvas
             && self.profile == other.profile
             && self.version == other.version
@@ -2347,6 +2536,7 @@ impl Layout {
             dock_areas,
             main_areas,
             floating_groups,
+            last_dock_locations: HashMap::new(),
             canvas,
             profile,
             version,
@@ -3247,10 +3437,10 @@ mod tests {
                 DockCommand::OpenPanel {
                     key: PanelKey::new("extra-panel").unwrap(),
                     constraints: descriptors()[0].1,
-                    target: DropTarget::MainColumn {
+                    target: Some(DropTarget::MainColumn {
                         side: DockSide::Right,
                         index: metrics.max_columns,
-                    },
+                    }),
                 },
                 &metrics,
             )
@@ -3520,6 +3710,295 @@ mod tests {
         assert_eq!(outcome.new_version, 0);
         assert!(outcome.inverse.is_none());
         assert!(outcome.changed_nodes.is_empty());
+    }
+
+
+    #[test]
+    fn c43_activate_and_reorder_tabs_preserve_active_panel_identity() {
+        let metrics = DockMetrics::default();
+        let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Generic);
+        let (first_id, first_node) = builder.panel(PanelKey::new("c43-first").unwrap(), descriptors()[0].1);
+        let (second_id, second_node) = builder.panel(PanelKey::new("c43-second").unwrap(), descriptors()[0].1);
+        let (third_id, third_node) = builder.panel(PanelKey::new("c43-third").unwrap(), descriptors()[0].1);
+        let group = builder.tabs(vec![first_node, second_node, third_node], 0, false);
+        let column = builder.column(
+            metrics.default_column_width,
+            crate::ColumnMode::Expanded,
+            vec![group],
+            vec![1.0],
+        );
+        builder.main_area(DockSide::Right, column);
+        let mut layout = builder.build();
+
+        layout.apply(DockCommand::ActivateTab { group, panel: second_id }, &metrics).unwrap();
+        assert!(matches!(layout.node(group), Some(Node::Tabs(tabs)) if tabs.active_index == 1));
+        assert_eq!(layout.validate(&metrics), Ok(()));
+
+        layout.apply(
+            DockCommand::ReorderTab { group, panel: second_id, to_index: 2 },
+            &metrics,
+        ).unwrap();
+        assert!(matches!(
+            layout.node(group),
+            Some(Node::Tabs(tabs))
+                if tabs.children == vec![first_node, third_node, second_node] && tabs.active_index == 2
+        ));
+        assert_eq!(layout.validate(&metrics), Ok(()));
+
+        layout.apply(
+            DockCommand::ReorderTab { group, panel: first_id, to_index: 1 },
+            &metrics,
+        ).unwrap();
+        assert!(matches!(
+            layout.node(group),
+            Some(Node::Tabs(tabs))
+                if tabs.children == vec![third_node, first_node, second_node] && tabs.active_index == 2
+        ));
+        assert_eq!(layout.panel_instances().count(), 3);
+        assert!(layout.panel_instance(third_id).is_some());
+        assert_eq!(layout.validate(&metrics), Ok(()));
+    }
+
+    #[test]
+    fn c43_move_panel_between_dock_and_floating_keeps_instance_and_activates_destination() {
+        let metrics = DockMetrics::default();
+        let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Generic);
+        let (moving_id, moving_node) = builder.panel(PanelKey::new("c43-moving").unwrap(), descriptors()[0].1);
+        let (_, dock_sibling) = builder.panel(PanelKey::new("c43-dock-sibling").unwrap(), descriptors()[0].1);
+        let dock_group = builder.tabs(vec![moving_node, dock_sibling], 0, false);
+        let column = builder.column(
+            metrics.default_column_width,
+            crate::ColumnMode::Expanded,
+            vec![dock_group],
+            vec![1.0],
+        );
+        builder.main_area(DockSide::Right, column);
+
+        let (_, floating_sibling) = builder.panel(PanelKey::new("c43-floating-sibling").unwrap(), descriptors()[0].1);
+        let floating_root = builder.tabs(vec![floating_sibling], 0, false);
+        let floating_id = builder.floating_group(
+            floating_root,
+            Rect::new(Point::new(80.0, 70.0), Size::new(360.0, 260.0)),
+            1,
+        );
+        let mut layout = builder.build();
+        assert_eq!(layout.validate(&metrics), Ok(()));
+
+        layout.apply(
+            DockCommand::MovePanel {
+                panel: moving_id,
+                target: DropTarget::Tabs { group: floating_root, index: 1 },
+            },
+            &metrics,
+        ).unwrap();
+        assert!(matches!(
+            layout.node(floating_root),
+            Some(Node::Tabs(tabs))
+                if tabs.children.len() == 2 && tabs.active_index == 1
+                    && matches!(layout.node(tabs.children[1]), Some(Node::Panel(panel)) if panel.panel_id == moving_id)
+        ));
+        assert_eq!(layout.panel_instance(moving_id).is_some(), true);
+        assert_eq!(layout.panel_instances().count(), 3);
+        assert!(layout.floating_group(floating_id).is_some());
+        assert_eq!(layout.validate(&metrics), Ok(()));
+
+        layout.apply(
+            DockCommand::MovePanel {
+                panel: moving_id,
+                target: DropTarget::Tabs { group: dock_group, index: 1 },
+            },
+            &metrics,
+        ).unwrap();
+        assert!(matches!(
+            layout.node(dock_group),
+            Some(Node::Tabs(tabs))
+                if tabs.children.len() == 2 && tabs.active_index == 1
+                    && matches!(layout.node(tabs.children[1]), Some(Node::Panel(panel)) if panel.panel_id == moving_id)
+        ));
+        assert!(layout.floating_group(floating_id).is_some());
+        assert_eq!(layout.panel_instances().count(), 3);
+        assert_eq!(layout.validate(&metrics), Ok(()));
+    }
+
+    #[test]
+    fn c43_close_panel_removes_instance_and_empty_group_column_and_remembers_location() {
+        let metrics = DockMetrics::default();
+        let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+        let key = PanelKey::new("c43-last-panel").unwrap();
+        let (panel_id, panel_node) = builder.panel(key.clone(), descriptors()[0].1);
+        let group = builder.tabs(vec![panel_node], 0, false);
+        let column = builder.column(
+            metrics.default_column_width,
+            crate::ColumnMode::Expanded,
+            vec![group],
+            vec![1.0],
+        );
+        builder.main_area(DockSide::Right, column);
+        let mut layout = builder.build();
+        assert_eq!(layout.validate(&metrics), Ok(()));
+
+        layout.apply(DockCommand::ClosePanel { panel: panel_id }, &metrics).unwrap();
+
+        assert!(layout.panel_instance(panel_id).is_none());
+        assert!(layout.main_area(DockSide::Right).is_none());
+        assert_eq!(layout.nodes().count(), 0);
+        assert_eq!(layout.panel_instances().count(), 0);
+        assert_eq!(
+            layout.last_dock_location(&key),
+            Some(crate::LastDockLocation::new(DockSide::Right, 0, 0))
+        );
+        assert_eq!(layout.validate(&metrics), Ok(()));
+    }
+
+    #[test]
+    fn c43_close_group_removes_all_owned_panel_instances_without_losing_other_groups() {
+        let metrics = DockMetrics::default();
+        let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+        let key_a = PanelKey::new("c43-group-a").unwrap();
+        let key_b = PanelKey::new("c43-group-b").unwrap();
+        let key_c = PanelKey::new("c43-group-c").unwrap();
+        let (panel_a, node_a) = builder.panel(key_a.clone(), descriptors()[0].1);
+        let (panel_b, node_b) = builder.panel(key_b.clone(), descriptors()[0].1);
+        let (panel_c, node_c) = builder.panel(key_c, descriptors()[0].1);
+        let closing_group = builder.tabs(vec![node_a, node_b], 0, false);
+        let kept_group = builder.tabs(vec![node_c], 0, false);
+        let column = builder.column(
+            metrics.default_column_width,
+            crate::ColumnMode::Expanded,
+            vec![closing_group, kept_group],
+            vec![0.5, 0.5],
+        );
+        builder.main_area(DockSide::Right, column);
+        let mut layout = builder.build();
+
+        layout.apply(DockCommand::CloseGroup { group: closing_group }, &metrics).unwrap();
+
+        assert!(layout.panel_instance(panel_a).is_none());
+        assert!(layout.panel_instance(panel_b).is_none());
+        assert_eq!(layout.panel_instances().count(), 1);
+        assert_eq!(layout.panel_instance(panel_c).is_some(), true);
+        assert_eq!(
+            layout.last_dock_location(&key_a),
+            Some(crate::LastDockLocation::new(DockSide::Right, 0, 0))
+        );
+        assert_eq!(
+            layout.last_dock_location(&key_b),
+            Some(crate::LastDockLocation::new(DockSide::Right, 0, 0))
+        );
+        assert!(matches!(
+            layout.node(column),
+            Some(Node::Column(value)) if value.groups == vec![kept_group]
+        ));
+        assert_eq!(layout.validate(&metrics), Ok(()));
+    }
+
+    #[test]
+    fn c43_open_panel_restores_runtime_location_then_falls_back_to_profile_default() {
+        let metrics = DockMetrics::default();
+        let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+        let key = PanelKey::new("c43-restore-location").unwrap();
+        let (closed_id, closed_node) = builder.panel(key.clone(), descriptors()[0].1);
+        let (_, sibling) = builder.panel(PanelKey::new("c43-restore-sibling").unwrap(), descriptors()[0].1);
+        let group = builder.tabs(vec![closed_node, sibling], 0, false);
+        let column = builder.column(
+            metrics.default_column_width,
+            crate::ColumnMode::Expanded,
+            vec![group],
+            vec![1.0],
+        );
+        builder.main_area(DockSide::Right, column);
+        let mut layout = builder.build();
+
+        layout.apply(DockCommand::ClosePanel { panel: closed_id }, &metrics).unwrap();
+        assert!(layout.panel_instance(closed_id).is_none());
+        assert_eq!(
+            layout.last_dock_location(&key),
+            Some(crate::LastDockLocation::new(DockSide::Right, 0, 0))
+        );
+
+        layout.apply(
+            DockCommand::OpenPanel {
+                key: key.clone(),
+                constraints: descriptors()[0].1,
+                target: None,
+            },
+            &metrics,
+        ).unwrap();
+        let active_panel = match layout.node(group).unwrap() {
+            Node::Tabs(tabs) => match layout.node(tabs.children[tabs.active_index]).unwrap() {
+                Node::Panel(panel) => panel.panel_id,
+                other => panic!("restored tab should point to a Panel node: {other:?}"),
+            },
+            other => panic!("remembered group should remain a Tabs node: {other:?}"),
+        };
+        assert_ne!(active_panel, closed_id);
+        assert_eq!(layout.panel_instances().count(), 3);
+        assert_eq!(layout.validate(&metrics), Ok(()));
+
+        let mut empty = Layout::new(Profile::Photoshop);
+        empty.apply(
+            DockCommand::OpenPanel {
+                key: PanelKey::new("c43-default-placement").unwrap(),
+                constraints: descriptors()[0].1,
+                target: None,
+            },
+            &metrics,
+        ).unwrap();
+        assert!(empty.main_area(DockSide::Right).is_some());
+        assert_eq!(empty.validate(&metrics), Ok(()));
+    }
+
+    #[test]
+    fn c43_opening_existing_singleton_activates_it_without_toggling_or_validating_new_target() {
+        let metrics = DockMetrics::default();
+        let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+        let singleton_key = PanelKey::new("c43-singleton").unwrap();
+        let singleton_constraints = PanelConstraints::new(
+            Size::new(80.0, 60.0),
+            Size::new(180.0, 120.0),
+            None,
+            true,
+        );
+        let (singleton_id, singleton_node) = builder.panel(singleton_key.clone(), singleton_constraints);
+        let (_, other_node) = builder.panel(PanelKey::new("c43-other").unwrap(), descriptors()[0].1);
+        let group = builder.tabs(vec![singleton_node, other_node], 1, false);
+        let column = builder.column(
+            metrics.default_column_width,
+            crate::ColumnMode::Expanded,
+            vec![group],
+            vec![1.0],
+        );
+        builder.main_area(DockSide::Right, column);
+        let mut layout = builder.build();
+
+        let first = layout.apply(
+            DockCommand::OpenPanel {
+                key: singleton_key.clone(),
+                constraints: singleton_constraints,
+                target: Some(DropTarget::Tabs { group: NodeId::null(), index: 0 }),
+            },
+            &metrics,
+        ).unwrap();
+        assert_eq!(layout.panel_instances().count(), 2);
+        assert!(matches!(layout.node(group), Some(Node::Tabs(tabs)) if tabs.active_index == 0));
+        assert_eq!(layout.version(), 1);
+        assert!(first.inverse.is_some());
+        assert_eq!(layout.validate(&metrics), Ok(()));
+
+        let second = layout.apply(
+            DockCommand::OpenPanel {
+                key: singleton_key,
+                constraints: singleton_constraints,
+                target: None,
+            },
+            &metrics,
+        ).unwrap();
+        assert_eq!(layout.panel_instances().count(), 2);
+        assert_eq!(layout.version(), 1);
+        assert_eq!(second.new_version, 1);
+        assert!(second.changed_nodes.is_empty());
+        assert!(second.inverse.is_none());
+        assert_eq!(layout.validate(&metrics), Ok(()));
     }
 
 }
