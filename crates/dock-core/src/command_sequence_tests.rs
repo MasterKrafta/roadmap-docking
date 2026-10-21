@@ -121,6 +121,15 @@ fn main_columns(layout: &Layout, side: DockSide) -> Vec<ColumnInfo> {
     columns
 }
 
+fn is_group_in_icon_rail(layout: &Layout, group: NodeId) -> bool {
+    [DockSide::Left, DockSide::Right]
+        .into_iter()
+        .flat_map(|side| main_columns(layout, side))
+        .any(|(_, groups, _, mode, _)| {
+            mode == ColumnMode::IconsOnly && groups.contains(&group)
+        })
+}
+
 fn nodes_in_subtree(layout: &Layout, root: NodeId) -> HashSet<NodeId> {
     let mut found = HashSet::new();
     let mut pending = vec![root];
@@ -148,7 +157,9 @@ fn main_tab_groups(layout: &Layout) -> Vec<(NodeId, Vec<NodeId>, usize, bool)> {
 
     tab_groups(layout)
         .into_iter()
-        .filter(|(group, _, _, _)| main_nodes.contains(group))
+        .filter(|(group, _, _, _)| {
+            main_nodes.contains(group) && !is_group_in_icon_rail(layout, *group)
+        })
         .collect()
 }
 
@@ -564,7 +575,9 @@ fn valid_commands(
             .find(|(_, children, _, _)| children.contains(panel_node))
             .map(|(group, _, _, _)| *group);
         for (target_group, children, _, _) in &groups {
-            if Some(*target_group) != source_group {
+            if Some(*target_group) != source_group
+                && !is_group_in_icon_rail(layout, *target_group)
+            {
                 commands.push(DockCommand::MovePanel {
                     panel: *panel_id,
                     target: DropTarget::Tabs {
