@@ -6,9 +6,10 @@ pub const DEFAULT_UNDO_LIMIT: usize = 100;
 /// Session-only undo/redo history for persistent layout commands.
 ///
 /// History stores validated in-memory Layout checkpoints rather than serializing
-/// command payloads that contain runtime IDs. This restores exact tree/arena
-/// state (including widths, ratios, tabs, column modes, panel placements and
-/// floating composition) within the current session. Workspace files never
+/// command payloads that contain runtime IDs. This restores exact logical layout
+/// state (widths, ratios, tabs, column modes, panel placements and floating
+/// composition). Surviving entities keep their keys; restored removed entities
+/// get fresh keys so stale handles cannot become valid again. Workspace files never
 /// include this history.
 ///
 /// Records are added only when Layout::apply commits a new persistent revision.
