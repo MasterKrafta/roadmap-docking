@@ -1,6 +1,6 @@
 use crate::layout_builder::LayoutBuilder;
 use crate::{
-    Axis, ColumnMode, DockCommand, DockMetrics, DockSide, DragDropRequest, DragPayload,
+    Axis, ColumnMode, DockCommand, DockMetrics, DockSide, DragDropRequest, DragHandle, DragPayload,
     DragSession, DropTarget, DropZone, FloatingGroupId, Layout, Node, NodeId, PanelConstraints,
     PanelKey, Point, Profile, Rect, Size, Tabs,
 };
@@ -571,9 +571,10 @@ fn drop_request_keeps_group_grip_semantics_distinct_from_panel_tab_drag() {
         request,
         DragDropRequest {
             payload: DragPayload::Group { group },
+            handle: DragHandle::GroupGrip,
             origin: Point::ZERO,
             point: Point::new(12.0, 8.0),
-            target,
+            target: Some(target),
         }
     );
     assert!(matches!(request.payload, DragPayload::Group { group: id } if id == group));
