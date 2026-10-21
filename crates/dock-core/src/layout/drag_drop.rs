@@ -320,28 +320,25 @@ impl Layout {
         if source_group == target_group {
             return true;
         }
-        if matches!(zone, DropZone::Top | DropZone::Bottom) {
-            let source_parent = self.find_parent(source_group);
-            let target_parent = self.find_parent(target_group);
-            if source_parent.is_some() && source_parent == target_parent {
-                let siblings = match source_parent.and_then(|parent| self.node(parent)) {
-                    Some(Node::Column(column)) => Some(&column.groups),
-                    Some(Node::Split(split)) if split.axis == Axis::Y => Some(&split.children),
-                    _ => None,
-                };
-                if let Some(siblings) = siblings {
-                    if let (Some(source_index), Some(target_index)) = (
-                        siblings.iter().position(|id| *id == source_group),
-                        siblings.iter().position(|id| *id == target_group),
-                    ) {
-                        if (zone == DropZone::Top && source_index + 1 == target_index)
-                            || (zone == DropZone::Bottom && target_index + 1 == source_index)
-                        {
-                            return true;
-                        }
-                    }
-                }
+        if matches!(zone, DropZone::Top | DropZone::Bottom)
+            && let (Some(source_parent), Some(target_parent)) = (
+                self.find_parent(source_group),
+                self.find_parent(target_group),
+            )
+            && source_parent == target_parent
+            && let Some(siblings) = match self.node(source_parent) {
+                Some(Node::Column(column)) => Some(&column.groups),
+                Some(Node::Split(split)) if split.axis == Axis::Y => Some(&split.children),
+                _ => None,
             }
+            && let (Some(source_index), Some(target_index)) = (
+                siblings.iter().position(|id| *id == source_group),
+                siblings.iter().position(|id| *id == target_group),
+            )
+            && ((zone == DropZone::Top && source_index + 1 == target_index)
+                || (zone == DropZone::Bottom && target_index + 1 == source_index))
+        {
+            return true;
         }
         if matches!(zone, DropZone::Left | DropZone::Right) {
             let Some(source_column) = self.find_owner_column(source_group) else {
