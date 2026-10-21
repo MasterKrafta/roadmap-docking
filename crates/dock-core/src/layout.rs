@@ -3233,6 +3233,66 @@ mod tests {
     }
 
 
+
+    #[test]
+    fn apply_vertical_group_split_uses_the_requested_target_groups_ratio() {
+        let metrics = DockMetrics::default();
+        let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+        let mut target_groups = Vec::new();
+
+        for index in 0..3 {
+            let (_, panel) = builder.panel(
+                PanelKey::new(format!("target-panel-{index}")).unwrap(),
+                descriptors()[0].1,
+            );
+            target_groups.push(builder.tabs(vec![panel], 0, false));
+        }
+        let target_column = builder.column(
+            metrics.default_column_width,
+            crate::ColumnMode::Expanded,
+            target_groups.clone(),
+            vec![0.2, 0.5, 0.3],
+        );
+        builder.main_area(DockSide::Right, target_column);
+
+        let (_, source_panel) = builder.panel(
+            PanelKey::new("source-panel").unwrap(),
+            descriptors()[0].1,
+        );
+        let source_group = builder.tabs(vec![source_panel], 0, false);
+        let source_column = builder.column(
+            metrics.default_column_width,
+            crate::ColumnMode::Expanded,
+            vec![source_group],
+            vec![1.0],
+        );
+        builder.main_area(DockSide::Left, source_column);
+
+        let mut layout = builder.build();
+        assert_eq!(layout.validate(&metrics), Ok(()));
+
+        layout
+            .apply(
+                DockCommand::SplitGroup {
+                    group: source_group,
+                    target_group: target_groups[1],
+                    zone: DropZone::Bottom,
+                    ratio: 0.4,
+                },
+                &metrics,
+            )
+            .unwrap();
+
+        let Node::Column(column) = layout.node(target_column).unwrap() else {
+            panic!("target column must remain a Column");
+        };
+        assert_eq!(column.groups, vec![target_groups[0], target_groups[1], source_group, target_groups[2]]);
+        assert_eq!(column.group_ratios, vec![0.2, 0.3, 0.2, 0.3]);
+        assert!(layout.main_area(DockSide::Left).is_none());
+        assert_eq!(layout.version(), 1);
+        assert_eq!(layout.validate(&metrics), Ok(()));
+    }
+
     #[test]
     fn apply_version_overflow_rejects_commit_atomically() {
         let metrics = DockMetrics::default();
