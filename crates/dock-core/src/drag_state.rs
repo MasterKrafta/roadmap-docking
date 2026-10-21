@@ -27,7 +27,7 @@ pub enum DragState {
         payload: DragPayload,
         origin: Point,
         position: Point,
-        target: DropTarget,
+        target: Option<DropTarget>,
     },
     /// Gesture ended without a drop request.
     Cancelled {
