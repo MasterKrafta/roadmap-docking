@@ -305,7 +305,7 @@ fn layout_column(
         if !required.is_finite() {
             return Err(ComputeRectsError::Geometry(GeometryError::ArithmeticOverflow));
         }
-        if rect.size.height + 1.0e-3 < required {
+        if rect.size.height < required {
             push_vertical_overflow(id, rect, required, output)?;
         }
         let mut y = rect.origin.y;
@@ -669,7 +669,7 @@ fn push_vertical_overflow(
     if !content_height.is_finite() {
         return Err(ComputeRectsError::Geometry(GeometryError::ArithmeticOverflow));
     }
-    if content_height <= viewport.size.height + 1.0e-3 {
+    if content_height <= viewport.size.height {
         return Ok(());
     }
     let content_extent = Rect::new(
@@ -1232,6 +1232,47 @@ mod tests {
         assert_eq!(layout.floating_group(ids[0]).unwrap().bounds.origin, Point::new(-100.0, 650.0));
         assert_eq!(rects.floating_resize_edges.len(), 24);
         assert!(rects.vertical_overflow.is_empty());
+    }
+
+    #[test]
+    fn non_finite_viewport_is_rejected_without_emitting_non_finite_rectangles() {
+        let layout = LayoutBuilder::new(Profile::Photoshop).build();
+        let metrics = DockMetrics::default();
+        for viewport in [
+            Rect::new(Point::new(f32::NAN, 0.0), Size::new(1000.0, 700.0)),
+            Rect::new(Point::ZERO, Size::new(f32::INFINITY, 700.0)),
+            Rect::new(Point::ZERO, Size::new(1000.0, f32::INFINITY)),
+        ] {
+            assert!(matches!(
+                layout.compute_rects(viewport, &metrics),
+                Err(ComputeRectsError::Geometry(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn floating_minimum_must_fit_client_height() {
+        let metrics = DockMetrics::default();
+        let mut builder = LayoutBuilder::new(Profile::Photoshop);
+        let tight = PanelConstraints::new(
+            Size::new(160.0, 100.0),
+            Size::new(180.0, 140.0),
+            Some(Size::new(800.0, 600.0)),
+            false,
+        );
+        let (_, panel_node) = builder.panel(key("float-too-tall"), tight);
+        let group = builder.tabs(vec![panel_node], 0, false);
+        builder.floating_group(
+            group,
+            Rect::new(Point::new(30.0, 20.0), Size::new(200.0, 90.0)),
+            1,
+        );
+        let layout = builder.build();
+
+        assert!(matches!(
+            layout.compute_rects(viewport(1000.0, 100.0), &metrics),
+            Err(ComputeRectsError::InsufficientSpace { axis: Axis::Y, .. })
+        ));
     }
 
     #[test]
