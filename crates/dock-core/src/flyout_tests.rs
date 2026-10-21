@@ -383,7 +383,7 @@ fn right_side_flyout_resizes_toward_canvas_from_its_left_edge() {
 
 struct FlyoutDragFixture {
     layout: Layout,
-    source_group: NodeId,
+    source_column: NodeId,
     dragged_panel: PanelId,
     target_group: NodeId,
 }
@@ -427,7 +427,7 @@ fn flyout_drag_fixture() -> FlyoutDragFixture {
 
     FlyoutDragFixture {
         layout,
-        source_group,
+        source_column,
         dragged_panel,
         target_group,
     }
@@ -505,8 +505,8 @@ fn successful_same_position_flyout_drop_closes_flyout_without_creating_undo_or_v
     let tree_before = tree_snapshot(&fixture.layout);
     let flyout_before = fixture.layout.flyout();
     let version = fixture.layout.version();
-    let target = DropTarget::Tabs {
-        group: fixture.source_group,
+    let target = DropTarget::RailSlot {
+        column: fixture.source_column,
         index: 0,
     };
     let mut session = DragSession::new(&metrics).unwrap();
