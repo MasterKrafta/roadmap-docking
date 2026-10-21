@@ -20,14 +20,13 @@ impl Layout {
                 reason: geometry_error_reason(reason),
             });
         }
-        if metrics_are_valid {
-            if let Some(bounds) = self.canvas.last_known_bounds()
-                && bounds.size.width + PIXEL_TOLERANCE < metrics.min_canvas_width
-            {
-                errors.push(ValidationError::InvalidCanvas {
-                    reason: "canvas width is below min_canvas_width",
-                });
-            }
+        if metrics_are_valid
+            && let Some(bounds) = self.canvas.last_known_bounds()
+            && bounds.size.width + PIXEL_TOLERANCE < metrics.min_canvas_width
+        {
+            errors.push(ValidationError::InvalidCanvas {
+                reason: "canvas width is below min_canvas_width",
+            });
         }
 
         let mut panel_placements: HashMap<PanelId, NodeId> = HashMap::new();
@@ -136,13 +135,13 @@ impl Layout {
                         }
                     }
 
-                    if let Some(width) = column.last_expanded_width {
-                        if !width.is_finite() || width <= 0.0 {
-                            errors.push(ValidationError::InvalidColumn {
-                                node: node_id,
-                                reason: "last_expanded_width must be finite and positive",
-                            });
-                        }
+                    if let Some(width) = column.last_expanded_width
+                        && (!width.is_finite() || width <= 0.0)
+                    {
+                        errors.push(ValidationError::InvalidColumn {
+                            node: node_id,
+                            reason: "last_expanded_width must be finite and positive",
+                        });
                     }
 
                     if column.groups.is_empty() {
