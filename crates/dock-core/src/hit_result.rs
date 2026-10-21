@@ -50,7 +50,9 @@ mod tests {
     use slotmap::Key;
 
     use super::HitResult;
-    use crate::{Axis, DropTarget, DropZone, NodeId, PanelId, ResizeEdge};
+    use crate::{Axis, DropTarget, DropZone, NodeId, ResizeEdge};
+    #[cfg(feature = "serde")]
+    use crate::PanelId;
 
     #[test]
     fn hit_results_are_pure_semantic_values() {
@@ -82,7 +84,6 @@ mod tests {
             hit,
             HitResult::FloatingResizeEdge { edge: ResizeEdge::BottomRight, .. }
         ));
-        let _ = PanelId::null();
     }
 
     #[cfg(feature = "serde")]
