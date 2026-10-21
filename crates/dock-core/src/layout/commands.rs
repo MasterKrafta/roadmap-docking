@@ -457,13 +457,18 @@ impl Layout {
                             if let Some(Node::Split(current)) = self.nodes.get_mut(area_root) {
                                 *current = split;
                             }
+                            let inverse_index = if source_index > adjusted_index {
+                                source_index + 1
+                            } else {
+                                source_index
+                            };
 
                             return Ok(CommandApplication {
                                 actual_value: None,
                                 inverse: Some(DockCommand::MoveGroupToMainColumn {
                                     group: *group,
                                     side: *side,
-                                    index: source_index,
+                                    index: inverse_index,
                                 }),
                                 persistent: true,
                             });
