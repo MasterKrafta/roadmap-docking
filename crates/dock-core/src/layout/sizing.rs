@@ -230,8 +230,8 @@ impl Layout {
             None => return Err(CommandError::MissingNode { node: column_id }),
         };
         match column.mode {
-            ColumnMode::IconsOnly => return Ok(metrics.rail_width),
-            ColumnMode::IconsAndLabels => return Ok(metrics.min_column_width),
+            ColumnMode::IconsOnly => Ok(metrics.rail_width),
+            ColumnMode::IconsAndLabels => Ok(metrics.min_column_width),
             ColumnMode::Expanded => self.minimum_expanded_column_width(column_id, metrics),
         }
     }
