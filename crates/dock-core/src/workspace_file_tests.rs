@@ -19,9 +19,9 @@ fn constraints() -> PanelConstraints {
 
 fn sample_layout() -> (Layout, Vec<(PanelKey, PanelConstraints)>) {
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
-    let (layers_id, layers_node) = builder.panel(key("layers"), constraints());
-    let (color_id, color_node) = builder.panel(key("color"), constraints());
-    let (history_id, history_node) = builder.panel(key("history"), constraints());
+    let (_, layers_node) = builder.panel(key("layers"), constraints());
+    let (_, color_node) = builder.panel(key("color"), constraints());
+    let (_, history_node) = builder.panel(key("history"), constraints());
 
     let group = builder.tabs(vec![layers_node, color_node], 1, true);
     let column = builder.column(
@@ -39,7 +39,6 @@ fn sample_layout() -> (Layout, Vec<(PanelKey, PanelConstraints)>) {
         7,
     );
 
-    let _ = (layers_id, color_id, history_id);
     let descriptors = ["layers", "color", "history"]
         .into_iter()
         .map(|panel_key| (key(panel_key), constraints()))
