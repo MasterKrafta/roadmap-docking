@@ -9,7 +9,7 @@ pub enum WorkspaceFileError {
     #[error("unsupported workspace format '{found}'")]
     UnsupportedFormat { found: String },
 
-    #[error("workspace version {found} is unsupported; this build supports version {supported}")]
+    #[error("workspace version {found} is unsupported; the current schema version is {supported}")]
     UnsupportedVersion { found: u32, supported: u32 },
 
     #[error("invalid dock metrics: {0}")]
