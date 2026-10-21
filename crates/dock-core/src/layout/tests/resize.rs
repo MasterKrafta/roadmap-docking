@@ -204,8 +204,10 @@ fn c45_reset_column_ratios_shares_free_height_only_between_expanded_groups() {
 
 #[test]
 fn c45_reset_group_ratios_respects_minimums_when_equal_share_would_be_too_small() {
-    let mut metrics = DockMetrics::default();
-    metrics.min_group_height = 80.0;
+    let metrics = DockMetrics {
+        min_group_height: 80.0,
+        ..DockMetrics::default()
+    };
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
     let (_, tall_panel) = builder.panel(
         PanelKey::new("c45-tall-group").unwrap(),
