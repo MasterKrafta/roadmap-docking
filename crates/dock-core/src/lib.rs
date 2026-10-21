@@ -133,4 +133,6 @@ pub use vertical_overflow::VerticalOverflow;
 #[cfg(test)]
 mod layout_builder;
 #[cfg(test)]
+mod drag_drop_semantics;
+#[cfg(test)]
 mod command_sequence_tests;
