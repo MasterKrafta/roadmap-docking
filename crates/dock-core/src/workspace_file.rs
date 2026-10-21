@@ -314,6 +314,9 @@ impl WorkspaceFile {
                             "cannot clamp floating group {index}: its layout references are invalid"
                         ))
                     }
+                    other => WorkspaceFileError::InvalidRuntimeLayout(format!(
+                        "cannot clamp floating group {index}: {other}"
+                    )),
                 })?;
             diagnostics.extend(changes.into_iter().map(
                 |(index, original, clamped)| WorkspaceDiagnostic::FloatingBoundsClamped {
