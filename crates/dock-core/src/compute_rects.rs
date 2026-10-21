@@ -102,7 +102,9 @@ fn preferred_width(
     let node = layout.node(id).ok_or(ComputeRectsError::InvalidLayout)?;
     let width = match node {
         Node::Column(column) => effective_column_width(column, metrics),
-        Node::Tabs(_) | Node::Panel(_) => metrics.default_column_width,
+        Node::Tabs(_) | Node::Panel(_) => {
+            metrics.default_column_width.max(minimum_node_size(layout, id, metrics)?.width)
+        }
         Node::Split(split) if split.axis == Axis::X => {
             let mut width = 0.0;
             for child in &split.children {
@@ -133,6 +135,87 @@ fn effective_column_width(column: &Column, metrics: &DockMetrics) -> f32 {
     }
 }
 
+/// Computes the minimum geometry of a node, including panel-content constraints
+/// and the chrome consumed by expanded Tabs groups.
+fn minimum_node_size(
+    layout: &Layout,
+    id: NodeId,
+    metrics: &DockMetrics,
+) -> Result<Size, ComputeRectsError> {
+    let node = layout.node(id).ok_or(ComputeRectsError::InvalidLayout)?;
+    let size = match node {
+        Node::Panel(panel) => layout
+            .panel_instance(panel.panel_id)
+            .ok_or(ComputeRectsError::InvalidLayout)?
+            .constraints
+            .min_size,
+        Node::Tabs(tabs) if tabs.collapsed => Size::new(
+            0.0,
+            metrics.collapsed_group_height.max(metrics.tab_strip_height),
+        ),
+        Node::Tabs(tabs) => {
+            let mut width = 0.0_f32;
+            let mut content_height = 0.0_f32;
+            for child in &tabs.children {
+                let child_size = minimum_node_size(layout, *child, metrics)?;
+                width = width.max(child_size.width);
+                content_height = content_height.max(child_size.height);
+            }
+            let height = metrics
+                .min_group_height
+                .max(metrics.header_height + metrics.tab_strip_height + content_height);
+            Size::new(width, height)
+        }
+        Node::Split(split) => {
+            let mut width = 0.0_f32;
+            let mut height = 0.0_f32;
+            for child in &split.children {
+                let child_size = minimum_node_size(layout, *child, metrics)?;
+                match split.axis {
+                    Axis::X => {
+                        width += child_size.width;
+                        height = height.max(child_size.height);
+                    }
+                    Axis::Y => {
+                        width = width.max(child_size.width);
+                        height += child_size.height;
+                    }
+                }
+            }
+            let gaps = metrics.splitter_thickness
+                * split.children.len().saturating_sub(1) as f32;
+            match split.axis {
+                Axis::X => width += gaps,
+                Axis::Y => height += gaps,
+            }
+            Size::new(width, height)
+        }
+        Node::Column(column) => {
+            let width = effective_column_width(column, metrics);
+            if column.mode == ColumnMode::IconsOnly {
+                Size::new(
+                    width,
+                    metrics.collapsed_group_height.max(metrics.tab_strip_height)
+                        * column.groups.len() as f32,
+                )
+            } else {
+                let mut height = 0.0_f32;
+                for group in &column.groups {
+                    height += minimum_node_size(layout, *group, metrics)?.height;
+                }
+                height += metrics.splitter_thickness
+                    * column.groups.len().saturating_sub(1) as f32;
+                Size::new(width, height)
+            }
+        }
+    };
+
+    if !size.width.is_finite() || !size.height.is_finite() || size.width < 0.0 || size.height <= 0.0 {
+        return Err(ComputeRectsError::Geometry(GeometryError::ArithmeticOverflow));
+    }
+    Ok(size)
+}
+
 fn layout_node(
     layout: &Layout,
     id: NodeId,
@@ -145,6 +228,25 @@ fn layout_node(
         Node::Column(column) => layout_column(layout, id, column, rect, metrics, output),
         Node::Tabs(tabs) => layout_tabs(layout, id, tabs, rect, metrics, output),
         Node::Panel(panel) => {
+            let minimum = layout
+                .panel_instance(panel.panel_id)
+                .ok_or(ComputeRectsError::InvalidLayout)?
+                .constraints
+                .min_size;
+            if rect.size.width < minimum.width {
+                return Err(ComputeRectsError::InsufficientSpace {
+                    axis: Axis::X,
+                    available: rect.size.width,
+                    required: minimum.width,
+                });
+            }
+            if rect.size.height < minimum.height {
+                return Err(ComputeRectsError::InsufficientSpace {
+                    axis: Axis::Y,
+                    available: rect.size.height,
+                    required: minimum.height,
+                });
+            }
             output.panels.push(PanelRect::new(panel.panel_id, rect));
             Ok(())
         }
@@ -194,12 +296,10 @@ fn layout_column(
         return Ok(());
     }
 
-    let collapsed: Vec<bool> = column.groups.iter().map(|group_id| {
-        matches!(layout.node(*group_id), Some(Node::Tabs(tabs)) if tabs.collapsed)
-    }).collect();
     let heights = allocate_stack_heights(
+        layout,
+        &column.groups,
         &column.group_ratios,
-        &collapsed,
         rect.size.height,
         Axis::Y,
         metrics,
@@ -242,12 +342,18 @@ fn layout_tabs(
 ) -> Result<(), ComputeRectsError> {
     let collapsed = tabs.collapsed;
     let collapsed_height = metrics.collapsed_group_height.max(metrics.tab_strip_height);
-    let expanded_minimum = metrics
-        .min_group_height
-        .max(metrics.header_height + metrics.tab_strip_height);
-    let minimum_height = if collapsed { collapsed_height } else { expanded_minimum };
-    if !minimum_height.is_finite() {
-        return Err(ComputeRectsError::Geometry(GeometryError::ArithmeticOverflow));
+    let minimum_size = minimum_node_size(layout, id, metrics)?;
+    let minimum_height = if collapsed {
+        collapsed_height
+    } else {
+        minimum_size.height.max(metrics.min_group_height)
+    };
+    if rect.size.width < minimum_size.width && !collapsed {
+        return Err(ComputeRectsError::InsufficientSpace {
+            axis: Axis::X,
+            available: rect.size.width,
+            required: minimum_size.width,
+        });
     }
     if rect.size.height < minimum_height {
         return Err(ComputeRectsError::InsufficientSpace {
@@ -356,10 +462,14 @@ fn layout_split(
                     preferred_width(layout, *child, metrics)
                 }).collect::<Result<Vec<_>, _>>()?
             } else {
+                let minimum_widths = split.children.iter().map(|child| {
+                    let minimum = minimum_node_size(layout, *child, metrics)?.width;
+                    Ok(minimum.max(metrics.min_column_width))
+                }).collect::<Result<Vec<f32>, ComputeRectsError>>()?;
                 weighted_sizes(
                     &split.ratios,
                     content_width,
-                    metrics.min_column_width,
+                    &minimum_widths,
                     Axis::X,
                 )?
             };
@@ -400,12 +510,10 @@ fn layout_split(
             Ok(())
         }
         Axis::Y => {
-            let collapsed: Vec<bool> = split.children.iter().map(|child_id| {
-                matches!(layout.node(*child_id), Some(Node::Tabs(tabs)) if tabs.collapsed)
-            }).collect();
             let heights = allocate_stack_heights(
+                layout,
+                &split.children,
                 &split.ratios,
-                &collapsed,
                 rect.size.height,
                 Axis::Y,
                 metrics,
@@ -438,13 +546,14 @@ fn layout_split(
 }
 
 fn allocate_stack_heights(
+    layout: &Layout,
+    children: &[NodeId],
     ratios: &[f32],
-    collapsed: &[bool],
     available: f32,
     axis: Axis,
     metrics: &DockMetrics,
 ) -> Result<Vec<f32>, ComputeRectsError> {
-    if ratios.len() != collapsed.len() {
+    if ratios.len() != children.len() {
         return Err(ComputeRectsError::InvalidLayout);
     }
     if ratios.is_empty() {
@@ -452,18 +561,25 @@ fn allocate_stack_heights(
     }
 
     let collapsed_height = metrics.collapsed_group_height.max(metrics.tab_strip_height);
-    let normal_min = metrics
-        .min_group_height
-        .max(metrics.header_height + metrics.tab_strip_height);
-    if !collapsed_height.is_finite() || !normal_min.is_finite() {
-        return Err(ComputeRectsError::Geometry(GeometryError::ArithmeticOverflow));
+    let mut collapsed = Vec::with_capacity(children.len());
+    let mut minimum_heights = Vec::with_capacity(children.len());
+    for child in children {
+        let is_collapsed = matches!(layout.node(*child), Some(Node::Tabs(tabs)) if tabs.collapsed);
+        collapsed.push(is_collapsed);
+        if is_collapsed {
+            minimum_heights.push(collapsed_height);
+        } else {
+            minimum_heights.push(minimum_node_size(layout, *child, metrics)?.height);
+        }
     }
 
-    let gap_total = metrics.splitter_thickness * ratios.len().saturating_sub(1) as f32;
-    let fixed_collapsed = collapsed.iter().filter(|value| **value).count() as f32
-        * collapsed_height;
+    let gap_total = metrics.splitter_thickness * children.len().saturating_sub(1) as f32;
+    let fixed_collapsed = collapsed.iter().enumerate()
+        .filter(|(_, value)| **value)
+        .map(|(index, _)| minimum_heights[index])
+        .sum::<f32>();
     let normal_count = collapsed.iter().filter(|value| !**value).count();
-    let required = gap_total + fixed_collapsed + normal_count as f32 * normal_min;
+    let required = gap_total + minimum_heights.iter().sum::<f32>();
     if !required.is_finite() {
         return Err(ComputeRectsError::Geometry(GeometryError::ArithmeticOverflow));
     }
@@ -477,12 +593,19 @@ fn allocate_stack_heights(
 
     let normal_available = available - gap_total - fixed_collapsed;
     let mut normal_weights = Vec::with_capacity(normal_count);
+    let mut normal_minimums = Vec::with_capacity(normal_count);
     for (index, is_collapsed) in collapsed.iter().enumerate() {
         if !is_collapsed {
             normal_weights.push(ratios[index]);
+            normal_minimums.push(minimum_heights[index]);
         }
     }
-    let normal_heights = weighted_sizes(&normal_weights, normal_available, normal_min, axis)?;
+    let normal_heights = weighted_sizes(
+        &normal_weights,
+        normal_available,
+        &normal_minimums,
+        axis,
+    )?;
 
     let mut normal_index = 0;
     Ok(collapsed.iter().map(|is_collapsed| {
@@ -499,16 +622,21 @@ fn allocate_stack_heights(
 fn weighted_sizes(
     weights: &[f32],
     available: f32,
-    minimum: f32,
+    minimums: &[f32],
     axis: Axis,
 ) -> Result<Vec<f32>, ComputeRectsError> {
+    if weights.len() != minimums.len() {
+        return Err(ComputeRectsError::InvalidLayout);
+    }
     if weights.is_empty() {
         return Ok(Vec::new());
     }
-    if !available.is_finite() || !minimum.is_finite() || minimum <= 0.0 {
+    if !available.is_finite()
+        || minimums.iter().any(|value| !value.is_finite() || *value <= 0.0)
+    {
         return Err(ComputeRectsError::Geometry(GeometryError::NonFinite));
     }
-    let required = minimum * weights.len() as f32;
+    let required = minimums.iter().sum::<f32>();
     if !required.is_finite() {
         return Err(ComputeRectsError::Geometry(GeometryError::ArithmeticOverflow));
     }
@@ -525,11 +653,11 @@ fn weighted_sizes(
             return Err(ComputeRectsError::InvalidLayout);
         }
         let undersized = active.iter().copied().find(|index| {
-            remaining * weights[*index] / weight_sum < minimum
+            remaining * weights[*index] / weight_sum < minimums[*index]
         });
         if let Some(index) = undersized {
-            output[index] = minimum;
-            remaining -= minimum;
+            output[index] = minimums[index];
+            remaining -= minimums[index];
             active.retain(|candidate| *candidate != index);
         } else {
             for index in active {
