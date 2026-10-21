@@ -370,7 +370,7 @@ impl Layout {
                             reason: "flyout column must use a rail mode",
                         });
                     }
-                    if !column.groups.contains(&flyout.group) {
+                    if !column.groups.iter().any(|root| self.is_descendant_or_same(*root, flyout.group)) {
                         errors.push(ValidationError::InvalidFlyout {
                             column: flyout.column,
                             group: flyout.group,
