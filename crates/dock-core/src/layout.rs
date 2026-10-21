@@ -5,8 +5,8 @@ use slotmap::SlotMap;
 use crate::{
     Axis, CanvasState, ChromeMode, ColumnMode, CommandError, CommandOutcome, CommandValue,
     DockArea, DockAreaId, DockAreaKind, DockCommand, DockMetrics, DockSide, DropTarget, DropZone,
-    FloatingGroup, FloatingGroupId, FlyoutState, GeometryError, Node, NodeId, PanelConstraints,
-    PanelId, PanelInstance, Profile, Rect, Size, ValidationError,
+    FloatingGroup, FloatingGroupId, FlyoutState, GeometryError, Node, NodeId, PanelId, PanelInstance,
+    Profile, Rect, Size, ValidationError,
 };
 
 const RATIO_TOLERANCE: f32 = 1.0e-4;
@@ -346,21 +346,21 @@ impl Layout {
                 let panel_node = self.find_panel_node(*panel).ok_or(CommandError::MissingPanel { panel: *panel })?;
                 self.validate_drop_target(*target, metrics)?;
                 if let (Some((source_group, source_index)), DropTarget::Tabs { group: target_group, index }) =
-                    (self.tab_parent_index(panel_node), target)
+                    (self.tab_parent_index(panel_node), *target)
                 {
-                    if source_group == *target_group
-                        && (*index == source_index || *index == source_index + 1)
+                    if source_group == target_group
+                        && (index == source_index || index == source_index + 1)
                     {
                         return Ok(CommandApplication::persistent());
                     }
-                    if source_group == *target_group {
+                    if source_group == target_group {
                         let tabs = match self.nodes.get_mut(source_group) {
                             Some(Node::Tabs(tabs)) => tabs,
                             _ => return Err(CommandError::InvalidTarget { reason: "panel parent is not a Tabs node" }),
                         };
                         let active_node = tabs.children.get(tabs.active_index).copied();
                         let moved = tabs.children.remove(source_index);
-                        let insert_index = (*index).min(tabs.children.len());
+                        let insert_index = index.min(tabs.children.len());
                         tabs.children.insert(insert_index, moved);
                         if let Some(active_node) = active_node {
                             if let Some(active_index) = tabs.children.iter().position(|id| *id == active_node) {
@@ -541,6 +541,7 @@ impl Layout {
                 if let Some(Node::Column(column)) = self.nodes.get_mut(*column) {
                     column.width = actual_width;
                 }
+                self.sync_main_column_ratios(*column)?;
                 Ok(CommandApplication {
                     actual_value: Some(CommandValue::ColumnWidth(actual_width)),
                     inverse: (actual_width != old_width).then_some(DockCommand::ResizeColumn { column: *column, width: old_width }),
@@ -567,10 +568,18 @@ impl Layout {
                 };
                 let left_min = self.minimum_column_width(left_id, metrics)?;
                 let right_min = self.minimum_column_width(right_id, metrics)?;
+                let lower_delta = left_min - left.width;
+                let upper_delta = right.width - right_min;
+                if lower_delta > upper_delta {
+                    return Err(CommandError::InvalidValue {
+                        field: "delta",
+                        reason: "adjacent columns cannot be resized within their minimum widths",
+                    });
+                }
                 let actual_delta = if left.mode == ColumnMode::IconsOnly || right.mode == ColumnMode::IconsOnly {
                     0.0
                 } else {
-                    delta.clamp(left_min - left.width, right.width - right_min)
+                    (*delta).clamp(lower_delta, upper_delta)
                 };
                 if actual_delta != 0.0 {
                     let new_left = left.width + actual_delta;
@@ -584,20 +593,7 @@ impl Layout {
                     if let Some(Node::Column(column)) = self.nodes.get_mut(right_id) {
                         column.width = new_right;
                     }
-                    let widths: Vec<f32> = columns.iter().filter_map(|id| match self.nodes.get(*id) {
-                        Some(Node::Column(column)) => Some(column.width),
-                        _ => None,
-                    }).collect();
-                    let total: f32 = widths.iter().copied().sum();
-                    if !total.is_finite() || total <= 0.0 {
-                        return Err(CommandError::InvalidValue { field: "delta", reason: "total dock column width overflowed" });
-                    }
-                    let ratios: Vec<f32> = widths.iter().map(|width| *width / total).collect();
-                    if let Some(area) = self.main_area(*side).copied() {
-                        if let Some(Node::Split(split)) = self.nodes.get_mut(area.root) {
-                            split.ratios = ratios;
-                        }
-                    }
+                    self.sync_main_column_ratios(left_id)?;
                 }
                 Ok(CommandApplication {
                     actual_value: Some(CommandValue::ColumnBoundaryDelta(actual_delta)),
@@ -638,7 +634,7 @@ impl Layout {
                     reason: geometry_error_reason(error),
                 })?;
                 if self.profile == Profile::Photoshop
-                    && !matches!(self.nodes.get(*node), Some(Node::Panel(_) | Node::Tabs(_)))
+                    && !matches!(self.nodes.get(*node), Some(Node::Panel(_)) | Some(Node::Tabs(_)))
                 {
                     return Err(CommandError::UnsupportedForProfile {
                         profile: self.profile,
@@ -771,7 +767,7 @@ impl Layout {
                 if current.mode == *mode {
                     return Ok(CommandApplication::persistent());
                 }
-                let width = match mode {
+                let width = match *mode {
                     ColumnMode::IconsOnly => metrics.rail_width,
                     ColumnMode::Expanded if current.mode == ColumnMode::IconsOnly => {
                         metrics.default_column_width.max(self.minimum_column_width(*column, metrics)?)
@@ -782,6 +778,7 @@ impl Layout {
                     value.mode = *mode;
                     value.width = width;
                 }
+                self.sync_main_column_ratios(*column)?;
                 Ok(CommandApplication::persistent())
             }
             DockCommand::OpenFlyout { column, group } => {
@@ -1427,6 +1424,40 @@ impl Layout {
             self.panel_instances.remove(panel.panel_id);
         }
         self.nodes.remove(node_id);
+    }
+
+    fn sync_main_column_ratios(&mut self, column_id: NodeId) -> Result<(), CommandError> {
+        let Some((side, _)) = self.main_column_position(column_id) else {
+            return Ok(());
+        };
+        let columns = self.main_columns(side)?;
+        if columns.len() < 2 {
+            return Ok(());
+        }
+        let widths: Vec<f32> = columns.iter().map(|id| match self.nodes.get(*id) {
+            Some(Node::Column(column)) => Ok(column.width),
+            _ => Err(CommandError::InvalidTarget { reason: "main horizontal split contains a non-Column child" }),
+        }).collect::<Result<_, _>>()?;
+        let total: f32 = widths.iter().copied().sum();
+        if !total.is_finite() || total <= 0.0 {
+            return Err(CommandError::InvalidValue {
+                field: "width",
+                reason: "total dock column width overflowed",
+            });
+        }
+        let ratios: Vec<f32> = widths.iter().map(|width| *width / total).collect();
+        let area = self.main_area(side).copied().ok_or(CommandError::InvalidTarget {
+            reason: "main dock area disappeared while synchronizing column ratios",
+        })?;
+        if let Some(Node::Split(split)) = self.nodes.get_mut(area.root) {
+            if split.axis != Axis::X {
+                return Err(CommandError::InvalidTarget {
+                    reason: "main column split must use horizontal axis X",
+                });
+            }
+            split.ratios = ratios;
+        }
+        Ok(())
     }
 
     fn minimum_column_width(
