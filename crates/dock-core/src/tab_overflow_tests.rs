@@ -98,8 +98,10 @@ fn all_tabs_remain_visible_and_share_width_when_minimums_fit() {
 
 #[test]
 fn narrow_strip_uses_full_width_for_overflow_button_when_no_tab_fits() {
-    let mut metrics = DockMetrics::default();
-    metrics.min_column_width = 80.0;
+    let metrics = DockMetrics {
+        min_column_width: 80.0,
+        ..DockMetrics::default()
+    };
     let (layout, group, panels) = two_or_more_tabs_layout(80.0, 2);
     let rects = layout.compute_rects(viewport(), &metrics).unwrap();
 
