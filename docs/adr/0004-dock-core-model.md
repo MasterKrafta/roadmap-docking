@@ -172,6 +172,13 @@ Layout является единственным владельцем арен �
 
 Все координаты и размеры — логические px в f32. NaN и бесконечности запрещены. Допуск сравнения пикселей — 1e-3, ratios — 1e-4. Округление до физических пикселей выполняет rendering adapter на границе UI.
 
+### C5.5 — Геометрические regression tests и DPI
+
+- Golden fixture для viewport 1280×800 вручную фиксирует ожидаемые logical-pixel rects: левый dock шириной 544 px (колонки 240 + splitter 4 + 300), правый dock 220 px, Canvas 516 px; проверяются все три колонки, четыре группы, четыре panel rects и два splitter hit rects. Для групп в первой колонке ожидаются высоты 398 px и splitter gap 4 px.
+- Отдельный дробный fixture сохраняет origin/size с дробными logical px без округления. Он проверяет одноколоночный dock, точную границу min_canvas_width, отказ для слишком узкого viewport и vertical overflow, если viewport короче минимума группы на 0.5 px.
+- Регрессии для обеих сторон одновременно дополнительно покрываются тестом ширин колонок; maximum-column suppression проверяется pure-тестом drop zones. Floating bounds проверяются возле/за всеми client-area краями с явными ожидаемыми clamp-координатами, а короткие колонки и Split проверяют scroll extent без сжатия ниже minimums.
+- Core намеренно работает в logical px и не принимает scale factor. Масштабирование DPI и округление в physical px остаются ответственностью rendering adapter; любые округления в pure geometry считаются regression, а не способом подгонять golden значения.
+
 ## Последствия
 
 - Вкладки ссылаются на NodeId, а не хранят Vec<PanelId>.
