@@ -29,6 +29,15 @@ pub enum DockCommand {
     },
     /// Move a panel to an explicit drop target.
     MovePanel { panel: PanelId, target: DropTarget },
+    /// Complete a panel drag initiated from the currently open flyout.
+    ///
+    /// The command performs the same docking move as MovePanel, then closes that
+    /// flyout in the same transaction. Invalid drops leave the flyout untouched.
+    MovePanelFromFlyout { panel: PanelId, target: DropTarget },
+    /// Float a panel dragged from the currently open flyout.
+    ///
+    /// This is the FreeArea completion path for FlyoutPanel drag handles.
+    FloatPanelFromFlyout { panel: PanelId, bounds: Rect },
     /// Move a group into a column at an exact group slot.
     ///
     /// This also expresses insertion into an icon rail: the destination
@@ -169,6 +178,11 @@ mod tests {
             DockCommand::ActivateTab { group: NodeId::null(), panel: PanelId::null() },
             DockCommand::ReorderTab { group: NodeId::null(), panel: PanelId::null(), to_index: 0 },
             DockCommand::MovePanel { panel: PanelId::null(), target },
+            DockCommand::MovePanelFromFlyout { panel: PanelId::null(), target },
+            DockCommand::FloatPanelFromFlyout {
+                panel: PanelId::null(),
+                bounds: Rect::new(Point::ZERO, Size::new(400.0, 300.0)),
+            },
             DockCommand::MoveGroup { group: NodeId::null(), column: NodeId::null(), index: 0 },
             DockCommand::MoveGroupToMainColumn {
                 group: NodeId::null(),
@@ -224,7 +238,7 @@ mod tests {
             DockCommand::ResizeFlyout { panel: PanelId::null(), width: 280.0 },
             DockCommand::SetChrome { mode: ChromeMode::Hidden },
         ];
-        assert_eq!(commands.len(), 29);
+        assert_eq!(commands.len(), 31);
     }
 
     #[cfg(feature = "serde")]
