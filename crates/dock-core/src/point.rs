@@ -2,6 +2,7 @@ use crate::GeometryError;
 
 /// A point in logical pixels.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Point {
     pub x: f32,
     pub y: f32,
@@ -57,5 +58,13 @@ mod tests {
             Point::new(f32::MAX, 0.0).checked_offset(f32::MAX, 0.0),
             Err(GeometryError::ArithmeticOverflow)
         );
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn point_round_trips_through_serde() {
+        let point = Point::new(12.5, -3.0);
+        let encoded = serde_json::to_string(&point).unwrap();
+        assert_eq!(serde_json::from_str::<Point>(&encoded).unwrap(), point);
     }
 }
