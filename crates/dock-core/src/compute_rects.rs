@@ -17,7 +17,9 @@ impl Layout {
     /// Column widths come from the model (or rail width for IconsOnly columns).
     /// The Canvas receives the remaining horizontal space. If that remainder is
     /// below min_canvas_width, computation fails instead of silently compressing
-    /// columns or the Canvas. This method does not mutate Layout or CanvasState.
+    /// columns or the Canvas. Vertical content that cannot fit is reported with
+    /// a scroll extent. Floating bounds are clamped in this snapshot only; the
+    /// persistent Layout and CanvasState are not mutated.
     pub fn compute_rects(
         &self,
         viewport: Rect,
