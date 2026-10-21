@@ -35,7 +35,7 @@ app ──▶ dock-core
 - Flyout selection, runtime version, session-only `LastDockLocation`, UI/scroll handles и panel content state в workspace JSON не входят. Содержимое панели и её scroll/selection state — отдельный app-owned канал.
 - Загрузчик возвращает `WorkspaceLoadResult` с diagnostics. Неизвестный/удалённый `PanelKey` сохраняется как placeholder с безопасными layout constraints и предупреждением; приложение может показать недоступную панель, а её исходное место остаётся в workspace.
 - Загрузчик применяет только однозначные исправления: ratios/структура, которые поддерживает нормализатор, и ширина колонки, однозначно заданная `ColumnMode`. Нарушение правил профиля, где нужно гадать или терять структуру, возвращается как `InvalidLayout` с конкретными `ValidationError`; тихого разрушительного ремонта нет.
-- Для floating bounds приложение может передать в `WorkspaceLoadOptions` видимый client rectangle в логических px. Core ограничивает bounds этой областью и сообщает об изменении. Определение монитора, физического DPI и предпочтительной позиции окна остаётся в app/platform слое.
+- Для floating bounds приложение может передать в `WorkspaceLoadOptions` видимый client rectangle в логических px. Core ограничивает bounds этой областью и сообщает об изменении, но не сжимает содержимое ниже его минимального размера: если client region слишком мал, загрузка возвращает `FloatingBoundsInsufficientSpace`. Определение монитора, физического DPI и предпочтительной позиции окна остаётся в app/platform слое.
 
 ## Ограничения реализации
 
