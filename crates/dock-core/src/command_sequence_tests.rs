@@ -701,16 +701,47 @@ fn valid_commands(
 
         if let Some(area) = layout.dock_area(floating.area) {
             let source_nodes = nodes_in_subtree(layout, area.root);
-            for (target, children, _, _) in &main_groups {
-                if !source_nodes.contains(target) {
-                    commands.push(DockCommand::DockFloating {
-                        group: floating_id,
-                        target: DropTarget::Tabs {
-                            group: *target,
-                            index: children.len(),
-                        },
-                    });
+            match layout.node(area.root) {
+                Some(Node::Tabs(_)) | Some(Node::Panel(_)) => {
+                    for (target, children, _, _) in &main_groups {
+                        if !source_nodes.contains(target) {
+                            commands.push(DockCommand::DockFloating {
+                                group: floating_id,
+                                target: DropTarget::Tabs {
+                                    group: *target,
+                                    index: children.len(),
+                                },
+                            });
+                        }
+                    }
                 }
+                Some(Node::Split(split)) if split.axis == Axis::Y => {
+                    for side in [DockSide::Left, DockSide::Right] {
+                        let target_columns = main_columns(layout, side);
+                        commands.push(DockCommand::DockFloating {
+                            group: floating_id,
+                            target: DropTarget::MainColumn {
+                                side,
+                                index: target_columns.len(),
+                            },
+                        });
+                        for (column, groups, _, mode, _) in &target_columns {
+                            if *mode == ColumnMode::IconsOnly {
+                                commands.push(DockCommand::DockFloating {
+                                    group: floating_id,
+                                    target: DropTarget::RailSlot {
+                                        column: *column,
+                                        index: groups.len(),
+                                    },
+                                });
+                            }
+                        }
+                    }
+                }
+                // The core intentionally rejects docking an X-axis floating
+                // split directly; do not generate a false-positive command.
+                Some(Node::Split(_)) | None => {}
+                Some(Node::Column(_)) => {}
             }
         }
     }
