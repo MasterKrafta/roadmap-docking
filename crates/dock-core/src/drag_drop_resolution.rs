@@ -182,7 +182,8 @@ fn panel_self_and_same_tab_position_resolve_to_noop() {
             origin: Point::ZERO,
             point: Point::new(4.0, 0.0),
             target: Some(DropTarget::Tabs { group, index }),
-        };
+        floating_bounds: None,
+};
         assert_eq!(layout.resolve_drag_drop(&request, &metrics).unwrap(), DragDropAction::NoOp);
     }
     assert_eq!(layout.version(), version);
@@ -209,7 +210,8 @@ fn panel_tab_may_split_from_its_own_group_edge() {
         origin: Point::ZERO,
         point: Point::new(4.0, 0.0),
         target: Some(DropTarget::GroupEdge { group, zone: crate::DropZone::Bottom }),
-    };
+    floating_bounds: None,
+};
 
     assert_eq!(
         layout.resolve_drag_drop(&request, &metrics).unwrap(),
@@ -244,14 +246,16 @@ fn group_self_drop_and_same_column_slot_are_noops_without_version_increment() {
         origin: Point::ZERO,
         point: Point::new(4.0, 0.0),
         target: Some(DropTarget::GroupTabs { group, index: 0 }),
-    };
+    floating_bounds: None,
+};
     assert_eq!(layout.resolve_drag_drop(&self_request, &metrics).unwrap(), DragDropAction::NoOp);
 
     for index in [0, 1] {
         let slot_request = DragDropRequest {
             target: Some(DropTarget::ColumnSlot { column, index }),
             ..self_request
-        };
+        floating_bounds: None,
+};
         assert_eq!(layout.resolve_drag_drop(&slot_request, &metrics).unwrap(), DragDropAction::NoOp);
     }
 
@@ -272,7 +276,8 @@ fn group_drag_to_main_column_becomes_one_command_and_preserves_tabs_state() {
         origin: Point::ZERO,
         point: Point::new(12.0, 8.0),
         target: Some(DropTarget::MainColumn { side: DockSide::Right, index: 0 }),
-    };
+    floating_bounds: None,
+};
 
     let action = layout.resolve_drag_drop(&request, &metrics).unwrap();
     assert_eq!(
@@ -321,7 +326,8 @@ fn sole_group_column_same_position_is_a_noop_command() {
         origin: Point::ZERO,
         point: Point::new(4.0, 0.0),
         target: Some(DropTarget::MainColumn { side: DockSide::Left, index: 0 }),
-    };
+    floating_bounds: None,
+};
     assert_eq!(layout.resolve_drag_drop(&request, &metrics).unwrap(), DragDropAction::NoOp);
 
     let outcome = layout.apply(
@@ -349,7 +355,8 @@ fn floating_capture_resolves_to_dock_floating_but_self_drop_is_noop() {
         origin: Point::ZERO,
         point: Point::new(4.0, 0.0),
         target: Some(DropTarget::GroupTabs { group: floating_root_group, index: 1 }),
-    };
+    floating_bounds: None,
+};
     assert_eq!(layout.resolve_drag_drop(&self_request, &metrics).unwrap(), DragDropAction::NoOp);
     assert_eq!(layout.version(), before);
 
@@ -372,7 +379,8 @@ fn floating_capture_resolves_to_dock_floating_but_self_drop_is_noop() {
         origin: Point::ZERO,
         point: Point::new(4.0, 0.0),
         target: Some(DropTarget::GroupTabs { group: main_tabs, index: 1 }),
-    };
+    floating_bounds: None,
+};
     assert_eq!(
         layout.resolve_drag_drop(&request, &metrics).unwrap(),
         DragDropAction::Command(DockCommand::DockFloating {
