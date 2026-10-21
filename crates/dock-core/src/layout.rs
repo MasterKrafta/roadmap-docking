@@ -6033,6 +6033,35 @@ mod tests {
         assert!(layout.main_area(DockSide::Left).is_none());
         assert_eq!(layout.panel_instances().count(), 3);
         assert_eq!(layout.validate(&metrics), Ok(()));
+
+        // Docking the whole floating stack creates a Column without flattening
+        // the Tabs groups or losing their order and panel instances.
+        layout.apply(
+            DockCommand::DockFloating {
+                group: floating_id,
+                target: DropTarget::MainColumn { side: DockSide::Left, index: 0 },
+            },
+            &metrics,
+        ).unwrap();
+        assert!(layout.floating_group(floating_id).is_none());
+        let docked_column = layout.main_area(DockSide::Left).unwrap().root;
+        assert!(matches!(
+            layout.node(docked_column),
+            Some(Node::Column(column))
+                if column.groups == vec![moving_group, target_group]
+                    && column.group_ratios.len() == 2
+                    && (column.group_ratios[0] - 0.3).abs() < 1.0e-4
+                    && (column.group_ratios[1] - 0.7).abs() < 1.0e-4
+        ));
+        assert!(matches!(
+            layout.node(moving_group),
+            Some(Node::Tabs(tabs))
+                if tabs.children == vec![moving_node_a, moving_node_b]
+                    && tabs.active_index == 1
+                    && tabs.collapsed
+        ));
+        assert_eq!(layout.panel_instances().count(), 3);
+        assert_eq!(layout.validate(&metrics), Ok(()));
     }
 
     #[test]
