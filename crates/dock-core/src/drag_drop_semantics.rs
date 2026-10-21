@@ -525,7 +525,8 @@ fn merging_a_group_moves_every_tab_and_activates_its_previous_active_tab() {
         &Tabs {
             children: vec![t0, s0, s1, s2, t1],
             active_index: 2,
-            collapsed: true,
+            // A successful center merge reveals the target group in Photoshop.
+            collapsed: false,
         },
     );
     assert_eq!(layout.validate(&metrics), Ok(()));
