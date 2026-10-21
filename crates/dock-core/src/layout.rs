@@ -424,12 +424,15 @@ impl Layout {
                             column: *column,
                             index: inverse_index,
                         });
-                        self.detach_node(*group)?;
-                        let new_len = match self.nodes.get(*column) {
-                            Some(Node::Column(value)) => value.groups.len(),
-                            _ => return Err(CommandError::InvalidTarget { reason: "MoveGroup target changed unexpectedly" }),
+                        let Some(Node::Column(target_column)) = self.nodes.get_mut(*column) else {
+                            return Err(CommandError::InvalidTarget {
+                                reason: "MoveGroup target changed unexpectedly",
+                            });
                         };
-                        self.insert_group_at_column(*column, *group, adjusted_index.min(new_len), None)?;
+                        let moved_group = target_column.groups.remove(source_index);
+                        let moved_ratio = target_column.group_ratios.remove(source_index);
+                        target_column.groups.insert(adjusted_index, moved_group);
+                        target_column.group_ratios.insert(adjusted_index, moved_ratio);
                         return Ok(CommandApplication { actual_value: None, inverse, persistent: true });
                     }
                 }
@@ -1126,8 +1129,12 @@ impl Layout {
                     reason: "split ratio target does not identify an existing group",
                 });
             }
-            let mut weights = if ratio_issues(&column.group_ratios, old_len).is_empty() {
-                column.group_ratios.clone()
+            let mut weights = if column.group_ratios.len() == old_len
+                && column.group_ratios.iter().all(|value| value.is_finite() && *value >= 0.0)
+                && column.group_ratios.iter().copied().sum::<f32>().is_finite()
+                && column.group_ratios.iter().copied().sum::<f32>() > f32::EPSILON
+            {
+                normalized_ratios(column.group_ratios.iter().copied().map(Some).collect())
             } else {
                 equal_ratios(old_len)
             };
@@ -1223,13 +1230,31 @@ impl Layout {
                             )?;
                             match self.nodes.get(parent) {
                                 Some(Node::Split(split)) if split.axis == Axis::Y && split.children.contains(&target_group) => {
-                                    let target_index = split.children.iter().position(|id| *id == target_group).unwrap_or(0);
+                                    let target_index = split.children.iter().position(|id| *id == target_group).ok_or(
+                                        CommandError::InvalidTarget {
+                                            reason: "target group is not present in the floating stack",
+                                        },
+                                    )?;
                                     let insert_at = if zone == DropZone::Top { target_index } else { target_index + 1 };
+                                    let old_len = split.children.len();
+                                    let mut weights = if split.ratios.len() == old_len
+                                        && split.ratios.iter().all(|value| value.is_finite() && *value >= 0.0)
+                                        && split.ratios.iter().copied().sum::<f32>().is_finite()
+                                        && split.ratios.iter().copied().sum::<f32>() > f32::EPSILON
+                                    {
+                                        normalized_ratios(split.ratios.iter().copied().map(Some).collect())
+                                    } else {
+                                        equal_ratios(old_len)
+                                    };
+                                    let target_weight = weights[target_index];
+                                    weights[target_index] = target_weight * (1.0 - split_ratio);
+                                    weights.insert(insert_at, target_weight * split_ratio);
+                                    let new_ratios = normalized_ratios(weights.into_iter().map(Some).collect());
                                     let Some(Node::Split(split)) = self.nodes.get_mut(parent) else {
                                         return Err(CommandError::InvalidTarget { reason: "floating stack changed unexpectedly" });
                                     };
                                     split.children.insert(insert_at, new_group);
-                                    split.ratios = equal_ratios(split.children.len());
+                                    split.ratios = new_ratios;
                                     Ok(())
                                 }
                                 _ => Err(CommandError::InvalidTarget { reason: "floating stack must be a vertical Split of Tabs" }),
