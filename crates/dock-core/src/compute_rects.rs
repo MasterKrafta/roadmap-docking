@@ -702,6 +702,10 @@ mod tests {
         assert_eq!(first.columns[0].rect.size.width, 240.0);
         assert_eq!(first.columns[1].rect.size.width, 300.0);
         assert_eq!(first.columns[2].rect.size.width, 220.0);
+        assert_eq!(first.columns[0].rect.origin.x, 0.0);
+        assert_eq!(first.columns[1].rect.origin.x, 244.0);
+        assert_eq!(first.columns[2].rect.origin.x, 980.0);
+        assert_eq!(first.canvas.unwrap().origin.x, 544.0);
         assert_eq!(first.canvas.unwrap().size.width, 436.0);
         assert_eq!(second.columns[0].rect.size.width, 240.0);
         assert_eq!(second.columns[1].rect.size.width, 300.0);
