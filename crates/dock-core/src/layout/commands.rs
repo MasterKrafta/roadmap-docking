@@ -1344,19 +1344,62 @@ impl Layout {
                     })?;
                 let flyout = crate::FlyoutState::new(*column, item.group, *panel);
                 if self.flyout == Some(flyout) {
+                    if self.flyout_auto_collapse {
+                        self.flyout = None;
+                    }
                     return Ok(CommandApplication::transient());
                 }
 
                 // Selecting an inactive rail icon must not mutate the group's
-                // persistent active_index.
+                // persistent active_index. Another icon replaces the current flyout.
                 self.flyout = Some(flyout);
                 Ok(CommandApplication::transient())
             }
             DockCommand::CloseFlyout => {
-                if self.flyout.is_none() {
-                    return Ok(CommandApplication::transient());
+                if self.flyout.is_some() {
+                    self.flyout = None;
                 }
-                self.flyout = None;
+                Ok(CommandApplication::transient())
+            }
+            DockCommand::DismissFlyout => {
+                if self.flyout_auto_collapse {
+                    self.flyout = None;
+                }
+                Ok(CommandApplication::transient())
+            }
+            DockCommand::SetFlyoutAutoCollapse { enabled } => {
+                self.flyout_auto_collapse = *enabled;
+                Ok(CommandApplication::transient())
+            }
+            DockCommand::ResizeFlyout { panel, width } => {
+                if !width.is_finite() || *width <= 0.0 {
+                    return Err(CommandError::InvalidValue {
+                        field: "width",
+                        reason: "flyout width must be finite and positive",
+                    });
+                }
+                let Some(flyout) = self.flyout else {
+                    return Err(CommandError::InvalidTarget {
+                        reason: "ResizeFlyout requires an active flyout",
+                    });
+                };
+                if flyout.panel != *panel {
+                    return Err(CommandError::InvalidTarget {
+                        reason: "ResizeFlyout panel must match the active flyout",
+                    });
+                }
+                let instance = self.panel_instances.get_mut(*panel).ok_or(
+                    CommandError::MissingPanel { panel: *panel },
+                )?;
+                let constraints = instance.constraints;
+                let max_width = constraints.max_size.map(|size| size.width).unwrap_or(f32::MAX);
+                let actual_width = (*width).clamp(constraints.min_size.width, max_width);
+                let remembered = instance.state.last_known_size()
+                    .unwrap_or(constraints.preferred_size);
+                let next_size = Size::new(actual_width, remembered.height);
+                if instance.state.last_known_size() != Some(next_size) {
+                    instance.state = crate::PanelState::new(Some(next_size));
+                }
                 Ok(CommandApplication::transient())
             }
             DockCommand::SetChrome { mode } => {
@@ -2366,6 +2409,7 @@ impl Layout {
             && self.version == other.version
             && self.chrome == other.chrome
             && self.flyout == other.flyout
+            && self.flyout_auto_collapse == other.flyout_auto_collapse
     }
 
     pub(super) fn changed_node_ids(&self, other: &Self) -> Vec<NodeId> {
