@@ -398,7 +398,7 @@ fn sole_group_column_same_position_is_a_noop_command() {
 #[test]
 fn floating_capture_resolves_to_dock_floating_but_self_drop_is_noop() {
     let metrics = DockMetrics::default();
-    let (mut layout, floating_id, floating_root_group) = floating_layout();
+    let (layout, floating_id, floating_root_group) = floating_layout();
     let before = layout.version();
     let self_request = DragDropRequest {
         payload: DragPayload::FloatingGroup { group: floating_id },
