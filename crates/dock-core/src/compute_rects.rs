@@ -892,7 +892,7 @@ fn push_vertical_overflow(
     Ok(())
 }
 
-fn clamp_floating_bounds(
+pub(crate) fn clamp_floating_bounds(
     layout: &Layout,
     root: NodeId,
     bounds: Rect,
@@ -931,8 +931,18 @@ fn clamp_floating_bounds(
     }
     let client_right = client_area.checked_right().map_err(ComputeRectsError::Geometry)?;
     let client_bottom = client_area.checked_bottom().map_err(ComputeRectsError::Geometry)?;
+    if client_right <= client_area.origin.x || client_bottom <= client_area.origin.y {
+        return Err(ComputeRectsError::Geometry(GeometryError::NonPositiveDimension));
+    }
     let max_x = client_right - width;
     let max_y = client_bottom - height;
+    if !max_x.is_finite()
+        || !max_y.is_finite()
+        || max_x < client_area.origin.x
+        || max_y < client_area.origin.y
+    {
+        return Err(ComputeRectsError::Geometry(GeometryError::ArithmeticOverflow));
+    }
     let origin = Point::new(
         bounds.origin.x.clamp(client_area.origin.x, max_x),
         bounds.origin.y.clamp(client_area.origin.y, max_y),
