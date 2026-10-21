@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 
 use crate::{
-    ComputeRectsError, DockMetrics, DropTarget, FloatingGroupRect, GeometryError, HitResult,
-    Layout, LayoutRects, Node, NodeId, PanelId, Point, Rect, ResizeEdge,
+    ComputeRectsError, DockMetrics, DropTarget, FloatingGroupRect, HitResult, Layout,
+    LayoutRects, Node, NodeId, PanelId, Point, Rect,
 };
 
 impl Layout {
@@ -281,11 +281,11 @@ fn target_in_scope(
 
 #[cfg(test)]
 mod tests {
-    use super::{ComputeRectsError, GeometryError, HitResult, Point, Rect, ResizeEdge};
+    use super::{ComputeRectsError, HitResult, Point, Rect};
     use crate::layout_builder::LayoutBuilder;
     use crate::{
-        Axis, ColumnMode, DockMetrics, DockSide, DropTarget, PanelConstraints, PanelKey, Profile,
-        Size,
+        Axis, ColumnMode, DockMetrics, DockSide, DropTarget, GeometryError, PanelConstraints,
+        PanelKey, Profile, ResizeEdge, Size,
     };
 
     fn constraints() -> PanelConstraints {
