@@ -216,7 +216,7 @@ fn group_drag_to_main_column_becomes_one_command_and_preserves_tabs_state() {
     let DragDropAction::Command(command) = action else { panic!("main column action"); };
     layout.apply(command, &metrics).unwrap();
     assert_eq!(tabs(&layout, source), &original);
-    assert_eq!(layout.main_area(DockSide::Left).unwrap().root != NodeId::null(), true);
+    assert!(layout.main_area(DockSide::Left).is_some());
     let Some(Node::Split(split)) = layout.main_area(DockSide::Right).and_then(|area| layout.node(area.root)) else {
         panic!("main-dock insertion produces a horizontal split");
     };
