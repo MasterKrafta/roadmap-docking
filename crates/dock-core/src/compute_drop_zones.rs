@@ -133,7 +133,7 @@ impl Layout {
             let left_edge = group_edge_rect(group_rect.rect, DropZone::Left, metrics.edge_drop_width)?;
             let right_edge = group_edge_rect(group_rect.rect, DropZone::Right, metrics.edge_drop_width)?;
             if let Some((side, column_index, _column_rect)) =
-                group_main_column(self, rects, group_rect.group, &left_columns, &right_columns)
+                group_main_column(self, group_rect.group, &left_columns, &right_columns)
             {
                 if may_add_column {
                     let left_target = match source {
@@ -753,7 +753,6 @@ fn main_columns(
 
 fn group_main_column(
     layout: &Layout,
-    rects: &LayoutRects,
     group: NodeId,
     left_columns: &[(NodeId, Rect)],
     right_columns: &[(NodeId, Rect)],
@@ -1003,6 +1002,7 @@ fn target_node(target: DropTarget) -> Option<NodeId> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use slotmap::Key;
     use crate::layout_builder::LayoutBuilder;
     use crate::{AllowedArea, ColumnMode, DockCommand, DockMetrics, DockSide, DropSource, DropTarget, DropZone, PanelConstraints, PanelKey, Point, Profile, Rect, Size};
 
