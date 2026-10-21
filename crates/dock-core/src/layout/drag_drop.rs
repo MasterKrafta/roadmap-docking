@@ -149,7 +149,11 @@ impl Layout {
                                                         && (index == 0 || index == 1)
                                                 )) =>
                                         {
-                                            return Ok(DragDropAction::NoOp);
+                                            return Ok(if request.handle == DragHandle::FlyoutPanel {
+                                                DragDropAction::Command(DockCommand::MovePanelFromFlyout { panel, target })
+                                            } else {
+                                                DragDropAction::NoOp
+                                            });
                                         }
                                         _ => {}
                                     }
