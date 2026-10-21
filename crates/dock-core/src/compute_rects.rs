@@ -237,33 +237,50 @@ fn layout_node(
     output: &mut LayoutRects,
 ) -> Result<(), ComputeRectsError> {
     rect.validate().map_err(ComputeRectsError::Geometry)?;
-    match layout.node(id).ok_or(ComputeRectsError::InvalidLayout)? {
-        Node::Column(column) => layout_column(layout, id, column, rect, metrics, output),
-        Node::Tabs(tabs) => layout_tabs(layout, id, tabs, rect, metrics, output),
+    let node = layout.node(id).ok_or(ComputeRectsError::InvalidLayout)?;
+
+    // Columns and vertical splits manage their own stack overflow. Other nodes
+    // need an expanded content rect when the parent viewport is shorter than
+    // their minimum geometry, with a separate viewport/content extent record.
+    let manages_vertical_stack = matches!(node, Node::Column(_))
+        || matches!(node, Node::Split(split) if split.axis == Axis::Y);
+    let mut content_rect = rect;
+    if !manages_vertical_stack {
+        let minimum = minimum_node_size(layout, id, metrics)?;
+        if content_rect.size.height < minimum.height {
+            push_vertical_overflow(id, rect, minimum.height, output)?;
+            content_rect.size.height = minimum.height;
+            content_rect.validate().map_err(ComputeRectsError::Geometry)?;
+        }
+    }
+
+    match node {
+        Node::Column(column) => layout_column(layout, id, column, content_rect, metrics, output),
+        Node::Tabs(tabs) => layout_tabs(layout, id, tabs, content_rect, metrics, output),
         Node::Panel(panel) => {
             let minimum = layout
                 .panel_instance(panel.panel_id)
                 .ok_or(ComputeRectsError::InvalidLayout)?
                 .constraints
                 .min_size;
-            if rect.size.width < minimum.width {
+            if content_rect.size.width < minimum.width {
                 return Err(ComputeRectsError::InsufficientSpace {
                     axis: Axis::X,
-                    available: rect.size.width,
+                    available: content_rect.size.width,
                     required: minimum.width,
                 });
             }
-            if rect.size.height < minimum.height {
+            if content_rect.size.height < minimum.height {
                 return Err(ComputeRectsError::InsufficientSpace {
                     axis: Axis::Y,
-                    available: rect.size.height,
+                    available: content_rect.size.height,
                     required: minimum.height,
                 });
             }
-            output.panels.push(PanelRect::new(panel.panel_id, rect));
+            output.panels.push(PanelRect::new(panel.panel_id, content_rect));
             Ok(())
         }
-        Node::Split(split) => layout_split(layout, id, split, rect, metrics, output),
+        Node::Split(split) => layout_split(layout, id, split, content_rect, metrics, output),
     }
 }
 
