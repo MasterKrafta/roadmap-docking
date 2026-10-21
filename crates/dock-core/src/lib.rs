@@ -30,9 +30,9 @@ pub mod point;
 pub mod profile;
 pub mod rect;
 pub mod size;
-pub mod validation_error;
 pub mod split;
 pub mod tabs;
+pub mod validation_error;
 
 pub use axis::Axis;
 pub use canvas_state::CanvasState;
@@ -62,6 +62,6 @@ pub use point::Point;
 pub use profile::Profile;
 pub use rect::Rect;
 pub use size::Size;
-pub use validation_error::ValidationError;
 pub use split::Split;
 pub use tabs::Tabs;
+pub use validation_error::ValidationError;
