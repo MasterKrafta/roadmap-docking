@@ -1238,7 +1238,11 @@ impl Layout {
                         DropZone::Left | DropZone::Right => {
                             let Some(column) = self.find_owner_column(group) else {
                                 return Err(CommandError::InvalidTarget {
-                                    reason: "horizontal group splits require a main-dock column",
+                                    reason: if self.find_floating_root_containing(group).is_some() {
+                                        "horizontal splits are not supported inside a floating stack"
+                                    } else {
+                                        "horizontal group splits require a main-dock column"
+                                    },
                                 });
                             };
                             if self.main_column_position(column).is_none() {
