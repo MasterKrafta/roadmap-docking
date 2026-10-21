@@ -917,7 +917,7 @@ impl Layout {
     }
 
     fn group_node_for(&mut self, node: NodeId) -> Result<NodeId, CommandError> {
-        match self.nodes.get(node) {
+        match self.nodes.get(node).cloned() {
             Some(Node::Tabs(_)) => Ok(node),
             Some(Node::Panel(_)) => Ok(self.nodes.insert(Node::Tabs(crate::Tabs {
                 children: vec![node],
