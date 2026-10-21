@@ -1,4 +1,4 @@
-use crate::{GeometryError, ValidationError};
+use crate::{GeometryError, Rect, ValidationError};
 
 /// Errors returned by the strict version-1 workspace JSON boundary.
 #[derive(Debug, thiserror::Error)]
@@ -26,6 +26,12 @@ pub enum WorkspaceFileError {
 
     #[error("workspace references panel key '{key}' but no descriptor is registered")]
     MissingPanelDescriptor { key: String },
+
+    #[error("floating group {index} has invalid bounds: {reason:?}")]
+    InvalidFloatingBounds { index: usize, reason: GeometryError },
+
+    #[error("visible client region has invalid bounds: {0:?}")]
+    InvalidVisibleClientRegion(GeometryError),
 
     #[error("cannot create workspace file from layout: {0}")]
     InvalidRuntimeLayout(String),
