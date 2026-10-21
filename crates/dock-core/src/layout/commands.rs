@@ -128,7 +128,7 @@ impl Layout {
                     }
                     let previous_flyout = self.flyout;
                     if let Some(column) = self.rail_column_for_group(group) {
-                        self.flyout = Some(crate::FlyoutState::new(column, group));
+                        self.flyout = Some(crate::FlyoutState::new(column, group, existing_id));
                     }
                     if !was_active {
                         return Ok(CommandApplication {
@@ -1324,89 +1324,32 @@ impl Layout {
                 self.sync_main_column_ratios(*column)?;
                 Ok(CommandApplication::persistent())
             }
-            DockCommand::OpenFlyout { column, group } => {
-                let groups = match self.nodes.get(*column) {
-                    Some(Node::Column(value)) => {
-                        if !value.mode.is_rail() {
-                            return Err(CommandError::InvalidTarget { reason: "flyout column must use a rail mode" });
-                        }
-                        value.groups.clone()
-                    }
-                    Some(_) => return Err(CommandError::InvalidTarget { reason: "OpenFlyout target must be a Column node" }),
-                    None => return Err(CommandError::MissingNode { node: *column }),
-                };
-                if !groups.iter().any(|root| self.is_descendant_or_same(*root, *group)) {
-                    return Err(CommandError::InvalidTarget { reason: "flyout group is not a member of the column" });
-                }
-                if !matches!(self.nodes.get(*group), Some(Node::Tabs(_))) {
-                    return Err(CommandError::InvalidTarget { reason: "flyout target must be a Tabs node" });
-                }
-                if self.flyout == Some(FlyoutState::new(*column, *group)) {
-                    return Ok(CommandApplication::transient());
-                }
-                self.flyout = Some(FlyoutState::new(*column, *group));
-                Ok(CommandApplication::transient())
-            }
-            DockCommand::OpenPanelFlyout { column, panel } => {
+            DockCommand::OpenFlyout { column, panel } => {
                 match self.nodes.get(*column) {
                     Some(Node::Column(value)) if value.mode.is_rail() => {}
                     Some(Node::Column(_)) => return Err(CommandError::InvalidTarget {
-                        reason: "panel flyout requires a rail column",
+                        reason: "flyout column must use a rail mode",
                     }),
                     Some(_) => return Err(CommandError::InvalidTarget {
-                        reason: "OpenPanelFlyout target must be a Column node",
+                        reason: "OpenFlyout target must be a Column node",
                     }),
                     None => return Err(CommandError::MissingNode { node: *column }),
                 }
+
                 let item = self.column_display_order(*column)?
                     .into_iter()
                     .find(|item| item.panel == *panel)
                     .ok_or(CommandError::InvalidTarget {
                         reason: "panel does not have an icon in the requested rail",
                     })?;
-                let group = item.group;
-                let previous_active = match self.nodes.get(group) {
-                    Some(Node::Tabs(tabs)) => tabs.children.get(tabs.active_index).and_then(|id| {
-                        match self.nodes.get(*id) {
-                            Some(Node::Panel(value)) => Some(value.panel_id),
-                            _ => None,
-                        }
-                    }),
-                    Some(_) => return Err(CommandError::InvalidTarget {
-                        reason: "panel icon parent is not a Tabs node",
-                    }),
-                    None => return Err(CommandError::MissingNode { node: group }),
-                };
-                let active_panel = match self.nodes.get(group) {
-                    Some(Node::Tabs(tabs)) => tabs.children.get(tabs.active_index).and_then(|id| {
-                        match self.nodes.get(*id) {
-                            Some(Node::Panel(value)) => Some(value.panel_id),
-                            _ => None,
-                        }
-                    }),
-                    _ => None,
-                };
-                let active_changed = active_panel != Some(*panel);
-                if active_changed {
-                    let Some(Node::Tabs(tabs)) = self.nodes.get_mut(group) else {
-                        return Err(CommandError::InvalidTarget {
-                            reason: "panel icon parent changed unexpectedly",
-                        });
-                    };
-                    tabs.active_index = item.tab_index;
-                }
-                let previous_flyout = self.flyout;
-                self.flyout = Some(crate::FlyoutState::new(*column, group));
-                if active_changed {
-                    return Ok(CommandApplication {
-                        actual_value: None,
-                        inverse: previous_active.map(|panel| DockCommand::ActivateTab { group, panel }),
-                        persistent: true,
-                    });
-                }
-                if previous_flyout != self.flyout {
+                let flyout = crate::FlyoutState::new(*column, item.group, *panel);
+                if self.flyout == Some(flyout) {
                     return Ok(CommandApplication::transient());
                 }
+
+                // Selecting an inactive rail icon must not mutate the group's
+                // persistent active_index.
+                self.flyout = Some(flyout);
                 Ok(CommandApplication::transient())
             }
             DockCommand::CloseFlyout => {
