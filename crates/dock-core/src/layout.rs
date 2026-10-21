@@ -503,7 +503,7 @@ impl Layout {
             );
         }
 
-        for (node_id, _) in &self.nodes {
+        for (node_id, _) in self.nodes.iter() {
             if let Some(references) = incoming.get(&node_id)
                 && *references > 1
             {
@@ -518,7 +518,7 @@ impl Layout {
         for root in &roots {
             mark_reachable(&self.nodes, *root, &mut reachable);
         }
-        for (node_id, _) in &self.nodes {
+        for (node_id, _) in self.nodes.iter() {
             if !reachable.contains(&node_id) {
                 errors.push(ValidationError::UnreachableNode { node: node_id });
             }
