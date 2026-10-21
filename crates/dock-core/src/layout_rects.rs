@@ -1,6 +1,6 @@
 use crate::{
     ColumnRect, DropZoneRect, FloatingGroupRect, FloatingResizeEdgeRect, GroupRect,
-    PanelRect, Rect, SplitterRect, TabHeaderRect, TabStripRect,
+    PanelRect, Rect, SplitterRect, TabHeaderRect, TabStripRect, VerticalOverflow,
 };
 
 /// Complete pure-data geometry snapshot produced by the geometry pass.
@@ -23,6 +23,8 @@ pub struct LayoutRects {
     pub floating_groups: Vec<FloatingGroupRect>,
     pub floating_resize_edges: Vec<FloatingResizeEdgeRect>,
     pub drop_zones: Vec<DropZoneRect>,
+    /// Vertical stacks that exceed their allocated viewport at minimum sizes.
+    pub vertical_overflow: Vec<VerticalOverflow>,
 }
 
 #[cfg(test)]
@@ -42,6 +44,7 @@ mod tests {
         assert!(rects.floating_groups.is_empty());
         assert!(rects.floating_resize_edges.is_empty());
         assert!(rects.drop_zones.is_empty());
+        assert!(rects.vertical_overflow.is_empty());
     }
 
     #[cfg(feature = "serde")]
