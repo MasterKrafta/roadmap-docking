@@ -1,4 +1,4 @@
-use crate::{GeometryError, ValidationError};
+use crate::{Axis, GeometryError, ValidationError};
 
 /// Errors returned by parsing, migrating, and recovering the versioned workspace JSON boundary.
 #[derive(Debug, thiserror::Error)]
@@ -26,6 +26,14 @@ pub enum WorkspaceFileError {
 
     #[error("floating group {index} has invalid bounds: {reason:?}")]
     InvalidFloatingBounds { index: usize, reason: GeometryError },
+
+    #[error("floating group {index} cannot fit in the visible client region: {axis:?} has {available} available, {required} required")]
+    FloatingBoundsInsufficientSpace {
+        index: usize,
+        axis: Axis,
+        available: f32,
+        required: f32,
+    },
 
     #[error("visible client region has invalid bounds: {0:?}")]
     InvalidVisibleClientRegion(GeometryError),
