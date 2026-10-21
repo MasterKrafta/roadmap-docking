@@ -383,7 +383,7 @@ fn existing_but_wrong_node_types_and_forbidden_targets_are_rejected_atomically()
         assert_rejected_atomically(&mut layout, command, &metrics);
     }
 
-    // A flyout requires a rail column and a group owned by that column.
+    // A flyout requires a rail column and a panel represented by one of its icons.
     layout
         .apply(
             DockCommand::SetColumnMode {
