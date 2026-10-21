@@ -36,4 +36,19 @@ mod tests {
         assert!(ColumnMode::IconsAndLabels.is_rail());
         assert!(ColumnMode::IconsOnly.is_rail());
     }
+
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn all_column_modes_round_trip_through_serde() {
+        for mode in [
+            ColumnMode::Expanded,
+            ColumnMode::IconsAndLabels,
+            ColumnMode::IconsOnly,
+        ] {
+            let encoded = serde_json::to_string(&mode).unwrap();
+            assert_eq!(serde_json::from_str::<ColumnMode>(&encoded).unwrap(), mode);
+        }
+    }
+
 }
