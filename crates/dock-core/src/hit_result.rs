@@ -9,6 +9,9 @@ use crate::{
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum HitResult {
+    /// The point belongs to the central application Canvas.
+    Canvas,
+    /// The point does not belong to any known interactive geometry.
     Miss,
     Column {
         column: NodeId,
