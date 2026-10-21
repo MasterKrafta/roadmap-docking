@@ -24,9 +24,6 @@ pub enum WorkspaceFileError {
         reason: GeometryError,
     },
 
-    #[error("workspace references panel key '{key}' but no descriptor is registered")]
-    MissingPanelDescriptor { key: String },
-
     #[error("floating group {index} has invalid bounds: {reason:?}")]
     InvalidFloatingBounds { index: usize, reason: GeometryError },
 
