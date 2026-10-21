@@ -15,9 +15,8 @@ const PIXEL_TOLERANCE: f32 = 1.0e-3;
 /// Complete UI-independent docking state.
 ///
 /// Layout is the sole owner of runtime arenas. Public access is read-only;
-/// persistent edits will be performed through DockCommand once the command
-/// layer is introduced. Flyout state is transient and kept separately from the
-/// persistent tree.
+/// external edits are performed only through Layout::apply and typed DockCommand
+/// values. Flyout state is transient and kept separately from the persistent tree.
 #[derive(Clone, Debug)]
 pub struct Layout {
     nodes: SlotMap<NodeId, Node>,
