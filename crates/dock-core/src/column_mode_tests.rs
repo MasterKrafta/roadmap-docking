@@ -298,3 +298,66 @@ fn rail_modes_can_open_flyouts_and_expanding_closes_the_stale_flyout() {
     assert_eq!(fixture.layout.flyout(), None);
     assert!(fixture.layout.validate(&metrics).is_ok());
 }
+
+
+#[test]
+fn expanding_a_rail_restores_enough_width_for_panel_minimums() {
+    let metrics = DockMetrics::default();
+    let wide_constraints = PanelConstraints::new(
+        Size::new(420.0, 60.0),
+        Size::new(460.0, 140.0),
+        Some(Size::new(700.0, 500.0)),
+        false,
+    );
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+    let (panel, panel_node) = builder.panel(key("rail-wide-panel"), wide_constraints);
+    let group = builder.tabs(vec![panel_node], 0, false);
+    let column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![group],
+        vec![1.0],
+    );
+    builder.main_area(DockSide::Left, column);
+    let mut layout = builder.build();
+
+    for mode in [ColumnMode::IconsAndLabels, ColumnMode::IconsOnly] {
+        layout
+            .apply(
+                DockCommand::SetColumnMode { column, mode },
+                &metrics,
+            )
+            .unwrap();
+        let Node::Column(value) = layout.node(column).unwrap() else {
+            panic!("expected Column node");
+        };
+        assert_eq!(
+            value.width,
+            if mode == ColumnMode::IconsOnly {
+                metrics.rail_width
+            } else {
+                metrics.min_column_width
+            },
+        );
+    }
+
+    layout
+        .apply(
+            DockCommand::SetColumnMode {
+                column,
+                mode: ColumnMode::Expanded,
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    let Node::Column(value) = layout.node(column).unwrap() else {
+        panic!("expected Column node");
+    };
+    assert!(value.width >= wide_constraints.min_size.width);
+    let rects = layout
+        .compute_rects(viewport(1200.0, 500.0), &metrics)
+        .unwrap();
+    assert_eq!(rects.panels.len(), 1);
+    assert_eq!(rects.panels[0].panel, panel);
+}
