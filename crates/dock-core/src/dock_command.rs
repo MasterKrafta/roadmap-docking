@@ -113,7 +113,10 @@ pub enum DockCommand {
     /// space and submit this command through `Layout::apply`. Gesture recognition
     /// and view-only state changes do not belong to Core.
     CollapseGroup { group: NodeId, collapsed: bool },
-    /// Change a column between expanded and icon-only modes.
+    /// Change a column between expanded, labeled-rail, and icon-only modes.
+    ///
+    /// Mode changes affect presentation geometry only; the column/group/tab tree
+    /// and active-tab selections remain intact.
     SetColumnMode { column: NodeId, mode: ColumnMode },
     /// Show a transient flyout for a group belonging to an icon rail.
     OpenFlyout { column: NodeId, group: NodeId },
