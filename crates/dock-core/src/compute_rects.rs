@@ -87,7 +87,7 @@ impl Layout {
             layout_node(self, root, area, metrics, &mut output)?;
         }
 
-        if let Some(flyout) = self.flyout {
+        if let Some(flyout) = self.flyout() {
             output.flyout = Some(compute_flyout_rect(self, flyout, viewport, &output)?);
         }
 
