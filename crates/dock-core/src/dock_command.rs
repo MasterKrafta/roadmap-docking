@@ -118,10 +118,11 @@ pub enum DockCommand {
     /// Mode changes affect presentation geometry only; the column/group/tab tree
     /// and active-tab selections remain intact.
     SetColumnMode { column: NodeId, mode: ColumnMode },
-    /// Show a transient flyout for a group belonging to an icon rail.
-    OpenFlyout { column: NodeId, group: NodeId },
-    /// Open the flyout for a specific rail icon and make that panel active.
-    OpenPanelFlyout { column: NodeId, panel: PanelId },
+    /// Show a transient flyout for a specific panel represented by a rail icon.
+    ///
+    /// The panel is selected in flyout display state only; its owning Tabs
+    /// node's active_index remains unchanged.
+    OpenFlyout { column: NodeId, panel: PanelId },
     /// Close the current transient flyout, if any.
     CloseFlyout,
     /// Set visibility of application chrome without rewriting the dock tree.
@@ -202,12 +203,11 @@ mod tests {
             DockCommand::DockFloating { group: FloatingGroupId::null(), target },
             DockCommand::CollapseGroup { group: NodeId::null(), collapsed: true },
             DockCommand::SetColumnMode { column: NodeId::null(), mode: ColumnMode::IconsOnly },
-            DockCommand::OpenFlyout { column: NodeId::null(), group: NodeId::null() },
-            DockCommand::OpenPanelFlyout { column: NodeId::null(), panel: PanelId::null() },
+            DockCommand::OpenFlyout { column: NodeId::null(), panel: PanelId::null() },
             DockCommand::CloseFlyout,
             DockCommand::SetChrome { mode: ChromeMode::Hidden },
         ];
-        assert_eq!(commands.len(), 27);
+        assert_eq!(commands.len(), 26);
     }
 
     #[cfg(feature = "serde")]
