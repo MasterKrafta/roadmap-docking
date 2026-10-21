@@ -814,3 +814,497 @@ mod tests {
         }
     }
 }
+
+
+fn logical_node(layout: &Layout, node_id: NodeId) -> String {
+    match layout.node(node_id) {
+        Some(Node::Panel(panel)) => match layout.panel_instance(panel.panel_id) {
+            Some(instance) => format!(
+                "Panel(key={:?},constraints={:?},remembered_size={:?})",
+                instance.key.as_str(),
+                instance.constraints,
+                instance.state.last_known_size()
+            ),
+            None => "Panel(missing-instance)".to_owned(),
+        },
+        Some(Node::Tabs(tabs)) => format!(
+            "Tabs(active={},collapsed={},children=[{}])",
+            tabs.active_index,
+            tabs.collapsed,
+            tabs.children
+                .iter()
+                .map(|child| logical_node(layout, *child))
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+        Some(Node::Split(split)) => format!(
+            "Split(axis={:?},ratios={:?},children=[{}])",
+            split.axis,
+            split.ratios,
+            split.children
+                .iter()
+                .map(|child| logical_node(layout, *child))
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+        Some(Node::Column(column)) => format!(
+            "Column(width={},mode={:?},ratios={:?},groups=[{}])",
+            column.width,
+            column.mode,
+            column.group_ratios,
+            column
+                .groups
+                .iter()
+                .map(|group| logical_node(layout, *group))
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+        None => "MissingNode".to_owned(),
+    }
+}
+
+/// Semantic projection of Layout: contains no NodeId, PanelId, DockAreaId or
+/// FloatingGroupId values. Runtime handle identity is intentionally not part
+/// of logical layout equivalence.
+fn logical_snapshot(layout: &Layout) -> String {
+    let mut parts = vec![format!(
+        "profile={:?};chrome={:?};canvas={:?}",
+        layout.profile(),
+        layout.chrome(),
+        layout.canvas()
+    )];
+
+    for side in [DockSide::Left, DockSide::Right] {
+        let root = layout
+            .main_area(side)
+            .map(|area| logical_node(layout, area.root))
+            .unwrap_or_else(|| "Empty".to_owned());
+        parts.push(format!("main({side:?})={root}"));
+    }
+
+    let mut floating = layout
+        .floating_groups()
+        .filter_map(|(_, group)| {
+            layout.dock_area(group.area).map(|area| {
+                (
+                    group.z_order,
+                    group.bounds,
+                    logical_node(layout, area.root),
+                )
+            })
+        })
+        .collect::<Vec<_>>();
+    floating.sort_by_key(|(z_order, _, _)| *z_order);
+    parts.push(format!("floating={floating:?}"));
+
+    let flyout = layout.flyout().map_or_else(
+        || "none".to_owned(),
+        |flyout| {
+            format!(
+                "column={},group={}",
+                logical_node(layout, flyout.column),
+                logical_node(layout, flyout.group)
+            )
+        },
+    );
+    parts.push(format!("flyout={flyout}"));
+
+    parts.join("\n")
+}
+
+fn panel_id_for_key(layout: &Layout, wanted: &str) -> PanelId {
+    layout
+        .panel_instances()
+        .find_map(|(panel_id, instance)| {
+            (instance.key.as_str() == wanted).then_some(panel_id)
+        })
+        .expect("test layout contains the requested panel key")
+}
+
+fn panel_node_for_key(layout: &Layout, wanted: &str) -> NodeId {
+    let panel_id = panel_id_for_key(layout, wanted);
+    layout
+        .nodes()
+        .find_map(|(node_id, node)| match node {
+            Node::Panel(panel) if panel.panel_id == panel_id => Some(node_id),
+            _ => None,
+        })
+        .expect("test layout contains a leaf for the requested panel key")
+}
+
+fn reordered_id_layout() -> Layout {
+    // Same logical tree and panel descriptors as create_initial_layout(), but
+    // allocate runtime instances/leaves in reverse key order.
+    let mut builder = LayoutBuilder::new(Profile::Generic);
+    let (_, history) = builder.panel(PanelKey::new("history").unwrap(), constraints());
+    let (_, properties) =
+        builder.panel(PanelKey::new("properties").unwrap(), constraints());
+    let (_, color) = builder.panel(PanelKey::new("color").unwrap(), constraints());
+    let (_, layers) = builder.panel(PanelKey::new("layers").unwrap(), constraints());
+
+    let appearance = builder.tabs(vec![layers, color], 0, false);
+    let information = builder.tabs(vec![properties, history], 0, false);
+    let root = builder.column(
+        280.0,
+        ColumnMode::Expanded,
+        vec![appearance, information],
+        vec![0.5, 0.5],
+    );
+    builder.main_area(DockSide::Right, root);
+    builder.build()
+}
+
+fn apply_and_record(
+    layout: &mut Layout,
+    journal: &mut Vec<DockCommand>,
+    command: DockCommand,
+    metrics: &DockMetrics,
+) {
+    let result = layout.apply(command.clone(), metrics);
+    assert!(
+        result.is_ok(),
+        "journal command {command:?} was rejected: {:?}",
+        result.err()
+    );
+    assert_eq!(
+        layout.validate(metrics),
+        Ok(()),
+        "Layout invalid after journal command {command:?}"
+    );
+    journal.push(command);
+}
+
+#[test]
+fn c47_logical_equivalence_ignores_runtime_id_allocation_order() {
+    let factory_layout = initial_layout(Profile::Generic);
+    let reordered_layout = reordered_id_layout();
+
+    assert_eq!(factory_layout.validate(&DockMetrics::default()), Ok(()));
+    assert_eq!(reordered_layout.validate(&DockMetrics::default()), Ok(()));
+    assert_ne!(
+        panel_id_for_key(&factory_layout, "layers"),
+        panel_id_for_key(&reordered_layout, "layers"),
+        "test setup must assign different runtime PanelIds to the same logical panel"
+    );
+    assert_ne!(
+        panel_node_for_key(&factory_layout, "layers"),
+        panel_node_for_key(&reordered_layout, "layers"),
+        "test setup must assign a different runtime leaf NodeId to the same panel key"
+    );
+    assert_eq!(
+        logical_snapshot(&factory_layout),
+        logical_snapshot(&reordered_layout)
+    );
+}
+
+#[cfg(feature = "serde")]
+#[test]
+fn c47_serialized_command_journal_replays_to_equivalent_logical_layout() {
+    let metrics = DockMetrics::default();
+    let mut recorded = sequence_layout();
+    let mut journal = Vec::new();
+
+    let initial_columns = main_columns(&recorded, DockSide::Right);
+    assert_eq!(initial_columns.len(), 2);
+    let first_column = initial_columns[0].0;
+    let first_group = initial_columns[0].1[0];
+    let second_group = initial_columns[0].1[1];
+    let other_column_group = initial_columns[1].1[0];
+    let initial_children = tab_groups(&recorded)
+        .into_iter()
+        .find(|(group, _, _, _)| *group == first_group)
+        .unwrap()
+        .1;
+    assert_eq!(initial_children.len(), 2);
+
+    let second_panel = match recorded.node(initial_children[1]).unwrap() {
+        Node::Panel(panel) => panel.panel_id,
+        _ => panic!("test tabs initially contain panel leaves"),
+    };
+    let first_panel = match recorded.node(initial_children[0]).unwrap() {
+        Node::Panel(panel) => panel.panel_id,
+        _ => panic!("test tabs initially contain panel leaves"),
+    };
+
+    apply_and_record(
+        &mut recorded,
+        &mut journal,
+        DockCommand::ActivateTab {
+            group: first_group,
+            panel: second_panel,
+        },
+        &metrics,
+    );
+    apply_and_record(
+        &mut recorded,
+        &mut journal,
+        DockCommand::ReorderTab {
+            group: first_group,
+            panel: first_panel,
+            to_index: 1,
+        },
+        &metrics,
+    );
+    apply_and_record(
+        &mut recorded,
+        &mut journal,
+        DockCommand::CollapseGroup {
+            group: other_column_group,
+            collapsed: true,
+        },
+        &metrics,
+    );
+    apply_and_record(
+        &mut recorded,
+        &mut journal,
+        DockCommand::ResizeGroups {
+            column: first_column,
+            boundary_index: 0,
+            delta: 20.0,
+            available_height: 1200.0,
+        },
+        &metrics,
+    );
+    apply_and_record(
+        &mut recorded,
+        &mut journal,
+        DockCommand::MovePanel {
+            panel: first_panel,
+            target: DropTarget::Tabs {
+                group: second_group,
+                index: 2,
+            },
+        },
+        &metrics,
+    );
+
+    // Float the one remaining tab, then mutate and dock the new floating root.
+    // The generated FloatingGroupId is recorded in the command journal too.
+    let remaining_panel_node = tab_groups(&recorded)
+        .into_iter()
+        .find(|(group, _, _, _)| *group == first_group)
+        .and_then(|(_, children, _, _)| children.first().copied())
+        .expect("source tabs retains its second panel");
+    apply_and_record(
+        &mut recorded,
+        &mut journal,
+        DockCommand::Float {
+            node: remaining_panel_node,
+            bounds: Rect::new(Point::new(45.0, 65.0), Size::new(320.0, 220.0)),
+        },
+        &metrics,
+    );
+
+    let (floating_id, floating) = recorded
+        .floating_groups()
+        .next()
+        .expect("Float created one floating window");
+    let original_origin = floating.bounds.origin;
+    apply_and_record(
+        &mut recorded,
+        &mut journal,
+        DockCommand::MoveFloating {
+            group: floating_id,
+            origin: Point::new(original_origin.x + 18.0, original_origin.y + 12.0),
+        },
+        &metrics,
+    );
+    apply_and_record(
+        &mut recorded,
+        &mut journal,
+        DockCommand::ResizeFloating {
+            group: floating_id,
+            size: Size::new(360.0, 260.0),
+        },
+        &metrics,
+    );
+    apply_and_record(
+        &mut recorded,
+        &mut journal,
+        DockCommand::RaiseFloating { group: floating_id },
+        &metrics,
+    );
+    apply_and_record(
+        &mut recorded,
+        &mut journal,
+        DockCommand::DockFloating {
+            group: floating_id,
+            target: DropTarget::Tabs {
+                group: second_group,
+                index: 3,
+            },
+        },
+        &metrics,
+    );
+    apply_and_record(
+        &mut recorded,
+        &mut journal,
+        DockCommand::SetChrome {
+            mode: ChromeMode::Hidden,
+        },
+        &metrics,
+    );
+
+    let encoded_journal =
+        serde_json::to_string(&journal).expect("DockCommand journal is serializable with serde");
+    let decoded_journal: Vec<DockCommand> = serde_json::from_str(&encoded_journal)
+        .expect("serialized DockCommand journal decodes without losing intent");
+
+    let mut replayed = sequence_layout();
+    for command in decoded_journal {
+        let result = replayed.apply(command.clone(), &metrics);
+        assert!(
+            result.is_ok(),
+            "replayed journal command {command:?} was rejected: {:?}",
+            result.err()
+        );
+        assert_eq!(
+            replayed.validate(&metrics),
+            Ok(()),
+            "replayed Layout invalid after {command:?}"
+        );
+    }
+
+    assert_eq!(recorded.version(), replayed.version());
+    assert_eq!(
+        logical_snapshot(&recorded),
+        logical_snapshot(&replayed),
+        "replay should reproduce the same logical tree and floating geometry without comparing runtime IDs"
+    );
+}
+
+#[test]
+fn c47_failed_commands_preserve_full_state_and_version() {
+    let metrics = DockMetrics::default();
+    let mut layout = sequence_layout();
+    let columns = main_columns(&layout, DockSide::Right);
+    let groups = tab_groups(&layout);
+    let column = columns[0].0;
+    let group = columns[0].1[0];
+    let children = groups
+        .iter()
+        .find(|(id, _, _, _)| *id == group)
+        .unwrap()
+        .1
+        .clone();
+    let panel_id = match layout.node(children[0]).unwrap() {
+        Node::Panel(panel) => panel.panel_id,
+        _ => panic!("test tabs contain panel leaves"),
+    };
+
+    // Set up a valid floating window so its invalid resize/move/dock commands
+    // exercise transaction rollback against a state with multiple area kinds.
+    layout
+        .apply(
+            DockCommand::Float {
+                node: children[0],
+                bounds: Rect::new(Point::new(40.0, 50.0), Size::new(320.0, 220.0)),
+            },
+            &metrics,
+        )
+        .unwrap();
+    assert_eq!(layout.validate(&metrics), Ok(()));
+    let floating_id = layout.floating_groups().next().unwrap().0;
+
+    let invalid_constraints = PanelConstraints::new(
+        Size::new(300.0, 80.0),
+        Size::new(180.0, 140.0),
+        Some(Size::new(800.0, 600.0)),
+        false,
+    );
+    let invalid_commands = vec![
+        DockCommand::OpenPanel {
+            key: PanelKey::new("c47-invalid-constraints").unwrap(),
+            constraints: invalid_constraints,
+            target: Some(DropTarget::Tabs { group, index: 0 }),
+        },
+        DockCommand::OpenPanel {
+            key: PanelKey::new("c47-invalid-index").unwrap(),
+            constraints: constraints(),
+            target: Some(DropTarget::Tabs {
+                group,
+                index: usize::MAX,
+            }),
+        },
+        DockCommand::SplitGroup {
+            group,
+            target_group: columns[0].1[1],
+            zone: DropZone::Bottom,
+            ratio: 0.0,
+        },
+        DockCommand::ResizeGroups {
+            column,
+            boundary_index: 0,
+            delta: 1.0,
+            available_height: 1.0,
+        },
+        DockCommand::ResizeColumn {
+            column,
+            width: f32::NAN,
+        },
+        DockCommand::ResizeColumnBoundary {
+            side: DockSide::Right,
+            boundary_index: usize::MAX,
+            delta: 1.0,
+        },
+        DockCommand::ResetColumnRatios {
+            column,
+            available_height: 1.0,
+        },
+        DockCommand::RestoreGroupRatios {
+            column,
+            ratios: vec![1.0],
+        },
+        DockCommand::MoveFloating {
+            group: floating_id,
+            origin: Point::new(f32::NAN, 1.0),
+        },
+        DockCommand::ResizeFloating {
+            group: floating_id,
+            size: Size::ZERO,
+        },
+        DockCommand::DockFloating {
+            group: floating_id,
+            target: DropTarget::Tabs {
+                group: NodeId::null(),
+                index: 0,
+            },
+        },
+        DockCommand::Float {
+            node: column,
+            bounds: Rect::new(Point::ZERO, Size::ZERO),
+        },
+        DockCommand::MoveGroup {
+            group: children[0],
+            column,
+            index: 0,
+        },
+        DockCommand::ClosePanel {
+            panel: PanelId::null(),
+        },
+    ];
+
+    for command in invalid_commands {
+        let before = format!("{layout:?}");
+        let version_before = layout.version();
+        let result = layout.apply(command.clone(), &metrics);
+        assert!(result.is_err(), "expected command to fail: {command:?}");
+        assert_eq!(
+            format!("{layout:?}"),
+            before,
+            "failed command changed some part of Layout: {command:?}"
+        );
+        assert_eq!(
+            layout.version(),
+            version_before,
+            "failed command advanced version: {command:?}"
+        );
+        assert_eq!(
+            layout.validate(&metrics),
+            Ok(()),
+            "rollback left Layout invalid after {command:?}"
+        );
+    }
+
+    assert!(layout.panel_instance(panel_id).is_some());
+}
