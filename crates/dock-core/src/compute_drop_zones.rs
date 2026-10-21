@@ -1339,8 +1339,10 @@ mod tests {
 
     #[test]
     fn max_columns_hides_new_column_targets_when_the_source_column_cannot_collapse() {
-        let mut metrics = DockMetrics::default();
-        metrics.max_columns = 1;
+        let metrics = DockMetrics {
+            max_columns: 1,
+            ..DockMetrics::default()
+        };
         let mut builder = LayoutBuilder::new(Profile::Photoshop);
         let (source_panel, source_node) = builder.panel(key("max-column-source"), constraints());
         let (_, other_node) = builder.panel(key("max-column-other"), constraints());
