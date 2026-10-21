@@ -2,8 +2,14 @@ use crate::{
     Axis, Column, ColumnMode, ColumnRect, ComputeRectsError, DockMetrics, DockSide, DropTarget,
     DropZone, DropZoneRect, FloatingGroupRect, FloatingResizeEdgeRect, GeometryError, GroupRect,
     Layout, LayoutRects, Node, NodeId, PanelRect, Point, Rect, ResizeEdge, Size,
-    SplitterRect, TabHeaderRect, TabStripRect, Tabs,
+    SplitterRect, TabHeaderRect, TabStripRect, Tabs, VerticalOverflow,
 };
+
+struct StackAllocation {
+    sizes: Vec<f32>,
+    content_height: f32,
+    overflows: bool,
+}
 
 impl Layout {
     /// Resolves the validated model into a snapshot of logical-pixel rectangles.
@@ -79,15 +85,22 @@ impl Layout {
 
         // Preserve deterministic back-to-front order in the geometry snapshot.
         for (id, floating) in self.floating_groups_in_paint_order() {
+            let area = self.dock_area(floating.area)
+                .ok_or(ComputeRectsError::InvalidLayout)?;
+            let bounds = clamp_floating_bounds(
+                self,
+                area.root,
+                floating.bounds,
+                viewport,
+                metrics,
+            )?;
             output.floating_groups.push(FloatingGroupRect::new(
                 id,
-                floating.bounds,
+                bounds,
                 floating.z_order,
             ));
-            push_resize_edges(id, floating.bounds, metrics, &mut output)?;
-            if let Some(area) = self.dock_area(floating.area) {
-                layout_node(self, area.root, floating.bounds, metrics, &mut output)?;
-            }
+            push_resize_edges(id, bounds, metrics, &mut output)?;
+            layout_node(self, area.root, bounds, metrics, &mut output)?;
         }
 
         Ok(output)
@@ -275,28 +288,23 @@ fn layout_column(
         if !required.is_finite() {
             return Err(ComputeRectsError::Geometry(GeometryError::ArithmeticOverflow));
         }
-        if rect.size.height < required {
-            return Err(ComputeRectsError::InsufficientSpace {
-                axis: Axis::Y,
-                available: rect.size.height,
-                required,
-            });
+        if rect.size.height + 1.0e-3 < required {
+            push_vertical_overflow(id, rect, required, output)?;
         }
         let mut y = rect.origin.y;
         for group_id in &column.groups {
-            output.groups.push(GroupRect::new(
-                *group_id,
-                Rect::new(
-                    Point::new(rect.origin.x, y),
-                    Size::new(rect.size.width, slot_height),
-                ),
-            ));
+            let group_rect = Rect::new(
+                Point::new(rect.origin.x, y),
+                Size::new(rect.size.width, slot_height),
+            );
+            group_rect.validate().map_err(ComputeRectsError::Geometry)?;
+            output.groups.push(GroupRect::new(*group_id, group_rect));
             y += slot_height;
         }
         return Ok(());
     }
 
-    let heights = allocate_stack_heights(
+    let allocation = allocate_stack_heights(
         layout,
         &column.groups,
         &column.group_ratios,
@@ -304,10 +312,13 @@ fn layout_column(
         Axis::Y,
         metrics,
     )?;
+    if allocation.overflows {
+        push_vertical_overflow(id, rect, allocation.content_height, output)?;
+    }
 
     let mut y = rect.origin.y;
     for (index, group_id) in column.groups.iter().enumerate() {
-        let height = heights[index];
+        let height = allocation.sizes[index];
         let group_rect = Rect::new(
             Point::new(rect.origin.x, y),
             Size::new(rect.size.width, height),
@@ -510,7 +521,7 @@ fn layout_split(
             Ok(())
         }
         Axis::Y => {
-            let heights = allocate_stack_heights(
+            let allocation = allocate_stack_heights(
                 layout,
                 &split.children,
                 &split.ratios,
@@ -518,11 +529,14 @@ fn layout_split(
                 Axis::Y,
                 metrics,
             )?;
+            if allocation.overflows {
+                push_vertical_overflow(id, rect, allocation.content_height, output)?;
+            }
             let mut y = rect.origin.y;
             for (index, child) in split.children.iter().enumerate() {
                 let child_rect = Rect::new(
                     Point::new(rect.origin.x, y),
-                    Size::new(rect.size.width, heights[index]),
+                    Size::new(rect.size.width, allocation.sizes[index]),
                 );
                 layout_node(layout, *child, child_rect, metrics, output)?;
                 y += heights[index];
@@ -552,55 +566,59 @@ fn allocate_stack_heights(
     available: f32,
     axis: Axis,
     metrics: &DockMetrics,
-) -> Result<Vec<f32>, ComputeRectsError> {
+) -> Result<StackAllocation, ComputeRectsError> {
     if ratios.len() != children.len() {
         return Err(ComputeRectsError::InvalidLayout);
     }
     if ratios.is_empty() {
-        return Ok(Vec::new());
+        return Ok(StackAllocation {
+            sizes: Vec::new(),
+            content_height: 0.0,
+            overflows: false,
+        });
     }
 
     let collapsed_height = metrics.collapsed_group_height.max(metrics.tab_strip_height);
     let mut collapsed = Vec::with_capacity(children.len());
-    let mut minimum_heights = Vec::with_capacity(children.len());
+    let mut minimums = Vec::with_capacity(children.len());
     for child in children {
         let is_collapsed = matches!(layout.node(*child), Some(Node::Tabs(tabs)) if tabs.collapsed);
         collapsed.push(is_collapsed);
         if is_collapsed {
-            minimum_heights.push(collapsed_height);
+            minimums.push(collapsed_height);
         } else {
-            minimum_heights.push(minimum_node_size(layout, *child, metrics)?.height);
+            minimums.push(minimum_node_size(layout, *child, metrics)?.height);
         }
     }
 
     let gap_total = metrics.splitter_thickness * children.len().saturating_sub(1) as f32;
-    let fixed_collapsed = collapsed.iter().enumerate()
-        .filter(|(_, value)| **value)
-        .map(|(index, _)| minimum_heights[index])
-        .sum::<f32>();
-    let normal_count = collapsed.iter().filter(|value| !**value).count();
-    let required = gap_total + minimum_heights.iter().sum::<f32>();
+    let required = minimums.iter().sum::<f32>() + gap_total;
     if !required.is_finite() {
         return Err(ComputeRectsError::Geometry(GeometryError::ArithmeticOverflow));
     }
+
+    // Never shrink a child below its content minimum. When the minimum layout
+    // does not fit, return those minimum sizes and let the adapter scroll the
+    // resulting content extent.
     if available < required {
-        return Err(ComputeRectsError::InsufficientSpace {
-            axis,
-            available,
-            required,
+        return Ok(StackAllocation {
+            sizes: minimums,
+            content_height: required,
+            overflows: true,
         });
     }
 
+    let normal_weights: Vec<f32> = ratios.iter().zip(&collapsed)
+        .filter_map(|(ratio, is_collapsed)| if *is_collapsed { None } else { Some(*ratio) })
+        .collect();
+    let normal_minimums: Vec<f32> = minimums.iter().zip(&collapsed)
+        .filter_map(|(minimum, is_collapsed)| if *is_collapsed { None } else { Some(*minimum) })
+        .collect();
+    let fixed_collapsed = minimums.iter().zip(&collapsed)
+        .filter_map(|(minimum, is_collapsed)| if *is_collapsed { Some(*minimum) } else { None })
+        .sum::<f32>();
     let normal_available = available - gap_total - fixed_collapsed;
-    let mut normal_weights = Vec::with_capacity(normal_count);
-    let mut normal_minimums = Vec::with_capacity(normal_count);
-    for (index, is_collapsed) in collapsed.iter().enumerate() {
-        if !is_collapsed {
-            normal_weights.push(ratios[index]);
-            normal_minimums.push(minimum_heights[index]);
-        }
-    }
-    let normal_heights = weighted_sizes(
+    let normal_sizes = weighted_sizes(
         &normal_weights,
         normal_available,
         &normal_minimums,
@@ -608,15 +626,96 @@ fn allocate_stack_heights(
     )?;
 
     let mut normal_index = 0;
-    Ok(collapsed.iter().map(|is_collapsed| {
+    let sizes = collapsed.iter().map(|is_collapsed| {
         if *is_collapsed {
             collapsed_height
         } else {
-            let height = normal_heights[normal_index];
+            let size = normal_sizes[normal_index];
             normal_index += 1;
-            height
+            size
         }
-    }).collect())
+    }).collect();
+
+    Ok(StackAllocation {
+        sizes,
+        content_height: available,
+        overflows: false,
+    })
+}
+
+fn push_vertical_overflow(
+    owner: NodeId,
+    viewport: Rect,
+    content_height: f32,
+    output: &mut LayoutRects,
+) -> Result<(), ComputeRectsError> {
+    if !content_height.is_finite() {
+        return Err(ComputeRectsError::Geometry(GeometryError::ArithmeticOverflow));
+    }
+    if content_height <= viewport.size.height + 1.0e-3 {
+        return Ok(());
+    }
+    let content_extent = Rect::new(
+        viewport.origin,
+        Size::new(viewport.size.width, content_height),
+    );
+    content_extent.validate().map_err(ComputeRectsError::Geometry)?;
+    output.vertical_overflow.push(VerticalOverflow::new(
+        owner,
+        viewport,
+        content_extent,
+    ));
+    Ok(())
+}
+
+fn clamp_floating_bounds(
+    layout: &Layout,
+    root: NodeId,
+    bounds: Rect,
+    client_area: Rect,
+    metrics: &DockMetrics,
+) -> Result<Rect, ComputeRectsError> {
+    bounds.validate_non_empty().map_err(ComputeRectsError::Geometry)?;
+    client_area.validate_non_empty().map_err(ComputeRectsError::Geometry)?;
+    let minimum = minimum_node_size(layout, root, metrics)?;
+    if minimum.width > client_area.size.width {
+        return Err(ComputeRectsError::InsufficientSpace {
+            axis: Axis::X,
+            available: client_area.size.width,
+            required: minimum.width,
+        });
+    }
+    if minimum.height > client_area.size.height {
+        return Err(ComputeRectsError::InsufficientSpace {
+            axis: Axis::Y,
+            available: client_area.size.height,
+            required: minimum.height,
+        });
+    }
+
+    // Geometry is clamped only in the returned snapshot. Persistent model bounds
+    // are untouched; an oversized stored window is fit to the client area only
+    // when doing so still respects its subtree's minimum size.
+    let width = bounds.size.width.max(minimum.width).min(client_area.size.width);
+    let height = bounds.size.height.max(minimum.height).min(client_area.size.height);
+    if width < minimum.width || height < minimum.height {
+        return Err(ComputeRectsError::InsufficientSpace {
+            axis: if width < minimum.width { Axis::X } else { Axis::Y },
+            available: if width < minimum.width { width } else { height },
+            required: if width < minimum.width { minimum.width } else { minimum.height },
+        });
+    }
+    let client_right = client_area.checked_right().map_err(ComputeRectsError::Geometry)?;
+    let client_bottom = client_area.checked_bottom().map_err(ComputeRectsError::Geometry)?;
+    let max_x = client_right - width;
+    let max_y = client_bottom - height;
+    let origin = Point::new(
+        bounds.origin.x.clamp(client_area.origin.x, max_x),
+        bounds.origin.y.clamp(client_area.origin.y, max_y),
+    );
+    let result = Rect::new(origin, Size::new(width, height));
+    result.validate_non_empty().map_err(ComputeRectsError::Geometry)?;
+    Ok(result)
 }
 
 fn weighted_sizes(
