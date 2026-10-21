@@ -103,24 +103,29 @@ impl Layout {
             }
         }
 
-        // Preserve deterministic back-to-front order in the geometry snapshot.
-        for (id, floating) in self.floating_groups_in_paint_order() {
-            let area = self.dock_area(floating.area)
-                .ok_or(ComputeRectsError::InvalidLayout)?;
-            let bounds = clamp_floating_bounds(
-                self,
-                area.root,
-                floating.bounds,
-                viewport,
-                metrics,
-            )?;
-            output.floating_groups.push(FloatingGroupRect::new(
-                id,
-                bounds,
-                floating.z_order,
-            ));
-            push_resize_edges(id, bounds, metrics, &mut output)?;
-            layout_node(self, area.root, bounds, metrics, &mut output)?;
+        // Floating windows are part of the dock chrome presentation too.
+        // Their model bounds and roots stay in Layout while hidden, but neither
+        // window geometry nor child-panel geometry is emitted in hidden modes.
+        if self.chrome().dock_visible() {
+            // Preserve deterministic back-to-front order in the geometry snapshot.
+            for (id, floating) in self.floating_groups_in_paint_order() {
+                let area = self.dock_area(floating.area)
+                    .ok_or(ComputeRectsError::InvalidLayout)?;
+                let bounds = clamp_floating_bounds(
+                    self,
+                    area.root,
+                    floating.bounds,
+                    viewport,
+                    metrics,
+                )?;
+                output.floating_groups.push(FloatingGroupRect::new(
+                    id,
+                    bounds,
+                    floating.z_order,
+                ));
+                push_resize_edges(id, bounds, metrics, &mut output)?;
+                layout_node(self, area.root, bounds, metrics, &mut output)?;
+            }
         }
 
         Ok(output)
