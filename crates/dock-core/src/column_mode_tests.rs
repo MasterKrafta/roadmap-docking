@@ -275,7 +275,7 @@ fn rail_modes_can_open_flyouts_and_expanding_closes_the_stale_flyout() {
         .apply(
             DockCommand::OpenFlyout {
                 column: fixture.column,
-                group: fixture.groups[0],
+                panel: fixture.panels[0],
             },
             &metrics,
         )
@@ -477,7 +477,7 @@ fn crossing_a_rail_group_boundary_places_the_same_panel_in_a_new_group() {
 }
 
 #[test]
-fn clicking_a_rail_icon_activates_its_panel_and_opens_the_group_flyout() {
+fn clicking_a_rail_icon_opens_its_flyout_without_changing_active_tab() {
     let metrics = DockMetrics::default();
     let mut fixture = fixture();
     fixture.layout.apply(
@@ -486,16 +486,17 @@ fn clicking_a_rail_icon_activates_its_panel_and_opens_the_group_flyout() {
     ).unwrap();
     let panel = fixture.panels[0];
     fixture.layout.apply(
-        DockCommand::OpenPanelFlyout { column: fixture.column, panel },
+        DockCommand::OpenFlyout { column: fixture.column, panel },
         &metrics,
     ).unwrap();
 
     let Node::Tabs(tabs) = fixture.layout.node(fixture.groups[0]).unwrap() else {
         panic!("expected source Tabs group");
     };
-    assert_eq!(tabs.active_index, 0);
+    assert_eq!(tabs.active_index, 1, "opening a flyout must not change the persistent active tab");
     assert_eq!(fixture.layout.flyout().unwrap().column, fixture.column);
     assert_eq!(fixture.layout.flyout().unwrap().group, fixture.groups[0]);
+    assert_eq!(fixture.layout.flyout().unwrap().panel, panel);
     assert!(fixture.layout.validate(&metrics).is_ok());
 }
 
@@ -529,6 +530,7 @@ fn reopening_a_singleton_from_the_window_menu_activates_it_and_opens_rail_flyout
     assert_eq!(tabs.active_index, 0);
     assert_eq!(fixture.layout.panel_instances().count(), panel_count);
     assert_eq!(fixture.layout.flyout().unwrap().group, fixture.groups[0]);
+    assert_eq!(fixture.layout.flyout().unwrap().panel, fixture.panels[0]);
 
     let version = fixture.layout.version();
     fixture.layout.apply(
@@ -567,10 +569,11 @@ fn nested_generic_rail_groups_can_open_flyouts() {
     let mut layout = builder.build();
 
     layout.apply(
-        DockCommand::OpenPanelFlyout { column, panel },
+        DockCommand::OpenFlyout { column, panel },
         &metrics,
     ).unwrap();
 
     assert_eq!(layout.flyout().unwrap().group, group);
+    assert_eq!(layout.flyout().unwrap().panel, panel);
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
