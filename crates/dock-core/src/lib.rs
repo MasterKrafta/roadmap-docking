@@ -146,3 +146,5 @@ mod drag_drop_resolution;
 mod command_sequence_tests;
 #[cfg(test)]
 mod collapse_group_tests;
+#[cfg(test)]
+mod column_mode_tests;
