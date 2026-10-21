@@ -14,7 +14,8 @@ struct StackAllocation {
 impl Layout {
     /// Resolves the validated model into a snapshot of logical-pixel rectangles.
     ///
-    /// Column widths come from the model (or rail width for IconsOnly columns).
+    /// Column widths come from the model for Expanded columns and from the
+    /// presentation metrics for the two rail modes.
     /// The Canvas receives the remaining horizontal space. If that remainder is
     /// below min_canvas_width, computation fails instead of silently compressing
     /// columns or the Canvas. Vertical content that cannot fit is reported with
@@ -147,6 +148,7 @@ fn preferred_width(
 fn effective_column_width(column: &Column, metrics: &DockMetrics) -> f32 {
     match column.mode {
         ColumnMode::Expanded => column.width,
+        ColumnMode::IconsAndLabels => metrics.min_column_width,
         ColumnMode::IconsOnly => metrics.rail_width,
     }
 }
@@ -208,11 +210,15 @@ fn minimum_node_size(
         }
         Node::Column(column) => {
             let width = effective_column_width(column, metrics);
-            if column.mode == ColumnMode::IconsOnly {
+            if column.mode.is_rail() {
+                let slot_count = layout
+                    .column_display_order(id)
+                    .map_err(|_| ComputeRectsError::InvalidLayout)?
+                    .len();
                 Size::new(
                     width,
                     metrics.collapsed_group_height.max(metrics.tab_strip_height)
-                        * column.groups.len() as f32,
+                        * slot_count as f32,
                 )
             } else {
                 let mut height = 0.0_f32;
@@ -300,26 +306,50 @@ fn layout_column(
         return Ok(());
     }
 
-    // An icon rail exposes one fixed hit target per group, not tab strips or
-    // panel content. The model's expanded width remains untouched.
-    if column.mode == ColumnMode::IconsOnly {
+    // Rail modes flatten tabs into fixed-height panel entries. Their order is
+    // canonical: groups top-to-bottom, then tabs inside each group left-to-right.
+    // Only geometry changes; the underlying Tabs/Column tree remains untouched.
+    if column.mode.is_rail() {
         let slot_height = metrics.collapsed_group_height.max(metrics.tab_strip_height);
-        let required = slot_height * column.groups.len() as f32;
+        let display_order = layout
+            .column_display_order(id)
+            .map_err(|_| ComputeRectsError::InvalidLayout)?;
+        let required = slot_height * display_order.len() as f32;
         if !required.is_finite() {
             return Err(ComputeRectsError::Geometry(GeometryError::ArithmeticOverflow));
         }
         if rect.size.height < required {
             push_vertical_overflow(id, rect, required, output)?;
         }
+
         let mut y = rect.origin.y;
         for group_id in &column.groups {
-            let group_rect = Rect::new(
-                Point::new(rect.origin.x, y),
-                Size::new(rect.size.width, slot_height),
-            );
-            group_rect.validate().map_err(ComputeRectsError::Geometry)?;
-            output.groups.push(GroupRect::new(*group_id, group_rect));
-            y += slot_height;
+            let group_start = y;
+            let mut item_count = 0usize;
+            for item in display_order.iter().filter(|item| item.group == *group_id) {
+                let item_rect = Rect::new(
+                    Point::new(rect.origin.x, y),
+                    Size::new(rect.size.width, slot_height),
+                );
+                item_rect.validate().map_err(ComputeRectsError::Geometry)?;
+                output.tab_headers.push(TabHeaderRect::new(
+                    item.group,
+                    item.panel,
+                    item.tab_index,
+                    item_rect,
+                ));
+                y += slot_height;
+                item_count += 1;
+            }
+
+            if item_count > 0 {
+                let group_rect = Rect::new(
+                    Point::new(rect.origin.x, group_start),
+                    Size::new(rect.size.width, slot_height * item_count as f32),
+                );
+                group_rect.validate().map_err(ComputeRectsError::Geometry)?;
+                output.groups.push(GroupRect::new(*group_id, group_rect));
+            }
         }
         return Ok(());
     }
