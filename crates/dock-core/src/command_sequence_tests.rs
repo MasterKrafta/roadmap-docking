@@ -578,6 +578,11 @@ fn valid_commands(
 
     for (_, source_groups, _, _, _) in &columns {
         for source_group in source_groups {
+            // Generic columns may contain a Split node after a vertical
+            // SplitGroup command. MoveGroup deliberately accepts Tabs only.
+            if !matches!(layout.node(*source_group), Some(Node::Tabs(_))) {
+                continue;
+            }
             for (target_column, target_groups, _, _, _) in &columns {
                 for index in 0..=target_groups.len() {
                     commands.push(DockCommand::MoveGroup {
@@ -598,8 +603,11 @@ fn valid_commands(
             continue;
         }
         for source in owned_groups {
+            if !matches!(layout.node(*source), Some(Node::Tabs(_))) {
+                continue;
+            }
             for target in owned_groups {
-                if source == target {
+                if source == target || !matches!(layout.node(*target), Some(Node::Tabs(_))) {
                     continue;
                 }
                 for zone in [DropZone::Top, DropZone::Bottom] {
