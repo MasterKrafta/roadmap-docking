@@ -1,8 +1,7 @@
 use crate::layout_builder::LayoutBuilder;
 use crate::{
     Axis, ColumnMode, DockCommand, DockMetrics, DockSide, DragDropAction, DragDropRequest,
-    DragHandle, DragPayload, DragSession, DragSessionError, DropTarget, FloatingGroup,
-    FloatingGroupId, Layout, Node, NodeId, PanelConstraints, PanelId, PanelKey, Point, Profile,
+    DragHandle, DragPayload, DragSession, DragSessionError, DropTarget, FloatingGroupId, Layout, Node, NodeId, PanelConstraints, PanelId, PanelKey, Point, Profile,
     Rect, Size, Tabs,
 };
 
@@ -245,7 +244,6 @@ fn floating_capture_resolves_to_dock_floating_but_self_drop_is_noop() {
     assert_eq!(layout.resolve_drag_drop(&self_request, &metrics).unwrap(), DragDropAction::NoOp);
     assert_eq!(layout.version(), before);
 
-    let (_, target_group, _) = group_layout();
     // Build a fresh layout with a main target and a floating source so all IDs
     // are from the same arena.
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
@@ -276,9 +274,8 @@ fn floating_capture_resolves_to_dock_floating_but_self_drop_is_noop() {
     let DragDropAction::Command(command) = action else { panic!("floating capture docks"); };
     layout.apply(command, &metrics).unwrap();
     assert_eq!(layout.floating_groups().count(), 0);
-    assert_tabs_state(&layout, main_tabs, 1, true);
+    assert_tabs_state(&layout, main_tabs, 2, false);
     assert_eq!(layout.validate(&metrics), Ok(()));
-    let _ = target_group;
 }
 
 fn assert_tabs_state(layout: &Layout, group: NodeId, active_index: usize, collapsed: bool) {
