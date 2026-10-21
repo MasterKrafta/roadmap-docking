@@ -8,6 +8,7 @@ pub mod chrome_mode;
 pub mod column;
 pub mod column_mode;
 pub mod command_error;
+pub(crate) mod command_application;
 pub mod command_outcome;
 pub mod command_value;
 pub mod dock_area;
