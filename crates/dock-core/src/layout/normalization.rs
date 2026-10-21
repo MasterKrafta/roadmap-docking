@@ -93,19 +93,24 @@ impl Layout {
         // Flyouts are transient. If normalization removed or changed their
         // target, close the flyout instead of retaining stale runtime handles.
         let keep_flyout = self.flyout.is_some_and(|flyout| {
-            matches!(
-                self.nodes.get(flyout.column),
-                Some(Node::Column(column))
-                    if column.mode.is_rail()
-                        && column.groups.iter().any(|root| self.is_descendant_or_same(*root, flyout.group))
-                        && matches!(
-                            self.nodes.get(flyout.group),
-                            Some(Node::Tabs(tabs)) if tabs.children.iter().any(|child| matches!(
-                                self.nodes.get(*child),
-                                Some(Node::Panel(panel)) if panel.panel_id == flyout.panel
-                            ))
-                        )
-            )
+            let belongs_to_main_dock = [DockSide::Left, DockSide::Right]
+                .into_iter()
+                .filter_map(|side| self.main_area(side).map(|area| area.root))
+                .any(|root| self.is_descendant_or_same(root, flyout.column));
+            belongs_to_main_dock
+                && matches!(
+                    self.nodes.get(flyout.column),
+                    Some(Node::Column(column))
+                        if column.mode.is_rail()
+                            && column.groups.iter().any(|root| self.is_descendant_or_same(*root, flyout.group))
+                            && matches!(
+                                self.nodes.get(flyout.group),
+                                Some(Node::Tabs(tabs)) if tabs.children.iter().any(|child| matches!(
+                                    self.nodes.get(*child),
+                                    Some(Node::Panel(panel)) if panel.panel_id == flyout.panel
+                                ))
+                            )
+                )
         });
         if !keep_flyout {
             self.flyout = None;
