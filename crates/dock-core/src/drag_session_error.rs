@@ -9,6 +9,10 @@ pub enum DragSessionError {
     NoActiveGesture,
     #[error("a drop target can only be assigned while dragging")]
     NotDragging,
+    #[error("the drag handle does not match the payload kind")]
+    PayloadHandleMismatch,
+    #[error("a floating title drag moves the window and cannot accept a dock target")]
+    NotDockingDrag,
     #[error("an active gesture cannot be reset before it is dropped or cancelled")]
     CannotResetActiveGesture,
     #[error("pointer coordinates must be finite")]
