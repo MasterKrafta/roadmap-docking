@@ -4458,10 +4458,29 @@ mod tests {
     fn c44_stale_horizontal_drop_at_column_limit_is_rejected_atomically() {
         let metrics = DockMetrics::default();
         let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+        let mut columns = Vec::new();
         let mut target_groups = Vec::new();
-        let mut target_columns = Vec::new();
 
-        for index in 0..metrics.max_columns {
+        let (_, source_panel) = builder.panel(
+            PanelKey::new("c44-stale-source").unwrap(),
+            descriptors()[0].1,
+        );
+        let source_group = builder.tabs(vec![source_panel], 0, false);
+
+        let (_, sibling_panel) = builder.panel(
+            PanelKey::new("c44-stale-sibling").unwrap(),
+            descriptors()[0].1,
+        );
+        let sibling_group = builder.tabs(vec![sibling_panel], 0, false);
+        let first_column = builder.column(
+            metrics.default_column_width,
+            crate::ColumnMode::Expanded,
+            vec![source_group, sibling_group],
+            vec![0.5, 0.5],
+        );
+        columns.push(first_column);
+
+        for index in 1..metrics.max_columns {
             let (_, panel) = builder.panel(
                 PanelKey::new(format!("c44-full-panel-{index}")).unwrap(),
                 descriptors()[0].1,
@@ -4474,25 +4493,22 @@ mod tests {
                 vec![1.0],
             );
             target_groups.push(group);
-            target_columns.push(column);
+            columns.push(column);
         }
-        let root = builder.split(Axis::X, target_columns, vec![1.0 / metrics.max_columns as f32; metrics.max_columns]);
-        builder.main_area(DockSide::Right, root);
 
-        let (_, source_panel) = builder.panel(PanelKey::new("c44-stale-source").unwrap(), descriptors()[0].1);
-        let source_group = builder.tabs(vec![source_panel], 0, false);
-        let source_column = builder.column(
-            metrics.default_column_width,
-            crate::ColumnMode::Expanded,
-            vec![source_group],
-            vec![1.0],
+        let root = builder.split(
+            Axis::X,
+            columns.clone(),
+            vec![1.0 / metrics.max_columns as f32; metrics.max_columns],
         );
-        builder.main_area(DockSide::Left, source_column);
+        builder.main_area(DockSide::Right, root);
 
         let mut layout = builder.build();
         assert_eq!(layout.validate(&metrics), Ok(()));
         let before = format!("{layout:?}");
 
+        // The source column retains sibling_group, so this horizontal move
+        // would leave max_columns + 1 nonempty columns in the final layout.
         let error = layout.apply(
             DockCommand::SplitGroup {
                 group: source_group,
