@@ -1,9 +1,15 @@
+use std::collections::{HashMap, HashSet};
+
 use slotmap::SlotMap;
 
 use crate::{
-    CanvasState, ChromeMode, DockArea, DockAreaId, DockSide, FloatingGroup, FloatingGroupId,
-    FlyoutState, Node, NodeId, PanelId, PanelInstance, Profile,
+    Axis, CanvasState, ChromeMode, Column, ColumnMode, DockArea, DockAreaId, DockAreaKind,
+    DockMetrics, DockSide, FloatingGroup, FloatingGroupId, FlyoutState, GeometryError, Layout as
+    LayoutAlias, Node, NodeId, Panel, PanelId, PanelInstance, Profile, Split, Tabs, ValidationError,
 };
+
+const RATIO_TOLERANCE: f32 = 1.0e-4;
+const PIXEL_TOLERANCE: f32 = 1.0e-3;
 
 /// Complete UI-independent docking state.
 ///
@@ -80,10 +86,7 @@ impl Layout {
 
     /// Returns the main area for a side, if one exists.
     pub fn main_area(&self, side: DockSide) -> Option<&DockArea> {
-        let index = match side {
-            DockSide::Left => 0,
-            DockSide::Right => 1,
-        };
+        let index = side_index(side);
         self.main_areas[index].and_then(|id| self.dock_areas.get(id))
     }
 
@@ -102,6 +105,430 @@ impl Layout {
 
     pub fn floating_groups(&self) -> impl Iterator<Item = (FloatingGroupId, &FloatingGroup)> {
         self.floating_groups.iter()
+    }
+
+    /// Validates the entire model and returns every detected issue.
+    ///
+    /// Metrics are supplied explicitly so callers and tests use the same
+    /// thresholds as the core algorithms. An empty layout is valid: the canvas
+    /// always exists, while empty main dock areas are represented by None.
+    pub fn validate(&self, metrics: &DockMetrics) -> Result<(), Vec<ValidationError>> {
+        let mut errors = Vec::new();
+        let metrics_result = metrics.validate();
+        if let Err(reason) = metrics_result {
+            errors.push(ValidationError::InvalidMetrics { reason });
+        }
+        let metrics_are_valid = metrics_result.is_ok();
+
+        if let Err(reason) = self.canvas.validate() {
+            errors.push(ValidationError::InvalidCanvas {
+                reason: geometry_error_reason(reason),
+            });
+        }
+        if metrics_are_valid {
+            if let Some(bounds) = self.canvas.last_known_bounds()
+                && bounds.size.width + PIXEL_TOLERANCE < metrics.min_canvas_width
+            {
+                errors.push(ValidationError::InvalidCanvas {
+                    reason: "canvas width is below min_canvas_width",
+                });
+            }
+        }
+
+        let mut panel_placements: HashMap<PanelId, (NodeId, usize)> = HashMap::new();
+
+        for (node_id, node) in &self.nodes {
+            match node {
+                Node::Split(split) => {
+                    if split.children.len() < 2 {
+                        errors.push(ValidationError::InvalidSplit {
+                            node: node_id,
+                            reason: "must contain at least two children",
+                        });
+                    }
+                    for reason in ratio_issues(&split.ratios, split.children.len()) {
+                        errors.push(ValidationError::InvalidSplit {
+                            node: node_id,
+                            reason,
+                        });
+                    }
+                }
+                Node::Tabs(tabs) => {
+                    if tabs.children.is_empty() {
+                        errors.push(ValidationError::InvalidTabs {
+                            node: node_id,
+                            reason: "must contain at least one child",
+                        });
+                    }
+                    if tabs.active_index >= tabs.children.len() {
+                        errors.push(ValidationError::InvalidTabs {
+                            node: node_id,
+                            reason: "active_index is outside children",
+                        });
+                    }
+                    if self.profile == Profile::Photoshop {
+                        for child in &tabs.children {
+                            if matches!(self.nodes.get(*child), Some(Node::Panel(_))) {
+                                continue;
+                            }
+                            if self.nodes.contains_key(*child) {
+                                errors.push(ValidationError::InvalidTabs {
+                                    node: node_id,
+                                    reason: "Photoshop Tabs children must be Panel nodes",
+                                });
+                            }
+                        }
+                    }
+                }
+                Node::Panel(panel) => {
+                    if !self.panel_instances.contains_key(panel.panel_id) {
+                        errors.push(ValidationError::MissingPanelInstance {
+                            node: node_id,
+                            panel: panel.panel_id,
+                        });
+                    }
+                    if let Some((first_node, count)) = panel_placements.get_mut(&panel.panel_id) {
+                        *count += 1;
+                        errors.push(ValidationError::DuplicatePanelPlacement {
+                            panel: panel.panel_id,
+                            first_node: *first_node,
+                            second_node: node_id,
+                        });
+                    } else {
+                        panel_placements.insert(panel.panel_id, (node_id, 1));
+                    }
+                }
+                Node::Column(column) => {
+                    if !column.width.is_finite() {
+                        errors.push(ValidationError::InvalidColumn {
+                            node: node_id,
+                            reason: "width must be finite",
+                        });
+                    } else if column.width <= 0.0 {
+                        errors.push(ValidationError::InvalidColumn {
+                            node: node_id,
+                            reason: "width must be positive",
+                        });
+                    } else if metrics_are_valid {
+                        match column.mode {
+                            ColumnMode::Expanded
+                                if column.width + PIXEL_TOLERANCE
+                                    < metrics.min_column_width =>
+                            {
+                                errors.push(ValidationError::InvalidColumn {
+                                    node: node_id,
+                                    reason: "expanded width is below min_column_width",
+                                });
+                            }
+                            ColumnMode::IconsOnly
+                                if (column.width - metrics.rail_width).abs()
+                                    > PIXEL_TOLERANCE =>
+                            {
+                                errors.push(ValidationError::InvalidColumn {
+                                    node: node_id,
+                                    reason: "IconsOnly width must equal rail_width",
+                                });
+                            }
+                            _ => {}
+                        }
+                    }
+
+                    if column.groups.is_empty() {
+                        errors.push(ValidationError::InvalidColumn {
+                            node: node_id,
+                            reason: "must contain at least one group before normalization",
+                        });
+                    }
+                    for reason in ratio_issues(&column.group_ratios, column.groups.len()) {
+                        errors.push(ValidationError::InvalidColumn {
+                            node: node_id,
+                            reason,
+                        });
+                    }
+                    if self.profile == Profile::Photoshop {
+                        for group in &column.groups {
+                            if matches!(self.nodes.get(*group), Some(Node::Tabs(_))) {
+                                continue;
+                            }
+                            if self.nodes.contains_key(*group) {
+                                errors.push(ValidationError::InvalidColumn {
+                                    node: node_id,
+                                    reason: "Photoshop Column groups must be Tabs nodes",
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut singleton_by_key: HashMap<crate::PanelKey, (PanelId, bool)> = HashMap::new();
+        for (panel_id, instance) in &self.panel_instances {
+            if let Err(reason) = instance.validate() {
+                errors.push(ValidationError::InvalidPanelInstance {
+                    panel: panel_id,
+                    reason,
+                });
+            }
+            if !panel_placements.contains_key(&panel_id) {
+                errors.push(ValidationError::UnplacedPanelInstance { panel: panel_id });
+            }
+
+            let key = instance.key.clone();
+            let singleton = instance.constraints.singleton;
+            if let Some((first_id, first_singleton)) = singleton_by_key.get(&key) {
+                if singleton || *first_singleton {
+                    errors.push(ValidationError::DuplicateSingletonPanel {
+                        key,
+                        first: *first_id,
+                        second: panel_id,
+                    });
+                }
+            } else {
+                singleton_by_key.insert(key, (panel_id, singleton));
+            }
+        }
+
+        // Validate area records and discover the only legal entry points into
+        // the tree: registered main sides and floating groups with a floating area.
+        let mut registered_areas = HashSet::new();
+        let mut roots = Vec::new();
+        let mut photoshop_main_columns = 0usize;
+
+        for (area_id, area) in &self.dock_areas {
+            if let Err(reason) = area.validate_metadata() {
+                errors.push(ValidationError::InvalidDockArea {
+                    area: area_id,
+                    reason,
+                });
+            }
+        }
+
+        for (side, index) in [(DockSide::Left, 0usize), (DockSide::Right, 1usize)] {
+            let Some(area_id) = self.main_areas[index] else {
+                continue;
+            };
+            if !registered_areas.insert(area_id) {
+                errors.push(ValidationError::InvalidMainArea {
+                    area: area_id,
+                    side,
+                    reason: "the same DockAreaId is assigned to more than one main side",
+                });
+            }
+
+            let Some(area) = self.dock_areas.get(area_id) else {
+                errors.push(ValidationError::InvalidMainArea {
+                    area: area_id,
+                    side,
+                    reason: "references a missing DockAreaId",
+                });
+                continue;
+            };
+
+            if area.kind != DockAreaKind::Main {
+                errors.push(ValidationError::InvalidMainArea {
+                    area: area_id,
+                    side,
+                    reason: "main side must reference a Main DockArea",
+                });
+            }
+            if area.side != Some(side) {
+                errors.push(ValidationError::InvalidMainArea {
+                    area: area_id,
+                    side,
+                    reason: "DockArea side does not match its main-area slot",
+                });
+            }
+
+            if self.nodes.contains_key(area.root) {
+                roots.push(area.root);
+                if self.profile == Profile::Photoshop
+                    && area.kind == DockAreaKind::Main
+                    && area.side == Some(side)
+                {
+                    photoshop_main_columns +=
+                        validate_photoshop_main_root(&self.nodes, area_id, area.root, &mut errors);
+                }
+            } else {
+                errors.push(ValidationError::MissingNode {
+                    owner: None,
+                    missing: area.root,
+                });
+            }
+        }
+
+        let mut groups_by_area: HashMap<DockAreaId, Vec<FloatingGroupId>> = HashMap::new();
+        let mut groups_by_z: HashMap<i32, FloatingGroupId> = HashMap::new();
+
+        for (group_id, group) in &self.floating_groups {
+            if let Err(reason) = group.validate() {
+                errors.push(ValidationError::InvalidFloatingGroup {
+                    group: group_id,
+                    reason: match reason {
+                        GeometryError::NonFinite => "bounds contain a non-finite value",
+                        GeometryError::NegativeDimension => "bounds dimensions must not be negative",
+                        GeometryError::NonPositiveDimension => "bounds must have positive dimensions",
+                        GeometryError::ArithmeticOverflow => "bounds edges overflow",
+                        GeometryError::InconsistentConstraints => "invalid bounds",
+                    },
+                });
+            }
+
+            if let Some(first_id) = groups_by_z.insert(group.z_order, group_id) {
+                errors.push(ValidationError::DuplicateFloatingZOrder {
+                    first: first_id,
+                    second: group_id,
+                    z_order: group.z_order,
+                });
+            }
+
+            let Some(area) = self.dock_areas.get(group.area) else {
+                errors.push(ValidationError::InvalidFloatingGroup {
+                    group: group_id,
+                    reason: "references a missing DockAreaId",
+                });
+                continue;
+            };
+            if area.kind != DockAreaKind::Floating {
+                errors.push(ValidationError::InvalidFloatingGroup {
+                    group: group_id,
+                    reason: "must reference a Floating DockArea",
+                });
+                continue;
+            }
+
+            registered_areas.insert(group.area);
+            groups_by_area.entry(group.area).or_default().push(group_id);
+            if self.nodes.contains_key(area.root) {
+                roots.push(area.root);
+                if self.profile == Profile::Photoshop {
+                    validate_photoshop_floating_root(
+                        &self.nodes,
+                        group_id,
+                        area.root,
+                        &mut errors,
+                    );
+                }
+            } else {
+                errors.push(ValidationError::MissingNode {
+                    owner: None,
+                    missing: area.root,
+                });
+            }
+        }
+
+        for (area_id, group_ids) in &groups_by_area {
+            if group_ids.len() > 1 {
+                errors.push(ValidationError::FloatingAreaReferencedMoreThanOnce {
+                    area: *area_id,
+                    first: group_ids[0],
+                    second: group_ids[1],
+                });
+            }
+        }
+
+        for (area_id, _) in &self.dock_areas {
+            if !registered_areas.contains(&area_id) {
+                errors.push(ValidationError::UnreferencedDockArea { area: area_id });
+            }
+        }
+
+        if metrics_are_valid && self.profile == Profile::Photoshop
+            && photoshop_main_columns > metrics.max_columns
+        {
+            errors.push(ValidationError::TooManyColumns {
+                actual: photoshop_main_columns,
+                max: metrics.max_columns,
+            });
+        }
+
+        if let Some(flyout) = self.flyout {
+            match self.nodes.get(flyout.column) {
+                None => errors.push(ValidationError::InvalidFlyout {
+                    column: flyout.column,
+                    group: flyout.group,
+                    reason: "references a missing column node",
+                }),
+                Some(Node::Column(column)) => {
+                    if column.mode != ColumnMode::IconsOnly {
+                        errors.push(ValidationError::InvalidFlyout {
+                            column: flyout.column,
+                            group: flyout.group,
+                            reason: "flyout column must be in IconsOnly mode",
+                        });
+                    }
+                    if !column.groups.contains(&flyout.group) {
+                        errors.push(ValidationError::InvalidFlyout {
+                            column: flyout.column,
+                            group: flyout.group,
+                            reason: "group is not a member of the referenced column",
+                        });
+                    }
+                }
+                Some(_) => errors.push(ValidationError::InvalidFlyout {
+                    column: flyout.column,
+                    group: flyout.group,
+                    reason: "column reference does not point to a Column node",
+                }),
+            }
+
+            if !self.nodes.contains_key(flyout.group) {
+                errors.push(ValidationError::InvalidFlyout {
+                    column: flyout.column,
+                    group: flyout.group,
+                    reason: "references a missing group node",
+                });
+            }
+        }
+
+        // Count all tree-edge references to find reused children, then mark
+        // reachability only from registered area roots. These are deliberately
+        // separate passes: cycles and missing links in an orphaned component
+        // must still be reported instead of hidden by an early return.
+        let mut incoming: HashMap<NodeId, usize> = HashMap::new();
+        for root in &roots {
+            *incoming.entry(*root).or_default() += 1;
+        }
+        let mut graph_visited = HashSet::new();
+        let mut visiting = HashSet::new();
+        for (node_id, _) in &self.nodes {
+            inspect_graph(
+                &self.nodes,
+                node_id,
+                None,
+                &mut graph_visited,
+                &mut visiting,
+                &mut incoming,
+                &mut errors,
+            );
+        }
+
+        for (node_id, _) in &self.nodes {
+            if let Some(references) = incoming.get(&node_id)
+                && *references > 1
+            {
+                errors.push(ValidationError::MultipleParents {
+                    node: node_id,
+                    references: *references,
+                });
+            }
+        }
+
+        let mut reachable = HashSet::new();
+        for root in &roots {
+            mark_reachable(&self.nodes, *root, &mut reachable);
+        }
+        for (node_id, _) in &self.nodes {
+            if !reachable.contains(&node_id) {
+                errors.push(ValidationError::UnreachableNode { node: node_id });
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
     }
 
     /// Internal constructor used by pure core factories and loading/migration.
@@ -135,11 +562,229 @@ impl Layout {
     }
 }
 
+fn side_index(side: DockSide) -> usize {
+    match side {
+        DockSide::Left => 0,
+        DockSide::Right => 1,
+    }
+}
+
+fn ratio_issues(ratios: &[f32], expected_len: usize) -> Vec<&'static str> {
+    let mut issues = Vec::new();
+    if ratios.len() != expected_len {
+        issues.push("ratio count must match child/group count");
+    }
+    if ratios.iter().any(|ratio| !ratio.is_finite() || *ratio < 0.0) {
+        issues.push("ratios must be finite and non-negative");
+    }
+    let sum: f32 = ratios.iter().copied().sum();
+    if !sum.is_finite() || (sum - 1.0).abs() > RATIO_TOLERANCE {
+        issues.push("ratios must sum to 1.0 within 1e-4");
+    }
+    issues
+}
+
+fn node_children(node: &Node) -> Vec<NodeId> {
+    match node {
+        Node::Split(split) => split.children.clone(),
+        Node::Tabs(tabs) => tabs.children.clone(),
+        Node::Column(column) => column.groups.clone(),
+        Node::Panel(_) => Vec::new(),
+    }
+}
+
+fn inspect_graph(
+    nodes: &SlotMap<NodeId, Node>,
+    node_id: NodeId,
+    parent: Option<NodeId>,
+    visited: &mut HashSet<NodeId>,
+    visiting: &mut HashSet<NodeId>,
+    incoming: &mut HashMap<NodeId, usize>,
+    errors: &mut Vec<ValidationError>,
+) {
+    if !nodes.contains_key(node_id) {
+        if let Some(owner) = parent {
+            errors.push(ValidationError::MissingNode {
+                owner: Some(owner),
+                missing: node_id,
+            });
+        }
+        return;
+    }
+    if visiting.contains(&node_id) {
+        errors.push(ValidationError::NodeCycle {
+            from: parent.unwrap_or(node_id),
+            to: node_id,
+        });
+        return;
+    }
+    if visited.contains(&node_id) {
+        return;
+    }
+
+    visiting.insert(node_id);
+    if let Some(node) = nodes.get(node_id) {
+        for child in node_children(node) {
+            if nodes.contains_key(child) {
+                *incoming.entry(child).or_default() += 1;
+                inspect_graph(
+                    nodes,
+                    child,
+                    Some(node_id),
+                    visited,
+                    visiting,
+                    incoming,
+                    errors,
+                );
+            } else {
+                errors.push(ValidationError::MissingNode {
+                    owner: Some(node_id),
+                    missing: child,
+                });
+            }
+        }
+    }
+    visiting.remove(&node_id);
+    visited.insert(node_id);
+}
+
+fn mark_reachable(
+    nodes: &SlotMap<NodeId, Node>,
+    node_id: NodeId,
+    reachable: &mut HashSet<NodeId>,
+) {
+    if !nodes.contains_key(node_id) || !reachable.insert(node_id) {
+        return;
+    }
+    if let Some(node) = nodes.get(node_id) {
+        for child in node_children(node) {
+            mark_reachable(nodes, child, reachable);
+        }
+    }
+}
+
+fn validate_photoshop_main_root(
+    nodes: &SlotMap<NodeId, Node>,
+    area: DockAreaId,
+    root: NodeId,
+    errors: &mut Vec<ValidationError>,
+) -> usize {
+    match nodes.get(root) {
+        Some(Node::Column(_)) => 1,
+        Some(Node::Split(split)) if split.axis == Axis::X => {
+            let mut count = 0;
+            let mut invalid_child = false;
+            for child in &split.children {
+                match nodes.get(*child) {
+                    Some(Node::Column(_)) => count += 1,
+                    Some(_) => invalid_child = true,
+                    None => {}
+                }
+            }
+            if invalid_child {
+                errors.push(ValidationError::InvalidMainRoot {
+                    area,
+                    root,
+                    reason: "Split(X) main root children must all be Column nodes",
+                });
+            }
+            count
+        }
+        Some(Node::Split(_)) => {
+            errors.push(ValidationError::InvalidMainRoot {
+                area,
+                root,
+                reason: "main Split must use axis X",
+            });
+            0
+        }
+        Some(_) => {
+            errors.push(ValidationError::InvalidMainRoot {
+                area,
+                root,
+                reason: "main root must be a Column or Split(X) of Columns",
+            });
+            0
+        }
+        None => 0,
+    }
+}
+
+fn validate_photoshop_floating_root(
+    nodes: &SlotMap<NodeId, Node>,
+    group: FloatingGroupId,
+    root: NodeId,
+    errors: &mut Vec<ValidationError>,
+) {
+    match nodes.get(root) {
+        Some(Node::Tabs(_)) => {}
+        Some(Node::Split(split)) if split.axis == Axis::Y => {
+            let invalid_child = split.children.iter().any(|child| {
+                nodes.contains_key(*child) && !matches!(nodes.get(*child), Some(Node::Tabs(_)))
+            });
+            if invalid_child {
+                errors.push(ValidationError::InvalidFloatingRoot {
+                    group,
+                    root,
+                    reason: "Split(Y) floating root children must all be Tabs nodes",
+                });
+            }
+        }
+        Some(Node::Split(_)) => errors.push(ValidationError::InvalidFloatingRoot {
+            group,
+            root,
+            reason: "floating stack Split must use axis Y",
+        }),
+        Some(_) => errors.push(ValidationError::InvalidFloatingRoot {
+            group,
+            root,
+            reason: "floating root must be Tabs or Split(Y) of Tabs",
+        }),
+        None => {}
+    }
+}
+
+fn geometry_error_reason(error: GeometryError) -> &'static str {
+    match error {
+        GeometryError::NonFinite => "bounds contain a non-finite value",
+        GeometryError::NegativeDimension => "bounds dimensions must not be negative",
+        GeometryError::NonPositiveDimension => "bounds must have positive dimensions",
+        GeometryError::ArithmeticOverflow => "bounds arithmetic overflowed",
+        GeometryError::InconsistentConstraints => "geometry constraints are inconsistent",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::Layout;
-    use crate::{CanvasState, ChromeMode, DockArea, DockAreaId, DockSide, FloatingGroup, FloatingGroupId, Node, NodeId, PanelId, PanelInstance, Profile};
+    use crate::{
+        Axis, CanvasState, ChromeMode, Column, ColumnMode, DockArea, DockAreaId, DockMetrics,
+        DockSide, FloatingGroup, FloatingGroupId, GeometryError, Layout as LayoutType, Node, NodeId,
+        Panel, PanelConstraints, PanelId, PanelInstance, PanelKey, Point, Profile, Rect, Size,
+        Split, Tabs, ValidationError,
+    };
     use slotmap::SlotMap;
+
+    fn descriptors() -> Vec<(PanelKey, PanelConstraints)> {
+        ["layers", "color", "properties", "history"]
+            .into_iter()
+            .map(|key| {
+                (
+                    PanelKey::new(key).unwrap(),
+                    PanelConstraints::new(
+                        Size::new(120.0, 80.0),
+                        Size::new(280.0, 220.0),
+                        None,
+                        false,
+                    ),
+                )
+            })
+            .collect()
+    }
+
+    fn initial_layout(profile: Profile) -> Layout {
+        crate::create_initial_layout(profile, &descriptors(), DockMetrics::default()).unwrap()
+    }
 
     #[test]
     fn new_layout_owns_empty_arenas_and_an_independent_canvas() {
@@ -156,19 +801,19 @@ mod tests {
         assert_eq!(layout.floating_groups().count(), 0);
         assert_eq!(layout.main_area(DockSide::Left), None);
         assert_eq!(layout.main_area(DockSide::Right), None);
+        assert_eq!(layout.validate(&DockMetrics::default()), Ok(()));
     }
 
     #[test]
     fn clone_preserves_runtime_handles_and_read_only_views() {
         let mut nodes = SlotMap::<NodeId, Node>::with_key();
-        let _root = nodes.insert(Node::Split(crate::Split {
-            axis: crate::Axis::Y,
+        let root = nodes.insert(Node::Split(Split {
+            axis: Axis::Y,
             children: Vec::new(),
             ratios: Vec::new(),
         }));
         let panels = SlotMap::<PanelId, PanelInstance>::with_key();
         let mut areas = SlotMap::<DockAreaId, DockArea>::with_key();
-        let root = nodes.iter().next().unwrap().0;
         let area = areas.insert(DockArea::main(DockSide::Left, root));
         let floating = SlotMap::<FloatingGroupId, FloatingGroup>::with_key();
         let layout = Layout::from_parts(
@@ -187,5 +832,178 @@ mod tests {
         assert_eq!(cloned.main_area(DockSide::Left).unwrap().root, root);
         assert_eq!(cloned.version(), 7);
         assert_eq!(cloned.chrome(), ChromeMode::Hidden);
+    }
+
+    #[test]
+    fn initial_factory_layout_passes_validation() {
+        let layout = initial_layout(Profile::Photoshop);
+        assert_eq!(layout.validate(&DockMetrics::default()), Ok(()));
+    }
+
+    #[test]
+    fn validation_collects_ratio_and_tabs_errors() {
+        let mut layout = initial_layout(Profile::Generic);
+        let root = layout.main_area(DockSide::Right).unwrap().root;
+        let Node::Column(column) = layout.nodes.get_mut(root).unwrap() else {
+            panic!("factory should create a column");
+        };
+        column.group_ratios = vec![0.2, 0.2];
+
+        let group_id = column.groups[0];
+        let Node::Tabs(tabs) = layout.nodes.get_mut(group_id).unwrap() else {
+            panic!("factory should create Tabs");
+        };
+        tabs.active_index = tabs.children.len();
+
+        let errors = layout.validate(&DockMetrics::default()).unwrap_err();
+        assert!(errors.iter().any(|error| matches!(
+            error,
+            ValidationError::InvalidColumn { reason: "ratios must sum to 1.0 within 1e-4", .. }
+        )));
+        assert!(errors.iter().any(|error| matches!(
+            error,
+            ValidationError::InvalidTabs { reason: "active_index is outside children", .. }
+        )));
+    }
+
+    #[test]
+    fn validation_detects_missing_node_and_cycle_even_in_broken_trees() {
+        let mut layout = initial_layout(Profile::Generic);
+        let root = layout.main_area(DockSide::Right).unwrap().root;
+        let Node::Column(column) = layout.nodes.get_mut(root).unwrap() else {
+            panic!("factory should create a column");
+        };
+        column.groups.push(NodeId::null());
+        column.group_ratios.push(0.0);
+
+        let group_id = column.groups[0];
+        let Node::Tabs(tabs) = layout.nodes.get_mut(group_id).unwrap() else {
+            panic!("factory should create Tabs");
+        };
+        tabs.children.push(group_id);
+
+        let errors = layout.validate(&DockMetrics::default()).unwrap_err();
+        assert!(errors.iter().any(|error| matches!(
+            error,
+            ValidationError::MissingNode { missing, .. } if *missing == NodeId::null()
+        )));
+        assert!(errors.iter().any(|error| matches!(error, ValidationError::NodeCycle { .. })));
+    }
+
+    #[test]
+    fn validation_detects_duplicate_panel_placement_and_singleton_keys() {
+        let mut layout = initial_layout(Profile::Generic);
+        let ids: Vec<_> = layout.nodes.iter().filter_map(|(id, node)| match node {
+            Node::Panel(panel) => Some((id, panel.panel_id)),
+            _ => None,
+        }).collect();
+        let (first_node, first_panel) = ids[0];
+        let (second_node, second_panel) = ids[1];
+        *layout.nodes.get_mut(second_node).unwrap() = Node::Panel(Panel::new(first_panel));
+
+        let duplicate_instance = layout.panel_instances.get_mut(second_panel).unwrap();
+        duplicate_instance.key = PanelKey::new("layers").unwrap();
+        duplicate_instance.constraints.singleton = true;
+        layout.panel_instances.get_mut(first_panel).unwrap().constraints.singleton = true;
+
+        let errors = layout.validate(&DockMetrics::default()).unwrap_err();
+        assert!(errors.iter().any(|error| matches!(
+            error,
+            ValidationError::DuplicatePanelPlacement { panel, .. } if *panel == first_panel
+        )));
+        assert!(errors.iter().any(|error| matches!(
+            error,
+            ValidationError::DuplicateSingletonPanel { .. }
+        )));
+        assert!(errors.iter().any(|error| matches!(
+            error,
+            ValidationError::UnplacedPanelInstance { panel } if *panel == second_panel
+        )));
+        assert_ne!(first_node, second_node);
+    }
+
+    #[test]
+    fn photoshop_profile_rejects_vertical_main_split() {
+        let mut layout = initial_layout(Profile::Photoshop);
+        let root = layout.main_area(DockSide::Right).unwrap().root;
+        let children = match layout.nodes.get(root).unwrap() {
+            Node::Column(column) => column.groups.clone(),
+            _ => unreachable!(),
+        };
+        *layout.nodes.get_mut(root).unwrap() = Node::Split(Split {
+            axis: Axis::Y,
+            children: children.clone(),
+            ratios: vec![0.5, 0.5],
+        });
+
+        let errors = layout.validate(&DockMetrics::default()).unwrap_err();
+        assert!(errors.iter().any(|error| matches!(
+            error,
+            ValidationError::InvalidMainRoot { reason: "main Split must use axis X", .. }
+        )));
+    }
+
+    #[test]
+    fn floating_bounds_and_duplicate_z_order_are_validated() {
+        let mut nodes = SlotMap::<NodeId, Node>::with_key();
+        let panel_id = PanelId::null();
+        let _ = panel_id;
+        let root = nodes.insert(Node::Tabs(Tabs {
+            children: Vec::new(),
+            active_index: 0,
+            collapsed: false,
+        }));
+        let panels = SlotMap::<PanelId, PanelInstance>::with_key();
+        let mut areas = SlotMap::<DockAreaId, DockArea>::with_key();
+        let area_one = areas.insert(DockArea::floating(root));
+        let area_two = areas.insert(DockArea::floating(root));
+        let mut floating = SlotMap::<FloatingGroupId, FloatingGroup>::with_key();
+        let bounds = Rect::new(Point::ZERO, Size::new(0.0, 300.0));
+        floating.insert(FloatingGroup::new(area_one, bounds, 1));
+        floating.insert(FloatingGroup::new(area_two, Rect::new(Point::ZERO, Size::new(400.0, 300.0)), 1));
+
+        let layout = Layout::from_parts(
+            nodes,
+            panels,
+            areas,
+            [None, None],
+            floating,
+            CanvasState::default(),
+            Profile::Generic,
+            0,
+            ChromeMode::Visible,
+        );
+        let errors = layout.validate(&DockMetrics::default()).unwrap_err();
+        assert!(errors.iter().any(|error| matches!(
+            error,
+            ValidationError::InvalidFloatingGroup { reason: "bounds must have positive dimensions", .. }
+        )));
+        assert!(errors.iter().any(|error| matches!(
+            error,
+            ValidationError::DuplicateFloatingZOrder { z_order: 1, .. }
+        )));
+        assert!(errors.iter().any(|error| matches!(
+            error,
+            ValidationError::InvalidTabs { .. }
+        )));
+    }
+
+    #[test]
+    fn validation_rejects_invalid_metrics_and_canvas_width() {
+        let mut layout = Layout::new(Profile::Generic);
+        layout.canvas = CanvasState::new(Some(Rect::new(Point::ZERO, Size::new(200.0, 600.0))));
+        let errors = layout.validate(&DockMetrics::default()).unwrap_err();
+        assert!(errors.iter().any(|error| matches!(
+            error,
+            ValidationError::InvalidCanvas { reason: "canvas width is below min_canvas_width" }
+        )));
+
+        let mut metrics = DockMetrics::default();
+        metrics.max_columns = 0;
+        let errors = layout.validate(&metrics).unwrap_err();
+        assert!(errors.iter().any(|error| matches!(
+            error,
+            ValidationError::InvalidMetrics { .. }
+        )));
     }
 }
