@@ -2023,12 +2023,9 @@ impl Layout {
         }
     }
 
-    /// Normalizes a candidate layout and commits the result only if it remains valid.
-    ///
-    /// Empty Tabs/Columns and empty Split containers are removed. Generic Split
-    /// nodes with one child collapse into that child, while a non-empty Column
-    /// remains a Column even with one group. The operation refuses to guess how
-    /// to repair broken links, cycles, shared children, or missing panel instances.
+    /// Test-only wrapper for the C3 normalization contract. Production mutations
+    /// call normalize_in_place on a private candidate inside Layout::apply.
+    #[cfg(test)]
     fn normalize(&mut self, metrics: &DockMetrics) -> Result<(), Vec<ValidationError>> {
         let mut candidate = self.clone();
         candidate.normalize_in_place(metrics)?;
@@ -2530,7 +2527,7 @@ mod tests {
         Axis, CanvasState, ChromeMode, CommandError, CommandValue, DockArea, DockAreaId,
         DockCommand, DockMetrics, DockSide, DropTarget, FloatingGroup, FloatingGroupId, Node,
         NodeId, Panel, PanelConstraints, PanelId, PanelInstance, PanelKey, Point, Profile, Rect,
-        Size, Split, Tabs, ValidationError,
+        Size, Split, Tabs, ValidationError, DropZone,
     };
     use slotmap::{Key, SlotMap};
 
@@ -3169,6 +3166,22 @@ mod tests {
         assert!(outcome.changed_nodes.is_empty());
         assert!(outcome.inverse.is_none());
         assert_eq!(layout.version(), 0);
+        assert_eq!(format!("{layout:?}"), before);
+
+        let self_drop = layout
+            .apply(
+                DockCommand::SplitGroup {
+                    group,
+                    target_group: group,
+                    zone: DropZone::Right,
+                    ratio: 0.5,
+                },
+                &metrics,
+            )
+            .unwrap();
+        assert_eq!(self_drop.new_version, 0);
+        assert!(self_drop.changed_nodes.is_empty());
+        assert!(self_drop.inverse.is_none());
         assert_eq!(format!("{layout:?}"), before);
     }
 
