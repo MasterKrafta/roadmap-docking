@@ -85,7 +85,7 @@ mod tests {
     #[test]
     fn legacy_hidden_name_remains_deserializable_as_all_hidden() {
         assert_eq!(
-            serde_json::from_str::<ChromeMode>("\\"Hidden\\"").unwrap(),
+            serde_json::from_str::<ChromeMode>("\"Hidden\"").unwrap(),
             ChromeMode::AllHidden,
         );
     }
