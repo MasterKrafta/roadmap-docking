@@ -155,7 +155,7 @@ Layout является единственным владельцем арен �
 - Resize-зоны проверяются в порядке NW, NE, SW, SE, W, E, N, S: углы имеют преимущество над перекрывающимися краями. В частности, верхний край и верхние углы не могут быть ошибочно классифицированы как title drag, потому что resize проверяется раньше title band. Title band возвращает `HitResult::FloatingGroup`.
 - Для dock geometry установлен порядок: splitter; верхняя header-полоса Tabs-группы (`HitResult::Group`, используемая как group/column header); tab header; drop zone; panel content; tab strip; тело группы; область Column; Canvas; Miss. В модели пока нет отдельного `ColumnHeaderRect`, поэтому существующая геометрия group header имеет собственную зону, а `ColumnRect` остаётся fallback-target для остальной области колонки.
 - Все containment проверки наследуют полуоткрытую семантику `Rect::contains`: left/top включены, right/bottom исключены. На перекрывающихся hit-zone используется фиксированный приоритет выше и детерминированный порядок массива геометрии; hit-test не зависит от порядка OS окон или состояния UI runtime.
-- Regression-тесты покрывают все восемь floating resize-zone directions, resize-over-title precedence, overlapping floating Z-order и запрет попадания сквозь front window, splitter hit-band над panel content и его полуоткрытую границу, соседние tab-header границы, group header, Canvas/Miss, collapsed tab strip и non-finite pointer.
+- Regression-тесты покрывают все восемь floating resize-zone directions, resize-over-title precedence, overlapping floating Z-order и запрет попадания сквозь front window, splitter hit-band над panel content и его полуоткрытую границу, соседние tab-header границы, group header, Canvas/Miss, collapsed tab header и non-finite pointer.
 
 
 ### Геометрия
