@@ -1,5 +1,5 @@
 use crate::{
-    ColumnRect, DropZoneRect, FloatingGroupRect, FloatingResizeEdgeRect, GroupRect,
+    ColumnRect, DropZoneRect, FloatingGroupRect, FloatingResizeEdgeRect, FlyoutRect, GroupRect,
     PanelRect, Rect, SplitterRect, TabHeaderRect, TabStripRect, VerticalOverflow,
 };
 
@@ -26,6 +26,9 @@ pub struct LayoutRects {
     pub splitters: Vec<SplitterRect>,
     pub floating_groups: Vec<FloatingGroupRect>,
     pub floating_resize_edges: Vec<FloatingResizeEdgeRect>,
+    /// Optional geometry for the active rail flyout, drawn above the Canvas.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub flyout: Option<FlyoutRect>,
     pub drop_zones: Vec<DropZoneRect>,
     /// Vertical stacks that exceed their allocated viewport at minimum sizes.
     pub vertical_overflow: Vec<VerticalOverflow>,
@@ -48,6 +51,7 @@ mod tests {
         assert!(rects.splitters.is_empty());
         assert!(rects.floating_groups.is_empty());
         assert!(rects.floating_resize_edges.is_empty());
+        assert!(rects.flyout.is_none());
         assert!(rects.drop_zones.is_empty());
         assert!(rects.vertical_overflow.is_empty());
     }
