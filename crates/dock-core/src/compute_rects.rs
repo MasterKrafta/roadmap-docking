@@ -866,9 +866,44 @@ mod tests {
         let heights: Vec<_> = rects.groups.iter().map(|group| group.rect.size.height).collect();
         assert_eq!(heights[0], metrics.collapsed_group_height);
         assert!((heights[1] / heights[2] - 0.3 / 0.5).abs() < PIXEL_TOLERANCE);
-        assert_eq!(heights.iter().sum::<f32>() + 2.0 * metrics.splitter_thickness, 500.0);
+        assert!(
+            (heights.iter().sum::<f32>() + 2.0 * metrics.splitter_thickness - 500.0).abs()
+                < PIXEL_TOLERANCE
+        );
         assert_eq!(rects.panels.len(), 2);
         assert!(rects.panels.iter().all(|panel| panel.rect.size.height > 0.0));
+    }
+
+    #[test]
+    fn ratio_allocation_clamps_small_group_to_its_panel_minimum_and_redistributes_remainder() {
+        let metrics = DockMetrics::default();
+        let mut builder = LayoutBuilder::new(Profile::Photoshop);
+        let mut groups = Vec::new();
+        for (index, collapsed) in [(0, true), (1, false), (2, false)] {
+            let (_, panel_node) = builder.panel(key(&format!("floor-{index}")), constraints());
+            groups.push(builder.tabs(vec![panel_node], 0, collapsed));
+        }
+        let column = builder.column(
+            280.0,
+            ColumnMode::Expanded,
+            groups,
+            vec![0.8, 0.19, 0.01],
+        );
+        builder.main_area(DockSide::Left, column);
+        let layout = builder.build();
+
+        let rects = layout.compute_rects(viewport(1000.0, 500.0), &metrics).unwrap();
+        let heights: Vec<_> = rects.groups.iter().map(|group| group.rect.size.height).collect();
+        let minimum = metrics.header_height + metrics.tab_strip_height + constraints().min_size.height;
+
+        assert_eq!(heights[0], metrics.collapsed_group_height);
+        assert!((heights[2] - minimum).abs() < PIXEL_TOLERANCE);
+        assert!((heights[1] - 348.0).abs() < PIXEL_TOLERANCE);
+        assert!(heights[2] >= minimum);
+        assert!(
+            (heights.iter().sum::<f32>() + 2.0 * metrics.splitter_thickness - 500.0).abs()
+                < PIXEL_TOLERANCE
+        );
     }
 
     #[test]
