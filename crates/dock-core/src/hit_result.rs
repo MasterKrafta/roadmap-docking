@@ -30,6 +30,18 @@ pub enum HitResult {
     Panel {
         panel: PanelId,
     },
+    /// The active panel surface inside a transient rail flyout.
+    FlyoutPanel {
+        column: NodeId,
+        group: NodeId,
+        panel: PanelId,
+    },
+    /// The flyout's resize edge facing the Canvas.
+    FlyoutResizeEdge {
+        column: NodeId,
+        panel: PanelId,
+        edge: ResizeEdge,
+    },
     Splitter {
         owner: NodeId,
         boundary_index: usize,
