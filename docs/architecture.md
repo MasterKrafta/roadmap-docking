@@ -37,6 +37,14 @@ app ──▶ dock-core
 - Загрузчик применяет только однозначные исправления: ratios/структура, которые поддерживает нормализатор, и ширина колонки, однозначно заданная `ColumnMode`. Нарушение правил профиля, где нужно гадать или терять структуру, возвращается как `InvalidLayout` с конкретными `ValidationError`; тихого разрушительного ремонта нет.
 - Для floating bounds приложение может передать в `WorkspaceLoadOptions` видимый client rectangle в логических px. Core ограничивает bounds этой областью и сообщает об изменении, но не сжимает содержимое ниже его минимального размера: если client region слишком мал, загрузка возвращает `FloatingBoundsInsufficientSpace`. Определение монитора, физического DPI и предпочтительной позиции окна остаётся в app/platform слое.
 
+## Undo/Redo contract
+
+- Session Undo/Redo входит в `dock-core` как `UndoRedoHistory`; история намеренно не сохраняется в JSON workspace для MVP.
+- История ведётся через фасад `UndoRedoHistory::apply`. После успешной команды, увеличившей `Layout::version`, записывается checkpoint до изменения. Это session-only снимки всей модели, а не последовательность best-effort inverse commands: так отмена покрывает команды, для которых inverse ещё отсутствует, включая reorder/move, ratios, floating bounds и stacking.
+- No-op (не изменивший версию), отклонённая команда и transient flyout-команда не создают запись. Drag preview не меняет Layout и в API истории не входит. После новой persistent-команды на разветвлении undo redo-ветка очищается.
+- Undo/Redo восстанавливает точный persistent checkpoint, но не откатывает `Layout::version`: версия остаётся монотонной. Flyout при восстановлении закрывается; session-only flyout auto-collapse preference сохраняется текущим.
+- История ограничена количеством записей (по умолчанию 100); `clear()` сбрасывает её без изменения раскладки. Ошибка проверки checkpoint при текущих metrics не меняет Layout и возвращает запись в стек.
+
 ## Ограничения реализации
 
 - Один собственный `struct`/`enum` на файл. `lib.rs` и `mod.rs` содержат только объявления модулей и re-export.
