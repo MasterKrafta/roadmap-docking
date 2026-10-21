@@ -130,6 +130,13 @@ Layout является единственным владельцем арен �
 - Семантический снимок включает профиль/chrome/canvas, ordered tree shape, ключи и constraints панелей, активные/свёрнутые tabs, split/column ratios, floating bounds/Z-order и flyout. Отдельный тест строит одинаковую раскладку с другим порядком выдачи PanelId/leaf NodeId и подтверждает идентичность снимка.
 - Важно: `DockCommand` сохраняет runtime-ID ссылки на цели. Поэтому replay такого JSON-журнала требует того же совместимого исходного дерева/набора handles; независимое восстановление журнала поверх workspace с заново выданными IDs потребует отдельного стабильного selector/rebinding слоя и не заявляется как гарантия этого этапа.
 
+### Чистые геометрические результаты (C5.1)
+
+- Каждый результат размещения имеет свой файл и содержит только Rust-данные/модельные handles и `Rect`: `LayoutRects`, `ColumnRect`, `GroupRect`, `TabStripRect`, `TabHeaderRect`, `PanelRect`, `SplitterRect`, `FloatingGroupRect`, `FloatingResizeEdgeRect`, `DropZoneRect`, `HitResult`.
+- `LayoutRects` — контейнер результатов geometry pass для основных областей, колонок, групп, tab strip/header, содержимого панелей, splitter, floating windows/resize handles и drop zones. Отдельные записи сохраняют ID и индекс, необходимые для преобразования hit в семантическую команду.
+- `HitResult` — tagged enum с семантическими вариантами для column/group/tab strip/tab header/panel/splitter/floating group/resize edge/drop zone и miss. Он не хранит GPUI entity, view, mouse event или platform window.
+- `ResizeEdge` — отдельный pure-data enum для четырёх сторон и четырёх углов плавающего окна; геометрические типы и результаты допускают optional Serde feature и не вводят зависимость от UI/GPUI.
+
 ### Геометрия
 
 Все координаты и размеры — логические px в f32. NaN и бесконечности запрещены. Допуск сравнения пикселей — 1e-3, ratios — 1e-4. Округление до физических пикселей выполняет rendering adapter на границе UI.
