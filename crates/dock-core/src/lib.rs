@@ -3,15 +3,20 @@
 //! UI-independent data model and behavior for docking layouts.
 
 pub mod axis;
+pub mod canvas_state;
 pub mod chrome_mode;
 pub mod column;
 pub mod column_mode;
+pub mod dock_area;
 pub mod dock_area_id;
 pub mod dock_area_kind;
 pub mod dock_metrics;
 pub mod dock_side;
+pub mod floating_group;
 pub mod floating_group_id;
+pub mod flyout_state;
 pub mod geometry_error;
+pub mod layout;
 pub mod node;
 pub mod node_id;
 pub mod panel;
@@ -28,15 +33,20 @@ pub mod split;
 pub mod tabs;
 
 pub use axis::Axis;
+pub use canvas_state::CanvasState;
 pub use chrome_mode::ChromeMode;
 pub use column::Column;
 pub use column_mode::ColumnMode;
+pub use dock_area::DockArea;
 pub use dock_area_id::DockAreaId;
 pub use dock_area_kind::DockAreaKind;
 pub use dock_metrics::DockMetrics;
 pub use dock_side::DockSide;
+pub use floating_group::FloatingGroup;
 pub use floating_group_id::FloatingGroupId;
+pub use flyout_state::FlyoutState;
 pub use geometry_error::GeometryError;
+pub use layout::Layout;
 pub use node::Node;
 pub use node_id::NodeId;
 pub use panel::Panel;
