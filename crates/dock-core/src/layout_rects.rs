@@ -1,6 +1,6 @@
 use crate::{
     ColumnRect, DropZoneRect, FloatingGroupRect, FloatingResizeEdgeRect, FlyoutRect, GroupRect,
-    PanelRect, Rect, SplitterRect, TabHeaderRect, TabStripRect, VerticalOverflow,
+    PanelRect, Rect, SplitterRect, TabHeaderRect, TabOverflowRect, TabStripRect, VerticalOverflow,
 };
 
 /// Complete pure-data geometry snapshot produced by the geometry pass.
@@ -22,6 +22,9 @@ pub struct LayoutRects {
     pub groups: Vec<GroupRect>,
     pub tab_strips: Vec<TabStripRect>,
     pub tab_headers: Vec<TabHeaderRect>,
+    /// Per-group overflow buttons and the panel tabs omitted from visible headers.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub tab_overflows: Vec<TabOverflowRect>,
     pub panels: Vec<PanelRect>,
     pub splitters: Vec<SplitterRect>,
     pub floating_groups: Vec<FloatingGroupRect>,
@@ -47,6 +50,7 @@ mod tests {
         assert!(rects.groups.is_empty());
         assert!(rects.tab_strips.is_empty());
         assert!(rects.tab_headers.is_empty());
+        assert!(rects.tab_overflows.is_empty());
         assert!(rects.panels.is_empty());
         assert!(rects.splitters.is_empty());
         assert!(rects.floating_groups.is_empty());
