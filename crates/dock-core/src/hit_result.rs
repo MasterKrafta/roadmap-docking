@@ -35,6 +35,11 @@ pub enum HitResult {
         boundary_index: usize,
         axis: Axis,
     },
+    /// The title band of a floating window, used for moving the window.
+    FloatingTitle {
+        group: FloatingGroupId,
+    },
+    /// The body/background of a floating window without a more specific hit.
     FloatingGroup {
         group: FloatingGroupId,
     },
