@@ -206,3 +206,294 @@ fn collapsed_geometry_keeps_tab_strip_and_headers_but_hides_panel_content() {
         other => panic!("expected Tabs group, found {other:?}"),
     }
 }
+
+
+#[test]
+fn reexpand_after_resize_and_reorder_restores_saved_weights_with_current_viewport_minima() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+    let mut groups = Vec::new();
+    for name in ["restore-a", "restore-b", "restore-c"] {
+        let (_, panel_node) = builder.panel(key(name), constraints());
+        groups.push(builder.tabs(vec![panel_node], 0, false));
+    }
+    let column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        groups.clone(),
+        vec![0.2, 0.3, 0.5],
+    );
+    builder.main_area(DockSide::Left, column);
+    let mut layout = builder.build();
+
+    layout
+        .apply(
+            DockCommand::CollapseGroup {
+                group: groups[0],
+                collapsed: true,
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    // available_height excludes the two splitter gaps in this three-group stack.
+    layout
+        .apply(
+            DockCommand::ResizeGroups {
+                column,
+                boundary_index: 1,
+                delta: 30.0,
+                available_height: 692.0,
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    let resized_weights = match layout.node(column).unwrap() {
+        Node::Column(column) => column.group_ratios.clone(),
+        other => panic!("expected Column, found {other:?}"),
+    };
+    assert!((resized_weights[0] - 0.2).abs() < 1.0e-4);
+    assert!(resized_weights[1] > 0.3);
+    assert!(resized_weights[2] < 0.5);
+    assert!(matches!(
+        layout.node(groups[0]),
+        Some(Node::Tabs(tabs)) if tabs.collapsed
+    ));
+
+    // Reordering the collapsed group must move its ratio with it; its state stays
+    // on the group node rather than following a positional slot.
+    layout
+        .apply(
+            DockCommand::MoveGroup {
+                group: groups[0],
+                column,
+                index: 3,
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    let reordered_weights = match layout.node(column).unwrap() {
+        Node::Column(column) => {
+            assert_eq!(column.groups, vec![groups[1], groups[2], groups[0]]);
+            column.group_ratios.clone()
+        }
+        other => panic!("expected Column, found {other:?}"),
+    };
+    assert!((reordered_weights[0] - resized_weights[1]).abs() < 1.0e-4);
+    assert!((reordered_weights[1] - resized_weights[2]).abs() < 1.0e-4);
+    assert!((reordered_weights[2] - resized_weights[0]).abs() < 1.0e-4);
+    assert!(matches!(
+        layout.node(groups[0]),
+        Some(Node::Tabs(tabs)) if tabs.collapsed
+    ));
+
+    layout
+        .apply(
+            DockCommand::CollapseGroup {
+                group: groups[0],
+                collapsed: false,
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    let rects = layout
+        .compute_rects(viewport(1200.0, 600.0), &metrics)
+        .unwrap();
+    let height_for = |group| {
+        rects
+            .groups
+            .iter()
+            .find(|rect| rect.group == group)
+            .unwrap()
+            .rect
+            .size
+            .height
+    };
+    let available_group_height = 600.0 - 2.0 * metrics.splitter_thickness;
+    let rendered_total = groups.iter().map(|group| height_for(*group)).sum::<f32>();
+    assert!((rendered_total - available_group_height).abs() < 1.0e-3);
+
+    // At this viewport all groups can honor their minima, so the restored
+    // distribution should track the adjusted weights rather than the old pixels.
+    for (group, weight) in [
+        (groups[1], reordered_weights[0]),
+        (groups[2], reordered_weights[1]),
+        (groups[0], reordered_weights[2]),
+    ] {
+        let expected = available_group_height * weight;
+        assert!(
+            (height_for(group) - expected).abs() < 1.0e-2,
+            "group height should follow retained ratio within current viewport constraints",
+        );
+    }
+    assert!(layout.validate(&metrics).is_ok());
+}
+
+#[test]
+fn center_drop_of_panel_expands_collapsed_target_in_photoshop_profile() {
+    let metrics = DockMetrics::default();
+    let (mut layout, target_group, _, first_panel, active_panel, source_panel) =
+        layout_with_tabs();
+    let source_node = layout
+        .nodes()
+        .find_map(|(node, value)| {
+            matches!(value, Node::Panel(panel) if panel.panel_id == source_panel)
+                .then_some(node)
+        })
+        .unwrap();
+
+    layout
+        .apply(
+            DockCommand::CollapseGroup {
+                group: target_group,
+                collapsed: true,
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    layout
+        .apply(
+            DockCommand::MovePanel {
+                panel: source_panel,
+                target: crate::DropTarget::Tabs {
+                    group: target_group,
+                    index: 1,
+                },
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    match layout.node(target_group).unwrap() {
+        Node::Tabs(tabs) => {
+            assert!(!tabs.collapsed);
+            assert_eq!(tabs.children[0], layout.nodes().find_map(|(id, node)|
+                matches!(node, Node::Panel(panel) if panel.panel_id == first_panel).then_some(id)
+            ).unwrap());
+            assert_eq!(tabs.children[1], source_node);
+            assert_eq!(tabs.children[2], layout.nodes().find_map(|(id, node)|
+                matches!(node, Node::Panel(panel) if panel.panel_id == active_panel).then_some(id)
+            ).unwrap());
+            assert_eq!(tabs.active_index, 1);
+        }
+        other => panic!("expected Tabs group, found {other:?}"),
+    }
+    assert!(layout.validate(&metrics).is_ok());
+}
+
+#[test]
+fn center_drop_of_whole_group_expands_collapsed_target_in_photoshop_profile() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+    let (target_first, target_first_node) =
+        builder.panel(key("merge-center-target-first"), constraints());
+    let (target_second, target_second_node) =
+        builder.panel(key("merge-center-target-second"), constraints());
+    let target_group = builder.tabs(
+        vec![target_first_node, target_second_node],
+        0,
+        true,
+    );
+    let (source_panel, source_node) =
+        builder.panel(key("merge-center-source"), constraints());
+    let source_group = builder.tabs(vec![source_node], 0, false);
+    let column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![target_group, source_group],
+        vec![0.5, 0.5],
+    );
+    builder.main_area(DockSide::Left, column);
+    let mut layout = builder.build();
+
+    layout
+        .apply(
+            DockCommand::MergeGroup {
+                group: source_group,
+                target_group,
+                index: 1,
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    match layout.node(target_group).unwrap() {
+        Node::Tabs(tabs) => {
+            assert!(!tabs.collapsed);
+            assert_eq!(tabs.children, vec![target_first_node, source_node, target_second_node]);
+            assert_eq!(tabs.active_index, 1);
+        }
+        other => panic!("expected Tabs group, found {other:?}"),
+    }
+    assert!(layout.node(source_group).is_none());
+    assert!(layout.panel_instance(target_first).is_some());
+    assert!(layout.panel_instance(target_second).is_some());
+    assert!(layout.panel_instance(source_panel).is_some());
+    assert!(layout.validate(&metrics).is_ok());
+}
+
+#[test]
+fn self_center_drop_does_not_expand_a_collapsed_group_or_increment_version() {
+    let metrics = DockMetrics::default();
+    let (mut layout, group, _, _, active_panel, _) = layout_with_tabs();
+    layout
+        .apply(
+            DockCommand::CollapseGroup {
+                group,
+                collapsed: true,
+            },
+            &metrics,
+        )
+        .unwrap();
+    let version = layout.version();
+
+    layout
+        .apply(
+            DockCommand::MovePanel {
+                panel: active_panel,
+                target: crate::DropTarget::Tabs { group, index: 1 },
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    assert_eq!(layout.version(), version);
+    assert!(matches!(
+        layout.node(group),
+        Some(Node::Tabs(tabs)) if tabs.collapsed
+    ));
+}
+
+#[test]
+fn generic_profile_does_not_implicitly_expand_collapsed_group_on_center_drop() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Generic);
+    let (_, target_node) = builder.panel(key("generic-center-target"), constraints());
+    let target_group = builder.tabs(vec![target_node], 0, true);
+    let (source_panel, source_node) =
+        builder.panel(key("generic-center-source"), constraints());
+    let source_group = builder.tabs(vec![source_node], 0, false);
+    let root = builder.split(crate::Axis::Y, vec![target_group, source_group], vec![0.5, 0.5]);
+    builder.main_area(DockSide::Left, root);
+    let mut layout = builder.build();
+
+    layout
+        .apply(
+            DockCommand::MovePanel {
+                panel: source_panel,
+                target: crate::DropTarget::Tabs { group: target_group, index: 1 },
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    assert!(matches!(
+        layout.node(target_group),
+        Some(Node::Tabs(tabs)) if tabs.collapsed && tabs.children.len() == 2
+    ));
+    assert!(layout.validate(&metrics).is_ok());
+}
