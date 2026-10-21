@@ -227,8 +227,10 @@ fn validation_rejects_invalid_metrics_and_canvas_width() {
         ValidationError::InvalidCanvas { reason: "canvas width is below min_canvas_width" }
     )));
 
-    let mut metrics = DockMetrics::default();
-    metrics.max_columns = 0;
+    let metrics = DockMetrics {
+        max_columns: 0,
+        ..DockMetrics::default()
+    };
     let errors = layout.validate(&metrics).unwrap_err();
     assert!(errors.iter().any(|error| matches!(
         error,
