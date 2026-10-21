@@ -540,6 +540,9 @@ fn restore_node(
 }
 
 fn placeholder_constraints(metrics: &DockMetrics) -> PanelConstraints {
-    let placeholder_size = Size::new(metrics.min_column_width, metrics.min_group_height);
+    // No descriptor means the former content minimum is unknowable. Use the
+    // compact rail metrics for a conservative placeholder instead of imposing
+    // the full expanded-column width as a panel-content minimum.
+    let placeholder_size = Size::new(metrics.rail_width, metrics.collapsed_group_height);
     PanelConstraints::new(placeholder_size, placeholder_size, None, false)
 }
