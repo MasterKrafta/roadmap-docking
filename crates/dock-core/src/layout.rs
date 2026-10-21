@@ -3314,6 +3314,27 @@ mod tests {
         };
         assert_eq!(groups_after_inverse, vec![first_group, second_group]);
         assert_eq!(layout.version(), 2);
+
+        let moved_backwards = layout
+            .apply(
+                DockCommand::MoveGroup {
+                    group: second_group,
+                    column: column_id,
+                    index: 0,
+                },
+                &metrics,
+            )
+            .unwrap();
+        assert!(matches!(
+            layout.node(column_id),
+            Some(Node::Column(column)) if column.groups == vec![second_group, first_group]
+        ));
+        layout.apply(moved_backwards.inverse.expect("backward move has a safe inverse"), &metrics).unwrap();
+        assert!(matches!(
+            layout.node(column_id),
+            Some(Node::Column(column)) if column.groups == vec![first_group, second_group]
+        ));
+        assert_eq!(layout.version(), 4);
         assert_eq!(layout.validate(&metrics), Ok(()));
     }
 
