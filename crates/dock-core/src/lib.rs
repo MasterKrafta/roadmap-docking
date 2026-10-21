@@ -142,3 +142,5 @@ mod drag_drop_semantics;
 mod drag_drop_resolution;
 #[cfg(test)]
 mod command_sequence_tests;
+#[cfg(test)]
+mod collapse_group_tests;
