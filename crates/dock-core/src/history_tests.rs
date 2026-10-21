@@ -2,7 +2,7 @@ use slotmap::Key;
 
 use crate::layout_builder::LayoutBuilder;
 use crate::{
-    ChromeMode, ColumnMode, DockCommand, DockMetrics, DockSide, DropTarget, Layout,
+    ChromeMode, ColumnMode, DockCommand, DockMetrics, DockSide, DropTarget, Layout, Node,
     PanelConstraints, PanelId, PanelKey, Point, Profile, Rect, Size, UndoRedoHistory,
 };
 
@@ -74,37 +74,73 @@ fn fixture() -> Fixture {
     }
 }
 
+fn node_shape(layout: &Layout, id: crate::NodeId) -> String {
+    match layout.node(id) {
+        Some(Node::Split(split)) => {
+            let children = split.children.iter()
+                .map(|child| node_shape(layout, *child))
+                .collect::<Vec<_>>();
+            format!("Split({:?},{children:?},{:?})", split.axis, split.ratios)
+        }
+        Some(Node::Tabs(tabs)) => {
+            let children = tabs.children.iter()
+                .map(|child| node_shape(layout, *child))
+                .collect::<Vec<_>>();
+            format!(
+                "Tabs(active={},collapsed={},children={children:?})",
+                tabs.active_index, tabs.collapsed
+            )
+        }
+        Some(Node::Panel(panel_leaf)) => {
+            let Some(panel) = layout.panel_instance(panel_leaf.panel_id) else {
+                return "Panel(<missing-instance>)".to_owned();
+            };
+            format!(
+                "Panel(key={},constraints={:?},state={:?})",
+                panel.key, panel.constraints, panel.state
+            )
+        }
+        Some(Node::Column(column)) => {
+            let groups = column.groups.iter()
+                .map(|group| node_shape(layout, *group))
+                .collect::<Vec<_>>();
+            format!(
+                "Column(width={},mode={:?},ratios={:?},last_expanded={:?},groups={groups:?})",
+                column.width, column.mode, column.group_ratios, column.last_expanded_width
+            )
+        }
+        None => "<missing-node>".to_owned(),
+    }
+}
+
 fn persistent_shape(layout: &Layout) -> String {
-    let nodes: Vec<_> = layout.nodes().map(|(id, node)| (id, node.clone())).collect();
-    let panels: Vec<_> = layout
-        .panel_instances()
-        .map(|(id, panel)| (id, panel.clone()))
-        .collect();
-    let areas: Vec<_> = layout.dock_areas().map(|(id, area)| (id, *area)).collect();
-    let main_areas = [
-        layout.main_area(DockSide::Left).copied(),
-        layout.main_area(DockSide::Right).copied(),
-    ];
-    let floating: Vec<_> = layout
-        .floating_groups_in_paint_order()
+    let main = [DockSide::Left, DockSide::Right].map(|side| {
+        layout.main_area(side).map(|area| node_shape(layout, area.root))
+    });
+    let floating: Vec<_> = layout.floating_groups_in_paint_order()
         .into_iter()
-        .map(|(id, group)| (id, *group))
+        .map(|(_, group)| {
+            let root = layout.dock_area(group.area)
+                .map(|area| node_shape(layout, area.root));
+            (group.bounds, group.z_order, root)
+        })
         .collect();
-    let remembered_locations: Vec<_> = layout
+    let mut remembered_locations: Vec<_> = layout
         .panel_instances()
-        .map(|(_, panel)| (panel.key.clone(), layout.last_dock_location(&panel.key)))
+        .map(|(_, panel)| {
+            (
+                panel.key.as_str().to_owned(),
+                layout.last_dock_location(&panel.key),
+            )
+        })
         .collect();
+    remembered_locations.sort_by(|left, right| left.0.cmp(&right.0));
 
     format!(
-        "{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}",
+        "profile={:?};chrome={:?};canvas={:?};main={main:?};floating={floating:?};locations={remembered_locations:?}",
         layout.profile(),
         layout.chrome(),
         layout.canvas(),
-        nodes,
-        panels,
-        areas,
-        main_areas,
-        (floating, remembered_locations),
     )
 }
 
