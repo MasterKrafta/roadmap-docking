@@ -877,6 +877,21 @@ mod tests {
         Rect::new(Point::ZERO, Size::new(width, height))
     }
 
+    // Test-only stand-in for the renderer's final logical->physical pixel snap.
+    // Production dock-core geometry deliberately does not accept a scale factor.
+    fn snap_rect_at_render_boundary(rect: Rect, scale: f32) -> Rect {
+        assert!(scale.is_finite() && scale > 0.0);
+        let snap = |coordinate: f32| (coordinate * scale).round() / scale;
+        let left = snap(rect.origin.x);
+        let top = snap(rect.origin.y);
+        let right = snap(rect.origin.x + rect.size.width);
+        let bottom = snap(rect.origin.y + rect.size.height);
+        Rect::new(
+            Point::new(left, top),
+            Size::new(right - left, bottom - top),
+        )
+    }
+
     #[test]
     fn columns_keep_model_width_and_canvas_receives_horizontal_remainder() {
         let metrics = DockMetrics::default();
@@ -1317,6 +1332,119 @@ mod tests {
             Err(ComputeRectsError::InsufficientCanvasWidth { available, minimum })
                 if available == 319.75 && minimum == metrics.min_canvas_width
         ));
+    }
+
+    #[test]
+    fn pixel_snapping_is_deferred_to_the_render_boundary_for_common_dpi_scales() {
+        let metrics = DockMetrics::default();
+        let mut builder = LayoutBuilder::new(Profile::Photoshop);
+        let (_, panel_node) = builder.panel(key("dpi-boundary-panel"), constraints());
+        let group = builder.tabs(vec![panel_node], 0, false);
+        let column = builder.column(
+            200.25,
+            ColumnMode::Expanded,
+            vec![group],
+            vec![1.0],
+        );
+        builder.main_area(DockSide::Left, column);
+        let layout = builder.build();
+        let viewport = Rect::new(
+            Point::new(12.25, 7.5),
+            Size::new(520.75, 196.5),
+        );
+        let expected_logical_panel = Rect::new(
+            Point::new(12.25, 63.5),
+            Size::new(200.25, 140.5),
+        );
+        let baseline = layout.compute_rects(viewport, &metrics).unwrap();
+        assert_eq!(baseline.panels[0].rect, expected_logical_panel);
+
+        for scale in [1.0_f32, 1.25, 1.5, 2.0] {
+            // Recomputing core geometry must return identical logical-pixel data.
+            let rects = layout.compute_rects(viewport, &metrics).unwrap();
+            assert_eq!(rects, baseline, "logical geometry changed at scale {scale}");
+            let logical_panel = rects.panels[0].rect;
+            assert_eq!(logical_panel, expected_logical_panel);
+
+            // Snapping is a separate operation on a copy at the render boundary.
+            let snapped = snap_rect_at_render_boundary(logical_panel, scale);
+            assert_ne!(snapped, logical_panel, "fractional edges should snap at scale {scale}");
+            let physical_edges = [
+                snapped.origin.x * scale,
+                snapped.origin.y * scale,
+                (snapped.origin.x + snapped.size.width) * scale,
+                (snapped.origin.y + snapped.size.height) * scale,
+            ];
+            for edge in physical_edges {
+                assert!(
+                    (edge - edge.round()).abs() < PIXEL_TOLERANCE,
+                    "edge {edge} is not pixel-aligned at scale {scale}"
+                );
+            }
+
+            // Applying render snapping cannot mutate the geometry snapshot.
+            assert_eq!(rects.panels[0].rect, expected_logical_panel);
+        }
+        assert!(layout.validate(&metrics).is_ok());
+    }
+
+    #[test]
+    fn configurable_metrics_drive_header_strip_and_splitter_geometry() {
+        let mut metrics = DockMetrics::default();
+        metrics.header_height = 31.5;
+        metrics.tab_strip_height = 20.25;
+        metrics.splitter_thickness = 3.5;
+        metrics.splitter_hit_zone = 9.0;
+        assert_eq!(metrics.validate(), Ok(()));
+
+        let mut builder = LayoutBuilder::new(Profile::Photoshop);
+        let mut groups = Vec::new();
+        for name in ["custom-metrics-upper", "custom-metrics-lower"] {
+            let (_, panel_node) = builder.panel(key(name), constraints());
+            groups.push(builder.tabs(vec![panel_node], 0, false));
+        }
+        let column = builder.column(
+            280.0,
+            ColumnMode::Expanded,
+            groups.clone(),
+            vec![0.5, 0.5],
+        );
+        builder.main_area(DockSide::Left, column);
+        let layout = builder.build();
+        let rects = layout.compute_rects(viewport(1000.0, 500.0), &metrics).unwrap();
+
+        assert_eq!(
+            rects.tab_strips.iter().map(|item| item.rect).collect::<Vec<_>>(),
+            vec![
+                Rect::new(Point::new(0.0, 31.5), Size::new(280.0, 20.25)),
+                Rect::new(Point::new(0.0, 283.25), Size::new(280.0, 20.25)),
+            ]
+        );
+        assert_eq!(
+            rects.panels.iter().map(|item| item.rect).collect::<Vec<_>>(),
+            vec![
+                Rect::new(Point::new(0.0, 51.75), Size::new(280.0, 196.5)),
+                Rect::new(Point::new(0.0, 303.5), Size::new(280.0, 196.5)),
+            ]
+        );
+        assert_eq!(rects.splitters.len(), 1);
+        assert_eq!(rects.splitters[0].owner, column);
+        assert_eq!(
+            rects.splitters[0].rect,
+            Rect::new(Point::new(0.0, 245.5), Size::new(280.0, 9.0))
+        );
+        assert_eq!(
+            rects.canvas,
+            Some(Rect::new(Point::new(280.0, 0.0), Size::new(720.0, 500.0)))
+        );
+
+        // The model remains unchanged; these configurable presentation metrics
+        // affect only the computed geometry snapshot.
+        assert_eq!(layout.node(column).is_some(), true);
+        assert_eq!(metrics.header_height, 31.5);
+        assert_eq!(metrics.tab_strip_height, 20.25);
+        assert_eq!(metrics.splitter_thickness, 3.5);
+        assert_eq!(metrics.splitter_hit_zone, 9.0);
     }
 
     #[test]
