@@ -260,6 +260,50 @@ impl Layout {
                     persistent: true,
                 })
             }
+            DockCommand::MovePanelFromFlyout { panel, target } => {
+                if !self.flyout.is_some_and(|flyout| flyout.panel == *panel) {
+                    return Err(CommandError::InvalidTarget {
+                        reason: "MovePanelFromFlyout requires the dragged panel to own the active flyout",
+                    });
+                }
+
+                let before = self.clone();
+                let mut applied = self.apply_command(
+                    &DockCommand::MovePanel { panel: *panel, target: *target },
+                    metrics,
+                )?;
+                // A valid release is the flyout's terminal transition, even when the
+                // target resolves to the panel's current position. Invalid commands
+                // return before this point, so the source remains visible on failure.
+                self.flyout = None;
+                if self.same_persistent_state(&before) {
+                    // Closing a flyout after a successful no-op drop is still transient.
+                    applied.persistent = false;
+                    applied.inverse = None;
+                }
+                Ok(applied)
+            }
+            DockCommand::FloatPanelFromFlyout { panel, bounds } => {
+                if !self.flyout.is_some_and(|flyout| flyout.panel == *panel) {
+                    return Err(CommandError::InvalidTarget {
+                        reason: "FloatPanelFromFlyout requires the dragged panel to own the active flyout",
+                    });
+                }
+                let node = self.find_panel_node(*panel).ok_or(
+                    CommandError::MissingPanel { panel: *panel },
+                )?;
+                let before = self.clone();
+                let mut applied = self.apply_command(
+                    &DockCommand::Float { node, bounds: *bounds },
+                    metrics,
+                )?;
+                self.flyout = None;
+                if self.same_persistent_state(&before) {
+                    applied.persistent = false;
+                    applied.inverse = None;
+                }
+                Ok(applied)
+            }
             DockCommand::MovePanel { panel, target } => {
                 if matches!(target, DropTarget::GroupTabs { .. }) {
                     return Err(CommandError::InvalidTarget {
@@ -2407,7 +2451,7 @@ impl Layout {
         }
     }
 
-    pub(super) fn same_state(&self, other: &Self) -> bool {
+    pub(super) fn same_persistent_state(&self, other: &Self) -> bool {
         self.nodes.iter().eq(other.nodes.iter())
             && self.panel_instances.iter().eq(other.panel_instances.iter())
             && self.dock_areas.iter().eq(other.dock_areas.iter())
@@ -2418,6 +2462,10 @@ impl Layout {
             && self.profile == other.profile
             && self.version == other.version
             && self.chrome == other.chrome
+    }
+
+    pub(super) fn same_state(&self, other: &Self) -> bool {
+        self.same_persistent_state(other)
             && self.flyout == other.flyout
             && self.flyout_auto_collapse == other.flyout_auto_collapse
     }
