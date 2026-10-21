@@ -456,7 +456,6 @@ fn stale_profile_rail_width_is_repaired_and_reported() {
 fn invalid_visible_region_returns_an_error() {
     let metrics = DockMetrics::default();
     let (layout, descriptors) = sample_layout();
-    let file = WorkspaceFile::from_layout(&layout).unwrap();
 
     for region in [
         Rect::ZERO,
