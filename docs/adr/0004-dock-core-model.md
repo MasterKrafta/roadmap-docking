@@ -125,6 +125,10 @@ Layout является единственным владельцем арен �
 - Drop/move на ту же группу или ту же позицию считается допустимым no-op: версия не изменяется, inverse отсутствует, Layout остаётся валидным.
 - Property-тест `generated_command_sequences_from_current_ids_remain_valid` использует `proptest`: строит до 35 команд на последовательность, на каждом шаге заново получает доступные IDs из текущего Layout и формирует только применимые команды. После каждого успешного `apply` проверяется `validate`; неожиданная ошибка generated-команды валит property.
 - Ограничения размеров и количества колонок опираются также на focused regressions C4.4/C4.5: `c44_stale_horizontal_drop_at_column_limit_is_rejected_atomically`, `c45_resize_column_clamps_min_and_max_and_canvas_gets_remainder`, `c45_resize_rejects_non_finite_or_non_positive_inputs_atomically`, а также тесты невозможности разместить группы при недостаточной доступной высоте.
+- Дополнительная failure-atomicity матрица охватывает некорректные constraints/индексы/ratios, недостаточную высоту, non-finite resize/move, пустые bounds, stale IDs и ошибки целей. Для каждой ошибки сравниваются полное состояние Layout, version и результат `validate`.
+- Под feature `serde` журнал `Vec<DockCommand>` сериализуется в JSON, декодируется и проигрывается на таком же исходном состоянии; после каждой команды выполняется `validate`. Итог сравнивается семантическим снимком дерева, а не сырыми runtime handles.
+- Семантический снимок включает профиль/chrome/canvas, ordered tree shape, ключи и constraints панелей, активные/свёрнутые tabs, split/column ratios, floating bounds/Z-order и flyout. Отдельный тест строит одинаковую раскладку с другим порядком выдачи PanelId/leaf NodeId и подтверждает идентичность снимка.
+- Важно: `DockCommand` сохраняет runtime-ID ссылки на цели. Поэтому replay такого JSON-журнала требует того же совместимого исходного дерева/набора handles; независимое восстановление журнала поверх workspace с заново выданными IDs потребует отдельного стабильного selector/rebinding слоя и не заявляется как гарантия этого этапа.
 
 ### Геометрия
 
