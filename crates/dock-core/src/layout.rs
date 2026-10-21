@@ -441,9 +441,6 @@ impl Layout {
                         reason: "split ratio must be finite and strictly between 0 and 1",
                     });
                 }
-                if group == target_group {
-                    return Ok(CommandApplication::persistent());
-                }
                 if !matches!(self.nodes.get(*group), Some(Node::Tabs(_))) {
                     return Err(if self.nodes.contains_key(*group) {
                         CommandError::InvalidTarget { reason: "SplitGroup source must be a Tabs node" }
@@ -459,6 +456,9 @@ impl Layout {
                     });
                 }
                 self.validate_drop_target(DropTarget::GroupEdge { group: *target_group, zone: *zone }, metrics)?;
+                if group == target_group {
+                    return Ok(CommandApplication::persistent());
+                }
                 if let Some(source_column) = self.find_owner_column(*group) {
                     if self.find_owner_column(*target_group) == Some(source_column) {
                         let groups = match self.nodes.get(source_column) {
