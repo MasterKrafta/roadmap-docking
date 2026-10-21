@@ -431,10 +431,10 @@ fn client_region_smaller_than_floating_minimum_is_reported_not_shrunk_below_mini
         ),
         Err(WorkspaceFileError::FloatingBoundsInsufficientSpace {
             axis: crate::Axis::X,
-            available: 1.0,
+            available,
             required,
             ..
-        }) if required >= constraints().min_size.width
+        }) if available == 1.0 && required >= constraints().min_size.width
     ));
 }
 
