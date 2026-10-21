@@ -81,6 +81,47 @@ impl Layout {
     }
 
     #[cfg(feature = "serde")]
+    pub(crate) fn clamp_floating_groups_for_workspace_load(
+        &mut self,
+        client_area: Rect,
+        metrics: &DockMetrics,
+    ) -> Result<Vec<(usize, Rect, Rect)>, (usize, crate::ComputeRectsError)> {
+        let mut groups: Vec<_> = self
+            .floating_groups
+            .iter()
+            .map(|(id, group)| (id, group.z_order))
+            .collect();
+        groups.sort_by_key(|(_, z_order)| *z_order);
+
+        let mut changes = Vec::new();
+        for (index, (id, _)) in groups.into_iter().enumerate() {
+            let Some(group) = self.floating_groups.get(id).copied() else {
+                return Err((index, crate::ComputeRectsError::InvalidLayout));
+            };
+            let Some(root) = self.dock_areas.get(group.area).map(|area| area.root) else {
+                return Err((index, crate::ComputeRectsError::InvalidLayout));
+            };
+            let clamped = crate::compute_rects::clamp_floating_bounds(
+                self,
+                root,
+                group.bounds,
+                client_area,
+                metrics,
+            )
+            .map_err(|error| (index, error))?;
+
+            if clamped != group.bounds {
+                let Some(group) = self.floating_groups.get_mut(id) else {
+                    return Err((index, crate::ComputeRectsError::InvalidLayout));
+                };
+                group.bounds = clamped;
+                changes.push((index, group.bounds, clamped));
+            }
+        }
+        Ok(changes)
+    }
+
+    #[cfg(feature = "serde")]
     pub(crate) fn normalize_for_workspace_load(
         &mut self,
         metrics: &DockMetrics,
