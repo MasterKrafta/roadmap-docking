@@ -208,9 +208,14 @@ impl Layout {
     }
 
     pub(super) fn rail_column_for_group(&self, group_id: NodeId) -> Option<NodeId> {
+        let main_roots = [DockSide::Left, DockSide::Right]
+            .into_iter()
+            .filter_map(|side| self.main_area(side).map(|area| area.root))
+            .collect::<Vec<_>>();
         self.nodes.iter().find_map(|(column_id, node)| match node {
             Node::Column(column)
                 if column.mode.is_rail()
+                    && main_roots.iter().any(|root| self.is_descendant_or_same(*root, column_id))
                     && column.groups.iter().any(|root| self.is_descendant_or_same(*root, group_id)) =>
             {
                 Some(column_id)
