@@ -327,7 +327,7 @@ impl Layout {
                 continue;
             }
             let mut icons: Vec<_> = rects.tab_headers.iter()
-                .filter(|icon| column.groups.iter().any(|root| self.is_descendant_or_same(*root, icon.group)))
+                .filter(|icon| column.groups.iter().any(|root| contains_node(self, *root, icon.group)))
                 .collect();
             icons.sort_by(|left, right| {
                 left.rect.origin.y.partial_cmp(&right.rect.origin.y).unwrap_or(std::cmp::Ordering::Equal)
