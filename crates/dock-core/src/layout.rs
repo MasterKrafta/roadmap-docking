@@ -553,6 +553,35 @@ impl Layout {
                         }
                     }
                 }
+                // A floating vertical stack has the same neighboring no-op
+                // rule as a Column's ordered group list.
+                if matches!(zone, DropZone::Top | DropZone::Bottom) {
+                    if let (Some(source_parent), Some(target_parent)) = (
+                        self.find_parent(*group),
+                        self.find_parent(*target_group),
+                    ) {
+                        if source_parent == target_parent {
+                            if let Some(Node::Split(split)) = self.nodes.get(source_parent) {
+                                if split.axis == Axis::Y {
+                                    let source_index = split.children.iter().position(|id| id == group);
+                                    let target_index = split.children.iter().position(|id| id == target_group);
+                                    if let (Some(source_index), Some(target_index)) =
+                                        (source_index, target_index)
+                                    {
+                                        let already_at_requested_edge =
+                                            (*zone == DropZone::Top && source_index + 1 == target_index)
+                                                || (*zone == DropZone::Bottom
+                                                    && target_index + 1 == source_index);
+                                        if already_at_requested_edge {
+                                            return Ok(CommandApplication::persistent());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 let source_column = self.find_owner_column(*group);
                 let source_index = source_column.and_then(|column| match self.nodes.get(column) {
                     Some(Node::Column(column_data)) if column_data.groups.len() > 1 => {
@@ -4392,6 +4421,48 @@ mod tests {
             assert!(layout.panel_instance(panel).is_some());
         }
         assert_eq!(layout.panel_instances().count(), 3);
+        assert_eq!(layout.validate(&metrics), Ok(()));
+    }
+
+    #[test]
+    fn c44_drop_on_adjacent_floating_stack_slot_is_a_noop() {
+        let metrics = DockMetrics::default();
+        let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+
+        let (_, top_panel) = builder.panel(
+            PanelKey::new("c44-floating-noop-top").unwrap(),
+            descriptors()[0].1,
+        );
+        let top_group = builder.tabs(vec![top_panel], 0, false);
+        let (_, bottom_panel) = builder.panel(
+            PanelKey::new("c44-floating-noop-bottom").unwrap(),
+            descriptors()[0].1,
+        );
+        let bottom_group = builder.tabs(vec![bottom_panel], 0, false);
+        let stack = builder.split(Axis::Y, vec![top_group, bottom_group], vec![0.4, 0.6]);
+        builder.floating_group(
+            stack,
+            Rect::new(Point::new(40.0, 60.0), Size::new(380.0, 260.0)),
+            1,
+        );
+        let mut layout = builder.build();
+        assert_eq!(layout.validate(&metrics), Ok(()));
+        let before = format!("{layout:?}");
+
+        let outcome = layout.apply(
+            DockCommand::SplitGroup {
+                group: top_group,
+                target_group: bottom_group,
+                zone: DropZone::Top,
+                ratio: 0.5,
+            },
+            &metrics,
+        ).unwrap();
+
+        assert_eq!(outcome.new_version, 0);
+        assert!(outcome.changed_nodes.is_empty());
+        assert!(outcome.inverse.is_none());
+        assert_eq!(format!("{layout:?}"), before);
         assert_eq!(layout.validate(&metrics), Ok(()));
     }
 
