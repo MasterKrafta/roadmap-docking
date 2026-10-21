@@ -28,8 +28,8 @@ mod tests {
 
     #[test]
     fn targets_preserve_explicit_positions() {
-        assert_eq!(
-            DropTarget::MainColumn { side: DockSide::Right, index: 2 },
+        assert_ne!(
+            DropTarget::MainColumn { side: DockSide::Right, index: 1 },
             DropTarget::MainColumn { side: DockSide::Right, index: 2 }
         );
         assert_ne!(
