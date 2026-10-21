@@ -57,7 +57,7 @@ impl Layout {
 
             if let Some((nodes, panels)) = floating_subtree(self, floating.group)? {
                 if let Some(hit) = hit_layout_geometry(
-                    self, point, rects, metrics, &nodes, &panels,
+                    self, point, rects, metrics, &nodes, &panels, true,
                 )? {
                     return Ok(hit);
                 }
@@ -68,7 +68,6 @@ impl Layout {
             return Ok(HitResult::FloatingGroup { group: floating.group });
         }
 
-        let empty_nodes = HashSet::new();
         if let Some(hit) = hit_layout_geometry(
             self,
             point,
@@ -76,6 +75,7 @@ impl Layout {
             metrics,
             &floating_nodes,
             &floating_panels,
+            false,
         )? {
             return Ok(hit);
         }
@@ -86,8 +86,7 @@ impl Layout {
             }
         }
 
-        // Kept explicit to make an unknown point different from the Canvas.
-        let _ = empty_nodes;
+        // Keep unknown points distinct from the central Canvas.
         Ok(HitResult::Miss)
     }
 }
@@ -162,13 +161,14 @@ fn hit_layout_geometry(
     point: Point,
     rects: &LayoutRects,
     metrics: &DockMetrics,
-    excluded_nodes: &HashSet<NodeId>,
-    excluded_panels: &HashSet<PanelId>,
+    scope_nodes: &HashSet<NodeId>,
+    scope_panels: &HashSet<PanelId>,
+    include_only: bool,
 ) -> Result<Option<HitResult>, ComputeRectsError> {
     // Splitters win over the column/panel areas they overlap. Reversing the
     // deterministic geometry order gives nested/outer boundaries a stable tie.
     for splitter in rects.splitters.iter().rev() {
-        if !excluded_nodes.contains(&splitter.owner) && contains(splitter.rect, point)? {
+        if node_in_scope(splitter.owner, scope_nodes, include_only) && contains(splitter.rect, point)? {
             return Ok(Some(HitResult::Splitter {
                 owner: splitter.owner,
                 boundary_index: splitter.boundary_index,
@@ -180,7 +180,7 @@ fn hit_layout_geometry(
     // A GroupRect's upper header band is the non-floating group/column header.
     // Collapsed groups have no separate header: their tab strip starts at y=0.
     for group in rects.groups.iter().rev() {
-        if excluded_nodes.contains(&group.group) {
+        if !node_in_scope(group.group, scope_nodes, include_only) {
             continue;
         }
         if !rects.tab_strips.iter().any(|strip| strip.group == group.group) {
@@ -200,7 +200,7 @@ fn hit_layout_geometry(
     }
 
     for tab in rects.tab_headers.iter().rev() {
-        if !excluded_nodes.contains(&tab.group) && contains(tab.rect, point)? {
+        if node_in_scope(tab.group, scope_nodes, include_only) && contains(tab.rect, point)? {
             return Ok(Some(HitResult::TabHeader {
                 group: tab.group,
                 panel: tab.panel,
@@ -212,7 +212,7 @@ fn hit_layout_geometry(
     // Drop zones are semantic overlays on group bodies and win over panel
     // content, but never over resize, splitter or tab-header hit regions.
     for zone in rects.drop_zones.iter().rev() {
-        if target_in_scope(zone.target, excluded_nodes) && contains(zone.rect, point)? {
+        if target_in_scope(zone.target, scope_nodes, include_only) && contains(zone.rect, point)? {
             return Ok(Some(HitResult::DropZone {
                 target: zone.target,
                 zone: zone.zone,
@@ -221,25 +221,25 @@ fn hit_layout_geometry(
     }
 
     for panel in rects.panels.iter().rev() {
-        if !excluded_panels.contains(&panel.panel) && contains(panel.rect, point)? {
+        if panel_in_scope(panel.panel, scope_panels, include_only) && contains(panel.rect, point)? {
             return Ok(Some(HitResult::Panel { panel: panel.panel }));
         }
     }
 
     for strip in rects.tab_strips.iter().rev() {
-        if !excluded_nodes.contains(&strip.group) && contains(strip.rect, point)? {
+        if node_in_scope(strip.group, scope_nodes, include_only) && contains(strip.rect, point)? {
             return Ok(Some(HitResult::TabStrip { group: strip.group }));
         }
     }
 
     for group in rects.groups.iter().rev() {
-        if !excluded_nodes.contains(&group.group) && contains(group.rect, point)? {
+        if node_in_scope(group.group, scope_nodes, include_only) && contains(group.rect, point)? {
             return Ok(Some(HitResult::Group { group: group.group }));
         }
     }
 
     for column in rects.columns.iter().rev() {
-        if !excluded_nodes.contains(&column.column) && contains(column.rect, point)? {
+        if node_in_scope(column.column, scope_nodes, include_only) && contains(column.rect, point)? {
             return Ok(Some(HitResult::Column { column: column.column }));
         }
     }
@@ -247,13 +247,25 @@ fn hit_layout_geometry(
     Ok(None)
 }
 
-fn target_in_scope(target: DropTarget, excluded_nodes: &HashSet<NodeId>) -> bool {
+fn node_in_scope(node: NodeId, scope_nodes: &HashSet<NodeId>, include_only: bool) -> bool {
+    scope_nodes.contains(&node) == include_only
+}
+
+fn panel_in_scope(panel: PanelId, scope_panels: &HashSet<PanelId>, include_only: bool) -> bool {
+    scope_panels.contains(&panel) == include_only
+}
+
+fn target_in_scope(
+    target: DropTarget,
+    scope_nodes: &HashSet<NodeId>,
+    include_only: bool,
+) -> bool {
     let target_node = match target {
         DropTarget::Tabs { group, .. } | DropTarget::GroupEdge { group, .. } => Some(group),
         DropTarget::RailSlot { column, .. } => Some(column),
         DropTarget::MainColumn { .. } => None,
     };
-    target_node.is_some_and(|node| !excluded_nodes.contains(&node))
+    target_node.is_some_and(|node| node_in_scope(node, scope_nodes, include_only))
 }
 
 #[cfg(test)]
@@ -343,7 +355,10 @@ mod tests {
         // A blank point in the front window must not hit the lower window.
         assert_eq!(
             layout.hit_test(Point::new(390.0, 280.0), &rects, &metrics).unwrap(),
-            HitResult::FloatingGroup { group: upper }
+            HitResult::DropZone {
+                target: DropTarget::GroupEdge { group: upper_group, zone: crate::DropZone::Bottom },
+                zone: crate::DropZone::Bottom,
+            }
         );
         assert_ne!(lower, upper);
     }
