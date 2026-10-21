@@ -233,6 +233,7 @@ impl Layout {
             version,
             chrome,
             flyout: None,
+            flyout_auto_collapse: true,
         }
     }
 }
