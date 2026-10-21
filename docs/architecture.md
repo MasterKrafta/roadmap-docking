@@ -41,6 +41,7 @@ app ──▶ dock-core
 
 - Session Undo/Redo входит в `dock-core` как `UndoRedoHistory`; история намеренно не сохраняется в JSON workspace для MVP.
 - История ведётся через фасад `UndoRedoHistory::apply`. После успешной команды, увеличившей `Layout::version`, записывается checkpoint до изменения. Это session-only снимки всей модели, а не последовательность best-effort inverse commands: так отмена покрывает команды, для которых inverse ещё отсутствует, включая reorder/move, ratios, floating bounds и stacking.
+- UI-адаптер должен отправлять undoable user commands через `UndoRedoHistory::apply`; прямой вызов `Layout::apply` сохраняется для сценариев без истории и намеренно не записывает undo entry.
 - No-op (не изменивший версию), отклонённая команда и transient flyout-команда не создают запись. Drag preview не меняет Layout и в API истории не входит. После новой persistent-команды на разветвлении undo redo-ветка очищается.
 - Undo/Redo восстанавливает точное логическое persistent-состояние, но не откатывает `Layout::version`: версия остаётся монотонной. ID существующих в обеих версиях сущностей сохраняются, удалённые и воссозданные сущности получают новые runtime keys, поэтому stale handles не оживают; UI-адаптер должен перечитать ID после undo/redo. Flyout при восстановлении закрывается; session-only flyout auto-collapse preference сохраняется текущим.
 - История ограничена количеством записей (по умолчанию 100); `clear()` сбрасывает её без изменения раскладки. Ошибка проверки checkpoint при текущих metrics не меняет Layout и возвращает запись в стек.
