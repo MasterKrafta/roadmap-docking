@@ -340,11 +340,11 @@ fn apply_drop_of_panel_at_its_current_tab_slot_is_a_no_op() {
 fn apply_transient_flyout_does_not_increment_persistent_version() {
     let metrics = DockMetrics::default();
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
-    let (_, panel) = builder.panel(
+    let (panel_id, panel_node) = builder.panel(
         PanelKey::new("layers").unwrap(),
         descriptors()[0].1,
     );
-    let group = builder.tabs(vec![panel], 0, false);
+    let group = builder.tabs(vec![panel_node], 0, false);
     let column = builder.column(
         metrics.rail_width,
         crate::ColumnMode::IconsOnly,
@@ -355,10 +355,10 @@ fn apply_transient_flyout_does_not_increment_persistent_version() {
     let mut layout = builder.build();
 
     let outcome = layout
-        .apply(DockCommand::OpenFlyout { column, group }, &metrics)
+        .apply(DockCommand::OpenFlyout { column, panel: panel_id }, &metrics)
         .unwrap();
 
-    assert_eq!(layout.flyout(), Some(crate::FlyoutState::new(column, group)));
+    assert_eq!(layout.flyout(), Some(crate::FlyoutState::new(column, group, panel_id)));
     assert_eq!(layout.version(), 0);
     assert_eq!(outcome.new_version, 0);
     assert!(outcome.inverse.is_none());
