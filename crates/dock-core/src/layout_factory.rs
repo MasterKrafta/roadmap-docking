@@ -5,7 +5,7 @@ use slotmap::SlotMap;
 use crate::{
     CanvasState, ChromeMode, Column, ColumnMode, DockArea, DockAreaId, DockMetrics, DockSide,
     FloatingGroup, FloatingGroupId, Layout, Node, NodeId, Panel, PanelConstraints, PanelId,
-    PanelInstance, PanelKey, Profile, Size, Tabs,
+    PanelInstance, PanelKey, Profile, Tabs,
 };
 
 const REQUIRED_PANEL_KEYS: [&str; 4] = ["layers", "color", "properties", "history"];
