@@ -572,15 +572,22 @@ fn push_group_drop_zones(
     metrics: &DockMetrics,
     output: &mut LayoutRects,
 ) -> Result<(), ComputeRectsError> {
-    let x_band = metrics.edge_drop_width.min(rect.size.width);
-    let y_band = metrics.edge_drop_width.min(rect.size.height);
+    let x_band = metrics.edge_drop_width.min(rect.size.width / 2.0);
+    let y_band = metrics.edge_drop_width.min(rect.size.height / 2.0);
+    let side_height = (rect.size.height - 2.0 * y_band).max(0.0);
     let zones = [
-        (DropZone::Left, Rect::new(rect.origin, Size::new(x_band, rect.size.height))),
+        (
+            DropZone::Left,
+            Rect::new(
+                Point::new(rect.origin.x, rect.origin.y + y_band),
+                Size::new(x_band, side_height),
+            ),
+        ),
         (
             DropZone::Right,
             Rect::new(
-                Point::new(rect.origin.x + rect.size.width - x_band, rect.origin.y),
-                Size::new(x_band, rect.size.height),
+                Point::new(rect.origin.x + rect.size.width - x_band, rect.origin.y + y_band),
+                Size::new(x_band, side_height),
             ),
         ),
         (DropZone::Top, Rect::new(rect.origin, Size::new(rect.size.width, y_band))),
