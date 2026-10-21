@@ -123,8 +123,22 @@ pub enum DockCommand {
     /// The panel is selected in flyout display state only; its owning Tabs
     /// node's active_index remains unchanged.
     OpenFlyout { column: NodeId, panel: PanelId },
-    /// Close the current transient flyout, if any.
+    /// Explicitly close the current transient flyout, regardless of auto-collapse policy.
     CloseFlyout,
+    /// Dismiss a flyout in response to a click outside or Escape.
+    ///
+    /// This is ignored when auto-collapse is disabled. Adapters should use this for
+    /// passive dismissal and CloseFlyout for an explicit close action.
+    DismissFlyout,
+    /// Enable or disable click-away, Escape, and same-icon auto-collapse behavior.
+    ///
+    /// This is transient UI configuration and never creates an undo record.
+    SetFlyoutAutoCollapse { enabled: bool },
+    /// Remember a flyout's requested width for the selected panel instance.
+    ///
+    /// Width is clamped to that panel's declared constraints. The command is transient:
+    /// it does not change the dock tree, layout version, or undo history.
+    ResizeFlyout { panel: PanelId, width: f32 },
     /// Set visibility of application chrome without rewriting the dock tree.
     SetChrome { mode: ChromeMode },
 }
@@ -205,9 +219,12 @@ mod tests {
             DockCommand::SetColumnMode { column: NodeId::null(), mode: ColumnMode::IconsOnly },
             DockCommand::OpenFlyout { column: NodeId::null(), panel: PanelId::null() },
             DockCommand::CloseFlyout,
+            DockCommand::DismissFlyout,
+            DockCommand::SetFlyoutAutoCollapse { enabled: true },
+            DockCommand::ResizeFlyout { panel: PanelId::null(), width: 280.0 },
             DockCommand::SetChrome { mode: ChromeMode::Hidden },
         ];
-        assert_eq!(commands.len(), 26);
+        assert_eq!(commands.len(), 29);
     }
 
     #[cfg(feature = "serde")]
