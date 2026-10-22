@@ -1,6 +1,6 @@
 use gpui::{
-    Context, InteractiveElement, IntoElement, MouseButton, MouseMoveEvent, MouseUpEvent,
-    ParentElement, Render, StatefulInteractiveElement, Styled, Window, div, px, rgb,
+    Context, InteractiveElement, IntoElement, MouseButton, ParentElement, Render,
+    StatefulInteractiveElement, Styled, Window, div, px, rgb,
 };
 use ui::Theme;
 
@@ -43,44 +43,6 @@ impl Render for MainWindow {
             .clamp(metrics.min_column_width, max_column_width);
         let tab_width =
             metrics.column_tab_width.min(((column_width - metrics.button_size).max(0.0)) / 2.0);
-
-        // Register window-level mouse handlers while resizing so the pointer can
-        // leave the narrow splitter hit zone without interrupting the drag.
-        if self.is_resizing {
-            let min_width = metrics.min_column_width;
-            let max_width = max_column_width;
-            let move_listener = cx.listener(
-                move |this, event: &MouseMoveEvent, _window, cx| {
-                    if !this.is_resizing {
-                        return;
-                    }
-
-                    // The column is attached to the right edge: moving its free
-                    // edge left increases its width.
-                    let delta = this.resize_start_x - event.position.x.as_f32();
-                    this.column_width =
-                        (this.resize_start_width + delta).clamp(min_width, max_width);
-                    cx.notify();
-                },
-            );
-            window.on_mouse_event(
-                move |event: &MouseMoveEvent, _phase, window, cx| {
-                    move_listener(event, window, cx);
-                },
-            );
-
-            let up_listener = cx.listener(|this, event: &MouseUpEvent, _window, cx| {
-                if this.is_resizing && event.button == MouseButton::Left {
-                    this.is_resizing = false;
-                    cx.notify();
-                }
-            });
-            window.on_mouse_event(
-                move |event: &MouseUpEvent, _phase, window, cx| {
-                    up_listener(event, window, cx);
-                },
-            );
-        }
 
         let control = |label: &'static str| {
             div()
@@ -150,6 +112,31 @@ impl Render for MainWindow {
                             this.resize_start_x = event.position.x.as_f32();
                             this.resize_start_width = this.column_width;
                             cx.notify();
+                        }),
+                    )
+                    .on_mouse_move({
+                        let min_width = metrics.min_column_width;
+                        let hit_zone = metrics.splitter_hit_zone;
+                        cx.listener(move |this, event, window, cx| {
+                            if !this.is_resizing {
+                                return;
+                            }
+
+                            let window_width = window.viewport_size().width.as_f32().max(1.0);
+                            let max_width = (window_width - hit_zone).max(min_width);
+                            let delta = this.resize_start_x - event.position.x.as_f32();
+                            this.column_width =
+                                (this.resize_start_width + delta).clamp(min_width, max_width);
+                            cx.notify();
+                        })
+                    })
+                    .on_mouse_up(
+                        MouseButton::Left,
+                        cx.listener(|this, _event, _window, cx| {
+                            if this.is_resizing {
+                                this.is_resizing = false;
+                                cx.notify();
+                            }
                         }),
                     )
                     .child(
