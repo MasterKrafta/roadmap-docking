@@ -993,7 +993,7 @@ fn runtime_id_sets(layout: &Layout) -> RuntimeIdSets {
     )
 }
 
-fn assert_layout_ids_resolve(layout: &Layout, metrics: &DockMetrics) {
+fn assert_layout_state_invariants(layout: &Layout, metrics: &DockMetrics) {
     assert_eq!(layout.validate(metrics), Ok(()), "layout must validate");
 
     for (node_id, node) in layout.nodes() {
@@ -1065,6 +1065,11 @@ fn assert_layout_ids_resolve(layout: &Layout, metrics: &DockMetrics) {
             flyout.group
         );
     }
+
+    let rects = layout
+        .compute_rects(Rect::new(Point::ZERO, Size::new(32_768.0, 32_768.0)), metrics)
+        .unwrap_or_else(|error| panic!("valid layout failed large-viewport geometry: {error}"));
+    crate::layout_rects::assert_layout_rects_invariants(&rects);
 }
 
 fn assert_retired_ids_stay_stale(
@@ -1073,25 +1078,41 @@ fn assert_retired_ids_stay_stale(
     after: &RuntimeIdSets,
     context: &str,
 ) {
-    for id in before.0.difference(&after.0).chain(after.0.difference(&before.0)) {
+    for id in before
+        .0
+        .difference(&after.0)
+        .chain(after.0.difference(&before.0))
+    {
         assert!(
             layout.node(*id).is_none(),
             "{context}: retired/replaced NodeId {id:?} became live again"
         );
     }
-    for id in before.1.difference(&after.1).chain(after.1.difference(&before.1)) {
+    for id in before
+        .1
+        .difference(&after.1)
+        .chain(after.1.difference(&before.1))
+    {
         assert!(
             layout.panel_instance(*id).is_none(),
             "{context}: retired/replaced PanelId {id:?} became live again"
         );
     }
-    for id in before.2.difference(&after.2).chain(after.2.difference(&before.2)) {
+    for id in before
+        .2
+        .difference(&after.2)
+        .chain(after.2.difference(&before.2))
+    {
         assert!(
             layout.dock_area(*id).is_none(),
             "{context}: retired/replaced DockAreaId {id:?} became live again"
         );
     }
-    for id in before.3.difference(&after.3).chain(after.3.difference(&before.3)) {
+    for id in before
+        .3
+        .difference(&after.3)
+        .chain(after.3.difference(&before.3))
+    {
         assert!(
             layout.floating_group(*id).is_none(),
             "{context}: retired/replaced FloatingGroupId {id:?} became live again"
@@ -1128,7 +1149,7 @@ fn assert_history_round_trip(
     let outcome = history
         .apply(layout, command.clone(), metrics)
         .unwrap_or_else(|error| panic!("history command {description} failed: {error}"));
-    assert_layout_ids_resolve(layout, metrics);
+    assert_layout_state_invariants(layout, metrics);
 
     if expect_persistent_change {
         assert_ne!(
@@ -1201,24 +1222,30 @@ fn assert_history_round_trip(
 #[test]
 fn expected_small_viewport_errors_are_constraints_not_layout_regressions() {
     let metrics = DockMetrics::default();
-    let layout = sequence_layout();
+    let mut builder = LayoutBuilder::new(Profile::Generic);
+    let (_, panel_node) =
+        builder.panel(PanelKey::new("small-viewport-canvas").unwrap(), constraints());
+    let group = builder.tabs(vec![panel_node], 0, false);
+    let column = builder.column(280.0, ColumnMode::Expanded, vec![group], vec![1.0]);
+    builder.main_area(DockSide::Left, column);
+    let layout = builder.build();
     assert_eq!(layout.validate(&metrics), Ok(()));
 
-    // The model is valid, but two 280px columns cannot leave the required
-    // Canvas width in a 879px viewport. This is an expected sizing result.
+    // The model is valid, but a 280px dock leaves only 319px for Canvas in a
+    // 599px viewport. This is an expected sizing result, not a model failure.
     assert!(matches!(
         layout.compute_rects(
-            Rect::new(Point::ZERO, Size::new(879.0, 600.0)),
+            Rect::new(Point::ZERO, Size::new(599.0, 600.0)),
             &metrics
         ),
         Err(ComputeRectsError::InsufficientCanvasWidth { available, minimum })
-            if available < minimum && minimum == metrics.min_canvas_width
+            if available == 319.0 && minimum == metrics.min_canvas_width
     ));
 
-    // The exact same layout computes successfully when enough width is available.
+    // The same valid layout computes successfully when enough width is available.
     assert!(layout
         .compute_rects(
-            Rect::new(Point::ZERO, Size::new(1200.0, 900.0)),
+            Rect::new(Point::ZERO, Size::new(800.0, 900.0)),
             &metrics
         )
         .is_ok());
@@ -1227,11 +1254,14 @@ fn expected_small_viewport_errors_are_constraints_not_layout_regressions() {
     // viewport that is shorter than the required content. Keep this failure
     // typed separately from InvalidLayout and Geometry errors.
     let mut builder = LayoutBuilder::new(Profile::Generic);
-    let (_, panel_node) = builder.panel(PanelKey::new("short-floating-viewport").unwrap(), constraints());
+    let (_, panel_node) = builder.panel(
+        PanelKey::new("short-floating-viewport").unwrap(),
+        constraints(),
+    );
     let group = builder.tabs(vec![panel_node], 0, false);
     builder.floating_group(
         group,
-        Rect::new(Point::new(30.0, 20.0), Size::new(200.0, 90.0)),
+        Rect::new(Point::new(30.0, 20.0), Size::new(320.0, 220.0)),
         1,
     );
     let floating_layout = builder.build();
