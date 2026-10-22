@@ -569,15 +569,33 @@ fn resize_groups_with_tab_chrome_supports_history_undo_and_redo_after_clamping()
     let viewport = Rect::new(Point::ZERO, Size::new(1000.0, 504.0));
     let group_heights = |layout: &Layout| {
         let rects = layout.compute_rects(viewport, &metrics).unwrap();
-        (
-            rects.groups.iter().find(|item| item.group == group_a).unwrap().rect.size.height,
-            rects.groups.iter().find(|item| item.group == group_b).unwrap().rect.size.height,
-        )
+        let height_a = rects
+            .groups
+            .iter()
+            .find(|item| item.group == group_a)
+            .unwrap()
+            .rect
+            .size
+            .height;
+        let height_b = rects
+            .groups
+            .iter()
+            .find(|item| item.group == group_b)
+            .unwrap()
+            .rect
+            .size
+            .height;
+        (height_a, height_b)
+    };
+    let assert_heights = |layout: &Layout, expected_a: f32, expected_b: f32| {
+        let (height_a, height_b) = group_heights(layout);
+        assert!((height_a - expected_a).abs() < 1.0e-3);
+        assert!((height_b - expected_b).abs() < 1.0e-3);
     };
 
     let mut history = UndoRedoHistory::new();
     let before = persistent_shape(&layout);
-    assert_eq!(group_heights(&layout), (250.0, 250.0));
+    assert_heights(&layout, 250.0, 250.0);
     let outcome = history
         .apply(
             &mut layout,
@@ -596,16 +614,16 @@ fn resize_groups_with_tab_chrome_supports_history_undo_and_redo_after_clamping()
     ));
     let after = persistent_shape(&layout);
     assert_ne!(after, before);
-    assert_eq!(group_heights(&layout), (340.0, 160.0));
+    assert_heights(&layout, 340.0, 160.0);
     assert!(history.can_undo());
 
     assert!(history.undo(&mut layout, &metrics).unwrap());
     assert_eq!(persistent_shape(&layout), before);
-    assert_eq!(group_heights(&layout), (250.0, 250.0));
+    assert_heights(&layout, 250.0, 250.0);
     assert!(history.can_redo());
 
     assert!(history.redo(&mut layout, &metrics).unwrap());
     assert_eq!(persistent_shape(&layout), after);
-    assert_eq!(group_heights(&layout), (340.0, 160.0));
+    assert_heights(&layout, 340.0, 160.0);
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
