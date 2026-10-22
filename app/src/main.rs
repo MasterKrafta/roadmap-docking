@@ -1,18 +1,25 @@
-mod panels;
-
 #[cfg(windows)]
-mod startup_window;
+mod main_window;
+#[cfg(windows)]
+mod panels;
 
 #[cfg(windows)]
 fn main() {
     use gpui::{App, AppContext, Bounds, WindowBounds, WindowOptions, px, size};
     use gpui_platform::application;
-    use startup_window::StartupWindow;
+    use main_window::MainWindow;
 
     application().run(|cx: &mut App| {
         let theme = ui::Theme::default();
+        let main_window = match MainWindow::new(theme) {
+            Ok(window) => window,
+            Err(error) => {
+                eprintln!("Could not initialize the docking layout: {error}");
+                return;
+            }
+        };
 
-        let bounds = Bounds::centered(None, size(px(1000.0), px(700.0)), cx);
+        let bounds = Bounds::centered(None, size(px(1200.0), px(800.0)), cx);
 
         let window_options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
@@ -20,7 +27,7 @@ fn main() {
         };
 
         if let Err(error) = cx.open_window(window_options, move |_window, cx| {
-            cx.new(|_| StartupWindow::new(theme))
+            cx.new(|_| main_window)
         }) {
             eprintln!("Could not open the application window: {error}");
             return;
