@@ -60,7 +60,8 @@ impl Render for MainWindow {
         let menu_bar_height = 32.0_f32.min(window_height);
         let menu_item_height = 28.0;
         let menu_dropdown_height = if self.windows_menu_open {
-            menu_item_height * 4.0 + 16.0
+            // Four 28px items, vertical padding, and three row gaps.
+            menu_item_height * 4.0 + 28.0
         } else {
             0.0
         };
@@ -143,7 +144,6 @@ impl Render for MainWindow {
                 let min_group_height = metrics.min_group_height;
                 let column_header_height = metrics.column_header_height;
                 let default_split = metrics.default_column_split_ratio;
-                let menu_area_height = menu_area_height;
 
                 cx.listener(move |this, event: &MouseMoveEvent, window, cx| {
                     if this.is_resizing_outer_splitter {
@@ -408,11 +408,45 @@ impl Render for MainWindow {
     }
 }
 
+fn render_panel_menu_item(
+    index: usize,
+    label: &'static str,
+    checked: bool,
+    theme: Theme,
+    cx: &mut Context<MainWindow>,
+) -> impl IntoElement {
+    let colors = theme.colors;
+    let id = match index {
+        0 => "windows-menu-left-upper",
+        1 => "windows-menu-left-lower",
+        2 => "windows-menu-right-upper",
+        _ => "windows-menu-right-lower",
+    };
+
+    div()
+        .id(id)
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap_2()
+        .h(px(28.0))
+        .p(px(4.0))
+        .text_color(rgb(colors.primary_text))
+        .on_click(cx.listener(move |this, _, _, cx| {
+            this.visible_panels[index] = !this.visible_panels[index];
+            cx.notify();
+        }))
+        .child(if checked { "☑" } else { "☐" })
+        .child(label)
+}
+
 fn render_column(
     column_index: usize,
     column_width: f32,
     top_panel_height: f32,
     bottom_panel_height: f32,
+    show_upper_panel: bool,
+    show_lower_panel: bool,
     theme: Theme,
     active_tab: usize,
     lower_active_tab: usize,
@@ -456,35 +490,36 @@ fn render_column(
             .child(label)
     };
 
-    div()
+    let header = div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .h(px(metrics.column_header_height))
+        .flex_shrink_0()
+        .bg(rgb(colors.group_background))
+        .border_b_1()
+        .border_color(rgb(colors.border))
+        .child(div().flex_1())
+        .child(control(">>"))
+        .child(control("x"));
+
+    let mut column = div()
         .flex()
         .flex_col()
         .w(px(column_width))
         .min_w(px(metrics.min_column_width))
         .h(px(
-            // The requested layout fills the full window height.
-            top_panel_height + horizontal_splitter_height + bottom_panel_height
+            top_panel_height
+                + horizontal_splitter_height
+                + bottom_panel_height
                 + metrics.column_header_height,
         ))
         .flex_shrink_0()
         .bg(rgb(colors.window_background))
-        // Header with its controls aligned to the right.
-        .child(
-            div()
-                .flex()
-                .flex_row()
-                .items_center()
-                .h(px(metrics.column_header_height))
-                .flex_shrink_0()
-                .bg(rgb(colors.group_background))
-                .border_b_1()
-                .border_color(rgb(colors.border))
-                .child(div().flex_1())
-                .child(control(">>"))
-                .child(control("x")),
-        )
-        // Upper tab group and its content.
-        .child(
+        .child(header);
+
+    if show_upper_panel {
+        column = column.child(
             div()
                 .flex()
                 .flex_col()
@@ -505,11 +540,19 @@ fn render_column(
                     div()
                         .flex_1()
                         .min_h(px(0.0))
-                        .bg(rgb(colors.canvas_background)),
+                        .bg(rgb(colors.canvas_background))
+                        .child(render_panel_content(
+                            column_index,
+                            false,
+                            active_tab,
+                            theme,
+                        )),
                 ),
-        )
-        // Horizontal splitter is independently resizable in each column.
-        .child(
+        );
+    }
+
+    if show_upper_panel && show_lower_panel {
+        column = column.child(
             div()
                 .flex()
                 .items_center()
@@ -538,9 +581,11 @@ fn render_column(
                         .h(px(metrics.splitter_thickness.min(horizontal_splitter_height)))
                         .bg(rgb(horizontal_splitter_color)),
                 ),
-        )
-        // Lower tab group and its content.
-        .child(
+        );
+    }
+
+    if show_lower_panel {
+        column = column.child(
             div()
                 .flex()
                 .flex_col()
@@ -561,8 +606,60 @@ fn render_column(
                     div()
                         .flex_1()
                         .min_h(px(0.0))
-                        .bg(rgb(colors.canvas_background)),
+                        .bg(rgb(colors.canvas_background))
+                        .child(render_panel_content(
+                            column_index,
+                            true,
+                            lower_active_tab,
+                            theme,
+                        )),
                 ),
+        );
+    }
+
+    column
+}
+
+fn render_panel_content(
+    column_index: usize,
+    is_lower: bool,
+    active_tab: usize,
+    theme: Theme,
+) -> impl IntoElement {
+    let colors = theme.colors;
+    let metrics = theme.metrics;
+    let column_name = if column_index == 0 {
+        "Левая колонка"
+    } else {
+        "Правая колонка"
+    };
+    let panel_name = if is_lower {
+        "Нижняя панель"
+    } else {
+        "Верхняя панель"
+    };
+    let tab_name = if active_tab == 0 {
+        "Содержимое вкладки 1"
+    } else {
+        "Содержимое вкладки 2"
+    };
+    let details = format!("{column_name} · {panel_name}");
+
+    div()
+        .flex()
+        .flex_col()
+        .gap_2()
+        .p(px(metrics.content_padding))
+        .text_color(rgb(colors.primary_text))
+        .child(
+            div()
+                .text_size(px(theme.typography.title_size))
+                .child(tab_name),
+        )
+        .child(
+            div()
+                .text_color(rgb(colors.muted_text))
+                .child(details),
         )
 }
 
