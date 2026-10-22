@@ -189,8 +189,18 @@ cargo test -p dock-core --release benchmark_hit_test_multiple_floating_subtrees 
 
 The benchmark asserts a panel hit inside the frontmost window and a Canvas hit outside every floating window. The separate regression test asserts that blank space inside the topmost floating window returns that window's `FloatingGroup` hit instead of falling through to a lower window or the Canvas.
 
+**Post-change results:** the lazy union collection removes most of the cost for a point inside the frontmost window, while the outside-window case measured slower in all three post-change runs. This is a workload trade-off; correctness and full validation are still required before accepting the optimization.
+
+| Point | Run 1 | Run 2 | Run 3 | Median | Change vs. baseline median |
+|---|---:|---:|---:|---:|---:|
+| `inside-front-floating` | 27.130 | 26.721 | 27.099 | **27.099** | **−88.0% (8.3× faster)** |
+| `outside-floating` | 267.849 | 234.511 | 234.189 | **234.511** | **+19.3% slower** |
+
+All timings are microseconds per call from 500 iterations per point on the same reported local Windows release build. Small benchmark samples can still be affected by machine load; the outside-window regression should be treated as a signal to verify, not a universal cost estimate.
+
 - [x] Record the release benchmark baseline for both points across three runs.
-- [ ] Compare the lazy union collection with this baseline across three release runs; keep the change only if the measured result is useful and correctness is preserved.
+- [x] Compare the lazy union collection with the baseline across three release runs.
+- [ ] Run and review the full fmt, test, serde-test and clippy checks before deciding whether to retain the workload trade-off.
 - [ ] Preserve priority: Z-order → floating resize/title → internal targets → flyout → main dock/canvas.
 - [ ] Confirm blank space in the topmost floating window never leaks hits to lower windows or Canvas.
 
