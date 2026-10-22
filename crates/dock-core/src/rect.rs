@@ -47,6 +47,11 @@ impl Rect {
         if !right.is_finite() {
             return Err(GeometryError::ArithmeticOverflow);
         }
+        // A finite positive width can disappear when added to a large f32
+        // origin. Such a rectangle has no representable right edge.
+        if self.size.width > 0.0 && right <= self.origin.x {
+            return Err(GeometryError::NonPositiveDimension);
+        }
         Ok(right)
     }
 
@@ -60,6 +65,10 @@ impl Rect {
         let bottom = self.origin.y + self.size.height;
         if !bottom.is_finite() {
             return Err(GeometryError::ArithmeticOverflow);
+        }
+        // Keep the vertical edge contract identical to the horizontal one.
+        if self.size.height > 0.0 && bottom <= self.origin.y {
+            return Err(GeometryError::NonPositiveDimension);
         }
         Ok(bottom)
     }
@@ -127,6 +136,62 @@ mod tests {
         assert_eq!(
             valid.contains(Point::new(f32::NAN, 0.0)),
             Err(GeometryError::NonFinite)
+        );
+    }
+
+    #[test]
+    fn rejects_positive_dimensions_whose_edges_collapse_at_large_origins() {
+        // At 2^24, adjacent f32 values are two units apart; adding one rounds
+        // back to the original coordinate rather than creating a distinct edge.
+        let horizontal =
+            Rect::new(Point::new(16_777_216.0, 0.0), Size::new(1.0, 10.0));
+        assert_eq!(
+            horizontal.checked_right(),
+            Err(GeometryError::NonPositiveDimension)
+        );
+        assert_eq!(
+            horizontal.validate(),
+            Err(GeometryError::NonPositiveDimension)
+        );
+        assert_eq!(
+            horizontal.validate_non_empty(),
+            Err(GeometryError::NonPositiveDimension)
+        );
+        assert_eq!(
+            horizontal.contains(Point::new(16_777_216.0, 5.0)),
+            Err(GeometryError::NonPositiveDimension)
+        );
+        assert_eq!(
+            horizontal.intersects(Rect::new(
+                Point::new(16_777_216.0, 0.0),
+                Size::new(4.0, 10.0),
+            )),
+            Err(GeometryError::NonPositiveDimension)
+        );
+
+        let vertical =
+            Rect::new(Point::new(0.0, 16_777_216.0), Size::new(10.0, 1.0));
+        assert_eq!(
+            vertical.checked_bottom(),
+            Err(GeometryError::NonPositiveDimension)
+        );
+        assert_eq!(
+            vertical.validate(),
+            Err(GeometryError::NonPositiveDimension)
+        );
+    }
+
+    #[test]
+    fn zero_area_rect_remains_valid_even_at_large_origins() {
+        let empty = Rect::new(
+            Point::new(16_777_216.0, 16_777_216.0),
+            Size::ZERO,
+        );
+        assert_eq!(empty.validate(), Ok(()));
+        assert_eq!(empty.contains(empty.origin), Ok(false));
+        assert_eq!(
+            empty.validate_non_empty(),
+            Err(GeometryError::NonPositiveDimension)
         );
     }
 
