@@ -837,6 +837,25 @@ mod tests {
                     "Layout invalid after successful command {:?}",
                     command
                 );
+
+                // Generated commands must leave a layout that not only validates,
+                // but also resolves into usable geometry in a deliberately generous
+                // viewport. This keeps expected small-window failures separate from
+                // model/geometry regressions.
+                let viewport = Rect::new(
+                    Point::ZERO,
+                    Size::new(32_768.0, 32_768.0),
+                );
+                let rects = layout.compute_rects(viewport, &metrics);
+                prop_assert!(
+                    rects.is_ok(),
+                    "geometry failed after successful command {:?}: {:?}",
+                    command,
+                    rects
+                );
+                crate::layout_rects::assert_layout_rects_invariants(
+                    rects.as_ref().expect("geometry success was asserted"),
+                );
             }
         }
     }
