@@ -684,6 +684,7 @@ impl Render for MainWindow {
                 self.theme,
                 window_width,
                 window_height,
+                self.collapsed_group_content,
                 cx,
             ));
         }
@@ -1174,6 +1175,7 @@ fn render_mouse_context_menu(
     theme: Theme,
     window_width: f32,
     window_height: f32,
+    collapsed_group_content: [bool; 3],
     cx: &mut Context<MainWindow>,
 ) -> impl IntoElement {
     let colors = theme.colors;
@@ -1340,6 +1342,7 @@ fn render_mouse_context_menu(
         .child("Close Tab Group");
 
     let group_to_minimize = menu.group_index;
+    let group_is_minimized = collapsed_group_content[group_to_minimize];
     let minimize = div()
         .id("mouse-context-minimize")
         .flex()
@@ -1348,12 +1351,16 @@ fn render_mouse_context_menu(
         .p(px(6.0))
         .text_color(rgb(colors.primary_text))
         .on_click(cx.listener(move |this, _, _, cx| {
-            this.collapsed_group_content[group_to_minimize] = true;
+            this.collapsed_group_content[group_to_minimize] = !group_is_minimized;
             this.open_tab_context_menu = None;
             this.mouse_context_menu = None;
             cx.notify();
         }))
-        .child("Minimize");
+        .child(if group_is_minimized {
+            "Expand Tab Group"
+        } else {
+            "Minimize"
+        });
 
     let column_to_collapse = menu.column_index;
     let collapse_to_icons = div()
