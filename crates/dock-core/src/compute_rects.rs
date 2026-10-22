@@ -332,11 +332,11 @@ fn minimum_node_size(
     #[cfg(test)]
     visit_probe::record_minimum_node_size_helper(id);
     layout.minimum_node_size(id, metrics).map_err(|error| match error {
-            crate::CommandError::InvalidValue { field: "size", .. } => {
-                ComputeRectsError::Geometry(GeometryError::ArithmeticOverflow)
-            }
-            _ => ComputeRectsError::InvalidLayout,
-        })
+        crate::CommandError::InvalidValue { field: "size", .. } => {
+            ComputeRectsError::Geometry(GeometryError::ArithmeticOverflow)
+        }
+        _ => ComputeRectsError::InvalidLayout,
+    })
 }
 
 fn layout_node(
@@ -755,7 +755,7 @@ fn layout_split(
                 rect.size.height,
                 Axis::Y,
                 metrics,
-                )?;
+            )?;
             if allocation.overflows {
                 push_vertical_overflow(id, rect, allocation.content_height, output)?;
             }
