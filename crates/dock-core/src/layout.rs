@@ -18,6 +18,22 @@ const PIXEL_TOLERANCE: f32 = 1.0e-3;
 /// Layout is the sole owner of runtime arenas. Public access is read-only;
 /// external edits are performed only through Layout::apply and typed DockCommand
 /// values. Flyout state is transient and kept separately from the persistent tree.
+#[cfg(feature = "serde")]
+pub(crate) struct WorkspaceLayoutParts {
+    pub(crate) nodes: SlotMap<NodeId, Node>,
+    pub(crate) panel_instances: SlotMap<PanelId, PanelInstance>,
+    pub(crate) dock_areas: SlotMap<DockAreaId, DockArea>,
+    pub(crate) main_areas: [Option<DockAreaId>; 2],
+    pub(crate) floating_groups: SlotMap<FloatingGroupId, FloatingGroup>,
+    pub(crate) canvas: CanvasState,
+    pub(crate) profile: Profile,
+    pub(crate) chrome: ChromeMode,
+}
+
+#[cfg(feature = "serde")]
+pub(crate) type FloatingBoundsClampResult =
+    Result<Vec<(usize, Rect, Rect)>, (usize, crate::ComputeRectsError)>;
+
 #[derive(Clone, Debug)]
 pub struct Layout {
     nodes: SlotMap<NodeId, Node>,
@@ -54,16 +70,18 @@ impl Layout {
     }
 
     #[cfg(feature = "serde")]
-    pub(crate) fn from_workspace_parts(
-        nodes: SlotMap<NodeId, Node>,
-        panel_instances: SlotMap<PanelId, PanelInstance>,
-        dock_areas: SlotMap<DockAreaId, DockArea>,
-        main_areas: [Option<DockAreaId>; 2],
-        floating_groups: SlotMap<FloatingGroupId, FloatingGroup>,
-        canvas: CanvasState,
-        profile: Profile,
-        chrome: ChromeMode,
-    ) -> Self {
+    pub(crate) fn from_workspace_parts(parts: WorkspaceLayoutParts) -> Self {
+        let WorkspaceLayoutParts {
+            nodes,
+            panel_instances,
+            dock_areas,
+            main_areas,
+            floating_groups,
+            canvas,
+            profile,
+            chrome,
+        } = parts;
+
         Self {
             nodes,
             panel_instances,
@@ -85,7 +103,7 @@ impl Layout {
         &mut self,
         client_area: Rect,
         metrics: &DockMetrics,
-    ) -> Result<Vec<(usize, Rect, Rect)>, (usize, crate::ComputeRectsError)> {
+    ) -> FloatingBoundsClampResult {
         let mut groups: Vec<_> = self
             .floating_groups
             .iter()
