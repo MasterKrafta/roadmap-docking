@@ -5,7 +5,8 @@ use dock_core::{
     Size, Tabs,
 };
 use gpui::{
-    AnyElement, App, ClickEvent, Div, IntoElement, ParentElement, StatefulInteractiveElement,
+    AnyElement, App, ClickEvent, Div, InteractiveElement, IntoElement, ParentElement,
+    StatefulInteractiveElement,
     Styled, Window, div, px, rgb,
 };
 use ui::Theme;
@@ -183,6 +184,7 @@ where
         let element = rect_element(header.rect, background)
             .text_color(rgb(theme.colors.primary_text))
             .child(label)
+            .id(format!("dock-tab-{:?}-{:?}", header.group, header.panel))
             .on_click(make_command_handler(DockCommand::ActivateTab {
                 group: header.group,
                 panel: header.panel,
