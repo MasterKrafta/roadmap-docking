@@ -339,6 +339,7 @@ impl Render for MainWindow {
                     let tab_strip_height = metrics.tab_strip_height;
                     let button_size = metrics.button_size;
                     let left_column_visible = left_column_visible;
+                    let right_column_visible = right_column_visible;
                     let left_column_width = left_column_width;
                     let right_column_width = right_column_width;
                     let divider_width = divider_width;
@@ -370,27 +371,29 @@ impl Render for MainWindow {
                         }
 
                         if let Some(group) = this.open_tab_context_menu {
+                            let left_column_left = if right_column_visible {
+                                (window_width
+                                    - left_column_width
+                                    - right_column_width
+                                    - divider_width)
+                                    .max(0.0)
+                            } else {
+                                (window_width - left_column_width).max(0.0)
+                            };
                             let (strip_top, menu_left) = match group {
                                 0 => (
                                     menu_bar_height + header_height,
-                                    left_column_width - 176.0,
+                                    left_column_left + left_column_width - 176.0,
                                 ),
                                 1 => (
                                     menu_bar_height + header_height + left_top_height
                                         + left_horizontal_divider,
-                                    left_column_width - 176.0,
+                                    left_column_left + left_column_width - 176.0,
                                 ),
-                                _ => {
-                                    let right_left = if left_column_visible {
-                                        left_column_width + divider_width
-                                    } else {
-                                        0.0
-                                    };
-                                    (
-                                        menu_bar_height + header_height,
-                                        right_left + right_column_width - 176.0,
-                                    )
-                                }
+                                _ => (
+                                    menu_bar_height + header_height,
+                                    window_width - 176.0,
+                                ),
                             };
 
                             let menu_inside = x >= menu_left
@@ -399,15 +402,8 @@ impl Render for MainWindow {
                                 && y <= strip_top + tab_strip_height + 68.0;
 
                             let button_left = match group {
-                                0 | 1 => left_column_width - button_size,
-                                _ => {
-                                    let right_left = if left_column_visible {
-                                        left_column_width + divider_width
-                                    } else {
-                                        0.0
-                                    };
-                                    right_left + right_column_width - button_size
-                                }
+                                0 | 1 => left_column_left + left_column_width - button_size,
+                                _ => window_width - button_size,
                             };
                             let button_inside = x >= button_left
                                 && x <= button_left + button_size
