@@ -198,7 +198,20 @@ The benchmark asserts a panel hit inside the frontmost window and a Canvas hit o
 
 All timings are microseconds per call from 500 iterations per point on the same reported local Windows release build. Small benchmark samples can still be affected by machine load; the outside-window regression should be treated as a signal to verify, not a universal cost estimate.
 
-**Follow-up experiment:** direct union collection reuses the same node/panel sets across floating roots, and subtree traversal iterates child lists without cloning them. This targets the allocations and hashing still present on the outside-window path. The measurements above remain the comparator until three local release runs validate this variant.
+**Follow-up implementation (PR #34):** direct union collection reuses the same node/panel sets across floating roots, and subtree traversal iterates child lists without cloning them. This targets the allocations and hashing on the outside-window path.
+
+**Follow-up measurements after PR #34:** three release runs on the same local Windows build, 500 iterations per point.
+
+| Point | Run 1 | Run 2 | Run 3 | Median | Change vs. original baseline |
+|---|---:|---:|---:|---:|---:|
+| `inside-front-floating` | 26.155 | 32.847 | 22.652 | **26.155** | **−88.4% (8.63× faster)** |
+| `outside-floating` | 104.460 | 124.460 | 104.596 | **104.596** | **−46.8% (1.88× faster)** |
+
+Against the intermediate lazy-union-only variant, the outside-window median improved from 234.511 to 104.596 µs/call (55.4% lower); the inside-window median remained in the same range (27.099 → 26.155 µs/call). The third outside-window run is notably slower than the other two, so these are workload-specific measurements rather than a universal performance guarantee.
+
+The updated measurements resolve the measured performance regression in this synthetic outside-window case. The optimization remains pending the full local `fmt`, test, serde-test and clippy suite after PR #34; do not mark the stage complete until these checks pass and the floating-window priority/blank-space regression tests are confirmed.
+
+
 
 - [x] Record the release benchmark baseline for both points across three runs.
 - [x] Compare the lazy union collection with the baseline across three release runs.
