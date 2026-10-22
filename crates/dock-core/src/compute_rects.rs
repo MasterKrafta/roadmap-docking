@@ -2177,6 +2177,163 @@ mod tests {
     }
 
     #[test]
+    fn dominant_ratio_keeps_zero_weight_groups_at_minimum_and_gives_remainder_to_dominant_group() {
+        let metrics = DockMetrics::default();
+        let mut builder = LayoutBuilder::new(Profile::Photoshop);
+        let mut groups = Vec::new();
+        for index in 0..3 {
+            let (_, panel_node) = builder.panel(key(&format!("dominant-ratio-{index}")), constraints());
+            groups.push(builder.tabs(vec![panel_node], 0, false));
+        }
+        let zero_a = groups[0];
+        let zero_b = groups[1];
+        let dominant = groups[2];
+        let column = builder.column(
+            metrics.default_column_width,
+            ColumnMode::Expanded,
+            groups,
+            vec![0.0, 0.0, 1.0],
+        );
+        builder.main_area(DockSide::Left, column);
+        let layout = builder.build();
+
+        assert_eq!(layout.validate(&metrics), Ok(()));
+        let viewport_height = 1000.0;
+        let rects = layout
+            .compute_rects(viewport(1000.0, viewport_height), &metrics)
+            .expect("a dominant positive ratio should absorb the remaining height");
+
+        let height = |wanted| {
+            rects
+                .groups
+                .iter()
+                .find(|group| group.group == wanted)
+                .expect("every expanded group should emit geometry")
+                .rect
+                .size
+                .height
+        };
+        let minimum = metrics.header_height
+            + metrics.tab_strip_height
+            + constraints().min_size.height;
+
+        assert!((height(zero_a) - minimum).abs() < PIXEL_TOLERANCE);
+        assert!((height(zero_b) - minimum).abs() < PIXEL_TOLERANCE);
+        assert!(
+            (height(dominant)
+                - (viewport_height - 2.0 * metrics.splitter_thickness - 2.0 * minimum))
+                .abs()
+                < PIXEL_TOLERANCE
+        );
+        assert!(height(dominant) > height(zero_a) * 2.0);
+        assert_snapshot_rectangles_are_valid(&rects);
+    }
+
+    #[test]
+    fn all_collapsed_groups_keep_their_fixed_strip_height_and_do_not_overflow() {
+        let metrics = DockMetrics::default();
+        let mut builder = LayoutBuilder::new(Profile::Photoshop);
+        let mut groups = Vec::new();
+        for index in 0..3 {
+            let (_, panel_node) = builder.panel(key(&format!("all-collapsed-{index}")), constraints());
+            groups.push(builder.tabs(vec![panel_node], 0, true));
+        }
+        let column = builder.column(
+            metrics.default_column_width,
+            ColumnMode::Expanded,
+            groups.clone(),
+            vec![0.0, 1.0, 0.0],
+        );
+        builder.main_area(DockSide::Left, column);
+        let layout = builder.build();
+
+        assert_eq!(layout.validate(&metrics), Ok(()));
+        let rects = layout
+            .compute_rects(viewport(1000.0, 500.0), &metrics)
+            .expect("all-collapsed columns should be valid with a generous viewport");
+
+        assert_eq!(rects.groups.len(), 3);
+        assert!(rects.panels.is_empty());
+        assert!(rects.vertical_overflow.is_empty());
+        for group in groups {
+            let rendered = rects
+                .groups
+                .iter()
+                .find(|rendered| rendered.group == group)
+                .expect("collapsed group should still emit its rail/header geometry");
+            assert_eq!(
+                rendered.rect.size.height,
+                metrics.effective_collapsed_group_height()
+            );
+        }
+        assert_snapshot_rectangles_are_valid(&rects);
+    }
+
+    #[test]
+    fn ratio_allocation_remains_valid_through_multiple_nested_vertical_splits() {
+        let metrics = DockMetrics::default();
+        let mut builder = LayoutBuilder::new(Profile::Generic);
+        let (_, panel_a) = builder.panel(key("multi-level-a"), constraints());
+        let (_, panel_b) = builder.panel(key("multi-level-b"), constraints());
+        let (_, panel_c) = builder.panel(key("multi-level-c"), constraints());
+        let (_, panel_d) = builder.panel(key("multi-level-d"), constraints());
+        let group_a = builder.tabs(vec![panel_a], 0, false);
+        let group_b = builder.tabs(vec![panel_b], 0, false);
+        let group_c = builder.tabs(vec![panel_c], 0, false);
+        let group_d = builder.tabs(vec![panel_d], 0, false);
+        let inner = builder.split(Axis::Y, vec![group_b, group_c], vec![0.0, 1.0]);
+        let outer = builder.split(
+            Axis::Y,
+            vec![group_a, inner, group_d],
+            vec![0.25, 0.5, 0.25],
+        );
+        let column = builder.column(
+            metrics.default_column_width,
+            ColumnMode::Expanded,
+            vec![outer],
+            vec![1.0],
+        );
+        builder.main_area(DockSide::Left, column);
+        let layout = builder.build();
+
+        assert_eq!(layout.validate(&metrics), Ok(()));
+        let viewport_height = 1400.0;
+        let rects = layout
+            .compute_rects(viewport(1000.0, viewport_height), &metrics)
+            .expect("nested valid ratios should allocate geometry through every split level");
+
+        let height = |wanted| {
+            rects
+                .groups
+                .iter()
+                .find(|group| group.group == wanted)
+                .expect("nested tab group should emit geometry")
+                .rect
+                .size
+                .height
+        };
+        let minimum = metrics.header_height
+            + metrics.tab_strip_height
+            + constraints().min_size.height;
+        let outer_left = height(group_a);
+        let outer_right = height(group_d);
+        let inner_zero_weight = height(group_b);
+        let inner_dominant = height(group_c);
+
+        assert!((outer_left - outer_right).abs() < PIXEL_TOLERANCE);
+        assert!((inner_zero_weight - minimum).abs() < PIXEL_TOLERANCE);
+        assert!(inner_dominant > minimum);
+        assert!(
+            ((inner_zero_weight + inner_dominant + metrics.splitter_thickness)
+                - 2.0 * outer_left)
+                .abs()
+                < PIXEL_TOLERANCE
+        );
+        assert!(rects.vertical_overflow.is_empty());
+        assert_snapshot_rectangles_are_valid(&rects);
+    }
+
+    #[test]
     fn compute_rects_rejects_child_rect_with_unrepresentable_edge() {
         let metrics = DockMetrics::default();
         let origin_x = 4_294_967_296.0;
