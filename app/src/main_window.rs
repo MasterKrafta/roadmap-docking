@@ -28,6 +28,8 @@ pub(crate) struct MainWindow {
     is_resizing_column: bool,
     resize_start_x: f32,
     resize_start_width: f32,
+    is_resizing_groups: bool,
+    resize_group_last_y: f32,
 }
 
 impl MainWindow {
@@ -194,6 +196,8 @@ impl MainWindow {
             is_resizing_column: false,
             resize_start_x: 0.0,
             resize_start_width: dock_metrics.default_column_width,
+            is_resizing_groups: false,
+            resize_group_last_y: 0.0,
         })
     }
 
@@ -539,7 +543,17 @@ impl Render for MainWindow {
         let splitter = div()
             .w(px(column_width))
             .h(px(splitter_height))
-            .bg(rgb(colors.splitter));
+            .bg(rgb(colors.splitter))
+            .cursor(CursorStyle::ResizeUpDown)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, event: &MouseDownEvent, _window, cx| {
+                    this.is_resizing_column = false;
+                    this.is_resizing_groups = true;
+                    this.resize_group_last_y = event.position.y.as_f32();
+                    cx.notify();
+                }),
+            );
 
         // The free, canvas-facing edge of the right dock column owns this
         // resize handle. Width changes are committed through Dock Core.
@@ -593,6 +607,34 @@ impl Render for MainWindow {
             .child(div().w(px(workspace_width)).h(px(window_height)))
             .child(right_column)
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
+                if this.is_resizing_groups {
+                    let pointer_y = event.position.y.as_f32();
+                    let delta_y = pointer_y - this.resize_group_last_y;
+                    this.resize_group_last_y = pointer_y;
+
+                    if delta_y != 0.0 {
+                        let viewport_height = window.viewport_size().height.as_f32().max(1.0);
+                        let available_height = (viewport_height
+                            - this.theme.metrics.column_header_height
+                            - this.theme.metrics.splitter_thickness)
+                            .max(1.0);
+                        if let Err(error) = this.layout.apply(
+                            DockCommand::ResizeGroups {
+                                column: this.column_id,
+                                boundary_index: 0,
+                                delta: delta_y,
+                                available_height,
+                            },
+                            &this.dock_metrics,
+                        ) {
+                            eprintln!("Could not resize dock groups: {error}");
+                            this.is_resizing_groups = false;
+                        }
+                    }
+                    cx.notify();
+                    return;
+                }
+
                 if !this.is_resizing_column {
                     return;
                 }
@@ -620,8 +662,9 @@ impl Render for MainWindow {
             .on_mouse_up(
                 MouseButton::Left,
                 cx.listener(|this, _event, _window, cx| {
-                    if this.is_resizing_column {
+                    if this.is_resizing_column || this.is_resizing_groups {
                         this.is_resizing_column = false;
+                        this.is_resizing_groups = false;
                         cx.notify();
                     }
                 }),
