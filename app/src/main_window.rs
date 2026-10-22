@@ -17,6 +17,7 @@ pub(crate) struct MainWindow {
     resize_start_top_height: f32,
     split_ratios: [f32; 2],
     visible_tabs: [bool; 5],
+    collapsed_columns: [bool; 2],
     windows_menu_open: bool,
     resizing_height_column: usize,
     is_resizing_columns: bool,
@@ -41,6 +42,7 @@ impl MainWindow {
             resize_start_top_height: 0.0,
             split_ratios: [default_split, default_split],
             visible_tabs: [true, true, true, true, true],
+            collapsed_columns: [false, false],
             windows_menu_open: false,
             resizing_height_column: 0,
             is_resizing_columns: false,
@@ -75,29 +77,61 @@ impl Render for MainWindow {
         let right_column_visible = right_group_visible;
         let both_columns_visible = left_column_visible && right_column_visible;
         let any_column_visible = left_column_visible || right_column_visible;
+        let center_splitter_resizable = both_columns_visible
+            && !self.collapsed_columns[0]
+            && !self.collapsed_columns[1];
+        let outer_splitter_resizable = (left_column_visible
+            && !self.collapsed_columns[0]
+            && (!right_column_visible || !self.collapsed_columns[1]))
+            || (!left_column_visible
+                && right_column_visible
+                && !self.collapsed_columns[1]);
 
-        let max_single_width = (window_width - divider_width).max(min_column_width);
-        let max_pair_width = (window_width - divider_width * 2.0)
-            .max(min_column_width * 2.0);
-        let (left_column_width, right_column_width) = match (left_column_visible, right_column_visible) {
-            (true, true) => {
-                let pair_width = (self.column_widths[0] + self.column_widths[1])
-                    .min(max_pair_width)
-                    .max(min_column_width * 2.0);
-                let left = self.column_widths[0]
-                    .clamp(min_column_width, pair_width - min_column_width);
-                (left, pair_width - left)
-            }
-            (true, false) => (
-                self.column_widths[0].clamp(min_column_width, max_single_width),
-                0.0,
-            ),
-            (false, true) => (
-                0.0,
-                self.column_widths[1].clamp(min_column_width, max_single_width),
-            ),
-            (false, false) => (0.0, 0.0),
+        let collapsed_column_width = (metrics.button_size * 2.0 + 8.0).max(48.0);
+        let left_min_width = if self.collapsed_columns[0] {
+            collapsed_column_width
+        } else {
+            min_column_width
         };
+        let right_min_width = if self.collapsed_columns[1] {
+            collapsed_column_width
+        } else {
+            min_column_width
+        };
+        let left_base_width = if self.collapsed_columns[0] {
+            collapsed_column_width
+        } else {
+            self.column_widths[0]
+        };
+        let right_base_width = if self.collapsed_columns[1] {
+            collapsed_column_width
+        } else {
+            self.column_widths[1]
+        };
+        let max_single_width = (window_width - divider_width).max(left_min_width.min(right_min_width));
+        let required_pair_width = left_min_width + right_min_width;
+        let max_pair_width =
+            (window_width - divider_width * 2.0).max(required_pair_width);
+        let (left_column_width, right_column_width) =
+            match (left_column_visible, right_column_visible) {
+                (true, true) => {
+                    let pair_width = (left_base_width + right_base_width)
+                        .min(max_pair_width)
+                        .max(required_pair_width);
+                    let left = left_base_width
+                        .clamp(left_min_width, pair_width - right_min_width);
+                    (left, pair_width - left)
+                }
+                (true, false) => (
+                    left_base_width.clamp(left_min_width, (window_width - divider_width).max(left_min_width)),
+                    0.0,
+                ),
+                (false, true) => (
+                    0.0,
+                    right_base_width.clamp(right_min_width, (window_width - divider_width).max(right_min_width)),
+                ),
+                (false, false) => (0.0, 0.0),
+            };
 
         let header_height = metrics.column_header_height.min(workspace_height);
         let full_panel_height = (workspace_height - header_height).max(0.0);
@@ -300,15 +334,23 @@ impl Render for MainWindow {
             let outer_right_only = !left_column_visible && right_column_visible;
             let remembered_left_width = self.column_widths[0];
             let remembered_right_width = self.column_widths[1];
-            dock_row = dock_row.child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .w(px(divider_width))
-                    .h(px(workspace_height))
-                    .flex_shrink_0()
-                    .bg(rgb(colors.window_background))
+            let mut outer_splitter = div()
+                .flex()
+                .items_center()
+                .justify_center()
+                .w(px(divider_width))
+                .h(px(workspace_height))
+                .flex_shrink_0()
+                .bg(rgb(colors.window_background))
+                .child(
+                    div()
+                        .w(px(metrics.splitter_thickness))
+                        .h(px(workspace_height))
+                        .bg(rgb(colors.splitter)),
+                );
+
+            if outer_splitter_resizable {
+                outer_splitter = outer_splitter
                     .cursor(CursorStyle::ResizeLeftRight)
                     .on_mouse_down(
                         MouseButton::Left,
@@ -332,14 +374,10 @@ impl Render for MainWindow {
                             ];
                             cx.notify();
                         }),
-                    )
-                    .child(
-                        div()
-                            .w(px(metrics.splitter_thickness))
-                            .h(px(workspace_height))
-                            .bg(rgb(colors.splitter)),
-                    ),
-            );
+                    );
+            }
+
+            dock_row = dock_row.child(outer_splitter);
         }
 
         if left_column_visible {
@@ -352,6 +390,7 @@ impl Render for MainWindow {
                 left_lower_group_visible,
                 [self.visible_tabs[0], self.visible_tabs[1]],
                 [self.visible_tabs[2], self.visible_tabs[3]],
+                self.collapsed_columns[0],
                 self.theme,
                 self.active_tabs[0],
                 self.lower_active_tabs[0],
@@ -363,15 +402,23 @@ impl Render for MainWindow {
         }
 
         if both_columns_visible {
-            dock_row = dock_row.child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .w(px(divider_width))
-                    .h(px(workspace_height))
-                    .flex_shrink_0()
-                    .bg(rgb(colors.window_background))
+            let mut center_splitter = div()
+                .flex()
+                .items_center()
+                .justify_center()
+                .w(px(divider_width))
+                .h(px(workspace_height))
+                .flex_shrink_0()
+                .bg(rgb(colors.window_background))
+                .child(
+                    div()
+                        .w(px(metrics.splitter_thickness))
+                        .h(px(workspace_height))
+                        .bg(rgb(colors.splitter)),
+                );
+
+            if center_splitter_resizable {
+                center_splitter = center_splitter
                     .cursor(CursorStyle::ResizeLeftRight)
                     .on_mouse_down(
                         MouseButton::Left,
@@ -386,14 +433,10 @@ impl Render for MainWindow {
                                 [left_column_width, right_column_width];
                             cx.notify();
                         }),
-                    )
-                    .child(
-                        div()
-                            .w(px(metrics.splitter_thickness))
-                            .h(px(workspace_height))
-                            .bg(rgb(colors.splitter)),
-                    ),
-            );
+                    );
+            }
+
+            dock_row = dock_row.child(center_splitter);
         }
 
         if right_column_visible {
@@ -406,6 +449,7 @@ impl Render for MainWindow {
                 false,
                 [self.visible_tabs[4], false],
                 [false, false],
+                self.collapsed_columns[1],
                 self.theme,
                 self.active_tabs[1],
                 self.lower_active_tabs[1],
@@ -537,6 +581,7 @@ fn render_column(
     show_lower_panel: bool,
     upper_tabs_visible: [bool; 2],
     lower_tabs_visible: [bool; 2],
+    is_collapsed: bool,
     theme: Theme,
     active_tab: usize,
     lower_active_tab: usize,
@@ -564,16 +609,25 @@ fn render_column(
             )
         };
 
-    let control = |label: &'static str| {
-        div()
-            .flex()
-            .items_center()
-            .justify_center()
-            .w(px(metrics.button_size))
-            .h(px(metrics.button_size))
-            .text_color(rgb(colors.muted_text))
-            .child(label)
-    };
+    let toggle_collapse = cx.listener(move |this, _, _, cx| {
+        this.collapsed_columns[column_index] = !this.collapsed_columns[column_index];
+        cx.notify();
+    });
+    let close_column = cx.listener(move |this, _, _, cx| {
+        if column_index == 0 {
+            this.visible_tabs[0] = false;
+            this.visible_tabs[1] = false;
+            this.visible_tabs[2] = false;
+            this.visible_tabs[3] = false;
+        } else {
+            this.visible_tabs[4] = false;
+        }
+        this.collapsed_columns[column_index] = false;
+        this.is_resizing_columns = false;
+        this.is_resizing_outer_splitter = false;
+        this.is_resizing_height = false;
+        cx.notify();
+    });
 
     let header = div()
         .flex()
@@ -585,23 +639,92 @@ fn render_column(
         .border_b_1()
         .border_color(rgb(colors.border))
         .child(div().flex_1())
-        .child(control(">>"))
-        .child(control("x"));
+        .child(
+            div()
+                .id(if column_index == 0 {
+                    "left-column-collapse-button"
+                } else {
+                    "right-column-collapse-button"
+                })
+                .flex()
+                .items_center()
+                .justify_center()
+                .w(px(metrics.button_size))
+                .h(px(metrics.button_size))
+                .text_color(rgb(colors.muted_text))
+                .on_click(toggle_collapse)
+                .child(if is_collapsed { "<<" } else { ">>" }),
+        )
+        .child(
+            div()
+                .id(if column_index == 0 {
+                    "left-column-close-button"
+                } else {
+                    "right-column-close-button"
+                })
+                .flex()
+                .items_center()
+                .justify_center()
+                .w(px(metrics.button_size))
+                .h(px(metrics.button_size))
+                .text_color(rgb(colors.muted_text))
+                .on_click(close_column)
+                .child("x"),
+        );
 
+    let column_height = top_panel_height
+        + horizontal_splitter_height
+        + bottom_panel_height
+        + metrics.column_header_height;
     let mut column = div()
         .flex()
         .flex_col()
         .w(px(column_width))
-        .min_w(px(metrics.min_column_width))
-        .h(px(
-            top_panel_height
-                + horizontal_splitter_height
-                + bottom_panel_height
-                + metrics.column_header_height,
-        ))
+        .h(px(column_height))
         .flex_shrink_0()
         .bg(rgb(colors.window_background))
         .child(header);
+
+    if is_collapsed {
+        let mut icon_rail = div()
+            .flex()
+            .flex_col()
+            .items_center()
+            .gap_1()
+            .w(px(column_width))
+            .h(px((column_height - metrics.column_header_height).max(0.0)))
+            .flex_shrink_0()
+            .bg(rgb(colors.group_background));
+
+        if column_index == 0 {
+            if upper_tabs_visible[0] {
+                icon_rail = icon_rail.child(render_collapsed_tab_icon(
+                    0, "▱", column_width, theme, cx,
+                ));
+            }
+            if upper_tabs_visible[1] {
+                icon_rail = icon_rail.child(render_collapsed_tab_icon(
+                    1, "◇", column_width, theme, cx,
+                ));
+            }
+            if lower_tabs_visible[0] {
+                icon_rail = icon_rail.child(render_collapsed_tab_icon(
+                    2, "◉", column_width, theme, cx,
+                ));
+            }
+            if lower_tabs_visible[1] {
+                icon_rail = icon_rail.child(render_collapsed_tab_icon(
+                    3, "↶", column_width, theme, cx,
+                ));
+            }
+        } else if upper_tabs_visible[0] {
+            icon_rail = icon_rail.child(render_collapsed_tab_icon(
+                4, "☷", column_width, theme, cx,
+            ));
+        }
+
+        return column.child(icon_rail);
+    }
 
     if show_upper_panel {
         column = column.child(
@@ -707,6 +830,47 @@ fn render_column(
     }
 
     column
+}
+
+fn render_collapsed_tab_icon(
+    tab_index: usize,
+    icon: &'static str,
+    column_width: f32,
+    theme: Theme,
+    cx: &mut Context<MainWindow>,
+) -> impl IntoElement {
+    let metrics = theme.metrics;
+    let colors = theme.colors;
+    let id = match tab_index {
+        0 => "collapsed-icon-layers",
+        1 => "collapsed-icon-navigator",
+        2 => "collapsed-icon-color",
+        3 => "collapsed-icon-history",
+        _ => "collapsed-icon-properties",
+    };
+
+    div()
+        .id(id)
+        .flex()
+        .items_center()
+        .justify_center()
+        .w(px(column_width))
+        .h(px(metrics.button_size))
+        .flex_shrink_0()
+        .bg(rgb(colors.dock_background))
+        .text_color(rgb(colors.primary_text))
+        .on_click(cx.listener(move |this, _, _, cx| {
+            this.collapsed_columns[if tab_index == 4 { 1 } else { 0 }] = false;
+            match tab_index {
+                0 => this.active_tabs[0] = 0,
+                1 => this.active_tabs[0] = 1,
+                2 => this.lower_active_tabs[0] = 0,
+                3 => this.lower_active_tabs[0] = 1,
+                _ => this.active_tabs[1] = 0,
+            }
+            cx.notify();
+        }))
+        .child(icon)
 }
 
 fn render_panel_content(
