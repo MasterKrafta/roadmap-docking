@@ -85,17 +85,6 @@ impl MainWindow {
         })
     }
 
-    fn reset_floating_if_empty(&mut self) {
-        if !self.visible_tabs.iter().any(|visible| *visible) {
-            self.composition_floating = false;
-            self.dragging_composition = false;
-            self.floating_composition_position = [0.0, 0.0];
-            self.collapsed_columns = [false, false];
-            self.collapsed_group_content = [false, false, false];
-            self.open_tab_context_menu = None;
-            self.mouse_context_menu = None;
-        }
-    }
 }
 
 impl Render for MainWindow {
@@ -191,7 +180,9 @@ impl Render for MainWindow {
             .min(620.0)
             .max(metrics.column_header_height + metrics.min_group_height * 2.0)
             .min(window_height);
-        let composition_height = if self.composition_floating {
+        // Keep the floating state and its position while all panels are hidden,
+        // but let the empty workspace occupy its normal height.
+        let composition_height = if self.composition_floating && any_column_visible {
             floating_composition_height
         } else {
             workspace_height
@@ -955,7 +946,6 @@ fn render_column(
             this.visible_tabs[4] = false;
         }
         this.collapsed_columns[column_index] = false;
-        this.reset_floating_if_empty();
         this.is_resizing_columns = false;
         this.is_resizing_outer_splitter = false;
         this.is_resizing_height = false;
@@ -1350,7 +1340,6 @@ fn render_mouse_context_menu(
                 .text_color(rgb(colors.primary_text))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.collapsed_columns[column_index] = true;
-                    this.reset_floating_if_empty();
                     this.open_tab_context_menu = None;
                     this.mouse_context_menu = None;
                     cx.notify();
@@ -1374,7 +1363,6 @@ fn render_mouse_context_menu(
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.collapsed_columns[column_index] = false;
                     this.collapsed_group_content[group_index] = false;
-                    this.reset_floating_if_empty();
                     this.open_tab_context_menu = None;
                     this.mouse_context_menu = None;
                     cx.notify();
@@ -1436,7 +1424,6 @@ fn render_mouse_context_menu(
                     this.collapsed_group_content[2] = false;
                 }
             }
-            this.reset_floating_if_empty();
             this.open_tab_context_menu = None;
             this.mouse_context_menu = None;
             cx.notify();
@@ -1475,7 +1462,6 @@ fn render_mouse_context_menu(
                     this.collapsed_group_content[2] = false;
                 }
             }
-            this.reset_floating_if_empty();
             this.open_tab_context_menu = None;
             this.mouse_context_menu = None;
             cx.notify();
@@ -1493,7 +1479,6 @@ fn render_mouse_context_menu(
         .text_color(rgb(colors.primary_text))
         .on_click(cx.listener(move |this, _, _, cx| {
             this.collapsed_group_content[group_to_minimize] = !group_is_minimized;
-            this.reset_floating_if_empty();
             this.open_tab_context_menu = None;
             this.mouse_context_menu = None;
             cx.notify();
@@ -1514,7 +1499,6 @@ fn render_mouse_context_menu(
         .text_color(rgb(colors.primary_text))
         .on_click(cx.listener(move |this, _, _, cx| {
             this.collapsed_columns[column_to_collapse] = true;
-            this.reset_floating_if_empty();
             this.open_tab_context_menu = None;
             this.mouse_context_menu = None;
             cx.notify();
@@ -1591,7 +1575,6 @@ fn render_tab_context_menu(
                 }
                 _ => {}
             }
-            this.reset_floating_if_empty();
             this.open_tab_context_menu = None;
             cx.notify();
         }))
@@ -1629,7 +1612,6 @@ fn render_tab_context_menu(
                 }
                 _ => {}
             }
-            this.reset_floating_if_empty();
             this.open_tab_context_menu = None;
             cx.notify();
         }))
