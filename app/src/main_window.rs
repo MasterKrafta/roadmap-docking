@@ -346,28 +346,6 @@ impl Render for MainWindow {
         } else {
             docked_composition_position
         };
-        // Bounds of each dock group (excluding the column header) let a drag
-        // detach as soon as the pointer leaves the group's visible area.
-        let tab_group_drag_bounds = [
-            [
-                tab_group_origins[0][0],
-                tab_group_origins[0][1],
-                left_column_width,
-                left_top_height,
-            ],
-            [
-                tab_group_origins[1][0],
-                tab_group_origins[1][1],
-                left_column_width,
-                left_bottom_height,
-            ],
-            [
-                tab_group_origins[2][0],
-                tab_group_origins[2][1],
-                right_column_width,
-                right_top_height,
-            ],
-        ];
         let right_column_origin_x = composition_origin[0]
             + if left_column_visible {
                 left_column_width + divider_width
@@ -389,6 +367,29 @@ impl Render for MainWindow {
             [
                 right_column_origin_x,
                 composition_origin[1] + metrics.column_header_height,
+            ],
+        ];
+
+        // Bounds of each dock group (excluding the column header) let a drag
+        // detach as soon as the pointer leaves the group's visible area.
+        let tab_group_drag_bounds = [
+            [
+                tab_group_origins[0][0],
+                tab_group_origins[0][1],
+                left_column_width,
+                left_top_height,
+            ],
+            [
+                tab_group_origins[1][0],
+                tab_group_origins[1][1],
+                left_column_width,
+                left_bottom_height,
+            ],
+            [
+                tab_group_origins[2][0],
+                tab_group_origins[2][1],
+                right_column_width,
+                right_top_height,
             ],
         ];
 
