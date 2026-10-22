@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::{
     Axis, Column, ColumnMode, ColumnRect, ComputeRectsError, DockMetrics, DockSide,
     FloatingGroupRect, FloatingResizeEdgeRect, FlyoutRect, GeometryError, GroupRect, Layout,
@@ -109,6 +111,11 @@ impl Layout {
         self.validate(metrics)
             .map_err(|_| ComputeRectsError::InvalidLayout)?;
 
+        // NodeId is a sufficient key only inside this pass: both the Layout tree
+        // and DockMetrics are fixed until the returned geometry snapshot is complete.
+        // Never retain this cache across compute_rects calls.
+        let mut minimum_size_cache = HashMap::new();
+
         // Hidden chrome changes presentation only. Keep the main-dock tree in
         // Layout, but omit its geometry so the Canvas gets the full viewport.
         let (left_root, right_root) = if self.chrome().dock_visible() {
@@ -120,11 +127,11 @@ impl Layout {
             (None, None)
         };
         let left_width = match left_root {
-            Some(root) => preferred_width(self, root, metrics)?,
+            Some(root) => preferred_width(self, root, metrics, &mut minimum_size_cache)?,
             None => 0.0,
         };
         let right_width = match right_root {
-            Some(root) => preferred_width(self, root, metrics)?,
+            Some(root) => preferred_width(self, root, metrics, &mut minimum_size_cache)?,
             None => 0.0,
         };
 
@@ -160,14 +167,14 @@ impl Layout {
 
         if let Some(root) = left_root {
             let area = Rect::new(viewport.origin, Size::new(left_width, viewport.size.height));
-            layout_node(self, root, area, metrics, &mut output)?;
+            layout_node(self, root, area, metrics, &mut output, &mut minimum_size_cache)?;
         }
         if let Some(root) = right_root {
             let area = Rect::new(
                 Point::new(right_x, viewport.origin.y),
                 Size::new(right_width, viewport.size.height),
             );
-            layout_node(self, root, area, metrics, &mut output)?;
+            layout_node(self, root, area, metrics, &mut output, &mut minimum_size_cache)?;
         }
 
         // A rail flyout belongs to the dock presentation. Keep its transient
@@ -187,13 +194,26 @@ impl Layout {
                 let area = self
                     .dock_area(floating.area)
                     .ok_or(ComputeRectsError::InvalidLayout)?;
-                let bounds =
-                    clamp_floating_bounds(self, area.root, floating.bounds, viewport, metrics)?;
+                let bounds = clamp_floating_bounds_with_cache(
+                    self,
+                    area.root,
+                    floating.bounds,
+                    viewport,
+                    metrics,
+                    &mut minimum_size_cache,
+                )?;
                 output
                     .floating_groups
                     .push(FloatingGroupRect::new(id, bounds, floating.z_order));
                 push_resize_edges(id, bounds, metrics, &mut output)?;
-                layout_node(self, area.root, bounds, metrics, &mut output)?;
+                layout_node(
+                    self,
+                    area.root,
+                    bounds,
+                    metrics,
+                    &mut output,
+                    &mut minimum_size_cache,
+                )?;
             }
         }
 
@@ -280,6 +300,7 @@ fn preferred_width(
     layout: &Layout,
     id: NodeId,
     metrics: &DockMetrics,
+    minimum_size_cache: &mut HashMap<NodeId, Size>,
 ) -> Result<f32, ComputeRectsError> {
     #[cfg(test)]
     visit_probe::record_preferred_width(id);
@@ -288,11 +309,11 @@ fn preferred_width(
         Node::Column(column) => effective_column_width(column, metrics),
         Node::Tabs(_) | Node::Panel(_) => metrics
             .default_column_width
-            .max(minimum_node_size(layout, id, metrics)?.width),
+            .max(minimum_node_size(layout, id, metrics, minimum_size_cache)?.width),
         Node::Split(split) if split.axis == Axis::X => {
             let mut width = 0.0;
             for child in &split.children {
-                width += preferred_width(layout, *child, metrics)?;
+                width += preferred_width(layout, *child, metrics, minimum_size_cache)?;
             }
             width += metrics.splitter_thickness * split.children.len().saturating_sub(1) as f32;
             width
@@ -300,7 +321,7 @@ fn preferred_width(
         Node::Split(split) => {
             let mut width = 0.0_f32;
             for child in &split.children {
-                width = width.max(preferred_width(layout, *child, metrics)?);
+                width = width.max(preferred_width(layout, *child, metrics, minimum_size_cache)?);
             }
             width
         }
@@ -328,15 +349,18 @@ fn minimum_node_size(
     layout: &Layout,
     id: NodeId,
     metrics: &DockMetrics,
+    minimum_size_cache: &mut HashMap<NodeId, Size>,
 ) -> Result<Size, ComputeRectsError> {
     #[cfg(test)]
     visit_probe::record_minimum_node_size_helper(id);
-    layout.minimum_node_size(id, metrics).map_err(|error| match error {
-        crate::CommandError::InvalidValue { field: "size", .. } => {
-            ComputeRectsError::Geometry(GeometryError::ArithmeticOverflow)
-        }
-        _ => ComputeRectsError::InvalidLayout,
-    })
+    layout
+        .minimum_node_size_with_cache(id, metrics, minimum_size_cache)
+        .map_err(|error| match error {
+            crate::CommandError::InvalidValue { field: "size", .. } => {
+                ComputeRectsError::Geometry(GeometryError::ArithmeticOverflow)
+            }
+            _ => ComputeRectsError::InvalidLayout,
+        })
 }
 
 fn layout_node(
@@ -345,6 +369,7 @@ fn layout_node(
     rect: Rect,
     metrics: &DockMetrics,
     output: &mut LayoutRects,
+    minimum_size_cache: &mut HashMap<NodeId, Size>,
 ) -> Result<(), ComputeRectsError> {
     rect.validate().map_err(ComputeRectsError::Geometry)?;
     let node = layout.node(id).ok_or(ComputeRectsError::InvalidLayout)?;
@@ -356,7 +381,7 @@ fn layout_node(
         || matches!(node, Node::Split(split) if split.axis == Axis::Y);
     let mut content_rect = rect;
     if !manages_vertical_stack {
-        let minimum = minimum_node_size(layout, id, metrics)?;
+        let minimum = minimum_node_size(layout, id, metrics, minimum_size_cache)?;
         if content_rect.size.height < minimum.height {
             push_vertical_overflow(id, rect, minimum.height, output)?;
             content_rect.size.height = minimum.height;
@@ -367,8 +392,24 @@ fn layout_node(
     }
 
     match node {
-        Node::Column(column) => layout_column(layout, id, column, content_rect, metrics, output),
-        Node::Tabs(tabs) => layout_tabs(layout, id, tabs, content_rect, metrics, output),
+        Node::Column(column) => layout_column(
+            layout,
+            id,
+            column,
+            content_rect,
+            metrics,
+            output,
+            minimum_size_cache,
+        ),
+        Node::Tabs(tabs) => layout_tabs(
+            layout,
+            id,
+            tabs,
+            content_rect,
+            metrics,
+            output,
+            minimum_size_cache,
+        ),
         Node::Panel(panel) => {
             let minimum = layout
                 .panel_instance(panel.panel_id)
@@ -394,7 +435,15 @@ fn layout_node(
                 .push(PanelRect::new(panel.panel_id, content_rect));
             Ok(())
         }
-        Node::Split(split) => layout_split(layout, id, split, content_rect, metrics, output),
+        Node::Split(split) => layout_split(
+            layout,
+            id,
+            split,
+            content_rect,
+            metrics,
+            output,
+            minimum_size_cache,
+        ),
     }
 }
 
@@ -405,6 +454,7 @@ fn layout_column(
     rect: Rect,
     metrics: &DockMetrics,
     output: &mut LayoutRects,
+    minimum_size_cache: &mut HashMap<NodeId, Size>,
 ) -> Result<(), ComputeRectsError> {
     output.columns.push(ColumnRect::new(id, rect));
     if column.groups.is_empty() {
@@ -471,6 +521,7 @@ fn layout_column(
         rect.size.height,
         Axis::Y,
         metrics,
+        minimum_size_cache,
     )?;
     if allocation.overflows {
         push_vertical_overflow(id, rect, allocation.content_height, output)?;
@@ -483,7 +534,7 @@ fn layout_column(
             Point::new(rect.origin.x, y),
             Size::new(rect.size.width, height),
         );
-        layout_node(layout, *group_id, group_rect, metrics, output)?;
+        layout_node(layout, *group_id, group_rect, metrics, output, minimum_size_cache)?;
         y += height;
 
         if index + 1 < column.groups.len() {
@@ -501,9 +552,10 @@ fn layout_tabs(
     rect: Rect,
     metrics: &DockMetrics,
     output: &mut LayoutRects,
+    minimum_size_cache: &mut HashMap<NodeId, Size>,
 ) -> Result<(), ComputeRectsError> {
     let collapsed = tabs.collapsed;
-    let minimum_size = minimum_node_size(layout, id, metrics)?;
+    let minimum_size = minimum_node_size(layout, id, metrics, minimum_size_cache)?;
     // Geometry and resize commands share Layout::minimum_node_size, including
     // the effective tab-strip floor for collapsed groups.
     let minimum_height = minimum_size.height;
@@ -650,7 +702,7 @@ fn layout_tabs(
         Size::new(group_rect.size.width, content_height),
     );
     if let Some(active_child) = tabs.active_child() {
-        layout_node(layout, active_child, content_rect, metrics, output)?;
+        layout_node(layout, active_child, content_rect, metrics, output, minimum_size_cache)?;
     }
     Ok(())
 }
@@ -662,6 +714,7 @@ fn layout_split(
     rect: Rect,
     metrics: &DockMetrics,
     output: &mut LayoutRects,
+    minimum_size_cache: &mut HashMap<NodeId, Size>,
 ) -> Result<(), ComputeRectsError> {
     if split.children.is_empty() {
         return Ok(());
@@ -683,14 +736,15 @@ fn layout_split(
                 split
                     .children
                     .iter()
-                    .map(|child| preferred_width(layout, *child, metrics))
+                    .map(|child| preferred_width(layout, *child, metrics, minimum_size_cache))
                     .collect::<Result<Vec<_>, _>>()?
             } else {
                 let minimum_widths = split
                     .children
                     .iter()
                     .map(|child| {
-                        let minimum = minimum_node_size(layout, *child, metrics)?.width;
+                        let minimum =
+                            minimum_node_size(layout, *child, metrics, minimum_size_cache)?.width;
                         Ok(minimum.max(metrics.min_column_width))
                     })
                     .collect::<Result<Vec<f32>, ComputeRectsError>>()?;
@@ -716,7 +770,7 @@ fn layout_split(
                     Point::new(x, rect.origin.y),
                     Size::new(widths[index], rect.size.height),
                 );
-                layout_node(layout, *child, child_rect, metrics, output)?;
+                layout_node(layout, *child, child_rect, metrics, output, minimum_size_cache)?;
                 x += widths[index];
                 if index + 1 < split.children.len() {
                     push_splitter(id, index, Axis::X, x, rect, metrics, output)?;
@@ -733,6 +787,7 @@ fn layout_split(
                 rect.size.height,
                 Axis::Y,
                 metrics,
+                minimum_size_cache,
             )?;
             if allocation.overflows {
                 push_vertical_overflow(id, rect, allocation.content_height, output)?;
@@ -743,7 +798,7 @@ fn layout_split(
                     Point::new(rect.origin.x, y),
                     Size::new(rect.size.width, allocation.sizes[index]),
                 );
-                layout_node(layout, *child, child_rect, metrics, output)?;
+                layout_node(layout, *child, child_rect, metrics, output, minimum_size_cache)?;
                 y += allocation.sizes[index];
                 if index + 1 < split.children.len() {
                     push_splitter(id, index, Axis::Y, y, rect, metrics, output)?;
@@ -762,6 +817,7 @@ fn allocate_stack_heights(
     available: f32,
     axis: Axis,
     metrics: &DockMetrics,
+    minimum_size_cache: &mut HashMap<NodeId, Size>,
 ) -> Result<StackAllocation, ComputeRectsError> {
     if ratios.len() != children.len() {
         return Err(ComputeRectsError::InvalidLayout);
@@ -782,7 +838,7 @@ fn allocate_stack_heights(
         collapsed.push(matches!(layout.node(*child), Some(Node::Tabs(tabs)) if tabs.collapsed));
         // Query the common contract for every child; collapsed nodes report
         // their effective strip height from Layout::minimum_node_size too.
-        minimums.push(minimum_node_size(layout, *child, metrics)?.height);
+        minimums.push(minimum_node_size(layout, *child, metrics, minimum_size_cache)?.height);
     }
 
     let gap_total = metrics.splitter_thickness * children.len().saturating_sub(1) as f32;
@@ -878,13 +934,32 @@ pub(crate) fn clamp_floating_bounds(
     client_area: Rect,
     metrics: &DockMetrics,
 ) -> Result<Rect, ComputeRectsError> {
+    let mut minimum_size_cache = HashMap::new();
+    clamp_floating_bounds_with_cache(
+        layout,
+        root,
+        bounds,
+        client_area,
+        metrics,
+        &mut minimum_size_cache,
+    )
+}
+
+fn clamp_floating_bounds_with_cache(
+    layout: &Layout,
+    root: NodeId,
+    bounds: Rect,
+    client_area: Rect,
+    metrics: &DockMetrics,
+    minimum_size_cache: &mut HashMap<NodeId, Size>,
+) -> Result<Rect, ComputeRectsError> {
     bounds
         .validate_non_empty()
         .map_err(ComputeRectsError::Geometry)?;
     client_area
         .validate_non_empty()
         .map_err(ComputeRectsError::Geometry)?;
-    let minimum = minimum_node_size(layout, root, metrics)?;
+    let minimum = minimum_node_size(layout, root, metrics, minimum_size_cache)?;
     if minimum.width > client_area.size.width {
         return Err(ComputeRectsError::InsufficientSpace {
             axis: Axis::X,
@@ -2702,4 +2777,147 @@ mod tests {
         }
     }
 
+    #[test]
+    fn minimum_size_cache_is_scoped_to_each_metrics_pass() {
+        let metrics = DockMetrics::default();
+        let taller_metrics = DockMetrics {
+            header_height: 70.0,
+            tab_strip_height: 70.0,
+            ..metrics
+        };
+        assert_eq!(taller_metrics.validate(), Ok(()));
+
+        let mut builder = LayoutBuilder::new(Profile::Generic);
+        let (_, panel) = builder.panel(key("minimum-cache-metrics"), constraints());
+        let group = builder.tabs(vec![panel], 0, false);
+        let column = builder.column(
+            metrics.default_column_width,
+            ColumnMode::Expanded,
+            vec![group],
+            vec![1.0],
+        );
+        builder.main_area(DockSide::Left, column);
+        let layout = builder.build();
+        let small_viewport = viewport(1000.0, 150.0);
+
+        let default_rects = layout.compute_rects(small_viewport, &metrics).unwrap();
+        let taller_rects = layout
+            .compute_rects(small_viewport, &taller_metrics)
+            .unwrap();
+        let group_height = |rects: &LayoutRects| {
+            rects
+                .groups
+                .iter()
+                .find(|rendered| rendered.group == group)
+                .unwrap()
+                .rect
+                .size
+                .height
+        };
+
+        assert_eq!(group_height(&default_rects), 150.0);
+        assert_eq!(group_height(&taller_rects), 200.0);
+        assert!(default_rects.vertical_overflow.is_empty());
+        assert_eq!(taller_rects.vertical_overflow.len(), 1);
+    }
+
+    #[test]
+    fn minimum_size_cache_does_not_leak_across_column_modes() {
+        let metrics = DockMetrics::default();
+        let build_layout = |mode: ColumnMode| {
+            let mut builder = LayoutBuilder::new(Profile::Photoshop);
+            let (_, panel) =
+                builder.panel(key("minimum-cache-column-mode"), constraints());
+            let group = builder.tabs(vec![panel], 0, false);
+            let width = match mode {
+                ColumnMode::Expanded => metrics.default_column_width,
+                ColumnMode::IconsAndLabels => metrics.min_column_width,
+                ColumnMode::IconsOnly => metrics.rail_width,
+            };
+            let column = builder.column(width, mode, vec![group], vec![1.0]);
+            builder.main_area(DockSide::Left, column);
+            let layout = builder.build();
+            assert_eq!(layout.validate(&metrics), Ok(()));
+            (layout, column)
+        };
+
+        let (expanded, _) = build_layout(ColumnMode::Expanded);
+        let (icons_and_labels, _) = build_layout(ColumnMode::IconsAndLabels);
+        let (icons_only, _) = build_layout(ColumnMode::IconsOnly);
+
+        let expanded_rects = expanded
+            .compute_rects(viewport(1000.0, 500.0), &metrics)
+            .unwrap();
+        let labels_rects = icons_and_labels
+            .compute_rects(viewport(1000.0, 500.0), &metrics)
+            .unwrap();
+        let icons_rects = icons_only
+            .compute_rects(viewport(1000.0, 500.0), &metrics)
+            .unwrap();
+
+        assert_eq!(
+            expanded_rects.columns[0].rect.size.width,
+            metrics.default_column_width
+        );
+        assert_eq!(
+            labels_rects.columns[0].rect.size.width,
+            metrics.min_column_width
+        );
+        assert_eq!(
+            icons_rects.columns[0].rect.size.width,
+            metrics.rail_width
+        );
+        assert_eq!(expanded_rects.panels.len(), 1);
+        assert!(labels_rects.panels.is_empty());
+        assert!(icons_rects.panels.is_empty());
+    }
+
+    #[test]
+    fn minimum_size_cache_does_not_leak_across_collapsed_states() {
+        let metrics = DockMetrics::default();
+        let build_layout = |collapsed: bool| {
+            let mut builder = LayoutBuilder::new(Profile::Generic);
+            let (_, panel) =
+                builder.panel(key("minimum-cache-collapsed"), constraints());
+            let group = builder.tabs(vec![panel], 0, collapsed);
+            let column = builder.column(
+                metrics.default_column_width,
+                ColumnMode::Expanded,
+                vec![group],
+                vec![1.0],
+            );
+            builder.main_area(DockSide::Left, column);
+            (builder.build(), group)
+        };
+
+        let (expanded, expanded_group) = build_layout(false);
+        let (collapsed, collapsed_group) = build_layout(true);
+        let expanded_rects = expanded
+            .compute_rects(viewport(1000.0, 500.0), &metrics)
+            .unwrap();
+        let collapsed_rects = collapsed
+            .compute_rects(viewport(1000.0, 500.0), &metrics)
+            .unwrap();
+        let rendered_group_height = |rects: &LayoutRects, group| {
+            rects
+                .groups
+                .iter()
+                .find(|rendered| rendered.group == group)
+                .unwrap()
+                .rect
+                .size
+                .height
+        };
+
+        assert_eq!(
+            rendered_group_height(&expanded_rects, expanded_group),
+            500.0
+        );
+        assert_eq!(
+            rendered_group_height(&collapsed_rects, collapsed_group),
+            metrics.effective_collapsed_group_height()
+        );
+        assert_eq!(expanded_rects.panels.len(), 1);
+        assert!(collapsed_rects.panels.is_empty());
+    }
 }
