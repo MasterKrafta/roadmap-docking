@@ -742,7 +742,7 @@ impl DropZoneTreeIndex {
             if let Node::Panel(panel) = node {
                 panel_by_id.insert(panel.panel_id, node_id);
             }
-            for child in children(layout, node_id) {
+            for child in node.children() {
                 parent_by_node.insert(*child, node_id);
             }
         }
@@ -795,13 +795,13 @@ fn collect_panels(layout: &Layout, root: NodeId) -> Vec<PanelId> {
     let mut result = Vec::new();
     let mut stack = vec![root];
     while let Some(node_id) = stack.pop() {
-        match layout.node(node_id) {
-            Some(Node::Panel(panel)) => result.push(panel.panel_id),
-            Some(Node::Tabs(tabs)) => stack.extend(tabs.children.iter().copied()),
-            Some(Node::Split(split)) => stack.extend(split.children.iter().copied()),
-            Some(Node::Column(column)) => stack.extend(column.groups.iter().copied()),
-            None => {}
+        let Some(node) = layout.node(node_id) else {
+            continue;
+        };
+        if let Node::Panel(panel) = node {
+            result.push(panel.panel_id);
         }
+        stack.extend(node.children().iter().copied());
     }
     result
 }
@@ -813,15 +813,6 @@ fn source_allows(layout: &Layout, panels: &[PanelId], area: AllowedArea) -> bool
             .map(|instance| instance.constraints.allows_area(area))
             .unwrap_or(false)
     })
-}
-
-fn children(layout: &Layout, node: NodeId) -> &[NodeId] {
-    match layout.node(node) {
-        Some(Node::Tabs(tabs)) => &tabs.children,
-        Some(Node::Split(split)) => &split.children,
-        Some(Node::Column(column)) => &column.groups,
-        Some(Node::Panel(_)) | None => &[],
-    }
 }
 
 fn contains_node(tree_index: &DropZoneTreeIndex, root: NodeId, target: NodeId) -> bool {

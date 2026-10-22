@@ -198,15 +198,6 @@ pub(super) fn equal_ratios(len: usize) -> Vec<f32> {
     vec![1.0 / len as f32; len]
 }
 
-pub(super) fn node_children(node: &Node) -> Vec<NodeId> {
-    match node {
-        Node::Split(split) => split.children.clone(),
-        Node::Tabs(tabs) => tabs.children.clone(),
-        Node::Column(column) => column.groups.clone(),
-        Node::Panel(_) => Vec::new(),
-    }
-}
-
 pub(super) fn inspect_graph(
     nodes: &SlotMap<NodeId, Node>,
     node_id: NodeId,
@@ -238,7 +229,8 @@ pub(super) fn inspect_graph(
 
     visiting.insert(node_id);
     if let Some(node) = nodes.get(node_id) {
-        for child in node_children(node) {
+        for child in node.children() {
+            let child = *child;
             if nodes.contains_key(child) {
                 *incoming.entry(child).or_default() += 1;
                 inspect_graph(
@@ -271,8 +263,8 @@ pub(super) fn mark_reachable(
         return;
     }
     if let Some(node) = nodes.get(node_id) {
-        for child in node_children(node) {
-            mark_reachable(nodes, child, reachable);
+        for child in node.children() {
+            mark_reachable(nodes, *child, reachable);
         }
     }
 }
