@@ -1056,11 +1056,11 @@ fn push_resize_edges(
 
 #[cfg(test)]
 mod tests {
-    use super::ComputeRectsError;
+    use super::{clamp_floating_bounds, ComputeRectsError};
     use crate::layout_builder::LayoutBuilder;
     use crate::{
-        Axis, ColumnMode, DockMetrics, DockSide, LayoutRects, Node, PanelConstraints, PanelKey,
-        Point, Profile, Rect, Size,
+        Axis, ColumnMode, DockMetrics, DockSide, GeometryError, LayoutRects, Node,
+        PanelConstraints, PanelKey, Point, Profile, Rect, Size,
     };
 
     const PIXEL_TOLERANCE: f32 = 1.0e-3;
@@ -2201,6 +2201,64 @@ mod tests {
                 < PIXEL_TOLERANCE
         );
         assert!(rects.vertical_overflow.is_empty());
+    }
+
+ 
+    #[test]
+    fn compute_rects_rejects_child_rect_with_unrepresentable_edge() {
+        let metrics = DockMetrics::default();
+        let origin_x = 4_294_967_296.0;
+        let viewport = Rect::new(
+            Point::new(origin_x, 0.0),
+            Size::new(4096.0, 800.0),
+        );
+        assert_eq!(viewport.validate_non_empty(), Ok(()));
+
+        let mut builder = LayoutBuilder::new(Profile::Generic);
+        let (_, panel_a) = builder.panel(key("large-origin-a"), constraints());
+        let (_, panel_b) = builder.panel(key("large-origin-b"), constraints());
+        let group_a = builder.tabs(vec![panel_a], 0, false);
+        let group_b = builder.tabs(vec![panel_b], 0, false);
+        // The first child gets its minimum 180px width. At this coordinate
+        // magnitude the f32 spacing is 512px, so origin + 180 collapses to
+        // origin and the child must not be emitted with a zero effective width.
+        let split = builder.split(Axis::X, vec![group_a, group_b], vec![0.01, 0.99]);
+        builder.main_area(DockSide::Left, split);
+        let layout = builder.build();
+
+        assert_eq!(layout.validate(&metrics), Ok(()));
+        assert!(matches!(
+            layout.compute_rects(viewport, &metrics),
+            Err(ComputeRectsError::Geometry(
+                GeometryError::NonPositiveDimension
+            ))
+        ));
+    }
+
+    #[test]
+    fn floating_bounds_clamp_rejects_positive_but_unrepresentable_edge() {
+        let metrics = DockMetrics::default();
+        let mut builder = LayoutBuilder::new(Profile::Generic);
+        let (_, panel) = builder.panel(key("large-origin-floating"), constraints());
+        let root = builder.tabs(vec![panel], 0, false);
+        let layout = builder.build();
+        let bounds = Rect::new(
+            Point::new(2_147_483_648.0, 0.0),
+            Size::new(80.0, 300.0),
+        );
+
+        assert_eq!(
+            super::clamp_floating_bounds(
+                &layout,
+                root,
+                bounds,
+                viewport(800.0, 600.0),
+                &metrics,
+            ),
+            Err(ComputeRectsError::Geometry(
+                GeometryError::NonPositiveDimension
+            ))
+        );
     }
 
 }
