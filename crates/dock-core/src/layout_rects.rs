@@ -118,8 +118,28 @@ pub(crate) fn assert_layout_rects_invariants(rects: &LayoutRects) {
         }
     }
 
-    // These rectangles are used directly as hit targets or resize/drop affordances.
+    // These rectangles are used directly by hit testing, as scroll regions,
+    // or as resize/drop affordances. They must never collapse to empty zones.
     let mut interactive = Vec::<(&'static str, Rect)>::new();
+    interactive.extend(rects.canvas.map(|rect| ("canvas hit region", rect)));
+    interactive.extend(
+        rects
+            .columns
+            .iter()
+            .map(|item| ("column hit region", item.rect)),
+    );
+    interactive.extend(
+        rects
+            .groups
+            .iter()
+            .map(|item| ("group hit region", item.rect)),
+    );
+    interactive.extend(
+        rects
+            .tab_strips
+            .iter()
+            .map(|item| ("tab strip hit region", item.rect)),
+    );
     interactive.extend(
         rects
             .tab_headers
@@ -132,6 +152,7 @@ pub(crate) fn assert_layout_rects_invariants(rects: &LayoutRects) {
             .iter()
             .map(|item| ("tab overflow hit target", item.button_rect)),
     );
+    interactive.extend(rects.panels.iter().map(|item| ("panel hit region", item.rect)));
     interactive.extend(
         rects
             .splitters
@@ -140,16 +161,22 @@ pub(crate) fn assert_layout_rects_invariants(rects: &LayoutRects) {
     );
     interactive.extend(
         rects
+            .floating_groups
+            .iter()
+            .map(|item| ("floating window hit region", item.rect)),
+    );
+    interactive.extend(
+        rects
             .floating_resize_edges
             .iter()
             .map(|item| ("floating resize hit target", item.rect)),
     );
-    interactive.extend(
-        rects
-            .drop_zones
-            .iter()
-            .map(|item| ("drop zone hit target", item.rect)),
-    );
+    interactive.extend(rects.flyout.map(|item| ("flyout hit region", item.rect)));
+    interactive.extend(rects.drop_zones.iter().map(|item| ("drop zone hit target", item.rect)));
+    for overflow in &rects.vertical_overflow {
+        interactive.push(("vertical overflow viewport", overflow.viewport));
+        interactive.push(("vertical overflow content", overflow.content_extent));
+    }
 
     for (kind, rect) in interactive {
         assert_eq!(
