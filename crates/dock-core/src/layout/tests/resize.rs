@@ -182,6 +182,99 @@ fn c45_resize_groups_cannot_shrink_below_tab_chrome_and_panel_minimum() {
 }
 
 #[test]
+fn c45_resize_groups_rejects_height_below_shared_expanded_group_minimums() {
+    let metrics = DockMetrics::default();
+    let panel_constraints = |min_height: f32| {
+        PanelConstraints::new(
+            Size::new(120.0, min_height),
+            Size::new(200.0, min_height.max(140.0)),
+            None,
+            false,
+        )
+    };
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+    let (_, panel_a) = builder.panel(
+        PanelKey::new("c45-shared-minimum-a").unwrap(),
+        panel_constraints(120.0),
+    );
+    let (_, panel_b) = builder.panel(
+        PanelKey::new("c45-shared-minimum-b").unwrap(),
+        panel_constraints(100.0),
+    );
+    let group_a = builder.tabs(vec![panel_a], 0, false);
+    let group_b = builder.tabs(vec![panel_b], 0, false);
+    let column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![group_a, group_b],
+        vec![0.5, 0.5],
+    );
+    builder.main_area(DockSide::Right, column);
+    let mut layout = builder.build();
+
+    // The common minimum contract is header + tab strip + minimum panel height.
+    let minimum_a = layout.minimum_node_size(group_a, &metrics).unwrap().height;
+    let minimum_b = layout.minimum_node_size(group_b, &metrics).unwrap().height;
+    assert_eq!(minimum_a, 176.0);
+    assert_eq!(minimum_b, 156.0);
+    let before = format!("{layout:?}");
+
+    // available_height excludes the splitter. 331 px cannot accommodate both
+    // groups' 176 px and 156 px minimums, even before the 4 px splitter gap.
+    let error = layout
+        .apply(
+            DockCommand::ResizeGroups {
+                column,
+                boundary_index: 0,
+                delta: 1.0,
+                available_height: 331.0,
+            },
+            &metrics,
+        )
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        CommandError::InvalidValue {
+            field: "available_height",
+            ..
+        }
+    ));
+    assert_eq!(format!("{layout:?}"), before);
+    assert_eq!(layout.version(), 0);
+
+    // Geometry honors those same minima and includes the splitter in the column.
+    let rects = layout
+        .compute_rects(
+            Rect::new(Point::ZERO, Size::new(1000.0, 336.0)),
+            &metrics,
+        )
+        .unwrap();
+    assert_eq!(
+        rects
+            .groups
+            .iter()
+            .find(|item| item.group == group_a)
+            .unwrap()
+            .rect
+            .size
+            .height,
+        minimum_a
+    );
+    assert_eq!(
+        rects
+            .groups
+            .iter()
+            .find(|item| item.group == group_b)
+            .unwrap()
+            .rect
+            .size
+            .height,
+        minimum_b
+    );
+    assert!(rects.vertical_overflow.is_empty());
+}
+
+#[test]
 fn c45_resize_groups_uses_effective_collapsed_height_when_tab_strip_is_taller() {
     let metrics = DockMetrics {
         collapsed_group_height: 28.0,
