@@ -2051,4 +2051,89 @@ mod tests {
             ));
         }
     }
+
+    #[test]
+    fn collapsed_group_unit_weight_does_not_leave_expanded_column_weight_sum_zero() {
+        let metrics = DockMetrics::default();
+        let mut builder = LayoutBuilder::new(Profile::Photoshop);
+        let (_, expanded_panel) = builder.panel(key("zero-weight-expanded"), constraints());
+        let (_, collapsed_panel) = builder.panel(key("unit-weight-collapsed"), constraints());
+        let expanded = builder.tabs(vec![expanded_panel], 0, false);
+        let collapsed = builder.tabs(vec![collapsed_panel], 0, true);
+        let column = builder.column(
+            metrics.default_column_width,
+            ColumnMode::Expanded,
+            vec![expanded, collapsed],
+            vec![0.0, 1.0],
+        );
+        builder.main_area(DockSide::Left, column);
+        let layout = builder.build();
+
+        assert_eq!(layout.validate(&metrics), Ok(()));
+
+        // The collapsed group's unit ratio is a fixed strip, not a weight
+        // available to the expanded group. Its zero ratio must trigger fallback.
+        let rects = layout
+            .compute_rects(viewport(1000.0, 500.0), &metrics)
+            .expect("valid ratios with a zero expanded-weight sum must lay out");
+        let height = |group| {
+            rects
+                .groups
+                .iter()
+                .find(|item| item.group == group)
+                .unwrap()
+                .rect
+                .size
+                .height
+        };
+        assert!((height(expanded) - 468.0).abs() < PIXEL_TOLERANCE);
+        assert_eq!(height(collapsed), metrics.effective_collapsed_group_height());
+        assert!(rects.vertical_overflow.is_empty());
+    }
+
+    #[test]
+    fn nested_vertical_split_shares_space_when_all_expanded_child_weights_are_zero() {
+        let metrics = DockMetrics::default();
+        let mut builder = LayoutBuilder::new(Profile::Generic);
+        let (_, panel_a) = builder.panel(key("nested-zero-a"), constraints());
+        let (_, panel_b) = builder.panel(key("nested-zero-b"), constraints());
+        let (_, collapsed_panel) = builder.panel(key("nested-zero-collapsed"), constraints());
+        let group_a = builder.tabs(vec![panel_a], 0, false);
+        let group_b = builder.tabs(vec![panel_b], 0, false);
+        let collapsed = builder.tabs(vec![collapsed_panel], 0, true);
+        let vertical_split = builder.split(
+            Axis::Y,
+            vec![group_a, group_b, collapsed],
+            vec![0.0, 0.0, 1.0],
+        );
+        let column = builder.column(
+            metrics.default_column_width,
+            ColumnMode::Expanded,
+            vec![vertical_split],
+            vec![1.0],
+        );
+        builder.main_area(DockSide::Left, column);
+        let layout = builder.build();
+
+        assert_eq!(layout.validate(&metrics), Ok(()));
+
+        let rects = layout
+            .compute_rects(viewport(1000.0, 500.0), &metrics)
+            .expect("nested Split(Y) must fall back when expanded weights sum to zero");
+        let height = |group| {
+            rects
+                .groups
+                .iter()
+                .find(|item| item.group == group)
+                .unwrap()
+                .rect
+                .size
+                .height
+        };
+        assert!((height(group_a) - 232.0).abs() < PIXEL_TOLERANCE);
+        assert!((height(group_b) - 232.0).abs() < PIXEL_TOLERANCE);
+        assert_eq!(height(collapsed), metrics.effective_collapsed_group_height());
+        assert!(rects.vertical_overflow.is_empty());
+    }
+
 }
