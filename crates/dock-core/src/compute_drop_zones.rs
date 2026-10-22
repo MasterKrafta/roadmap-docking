@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::{
     AllowedArea, ComputeRectsError, DockMetrics, DockSide, DropSource, DropTarget, DropZone,
     DropZoneRect, FloatingGroupId, Layout, LayoutRects, Node, NodeId, PanelId, Point, Profile,
@@ -21,11 +23,12 @@ impl Layout {
             .map_err(|_| ComputeRectsError::InvalidMetrics)?;
         self.validate(metrics)
             .map_err(|_| ComputeRectsError::InvalidLayout)?;
+        let tree_index = DropZoneTreeIndex::new(self);
         let viewport = rects.viewport.ok_or(ComputeRectsError::InvalidLayout)?;
         viewport
             .validate_non_empty()
             .map_err(ComputeRectsError::Geometry)?;
-        let source_root = source_root(self, source)?;
+        let source_root = source_root(self, source, &tree_index)?;
         let source_panels = collect_panels(self, source_root);
         if source_panels.is_empty()
             || source_panels
@@ -60,6 +63,7 @@ impl Layout {
         let right_columns = main_columns(self, rects, DockSide::Right);
         let may_add_column = can_add_column(
             self,
+            &tree_index,
             source,
             source_root,
             &left_columns,
@@ -74,10 +78,10 @@ impl Layout {
             if !matches!(self.node(group_rect.group), Some(Node::Tabs(_))) {
                 continue;
             }
-            if is_rail_group(self, group_rect.group) {
+            if is_rail_group(self, &tree_index, group_rect.group) {
                 continue;
             }
-            let Some(area) = target_area(self, group_rect.group) else {
+            let Some(area) = target_area(self, &tree_index, group_rect.group) else {
                 continue;
             };
             if area == AllowedArea::FLOATING {
@@ -89,10 +93,10 @@ impl Layout {
                 _ => continue,
             };
             let source_contains_target = matches!(source, DropSource::Group { .. })
-                && contains_node(self, source_root, group_rect.group);
+                && contains_node(&tree_index, source_root, group_rect.group);
             let source_panel_is_here = match source {
                 DropSource::Panel { panel } => {
-                    panel_node(self, panel).and_then(|node| direct_parent(self, node))
+                    panel_node(&tree_index, panel).and_then(|node| direct_parent(&tree_index, node))
                         == Some(group_rect.group)
                 }
                 DropSource::Group { .. } => false,
@@ -117,7 +121,7 @@ impl Layout {
 
             if source_contains_target
                 || (matches!(source, DropSource::Group { .. })
-                    && contains_node(self, group_rect.group, source_root))
+                    && contains_node(&tree_index, group_rect.group, source_root))
                 || !source_allows(self, &source_panels, area)
             {
                 continue;
@@ -126,7 +130,7 @@ impl Layout {
                 (DropZone::Top, DropZone::Top),
                 (DropZone::Bottom, DropZone::Bottom),
             ] {
-                if group_edge_is_noop(self, source, group_rect.group, edge) {
+                if group_edge_is_noop(self, &tree_index, source, group_rect.group, edge) {
                     continue;
                 }
                 let target = DropTarget::GroupEdge {
@@ -146,7 +150,7 @@ impl Layout {
             let right_edge =
                 group_edge_rect(group_rect.rect, DropZone::Right, metrics.edge_drop_width)?;
             if let Some((side, column_index, _column_rect)) =
-                group_main_column(self, group_rect.group, &left_columns, &right_columns)
+                group_main_column(self, &tree_index, group_rect.group, &left_columns, &right_columns)
             {
                 if may_add_column {
                     let left_target = match source {
@@ -169,17 +173,17 @@ impl Layout {
                             zone: DropZone::Right,
                         },
                     };
-                    if !group_edge_is_noop(self, source, group_rect.group, DropZone::Left) {
+                    if !group_edge_is_noop(self, &tree_index, source, group_rect.group, DropZone::Left) {
                         push_zone(&mut zones, left_target, DropZone::ColumnLeft, left_edge)?;
                     }
-                    if !group_edge_is_noop(self, source, group_rect.group, DropZone::Right) {
+                    if !group_edge_is_noop(self, &tree_index, source, group_rect.group, DropZone::Right) {
                         push_zone(&mut zones, right_target, DropZone::ColumnRight, right_edge)?;
                     }
                 }
             } else if self.profile() == Profile::Generic {
                 // Generic layouts permit a nested horizontal Split around a group.
                 for (edge, rect) in [(DropZone::Left, left_edge), (DropZone::Right, right_edge)] {
-                    if !group_edge_is_noop(self, source, group_rect.group, edge) {
+                    if !group_edge_is_noop(self, &tree_index, source, group_rect.group, edge) {
                         push_zone(
                             &mut zones,
                             DropTarget::GroupEdge {
@@ -197,15 +201,15 @@ impl Layout {
         // Tab strips are independent insertion/reorder affordances. Each header
         // is split into two half-open halves mapping to the exact slots before/after it.
         for header in &rects.tab_headers {
-            let Some(area) = target_area(self, header.group) else {
+            let Some(area) = target_area(self, &tree_index, header.group) else {
                 continue;
             };
             if area == AllowedArea::ICON_RAIL || !source_allows(self, &source_panels, area) {
                 continue;
             }
             if matches!(source, DropSource::Group { .. })
-                && (contains_node(self, source_root, header.group)
-                    || contains_node(self, header.group, source_root))
+                && (contains_node(&tree_index, source_root, header.group)
+                    || contains_node(&tree_index, header.group, source_root))
             {
                 continue;
             }
@@ -320,13 +324,13 @@ impl Layout {
                     if let Some((left_target, right_target)) = targets {
                         let left_is_noop = match &left_target {
                             DropTarget::GroupEdge { group, zone } => {
-                                group_edge_is_noop(self, source, *group, *zone)
+                                group_edge_is_noop(self, &tree_index, source, *group, *zone)
                             }
                             _ => false,
                         };
                         let right_is_noop = match &right_target {
                             DropTarget::GroupEdge { group, zone } => {
-                                group_edge_is_noop(self, source, *group, *zone)
+                                group_edge_is_noop(self, &tree_index, source, *group, *zone)
                             }
                             _ => false,
                         };
@@ -362,7 +366,7 @@ impl Layout {
                     column
                         .groups
                         .iter()
-                        .any(|root| contains_node(self, *root, icon.group))
+                        .any(|root| contains_node(&tree_index, *root, icon.group))
                 })
                 .collect();
             icons.sort_by(|left, right| {
@@ -428,7 +432,7 @@ impl Layout {
             let mut target_groups: Vec<_> = rects
                 .groups
                 .iter()
-                .filter(|group| contains_node(self, area.root, group.group))
+                .filter(|group| contains_node(&tree_index, area.root, group.group))
                 .collect();
             target_groups.sort_by(|left, right| {
                 left.rect
@@ -454,10 +458,10 @@ impl Layout {
                 .copied();
             if let Some(center_group) = center_group {
                 let is_self = matches!(source, DropSource::Group { .. })
-                    && contains_node(self, source_root, center_group.group);
+                    && contains_node(&tree_index, source_root, center_group.group);
                 let panel_already_in_group = match source {
                     DropSource::Panel { panel } => {
-                        panel_node(self, panel).and_then(|node_id| direct_parent(self, node_id))
+                        panel_node(&tree_index, panel).and_then(|node_id| direct_parent(&tree_index, node_id))
                             == Some(center_group.group)
                     }
                     DropSource::Group { .. } => false,
@@ -498,7 +502,7 @@ impl Layout {
             let top_rect = floating_edge_rect(floating_rect.rect, DropZone::Top, metrics)?;
             let bottom_rect = floating_edge_rect(floating_rect.rect, DropZone::Bottom, metrics)?;
             if !(matches!(source, DropSource::Group { .. })
-                && group_edge_is_noop(self, source, first_group.group, DropZone::Top))
+                && group_edge_is_noop(self, &tree_index, source, first_group.group, DropZone::Top))
             {
                 push_zone(
                     &mut zones,
@@ -511,7 +515,7 @@ impl Layout {
                 )?;
             }
             if !(matches!(source, DropSource::Group { .. })
-                && group_edge_is_noop(self, source, last_group.group, DropZone::Bottom))
+                && group_edge_is_noop(self, &tree_index, source, last_group.group, DropZone::Bottom))
             {
                 push_zone(
                     &mut zones,
@@ -528,7 +532,7 @@ impl Layout {
             if self.profile() == Profile::Generic {
                 for target_group in target_groups {
                     if matches!(source, DropSource::Group { .. })
-                        && contains_node(self, source_root, target_group.group)
+                        && contains_node(&tree_index, source_root, target_group.group)
                     {
                         continue;
                     }
@@ -536,7 +540,7 @@ impl Layout {
                         (DropZone::Left, DropZone::Left),
                         (DropZone::Right, DropZone::Right),
                     ] {
-                        if group_edge_is_noop(self, source, target_group.group, edge) {
+                        if group_edge_is_noop(self, &tree_index, source, target_group.group, edge) {
                             continue;
                         }
                         push_zone(
@@ -590,7 +594,7 @@ impl Layout {
                 if let Some(target) = target {
                     let is_noop = match target {
                         DropTarget::GroupEdge { group, zone } => {
-                            group_edge_is_noop(self, source, group, zone)
+                            group_edge_is_noop(self, &tree_index, source, group, zone)
                         }
                         _ => false,
                     };
@@ -649,6 +653,7 @@ impl Layout {
             let Some(area) = self.dock_area(floating.area) else {
                 return Ok(None);
             };
+            let tree_index = DropZoneTreeIndex::new(self);
             return best_containing_zone(&zones, point, |zone| {
                 matches!(
                     zone.zone,
@@ -659,7 +664,7 @@ impl Layout {
                         | DropZone::Left
                         | DropZone::Right
                 ) && target_node(zone.target)
-                    .map(|node| contains_node(self, area.root, node))
+                    .map(|node| contains_node(&tree_index, area.root, node))
                     .unwrap_or(false)
             });
         }
@@ -723,10 +728,54 @@ fn zone_priority(zone: DropZone) -> u8 {
     }
 }
 
-fn source_root(layout: &Layout, source: DropSource) -> Result<NodeId, ComputeRectsError> {
+struct DropZoneTreeIndex {
+    parent_by_node: HashMap<NodeId, NodeId>,
+    panel_by_id: HashMap<PanelId, NodeId>,
+}
+
+impl DropZoneTreeIndex {
+    fn new(layout: &Layout) -> Self {
+        let mut parent_by_node = HashMap::new();
+        let mut panel_by_id = HashMap::new();
+
+        for (node_id, node) in layout.nodes() {
+            if let Node::Panel(panel) = node {
+                panel_by_id.insert(panel.panel_id, node_id);
+            }
+            for child in children(layout, node_id) {
+                parent_by_node.insert(*child, node_id);
+            }
+        }
+
+        Self { parent_by_node, panel_by_id }
+    }
+
+    fn contains_node(&self, root: NodeId, target: NodeId) -> bool {
+        let mut current = target;
+        loop {
+            if current == root {
+                return true;
+            }
+            let Some(parent) = self.parent_by_node.get(&current) else {
+                return false;
+            };
+            current = *parent;
+        }
+    }
+
+    fn direct_parent(&self, child: NodeId) -> Option<NodeId> {
+        self.parent_by_node.get(&child).copied()
+    }
+}
+
+fn source_root(
+    layout: &Layout,
+    source: DropSource,
+    tree_index: &DropZoneTreeIndex,
+) -> Result<NodeId, ComputeRectsError> {
     match source {
         DropSource::Panel { panel } => {
-            panel_node(layout, panel).ok_or(ComputeRectsError::InvalidLayout)
+            panel_node(tree_index, panel).ok_or(ComputeRectsError::InvalidLayout)
         }
         DropSource::Group { group } => {
             if matches!(layout.node(group), Some(Node::Tabs(_))) {
@@ -738,11 +787,8 @@ fn source_root(layout: &Layout, source: DropSource) -> Result<NodeId, ComputeRec
     }
 }
 
-fn panel_node(layout: &Layout, panel: PanelId) -> Option<NodeId> {
-    layout.nodes().find_map(|(node_id, node)| match node {
-        Node::Panel(value) if value.panel_id == panel => Some(node_id),
-        _ => None,
-    })
+fn panel_node(tree_index: &DropZoneTreeIndex, panel: PanelId) -> Option<NodeId> {
+    tree_index.panel_by_id.get(&panel).copied()
 }
 
 fn collect_panels(layout: &Layout, root: NodeId) -> Vec<PanelId> {
@@ -769,59 +815,51 @@ fn source_allows(layout: &Layout, panels: &[PanelId], area: AllowedArea) -> bool
     })
 }
 
-fn children(layout: &Layout, node: NodeId) -> Vec<NodeId> {
+fn children(layout: &Layout, node: NodeId) -> &[NodeId] {
     match layout.node(node) {
-        Some(Node::Tabs(tabs)) => tabs.children.clone(),
-        Some(Node::Split(split)) => split.children.clone(),
-        Some(Node::Column(column)) => column.groups.clone(),
-        Some(Node::Panel(_)) | None => Vec::new(),
+        Some(Node::Tabs(tabs)) => &tabs.children,
+        Some(Node::Split(split)) => &split.children,
+        Some(Node::Column(column)) => &column.groups,
+        Some(Node::Panel(_)) | None => &[],
     }
 }
 
-fn contains_node(layout: &Layout, root: NodeId, target: NodeId) -> bool {
-    if root == target {
-        return true;
-    }
-    let mut stack = vec![root];
-    while let Some(node_id) = stack.pop() {
-        if node_id == target {
-            return true;
-        }
-        stack.extend(children(layout, node_id));
-    }
-    false
+fn contains_node(tree_index: &DropZoneTreeIndex, root: NodeId, target: NodeId) -> bool {
+    tree_index.contains_node(root, target)
 }
 
-fn direct_parent(layout: &Layout, child: NodeId) -> Option<NodeId> {
-    layout.nodes().find_map(|(parent, _)| {
-        if children(layout, parent).contains(&child) {
-            Some(parent)
-        } else {
-            None
-        }
-    })
+fn direct_parent(tree_index: &DropZoneTreeIndex, child: NodeId) -> Option<NodeId> {
+    tree_index.direct_parent(child)
 }
 
-fn target_area(layout: &Layout, target: NodeId) -> Option<AllowedArea> {
-    if is_rail_group(layout, target) {
+fn target_area(
+    layout: &Layout,
+    tree_index: &DropZoneTreeIndex,
+    target: NodeId,
+) -> Option<AllowedArea> {
+    if is_rail_group(layout, tree_index, target) {
         return Some(AllowedArea::ICON_RAIL);
     }
-    if floating_owner(layout, target).is_some() {
+    if floating_owner(layout, tree_index, target).is_some() {
         return Some(AllowedArea::FLOATING);
     }
-    main_side_for_node(layout, target).map(|_| AllowedArea::MAIN_DOCK)
+    main_side_for_node(layout, tree_index, target).map(|_| AllowedArea::MAIN_DOCK)
 }
 
-fn is_rail_group(layout: &Layout, group: NodeId) -> bool {
+fn is_rail_group(layout: &Layout, tree_index: &DropZoneTreeIndex, group: NodeId) -> bool {
     matches!(
-        owner_column(layout, group).and_then(|column| layout.node(column)),
+        owner_column(layout, tree_index, group).and_then(|column| layout.node(column)),
         Some(Node::Column(column)) if column.mode.is_rail()
     )
 }
 
-fn owner_column(layout: &Layout, node: NodeId) -> Option<NodeId> {
+fn owner_column(
+    layout: &Layout,
+    tree_index: &DropZoneTreeIndex,
+    node: NodeId,
+) -> Option<NodeId> {
     let mut current = node;
-    while let Some(parent) = direct_parent(layout, current) {
+    while let Some(parent) = direct_parent(tree_index, current) {
         if matches!(layout.node(parent), Some(Node::Column(_))) {
             return Some(parent);
         }
@@ -830,11 +868,15 @@ fn owner_column(layout: &Layout, node: NodeId) -> Option<NodeId> {
     None
 }
 
-fn floating_owner(layout: &Layout, node: NodeId) -> Option<FloatingGroupId> {
+fn floating_owner(
+    layout: &Layout,
+    tree_index: &DropZoneTreeIndex,
+    node: NodeId,
+) -> Option<FloatingGroupId> {
     layout.floating_groups().find_map(|(group_id, floating)| {
         layout
             .dock_area(floating.area)
-            .filter(|area| contains_node(layout, area.root, node))
+            .filter(|area| contains_node(tree_index, area.root, node))
             .map(|_| group_id)
     })
 }
@@ -848,11 +890,15 @@ fn source_is_floating_root(layout: &Layout, source_root: NodeId) -> bool {
     })
 }
 
-fn main_side_for_node(layout: &Layout, node: NodeId) -> Option<DockSide> {
+fn main_side_for_node(
+    layout: &Layout,
+    tree_index: &DropZoneTreeIndex,
+    node: NodeId,
+) -> Option<DockSide> {
     [DockSide::Left, DockSide::Right].into_iter().find(|side| {
         layout
             .main_area(*side)
-            .map(|area| contains_node(layout, area.root, node))
+            .map(|area| contains_node(tree_index, area.root, node))
             .unwrap_or(false)
     })
 }
@@ -890,11 +936,12 @@ fn main_columns(layout: &Layout, rects: &LayoutRects, side: DockSide) -> Vec<(No
 
 fn group_main_column(
     layout: &Layout,
+    tree_index: &DropZoneTreeIndex,
     group: NodeId,
     left_columns: &[(NodeId, Rect)],
     right_columns: &[(NodeId, Rect)],
 ) -> Option<(DockSide, usize, Rect)> {
-    let column_id = owner_column(layout, group)?;
+    let column_id = owner_column(layout, tree_index, group)?;
     let (side, columns) = if left_columns.iter().any(|(id, _)| *id == column_id) {
         (DockSide::Left, left_columns)
     } else if right_columns.iter().any(|(id, _)| *id == column_id) {
@@ -934,6 +981,7 @@ fn edge_group_for_dock_edge(
 
 fn can_add_column(
     layout: &Layout,
+    tree_index: &DropZoneTreeIndex,
     source: DropSource,
     source_root: NodeId,
     left_columns: &[(NodeId, Rect)],
@@ -945,10 +993,10 @@ fn can_add_column(
     {
         return true;
     }
-    let Some(column_id) = owner_column(layout, source_root) else {
+    let Some(column_id) = owner_column(layout, tree_index, source_root) else {
         return false;
     };
-    if main_side_for_node(layout, column_id).is_none() {
+    if main_side_for_node(layout, tree_index, column_id).is_none() {
         return false;
     }
     let Some(Node::Column(column)) = layout.node(column_id) else {
@@ -957,10 +1005,10 @@ fn can_add_column(
     match source {
         DropSource::Group { group } => column.groups.len() == 1 && column.groups[0] == group,
         DropSource::Panel { panel } => {
-            let Some(panel_node) = panel_node(layout, panel) else {
+            let Some(panel_node) = panel_node(tree_index, panel) else {
                 return false;
             };
-            let Some(group) = direct_parent(layout, panel_node) else {
+            let Some(group) = direct_parent(tree_index, panel_node) else {
                 return false;
             };
             column.groups.len() == 1
@@ -1035,6 +1083,7 @@ fn floating_edge_rect(
 
 fn group_edge_is_noop(
     layout: &Layout,
+    tree_index: &DropZoneTreeIndex,
     source: DropSource,
     target_group: NodeId,
     zone: DropZone,
@@ -1045,11 +1094,11 @@ fn group_edge_is_noop(
     else {
         return false;
     };
-    if source_group == target_group || contains_node(layout, source_group, target_group) {
+    if source_group == target_group || contains_node(tree_index, source_group, target_group) {
         return true;
     }
-    let source_parent = direct_parent(layout, source_group);
-    let target_parent = direct_parent(layout, target_group);
+    let source_parent = direct_parent(tree_index, source_group);
+    let target_parent = direct_parent(tree_index, target_group);
     if let (Some(parent), Some(target_parent)) = (source_parent, target_parent)
         && parent == target_parent
     {
@@ -1070,18 +1119,18 @@ fn group_edge_is_noop(
         }
     }
     if matches!(zone, DropZone::Left | DropZone::Right) {
-        let Some(source_column) = owner_column(layout, source_group) else {
+        let Some(source_column) = owner_column(layout, tree_index, source_group) else {
             return false;
         };
-        let Some(target_column) = owner_column(layout, target_group) else {
+        let Some(target_column) = owner_column(layout, tree_index, target_group) else {
             return false;
         };
         if source_column == target_column {
             return false;
         }
         let (Some(source_side), Some(target_side)) = (
-            main_side_for_node(layout, source_column),
-            main_side_for_node(layout, target_column),
+            main_side_for_node(layout, tree_index, source_column),
+            main_side_for_node(layout, tree_index, target_column),
         ) else {
             return false;
         };
@@ -2172,7 +2221,7 @@ mod tests {
         let calls_per_second = iterations as f64 / elapsed.as_secs_f64();
 
         println!(
-            "drop-zone baseline [{}]: nodes={}, panels={}, floating={}, groups={}, headers={}, zones/call={}, iterations={}, elapsed_ms={:.3}, us/call={:.3}, calls/s={:.1}",
+            "drop-zone measurement [{}]: nodes={}, panels={}, floating={}, groups={}, headers={}, zones/call={}, iterations={}, elapsed_ms={:.3}, us/call={:.3}, calls/s={:.1}",
             label,
             layout.nodes().count(),
             layout.panel_instances().count(),
