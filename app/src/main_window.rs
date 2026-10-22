@@ -85,12 +85,6 @@ impl Render for MainWindow {
         } else {
             colors.splitter
         };
-        let horizontal_splitter_color = if self.is_resizing_height {
-            colors.focus
-        } else {
-            colors.splitter
-        };
-
         let root = div()
             .flex()
             .flex_row()
@@ -175,6 +169,19 @@ impl Render for MainWindow {
                     .h(px(window_height))
                     .bg(rgb(colors.window_background)),
             )
+            .child(render_column(
+                0,
+                left_column_width,
+                left_top_height,
+                left_bottom_height,
+                self.theme,
+                self.active_tabs[0],
+                self.lower_active_tabs[0],
+                self.split_ratios[0],
+                horizontal_splitter_height,
+                self.is_resizing_height && self.resizing_height_column == 0,
+                cx,
+            ))
             // Shared vertical splitter: dragging it reallocates width between both columns.
             .child(
                 div()
@@ -206,19 +213,6 @@ impl Render for MainWindow {
                     ),
             )
             .child(render_column(
-                0,
-                left_column_width,
-                left_top_height,
-                left_bottom_height,
-                self.theme,
-                self.active_tabs[0],
-                self.lower_active_tabs[0],
-                self.split_ratios[0],
-                horizontal_splitter_height,
-                horizontal_splitter_color,
-                cx,
-            ))
-            .child(render_column(
                 1,
                 right_column_width,
                 right_top_height,
@@ -228,7 +222,7 @@ impl Render for MainWindow {
                 self.lower_active_tabs[1],
                 self.split_ratios[1],
                 horizontal_splitter_height,
-                horizontal_splitter_color,
+                self.is_resizing_height && self.resizing_height_column == 1,
                 cx,
             ))
     }
@@ -244,11 +238,16 @@ fn render_column(
     lower_active_tab: usize,
     split_ratio: f32,
     horizontal_splitter_height: f32,
-    horizontal_splitter_color: gpui::Rgba,
+    is_resizing_height: bool,
     cx: &mut Context<MainWindow>,
 ) -> impl IntoElement {
     let colors = theme.colors;
     let metrics = theme.metrics;
+    let horizontal_splitter_color = if is_resizing_height {
+        colors.focus
+    } else {
+        colors.splitter
+    };
     let tab_width =
         metrics.column_tab_width.min(((column_width - metrics.button_size).max(0.0)) / 2.0);
 
