@@ -2052,4 +2052,192 @@ mod tests {
         assert!(layout.panel_instance(target_panel).is_some());
         assert_eq!(layout.validate(&metrics), Ok(()));
     }
+
+    fn synthetic_drop_zone_layout(
+        column_count: usize,
+        groups_per_column: usize,
+        panels_per_group: usize,
+        metrics: &DockMetrics,
+    ) -> (crate::Layout, crate::PanelId, NodeId, Rect) {
+        assert!(column_count > 0);
+        assert!(groups_per_column > 0);
+        assert!(panels_per_group > 0);
+
+        let mut builder = LayoutBuilder::new(Profile::Generic);
+        let mut columns = Vec::with_capacity(column_count);
+        let mut source_panel = None;
+        let mut source_group = None;
+
+        for column_index in 0..column_count {
+            let mut groups = Vec::with_capacity(groups_per_column);
+            for group_index in 0..groups_per_column {
+                let mut panel_nodes = Vec::with_capacity(panels_per_group);
+                for panel_index in 0..panels_per_group {
+                    let panel_key =
+                        format!("bench-c{column_index}-g{group_index}-p{panel_index}");
+                    let (panel, panel_node) = builder.panel(key(&panel_key), constraints());
+                    source_panel.get_or_insert(panel);
+                    panel_nodes.push(panel_node);
+                }
+                let group = builder.tabs(panel_nodes, 0, false);
+                source_group.get_or_insert(group);
+                groups.push(group);
+            }
+
+            columns.push(builder.column(
+                metrics.default_column_width,
+                ColumnMode::Expanded,
+                groups,
+                vec![1.0 / groups_per_column as f32; groups_per_column],
+            ));
+        }
+
+        let root = if columns.len() == 1 {
+            columns[0]
+        } else {
+            builder.split(
+                crate::Axis::X,
+                columns,
+                vec![1.0 / column_count as f32; column_count],
+            )
+        };
+        builder.main_area(DockSide::Left, root);
+
+        // Keep one floating group in both fixtures to include the floating-area
+        // ancestry lookups performed by the same public drop-zone pipeline.
+        let (_, floating_panel_node) =
+            builder.panel(key("bench-floating-panel"), constraints());
+        let floating_tabs = builder.tabs(vec![floating_panel_node], 0, false);
+
+        let viewport_width = column_count as f32 * metrics.default_column_width
+            + metrics.min_canvas_width
+            + 256.0;
+        let viewport_height = groups_per_column as f32
+            * (metrics.header_height
+                + metrics.tab_strip_height
+                + constraints().min_size.height
+                + metrics.splitter_thickness)
+            + 800.0;
+        builder.floating_group(
+            floating_tabs,
+            Rect::new(
+                Point::new(viewport_width - 460.0, 48.0),
+                Size::new(420.0, 320.0),
+            ),
+            1,
+        );
+
+        (
+            builder.build(),
+            source_panel.expect("synthetic layout has at least one panel"),
+            source_group.expect("synthetic layout has at least one group"),
+            Rect::new(Point::ZERO, Size::new(viewport_width, viewport_height)),
+        )
+    }
+
+    fn measure_drop_zone_case(
+        label: &str,
+        layout: &crate::Layout,
+        source: DropSource,
+        rects: &crate::LayoutRects,
+        metrics: &DockMetrics,
+        iterations: usize,
+    ) {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        let warmup_iterations = iterations.min(10);
+        for _ in 0..warmup_iterations {
+            let zones = layout
+                .compute_drop_zones(source, rects, metrics)
+                .expect("benchmark layout must produce drop zones");
+            let _ = black_box(zones.len());
+        }
+
+        let start = Instant::now();
+        let mut zone_count = 0;
+        for _ in 0..iterations {
+            let zones = layout
+                .compute_drop_zones(source, rects, metrics)
+                .expect("benchmark layout must produce drop zones");
+            zone_count = zones.len();
+            let _ = black_box(zones);
+        }
+        assert!(
+            zone_count > 0,
+            "benchmark case {label} should emit legal drop zones"
+        );
+        let elapsed = start.elapsed();
+        let micros_per_call = elapsed.as_secs_f64() * 1_000_000.0 / iterations as f64;
+        let calls_per_second = iterations as f64 / elapsed.as_secs_f64();
+
+        println!(
+            "drop-zone baseline [{}]: nodes={}, panels={}, floating={}, groups={}, headers={}, zones/call={}, iterations={}, elapsed_ms={:.3}, us/call={:.3}, calls/s={:.1}",
+            label,
+            layout.nodes().count(),
+            layout.panel_instances().count(),
+            layout.floating_groups().count(),
+            rects.groups.len(),
+            rects.tab_headers.len(),
+            zone_count,
+            iterations,
+            elapsed.as_secs_f64() * 1000.0,
+            micros_per_call,
+            calls_per_second,
+        );
+    }
+
+    /// Manual baseline only: this is deliberately ignored during normal test runs.
+    ///
+    /// Run in release mode with one test thread to compare typical and large tree
+    /// traversal cost before changing the drop-zone algorithm.
+    /// Command: cargo test -p dock-core --release benchmark_compute_drop_zones_typical_and_large_layouts -- --ignored --nocapture --test-threads=1
+    #[test]
+    #[ignore = "manual performance baseline; run the documented release-mode command"]
+    fn benchmark_compute_drop_zones_typical_and_large_layouts() {
+        let metrics = DockMetrics::default();
+        let cases = [
+            ("typical-2x4x2", 2, 4, 2, 500, 200),
+            ("large-8x12x3", 8, 12, 3, 20, 5),
+        ];
+
+        for (
+            label,
+            column_count,
+            groups_per_column,
+            panels_per_group,
+            panel_iterations,
+            group_iterations,
+        ) in cases
+        {
+            let (layout, source_panel, source_group, viewport) = synthetic_drop_zone_layout(
+                column_count,
+                groups_per_column,
+                panels_per_group,
+                &metrics,
+            );
+            assert_eq!(layout.validate(&metrics), Ok(()));
+            let rects = layout
+                .compute_rects(viewport, &metrics)
+                .expect("synthetic benchmark layout must resolve geometry");
+
+            measure_drop_zone_case(
+                &format!("{label}-panel-source"),
+                &layout,
+                DropSource::Panel { panel: source_panel },
+                &rects,
+                &metrics,
+                panel_iterations,
+            );
+            measure_drop_zone_case(
+                &format!("{label}-group-source"),
+                &layout,
+                DropSource::Group { group: source_group },
+                &rects,
+                &metrics,
+                group_iterations,
+            );
+        }
+    }
+
 }
