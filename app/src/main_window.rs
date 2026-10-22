@@ -108,7 +108,6 @@ impl Render for MainWindow {
         } else {
             self.column_widths[1]
         };
-        let max_single_width = (window_width - divider_width).max(left_min_width.min(right_min_width));
         let required_pair_width = left_min_width + right_min_width;
         let max_pair_width =
             (window_width - divider_width * 2.0).max(required_pair_width);
@@ -396,7 +395,6 @@ impl Render for MainWindow {
                 self.lower_active_tabs[0],
                 self.split_ratios[0],
                 left_horizontal_divider,
-                self.is_resizing_height && self.resizing_height_column == 0,
                 cx,
             ));
         }
@@ -455,7 +453,6 @@ impl Render for MainWindow {
                 self.lower_active_tabs[1],
                 self.split_ratios[1],
                 right_horizontal_divider,
-                self.is_resizing_height && self.resizing_height_column == 1,
                 cx,
             ));
         }
@@ -587,7 +584,6 @@ fn render_column(
     lower_active_tab: usize,
     split_ratio: f32,
     horizontal_splitter_height: f32,
-    is_resizing_height: bool,
     cx: &mut Context<MainWindow>,
 ) -> impl IntoElement {
     let colors = theme.colors;
