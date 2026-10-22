@@ -271,7 +271,7 @@ impl Layout {
                     ),
                 );
                 let end_index = column.groups.len();
-                if !group_slot_is_noop(self, source, *column_id, end_index) {
+                if !matches!(source, DropSource::Group { group } if self.group_slot_is_noop(group, *column_id, end_index)) {
                     push_zone(
                         &mut zones,
                         DropTarget::ColumnSlot {
@@ -1151,18 +1151,6 @@ fn collect_main_columns(layout: &Layout, root: NodeId, output: &mut Vec<NodeId>)
     }
 }
 
-fn group_slot_is_noop(layout: &Layout, source: DropSource, column: NodeId, index: usize) -> bool {
-    let DropSource::Group { group } = source else {
-        return false;
-    };
-    let Some(Node::Column(value)) = layout.node(column) else {
-        return false;
-    };
-    let Some(source_index) = value.groups.iter().position(|id| *id == group) else {
-        return false;
-    };
-    index == source_index || index == source_index + 1
-}
 
 
 #[cfg(test)]
