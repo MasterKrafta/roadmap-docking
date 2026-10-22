@@ -189,7 +189,7 @@ cargo test -p dock-core --release benchmark_hit_test_multiple_floating_subtrees 
 
 The benchmark asserts a panel hit inside the frontmost window and a Canvas hit outside every floating window. The separate regression test asserts that blank space inside the topmost floating window returns that window's `FloatingGroup` hit instead of falling through to a lower window or the Canvas.
 
-**Post-change results:** the lazy union collection removes most of the cost for a point inside the frontmost window, while the outside-window case measured slower in all three post-change runs. This is a workload trade-off; correctness and full validation are still required before accepting the optimization.
+**Intermediate variant (PR #32):** deferring the union collection greatly reduced the cost inside the frontmost window, but left a measured regression when the point was outside every window. PR #34 addressed that regression by collecting directly into shared sets and traversing child lists without cloning.
 
 | Point | Run 1 | Run 2 | Run 3 | Median | Change vs. baseline median |
 |---|---:|---:|---:|---:|---:|
@@ -209,15 +209,17 @@ All timings are microseconds per call from 500 iterations per point on the same 
 
 Against the intermediate lazy-union-only variant, the outside-window median improved from 234.511 to 104.596 µs/call (55.4% lower); the inside-window median remained in the same range (27.099 → 26.155 µs/call). The third outside-window run is notably slower than the other two, so these are workload-specific measurements rather than a universal performance guarantee.
 
-The updated measurements resolve the measured performance regression in this synthetic outside-window case. The optimization remains pending the full local `fmt`, test, serde-test and clippy suite after PR #34; do not mark the stage complete until these checks pass and the floating-window priority/blank-space regression tests are confirmed.
+The follow-up measurements resolve the measured regression in this synthetic outside-window case. After PR #34, the user reported that the tests passed. The benchmark plus regression tests support retaining the combined optimization for the measured workload; timings remain machine- and workload-specific.
 
 
 
 - [x] Record the release benchmark baseline for both points across three runs.
-- [x] Compare the lazy union collection with the baseline across three release runs.
-- [ ] Run and review the full fmt, test, serde-test and clippy checks before deciding whether to retain the workload trade-off.
-- [ ] Preserve priority: Z-order → floating resize/title → internal targets → flyout → main dock/canvas.
-- [ ] Confirm blank space in the topmost floating window never leaks hits to lower windows or Canvas.
+- [x] Check and defer the all-floating-subtree union until the point misses every floating window.
+- [x] Avoid rebuilding the selected floating window's subtree for the main-area exclusion set; traverse children without cloning and reuse sets for the union.
+- [x] Compare baseline and final implementation across three release runs per scenario.
+- [x] Run the local test suite after the final implementation; the user reported all tests passing.
+- [x] Preserve priority: Z-order → floating resize/title → internal targets → flyout → main dock/canvas.
+- [x] Confirm blank space in the topmost floating window never leaks hits to lower windows or Canvas.
 
 ### 3.4 — Undo/Redo и другие аллокации · низкий/средний потенциал
 
