@@ -178,7 +178,7 @@ impl Render for MainWindow {
                 self.active_tabs[0],
                 self.lower_active_tabs[0],
                 self.split_ratios[0],
-                horizontal_splitter_height,
+                horizontal_divider_height,
                 self.is_resizing_height && self.resizing_height_column == 0,
                 cx,
             ))
@@ -221,7 +221,7 @@ impl Render for MainWindow {
                 self.active_tabs[1],
                 self.lower_active_tabs[1],
                 self.split_ratios[1],
-                horizontal_splitter_height,
+                horizontal_divider_height,
                 self.is_resizing_height && self.resizing_height_column == 1,
                 cx,
             ))
@@ -248,9 +248,6 @@ fn render_column(
     } else {
         colors.splitter
     };
-    let tab_width =
-        metrics.column_tab_width.min(((column_width - metrics.button_size).max(0.0)) / 2.0);
-
     let (first_tab_id, second_tab_id, lower_first_tab_id, lower_second_tab_id) =
         if column_index == 0 {
             (
@@ -277,47 +274,6 @@ fn render_column(
             .h(px(metrics.button_size))
             .text_color(rgb(colors.muted_text))
             .child(label)
-    };
-
-    let first_tab_background = if active_tab == 0 {
-        colors.active_tab
-    } else {
-        colors.dock_background
-    };
-    let first_tab_text = if active_tab == 0 {
-        colors.primary_text
-    } else {
-        colors.muted_text
-    };
-    let second_tab_background = if active_tab == 1 {
-        colors.active_tab
-    } else {
-        colors.dock_background
-    };
-    let second_tab_text = if active_tab == 1 {
-        colors.primary_text
-    } else {
-        colors.muted_text
-    };
-    let lower_first_tab_background = if lower_active_tab == 0 {
-        colors.active_tab
-    } else {
-        colors.dock_background
-    };
-    let lower_first_tab_text = if lower_active_tab == 0 {
-        colors.primary_text
-    } else {
-        colors.muted_text
-    };
-    let lower_second_tab_background = if lower_active_tab == 1 {
-        colors.active_tab
-    } else {
-        colors.dock_background
-    };
-    let lower_second_tab_text = if lower_active_tab == 1 {
-        colors.primary_text
-    } else {
-        colors.muted_text
     };
 
     div()
