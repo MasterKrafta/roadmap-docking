@@ -254,6 +254,7 @@ where
             .text_color(rgb(theme.colors.primary_text))
             .child("⋯")
             .id(format!("dock-flyout-menu-{:?}-{:?}", flyout.group, flyout.panel))
+            .focusable()
             .on_click(make_menu_handler(DockMenuRequest::PanelGroup {
                 group: flyout.group,
                 panel: Some(flyout.panel),
@@ -267,6 +268,7 @@ where
             .text_color(rgb(theme.colors.primary_text))
             .child("×")
             .id(format!("dock-flyout-close-{:?}-{:?}", flyout.group, flyout.panel))
+            .focusable()
             .on_click(make_command_handler(DockCommand::CloseFlyout));
 
         let content_rect = Rect::new(
@@ -444,6 +446,7 @@ where
                     .text_color(rgb(theme.colors.primary_text))
                     .child("⋯")
                     .id(format!("dock-group-menu-{:?}", group.group))
+                    .focusable()
                     .on_click(make_menu_handler(DockMenuRequest::PanelGroup {
                         group: group.group,
                         panel: active_panel(layout, tabs),
@@ -496,6 +499,7 @@ where
             .text_color(rgb(theme.colors.primary_text))
             .child(display_label)
             .id(format!("dock-tab-{:?}-{:?}", header.group, header.panel))
+            .focusable()
             .on_mouse_down(
                 MouseButton::Left,
                 make_drag_start_handler(payload, DragHandle::PanelTab),
@@ -524,6 +528,7 @@ where
                 .text_color(rgb(theme.colors.primary_text))
                 .child("⋯")
                 .id(format!("dock-tab-overflow-{:?}", overflow.group))
+                .focusable()
                 .on_click(make_menu_handler(DockMenuRequest::TabOverflow {
                     group: overflow.group,
                 }))
@@ -646,6 +651,7 @@ where
             elements.push(
                 entry
                     .id(format!("dock-rail-{:?}-{:?}", column_rect.column, item.panel))
+                    .focusable()
                     .on_click(make_command_handler(DockCommand::OpenFlyout {
                         column: column_rect.column,
                         panel: item.panel,

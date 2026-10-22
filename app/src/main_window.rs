@@ -34,6 +34,40 @@ impl From<dock_gpui::DockMenuRequest> for DockMenuState {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum EscapeAction {
+    CancelInteraction,
+    DismissMenu,
+    DismissFlyout,
+    Ignore,
+}
+
+fn escape_action(interaction_active: bool, menu_open: bool, flyout_open: bool) -> EscapeAction {
+    if interaction_active {
+        EscapeAction::CancelInteraction
+    } else if menu_open {
+        EscapeAction::DismissMenu
+    } else if flyout_open {
+        EscapeAction::DismissFlyout
+    } else {
+        EscapeAction::Ignore
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FocusDirection {
+    Forward,
+    Backward,
+}
+
+fn focus_direction(shift_pressed: bool) -> FocusDirection {
+    if shift_pressed {
+        FocusDirection::Backward
+    } else {
+        FocusDirection::Forward
+    }
+}
+
 #[derive(Clone)]
 enum MenuAction {
     OpenOrActivatePanel(PanelKey),
@@ -541,6 +575,20 @@ impl MainWindow {
         self.finish_drag_at(position, viewport, cx);
     }
 
+    fn handle_escape(&mut self, cx: &mut Context<Self>) {
+        let interaction_active =
+            active_drag_payload(self.drag_session.state()).is_some() || self.resize_gesture.is_some();
+        match escape_action(interaction_active, self.menu.is_some(), self.layout.flyout().is_some()) {
+            EscapeAction::CancelInteraction => self.cancel_active_interactions(true, cx),
+            EscapeAction::DismissMenu => {
+                self.menu = None;
+                cx.notify();
+            }
+            EscapeAction::DismissFlyout => self.apply_command(DockCommand::DismissFlyout, cx),
+            EscapeAction::Ignore => {}
+        }
+    }
+
     fn cancel_active_interactions(&mut self, escape: bool, cx: &mut Context<Self>) {
         let mut changed = false;
         if active_drag_payload(self.drag_session.state()).is_some() {
@@ -877,12 +925,19 @@ impl Render for MainWindow {
                     view.finish_pointer_at(position, drag_viewport, cx);
                 });
             })
-            .on_key_down(move |event, _window, app| {
-                if event.keystroke.key == "escape" {
-                    let weak = escape_weak.clone();
-                    let _ = weak.update(app, |view, cx| {
-                        view.cancel_active_interactions(true, cx);
-                    });
+            .on_key_down(move |event, window, app| {
+                match event.keystroke.key.as_str() {
+                    "tab" => match focus_direction(event.keystroke.modifiers.shift) {
+                        FocusDirection::Forward => window.focus_next(app),
+                        FocusDirection::Backward => window.focus_prev(app),
+                    },
+                    "escape" => {
+                        let weak = escape_weak.clone();
+                        let _ = weak.update(app, |view, cx| {
+                            view.handle_escape(cx);
+                        });
+                    }
+                    _ => {}
                 }
             });
 
@@ -897,6 +952,7 @@ impl Render for MainWindow {
             .text_color(rgb(self.theme.colors.primary_text))
             .child("Window / Panels  ▾")
             .id("window-panels-menu-trigger")
+            .focusable()
             .on_click(move |_event: &ClickEvent, _window: &mut Window, app: &mut App| {
                 let weak = window_menu_weak.clone();
                 let _ = weak.update(app, |view, cx| {
@@ -1015,6 +1071,7 @@ impl Render for MainWindow {
                         .text_color(rgb(self.theme.colors.primary_text))
                         .child(row.label)
                         .id(format!("dock-menu-row-{}", row.id))
+                        .focusable()
                         .on_click(move |_event: &ClickEvent, _window: &mut Window, app: &mut App| {
                             let weak = weak.clone();
                             let _ = weak.update(app, |view, cx| {
@@ -1028,5 +1085,45 @@ impl Render for MainWindow {
         }
 
         root.into_any_element()
+    }
+}
+
+
+#[cfg(test)]
+mod keyboard_handling_tests {
+    use super::{EscapeAction, FocusDirection, escape_action, focus_direction};
+
+    #[test]
+    fn escape_cancels_active_drag_or_resize_before_dismissing_overlays() {
+        assert_eq!(
+            escape_action(true, true, true),
+            EscapeAction::CancelInteraction,
+        );
+        assert_eq!(
+            escape_action(true, false, true),
+            EscapeAction::CancelInteraction,
+        );
+    }
+
+    #[test]
+    fn escape_dismisses_menu_before_flyout() {
+        assert_eq!(
+            escape_action(false, true, true),
+            EscapeAction::DismissMenu,
+        );
+        assert_eq!(
+            escape_action(false, false, true),
+            EscapeAction::DismissFlyout,
+        );
+        assert_eq!(
+            escape_action(false, false, false),
+            EscapeAction::Ignore,
+        );
+    }
+
+    #[test]
+    fn shift_tab_reverses_focus_traversal() {
+        assert_eq!(focus_direction(false), FocusDirection::Forward);
+        assert_eq!(focus_direction(true), FocusDirection::Backward);
     }
 }
