@@ -118,22 +118,18 @@ impl Render for MainWindow {
                             window.viewport_size().width.as_f32().max(1.0);
                         let max_total_width =
                             (actual_window_width - hit_zone * 2.0).max(min_width * 2.0);
-                        let start_total_width = this.resize_start_column_widths[0]
-                            + this.resize_start_column_widths[1];
+                        let right_width = this.resize_start_column_widths[1]
+                            .clamp(min_width, max_total_width - min_width);
+                        let max_left_width = (max_total_width - right_width).max(min_width);
                         let delta = event.position.x.as_f32() - this.resize_start_x;
-                        // The outer handle moves opposite to the dock group's width:
-                        // dragging left grows the group; dragging right shrinks it.
-                        let total_width = (start_total_width - delta)
-                            .clamp(min_width * 2.0, max_total_width);
-                        let start_left_ratio = if start_total_width > 0.0 {
-                            this.resize_start_column_widths[0] / start_total_width
-                        } else {
-                            0.5
-                        };
-                        let left_width = (total_width * start_left_ratio)
-                            .clamp(min_width, total_width - min_width);
 
-                        this.column_widths = [left_width, total_width - left_width];
+                        // Resize only the column adjacent to the outer splitter.
+                        // Keeping the right column width fixed leaves the center splitter
+                        // at the same screen position while the outer splitter moves.
+                        let left_width = (this.resize_start_column_widths[0] - delta)
+                            .clamp(min_width, max_left_width);
+
+                        this.column_widths = [left_width, right_width];
                         cx.notify();
                     } else if this.is_resizing_columns {
                         let actual_window_width =
@@ -199,7 +195,7 @@ impl Render for MainWindow {
                     .h(px(window_height))
                     .bg(rgb(colors.window_background)),
             )
-            // Outer splitter: resize the combined dock group against the workspace.
+            // Outer splitter: resize the adjacent column without moving the center splitter.
             .child(
                 div()
                     .flex()
