@@ -2121,7 +2121,6 @@ mod tests {
         assert!(rects.vertical_overflow.is_empty());
     }
 
-
     #[test]
     fn zero_weight_child_keeps_its_minimum_without_changing_positive_weight_proportions() {
         let metrics = DockMetrics::default();
@@ -2182,7 +2181,8 @@ mod tests {
         let mut builder = LayoutBuilder::new(Profile::Photoshop);
         let mut groups = Vec::new();
         for index in 0..3 {
-            let (_, panel_node) = builder.panel(key(&format!("dominant-ratio-{index}")), constraints());
+            let (_, panel_node) =
+                builder.panel(key(&format!("dominant-ratio-{index}")), constraints());
             groups.push(builder.tabs(vec![panel_node], 0, false));
         }
         let zero_a = groups[0];
@@ -2235,7 +2235,8 @@ mod tests {
         let mut builder = LayoutBuilder::new(Profile::Photoshop);
         let mut groups = Vec::new();
         for index in 0..3 {
-            let (_, panel_node) = builder.panel(key(&format!("all-collapsed-{index}")), constraints());
+            let (_, panel_node) =
+                builder.panel(key(&format!("all-collapsed-{index}")), constraints());
             groups.push(builder.tabs(vec![panel_node], 0, true));
         }
         let column = builder.column(
