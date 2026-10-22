@@ -509,6 +509,10 @@ impl Render for MainWindow {
                         };
                         cx.notify();
                     } else if let Some(tab_index) = this.dragging_tab {
+                        // A tab drag owns the gesture. Never let a stale/bubbled
+                        // group or composition drag move the whole column alongside it.
+                        this.dragging_tab_group = None;
+                        this.dragging_composition = false;
                         let cursor_x = event.position.x.as_f32();
                         let cursor_y = event.position.y.as_f32();
                         let delta_x = cursor_x - this.tab_drag_start_cursor[0];
@@ -3202,6 +3206,11 @@ fn render_tab_strip(
                 this.dragging_tab = None;
             } else {
                 this.dragging_tab = Some(first_display_global_index);
+                this.dragging_tab_group = None;
+                this.dragging_composition = false;
+                this.is_resizing_columns = false;
+                this.is_resizing_outer_splitter = false;
+                this.is_resizing_height = false;
                 this.tab_drag_start_cursor = [
                     event.position.x.as_f32(),
                     event.position.y.as_f32(),
@@ -3234,6 +3243,11 @@ fn render_tab_strip(
                 this.dragging_tab = None;
             } else {
                 this.dragging_tab = Some(second_display_global_index);
+                this.dragging_tab_group = None;
+                this.dragging_composition = false;
+                this.is_resizing_columns = false;
+                this.is_resizing_outer_splitter = false;
+                this.is_resizing_height = false;
                 this.tab_drag_start_cursor = [
                     event.position.x.as_f32(),
                     event.position.y.as_f32(),
