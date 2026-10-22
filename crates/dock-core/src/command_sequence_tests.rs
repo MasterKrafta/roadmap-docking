@@ -837,6 +837,39 @@ mod tests {
                     "Layout invalid after successful command {:?}",
                     command
                 );
+
+                // Generated commands must leave a layout that not only validates,
+                // but also resolves into usable geometry in a deliberately generous
+                // viewport. This keeps expected small-window failures separate from
+                // model/geometry regressions.
+                let viewport = Rect::new(Point::ZERO, Size::new(32_768.0, 32_768.0));
+                let rects = layout.compute_rects(viewport, &metrics);
+                prop_assert!(
+                    rects.is_ok(),
+                    "geometry failed after successful command {:?}: {:?}",
+                    command,
+                    rects
+                );
+                let mut rects = rects.expect("geometry success was asserted");
+
+                // Drop-zone rectangles are computed separately because their
+                // legality depends on the dragged source. Include a real source
+                // so the snapshot checker also validates every emitted drop zone.
+                let panels = panel_nodes(&layout);
+                prop_assert!(!panels.is_empty(), "generated layout lost every panel");
+                let drop_zones = layout.compute_drop_zones(
+                    crate::DropSource::Panel { panel: panels[0].1 },
+                    &rects,
+                    &metrics,
+                );
+                prop_assert!(
+                    drop_zones.is_ok(),
+                    "drop-zone geometry failed after successful command {:?}: {:?}",
+                    command,
+                    drop_zones
+                );
+                rects.drop_zones = drop_zones.expect("drop-zone success was asserted");
+                crate::layout_rects::assert_layout_rects_invariants(&rects);
             }
         }
     }

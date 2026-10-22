@@ -1886,34 +1886,7 @@ mod tests {
     }
 
     fn assert_snapshot_rectangles_are_valid(rects: &LayoutRects) {
-        let mut all = Vec::new();
-        all.extend(rects.viewport);
-        all.extend(rects.canvas);
-        all.extend(rects.columns.iter().map(|item| item.rect));
-        all.extend(rects.groups.iter().map(|item| item.rect));
-        all.extend(rects.tab_strips.iter().map(|item| item.rect));
-        all.extend(rects.tab_headers.iter().map(|item| item.rect));
-        all.extend(rects.tab_overflows.iter().map(|item| item.button_rect));
-        all.extend(rects.panels.iter().map(|item| item.rect));
-        all.extend(rects.splitters.iter().map(|item| item.rect));
-        all.extend(rects.floating_groups.iter().map(|item| item.rect));
-        all.extend(rects.floating_resize_edges.iter().map(|item| item.rect));
-        all.extend(rects.flyout.map(|item| item.rect));
-        all.extend(rects.drop_zones.iter().map(|item| item.rect));
-        for overflow in &rects.vertical_overflow {
-            all.push(overflow.viewport);
-            all.push(overflow.content_extent);
-        }
-
-        for rect in all {
-            assert_eq!(
-                rect.validate(),
-                Ok(()),
-                "invalid emitted geometry: {rect:?}"
-            );
-            assert!(rect.size.width >= 0.0, "negative width: {rect:?}");
-            assert!(rect.size.height >= 0.0, "negative height: {rect:?}");
-        }
+        crate::layout_rects::assert_layout_rects_invariants(rects);
     }
 
     #[test]
