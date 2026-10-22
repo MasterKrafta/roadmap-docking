@@ -146,7 +146,7 @@ impl Render for MainWindow {
         let any_column_visible = left_column_visible || right_column_visible;
         let docked_tab_context_menu = self.open_tab_context_menu.filter(|group_index| {
             !self.floating_tab_groups[*group_index]
-                && match group_index {
+                && match *group_index {
                     0 => (self.visible_tabs[0] && !self.floating_tabs[0])
                         || (self.visible_tabs[1] && !self.floating_tabs[1]),
                     1 => (self.visible_tabs[2] && !self.floating_tabs[2])
@@ -959,7 +959,8 @@ impl Render for MainWindow {
             };
             let group_height = if is_collapsed {
                 metrics.column_header_height
-                    + (self.visible_tabs[0] as usize + self.visible_tabs[1] as usize) as f32
+                    + ((self.visible_tabs[0] && !self.floating_tabs[0]) as usize
+                        + (self.visible_tabs[1] && !self.floating_tabs[1]) as usize) as f32
                         * collapsed_column_width
             } else if self.collapsed_group_content[0] {
                 metrics.column_header_height + metrics.tab_strip_height
@@ -993,7 +994,8 @@ impl Render for MainWindow {
             };
             let group_height = if is_collapsed {
                 metrics.column_header_height
-                    + (self.visible_tabs[2] as usize + self.visible_tabs[3] as usize) as f32
+                    + ((self.visible_tabs[2] && !self.floating_tabs[2]) as usize
+                        + (self.visible_tabs[3] && !self.floating_tabs[3]) as usize) as f32
                         * collapsed_column_width
             } else if self.collapsed_group_content[1] {
                 metrics.column_header_height + metrics.tab_strip_height
@@ -2634,6 +2636,8 @@ fn render_tab_strip(
     let start_drag_first =
         cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
             if event.click_count >= 2 {
+                this.collapsed_group_content[content_index] =
+                    !this.collapsed_group_content[content_index];
                 this.dragging_tab = None;
             } else {
                 this.dragging_tab = Some(first_tab_index);
@@ -2660,6 +2664,8 @@ fn render_tab_strip(
     let start_drag_second =
         cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
             if event.click_count >= 2 {
+                this.collapsed_group_content[content_index] =
+                    !this.collapsed_group_content[content_index];
                 this.dragging_tab = None;
             } else {
                 this.dragging_tab = Some(second_tab_index);
@@ -2682,22 +2688,6 @@ fn render_tab_strip(
                 this.windows_menu_open = false;
             }
             cx.notify();
-        });
-    let toggle_content_first =
-        cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
-            if event.click_count >= 2 {
-                this.collapsed_group_content[content_index] =
-                    !this.collapsed_group_content[content_index];
-                cx.notify();
-            }
-        });
-    let toggle_content_second =
-        cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
-            if event.click_count >= 2 {
-                this.collapsed_group_content[content_index] =
-                    !this.collapsed_group_content[content_index];
-                cx.notify();
-            }
         });
     let drag_tab_group_or_toggle_content =
         cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
@@ -2816,7 +2806,6 @@ fn render_tab_strip(
                 .bg(rgb(first_tab_background))
                 .text_color(rgb(first_tab_text))
                 .on_click(activate_first)
-                .on_mouse_down(MouseButton::Left, toggle_content_first)
                 .on_mouse_down(MouseButton::Left, start_drag_first)
                 .on_mouse_down(MouseButton::Right, open_tab_context_menu_first)
                 .child(first_tab_label),
@@ -2835,7 +2824,6 @@ fn render_tab_strip(
                 .bg(rgb(second_tab_background))
                 .text_color(rgb(second_tab_text))
                 .on_click(activate_second)
-                .on_mouse_down(MouseButton::Left, toggle_content_second)
                 .on_mouse_down(MouseButton::Left, start_drag_second)
                 .on_mouse_down(MouseButton::Right, open_tab_context_menu_second)
                 .child(second_tab_label),
