@@ -891,16 +891,15 @@ fn render_column(
             .flex()
             .flex_col()
             .items_center()
-            .gap_1()
             .w(px(column_width))
             .h(px((column_height - metrics.column_header_height).max(0.0)))
             .flex_shrink_0()
-            .bg(rgb(colors.group_background));
+            .bg(rgb(colors.dock_background));
 
         if column_index == 0 {
             if upper_tabs_visible[0] || upper_tabs_visible[1] {
                 icon_rail = icon_rail.child(render_collapsed_group_header(
-                    0, column_index, column_width, theme, cx,
+                    0, column_width, theme,
                 ));
                 if upper_tabs_visible[0] {
                     icon_rail = icon_rail.child(render_collapsed_tab_icon(
@@ -915,8 +914,17 @@ fn render_column(
             }
 
             if lower_tabs_visible[0] || lower_tabs_visible[1] {
+                if upper_tabs_visible[0] || upper_tabs_visible[1] {
+                    icon_rail = icon_rail.child(
+                        div()
+                            .w(px(column_width))
+                            .h(px(1.0))
+                            .flex_shrink_0()
+                            .bg(rgb(colors.border)),
+                    );
+                }
                 icon_rail = icon_rail.child(render_collapsed_group_header(
-                    1, column_index, column_width, theme, cx,
+                    1, column_width, theme,
                 ));
                 if lower_tabs_visible[0] {
                     icon_rail = icon_rail.child(render_collapsed_tab_icon(
@@ -931,7 +939,7 @@ fn render_column(
             }
         } else if upper_tabs_visible[0] {
             icon_rail = icon_rail.child(render_collapsed_group_header(
-                2, column_index, column_width, theme, cx,
+                2, column_width, theme,
             ));
             icon_rail = icon_rail.child(render_collapsed_tab_icon(
                 4, "☷", column_width, theme, cx,
@@ -1083,10 +1091,8 @@ fn render_column(
 
 fn render_collapsed_group_header(
     group_index: usize,
-    column_index: usize,
     column_width: f32,
     theme: Theme,
-    cx: &mut Context<MainWindow>,
 ) -> impl IntoElement {
     let metrics = theme.metrics;
     let colors = theme.colors;
@@ -1102,18 +1108,6 @@ fn render_collapsed_group_header(
         .h(px(metrics.tab_strip_height))
         .flex_shrink_0()
         .bg(rgb(colors.dock_background))
-        .border_b_1()
-        .border_color(rgb(colors.border))
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
-                if event.click_count >= 2 {
-                    this.collapsed_columns[column_index] = false;
-                    this.collapsed_group_content[group_index] = false;
-                    cx.notify();
-                }
-            }),
-        )
 }
 
 fn render_collapsed_tab_icon(
