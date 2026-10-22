@@ -960,13 +960,9 @@ impl Layout {
                 let heights =
                     self.group_heights_for_available_height(*column, *available_height, metrics)?;
                 let minimums = self.group_minimum_heights(*column, metrics)?;
-                let collapsed_height = metrics.effective_collapsed_group_height();
-                let collapsed_count = current
-                    .groups
-                    .iter()
-                    .filter(|group| self.group_is_collapsed(**group))
-                    .count() as f32;
-                let required_height = minimums.iter().sum::<f32>() + collapsed_count * collapsed_height;
+                // group_minimum_heights already includes the effective fixed
+                // height for collapsed groups; do not add that floor a second time.
+                let required_height = minimums.iter().sum::<f32>();
                 if !required_height.is_finite() || *available_height < required_height {
                     return Err(CommandError::InvalidValue {
                         field: "available_height",

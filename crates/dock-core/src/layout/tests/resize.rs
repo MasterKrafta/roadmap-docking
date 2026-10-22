@@ -306,6 +306,14 @@ fn c45_resize_groups_uses_effective_collapsed_height_when_tab_strip_is_taller() 
     );
     builder.main_area(DockSide::Right, column);
     let mut layout = builder.build();
+    assert_eq!(
+        layout.minimum_node_size(collapsed, &metrics).unwrap().height,
+        42.0
+    );
+    assert_eq!(
+        layout.minimum_node_size(expanded, &metrics).unwrap().height,
+        170.0
+    );
     let before = format!("{layout:?}");
 
     // The effective collapsed height is 42 px, leaving only 169 px for an

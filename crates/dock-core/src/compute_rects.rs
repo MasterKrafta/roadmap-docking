@@ -425,11 +425,9 @@ fn layout_tabs(
     output: &mut LayoutRects,
 ) -> Result<(), ComputeRectsError> {
     let collapsed = tabs.collapsed;
-    let collapsed_height = metrics.effective_collapsed_group_height();
     let minimum_size = minimum_node_size(layout, id, metrics)?;
-    // Keep geometry on the same minimum-size contract used by ResizeGroups:
-    // expanded Tabs include header, tab strip, and panel constraints, while
-    // collapsed Tabs use the effective collapsed/tab-strip height.
+    // Geometry and resize commands share Layout::minimum_node_size, including
+    // the effective tab-strip floor for collapsed groups.
     let minimum_height = minimum_size.height;
     if rect.size.width < minimum_size.width && !collapsed {
         return Err(ComputeRectsError::InsufficientSpace {
@@ -449,7 +447,7 @@ fn layout_tabs(
     // A collapsed Tabs group remains strip-sized even when its parent container
     // (for example a floating window) is taller than the collapsed group.
     let group_rect = if collapsed {
-        Rect::new(rect.origin, Size::new(rect.size.width, collapsed_height))
+        Rect::new(rect.origin, Size::new(rect.size.width, minimum_size.height))
     } else {
         rect
     };
@@ -698,17 +696,13 @@ fn allocate_stack_heights(
         });
     }
 
-    let collapsed_height = metrics.effective_collapsed_group_height();
     let mut collapsed = Vec::with_capacity(children.len());
     let mut minimums = Vec::with_capacity(children.len());
     for child in children {
-        let is_collapsed = matches!(layout.node(*child), Some(Node::Tabs(tabs)) if tabs.collapsed);
-        collapsed.push(is_collapsed);
-        if is_collapsed {
-            minimums.push(collapsed_height);
-        } else {
-            minimums.push(minimum_node_size(layout, *child, metrics)?.height);
-        }
+        collapsed.push(matches!(layout.node(*child), Some(Node::Tabs(tabs)) if tabs.collapsed));
+        // Query the common contract for every child; collapsed nodes report
+        // their effective strip height from Layout::minimum_node_size too.
+        minimums.push(minimum_node_size(layout, *child, metrics)?.height);
     }
 
     let gap_total = metrics.splitter_thickness * children.len().saturating_sub(1) as f32;
@@ -751,9 +745,10 @@ fn allocate_stack_heights(
     let mut normal_index = 0;
     let sizes = collapsed
         .iter()
-        .map(|is_collapsed| {
+        .enumerate()
+        .map(|(index, is_collapsed)| {
             if *is_collapsed {
-                collapsed_height
+                minimums[index]
             } else {
                 let size = normal_sizes[normal_index];
                 normal_index += 1;

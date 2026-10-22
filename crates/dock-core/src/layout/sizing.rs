@@ -24,15 +24,10 @@ impl Layout {
             .groups
             .iter()
             .map(|group| {
-                if self.group_is_collapsed(*group) {
-                    // Collapsed height is fixed separately by the callers.
-                    Ok(0.0)
-                } else {
-                    // minimum_node_size is the shared contract with geometry;
-                    // expanded Tabs include header, strip, and panel minima.
-                    self.minimum_node_size(*group, metrics)
-                        .map(|size| size.height)
-                }
+                // Use the same minimum-size contract for expanded and collapsed
+                // groups. Resize commands account for every group's floor once.
+                self.minimum_node_size(*group, metrics)
+                    .map(|size| size.height)
             })
             .collect()
     }
@@ -81,11 +76,11 @@ impl Layout {
         let mut expanded_indices = Vec::new();
         let mut weights = Vec::new();
         let mut fixed_height = 0.0_f32;
-        let collapsed_height = metrics.effective_collapsed_group_height();
         for (index, group) in column.groups.iter().copied().enumerate() {
             if self.group_is_collapsed(group) {
-                heights[index] = collapsed_height;
-                fixed_height += collapsed_height;
+                let minimum_height = self.minimum_node_size(group, metrics)?.height;
+                heights[index] = minimum_height;
+                fixed_height += minimum_height;
             } else {
                 expanded_indices.push(index);
                 weights.push(ratios[index]);
@@ -147,11 +142,11 @@ impl Layout {
         let mut heights = vec![0.0; column.groups.len()];
         let mut expanded_indices = Vec::new();
         let mut fixed_height = 0.0_f32;
-        let collapsed_height = metrics.effective_collapsed_group_height();
         for (index, group) in column.groups.iter().copied().enumerate() {
             if self.group_is_collapsed(group) {
-                heights[index] = collapsed_height;
-                fixed_height += collapsed_height;
+                let minimum_height = self.minimum_node_size(group, metrics)?.height;
+                heights[index] = minimum_height;
+                fixed_height += minimum_height;
             } else {
                 expanded_indices.push(index);
             }
