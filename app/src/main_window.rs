@@ -1,5 +1,5 @@
 use gpui::{
-    Context, InteractiveElement, IntoElement, MouseButton, ParentElement, Render,
+    Context, InteractiveElement, IntoElement, MouseButton, MouseMoveEvent, ParentElement, Render,
     StatefulInteractiveElement, Styled, Window, div, px, rgb,
 };
 use ui::Theme;
@@ -91,7 +91,7 @@ impl Render for MainWindow {
             .on_mouse_move({
                 let min_width = metrics.min_column_width;
                 let hit_zone = metrics.splitter_hit_zone;
-                cx.listener(move |this, event, window, cx| {
+                cx.listener(move |this, event: &MouseMoveEvent, window, cx| {
                     if !this.is_resizing {
                         return;
                     }
