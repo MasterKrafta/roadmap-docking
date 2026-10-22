@@ -436,13 +436,13 @@ impl Render for MainWindow {
                 [self.visible_tabs[0], self.visible_tabs[1]],
                 [self.visible_tabs[2], self.visible_tabs[3]],
                 self.collapsed_columns[0],
-                self.collapsed_group_content[0],
-                self.collapsed_group_content[1],
                 self.theme,
                 self.active_tabs[0],
                 self.lower_active_tabs[0],
                 self.split_ratios[0],
                 left_horizontal_divider,
+                self.collapsed_group_content[0],
+                self.collapsed_group_content[1],
                 cx,
             ));
         }
@@ -496,13 +496,13 @@ impl Render for MainWindow {
                 [self.visible_tabs[4], false],
                 [false, false],
                 self.collapsed_columns[1],
-                self.collapsed_group_content[2],
-                false,
                 self.theme,
                 self.active_tabs[1],
                 self.lower_active_tabs[1],
                 self.split_ratios[1],
                 right_horizontal_divider,
+                self.collapsed_group_content[2],
+                false,
                 cx,
             ));
         }
