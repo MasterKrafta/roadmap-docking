@@ -88,6 +88,31 @@ impl Render for MainWindow {
             .w(px(width))
             .h(px(height))
             .bg(rgb(colors.window_background))
+            .on_mouse_move({
+                let min_width = metrics.min_column_width;
+                let hit_zone = metrics.splitter_hit_zone;
+                cx.listener(move |this, event, window, cx| {
+                    if !this.is_resizing {
+                        return;
+                    }
+
+                    let window_width = window.viewport_size().width.as_f32().max(1.0);
+                    let max_width = (window_width - hit_zone).max(min_width);
+                    let delta = this.resize_start_x - event.position.x.as_f32();
+                    this.column_width =
+                        (this.resize_start_width + delta).clamp(min_width, max_width);
+                    cx.notify();
+                })
+            })
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, _event, _window, cx| {
+                    if this.is_resizing {
+                        this.is_resizing = false;
+                        cx.notify();
+                    }
+                }),
+            )
             .child(
                 // Empty workspace to the left of the dock column.
                 div()
@@ -112,31 +137,6 @@ impl Render for MainWindow {
                             this.resize_start_x = event.position.x.as_f32();
                             this.resize_start_width = this.column_width;
                             cx.notify();
-                        }),
-                    )
-                    .on_mouse_move({
-                        let min_width = metrics.min_column_width;
-                        let hit_zone = metrics.splitter_hit_zone;
-                        cx.listener(move |this, event, window, cx| {
-                            if !this.is_resizing {
-                                return;
-                            }
-
-                            let window_width = window.viewport_size().width.as_f32().max(1.0);
-                            let max_width = (window_width - hit_zone).max(min_width);
-                            let delta = this.resize_start_x - event.position.x.as_f32();
-                            this.column_width =
-                                (this.resize_start_width + delta).clamp(min_width, max_width);
-                            cx.notify();
-                        })
-                    })
-                    .on_mouse_up(
-                        MouseButton::Left,
-                        cx.listener(|this, _event, _window, cx| {
-                            if this.is_resizing {
-                                this.is_resizing = false;
-                                cx.notify();
-                            }
                         }),
                     )
                     .child(
