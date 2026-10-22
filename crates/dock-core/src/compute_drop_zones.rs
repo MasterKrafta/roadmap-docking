@@ -629,7 +629,6 @@ impl Layout {
     ) -> Result<Option<DropTarget>, ComputeRectsError> {
         point.validate().map_err(ComputeRectsError::Geometry)?;
         let zones = self.compute_drop_zones(source, rects, metrics)?;
-        let tree_index = DropZoneTreeIndex::new(self);
 
         let mut topmost_floating: Option<(FloatingGroupId, Rect, i32)> = None;
         for floating in &rects.floating_groups {
@@ -654,6 +653,7 @@ impl Layout {
             let Some(area) = self.dock_area(floating.area) else {
                 return Ok(None);
             };
+            let tree_index = DropZoneTreeIndex::new(self);
             return best_containing_zone(&zones, point, |zone| {
                 matches!(
                     zone.zone,
