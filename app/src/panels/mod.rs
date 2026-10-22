@@ -1,3 +1,3 @@
 mod registry;
 
-pub(crate) use registry::PanelRegistry;
+pub(crate) use registry::{PanelMenuItem, PanelRegistry};
