@@ -90,6 +90,10 @@ impl MainWindow {
             self.composition_floating = false;
             self.dragging_composition = false;
             self.floating_composition_position = [0.0, 0.0];
+            self.collapsed_columns = [false, false];
+            self.collapsed_group_content = [false, false, false];
+            self.open_tab_context_menu = None;
+            self.mouse_context_menu = None;
         }
     }
 }
@@ -1347,7 +1351,7 @@ fn render_mouse_context_menu(
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.collapsed_columns[column_index] = true;
                     this.reset_floating_if_empty();
-            this.open_tab_context_menu = None;
+                    this.open_tab_context_menu = None;
                     this.mouse_context_menu = None;
                     cx.notify();
                 }))
@@ -1371,7 +1375,7 @@ fn render_mouse_context_menu(
                     this.collapsed_columns[column_index] = false;
                     this.collapsed_group_content[group_index] = false;
                     this.reset_floating_if_empty();
-            this.open_tab_context_menu = None;
+                    this.open_tab_context_menu = None;
                     this.mouse_context_menu = None;
                     cx.notify();
                 }))
