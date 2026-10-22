@@ -2,11 +2,11 @@ use std::collections::{HashMap, HashSet};
 
 use dock_core::{
     DockCommand, DockSide, Layout, LayoutRects, Node, NodeId, PanelId, PanelInstance, Rect,
-    Tabs,
+    Size, Tabs,
 };
 use gpui::{
-    AnyElement, App, ClickEvent, Div, InteractiveElement, IntoElement, ParentElement, Styled,
-    Window, div, px, rgb,
+    AnyElement, App, ClickEvent, Div, IntoElement, ParentElement, StatefulInteractiveElement,
+    Styled, Window, div, px, rgb,
 };
 use ui::Theme;
 
