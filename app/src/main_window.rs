@@ -19,9 +19,7 @@ impl MainWindow {
 
 impl Render for MainWindow {
     fn render(&mut self, window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        let size = window.viewport_size();
-        let width = size.width.as_f32().max(1.0);
-        let height = size.height.as_f32().max(1.0);
+        let height = window.viewport_size().height.as_f32().max(1.0);
         let colors = self.theme.colors;
 
         let control = |label: &'static str| {
@@ -38,7 +36,8 @@ impl Render for MainWindow {
         div()
             .flex()
             .flex_col()
-            .w(px(width))
+            .w(px(280.0))
+            .min_w(px(200.0))
             .h(px(height))
             .bg(rgb(colors.window_background))
             // 1. Header: empty space on the left, controls on the right.
