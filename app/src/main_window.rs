@@ -346,6 +346,28 @@ impl Render for MainWindow {
         } else {
             docked_composition_position
         };
+        // Bounds of each dock group (excluding the column header) let a drag
+        // detach as soon as the pointer leaves the group's visible area.
+        let tab_group_drag_bounds = [
+            [
+                tab_group_origins[0][0],
+                tab_group_origins[0][1],
+                left_column_width,
+                left_top_height,
+            ],
+            [
+                tab_group_origins[1][0],
+                tab_group_origins[1][1],
+                left_column_width,
+                left_bottom_height,
+            ],
+            [
+                tab_group_origins[2][0],
+                tab_group_origins[2][1],
+                right_column_width,
+                right_top_height,
+            ],
+        ];
         let right_column_origin_x = composition_origin[0]
             + if left_column_visible {
                 left_column_width + divider_width
@@ -480,9 +502,22 @@ impl Render for MainWindow {
                         let cursor_y = event.position.y.as_f32();
                         let delta_x = cursor_x - this.tab_drag_start_cursor[0];
                         let delta_y = cursor_y - this.tab_drag_start_cursor[1];
+                        let group_index = match tab_index {
+                            0 | 1 => 0,
+                            2 | 3 => 1,
+                            _ => 2,
+                        };
+                        let [group_x, group_y, group_width, group_height] =
+                            tab_group_drag_bounds[group_index];
+                        let cursor_outside_group = group_width > 0.0
+                            && group_height > 0.0
+                            && (cursor_x < group_x
+                                || cursor_x > group_x + group_width
+                                || cursor_y < group_y
+                                || cursor_y > group_y + group_height);
 
                         // A single-tab group can be torn off in any direction.
-                        // With multiple tabs, keep horizontal-only dragging docked.
+                        // Any tab also detaches as soon as the pointer leaves its group.
                         let group_has_single_tab = match tab_index {
                             0 | 1 => {
                                 (this.visible_tabs[0] && !this.floating_tabs[0])
@@ -495,7 +530,8 @@ impl Render for MainWindow {
                             4 => true,
                             _ => false,
                         };
-                        let drag_threshold_reached = delta_y.abs() >= drag_threshold
+                        let drag_threshold_reached = cursor_outside_group
+                            || delta_y.abs() >= drag_threshold
                             || (group_has_single_tab && delta_x.abs() >= drag_threshold);
                         if this.floating_tabs[tab_index] || drag_threshold_reached {
                             if !this.floating_tabs[tab_index] {
@@ -527,11 +563,6 @@ impl Render for MainWindow {
                                     _ => {}
                                 }
                             }
-                            let group_index = match tab_index {
-                                0 | 1 => 0,
-                                2 | 3 => 1,
-                                _ => 2,
-                            };
                             if !this.floating_tabs[tab_index] {
                                 this.floating_tab_content_collapsed[tab_index] =
                                     this.collapsed_group_content[group_index];
