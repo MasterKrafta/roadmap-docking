@@ -21,7 +21,7 @@ impl Rect {
         Self { origin, size }
     }
 
-    /// Validates finite coordinates, non-negative dimensions, and finite edges.
+    /// Validates finite coordinates, non-negative dimensions, and representable positive edges.
     pub fn validate(self) -> Result<(), GeometryError> {
         self.origin.validate()?;
         self.size.validate()?;
@@ -36,7 +36,7 @@ impl Rect {
         self.size.validate_positive()
     }
 
-    pub fn checked_right(self) -> Result<f32, GeometryError> {
+    /// Computes the right edge, rejecting a positive width that rounds back to the origin.\n    pub fn checked_right(self) -> Result<f32, GeometryError> {
         if !self.origin.x.is_finite() || !self.size.width.is_finite() {
             return Err(GeometryError::NonFinite);
         }
@@ -55,7 +55,7 @@ impl Rect {
         Ok(right)
     }
 
-    pub fn checked_bottom(self) -> Result<f32, GeometryError> {
+    /// Computes the bottom edge, rejecting a positive height that rounds back to the origin.\n    pub fn checked_bottom(self) -> Result<f32, GeometryError> {
         if !self.origin.y.is_finite() || !self.size.height.is_finite() {
             return Err(GeometryError::NonFinite);
         }
@@ -183,10 +183,7 @@ mod tests {
 
     #[test]
     fn zero_area_rect_remains_valid_even_at_large_origins() {
-        let empty = Rect::new(
-            Point::new(16_777_216.0, 16_777_216.0),
-            Size::ZERO,
-        );
+        let empty = Rect::new(Point::new(16_777_216.0, 16_777_216.0), Size::ZERO);
         assert_eq!(empty.validate(), Ok(()));
         assert_eq!(empty.contains(empty.origin), Ok(false));
         assert_eq!(
