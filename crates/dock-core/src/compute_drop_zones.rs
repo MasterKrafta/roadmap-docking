@@ -1090,24 +1090,14 @@ fn group_edge_is_noop(
     }
     let source_parent = direct_parent(tree_index, source_group);
     let target_parent = direct_parent(tree_index, target_group);
-    if let (Some(parent), Some(target_parent)) = (source_parent, target_parent)
-        && parent == target_parent
-    {
-        let siblings = match layout.node(parent) {
-            Some(Node::Column(column)) => Some(&column.groups),
-            Some(Node::Split(split)) if split.axis == crate::Axis::Y => Some(&split.children),
-            _ => None,
-        };
-        if let Some(siblings) = siblings {
-            let source_index = siblings.iter().position(|id| *id == source_group);
-            let target_index = siblings.iter().position(|id| *id == target_group);
-            if let (Some(source_index), Some(target_index)) = (source_index, target_index)
-                && ((zone == DropZone::Top && source_index + 1 == target_index)
-                    || (zone == DropZone::Bottom && target_index + 1 == source_index))
-            {
-                return true;
-            }
-        }
+    if layout.adjacent_group_edge_is_noop(
+        source_group,
+        target_group,
+        zone,
+        source_parent,
+        target_parent,
+    ) {
+        return true;
     }
     if matches!(zone, DropZone::Left | DropZone::Right) {
         let Some(source_column) = owner_column(layout, tree_index, source_group) else {
