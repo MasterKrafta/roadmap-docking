@@ -113,7 +113,10 @@ pub fn create_initial_layout(
 #[cfg(test)]
 mod tests {
     use super::create_initial_layout;
-    use crate::{Column, DockMetrics, DockSide, Node, PanelConstraints, PanelKey, Profile, Size};
+    use crate::{
+        Column, ColumnMode, DockMetrics, DockSide, Node, PanelConstraints, PanelKey, Point, Profile,
+        Rect, Size,
+    };
 
     fn baseline_panel_constraints() -> PanelConstraints {
         PanelConstraints::new(Size::new(120.0, 80.0), Size::new(280.0, 220.0), None, false)
@@ -219,4 +222,56 @@ mod tests {
             Some(Node::Column(Column { .. }))
         ));
     }
+    #[test]
+    fn factory_expands_column_to_fit_panel_minimum_width_for_both_profiles() {
+        let metrics = DockMetrics::default();
+        let wide_constraints =
+            PanelConstraints::new(Size::new(400.0, 80.0), Size::new(450.0, 220.0), None, false);
+        let items = descriptors()
+            .into_iter()
+            .map(|(key, _)| (key, wide_constraints))
+            .collect::<Vec<_>>();
+
+        for profile in [Profile::Generic, Profile::Photoshop] {
+            let layout = create_initial_layout(profile, &items, metrics).unwrap();
+            let root = layout.main_area(DockSide::Right).unwrap().root;
+            let Node::Column(column) = layout.node(root).unwrap() else {
+                panic!("main root must be a Column");
+            };
+
+            assert_eq!(column.mode, ColumnMode::Expanded);
+            assert_eq!(column.width, 400.0);
+            assert_eq!(column.last_expanded_width, Some(400.0));
+            assert_eq!(layout.validate(&metrics), Ok(()));
+            layout
+                .compute_rects(
+                    Rect::new(Point::new(0.0, 0.0), Size::new(800.0, 600.0)),
+                    &metrics,
+                )
+                .expect("factory layout must be placeable at its required minimum width");
+        }
+    }
+
+    #[test]
+    fn factory_rejects_conflicting_panel_minimum_and_tab_maximum_widths() {
+        let mut items = descriptors();
+        items[0].1 = PanelConstraints::new(
+            Size::new(400.0, 80.0),
+            Size::new(420.0, 220.0),
+            Some(Size::new(450.0, 300.0)),
+            false,
+        );
+        items[1].1 = PanelConstraints::new(
+            Size::new(120.0, 80.0),
+            Size::new(200.0, 220.0),
+            Some(Size::new(350.0, 300.0)),
+            false,
+        );
+
+        assert_eq!(
+            create_initial_layout(Profile::Generic, &items, DockMetrics::default()).unwrap_err(),
+            "panel minimum width exceeds the maximum width allowed by its tab group"
+        );
+    }
+
 }
