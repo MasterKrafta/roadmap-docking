@@ -231,67 +231,46 @@ where
         );
     }
 
-    // Core owns flyout selection and geometry. Only the selected flyout panel's factory is called.
+    // The flyout is one absolute-positioned overlay. Its children use local coordinates,
+    // so the overlay never participates in the Canvas/dock layout or changes base rectangles.
     if let Some(flyout) = rects.flyout
         && let Some(instance) = layout.panel_instance(flyout.panel)
     {
-        root = root.child(
-            rect_element(flyout.rect, theme.colors.dock_background)
-                .border_1()
-                .border_color(rgb(theme.colors.border))
-                .into_any_element(),
-        );
-
         let header_height = theme.metrics.column_header_height.min(flyout.rect.size.height);
         let header_rect = Rect::new(
-            flyout.rect.origin,
+            Point::ZERO,
             Size::new(flyout.rect.size.width, header_height),
         );
-        root = root.child(
-            rect_element(header_rect, theme.colors.toolbar_background)
-                .text_color(rgb(theme.colors.primary_text))
-                .child(panel_title(instance))
-                .into_any_element(),
-        );
+        let header = rect_element(header_rect, theme.colors.toolbar_background)
+            .text_color(rgb(theme.colors.primary_text))
+            .child(panel_title(instance));
 
         let button_width = (flyout.rect.size.width / 2.0).min(28.0);
         let menu_rect = Rect::new(
-            Point::new(
-                flyout.rect.origin.x + flyout.rect.size.width - button_width * 2.0,
-                flyout.rect.origin.y,
-            ),
+            Point::new(flyout.rect.size.width - button_width * 2.0, 0.0),
             Size::new(button_width, header_height),
         );
-        root = root.child(
-            rect_element(menu_rect, theme.colors.toolbar_background)
-                .text_color(rgb(theme.colors.primary_text))
-                .child("⋯")
-                .id(format!("dock-flyout-menu-{:?}-{:?}", flyout.group, flyout.panel))
-                .on_click(make_menu_handler(DockMenuRequest::PanelGroup {
-                    group: flyout.group,
-                    panel: Some(flyout.panel),
-                }))
-                .into_any_element(),
-        );
+        let menu_button = rect_element(menu_rect, theme.colors.toolbar_background)
+            .text_color(rgb(theme.colors.primary_text))
+            .child("⋯")
+            .id(format!("dock-flyout-menu-{:?}-{:?}", flyout.group, flyout.panel))
+            .on_click(make_menu_handler(DockMenuRequest::PanelGroup {
+                group: flyout.group,
+                panel: Some(flyout.panel),
+            }));
 
         let close_rect = Rect::new(
-            Point::new(
-                flyout.rect.origin.x + flyout.rect.size.width - button_width,
-                flyout.rect.origin.y,
-            ),
+            Point::new(flyout.rect.size.width - button_width, 0.0),
             Size::new(button_width, header_height),
         );
-        root = root.child(
-            rect_element(close_rect, theme.colors.toolbar_background)
-                .text_color(rgb(theme.colors.primary_text))
-                .child("×")
-                .id(format!("dock-flyout-close-{:?}-{:?}", flyout.group, flyout.panel))
-                .on_click(make_command_handler(DockCommand::CloseFlyout))
-                .into_any_element(),
-        );
+        let close_button = rect_element(close_rect, theme.colors.toolbar_background)
+            .text_color(rgb(theme.colors.primary_text))
+            .child("×")
+            .id(format!("dock-flyout-close-{:?}-{:?}", flyout.group, flyout.panel))
+            .on_click(make_command_handler(DockCommand::CloseFlyout));
 
         let content_rect = Rect::new(
-            Point::new(flyout.rect.origin.x, flyout.rect.origin.y + header_height),
+            Point::new(0.0, header_height),
             Size::new(
                 flyout.rect.size.width,
                 (flyout.rect.size.height - header_height).max(0.0),
@@ -299,20 +278,26 @@ where
         );
         let payload = DragPayload::Panel { panel: flyout.panel };
         let ghost_title = panel_title(instance);
-        root = root.child(
-            rect_element(content_rect, theme.colors.group_background)
-                .child(render_panel(instance))
-                .id(format!("dock-flyout-panel-{:?}", flyout.panel))
-                .on_mouse_down(
-                    MouseButton::Left,
-                    make_drag_start_handler(payload, DragHandle::FlyoutPanel),
-                )
-                .on_drag(payload, move |_payload, _offset, _window, app| {
-                    let title = ghost_title.clone();
-                    app.new(|_| DragGhost { title })
-                })
-                .into_any_element(),
-        );
+        let content = rect_element(content_rect, theme.colors.group_background)
+            .child(render_panel(instance))
+            .id(format!("dock-flyout-panel-{:?}", flyout.panel))
+            .on_mouse_down(
+                MouseButton::Left,
+                make_drag_start_handler(payload, DragHandle::FlyoutPanel),
+            )
+            .on_drag(payload, move |_payload, _offset, _window, app| {
+                let title = ghost_title.clone();
+                app.new(|_| DragGhost { title })
+            });
+
+        let overlay = rect_element(flyout.rect, theme.colors.dock_background)
+            .border_1()
+            .border_color(rgb(theme.colors.border))
+            .child(header.into_any_element())
+            .child(menu_button.into_any_element())
+            .child(close_button.into_any_element())
+            .child(content.into_any_element());
+        root = root.child(overlay.into_any_element());
     }
 
     if let Some(overlay) = drag_overlay {

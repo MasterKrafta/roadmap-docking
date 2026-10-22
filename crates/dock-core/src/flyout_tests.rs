@@ -87,6 +87,31 @@ fn active_index(layout: &Layout, group: NodeId) -> usize {
     }
 }
 
+fn assert_base_rectangles_equal(before: &crate::LayoutRects, after: &crate::LayoutRects) {
+    assert_eq!(after.viewport, before.viewport, "viewport must not reflow");
+    assert_eq!(after.canvas, before.canvas, "flyout must overlay the Canvas");
+    assert_eq!(after.columns, before.columns, "dock columns must not reflow");
+    assert_eq!(after.groups, before.groups, "dock groups must not reflow");
+    assert_eq!(after.tab_strips, before.tab_strips, "tab strips must not reflow");
+    assert_eq!(after.tab_headers, before.tab_headers, "tab headers must not reflow");
+    assert_eq!(after.tab_overflows, before.tab_overflows, "tab overflow must not reflow");
+    assert_eq!(after.panels, before.panels, "panel content must not reflow");
+    assert_eq!(after.splitters, before.splitters, "splitters must not move");
+    assert_eq!(
+        after.floating_groups, before.floating_groups,
+        "floating groups must not reflow",
+    );
+    assert_eq!(
+        after.floating_resize_edges, before.floating_resize_edges,
+        "floating resize handles must not move",
+    );
+    assert_eq!(after.drop_zones, before.drop_zones, "drop zones must not reflow");
+    assert_eq!(
+        after.vertical_overflow, before.vertical_overflow,
+        "vertical overflow geometry must not change",
+    );
+}
+
 fn assert_transient_outcome(outcome: &crate::CommandOutcome, version: u64) {
     assert!(outcome.changed_nodes.is_empty());
     assert_eq!(outcome.new_version, version);
@@ -128,8 +153,7 @@ fn opening_switching_and_explicitly_closing_flyouts_preserves_the_dock_tree() {
         )),
     );
     let open_rects = fixture.layout.compute_rects(viewport(), &metrics).unwrap();
-    assert_eq!(open_rects.canvas, rects_before.canvas);
-    assert_eq!(open_rects.columns, rects_before.columns);
+    assert_base_rectangles_equal(&rects_before, &open_rects);
     let flyout_rect = open_rects.flyout.unwrap();
     assert_eq!(flyout_rect.panel, fixture.first_panel);
     assert_eq!(
@@ -166,8 +190,7 @@ fn opening_switching_and_explicitly_closing_flyouts_preserves_the_dock_tree() {
     );
     let switched_rects = fixture.layout.compute_rects(viewport(), &metrics).unwrap();
     assert_eq!(switched_rects.flyout.unwrap().panel, fixture.second_panel);
-    assert_eq!(switched_rects.canvas, rects_before.canvas);
-    assert_eq!(switched_rects.columns, rects_before.columns);
+    assert_base_rectangles_equal(&rects_before, &switched_rects);
     assert_eq!(
         active_index(&fixture.layout, fixture.group),
         original_active_index
