@@ -860,15 +860,15 @@ mod tests {
 
     #[test]
     fn floating_descendant_rects_are_relative_to_the_container_origin() {
-        let rect = crate::Rect::new(
-            crate::Point::new(145.0, 92.0),
-            crate::Size::new(180.0, 48.0),
+        let rect = super::Rect::new(
+            super::Point::new(145.0, 92.0),
+            super::Size::new(180.0, 48.0),
         );
         assert_eq!(
-            super::translate_rect_to_local(rect, crate::Point::new(100.0, 60.0)),
-            crate::Rect::new(
-                crate::Point::new(45.0, 32.0),
-                crate::Size::new(180.0, 48.0),
+            super::translate_rect_to_local(rect, super::Point::new(100.0, 60.0)),
+            super::Rect::new(
+                super::Point::new(45.0, 32.0),
+                super::Size::new(180.0, 48.0),
             ),
         );
     }
