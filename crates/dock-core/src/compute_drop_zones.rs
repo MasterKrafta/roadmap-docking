@@ -2058,7 +2058,7 @@ mod tests {
         groups_per_column: usize,
         panels_per_group: usize,
         metrics: &DockMetrics,
-    ) -> (crate::Layout, crate::PanelId, Rect) {
+    ) -> (crate::Layout, crate::PanelId, NodeId, Rect) {
         assert!(column_count > 0);
         assert!(groups_per_column > 0);
         assert!(panels_per_group > 0);
@@ -2066,6 +2066,7 @@ mod tests {
         let mut builder = LayoutBuilder::new(Profile::Generic);
         let mut columns = Vec::with_capacity(column_count);
         let mut source_panel = None;
+        let mut source_group = None;
 
         for column_index in 0..column_count {
             let mut groups = Vec::with_capacity(groups_per_column);
@@ -2079,6 +2080,7 @@ mod tests {
                     panel_nodes.push(panel_node);
                 }
                 let group = builder.tabs(panel_nodes, 0, false);
+                source_group.get_or_insert(group);
                 groups.push(group);
             }
 
@@ -2128,6 +2130,7 @@ mod tests {
         (
             builder.build(),
             source_panel.expect("synthetic layout has at least one panel"),
+            source_group.expect("synthetic layout has at least one group"),
             Rect::new(Point::ZERO, Size::new(viewport_width, viewport_height)),
         )
     }
@@ -2135,7 +2138,7 @@ mod tests {
     fn measure_drop_zone_case(
         label: &str,
         layout: &crate::Layout,
-        source_panel: crate::PanelId,
+        source: DropSource,
         rects: &crate::LayoutRects,
         metrics: &DockMetrics,
         iterations: usize,
@@ -2143,9 +2146,6 @@ mod tests {
         use std::hint::black_box;
         use std::time::Instant;
 
-        let source = DropSource::Panel {
-            panel: source_panel,
-        };
         let warmup_iterations = iterations.min(10);
         for _ in 0..warmup_iterations {
             let zones = layout
@@ -2193,12 +2193,20 @@ mod tests {
     fn benchmark_compute_drop_zones_typical_and_large_layouts() {
         let metrics = DockMetrics::default();
         let cases = [
-            ("typical-2x4x2", 2, 4, 2, 500),
-            ("large-8x12x3", 8, 12, 3, 30),
+            ("typical-2x4x2", 2, 4, 2, 500, 200),
+            ("large-8x12x3", 8, 12, 3, 20, 5),
         ];
 
-        for (label, column_count, groups_per_column, panels_per_group, iterations) in cases {
-            let (layout, source_panel, viewport) = synthetic_drop_zone_layout(
+        for (
+            label,
+            column_count,
+            groups_per_column,
+            panels_per_group,
+            panel_iterations,
+            group_iterations,
+        ) in cases
+        {
+            let (layout, source_panel, source_group, viewport) = synthetic_drop_zone_layout(
                 column_count,
                 groups_per_column,
                 panels_per_group,
@@ -2210,12 +2218,20 @@ mod tests {
                 .expect("synthetic benchmark layout must resolve geometry");
 
             measure_drop_zone_case(
-                label,
+                &format!("{label}-panel-source"),
                 &layout,
-                source_panel,
+                DropSource::Panel { panel: source_panel },
                 &rects,
                 &metrics,
-                iterations,
+                panel_iterations,
+            );
+            measure_drop_zone_case(
+                &format!("{label}-group-source"),
+                &layout,
+                DropSource::Group { group: source_group },
+                &rects,
+                &metrics,
+                group_iterations,
             );
         }
     }
