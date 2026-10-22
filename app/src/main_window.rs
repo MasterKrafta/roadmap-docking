@@ -235,6 +235,7 @@ impl Render for MainWindow {
                     .border_color(rgb(colors.border))
                     .child(
                         div()
+                            .id("windows-menu-button")
                             .flex()
                             .items_center()
                             .justify_center()
