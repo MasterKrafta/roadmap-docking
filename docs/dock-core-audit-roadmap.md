@@ -70,7 +70,7 @@
 
 **Результат реализации:** `Rect::checked_right` и `checked_bottom` теперь отклоняют положительный размер, который не сдвигает край относительно начала из-за точности `f32`, с типизированной ошибкой `GeometryError::NonPositiveDimension`. Нулевые размеры по-прежнему допустимы для обычного `validate()`; `validate_non_empty()` их отклоняет. Добавлены регрессии для прямоугольных операций, вложенной геометрии layout на очень больших координатах, clamping floating bounds и workspace visible-client-region по обеим осям. **Тестовый прогон для этого изменения ожидает проверки на машине разработчика.**
 
-**Затронутые узлы:** `rect.rs`, `compute_rects.rs`, `workspace_file_tests.rs`.
+**Затронутые узлы:** `rect.rs`, `compute_rects.rs`, `workspace_file.rs`, `workspace_file_tests.rs`.
 
 ## Этап 2 — расширить проверку инвариантов и регрессий
 
