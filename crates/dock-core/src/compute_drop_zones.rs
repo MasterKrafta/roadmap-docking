@@ -461,7 +461,7 @@ impl Layout {
                     && contains_node(&tree_index, source_root, center_group.group);
                 let panel_already_in_group = match source {
                     DropSource::Panel { panel } => {
-                        panel_node(&tree_index, panel).and_then(|node_id| direct_parent(self, node_id))
+                        panel_node(&tree_index, panel).and_then(|node_id| direct_parent(&tree_index, node_id))
                             == Some(center_group.group)
                     }
                     DropSource::Group { .. } => false,
@@ -629,6 +629,7 @@ impl Layout {
     ) -> Result<Option<DropTarget>, ComputeRectsError> {
         point.validate().map_err(ComputeRectsError::Geometry)?;
         let zones = self.compute_drop_zones(source, rects, metrics)?;
+        let tree_index = DropZoneTreeIndex::new(self);
 
         let mut topmost_floating: Option<(FloatingGroupId, Rect, i32)> = None;
         for floating in &rects.floating_groups {
@@ -734,7 +735,7 @@ struct DropZoneTreeIndex {
 
 impl DropZoneTreeIndex {
     fn new(layout: &Layout) -> Self {
-        let mut parent_by_node = HashMap::with_capacity(layout.nodes().count());
+        let mut parent_by_node = HashMap::new();
         let mut panel_by_id = HashMap::new();
 
         for (node_id, node) in layout.nodes() {
