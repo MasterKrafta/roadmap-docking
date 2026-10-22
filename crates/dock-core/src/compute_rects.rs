@@ -206,7 +206,14 @@ impl Layout {
                     .floating_groups
                     .push(FloatingGroupRect::new(id, bounds, floating.z_order));
                 push_resize_edges(id, bounds, metrics, &mut output)?;
-                layout_node(self, area.root, bounds, metrics, &mut output, &mut minimum_size_cache)?;
+                layout_node(
+                    self,
+                    area.root,
+                    bounds,
+                    metrics,
+                    &mut output,
+                    &mut minimum_size_cache,
+                )?;
             }
         }
 
@@ -736,7 +743,8 @@ fn layout_split(
                     .children
                     .iter()
                     .map(|child| {
-                        let minimum = minimum_node_size(layout, *child, metrics, minimum_size_cache)?.width;
+                        let minimum =
+                            minimum_node_size(layout, *child, metrics, minimum_size_cache)?.width;
                         Ok(minimum.max(metrics.min_column_width))
                     })
                     .collect::<Result<Vec<f32>, ComputeRectsError>>()?;
