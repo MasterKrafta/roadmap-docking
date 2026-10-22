@@ -1027,7 +1027,7 @@ fn render_mouse_context_menu(
     let menu_height = if menu.kind == MouseContextMenuKind::Header {
         36.0
     } else {
-        4.0 * 28.0 + 8.0
+        4.0 * 28.0 + 3.0 * 4.0 + 8.0
     };
     let left = menu.x.clamp(0.0, (window_width - menu_width).max(0.0));
     let top = menu.y.clamp(0.0, (window_height - menu_height).max(0.0));
