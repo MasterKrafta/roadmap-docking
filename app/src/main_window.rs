@@ -83,12 +83,16 @@ impl Render for MainWindow {
         let (left_top_height, left_bottom_height) = panel_heights(self.split_ratios[0]);
         let (right_top_height, right_bottom_height) = panel_heights(self.split_ratios[1]);
 
-        let vertical_splitter_color =
-            if self.is_resizing_columns || self.is_resizing_outer_splitter {
-                colors.focus
-            } else {
-                colors.splitter
-            };
+        let vertical_splitter_color = if self.is_resizing_columns {
+            colors.focus
+        } else {
+            colors.splitter
+        };
+        let outer_splitter_color = if self.is_resizing_outer_splitter {
+            colors.focus
+        } else {
+            colors.splitter
+        };
         let root = div()
             .flex()
             .flex_row()
@@ -222,7 +226,7 @@ impl Render for MainWindow {
                         div()
                             .w(px(metrics.splitter_thickness))
                             .h(px(window_height))
-                            .bg(rgb(vertical_splitter_color)),
+                            .bg(rgb(outer_splitter_color)),
                     ),
             )
             .child(render_column(
