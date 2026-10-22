@@ -45,7 +45,10 @@ impl Render for MainWindow {
         let viewport = window.viewport_size();
         let viewport = Rect::new(
             Point::ZERO,
-            Size::new(viewport.width.0.max(1.0), viewport.height.0.max(1.0)),
+            Size::new(
+                viewport.width.as_f32().max(1.0),
+                viewport.height.as_f32().max(1.0),
+            ),
         );
 
         let rects = match self.layout.compute_rects(viewport, &self.metrics) {
