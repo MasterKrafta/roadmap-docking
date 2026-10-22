@@ -271,7 +271,11 @@ impl Layout {
                     ),
                 );
                 let end_index = column.groups.len();
-                if !matches!(source, DropSource::Group { group } if self.group_slot_is_noop(group, *column_id, end_index)) {
+                if !matches!(
+                    source,
+                    DropSource::Group { group }
+                        if self.group_slot_is_noop(group, *column_id, end_index)
+                ) {
                     push_zone(
                         &mut zones,
                         DropTarget::ColumnSlot {
@@ -1150,7 +1154,6 @@ fn collect_main_columns(layout: &Layout, root: NodeId, output: &mut Vec<NodeId>)
         Some(Node::Tabs(_) | Node::Panel(_)) | None => {}
     }
 }
-
 
 
 #[cfg(test)]
