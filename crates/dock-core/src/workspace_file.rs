@@ -3,11 +3,11 @@ use std::collections::{BTreeSet, HashMap};
 use slotmap::SlotMap;
 
 use crate::{
-    Column, ComputeRectsError, DockArea, DockAreaId, DockMetrics, DockSide, FloatingGroup,
-    FloatingGroupId, GeometryError, Layout,
-    Node, NodeId, Panel, PanelConstraints, PanelId, PanelInstance, PanelKey, Rect, Size, Split,
-    Tabs, WorkspaceDiagnostic, WorkspaceFileError, WorkspaceFloatingGroup, WorkspaceLayout,
-    WorkspaceLoadOptions, WorkspaceLoadResult, WorkspaceNode,
+    layout::WorkspaceLayoutParts, Column, ComputeRectsError, DockArea, DockAreaId, DockMetrics,
+    DockSide, FloatingGroup, FloatingGroupId, GeometryError, Layout, Node, NodeId, Panel,
+    PanelConstraints, PanelId, PanelInstance, PanelKey, Size, Split, Tabs, WorkspaceDiagnostic,
+    WorkspaceFileError, WorkspaceFloatingGroup, WorkspaceLayout, WorkspaceLoadOptions,
+    WorkspaceLoadResult, WorkspaceNode,
 };
 
 /// Marker identifying this file as a Roadmap Docking workspace.
@@ -281,16 +281,16 @@ impl WorkspaceFile {
                 .map(|key| WorkspaceDiagnostic::UnknownPanelKeyPreserved { key }),
         );
 
-        let mut layout = Layout::from_workspace_parts(
+        let mut layout = Layout::from_workspace_parts(WorkspaceLayoutParts {
             nodes,
             panel_instances,
             dock_areas,
             main_areas,
             floating_groups,
-            self.layout.canvas,
-            self.layout.profile,
-            self.layout.chrome,
-        );
+            canvas: self.layout.canvas,
+            profile: self.layout.profile,
+            chrome: self.layout.chrome,
+        });
 
         if let Some(region) = visible_region {
             let changes = layout
@@ -362,10 +362,11 @@ impl Layout {
 fn migrate_v1_to_v2(mut file: WorkspaceFile) -> WorkspaceFile {
     // V1 could omit last_expanded_width. For an Expanded column, current width
     // is an unambiguous fallback; a rail width cannot reveal the former width.
-    for root in [&mut file.layout.left, &mut file.layout.right] {
-        if let Some(root) = root {
-            migrate_v1_node(root);
-        }
+    for root in [&mut file.layout.left, &mut file.layout.right]
+        .into_iter()
+        .flatten()
+    {
+        migrate_v1_node(root);
     }
     for floating in &mut file.layout.floating_groups {
         migrate_v1_node(&mut floating.root);
