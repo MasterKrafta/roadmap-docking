@@ -1,6 +1,6 @@
 use gpui::{
-    Context, InteractiveElement, IntoElement, ParentElement, Render, StatefulInteractiveElement,
-    Styled, Window, div, px, rgb,
+    Context, InteractiveElement, IntoElement, MouseButton, MouseMoveEvent, MouseUpEvent,
+    ParentElement, Render, StatefulInteractiveElement, Styled, Window, div, px, rgb,
 };
 use ui::Theme;
 
@@ -8,13 +8,23 @@ use ui::Theme;
 pub(crate) struct MainWindow {
     theme: Theme,
     active_tab: usize,
+    column_width: f32,
+    resize_start_x: f32,
+    resize_start_width: f32,
+    is_resizing: bool,
 }
 
 impl MainWindow {
     pub(crate) fn new(theme: Theme) -> Result<Self, String> {
+        let column_width = theme.metrics.default_column_width;
+
         Ok(Self {
             theme,
             active_tab: 0,
+            column_width,
+            resize_start_x: 0.0,
+            resize_start_width: column_width,
+            is_resizing: false,
         })
     }
 }
@@ -25,14 +35,58 @@ impl Render for MainWindow {
         let width = size.width.as_f32().max(1.0);
         let height = size.height.as_f32().max(1.0);
         let colors = self.theme.colors;
+        let metrics = self.theme.metrics;
+
+        let max_column_width = (width - metrics.splitter_hit_zone).max(metrics.min_column_width);
+        let column_width = self
+            .column_width
+            .clamp(metrics.min_column_width, max_column_width);
+
+        // Register window-level mouse handlers while resizing so the pointer can
+        // leave the narrow splitter hit zone without interrupting the drag.
+        if self.is_resizing {
+            let min_width = metrics.min_column_width;
+            let max_width = max_column_width;
+            let move_listener = cx.listener(
+                move |this, event: &MouseMoveEvent, _window, cx| {
+                    if !this.is_resizing || event.pressed_button != Some(MouseButton::Left) {
+                        return;
+                    }
+
+                    // The column is attached to the right edge: moving its free
+                    // edge left increases its width.
+                    let delta = this.resize_start_x - event.position.x.as_f32();
+                    this.column_width =
+                        (this.resize_start_width + delta).clamp(min_width, max_width);
+                    cx.notify();
+                },
+            );
+            window.on_mouse_event(
+                move |event: &MouseMoveEvent, _phase, window, cx| {
+                    move_listener(event, window, cx);
+                },
+            );
+
+            let up_listener = cx.listener(|this, event: &MouseUpEvent, _window, cx| {
+                if this.is_resizing && event.button == MouseButton::Left {
+                    this.is_resizing = false;
+                    cx.notify();
+                }
+            });
+            window.on_mouse_event(
+                move |event: &MouseUpEvent, _phase, window, cx| {
+                    up_listener(event, window, cx);
+                },
+            );
+        }
 
         let control = |label: &'static str| {
             div()
                 .flex()
                 .items_center()
                 .justify_center()
-                .w(px(28.0))
-                .h(px(28.0))
+                .w(px(metrics.button_size))
+                .h(px(metrics.button_size))
                 .text_color(rgb(colors.muted_text))
                 .child(label)
         };
@@ -57,9 +111,13 @@ impl Render for MainWindow {
         } else {
             colors.muted_text
         };
+        let splitter_color = if self.is_resizing {
+            colors.focus
+        } else {
+            colors.splitter
+        };
 
-        // Fill the entire window with the dark theme so the area beside the
-        // 280 px column does not fall back to the platform's white background.
+        // The root fills the entire window; the dock column is attached to the right.
         div()
             .flex()
             .flex_row()
@@ -67,12 +125,46 @@ impl Render for MainWindow {
             .h(px(height))
             .bg(rgb(colors.window_background))
             .child(
+                // Empty workspace to the left of the dock column.
+                div()
+                    .flex_1()
+                    .h(px(height))
+                    .bg(rgb(colors.window_background)),
+            )
+            // Resizer lives on the column's unattached (left) edge.
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .w(px(metrics.splitter_hit_zone))
+                    .h(px(height))
+                    .flex_shrink_0()
+                    .bg(rgb(colors.window_background))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, event, _window, cx| {
+                            this.is_resizing = true;
+                            this.resize_start_x = event.position.x.as_f32();
+                            this.resize_start_width = this.column_width;
+                            cx.notify();
+                        }),
+                    )
+                    .child(
+                        div()
+                            .w(px(metrics.splitter_thickness))
+                            .h(px(height))
+                            .bg(rgb(splitter_color)),
+                    ),
+            )
+            .child(
                 div()
                     .flex()
                     .flex_col()
-                    .w(px(280.0))
-                    .min_w(px(200.0))
+                    .w(px(column_width))
+                    .min_w(px(metrics.min_column_width))
                     .h(px(height))
+                    .flex_shrink_0()
                     .bg(rgb(colors.window_background))
                     // 1. Header: empty space on the left, controls on the right.
                     .child(
@@ -80,7 +172,7 @@ impl Render for MainWindow {
                             .flex()
                             .flex_row()
                             .items_center()
-                            .h(px(32.0))
+                            .h(px(metrics.column_header_height))
                             .flex_shrink_0()
                             .bg(rgb(colors.group_background))
                             .border_b_1()
@@ -89,13 +181,13 @@ impl Render for MainWindow {
                             .child(control(">>"))
                             .child(control("x")),
                     )
-                    // 2. Tabs strip: two switchable tabs, free space, and the menu on the right.
+                    // 2. Tab strip: two switchable tabs, empty space, and the menu on the right.
                     .child(
                         div()
                             .flex()
                             .flex_row()
                             .items_center()
-                            .h(px(32.0))
+                            .h(px(metrics.tab_strip_height))
                             .flex_shrink_0()
                             .bg(rgb(colors.dock_background))
                             .border_b_1()
@@ -106,8 +198,8 @@ impl Render for MainWindow {
                                     .flex()
                                     .items_center()
                                     .justify_center()
-                                    .w(px(104.0))
-                                    .h(px(32.0))
+                                    .w(px(metrics.column_tab_width))
+                                    .h(px(metrics.tab_strip_height))
                                     .bg(rgb(first_tab_background))
                                     .text_color(rgb(first_tab_text))
                                     .on_click(cx.listener(|this, _, _, cx| {
@@ -122,8 +214,8 @@ impl Render for MainWindow {
                                     .flex()
                                     .items_center()
                                     .justify_center()
-                                    .w(px(104.0))
-                                    .h(px(32.0))
+                                    .w(px(metrics.column_tab_width))
+                                    .h(px(metrics.tab_strip_height))
                                     .bg(rgb(second_tab_background))
                                     .text_color(rgb(second_tab_text))
                                     .on_click(cx.listener(|this, _, _, cx| {
@@ -132,17 +224,8 @@ impl Render for MainWindow {
                                     }))
                                     .child("Вкладка 2"),
                             )
-                            .child(div().flex_1().h(px(32.0)))
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .w(px(32.0))
-                                    .h(px(32.0))
-                                    .text_color(rgb(colors.muted_text))
-                                    .child("☰"),
-                            ),
+                            .child(div().flex_1().h(px(metrics.tab_strip_height)))
+                            .child(control("☰")),
                     )
                     // 3. Content: deliberately blank for now.
                     .child(
