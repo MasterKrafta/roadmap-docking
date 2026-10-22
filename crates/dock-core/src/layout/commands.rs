@@ -1096,7 +1096,7 @@ impl Layout {
                     }
                 }
                 let min_width = self.minimum_column_width(*column, metrics)?;
-                let panel_max = self.maximum_column_width(*column)?;
+                let panel_max = self.maximum_column_width(*column, metrics)?;
                 let mut max_width = panel_max.unwrap_or(f32::MAX);
 
                 // When the canvas has a measured remainder, resizing an outer
