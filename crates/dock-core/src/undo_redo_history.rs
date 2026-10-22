@@ -82,11 +82,11 @@ impl UndoRedoHistory {
         let checkpoint = (self.limit > 0).then(|| layout.history_snapshot());
         let outcome = layout.apply(command, metrics)?;
 
-        if outcome.new_version != prior_version {
-            if let Some(checkpoint) = checkpoint {
-                Self::push_bounded(&mut self.undo, checkpoint, self.limit);
-                self.redo.clear();
-            }
+        if outcome.new_version != prior_version
+            && let Some(checkpoint) = checkpoint
+        {
+            Self::push_bounded(&mut self.undo, checkpoint, self.limit);
+            self.redo.clear();
         }
 
         Ok(outcome)
