@@ -27,8 +27,8 @@ pub(crate) struct MainWindow {
     column_has_bottom_group: [bool; 2],
     top_tab_groups: [NodeId; 2],
     bottom_tab_groups: [NodeId; 2],
-    /// Panel IDs per column, ordered: Layers, Color, Properties, History. Unused
-    /// slots alias an existing ID but are never exposed as tabs or menu entries.
+    /// Panel IDs per column, ordered: Layers, Color, Properties. Unused slots alias
+    /// an existing ID but are never exposed as tabs or menu entries.
     panels_by_column: [[PanelId; 4]; 2],
     /// Visibility choices exposed by the Windows menu. Hidden panels retain
     /// their Core nodes and active-tab state so they can be restored without
