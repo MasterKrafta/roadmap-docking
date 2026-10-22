@@ -223,10 +223,20 @@ The follow-up measurements resolve the measured regression in this synthetic out
 
 ### 3.4 — Undo/Redo и другие аллокации · низкий/средний потенциал
 
-- [ ] Не создавать history snapshot в `UndoRedoHistory::apply()`, если `limit == 0`; команда при этом по-прежнему должна применяться обычным путём.
-- [ ] Тестом подтвердить идентичность outcome/error и состояния при лимите истории 0.
+- [x] Не создавать history snapshot в `UndoRedoHistory::apply()`, если `limit == 0`; команда при этом по-прежнему должна применяться обычным путём.
+- [x] Тестом подтвердить идентичность outcome/error и состояния при лимите истории 0.
 - [ ] Измерить overhead snapshot/clone для типичных layout перед другими изменениями.
 - [ ] Рассматривать замену `Vec::remove(0)` в bounded history на другую структуру только если большой лимит истории важен на практике.
+
+**Manual benchmark:** `benchmark_history_snapshot_and_bounded_history` (ignored release test) reports node, panel-instance and floating-window counts, and microseconds per call for both `Layout::clone()` and `Layout::history_snapshot()` on small/medium/large valid fixtures. It also measures command application with history disabled, at the default limit of 100, and at a saturated limit of 1,000; fixture creation and history prefill are outside the timed loop.
+
+Run with:
+
+```sh
+cargo test -p dock-core --release benchmark_history_snapshot_and_bounded_history -- --ignored --nocapture --test-threads=1
+```
+
+Use the results to decide whether a queue representation change would matter at the supported/default history limit. Do not replace `Vec::remove(0)` without a demonstrated practical regression, and do not mix such a change into the snapshot measurements.
 
 **Готово, когда:** есть воспроизводимый benchmark (размер дерева, число панелей/окон, время до/после), и ускорение не покупается ухудшением читаемости или корректности.
 
