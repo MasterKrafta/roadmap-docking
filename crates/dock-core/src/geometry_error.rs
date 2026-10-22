@@ -5,7 +5,7 @@ pub enum GeometryError {
     NonFinite,
     /// A dimension is negative.
     NegativeDimension,
-    /// A dimension that must be positive is zero or negative.
+    /// A required-positive dimension or effective edge is zero or negative.
     NonPositiveDimension,
     /// Arithmetic overflowed into a non-finite floating-point result.
     ArithmeticOverflow,

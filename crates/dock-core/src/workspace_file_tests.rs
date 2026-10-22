@@ -485,8 +485,10 @@ fn invalid_visible_region_returns_an_error() {
 
     for region in [
         Rect::ZERO,
-        // Width is positive and finite, but adding it at this magnitude does
-        // not advance the f32 edge; clamping must return an error, not panic.
+        // Positive finite dimensions can disappear when added at a large f32
+        // origin. Workspace clamping must reject these regions without panic.
+        Rect::new(Point::new(16_777_216.0, 0.0), Size::new(1.0, 100.0)),
+        Rect::new(Point::new(0.0, 16_777_216.0), Size::new(100.0, 1.0)),
         Rect::new(Point::new(f32::MAX, 0.0), Size::new(1.0, 100.0)),
     ] {
         let fresh_file = WorkspaceFile::from_layout(&layout).unwrap();
