@@ -340,18 +340,14 @@ fn minimum_node_size(
 ) -> Result<Size, ComputeRectsError> {
     #[cfg(test)]
     visit_probe::record_minimum_node_size_helper(id);
-    if let Some(size) = minimum_size_cache.get(&id) {
-        return Ok(*size);
-    }
-
-    let size = layout.minimum_node_size(id, metrics).map_err(|error| match error {
-        crate::CommandError::InvalidValue { field: "size", .. } => {
-            ComputeRectsError::Geometry(GeometryError::ArithmeticOverflow)
-        }
-        _ => ComputeRectsError::InvalidLayout,
-    })?;
-    minimum_size_cache.insert(id, size);
-    Ok(size)
+    layout
+        .minimum_node_size_with_cache(id, metrics, minimum_size_cache)
+        .map_err(|error| match error {
+            crate::CommandError::InvalidValue { field: "size", .. } => {
+                ComputeRectsError::Geometry(GeometryError::ArithmeticOverflow)
+            }
+            _ => ComputeRectsError::InvalidLayout,
+        })
 }
 
 fn layout_node(
