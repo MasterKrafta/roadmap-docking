@@ -1449,7 +1449,7 @@ impl Layout {
                         reason: "floating group references a missing dock area",
                     })?
                     .root;
-                let minimum = self.minimum_node_size(root, metrics)?;
+                let minimum = self.minimum_floating_size(root, metrics)?;
                 let actual = Size::new(
                     size.width.max(minimum.width),
                     size.height.max(minimum.height),

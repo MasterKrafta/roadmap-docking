@@ -354,6 +354,39 @@ impl Layout {
         }
         self.maximum_expanded_column_width(column_id)
     }
+    /// Computes a floating window's minimum size.
+    ///
+    /// A collapsed root Tabs group is rendered as a strip, but its floating
+    /// window must still be large enough for the minimum size of its panel
+    /// content. This keeps ResizeFloating from shrinking the window below the
+    /// underlying panel constraints merely because the group is collapsed.
+    pub(crate) fn minimum_floating_size(
+        &self,
+        node_id: NodeId,
+        metrics: &DockMetrics,
+    ) -> Result<Size, CommandError> {
+        let Some(Node::Tabs(tabs)) = self.nodes.get(node_id) else {
+            return self.minimum_node_size(node_id, metrics);
+        };
+        if !tabs.collapsed || tabs.children.is_empty() {
+            return self.minimum_node_size(node_id, metrics);
+        }
+
+        let mut minimum = Size::ZERO;
+        for child in &tabs.children {
+            let child_size = self.minimum_node_size(*child, metrics)?;
+            minimum.width = minimum.width.max(child_size.width);
+            minimum.height = minimum.height.max(child_size.height);
+        }
+        if !minimum.is_finite() || minimum.width < 0.0 || minimum.height <= 0.0 {
+            return Err(CommandError::InvalidValue {
+                field: "size",
+                reason: "computed floating minimum size is non-finite or has invalid dimensions",
+            });
+        }
+        Ok(minimum)
+    }
+
     /// Computes the minimum layout size using the same rules as geometry.
     /// Expanded Tabs include their header and strip; Split/Column stacks include
     /// splitter gaps; Expanded Columns retain their configured width.
