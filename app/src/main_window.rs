@@ -4,7 +4,7 @@ use dock_core::{
     Node, NodeId, PanelId, PanelKey, Point, Profile, Rect, Size,
 };
 use gpui::{
-    App, ClickEvent, Context, InteractiveElement, IntoElement, MouseButton, ParentElement, Render,
+    App, ClickEvent, Context, InteractiveElement, IntoElement, ParentElement, Render,
     StatefulInteractiveElement, Styled, Window, div, px, rgb,
 };
 use ui::Theme;
@@ -91,7 +91,6 @@ impl MainWindow {
         payload: DragPayload,
         handle: DragHandle,
         position: Point,
-        cx: &mut Context<Self>,
     ) {
         match self.drag_session.state() {
             DragState::Pressed { .. } | DragState::Dragging { .. } => return,
@@ -570,7 +569,7 @@ impl Render for MainWindow {
                         event.position.y.as_f32() - MENU_BAR_HEIGHT,
                     );
                     let _ = weak.update(app, |view, cx| {
-                        view.begin_drag(payload, handle, position, cx);
+                        view.begin_drag(payload, handle, position);
                     });
                 }) as dock_gpui::DragStartHandler
             },
