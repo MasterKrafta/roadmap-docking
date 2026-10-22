@@ -486,12 +486,12 @@ impl Layout {
                         continue;
                     }
                 };
-                if maximum.is_some_and(|maximum| maximum + PIXEL_TOLERANCE < minimum) {
+                if maximum.is_some_and(|maximum| maximum < minimum) {
                     errors.push(ValidationError::InvalidColumn {
                         node: node_id,
                         reason: "minimum width required by expanded contents exceeds panel maximum width",
                     });
-                } else if column.width + PIXEL_TOLERANCE < minimum {
+                } else if column.width < minimum {
                     errors.push(ValidationError::InvalidColumn {
                         node: node_id,
                         reason: "expanded width is below minimum width required by its contents",
