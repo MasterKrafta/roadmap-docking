@@ -44,6 +44,7 @@ pub(crate) struct MainWindow {
     composition_drag_start_position: [f32; 2],
     floating_composition_position: [f32; 2],
     floating_tab_groups: [bool; 3],
+    floating_tab_group_collapsed: [bool; 3],
     dragging_tab_group: Option<usize>,
     tab_group_drag_start_cursor: [f32; 2],
     tab_group_drag_start_position: [f32; 2],
@@ -83,6 +84,7 @@ impl MainWindow {
             composition_drag_start_position: [0.0, 0.0],
             floating_composition_position: [0.0, 0.0],
             floating_tab_groups: [false, false, false],
+            floating_tab_group_collapsed: [false, false, false],
             dragging_tab_group: None,
             tab_group_drag_start_cursor: [0.0, 0.0],
             tab_group_drag_start_position: [0.0, 0.0],
@@ -337,6 +339,8 @@ impl Render for MainWindow {
                 let composition_width = composition_width;
                 let floating_composition_height = floating_composition_height;
                 let floating_group_default_height = floating_composition_height;
+                let floating_group_header_height = column_header_height;
+                let floating_group_collapsed_width = collapsed_column_width;
                 let tab_strip_height = metrics.tab_strip_height;
                 let drag_threshold = 5.0_f32;
 
@@ -426,10 +430,23 @@ impl Render for MainWindow {
                             || delta_y.abs() >= drag_threshold
                         {
                             this.floating_tab_groups[group_index] = true;
-                            let group_width =
-                                this.floating_tab_group_widths[group_index].max(1.0);
-                            let group_height = if this.collapsed_group_content[group_index] {
-                                tab_strip_height
+                            let group_width = if this.floating_tab_group_collapsed[group_index] {
+                                floating_group_collapsed_width
+                            } else {
+                                this.floating_tab_group_widths[group_index].max(1.0)
+                            };
+                            let visible_icon_count = match group_index {
+                                0 => usize::from(this.visible_tabs[0])
+                                    + usize::from(this.visible_tabs[1]),
+                                1 => usize::from(this.visible_tabs[2])
+                                    + usize::from(this.visible_tabs[3]),
+                                _ => usize::from(this.visible_tabs[4]),
+                            };
+                            let group_height = if this.floating_tab_group_collapsed[group_index] {
+                                floating_group_header_height
+                                    + visible_icon_count as f32 * floating_group_collapsed_width
+                            } else if this.collapsed_group_content[group_index] {
+                                floating_group_header_height + tab_strip_height
                             } else {
                                 floating_group_default_height
                             };
@@ -529,7 +546,7 @@ impl Render for MainWindow {
                                     let position = this.floating_tab_group_positions[group];
                                     let width = this.floating_tab_group_widths[group];
                                     (
-                                        position[1],
+                                        position[1] + header_height,
                                         position[0] + width - 176.0,
                                         position[0] + width - button_size,
                                     )
@@ -838,16 +855,27 @@ impl Render for MainWindow {
         root = root.child(dock_row);
 
         if self.floating_tab_groups[0] && (self.visible_tabs[0] || self.visible_tabs[1]) {
-            let group_height = if self.collapsed_group_content[0] {
-                metrics.tab_strip_height
+            let is_collapsed = self.floating_tab_group_collapsed[0];
+            let group_width = if is_collapsed {
+                collapsed_column_width
+            } else {
+                self.floating_tab_group_widths[0]
+            };
+            let group_height = if is_collapsed {
+                metrics.column_header_height
+                    + (usize::from(self.visible_tabs[0]) + usize::from(self.visible_tabs[1])) as f32
+                        * collapsed_column_width
+            } else if self.collapsed_group_content[0] {
+                metrics.column_header_height + metrics.tab_strip_height
             } else {
                 floating_composition_height
             };
             root = root.child(render_floating_tab_group(
                 0,
-                self.floating_tab_group_widths[0],
+                group_width,
                 group_height,
                 self.floating_tab_group_positions[0],
+                is_collapsed,
                 self.theme,
                 self.active_tabs[0],
                 self.visible_tabs[0],
@@ -858,16 +886,27 @@ impl Render for MainWindow {
             ));
         }
         if self.floating_tab_groups[1] && (self.visible_tabs[2] || self.visible_tabs[3]) {
-            let group_height = if self.collapsed_group_content[1] {
-                metrics.tab_strip_height
+            let is_collapsed = self.floating_tab_group_collapsed[1];
+            let group_width = if is_collapsed {
+                collapsed_column_width
+            } else {
+                self.floating_tab_group_widths[1]
+            };
+            let group_height = if is_collapsed {
+                metrics.column_header_height
+                    + (usize::from(self.visible_tabs[2]) + usize::from(self.visible_tabs[3])) as f32
+                        * collapsed_column_width
+            } else if self.collapsed_group_content[1] {
+                metrics.column_header_height + metrics.tab_strip_height
             } else {
                 floating_composition_height
             };
             root = root.child(render_floating_tab_group(
                 1,
-                self.floating_tab_group_widths[1],
+                group_width,
                 group_height,
                 self.floating_tab_group_positions[1],
+                is_collapsed,
                 self.theme,
                 self.lower_active_tabs[0],
                 self.visible_tabs[2],
@@ -878,16 +917,25 @@ impl Render for MainWindow {
             ));
         }
         if self.floating_tab_groups[2] && self.visible_tabs[4] {
-            let group_height = if self.collapsed_group_content[2] {
-                metrics.tab_strip_height
+            let is_collapsed = self.floating_tab_group_collapsed[2];
+            let group_width = if is_collapsed {
+                collapsed_column_width
+            } else {
+                self.floating_tab_group_widths[2]
+            };
+            let group_height = if is_collapsed {
+                metrics.column_header_height + collapsed_column_width
+            } else if self.collapsed_group_content[2] {
+                metrics.column_header_height + metrics.tab_strip_height
             } else {
                 floating_composition_height
             };
             root = root.child(render_floating_tab_group(
                 2,
-                self.floating_tab_group_widths[2],
+                group_width,
                 group_height,
                 self.floating_tab_group_positions[2],
+                is_collapsed,
                 self.theme,
                 self.active_tabs[1],
                 self.visible_tabs[4],
@@ -1396,6 +1444,7 @@ fn render_floating_tab_group(
     column_width: f32,
     column_height: f32,
     position: [f32; 2],
+    is_collapsed: bool,
     theme: Theme,
     active_tab: usize,
     first_tab_visible: bool,
@@ -1431,6 +1480,110 @@ fn render_floating_tab_group(
             ),
         };
 
+    let drag_floating_header =
+        cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
+            if event.click_count >= 2 {
+                this.floating_tab_group_collapsed[group_index] =
+                    !this.floating_tab_group_collapsed[group_index];
+            } else {
+                this.dragging_tab_group = Some(group_index);
+                this.tab_group_drag_start_cursor = [
+                    event.position.x.as_f32(),
+                    event.position.y.as_f32(),
+                ];
+                this.tab_group_drag_start_position =
+                    this.floating_tab_group_positions[group_index];
+                this.dragging_composition = false;
+                this.is_resizing_columns = false;
+                this.is_resizing_outer_splitter = false;
+                this.is_resizing_height = false;
+                this.open_tab_context_menu = None;
+                this.mouse_context_menu = None;
+                this.windows_menu_open = false;
+            }
+            cx.notify();
+        });
+    let collapse_floating_group = cx.listener(move |this, _, _, cx| {
+        this.floating_tab_group_collapsed[group_index] =
+            !this.floating_tab_group_collapsed[group_index];
+        this.open_tab_context_menu = None;
+        this.mouse_context_menu = None;
+        cx.notify();
+    });
+    let close_floating_group = cx.listener(move |this, _, _, cx| {
+        match group_index {
+            0 => {
+                this.visible_tabs[0] = false;
+                this.visible_tabs[1] = false;
+            }
+            1 => {
+                this.visible_tabs[2] = false;
+                this.visible_tabs[3] = false;
+            }
+            _ => this.visible_tabs[4] = false,
+        }
+        this.floating_tab_groups[group_index] = false;
+        this.floating_tab_group_collapsed[group_index] = false;
+        this.collapsed_group_content[group_index] = false;
+        this.dragging_tab_group = None;
+        this.open_tab_context_menu = None;
+        this.mouse_context_menu = None;
+        cx.notify();
+    });
+
+    let header = div()
+        .id(match group_index {
+            0 => "floating-left-upper-header",
+            1 => "floating-left-lower-header",
+            _ => "floating-right-header",
+        })
+        .flex()
+        .flex_row()
+        .items_center()
+        .h(px(metrics.column_header_height))
+        .flex_shrink_0()
+        .bg(rgb(colors.group_background))
+        .border_b_1()
+        .border_color(rgb(colors.border))
+        .child(
+            div()
+                .flex_1()
+                .h(px(metrics.column_header_height))
+                .on_mouse_down(MouseButton::Left, drag_floating_header),
+        )
+        .child(
+            div()
+                .id(match group_index {
+                    0 => "floating-left-upper-collapse",
+                    1 => "floating-left-lower-collapse",
+                    _ => "floating-right-collapse",
+                })
+                .flex()
+                .items_center()
+                .justify_center()
+                .w(px(metrics.button_size))
+                .h(px(metrics.button_size))
+                .text_color(rgb(colors.muted_text))
+                .on_click(collapse_floating_group)
+                .child(if is_collapsed { "<<" } else { ">>" }),
+        )
+        .child(
+            div()
+                .id(match group_index {
+                    0 => "floating-left-upper-close",
+                    1 => "floating-left-lower-close",
+                    _ => "floating-right-close",
+                })
+                .flex()
+                .items_center()
+                .justify_center()
+                .w(px(metrics.button_size))
+                .h(px(metrics.button_size))
+                .text_color(rgb(colors.muted_text))
+                .on_click(close_floating_group)
+                .child("x"),
+        );
+
     let mut panel = div()
         .id(group_id)
         .absolute()
@@ -1444,7 +1597,46 @@ fn render_floating_tab_group(
         .bg(rgb(colors.window_background))
         .border_1()
         .border_color(rgb(colors.border))
-        .child(render_tab_strip(
+        .child(header);
+
+    if is_collapsed {
+        let mut icon_rail = div()
+            .flex()
+            .flex_col()
+            .items_center()
+            .w(px(column_width))
+            .flex_1()
+            .bg(rgb(colors.dock_background));
+
+        if first_tab_visible {
+            let icon = match group_index {
+                0 => "▱",
+                1 => "◉",
+                _ => "☷",
+            };
+            icon_rail = icon_rail.child(render_floating_group_icon(
+                group_index,
+                0,
+                icon,
+                column_width,
+                theme,
+                cx,
+            ));
+        }
+        if second_tab_visible {
+            let icon = if group_index == 0 { "◇" } else { "↶" };
+            icon_rail = icon_rail.child(render_floating_group_icon(
+                group_index,
+                1,
+                icon,
+                column_width,
+                theme,
+                cx,
+            ));
+        }
+        panel = panel.child(icon_rail);
+    } else {
+        panel = panel.child(render_tab_strip(
             column_index,
             is_lower,
             column_width,
@@ -1454,37 +1646,77 @@ fn render_floating_tab_group(
             second_tab_id,
             first_tab_visible,
             second_tab_visible,
-            position,
+            [position[0], position[1] + metrics.column_header_height],
             cx,
         ));
 
-    if !content_collapsed {
-        panel = panel.child(
-            div()
-                .flex_1()
-                .min_h(px(0.0))
-                .bg(rgb(colors.canvas_background))
-                .child(render_panel_content(
-                    column_index,
-                    is_lower,
-                    active_tab,
-                    theme,
-                )),
-        );
-    }
+        if !content_collapsed {
+            panel = panel.child(
+                div()
+                    .flex_1()
+                    .min_h(px(0.0))
+                    .bg(rgb(colors.canvas_background))
+                    .child(render_panel_content(
+                        column_index,
+                        is_lower,
+                        active_tab,
+                        theme,
+                    )),
+            );
+        }
 
-    if open_tab_context_menu == Some(group_index) {
-        panel = panel.child(render_tab_context_menu(
-            group_index,
-            column_index,
-            is_lower,
-            metrics.tab_strip_height,
-            theme,
-            cx,
-        ));
+        if open_tab_context_menu == Some(group_index) {
+            panel = panel.child(render_tab_context_menu(
+                group_index,
+                column_index,
+                is_lower,
+                metrics.column_header_height + metrics.tab_strip_height,
+                theme,
+                cx,
+            ));
+        }
     }
 
     panel
+}
+
+fn render_floating_group_icon(
+    group_index: usize,
+    tab_index: usize,
+    icon: &'static str,
+    column_width: f32,
+    theme: Theme,
+    cx: &mut Context<MainWindow>,
+) -> impl IntoElement {
+    let colors = theme.colors;
+    let id = match (group_index, tab_index) {
+        (0, 0) => "floating-upper-icon-layers",
+        (0, _) => "floating-upper-icon-navigator",
+        (1, 0) => "floating-lower-icon-color",
+        (1, _) => "floating-lower-icon-history",
+        (_, _) => "floating-right-icon-properties",
+    };
+
+    div()
+        .id(id)
+        .flex()
+        .items_center()
+        .justify_center()
+        .w(px(column_width))
+        .h(px(column_width))
+        .flex_shrink_0()
+        .bg(rgb(colors.dock_background))
+        .text_color(rgb(colors.primary_text))
+        .on_click(cx.listener(move |this, _, _, cx| {
+            this.floating_tab_group_collapsed[group_index] = false;
+            match group_index {
+                0 => this.active_tabs[0] = tab_index,
+                1 => this.lower_active_tabs[0] = tab_index,
+                _ => this.active_tabs[1] = 0,
+            }
+            cx.notify();
+        }))
+        .child(icon)
 }
 
 fn render_collapsed_group_header(
@@ -2041,7 +2273,10 @@ fn render_tab_strip(
                 this.tab_group_drag_start_position = if this.floating_tab_groups[content_index] {
                     this.floating_tab_group_positions[content_index]
                 } else {
-                    tab_group_position
+                    [
+                        tab_group_position[0],
+                        (tab_group_position[1] - metrics.column_header_height).max(0.0),
+                    ]
                 };
                 this.floating_tab_group_widths[content_index] = column_width;
                 this.dragging_composition = false;
