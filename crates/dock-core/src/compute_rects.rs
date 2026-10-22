@@ -1211,7 +1211,7 @@ fn push_resize_edges(
 
 #[cfg(test)]
 mod tests {
-    use super::{clamp_floating_bounds, ComputeRectsError};
+    use super::ComputeRectsError;
     use crate::layout_builder::LayoutBuilder;
     use crate::{
         Axis, ColumnMode, DockMetrics, DockSide, GeometryError, LayoutRects, Node,
