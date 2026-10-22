@@ -24,6 +24,11 @@ pub(crate) struct MainWindow {
     bottom_tab_groups: [NodeId; 2],
     /// Panel IDs per column, ordered: Layers, Color, Properties, History.
     panels_by_column: [[PanelId; 4]; 2],
+    /// Visibility choices exposed by the Windows menu. Hidden panels retain
+    /// their Core nodes and active-tab state so they can be restored without
+    /// destroying their dock location.
+    panel_visibility: [bool; 4],
+    windows_menu_open: bool,
     is_resizing_column: bool,
     /// The outermost dock column whose canvas-facing edge is being resized.
     resizing_outer_column: Option<NodeId>,
@@ -277,6 +282,8 @@ impl MainWindow {
             top_tab_groups,
             bottom_tab_groups,
             panels_by_column,
+            panel_visibility: [true; 4],
+            windows_menu_open: false,
             is_resizing_column: false,
             resizing_outer_column: None,
             resize_column_pointer_offset_x: 0.0,
@@ -305,6 +312,43 @@ impl MainWindow {
         }
     }
 
+    fn panel_is_visible(&self, column_index: usize, panel_id: PanelId) -> bool {
+        self.panels_by_column
+            .get(column_index)
+            .and_then(|panel_ids| panel_ids.iter().position(|candidate| *candidate == panel_id))
+            .is_some_and(|panel_index| self.panel_visibility[panel_index])
+    }
+
+    fn toggle_panel_visibility(&mut self, panel_index: usize) {
+        if panel_index >= self.panel_visibility.len() {
+            return;
+        }
+        self.panel_visibility[panel_index] = !self.panel_visibility[panel_index];
+
+        // Keep Core's active-tab selection aligned with the visible tabs. A tab
+        // group can be intentionally empty from the view's perspective.
+        for column_index in 0..self.column_ids.len() {
+            let groups = [
+                (self.top_tab_groups[column_index], [0usize, 1usize]),
+                (self.bottom_tab_groups[column_index], [2usize, 3usize]),
+            ];
+            for (group, candidates) in groups {
+                let active_visible = self
+                    .active_panel_id(group)
+                    .is_some_and(|active| self.panel_is_visible(column_index, active));
+                if active_visible {
+                    continue;
+                }
+                if let Some(next_index) = candidates
+                    .into_iter()
+                    .find(|candidate| self.panel_visibility[*candidate])
+                {
+                    self.activate_tab(group, self.panels_by_column[column_index][next_index]);
+                }
+            }
+        }
+    }
+
     fn column_width(&self, column_index: usize) -> f32 {
         self.layout
             .node(self.column_ids[column_index])
@@ -330,6 +374,7 @@ impl MainWindow {
         cx: &mut Context<Self>,
         column_index: usize,
         window_height: f32,
+        window_y_offset: f32,
     ) -> Div {
         let column_id = self.column_ids[column_index];
         let top_tab_group = self.top_tab_groups[column_index];
@@ -356,14 +401,31 @@ impl MainWindow {
         let content_padding = metrics.content_padding.min(column_width / 2.0);
         let header_spacer_width =
             (column_width - content_padding - button_size * 2.0 - button_gap).max(0.0);
+        let visible_top_count =
+            (if self.panel_visibility[0] { 1usize } else { 0 })
+                + (if self.panel_visibility[1] { 1usize } else { 0 });
+        let visible_bottom_count =
+            (if self.panel_visibility[2] { 1usize } else { 0 })
+                + (if self.panel_visibility[3] { 1usize } else { 0 });
+        let available_tab_width =
+            (column_width - content_padding * 2.0 - button_size).max(0.0);
         let tab_width = metrics
             .column_tab_width
-            .min(((column_width - content_padding * 2.0 - button_size) / 2.0).max(0.0));
-        let tab_spacer_width =
-            (column_width - content_padding * 2.0 - tab_width * 2.0 - button_size).max(0.0);
+            .min((available_tab_width / visible_top_count.max(1) as f32).max(0.0));
+        let top_tab_spacer_width =
+            (available_tab_width - tab_width * visible_top_count as f32).max(0.0);
+        let bottom_tab_width = metrics
+            .column_tab_width
+            .min((available_tab_width / visible_bottom_count.max(1) as f32).max(0.0));
+        let bottom_tab_spacer_width =
+            (available_tab_width - bottom_tab_width * visible_bottom_count as f32).max(0.0);
 
-        let active_top_panel = self.active_panel_id(top_tab_group);
-        let active_bottom_panel = self.active_panel_id(bottom_tab_group);
+        let active_top_panel = self
+            .active_panel_id(top_tab_group)
+            .filter(|panel_id| self.panel_is_visible(column_index, *panel_id));
+        let active_bottom_panel = self
+            .active_panel_id(bottom_tab_group)
+            .filter(|panel_id| self.panel_is_visible(column_index, *panel_id));
         let get_title = |panel_id: PanelId, fallback: &str| {
             self.layout
                 .panel_instance(panel_id)
@@ -423,7 +485,7 @@ impl MainWindow {
             }))
             .child(color_title);
 
-        let top_tab_strip = div()
+        let mut top_tab_strip = div()
             .flex()
             .flex_row()
             .items_center()
@@ -432,10 +494,28 @@ impl MainWindow {
             .bg(rgb(colors.dock_background))
             .border_1()
             .border_color(rgb(colors.border))
-            .child(div().w(px(content_padding)).h(px(1.0)))
-            .child(layers_tab)
-            .child(color_tab)
-            .child(div().w(px(tab_spacer_width)).h(px(1.0)))
+            .child(div().w(px(content_padding)).h(px(1.0)));
+        if self.panel_visibility[0] {
+            top_tab_strip = top_tab_strip.child(layers_tab);
+        }
+        if self.panel_visibility[1] {
+            top_tab_strip = top_tab_strip.child(color_tab);
+        }
+        if visible_top_count == 0 {
+            top_tab_strip = top_tab_strip.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .w(px(top_tab_spacer_width))
+                    .h(px(top_tab_strip_height))
+                    .text_color(rgb(colors.muted_text))
+                    .child("No panels"),
+            );
+        } else {
+            top_tab_strip =
+                top_tab_strip.child(div().w(px(top_tab_spacer_width)).h(px(1.0)));
+        }
+        top_tab_strip = top_tab_strip
             .child(
                 div()
                     .flex()
@@ -454,7 +534,7 @@ impl MainWindow {
             .flex()
             .items_center()
             .justify_center()
-            .w(px(tab_width))
+            .w(px(bottom_tab_width))
             .h(px(bottom_tab_strip_height))
             .bg(rgb(if properties_active { colors.active_tab } else { colors.dock_background }))
             .border_1()
@@ -471,7 +551,7 @@ impl MainWindow {
             .flex()
             .items_center()
             .justify_center()
-            .w(px(tab_width))
+            .w(px(bottom_tab_width))
             .h(px(bottom_tab_strip_height))
             .bg(rgb(if history_active { colors.active_tab } else { colors.dock_background }))
             .border_1()
@@ -483,7 +563,7 @@ impl MainWindow {
             }))
             .child(history_title);
 
-        let bottom_tab_strip = div()
+        let mut bottom_tab_strip = div()
             .flex()
             .flex_row()
             .items_center()
@@ -492,10 +572,28 @@ impl MainWindow {
             .bg(rgb(colors.dock_background))
             .border_1()
             .border_color(rgb(colors.border))
-            .child(div().w(px(content_padding)).h(px(1.0)))
-            .child(properties_tab)
-            .child(history_tab)
-            .child(div().w(px(tab_spacer_width)).h(px(1.0)))
+            .child(div().w(px(content_padding)).h(px(1.0)));
+        if self.panel_visibility[2] {
+            bottom_tab_strip = bottom_tab_strip.child(properties_tab);
+        }
+        if self.panel_visibility[3] {
+            bottom_tab_strip = bottom_tab_strip.child(history_tab);
+        }
+        if visible_bottom_count == 0 {
+            bottom_tab_strip = bottom_tab_strip.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .w(px(bottom_tab_spacer_width))
+                    .h(px(bottom_tab_strip_height))
+                    .text_color(rgb(colors.muted_text))
+                    .child("No panels"),
+            );
+        } else {
+            bottom_tab_strip =
+                bottom_tab_strip.child(div().w(px(bottom_tab_spacer_width)).h(px(1.0)));
+        }
+        bottom_tab_strip = bottom_tab_strip
             .child(
                 div()
                     .flex()
@@ -544,7 +642,7 @@ impl MainWindow {
         let resize_hit_height = metrics.splitter_hit_zone.max(metrics.splitter_thickness);
         let visible_split_height = metrics.splitter_thickness.min(resize_hit_height);
         let group_splitter_center_y =
-            header_height + top_group_height + group_split_hit_height / 2.0;
+            window_y_offset + header_height + top_group_height + group_split_hit_height / 2.0;
         let group_splitter = div()
             .relative()
             .w(px(column_width))
@@ -654,6 +752,8 @@ impl Render for MainWindow {
         let window_height = viewport.height.as_f32().max(1.0);
         let colors = self.theme.colors;
         let metrics = self.theme.metrics;
+        let menu_height = metrics.column_header_height.min(window_height);
+        let dock_height = (window_height - menu_height).max(1.0);
 
         let left_width = self.column_width(0).min(window_width);
         let right_width = self.column_width(1).min(window_width);
@@ -664,14 +764,14 @@ impl Render for MainWindow {
         let workspace_width = (window_width - dock_width).max(0.0);
         let split_hit_width = metrics.splitter_hit_zone.max(splitter_width);
 
-        let left_column = self.render_column(cx, 0, window_height);
-        let right_column = self.render_column(cx, 1, window_height);
+        let left_column = self.render_column(cx, 0, dock_height, menu_height);
+        let right_column = self.render_column(cx, 1, dock_height, menu_height);
         let outer_splitter_center_x = workspace_width + outer_splitter_width / 2.0;
         let outer_column_id = self.column_ids[0];
         let outer_column_splitter = div()
             .relative()
             .w(px(outer_splitter_width))
-            .h(px(window_height))
+            .h(px(dock_height))
             .bg(rgb(colors.splitter))
             .child(
                 div()
@@ -679,7 +779,7 @@ impl Render for MainWindow {
                     .left(px((outer_splitter_width - split_hit_width) / 2.0))
                     .top(px(0.0))
                     .w(px(split_hit_width))
-                    .h(px(window_height))
+                    .h(px(dock_height))
                     .cursor(CursorStyle::ResizeLeftRight)
                     .on_mouse_down(
                         MouseButton::Left,
@@ -698,7 +798,7 @@ impl Render for MainWindow {
                             .left(px((split_hit_width - outer_splitter_width) / 2.0))
                             .top(px(0.0))
                             .w(px(outer_splitter_width))
-                            .h(px(window_height))
+                            .h(px(dock_height))
                             .bg(rgb(colors.splitter)),
                     ),
             );
@@ -707,7 +807,7 @@ impl Render for MainWindow {
         let column_splitter = div()
             .relative()
             .w(px(splitter_width))
-            .h(px(window_height))
+            .h(px(dock_height))
             .bg(rgb(colors.splitter))
             .child(
                 div()
@@ -715,7 +815,7 @@ impl Render for MainWindow {
                     .left(px((splitter_width - split_hit_width) / 2.0))
                     .top(px(0.0))
                     .w(px(split_hit_width))
-                    .h(px(window_height))
+                    .h(px(dock_height))
                     .cursor(CursorStyle::ResizeLeftRight)
                     .on_mouse_down(
                         MouseButton::Left,
@@ -734,23 +834,110 @@ impl Render for MainWindow {
                             .left(px((split_hit_width - splitter_width) / 2.0))
                             .top(px(0.0))
                             .w(px(splitter_width))
-                            .h(px(window_height))
+                            .h(px(dock_height))
                             .bg(rgb(colors.splitter)),
                     ),
             );
 
-        div()
+        let windows_button = div()
+            .id("windows-menu-button")
+            .flex()
+            .items_center()
+            .justify_center()
+            .h(px(menu_height))
+            .p(px(8.0))
+            .bg(rgb(if self.windows_menu_open { colors.hover } else { colors.toolbar_background }))
+            .text_color(rgb(colors.primary_text))
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.windows_menu_open = !this.windows_menu_open;
+                cx.notify();
+            }))
+            .child("Windows ▾");
+        let menu_bar = div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .w(px(window_width))
+            .h(px(menu_height))
+            .bg(rgb(colors.toolbar_background))
+            .border_1()
+            .border_color(rgb(colors.border))
+            .child(windows_button)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .h(px(menu_height))
+                    .p(px(8.0))
+                    .text_color(rgb(colors.muted_text))
+                    .child("Roadmap Docking"),
+            );
+
+        let dock_area = div()
             .flex()
             .flex_row()
             .w(px(window_width))
-            .h(px(window_height))
+            .h(px(dock_height))
             .bg(rgb(colors.canvas_background))
-            .child(div().w(px(workspace_width)).h(px(window_height)))
+            .child(div().w(px(workspace_width)).h(px(dock_height)))
             .child(outer_column_splitter)
             .child(left_column)
             .child(column_splitter)
-            .child(right_column)
-            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
+            .child(right_column);
+
+        let mut root = div()
+            .relative()
+            .flex()
+            .flex_col()
+            .w(px(window_width))
+            .h(px(window_height))
+            .bg(rgb(colors.canvas_background))
+            .child(menu_bar)
+            .child(dock_area);
+
+        if self.windows_menu_open {
+            let mut dropdown = div()
+                .id("windows-panel-dropdown")
+                .absolute()
+                .left(px(0.0))
+                .top(px(menu_height))
+                .w(px(220.0))
+                .bg(rgb(colors.toolbar_background))
+                .border_1()
+                .border_color(rgb(colors.border))
+                .p(px(4.0));
+            for (index, (_key, title)) in self.panels.menu_descriptors().into_iter().enumerate().take(4) {
+                let visible = self.panel_visibility[index];
+                let panel_index = index;
+                let item_id = match index {
+                    0 => "windows-panel-layers",
+                    1 => "windows-panel-color",
+                    2 => "windows-panel-properties",
+                    _ => "windows-panel-history",
+                };
+                let item = div()
+                    .id(item_id)
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap_2()
+                    .w(px(210.0))
+                    .h(px(30.0))
+                    .p(px(6.0))
+                    .bg(rgb(colors.toolbar_background))
+                    .text_color(rgb(if visible { colors.primary_text } else { colors.muted_text }))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.toggle_panel_visibility(panel_index);
+                        cx.notify();
+                    }))
+                    .child(if visible { "☑" } else { "☐" })
+                    .child(title);
+                dropdown = dropdown.child(item);
+            }
+            root = root.child(dropdown);
+        }
+
+        root.on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
                 if let Some(column_id) = this.resizing_outer_column {
                     let pointer_x = event.position.x.as_f32();
                     let window_width = window.viewport_size().width.as_f32().max(1.0);
@@ -841,9 +1028,12 @@ impl Render for MainWindow {
                 if let Some(column_id) = this.resizing_groups_column {
                     let pointer_y = event.position.y.as_f32();
                     let window_height = window.viewport_size().height.as_f32().max(1.0);
-                    let header_height =
+                    let menu_height =
                         this.theme.metrics.column_header_height.min(window_height);
-                    let available_below_header = (window_height - header_height).max(0.0);
+                    let dock_height = (window_height - menu_height).max(1.0);
+                    let header_height =
+                        this.theme.metrics.column_header_height.min(dock_height);
+                    let available_below_header = (dock_height - header_height).max(0.0);
                     let splitter_hit_height = this
                         .theme
                         .metrics
@@ -861,7 +1051,8 @@ impl Render for MainWindow {
                         cx.notify();
                         return;
                     };
-                    let current_splitter_center_y = header_height
+                    let current_splitter_center_y = menu_height
+                        + header_height
                         + available_height * this.group_split_ratio(column_index).clamp(0.0, 1.0)
                         + splitter_hit_height / 2.0;
                     let target_splitter_center_y =
