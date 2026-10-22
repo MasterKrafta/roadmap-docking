@@ -30,9 +30,11 @@ impl Layout {
         point.validate().map_err(ComputeRectsError::Geometry)?;
 
         let floating_order = floating_front_to_back(&rects.floating_groups);
-        let (floating_nodes, floating_panels) = all_floating_subtrees(self, &floating_order)?;
 
-        for floating in floating_order {
+        // Test front-to-back first. A hit inside a floating window only needs that
+        // window's subtree; collecting the union for all windows can wait until the
+        // point falls through to the main dock or Canvas.
+        for floating in &floating_order {
             if !contains(floating.rect, point)? {
                 continue;
             }
@@ -104,6 +106,9 @@ impl Layout {
             }
         }
 
+        // Main-dock hit filtering needs to exclude all floating subtrees. Do this
+        // only after floating windows, flyout and viewport bounds have declined the point.
+        let (floating_nodes, floating_panels) = all_floating_subtrees(self, &floating_order)?;
         if let Some(hit) = hit_layout_geometry(
             self,
             point,
