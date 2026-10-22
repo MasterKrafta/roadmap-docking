@@ -434,6 +434,16 @@ impl Render for MainWindow {
                 let drag_threshold = 5.0_f32;
 
                 cx.listener(move |this, event: &MouseMoveEvent, window, cx| {
+                    // Resolve drag ownership before handling any other gesture.
+                    // An active tab drag must never fall through to column/group movement.
+                    if this.dragging_tab.is_some() {
+                        this.is_resizing_columns = false;
+                        this.is_resizing_outer_splitter = false;
+                        this.is_resizing_height = false;
+                        this.dragging_tab_group = None;
+                        this.dragging_composition = false;
+                    }
+
                     if this.is_resizing_outer_splitter {
                         let actual_window_width =
                             window.viewport_size().width.as_f32().max(1.0);
