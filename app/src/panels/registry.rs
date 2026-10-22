@@ -7,6 +7,7 @@ type PanelMenuFactory = fn(&PanelInstance) -> Vec<PanelMenuItem>;
 type PanelEntry = (
     PanelKey,
     &'static str,
+    &'static str,
     PanelConstraints,
     PanelFactory,
     PanelMenuFactory,
@@ -40,6 +41,7 @@ impl Default for PanelRegistry {
                 (
                     PanelKey::new("layers").expect("valid built-in key"),
                     "Layers",
+                    "▱",
                     constraints,
                     render_layers,
                     no_panel_menu,
@@ -47,6 +49,7 @@ impl Default for PanelRegistry {
                 (
                     PanelKey::new("color").expect("valid built-in key"),
                     "Color",
+                    "◉",
                     constraints,
                     render_color,
                     no_panel_menu,
@@ -54,6 +57,7 @@ impl Default for PanelRegistry {
                 (
                     PanelKey::new("properties").expect("valid built-in key"),
                     "Properties",
+                    "☷",
                     constraints,
                     render_properties,
                     no_panel_menu,
@@ -61,6 +65,7 @@ impl Default for PanelRegistry {
                 (
                     PanelKey::new("history").expect("valid built-in key"),
                     "History",
+                    "↶",
                     constraints,
                     render_history,
                     no_panel_menu,
@@ -74,14 +79,14 @@ impl PanelRegistry {
     pub(crate) fn core_descriptors(&self) -> Vec<(PanelKey, PanelConstraints)> {
         self.entries
             .iter()
-            .map(|(key, _, constraints, _, _)| (key.clone(), *constraints))
+            .map(|(key, _, _, constraints, _, _)| (key.clone(), *constraints))
             .collect()
     }
 
     pub(crate) fn menu_descriptors(&self) -> Vec<(PanelKey, String)> {
         self.entries
             .iter()
-            .map(|(key, title, _, _, _)| (key.clone(), (*title).to_owned()))
+            .map(|(key, title, _, _, _, _)| (key.clone(), (*title).to_owned()))
             .collect()
     }
 
@@ -89,26 +94,30 @@ impl PanelRegistry {
         self.entries
             .iter()
             .find(|(key, _, _, _, _)| key.as_str() == wanted.as_str())
-            .map(|(_, _, constraints, _, _)| *constraints)
+            .map(|(_, _, _, constraints, _, _)| *constraints)
     }
 
     pub(crate) fn title(&self, instance: &PanelInstance) -> String {
         self.entries
             .iter()
             .find(|(key, _, _, _, _)| key.as_str() == instance.key.as_str())
-            .map(|(_, title, _, _, _)| (*title).to_owned())
+            .map(|(_, title, _, _, _, _)| (*title).to_owned())
             .unwrap_or_else(|| format!("Unavailable: {}", instance.key.as_str()))
     }
 
     pub(crate) fn icon(&self, instance: &PanelInstance) -> &'static str {
-        panel_icon_for_key(instance.key.as_str())
+        self.entries
+            .iter()
+            .find(|(key, _, _, _, _, _)| key.as_str() == instance.key.as_str())
+            .map(|(_, _, icon, _, _, _)| *icon)
+            .unwrap_or("◇")
     }
 
     pub(crate) fn menu_items(&self, instance: &PanelInstance) -> Vec<PanelMenuItem> {
         self.entries
             .iter()
             .find(|(key, _, _, _, _)| key.as_str() == instance.key.as_str())
-            .map(|(_, _, _, _, menu_factory)| menu_factory(instance))
+            .map(|(_, _, _, _, _, menu_factory)| menu_factory(instance))
             .unwrap_or_default()
     }
 
@@ -116,20 +125,10 @@ impl PanelRegistry {
         self.entries
             .iter()
             .find(|(key, _, _, _, _)| key.as_str() == instance.key.as_str())
-            .map(|(_, _, _, factory, _)| factory(theme))
+            .map(|(_, _, _, _, factory, _)| factory(theme))
             .unwrap_or_else(|| {
                 panel_content(theme, "Unavailable panel", instance.key.as_str())
             })
-    }
-}
-
-fn panel_icon_for_key(key: &str) -> &'static str {
-    match key {
-        "layers" => "▱",
-        "color" => "◉",
-        "properties" => "☷",
-        "history" => "↶",
-        _ => "◇",
     }
 }
 
@@ -176,14 +175,16 @@ fn render_history(theme: &Theme) -> AnyElement {
 
 #[cfg(test)]
 mod tests {
-    use super::panel_icon_for_key;
+    use super::PanelRegistry;
 
     #[test]
-    fn panel_icons_are_keyed_to_panel_identity_not_title_initials() {
-        assert_eq!(panel_icon_for_key("layers"), "▱");
-        assert_eq!(panel_icon_for_key("color"), "◉");
-        assert_eq!(panel_icon_for_key("properties"), "☷");
-        assert_eq!(panel_icon_for_key("history"), "↶");
-        assert_eq!(panel_icon_for_key("unregistered"), "◇");
+    fn built_in_panel_icons_are_owned_by_registry_descriptors() {
+        let registry = PanelRegistry::default();
+        let icons = registry
+            .entries
+            .iter()
+            .map(|(_, _, icon, _, _, _)| *icon)
+            .collect::<Vec<_>>();
+        assert_eq!(icons, vec!["▱", "◉", "☷", "↶"]);
     }
 }
