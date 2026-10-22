@@ -465,9 +465,11 @@ impl Layout {
         self.minimum_node_size_inner(node_id, metrics, &mut cache)
     }
 
-    /// Computes minimum geometry while memoizing every visited node for one
-    /// caller-owned geometry pass. The caller must keep Layout and DockMetrics
-    /// unchanged for the lifetime of the cache.
+    /// Computes minimum geometry while memoizing composite nodes for one
+    /// caller-owned geometry pass. Leaf Panel nodes are deliberately not cached:
+    /// resolving their minimum is a direct constraints lookup, and HashMap
+    /// bookkeeping can cost more than recomputing that value. The caller must
+    /// keep Layout and DockMetrics unchanged for the lifetime of the cache.
     pub(crate) fn minimum_node_size_with_cache(
         &self,
         node_id: NodeId,
@@ -484,16 +486,19 @@ impl Layout {
         metrics: &DockMetrics,
         cache: &mut Option<&mut HashMap<NodeId, Size>>,
     ) -> Result<Size, CommandError> {
-        if let Some(size) = cache.as_deref().and_then(|values| values.get(&node_id)) {
-            return Ok(*size);
-        }
-
-        #[cfg(test)]
-        crate::compute_rects::record_recursive_minimum_node_size(node_id);
         let node = self
             .nodes
             .get(node_id)
             .ok_or(CommandError::MissingNode { node: node_id })?;
+        let cacheable = !matches!(node, Node::Panel(_));
+        if cacheable {
+            if let Some(size) = cache.as_deref().and_then(|values| values.get(&node_id)) {
+                return Ok(*size);
+            }
+        }
+
+        #[cfg(test)]
+        crate::compute_rects::record_recursive_minimum_node_size(node_id);
         let size = match node {
             Node::Panel(panel) => self
                 .panel_instances
@@ -574,8 +579,10 @@ impl Layout {
                 reason: "computed minimum size is non-finite or has invalid dimensions",
             });
         }
-        if let Some(cache) = cache.as_deref_mut() {
-            cache.insert(node_id, size);
+        if cacheable {
+            if let Some(cache) = cache.as_deref_mut() {
+                cache.insert(node_id, size);
+            }
         }
         Ok(size)
     }
