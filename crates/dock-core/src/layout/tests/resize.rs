@@ -1013,8 +1013,14 @@ fn c46_resize_groups_clamps_against_tab_chrome_and_restores_inverse_atomically()
     let mut layout = builder.build();
 
     // The command minimum must include the header, tab strip and panel content.
-    assert_eq!(layout.minimum_node_size(group_a, &metrics).unwrap().height, 200.0);
-    assert_eq!(layout.minimum_node_size(group_b, &metrics).unwrap().height, 160.0);
+    assert_eq!(
+        layout.minimum_node_size(group_a, &metrics).unwrap().height,
+        200.0
+    );
+    assert_eq!(
+        layout.minimum_node_size(group_b, &metrics).unwrap().height,
+        160.0
+    );
 
     // 359 px cannot fit both group minima (200 + 160), even before the splitter.
     let before = format!("{layout:?}");
@@ -1057,41 +1063,31 @@ fn c46_resize_groups_clamps_against_tab_chrome_and_restores_inverse_atomically()
         outcome.actual_value,
         Some(CommandValue::GroupBoundaryDelta(delta)) if (delta - 90.0).abs() < 1.0e-3
     ));
-    let inverse = outcome.inverse.expect("successful resize must provide inverse");
+    let inverse = outcome
+        .inverse
+        .expect("successful resize must provide inverse");
 
-    let rects = layout
-        .compute_rects(
-            Rect::new(Point::ZERO, Size::new(1000.0, 504.0)),
-            &metrics,
-        )
-        .unwrap();
-    assert!((rects.groups.iter().find(|item| item.group == group_a).unwrap().rect.size.height
-        - 340.0)
-        .abs()
-        < 1.0e-3);
-    assert!((rects.groups.iter().find(|item| item.group == group_b).unwrap().rect.size.height
-        - 160.0)
-        .abs()
-        < 1.0e-3);
+    let viewport = Rect::new(Point::ZERO, Size::new(1000.0, 504.0));
+    let group_height = |layout: &Layout, group| {
+        let rects = layout.compute_rects(viewport, &metrics).unwrap();
+        rects
+            .groups
+            .iter()
+            .find(|item| item.group == group)
+            .unwrap()
+            .rect
+            .size
+            .height
+    };
+    assert!((group_height(&layout, group_a) - 340.0).abs() < 1.0e-3);
+    assert!((group_height(&layout, group_b) - 160.0).abs() < 1.0e-3);
 
     layout.apply(inverse, &metrics).unwrap();
     assert!(matches!(
         layout.node(column),
         Some(Node::Column(value)) if value.group_ratios == vec![0.5, 0.5]
     ));
-    let restored = layout
-        .compute_rects(
-            Rect::new(Point::ZERO, Size::new(1000.0, 504.0)),
-            &metrics,
-        )
-        .unwrap();
-    assert!((restored.groups.iter().find(|item| item.group == group_a).unwrap().rect.size.height
-        - 250.0)
-        .abs()
-        < 1.0e-3);
-    assert!((restored.groups.iter().find(|item| item.group == group_b).unwrap().rect.size.height
-        - 250.0)
-        .abs()
-        < 1.0e-3);
+    assert!((group_height(&layout, group_a) - 250.0).abs() < 1.0e-3);
+    assert!((group_height(&layout, group_b) - 250.0).abs() < 1.0e-3);
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
