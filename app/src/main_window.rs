@@ -25,9 +25,11 @@ pub(crate) struct MainWindow {
     /// Panel IDs per column, ordered: Layers, Color, Properties, History.
     panels_by_column: [[PanelId; 4]; 2],
     is_resizing_column: bool,
-    resize_last_x: f32,
+    /// Cursor-to-divider offset captured on mouse-down; keeps the pointer anchored
+    /// to the actual boundary even after Core clamps the requested resize.
+    resize_column_pointer_offset_x: f32,
     resizing_groups_column: Option<NodeId>,
-    resize_group_last_y: f32,
+    resize_group_pointer_offset_y: f32,
 }
 
 impl MainWindow {
@@ -274,9 +276,9 @@ impl MainWindow {
             bottom_tab_groups,
             panels_by_column,
             is_resizing_column: false,
-            resize_last_x: 0.0,
+            resize_column_pointer_offset_x: 0.0,
             resizing_groups_column: None,
-            resize_group_last_y: 0.0,
+            resize_group_pointer_offset_y: 0.0,
         })
     }
 
@@ -538,6 +540,8 @@ impl MainWindow {
 
         let resize_hit_height = metrics.splitter_hit_zone.max(metrics.splitter_thickness);
         let visible_split_height = metrics.splitter_thickness.min(resize_hit_height);
+        let group_splitter_center_y =
+            header_height + top_group_height + group_split_hit_height / 2.0;
         let group_splitter = div()
             .relative()
             .w(px(column_width))
@@ -548,7 +552,8 @@ impl MainWindow {
                 cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
                     this.is_resizing_column = false;
                     this.resizing_groups_column = Some(column_id);
-                    this.resize_group_last_y = event.position.y.as_f32();
+                    this.resize_group_pointer_offset_y =
+                        event.position.y.as_f32() - group_splitter_center_y;
                     cx.notify();
                 }),
             )
@@ -655,6 +660,8 @@ impl Render for MainWindow {
 
         let left_column = self.render_column(cx, 0, window_height);
         let right_column = self.render_column(cx, 1, window_height);
+        let column_splitter_center_x =
+            workspace_width + left_width + splitter_width / 2.0;
         let column_splitter = div()
             .relative()
             .w(px(splitter_width))
@@ -670,9 +677,10 @@ impl Render for MainWindow {
                     .cursor(CursorStyle::ResizeLeftRight)
                     .on_mouse_down(
                         MouseButton::Left,
-                        cx.listener(|this, event: &MouseDownEvent, _window, cx| {
+                        cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
                             this.is_resizing_column = true;
-                            this.resize_last_x = event.position.x.as_f32();
+                            this.resize_column_pointer_offset_x =
+                                event.position.x.as_f32() - column_splitter_center_x;
                             this.resizing_groups_column = None;
                             cx.notify();
                         }),
@@ -701,8 +709,17 @@ impl Render for MainWindow {
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
                 if this.is_resizing_column {
                     let pointer_x = event.position.x.as_f32();
-                    let delta_x = pointer_x - this.resize_last_x;
-                    this.resize_last_x = pointer_x;
+                    let window_width = window.viewport_size().width.as_f32().max(1.0);
+                    let splitter_width = this.theme.metrics.splitter_thickness;
+                    let left_width = this.column_width(0).min(window_width);
+                    let right_width = this.column_width(1).min(window_width);
+                    let workspace_width =
+                        (window_width - left_width - splitter_width - right_width).max(0.0);
+                    let current_splitter_center_x =
+                        workspace_width + left_width + splitter_width / 2.0;
+                    let target_splitter_center_x =
+                        pointer_x - this.resize_column_pointer_offset_x;
+                    let delta_x = target_splitter_center_x - current_splitter_center_x;
                     if delta_x != 0.0 {
                         if let Err(error) = this.layout.apply(
                             DockCommand::ResizeColumnBoundary {
@@ -722,13 +739,34 @@ impl Render for MainWindow {
 
                 if let Some(column_id) = this.resizing_groups_column {
                     let pointer_y = event.position.y.as_f32();
-                    let delta_y = pointer_y - this.resize_group_last_y;
-                    this.resize_group_last_y = pointer_y;
+                    let window_height = window.viewport_size().height.as_f32().max(1.0);
+                    let header_height =
+                        this.theme.metrics.column_header_height.min(window_height);
+                    let available_below_header = (window_height - header_height).max(0.0);
+                    let splitter_hit_height = this
+                        .theme
+                        .metrics
+                        .splitter_hit_zone
+                        .max(this.theme.metrics.splitter_thickness)
+                        .min(available_below_header);
+                    let available_height =
+                        (available_below_header - splitter_hit_height).max(1.0);
+                    let column_index = this
+                        .column_ids
+                        .iter()
+                        .position(|candidate| *candidate == column_id);
+                    let Some(column_index) = column_index else {
+                        this.resizing_groups_column = None;
+                        cx.notify();
+                        return;
+                    };
+                    let current_splitter_center_y = header_height
+                        + available_height * this.group_split_ratio(column_index).clamp(0.0, 1.0)
+                        + splitter_hit_height / 2.0;
+                    let target_splitter_center_y =
+                        pointer_y - this.resize_group_pointer_offset_y;
+                    let delta_y = target_splitter_center_y - current_splitter_center_y;
                     if delta_y != 0.0 {
-                        let available_height = (window.viewport_size().height.as_f32().max(1.0)
-                            - this.theme.metrics.column_header_height
-                            - this.theme.metrics.splitter_hit_zone.max(this.theme.metrics.splitter_thickness))
-                            .max(1.0);
                         if let Err(error) = this.layout.apply(
                             DockCommand::ResizeGroups {
                                 column: column_id,
