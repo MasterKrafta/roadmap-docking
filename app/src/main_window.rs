@@ -25,6 +25,8 @@ pub(crate) struct MainWindow {
     /// Panel IDs per column, ordered: Layers, Color, Properties, History.
     panels_by_column: [[PanelId; 4]; 2],
     is_resizing_column: bool,
+    /// The outermost dock column whose canvas-facing edge is being resized.
+    resizing_outer_column: Option<NodeId>,
     /// Cursor-to-divider offset captured on mouse-down; keeps the pointer anchored
     /// to the actual boundary even after Core clamps the requested resize.
     resize_column_pointer_offset_x: f32,
@@ -276,6 +278,7 @@ impl MainWindow {
             bottom_tab_groups,
             panels_by_column,
             is_resizing_column: false,
+            resizing_outer_column: None,
             resize_column_pointer_offset_x: 0.0,
             resizing_groups_column: None,
             resize_group_pointer_offset_y: 0.0,
@@ -551,6 +554,7 @@ impl MainWindow {
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
                     this.is_resizing_column = false;
+                    this.resizing_outer_column = None;
                     this.resizing_groups_column = Some(column_id);
                     this.resize_group_pointer_offset_y =
                         event.position.y.as_f32() - group_splitter_center_y;
@@ -654,14 +658,52 @@ impl Render for MainWindow {
         let left_width = self.column_width(0).min(window_width);
         let right_width = self.column_width(1).min(window_width);
         let splitter_width = metrics.splitter_thickness;
-        let dock_width = left_width + splitter_width + right_width;
+        let outer_splitter_width = splitter_width;
+        let dock_width =
+            left_width + outer_splitter_width + splitter_width + right_width;
         let workspace_width = (window_width - dock_width).max(0.0);
         let split_hit_width = metrics.splitter_hit_zone.max(splitter_width);
 
         let left_column = self.render_column(cx, 0, window_height);
         let right_column = self.render_column(cx, 1, window_height);
+        let outer_splitter_center_x = workspace_width + outer_splitter_width / 2.0;
+        let outer_column_id = self.column_ids[0];
+        let outer_column_splitter = div()
+            .relative()
+            .w(px(outer_splitter_width))
+            .h(px(window_height))
+            .bg(rgb(colors.splitter))
+            .child(
+                div()
+                    .absolute()
+                    .left(px((outer_splitter_width - split_hit_width) / 2.0))
+                    .top(px(0.0))
+                    .w(px(split_hit_width))
+                    .h(px(window_height))
+                    .cursor(CursorStyle::ResizeLeftRight)
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
+                            this.is_resizing_column = false;
+                            this.resizing_outer_column = Some(outer_column_id);
+                            this.resize_column_pointer_offset_x =
+                                event.position.x.as_f32() - outer_splitter_center_x;
+                            this.resizing_groups_column = None;
+                            cx.notify();
+                        }),
+                    )
+                    .child(
+                        div()
+                            .absolute()
+                            .left(px((split_hit_width - outer_splitter_width) / 2.0))
+                            .top(px(0.0))
+                            .w(px(outer_splitter_width))
+                            .h(px(window_height))
+                            .bg(rgb(colors.splitter)),
+                    ),
+            );
         let column_splitter_center_x =
-            workspace_width + left_width + splitter_width / 2.0;
+            workspace_width + outer_splitter_width + left_width + splitter_width / 2.0;
         let column_splitter = div()
             .relative()
             .w(px(splitter_width))
@@ -679,6 +721,7 @@ impl Render for MainWindow {
                         MouseButton::Left,
                         cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
                             this.is_resizing_column = true;
+                            this.resizing_outer_column = None;
                             this.resize_column_pointer_offset_x =
                                 event.position.x.as_f32() - column_splitter_center_x;
                             this.resizing_groups_column = None;
@@ -703,20 +746,61 @@ impl Render for MainWindow {
             .h(px(window_height))
             .bg(rgb(colors.canvas_background))
             .child(div().w(px(workspace_width)).h(px(window_height)))
+            .child(outer_column_splitter)
             .child(left_column)
             .child(column_splitter)
             .child(right_column)
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
+                if let Some(column_id) = this.resizing_outer_column {
+                    let pointer_x = event.position.x.as_f32();
+                    let window_width = window.viewport_size().width.as_f32().max(1.0);
+                    let splitter_width = this.theme.metrics.splitter_thickness;
+                    let left_width = this.column_width(0).min(window_width);
+                    let right_width = this.column_width(1).min(window_width);
+                    let outer_splitter_width = splitter_width;
+                    let workspace_width = (window_width
+                        - left_width
+                        - right_width
+                        - splitter_width
+                        - outer_splitter_width)
+                        .max(0.0);
+                    let current_splitter_center_x =
+                        workspace_width + outer_splitter_width / 2.0;
+                    let target_splitter_center_x =
+                        pointer_x - this.resize_column_pointer_offset_x;
+                    let width_delta = current_splitter_center_x - target_splitter_center_x;
+                    let requested_width = this.column_width(0) + width_delta;
+                    if width_delta != 0.0 {
+                        if let Err(error) = this.layout.apply(
+                            DockCommand::ResizeColumn {
+                                column: column_id,
+                                width: requested_width,
+                            },
+                            &this.dock_metrics,
+                        ) {
+                            eprintln!("Could not resize outer dock column: {error}");
+                            this.resizing_outer_column = None;
+                        }
+                    }
+                    cx.notify();
+                    return;
+                }
+
                 if this.is_resizing_column {
                     let pointer_x = event.position.x.as_f32();
                     let window_width = window.viewport_size().width.as_f32().max(1.0);
                     let splitter_width = this.theme.metrics.splitter_thickness;
                     let left_width = this.column_width(0).min(window_width);
                     let right_width = this.column_width(1).min(window_width);
-                    let workspace_width =
-                        (window_width - left_width - splitter_width - right_width).max(0.0);
+                    let outer_splitter_width = splitter_width;
+                    let workspace_width = (window_width
+                        - left_width
+                        - splitter_width
+                        - outer_splitter_width
+                        - right_width)
+                        .max(0.0);
                     let current_splitter_center_x =
-                        workspace_width + left_width + splitter_width / 2.0;
+                        workspace_width + outer_splitter_width + left_width + splitter_width / 2.0;
                     let target_splitter_center_x =
                         pointer_x - this.resize_column_pointer_offset_x;
                     let delta_x = target_splitter_center_x - current_splitter_center_x;
@@ -786,8 +870,12 @@ impl Render for MainWindow {
             .on_mouse_up(
                 MouseButton::Left,
                 cx.listener(|this, _event, _window, cx| {
-                    if this.is_resizing_column || this.resizing_groups_column.is_some() {
+                    if this.is_resizing_column
+                        || this.resizing_outer_column.is_some()
+                        || this.resizing_groups_column.is_some()
+                    {
                         this.is_resizing_column = false;
+                        this.resizing_outer_column = None;
                         this.resizing_groups_column = None;
                         cx.notify();
                     }
