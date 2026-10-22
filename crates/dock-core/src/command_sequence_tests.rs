@@ -842,10 +842,7 @@ mod tests {
                 // but also resolves into usable geometry in a deliberately generous
                 // viewport. This keeps expected small-window failures separate from
                 // model/geometry regressions.
-                let viewport = Rect::new(
-                    Point::ZERO,
-                    Size::new(32_768.0, 32_768.0),
-                );
+                let viewport = Rect::new(Point::ZERO, Size::new(32_768.0, 32_768.0));
                 let rects = layout.compute_rects(viewport, &metrics);
                 prop_assert!(
                     rects.is_ok(),
