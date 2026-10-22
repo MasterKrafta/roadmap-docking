@@ -903,12 +903,12 @@ fn render_column(
                 ));
                 if upper_tabs_visible[0] {
                     icon_rail = icon_rail.child(render_collapsed_tab_icon(
-                        0, "▱", column_width, theme, cx,
+                        0, "▱", theme, cx,
                     ));
                 }
                 if upper_tabs_visible[1] {
                     icon_rail = icon_rail.child(render_collapsed_tab_icon(
-                        1, "◇", column_width, theme, cx,
+                        1, "◇", theme, cx,
                     ));
                 }
             }
@@ -918,7 +918,7 @@ fn render_column(
                     icon_rail = icon_rail.child(
                         div()
                             .w(px(column_width))
-                            .h(px(1.0))
+                            .h(px(2.0))
                             .flex_shrink_0()
                             .bg(rgb(colors.border)),
                     );
@@ -928,12 +928,12 @@ fn render_column(
                 ));
                 if lower_tabs_visible[0] {
                     icon_rail = icon_rail.child(render_collapsed_tab_icon(
-                        2, "◉", column_width, theme, cx,
+                        2, "◉", theme, cx,
                     ));
                 }
                 if lower_tabs_visible[1] {
                     icon_rail = icon_rail.child(render_collapsed_tab_icon(
-                        3, "↶", column_width, theme, cx,
+                        3, "↶", theme, cx,
                     ));
                 }
             }
@@ -942,7 +942,7 @@ fn render_column(
                 2, column_width, theme,
             ));
             icon_rail = icon_rail.child(render_collapsed_tab_icon(
-                4, "☷", column_width, theme, cx,
+                4, "☷", theme, cx,
             ));
         }
 
@@ -1113,7 +1113,6 @@ fn render_collapsed_group_header(
 fn render_collapsed_tab_icon(
     tab_index: usize,
     icon: &'static str,
-    column_width: f32,
     theme: Theme,
     cx: &mut Context<MainWindow>,
 ) -> impl IntoElement {
@@ -1132,7 +1131,7 @@ fn render_collapsed_tab_icon(
         .flex()
         .items_center()
         .justify_center()
-        .w(px(column_width))
+        .w(px(metrics.button_size))
         .h(px(metrics.button_size))
         .flex_shrink_0()
         .bg(rgb(colors.dock_background))
