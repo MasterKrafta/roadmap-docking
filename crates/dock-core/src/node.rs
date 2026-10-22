@@ -1,4 +1,4 @@
-use crate::{Axis, Column, NodeId, Panel, Split, Tabs};
+use crate::{Column, NodeId, Panel, Split, Tabs};
 
 /// One node in the layout tree.
 ///
