@@ -407,7 +407,8 @@ impl Layout {
                         }
                     }
                 }
-                let gaps = metrics.splitter_thickness * split.children.len().saturating_sub(1) as f32;
+                let gaps =
+                    metrics.splitter_thickness * split.children.len().saturating_sub(1) as f32;
                 match split.axis {
                     Axis::X => width += gaps,
                     Axis::Y => height += gaps,
