@@ -339,7 +339,6 @@ impl Render for MainWindow {
                     let tab_strip_height = metrics.tab_strip_height;
                     let button_size = metrics.button_size;
                     let left_column_visible = left_column_visible;
-                    let right_column_visible = right_column_visible;
                     let left_column_width = left_column_width;
                     let right_column_width = right_column_width;
                     let divider_width = divider_width;
