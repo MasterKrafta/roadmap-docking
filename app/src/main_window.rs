@@ -1,7 +1,6 @@
 use dock_core::{
-    create_initial_layout, ColumnMode, DockCommand, DockMetrics, DockSide, FlyoutState, Layout,
-    LayoutRects, Node, NodeId, PanelConstraints, PanelId, PanelInstance, PanelKey, Point, Profile,
-    Rect, Size,
+    create_initial_layout, DockCommand, DockMetrics, FlyoutState, Layout, LayoutRects, Node, NodeId,
+    PanelId, PanelKey, Point, Profile, Rect, Size,
 };
 use gpui::{
     App, ClickEvent, Context, InteractiveElement, IntoElement, ParentElement, Render,
@@ -161,6 +160,19 @@ impl MainWindow {
         });
 
         if let Some(group) = group {
+            let group_is_collapsed = matches!(
+                self.layout.node(group),
+                Some(Node::Tabs(tabs)) if tabs.collapsed
+            );
+            if group_is_collapsed {
+                self.apply_command(
+                    DockCommand::CollapseGroup {
+                        group,
+                        collapsed: false,
+                    },
+                    cx,
+                );
+            }
             self.apply_command(DockCommand::ActivateTab { group, panel }, cx);
         } else {
             // A valid open panel should always have a Tabs parent. Keep the menu responsive
