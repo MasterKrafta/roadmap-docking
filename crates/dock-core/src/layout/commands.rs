@@ -959,6 +959,16 @@ impl Layout {
                 let right_group = current.groups[*boundary_index + 1];
                 let heights =
                     self.group_heights_for_available_height(*column, *available_height, metrics)?;
+                let minimums = self.group_minimum_heights(*column, metrics)?;
+                if current.groups.iter().enumerate().any(|(index, group)| {
+                    !self.group_is_collapsed(*group)
+                        && heights[index] + PIXEL_TOLERANCE < minimums[index]
+                }) {
+                    return Err(CommandError::InvalidValue {
+                        field: "available_height",
+                        reason: "current group ratios place an expanded group below its minimum; reset ratios before resizing",
+                    });
+                }
                 if self.group_is_collapsed(left_group) || self.group_is_collapsed(right_group) {
                     return Ok(CommandApplication {
                         actual_value: Some(CommandValue::GroupBoundaryDelta(0.0)),
@@ -967,7 +977,6 @@ impl Layout {
                     });
                 }
 
-                let minimums = self.group_minimum_heights(*column, metrics)?;
                 let left_index = *boundary_index;
                 let right_index = left_index + 1;
                 let lower_delta = minimums[left_index] - heights[left_index];
@@ -984,16 +993,6 @@ impl Layout {
                         actual_value: Some(CommandValue::GroupBoundaryDelta(0.0)),
                         inverse: None,
                         persistent: true,
-                    });
-                }
-
-                if current.groups.iter().enumerate().any(|(index, group)| {
-                    !self.group_is_collapsed(*group)
-                        && heights[index] + PIXEL_TOLERANCE < minimums[index]
-                }) {
-                    return Err(CommandError::InvalidValue {
-                        field: "available_height",
-                        reason: "current group ratios place an expanded group below its minimum; reset ratios before resizing",
                     });
                 }
 
