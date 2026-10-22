@@ -2,12 +2,15 @@ use dock_core::{PanelConstraints, PanelInstance, PanelKey, Size};
 use gpui::{AnyElement, IntoElement, ParentElement, Styled, div, px, rgb};
 use ui::Theme;
 
+type PanelFactory = fn(&Theme) -> AnyElement;
+type PanelEntry = (PanelKey, &'static str, PanelConstraints, PanelFactory);
+
 /// App-owned panel descriptors and content factories.
 ///
 /// Dock Core receives only each stable key and its size constraints. GPUI trees
 /// are created lazily by `render`, which the adapter calls for visible active panels.
 pub(crate) struct PanelRegistry {
-    entries: Vec<(PanelKey, &'static str, PanelConstraints, fn(&Theme) -> AnyElement)>,
+    entries: Vec<PanelEntry>,
 }
 
 impl Default for PanelRegistry {

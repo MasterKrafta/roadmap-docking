@@ -1,5 +1,9 @@
-use dock_core::{DockCommand, DockMetrics, Layout, Point, Profile, Rect, Size, create_initial_layout};
-use gpui::{App, ClickEvent, Context, IntoElement, Render, Window, div, px, rgb};
+use dock_core::{
+    create_initial_layout, DockCommand, DockMetrics, Layout, Point, Profile, Rect, Size,
+};
+use gpui::{
+    App, ClickEvent, Context, IntoElement, ParentElement, Render, Styled, Window, div, px, rgb,
+};
 use ui::Theme;
 
 use crate::panels::PanelRegistry;
