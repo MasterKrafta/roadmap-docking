@@ -5,7 +5,7 @@ use dock_core::{
     LayoutRects, Node, NodeId, PanelId, PanelInstance, Point, Rect, Size, Tabs,
 };
 use gpui::{
-    AnyElement, App, ClickEvent, Context, Div, InteractiveElement, IntoElement, MouseButton,
+    AnyElement, App, AppContext, ClickEvent, Context, Div, InteractiveElement, IntoElement, MouseButton,
     MouseDownEvent, ParentElement, Render, StatefulInteractiveElement, Styled, Window, div, px, rgb,
 };
 use ui::Theme;
