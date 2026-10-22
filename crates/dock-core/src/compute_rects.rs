@@ -11,6 +11,80 @@ struct StackAllocation {
     overflows: bool,
 }
 
+#[cfg(test)]
+mod visit_probe {
+    use std::{
+        collections::HashMap,
+        sync::{
+            atomic::{AtomicBool, Ordering},
+            Mutex, OnceLock,
+        },
+    };
+
+    use crate::NodeId;
+
+    #[derive(Clone, Copy, Default)]
+    pub(super) struct NodeVisitCounts {
+        pub(super) preferred_width: u64,
+        pub(super) minimum_node_size_helper: u64,
+        pub(super) recursive_minimum_node_size: u64,
+        pub(super) allocate_stack_child: u64,
+    }
+
+    static ENABLED: AtomicBool = AtomicBool::new(false);
+    static COUNTS: OnceLock<Mutex<HashMap<NodeId, NodeVisitCounts>>> = OnceLock::new();
+
+    fn counts() -> &'static Mutex<HashMap<NodeId, NodeVisitCounts>> {
+        COUNTS.get_or_init(|| Mutex::new(HashMap::new()))
+    }
+
+    fn record(node: NodeId, update: impl FnOnce(&mut NodeVisitCounts)) {
+        if !ENABLED.load(Ordering::Relaxed) {
+            return;
+        }
+        if let Ok(mut counts) = counts().lock() {
+            update(counts.entry(node).or_default());
+        }
+    }
+
+    pub(super) fn record_preferred_width(node: NodeId) {
+        record(node, |counts| counts.preferred_width += 1);
+    }
+
+    pub(super) fn record_minimum_node_size_helper(node: NodeId) {
+        record(node, |counts| counts.minimum_node_size_helper += 1);
+    }
+
+    pub(super) fn record_recursive_minimum_node_size(node: NodeId) {
+        record(node, |counts| counts.recursive_minimum_node_size += 1);
+    }
+
+    pub(super) fn record_allocate_stack_child(node: NodeId) {
+        record(node, |counts| counts.allocate_stack_child += 1);
+    }
+
+    pub(super) fn start() {
+        ENABLED.store(false, Ordering::Relaxed);
+        counts()
+            .lock()
+            .expect("visit-counter mutex must not be poisoned")
+            .clear();
+        ENABLED.store(true, Ordering::Relaxed);
+    }
+
+    pub(super) fn finish() -> HashMap<NodeId, NodeVisitCounts> {
+        ENABLED.store(false, Ordering::Relaxed);
+        counts()
+            .lock()
+            .expect("visit-counter mutex must not be poisoned")
+            .clone()
+    }
+}
+#[cfg(test)]
+pub(crate) fn record_recursive_minimum_node_size(node: NodeId) {
+    visit_probe::record_recursive_minimum_node_size(node);
+}
+
 impl Layout {
     /// Resolves the validated model into a snapshot of logical-pixel rectangles.
     ///
@@ -207,6 +281,8 @@ fn preferred_width(
     id: NodeId,
     metrics: &DockMetrics,
 ) -> Result<f32, ComputeRectsError> {
+    #[cfg(test)]
+    visit_probe::record_preferred_width(id);
     let node = layout.node(id).ok_or(ComputeRectsError::InvalidLayout)?;
     let width = match node {
         Node::Column(column) => effective_column_width(column, metrics),
@@ -253,6 +329,8 @@ fn minimum_node_size(
     id: NodeId,
     metrics: &DockMetrics,
 ) -> Result<Size, ComputeRectsError> {
+    #[cfg(test)]
+    visit_probe::record_minimum_node_size_helper(id);
     layout.minimum_node_size(id, metrics).map_err(|error| match error {
         crate::CommandError::InvalidValue { field: "size", .. } => {
             ComputeRectsError::Geometry(GeometryError::ArithmeticOverflow)
@@ -699,6 +777,8 @@ fn allocate_stack_heights(
     let mut collapsed = Vec::with_capacity(children.len());
     let mut minimums = Vec::with_capacity(children.len());
     for child in children {
+        #[cfg(test)]
+        visit_probe::record_allocate_stack_child(*child);
         collapsed.push(matches!(layout.node(*child), Some(Node::Tabs(tabs)) if tabs.collapsed));
         // Query the common contract for every child; collapsed nodes report
         // their effective strip height from Layout::minimum_node_size too.
@@ -2384,4 +2464,245 @@ mod tests {
             ))
         );
     }
+
+    fn add_perf_tabs_group(
+        builder: &mut LayoutBuilder,
+        prefix: &str,
+        panel_count: usize,
+    ) -> crate::NodeId {
+        let mut panels = Vec::with_capacity(panel_count);
+        for panel_index in 0..panel_count {
+            let panel_key = format!("{prefix}-p{panel_index}");
+            let (_, panel) = builder.panel(key(&panel_key), constraints());
+            panels.push(panel);
+        }
+        builder.tabs(panels, 0, false)
+    }
+
+    fn perf_wide_layout(
+        metrics: &DockMetrics,
+    ) -> (crate::Layout, Rect, &'static str) {
+        let column_count = 10;
+        let groups_per_column = 8;
+        let panels_per_group = 3;
+        let mut builder = LayoutBuilder::new(Profile::Generic);
+        let mut columns = Vec::with_capacity(column_count);
+
+        for column_index in 0..column_count {
+            let mut groups = Vec::with_capacity(groups_per_column);
+            for group_index in 0..groups_per_column {
+                groups.push(add_perf_tabs_group(
+                    &mut builder,
+                    &format!("rects-wide-c{column_index}-g{group_index}"),
+                    panels_per_group,
+                ));
+            }
+            columns.push(builder.column(
+                metrics.default_column_width,
+                ColumnMode::Expanded,
+                groups,
+                vec![1.0 / groups_per_column as f32; groups_per_column],
+            ));
+        }
+
+        let root = builder.split(
+            Axis::X,
+            columns,
+            vec![1.0 / column_count as f32; column_count],
+        );
+        builder.main_area(DockSide::Left, root);
+        let viewport_width = metrics.default_column_width * column_count as f32
+            + metrics.splitter_thickness * (column_count - 1) as f32
+            + metrics.min_canvas_width
+            + 512.0;
+        let viewport_height = groups_per_column as f32
+            * (metrics.min_group_height + metrics.splitter_thickness)
+            + 800.0;
+        (
+            builder.build(),
+            viewport(viewport_width, viewport_height),
+            "wide-10x8x3",
+        )
+    }
+
+    fn perf_deep_layout(
+        metrics: &DockMetrics,
+    ) -> (crate::Layout, Rect, &'static str) {
+        let depth = 24;
+        let mut builder = LayoutBuilder::new(Profile::Generic);
+        let mut root = add_perf_tabs_group(&mut builder, "rects-deep-leaf", 1);
+        let mut horizontal_levels = 0;
+
+        for level in 0..depth {
+            let sibling = add_perf_tabs_group(
+                &mut builder,
+                &format!("rects-deep-level{level}"),
+                1,
+            );
+            let axis = if level % 2 == 0 {
+                horizontal_levels += 1;
+                Axis::X
+            } else {
+                Axis::Y
+            };
+            root = builder.split(axis, vec![sibling, root], vec![0.5, 0.5]);
+        }
+        builder.main_area(DockSide::Left, root);
+
+        let viewport_width = metrics.default_column_width * (horizontal_levels + 2) as f32
+            + metrics.min_canvas_width
+            + 800.0;
+        let viewport_height = depth as f32
+            * (metrics.min_group_height + metrics.splitter_thickness)
+            + 1200.0;
+        (
+            builder.build(),
+            viewport(viewport_width, viewport_height),
+            "deep-alternating-24",
+        )
+    }
+
+    fn perf_many_tabs_layout(
+        metrics: &DockMetrics,
+    ) -> (crate::Layout, Rect, &'static str) {
+        let tabs_count = 128;
+        let mut builder = LayoutBuilder::new(Profile::Generic);
+        let group = add_perf_tabs_group(&mut builder, "rects-tabs", tabs_count);
+        let column = builder.column(
+            metrics.default_column_width,
+            ColumnMode::Expanded,
+            vec![group],
+            vec![1.0],
+        );
+        builder.main_area(DockSide::Left, column);
+
+        let viewport_width = metrics.default_column_width
+            + metrics.min_canvas_width
+            + 512.0;
+        let viewport_height = metrics.min_group_height + 1200.0;
+        (
+            builder.build(),
+            viewport(viewport_width, viewport_height),
+            "tabs-128",
+        )
+    }
+
+    fn visit_summary(
+        visits: &std::collections::HashMap<crate::NodeId, super::visit_probe::NodeVisitCounts>,
+        field: fn(&super::visit_probe::NodeVisitCounts) -> u64,
+    ) -> (u64, usize, u64) {
+        let total = visits.values().map(field).sum();
+        let repeated_nodes = visits.values().filter(|counts| field(counts) > 1).count();
+        let maximum = visits.values().map(field).max().unwrap_or(0);
+        (total, repeated_nodes, maximum)
+    }
+
+    fn measure_compute_rects_case(
+        layout: &crate::Layout,
+        viewport: Rect,
+        metrics: &DockMetrics,
+        label: &str,
+        iterations: usize,
+    ) {
+        use std::{hint::black_box, time::Instant};
+
+        assert_eq!(layout.validate(metrics), Ok(()));
+        let initial = layout
+            .compute_rects(viewport, metrics)
+            .expect("benchmark fixture must compute geometry");
+        assert!(!initial.panels.is_empty(), "benchmark should lay out panels");
+
+        for _ in 0..iterations.min(8) {
+            let rects = layout
+                .compute_rects(viewport, metrics)
+                .expect("benchmark fixture must compute geometry");
+            black_box((rects.panels.len(), rects.groups.len(), rects.columns.len()));
+        }
+
+        let started = Instant::now();
+        let mut panel_rects = 0;
+        let mut group_rects = 0;
+        for _ in 0..iterations {
+            let rects = layout
+                .compute_rects(viewport, metrics)
+                .expect("benchmark fixture must compute geometry");
+            panel_rects = rects.panels.len();
+            group_rects = rects.groups.len();
+            black_box((rects.panels.len(), rects.groups.len(), rects.columns.len()));
+        }
+        let elapsed = started.elapsed();
+        assert!(panel_rects > 0);
+        assert!(group_rects > 0);
+
+        // A separate profiled call gathers per-node counts without timing the
+        // enabled counter/locking overhead in the benchmark's elapsed duration.
+        super::visit_probe::start();
+        let profiled = layout.compute_rects(viewport, metrics);
+        let visits = super::visit_probe::finish();
+        let profiled = profiled.expect("profiled benchmark fixture must compute geometry");
+        assert_eq!(profiled.panels.len(), panel_rects);
+        assert_eq!(profiled.groups.len(), group_rects);
+
+        let preferred = visit_summary(&visits, |counts| counts.preferred_width);
+        let minimum_helper = visit_summary(&visits, |counts| counts.minimum_node_size_helper);
+        let minimum_recursive = visit_summary(&visits, |counts| counts.recursive_minimum_node_size);
+        let allocation_child = visit_summary(&visits, |counts| counts.allocate_stack_child);
+        let total_node_visits: u64 = visits.values().map(|counts| {
+            counts.preferred_width
+                + counts.minimum_node_size_helper
+                + counts.recursive_minimum_node_size
+                + counts.allocate_stack_child
+        }).sum();
+        let unique_nodes = visits.len();
+
+        println!(
+            "compute-rects baseline [{}]: nodes={}, panels={}, iterations={}, elapsed_ms={:.3}, us/call={:.3}, calls/s={:.1}, output_panels={}, output_groups={}, unique_instrumented_nodes={}, total_node_visits={}",
+            label,
+            layout.nodes().count(),
+            layout.panel_instances().count(),
+            iterations,
+            elapsed.as_secs_f64() * 1000.0,
+            elapsed.as_secs_f64() * 1_000_000.0 / iterations as f64,
+            iterations as f64 / elapsed.as_secs_f64(),
+            panel_rects,
+            group_rects,
+            unique_nodes,
+            total_node_visits,
+        );
+        println!(
+            "compute-rects visits [{}]: preferred_width=total/{}/nodes_repeated/{}/max_per_node/{}, minimum_node_size_helper=total/{}/nodes_repeated/{}/max_per_node/{}, recursive_minimum_node_size=total/{}/nodes_repeated/{}/max_per_node/{}, allocate_stack_children=total/{}/nodes_repeated/{}/max_per_node/{}",
+            label,
+            preferred.0, preferred.1, preferred.2,
+            minimum_helper.0, minimum_helper.1, minimum_helper.2,
+            minimum_recursive.0, minimum_recursive.1, minimum_recursive.2,
+            allocation_child.0, allocation_child.1, allocation_child.2,
+        );
+    }
+
+    /// Manual release-mode baseline for node-size recomputation during geometry.
+    ///
+    /// Run with one test thread so that per-node visit counters stay isolated:
+    /// cargo test -p dock-core --release benchmark_compute_rects_node_size_visits -- --ignored --nocapture --test-threads=1
+    #[test]
+    #[ignore = "manual performance baseline; run the documented release-mode command"]
+    fn benchmark_compute_rects_node_size_visits() {
+        let metrics = DockMetrics::default();
+        let cases = [
+            perf_wide_layout(&metrics),
+            perf_deep_layout(&metrics),
+            perf_many_tabs_layout(&metrics),
+        ];
+        for (layout, viewport, label) in cases {
+            let node_count = layout.nodes().count();
+            let iterations = if node_count > 300 { 20 } else { 60 };
+            measure_compute_rects_case(
+                &layout,
+                viewport,
+                &metrics,
+                label,
+                iterations,
+            );
+        }
+    }
+
 }
