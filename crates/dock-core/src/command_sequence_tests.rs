@@ -578,10 +578,10 @@ fn valid_commands(
 
     // Exercise ClosePanel / CloseGroup without allowing a generated command to
     // remove the last available panel or tab group from the generated layout.
-    if panels.len() > 4 {
-        if let Some((_, panel_id)) = panels.first() {
-            commands.push(DockCommand::ClosePanel { panel: *panel_id });
-        }
+    if panels.len() > 4
+        && let Some((_, panel_id)) = panels.first()
+    {
+        commands.push(DockCommand::ClosePanel { panel: *panel_id });
     }
     if groups.len() > 3 {
         commands.push(DockCommand::CloseGroup { group: groups[0].0 });
@@ -683,17 +683,17 @@ fn valid_commands(
             width: *width + 1.0,
         });
     }
-    if let Some(area) = layout.main_area(DockSide::Right) {
-        if let Some(Node::Split(split)) = layout.node(area.root) {
-            if split.axis == Axis::X && right_columns.len() > 1 {
-                for boundary_index in 0..right_columns.len() - 1 {
-                    commands.push(DockCommand::ResizeColumnBoundary {
-                        side: DockSide::Right,
-                        boundary_index,
-                        delta: 1.0,
-                    });
-                }
-            }
+    if let Some(area) = layout.main_area(DockSide::Right)
+        && let Some(Node::Split(split)) = layout.node(area.root)
+        && split.axis == Axis::X
+        && right_columns.len() > 1
+    {
+        for boundary_index in 0..right_columns.len() - 1 {
+            commands.push(DockCommand::ResizeColumnBoundary {
+                side: DockSide::Right,
+                boundary_index,
+                delta: 1.0,
+            });
         }
     }
 
