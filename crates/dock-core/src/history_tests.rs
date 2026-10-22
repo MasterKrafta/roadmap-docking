@@ -346,6 +346,55 @@ fn no_ops_failures_and_transient_flyouts_do_not_create_history() {
 }
 
 #[test]
+fn zero_history_limit_preserves_apply_outcomes_errors_and_state_without_history() {
+    let metrics = DockMetrics::default();
+    let fixture = fixture();
+    let mut history_layout = fixture.layout.clone();
+    let mut direct_layout = fixture.layout;
+    let mut history = UndoRedoHistory::with_limit(0);
+
+    // A persistent mutation must have the same outcome and state whether it is
+    // routed through disabled session history or applied directly to Layout.
+    let resize = DockCommand::ResizeColumn {
+        column: fixture.column,
+        width: 320.0,
+    };
+    let history_outcome = history
+        .apply(&mut history_layout, resize.clone(), &metrics)
+        .unwrap();
+    let direct_outcome = direct_layout.apply(resize, &metrics).unwrap();
+    assert_eq!(history_outcome, direct_outcome);
+    assert_eq!(persistent_shape(&history_layout), persistent_shape(&direct_layout));
+    assert_eq!(history_layout.version(), direct_layout.version());
+
+    assert_eq!(history.undo_len(), 0);
+    assert_eq!(history.redo_len(), 0);
+    assert!(!history.can_undo());
+    assert!(!history.can_redo());
+    assert!(!history.undo(&mut history_layout, &metrics).unwrap());
+    assert!(!history.redo(&mut history_layout, &metrics).unwrap());
+
+    // A rejected command must report the same typed error and leave the
+    // already-mutated layout unchanged on both paths.
+    let before_failure = persistent_shape(&history_layout);
+    let before_failure_version = history_layout.version();
+    let invalid_command = DockCommand::ClosePanel {
+        panel: PanelId::null(),
+    };
+    let history_error = history.apply(&mut history_layout, invalid_command.clone(), &metrics);
+    let direct_error = direct_layout.apply(invalid_command, &metrics);
+
+    assert_eq!(history_error, direct_error);
+    assert!(history_error.is_err());
+    assert_eq!(persistent_shape(&history_layout), before_failure);
+    assert_eq!(history_layout.version(), before_failure_version);
+    assert_eq!(persistent_shape(&history_layout), persistent_shape(&direct_layout));
+    assert_eq!(history_layout.version(), direct_layout.version());
+    assert_eq!(history.undo_len(), 0);
+    assert_eq!(history.redo_len(), 0);
+}
+
+#[test]
 fn undo_clears_transient_flyout_and_preserves_session_preference() {
     let metrics = DockMetrics::default();
     let mut fixture = fixture();

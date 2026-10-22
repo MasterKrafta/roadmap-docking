@@ -77,12 +77,16 @@ impl UndoRedoHistory {
         metrics: &DockMetrics,
     ) -> Result<CommandOutcome, CommandError> {
         let prior_version = layout.version();
-        let checkpoint = layout.history_snapshot();
+        // With history disabled, avoid cloning a full layout that will never
+        // be recorded. Command execution still uses the normal Layout::apply path.
+        let checkpoint = (self.limit > 0).then(|| layout.history_snapshot());
         let outcome = layout.apply(command, metrics)?;
 
-        if outcome.new_version != prior_version && self.limit > 0 {
-            Self::push_bounded(&mut self.undo, checkpoint, self.limit);
-            self.redo.clear();
+        if outcome.new_version != prior_version {
+            if let Some(checkpoint) = checkpoint {
+                Self::push_bounded(&mut self.undo, checkpoint, self.limit);
+                self.redo.clear();
+            }
         }
 
         Ok(outcome)
