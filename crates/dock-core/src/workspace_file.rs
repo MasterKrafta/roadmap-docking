@@ -4,7 +4,7 @@ use slotmap::SlotMap;
 
 use crate::{
     Column, ComputeRectsError, DockArea, DockAreaId, DockMetrics, DockSide, FloatingGroup,
-    FloatingGroupId, GeometryError, Layout, Node, NodeId, Panel, PanelConstraints, PanelId,
+    FloatingGroupId, Layout, Node, NodeId, Panel, PanelConstraints, PanelId,
     PanelInstance, PanelKey, Size, Split, Tabs, WorkspaceDiagnostic, WorkspaceFileError,
     WorkspaceFloatingGroup, WorkspaceLayout, WorkspaceLoadOptions, WorkspaceLoadResult,
     WorkspaceNode, layout::WorkspaceLayoutParts,
