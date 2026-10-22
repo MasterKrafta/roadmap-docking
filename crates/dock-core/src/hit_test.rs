@@ -169,17 +169,25 @@ fn collect_subtree(
     if !nodes.insert(root) {
         return Ok(());
     }
-    let children = match layout.node(root).ok_or(ComputeRectsError::InvalidLayout)? {
-        Node::Split(split) => split.children.clone(),
-        Node::Column(column) => column.groups.clone(),
-        Node::Tabs(tabs) => tabs.children.clone(),
+    match layout.node(root).ok_or(ComputeRectsError::InvalidLayout)? {
+        Node::Split(split) => {
+            for child in &split.children {
+                collect_subtree(layout, *child, nodes, panels)?;
+            }
+        }
+        Node::Column(column) => {
+            for group in &column.groups {
+                collect_subtree(layout, *group, nodes, panels)?;
+            }
+        }
+        Node::Tabs(tabs) => {
+            for child in &tabs.children {
+                collect_subtree(layout, *child, nodes, panels)?;
+            }
+        }
         Node::Panel(panel) => {
             panels.insert(panel.panel_id);
-            Vec::new()
         }
-    };
-    for child in children {
-        collect_subtree(layout, child, nodes, panels)?;
     }
     Ok(())
 }
@@ -209,10 +217,17 @@ fn all_floating_subtrees(
     let mut nodes = HashSet::new();
     let mut panels = HashSet::new();
     for item in floating {
-        if let Some((subtree_nodes, subtree_panels)) = floating_subtree(layout, item.group)? {
-            nodes.extend(subtree_nodes);
-            panels.extend(subtree_panels);
-        }
+        let Some(group) = layout.floating_group(item.group) else {
+            continue;
+        };
+        let Some(area) = layout.dock_area(group.area) else {
+            continue;
+        };
+
+        // Collect directly into shared sets. Building a pair of fresh HashSets
+        // per floating window and then extending the union repeats allocation
+        // and hashing work on points outside every floating window.
+        collect_subtree(layout, area.root, &mut nodes, &mut panels)?;
     }
     Ok((nodes, panels))
 }
