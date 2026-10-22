@@ -307,10 +307,12 @@ mod tests {
             false,
         );
 
-        assert_eq!(
-            create_initial_layout(Profile::Generic, &items, DockMetrics::default()).unwrap_err(),
-            "panel minimum width exceeds the maximum width allowed by its tab group"
-        );
+        for profile in [Profile::Generic, Profile::Photoshop] {
+            assert_eq!(
+                create_initial_layout(profile, &items, DockMetrics::default()).unwrap_err(),
+                "panel minimum width exceeds the maximum width allowed by its tab group"
+            );
+        }
     }
 
 }
