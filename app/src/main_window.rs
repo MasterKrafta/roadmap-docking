@@ -3,8 +3,9 @@ use dock_core::{
 };
 use dock_gpui::dock_metrics_from_theme;
 use gpui::{
-    Context, InteractiveElement, IntoElement, ParentElement, Render, StatefulInteractiveElement,
-    Styled, Window, div, px, rgb,
+    Context, CursorStyle, InteractiveElement, IntoElement, MouseButton, MouseDownEvent,
+    MouseMoveEvent, ParentElement, Render, StatefulInteractiveElement, Styled, Window, div, px,
+    rgb,
 };
 use ui::Theme;
 
@@ -17,8 +18,12 @@ pub(crate) struct MainWindow {
     layout: Layout,
     dock_metrics: DockMetrics,
     tab_group: NodeId,
+    column_id: NodeId,
     layers_panel: PanelId,
     color_panel: PanelId,
+    is_resizing_column: bool,
+    resize_start_x: f32,
+    resize_start_width: f32,
 }
 
 impl MainWindow {
@@ -52,8 +57,9 @@ impl MainWindow {
         let right_area = layout
             .main_area(DockSide::Right)
             .ok_or_else(|| "Dock Core did not create the right dock area".to_owned())?;
+        let column_id = right_area.root;
         let Node::Column(column) = layout
-            .node(right_area.root)
+            .node(column_id)
             .ok_or_else(|| "Dock Core returned a missing right column".to_owned())?
         else {
             return Err("Dock Core right dock root is not a column".to_owned());
@@ -103,8 +109,12 @@ impl MainWindow {
             layout,
             dock_metrics,
             tab_group,
+            column_id,
             layers_panel,
             color_panel,
+            is_resizing_column: false,
+            resize_start_x: 0.0,
+            resize_start_width: dock_metrics.default_column_width,
         })
     }
 
@@ -313,7 +323,38 @@ impl Render for MainWindow {
             .border_color(rgb(colors.border))
             .child(active_content);
 
+        // The free, canvas-facing edge of the right dock column owns this
+        // resize handle. Width changes are committed through Dock Core.
+        let resize_hit_zone = metrics.splitter_hit_zone;
+        let resize_line = metrics.splitter_thickness.min(resize_hit_zone);
+        let resize_handle = div()
+            .absolute()
+            .left(px(-resize_hit_zone / 2.0))
+            .top(px(0.0))
+            .w(px(resize_hit_zone))
+            .h(px(window_height))
+            .cursor(CursorStyle::ResizeLeftRight)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, event: &MouseDownEvent, _window, cx| {
+                    this.resize_start_width = this.column_width();
+                    this.resize_start_x = event.position.x.as_f32();
+                    this.is_resizing_column = true;
+                    cx.notify();
+                }),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .left(px((resize_hit_zone - resize_line) / 2.0))
+                    .top(px(0.0))
+                    .w(px(resize_line))
+                    .h(px(window_height))
+                    .bg(rgb(colors.splitter)),
+            );
+
         let right_column = div()
+            .relative()
             .flex()
             .flex_col()
             .w(px(column_width))
@@ -321,7 +362,9 @@ impl Render for MainWindow {
             .bg(rgb(colors.dock_background))
             .child(header)
             .child(tab_strip)
-            .child(content);
+            .child(content)
+            // Put the handle last so it remains visible above the column edge.
+            .child(resize_handle);
 
         div()
             .flex()
@@ -331,5 +374,39 @@ impl Render for MainWindow {
             .bg(rgb(colors.canvas_background))
             .child(div().w(px(workspace_width)).h(px(window_height)))
             .child(right_column)
+            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
+                if !this.is_resizing_column {
+                    return;
+                }
+
+                let delta_x = event.position.x.as_f32() - this.resize_start_x;
+                let minimum_width = this.dock_metrics.min_column_width;
+                let viewport_width = window.viewport_size().width.as_f32().max(1.0);
+                let maximum_width =
+                    (viewport_width - this.theme.metrics.min_document_width).max(minimum_width);
+                let requested_width =
+                    (this.resize_start_width - delta_x).clamp(minimum_width, maximum_width);
+
+                if let Err(error) = this.layout.apply(
+                    DockCommand::ResizeColumn {
+                        column: this.column_id,
+                        width: requested_width,
+                    },
+                    &this.dock_metrics,
+                ) {
+                    eprintln!("Could not resize dock column: {error}");
+                    this.is_resizing_column = false;
+                }
+                cx.notify();
+            }))
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, _event, _window, cx| {
+                    if this.is_resizing_column {
+                        this.is_resizing_column = false;
+                        cx.notify();
+                    }
+                }),
+            )
     }
 }
