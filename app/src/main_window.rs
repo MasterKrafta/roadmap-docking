@@ -43,6 +43,12 @@ pub(crate) struct MainWindow {
     composition_drag_start_cursor: [f32; 2],
     composition_drag_start_position: [f32; 2],
     floating_composition_position: [f32; 2],
+    floating_tab_groups: [bool; 3],
+    dragging_tab_group: Option<usize>,
+    tab_group_drag_start_cursor: [f32; 2],
+    tab_group_drag_start_position: [f32; 2],
+    floating_tab_group_positions: [[f32; 2]; 3],
+    floating_tab_group_widths: [f32; 3],
     windows_menu_open: bool,
     resizing_height_column: usize,
     is_resizing_columns: bool,
@@ -76,6 +82,12 @@ impl MainWindow {
             composition_drag_start_cursor: [0.0, 0.0],
             composition_drag_start_position: [0.0, 0.0],
             floating_composition_position: [0.0, 0.0],
+            floating_tab_groups: [false, false, false],
+            dragging_tab_group: None,
+            tab_group_drag_start_cursor: [0.0, 0.0],
+            tab_group_drag_start_position: [0.0, 0.0],
+            floating_tab_group_positions: [[0.0, 0.0]; 3],
+            floating_tab_group_widths: [default_width; 3],
             windows_menu_open: false,
             resizing_height_column: 0,
             is_resizing_columns: false,
@@ -104,9 +116,11 @@ impl Render for MainWindow {
 
         let min_column_width = metrics.min_column_width;
         let divider_width = metrics.splitter_hit_zone;
-        let left_upper_group_visible = self.visible_tabs[0] || self.visible_tabs[1];
-        let left_lower_group_visible = self.visible_tabs[2] || self.visible_tabs[3];
-        let right_group_visible = self.visible_tabs[4];
+        let left_upper_group_visible =
+            !self.floating_tab_groups[0] && (self.visible_tabs[0] || self.visible_tabs[1]);
+        let left_lower_group_visible =
+            !self.floating_tab_groups[1] && (self.visible_tabs[2] || self.visible_tabs[3]);
+        let right_group_visible = !self.floating_tab_groups[2] && self.visible_tabs[4];
         let left_column_visible = left_upper_group_visible || left_lower_group_visible;
         let right_column_visible = right_group_visible;
         let both_columns_visible = left_column_visible && right_column_visible;
@@ -266,6 +280,35 @@ impl Render for MainWindow {
                 false,
             );
 
+        let composition_origin = if self.composition_floating {
+            self.floating_composition_position
+        } else {
+            docked_composition_position
+        };
+        let right_column_origin_x = composition_origin[0]
+            + if left_column_visible {
+                left_column_width + divider_width
+            } else {
+                0.0
+            };
+        let tab_group_origins = [
+            [
+                composition_origin[0],
+                composition_origin[1] + metrics.column_header_height,
+            ],
+            [
+                composition_origin[0],
+                composition_origin[1]
+                    + metrics.column_header_height
+                    + left_top_height
+                    + left_horizontal_divider,
+            ],
+            [
+                right_column_origin_x,
+                composition_origin[1] + metrics.column_header_height,
+            ],
+        ];
+
         let mut root = div()
             .relative()
             .flex()
@@ -290,6 +333,8 @@ impl Render for MainWindow {
                 let both_columns_visible = both_columns_visible;
                 let composition_width = composition_width;
                 let floating_composition_height = floating_composition_height;
+                let floating_group_default_height = floating_composition_height;
+                let tab_strip_height = metrics.tab_strip_height;
                 let drag_threshold = 5.0_f32;
 
                 cx.listener(move |this, event: &MouseMoveEvent, window, cx| {
@@ -367,6 +412,40 @@ impl Render for MainWindow {
                             default_split
                         };
                         cx.notify();
+                    } else if let Some(group_index) = this.dragging_tab_group {
+                        let cursor_x = event.position.x.as_f32();
+                        let cursor_y = event.position.y.as_f32();
+                        let delta_x = cursor_x - this.tab_group_drag_start_cursor[0];
+                        let delta_y = cursor_y - this.tab_group_drag_start_cursor[1];
+
+                        if this.floating_tab_groups[group_index]
+                            || delta_x.abs() >= drag_threshold
+                            || delta_y.abs() >= drag_threshold
+                        {
+                            this.floating_tab_groups[group_index] = true;
+                            let group_width =
+                                this.floating_tab_group_widths[group_index].max(1.0);
+                            let group_height = if this.collapsed_group_content[group_index] {
+                                tab_strip_height
+                            } else {
+                                floating_group_default_height
+                            };
+                            let actual_size = window.viewport_size();
+                            let max_x =
+                                (actual_size.width.as_f32() - group_width).max(0.0);
+                            let max_y =
+                                (actual_size.height.as_f32() - group_height).max(0.0);
+                            this.floating_tab_group_positions[group_index] = [
+                                (this.tab_group_drag_start_position[0] + delta_x)
+                                    .clamp(0.0, max_x),
+                                (this.tab_group_drag_start_position[1] + delta_y)
+                                    .clamp(0.0, max_y),
+                            ];
+                            this.open_tab_context_menu = None;
+                            this.mouse_context_menu = None;
+                            this.windows_menu_open = false;
+                            cx.notify();
+                        }
                     } else if this.dragging_composition {
                         let cursor_x = event.position.x.as_f32();
                         let cursor_y = event.position.y.as_f32();
@@ -442,57 +521,70 @@ impl Render for MainWindow {
                         }
 
                         if let Some(group) = this.open_tab_context_menu {
-                            let left_column_left = if composition_floating {
-                                floating_position[0]
-                            } else if right_column_visible {
-                                (window_width
-                                    - left_column_width
-                                    - right_column_width
-                                    - divider_width)
-                                    .max(0.0)
-                            } else {
-                                (window_width - left_column_width).max(0.0)
-                            };
-                            let right_column_left = if composition_floating {
-                                floating_position[0]
-                                    + if left_column_visible {
-                                        left_column_width + divider_width
+                            let (strip_top, menu_left, button_left) =
+                                if this.floating_tab_groups[group] {
+                                    let position = this.floating_tab_group_positions[group];
+                                    let width = this.floating_tab_group_widths[group];
+                                    (
+                                        position[1],
+                                        position[0] + width - 176.0,
+                                        position[0] + width - button_size,
+                                    )
+                                } else {
+                                    let left_column_left = if composition_floating {
+                                        floating_position[0]
+                                    } else if right_column_visible {
+                                        (window_width
+                                            - left_column_width
+                                            - right_column_width
+                                            - divider_width)
+                                            .max(0.0)
                                     } else {
-                                        0.0
-                                    }
-                            } else {
-                                window_width - right_column_width
-                            };
-                            let vertical_origin = if composition_floating {
-                                floating_position[1]
-                            } else {
-                                menu_bar_height
-                            };
-                            let (strip_top, menu_left) = match group {
-                                0 => (
-                                    vertical_origin + header_height,
-                                    left_column_left + left_column_width - 176.0,
-                                ),
-                                1 => (
-                                    vertical_origin + header_height + left_top_height
-                                        + left_horizontal_divider,
-                                    left_column_left + left_column_width - 176.0,
-                                ),
-                                _ => (
-                                    vertical_origin + header_height,
-                                    right_column_left + right_column_width - 176.0,
-                                ),
-                            };
+                                        (window_width - left_column_width).max(0.0)
+                                    };
+                                    let right_column_left = if composition_floating {
+                                        floating_position[0]
+                                            + if left_column_visible {
+                                                left_column_width + divider_width
+                                            } else {
+                                                0.0
+                                            }
+                                    } else {
+                                        window_width - right_column_width
+                                    };
+                                    let vertical_origin = if composition_floating {
+                                        floating_position[1]
+                                    } else {
+                                        menu_bar_height
+                                    };
+                                    let (strip_top, menu_left) = match group {
+                                        0 => (
+                                            vertical_origin + header_height,
+                                            left_column_left + left_column_width - 176.0,
+                                        ),
+                                        1 => (
+                                            vertical_origin + header_height + left_top_height
+                                                + left_horizontal_divider,
+                                            left_column_left + left_column_width - 176.0,
+                                        ),
+                                        _ => (
+                                            vertical_origin + header_height,
+                                            right_column_left + right_column_width - 176.0,
+                                        ),
+                                    };
+                                    let button_left = match group {
+                                        0 | 1 => {
+                                            left_column_left + left_column_width - button_size
+                                        }
+                                        _ => right_column_left + right_column_width - button_size,
+                                    };
+                                    (strip_top, menu_left, button_left)
+                                };
 
                             let menu_inside = x >= menu_left
                                 && x <= menu_left + 176.0
                                 && y >= strip_top + tab_strip_height
                                 && y <= strip_top + tab_strip_height + 68.0;
-
-                            let button_left = match group {
-                                0 | 1 => left_column_left + left_column_width - button_size,
-                                _ => right_column_left + right_column_width - button_size,
-                            };
                             let button_inside = x >= button_left
                                 && x <= button_left + button_size
                                 && y >= strip_top
@@ -517,11 +609,13 @@ impl Render for MainWindow {
                         || this.is_resizing_outer_splitter
                         || this.is_resizing_height
                         || this.dragging_composition
+                        || this.dragging_tab_group.is_some()
                     {
                         this.is_resizing_columns = false;
                         this.is_resizing_outer_splitter = false;
                         this.is_resizing_height = false;
                         this.dragging_composition = false;
+                        this.dragging_tab_group = None;
                         cx.notify();
                     }
                 }),
@@ -652,8 +746,14 @@ impl Render for MainWindow {
                 left_bottom_height,
                 left_upper_group_visible,
                 left_lower_group_visible,
-                [self.visible_tabs[0], self.visible_tabs[1]],
-                [self.visible_tabs[2], self.visible_tabs[3]],
+                [
+                    self.visible_tabs[0] && !self.floating_tab_groups[0],
+                    self.visible_tabs[1] && !self.floating_tab_groups[0],
+                ],
+                [
+                    self.visible_tabs[2] && !self.floating_tab_groups[1],
+                    self.visible_tabs[3] && !self.floating_tab_groups[1],
+                ],
                 self.collapsed_columns[0],
                 self.theme,
                 self.active_tabs[0],
@@ -664,6 +764,7 @@ impl Render for MainWindow {
                 self.collapsed_group_content[1],
                 self.open_tab_context_menu,
                 docked_composition_position,
+                tab_group_origins,
                 cx,
             ));
         }
@@ -714,7 +815,7 @@ impl Render for MainWindow {
                 right_bottom_height,
                 right_group_visible,
                 false,
-                [self.visible_tabs[4], false],
+                [self.visible_tabs[4] && !self.floating_tab_groups[2], false],
                 [false, false],
                 self.collapsed_columns[1],
                 self.theme,
@@ -726,11 +827,73 @@ impl Render for MainWindow {
                 false,
                 self.open_tab_context_menu,
                 docked_composition_position,
+                tab_group_origins,
                 cx,
             ));
         }
 
         root = root.child(dock_row);
+
+        if self.floating_tab_groups[0] && (self.visible_tabs[0] || self.visible_tabs[1]) {
+            let group_height = if self.collapsed_group_content[0] {
+                metrics.tab_strip_height
+            } else {
+                floating_composition_height
+            };
+            root = root.child(render_floating_tab_group(
+                0,
+                self.floating_tab_group_widths[0],
+                group_height,
+                self.floating_tab_group_positions[0],
+                self.theme,
+                self.active_tabs[0],
+                self.visible_tabs[0],
+                self.visible_tabs[1],
+                self.collapsed_group_content[0],
+                self.open_tab_context_menu,
+                cx,
+            ));
+        }
+        if self.floating_tab_groups[1] && (self.visible_tabs[2] || self.visible_tabs[3]) {
+            let group_height = if self.collapsed_group_content[1] {
+                metrics.tab_strip_height
+            } else {
+                floating_composition_height
+            };
+            root = root.child(render_floating_tab_group(
+                1,
+                self.floating_tab_group_widths[1],
+                group_height,
+                self.floating_tab_group_positions[1],
+                self.theme,
+                self.lower_active_tabs[0],
+                self.visible_tabs[2],
+                self.visible_tabs[3],
+                self.collapsed_group_content[1],
+                self.open_tab_context_menu,
+                cx,
+            ));
+        }
+        if self.floating_tab_groups[2] && self.visible_tabs[4] {
+            let group_height = if self.collapsed_group_content[2] {
+                metrics.tab_strip_height
+            } else {
+                floating_composition_height
+            };
+            root = root.child(render_floating_tab_group(
+                2,
+                self.floating_tab_group_widths[2],
+                group_height,
+                self.floating_tab_group_positions[2],
+                self.theme,
+                self.active_tabs[1],
+                self.visible_tabs[4],
+                false,
+                self.collapsed_group_content[2],
+                self.open_tab_context_menu,
+                cx,
+            ));
+        }
 
         if self.windows_menu_open {
             root = root.child(
@@ -873,6 +1036,7 @@ fn render_column(
     lower_content_collapsed: bool,
     open_tab_context_menu: Option<usize>,
     docked_composition_position: [f32; 2],
+    tab_group_origins: [[f32; 2]; 3],
     cx: &mut Context<MainWindow>,
 ) -> impl IntoElement {
     let colors = theme.colors;
@@ -904,6 +1068,7 @@ fn render_column(
                 this.collapsed_columns[column_index] = !this.collapsed_columns[column_index];
                 this.dragging_composition = false;
             } else {
+                this.dragging_tab_group = None;
                 this.dragging_composition = true;
                 this.composition_drag_start_cursor = [
                     event.position.x.as_f32(),
@@ -942,8 +1107,11 @@ fn render_column(
             this.visible_tabs[1] = false;
             this.visible_tabs[2] = false;
             this.visible_tabs[3] = false;
+            this.floating_tab_groups[0] = false;
+            this.floating_tab_groups[1] = false;
         } else {
             this.visible_tabs[4] = false;
+            this.floating_tab_groups[2] = false;
         }
         this.collapsed_columns[column_index] = false;
         this.is_resizing_columns = false;
@@ -1095,6 +1263,7 @@ fn render_column(
                 second_tab_id,
                 upper_tabs_visible[0],
                 upper_tabs_visible[1],
+                tab_group_origins[if column_index == 0 { 0 } else { 2 }],
                 cx,
             ));
 
@@ -1170,6 +1339,7 @@ fn render_column(
                 lower_second_tab_id,
                 lower_tabs_visible[0],
                 lower_tabs_visible[1],
+                tab_group_origins[1],
                 cx,
             ));
 
@@ -1216,6 +1386,102 @@ fn render_column(
     }
 
     column
+}
+
+fn render_floating_tab_group(
+    group_index: usize,
+    column_width: f32,
+    column_height: f32,
+    position: [f32; 2],
+    theme: Theme,
+    active_tab: usize,
+    first_tab_visible: bool,
+    second_tab_visible: bool,
+    content_collapsed: bool,
+    open_tab_context_menu: Option<usize>,
+    cx: &mut Context<MainWindow>,
+) -> impl IntoElement {
+    let colors = theme.colors;
+    let metrics = theme.metrics;
+    let (column_index, is_lower, first_tab_id, second_tab_id, group_id) =
+        match group_index {
+            0 => (
+                0,
+                false,
+                "left-column-tab-1",
+                "left-column-tab-2",
+                "floating-left-upper-group",
+            ),
+            1 => (
+                0,
+                true,
+                "left-column-bottom-tab-1",
+                "left-column-bottom-tab-2",
+                "floating-left-lower-group",
+            ),
+            _ => (
+                1,
+                false,
+                "right-column-tab-1",
+                "right-column-tab-2",
+                "floating-right-group",
+            ),
+        };
+
+    let mut panel = div()
+        .id(group_id)
+        .absolute()
+        .left(px(position[0]))
+        .top(px(position[1]))
+        .w(px(column_width))
+        .h(px(column_height))
+        .flex()
+        .flex_col()
+        .flex_shrink_0()
+        .bg(rgb(colors.window_background))
+        .border_1()
+        .border_color(rgb(colors.border))
+        .child(render_tab_strip(
+            column_index,
+            is_lower,
+            column_width,
+            theme,
+            active_tab,
+            first_tab_id,
+            second_tab_id,
+            first_tab_visible,
+            second_tab_visible,
+            position,
+            cx,
+        ));
+
+    if !content_collapsed {
+        panel = panel.child(
+            div()
+                .flex_1()
+                .min_h(px(0.0))
+                .bg(rgb(colors.canvas_background))
+                .child(render_panel_content(
+                    column_index,
+                    is_lower,
+                    active_tab,
+                    theme,
+                )),
+        );
+    }
+
+    if open_tab_context_menu == Some(group_index) {
+        panel = panel.child(render_tab_context_menu(
+            group_index,
+            column_index,
+            is_lower,
+            metrics.tab_strip_height,
+            theme,
+            cx,
+        ));
+    }
+
+    panel
 }
 
 fn render_collapsed_group_header(
@@ -1685,6 +1951,7 @@ fn render_tab_strip(
     second_tab_id: &'static str,
     first_tab_visible: bool,
     second_tab_visible: bool,
+    tab_group_position: [f32; 2],
     cx: &mut Context<MainWindow>,
 ) -> impl IntoElement {
     let colors = theme.colors;
@@ -1756,13 +2023,33 @@ fn render_tab_strip(
                 cx.notify();
             }
         });
-    let toggle_content_empty =
+    let drag_tab_group_or_toggle_content =
         cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
             if event.click_count >= 2 {
                 this.collapsed_group_content[content_index] =
                     !this.collapsed_group_content[content_index];
-                cx.notify();
+                this.dragging_tab_group = None;
+            } else {
+                this.dragging_tab_group = Some(content_index);
+                this.tab_group_drag_start_cursor = [
+                    event.position.x.as_f32(),
+                    event.position.y.as_f32(),
+                ];
+                this.tab_group_drag_start_position = if this.floating_tab_groups[content_index] {
+                    this.floating_tab_group_positions[content_index]
+                } else {
+                    tab_group_position
+                };
+                this.floating_tab_group_widths[content_index] = column_width;
+                this.dragging_composition = false;
+                this.is_resizing_columns = false;
+                this.is_resizing_outer_splitter = false;
+                this.is_resizing_height = false;
+                this.open_tab_context_menu = None;
+                this.mouse_context_menu = None;
+                this.windows_menu_open = false;
             }
+            cx.notify();
         });
     let open_tab_context_menu_first =
         cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
@@ -1879,7 +2166,7 @@ fn render_tab_strip(
             div()
                 .flex_1()
                 .h(px(metrics.tab_strip_height))
-                .on_mouse_down(MouseButton::Left, toggle_content_empty)
+                .on_mouse_down(MouseButton::Left, drag_tab_group_or_toggle_content)
                 .on_mouse_down(MouseButton::Right, open_tab_context_menu_empty),
         )
         .child(control)
