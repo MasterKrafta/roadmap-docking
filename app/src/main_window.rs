@@ -436,11 +436,11 @@ impl Render for MainWindow {
                                 this.floating_tab_group_widths[group_index].max(1.0)
                             };
                             let visible_icon_count = match group_index {
-                                0 => usize::from(this.visible_tabs[0])
-                                    + usize::from(this.visible_tabs[1]),
-                                1 => usize::from(this.visible_tabs[2])
-                                    + usize::from(this.visible_tabs[3]),
-                                _ => usize::from(this.visible_tabs[4]),
+                                0 => this.visible_tabs[0] as usize
+                                    + this.visible_tabs[1] as usize,
+                                1 => this.visible_tabs[2] as usize
+                                    + this.visible_tabs[3] as usize,
+                                _ => this.visible_tabs[4] as usize,
                             };
                             let group_height = if this.floating_tab_group_collapsed[group_index] {
                                 floating_group_header_height
@@ -863,7 +863,7 @@ impl Render for MainWindow {
             };
             let group_height = if is_collapsed {
                 metrics.column_header_height
-                    + (usize::from(self.visible_tabs[0]) + usize::from(self.visible_tabs[1])) as f32
+                    + (self.visible_tabs[0] as usize + self.visible_tabs[1] as usize) as f32
                         * collapsed_column_width
             } else if self.collapsed_group_content[0] {
                 metrics.column_header_height + metrics.tab_strip_height
@@ -894,7 +894,7 @@ impl Render for MainWindow {
             };
             let group_height = if is_collapsed {
                 metrics.column_header_height
-                    + (usize::from(self.visible_tabs[2]) + usize::from(self.visible_tabs[3])) as f32
+                    + (self.visible_tabs[2] as usize + self.visible_tabs[3] as usize) as f32
                         * collapsed_column_width
             } else if self.collapsed_group_content[1] {
                 metrics.column_header_height + metrics.tab_strip_height
