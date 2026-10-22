@@ -2531,7 +2531,6 @@ mod tests {
         let depth = 24;
         let mut builder = LayoutBuilder::new(Profile::Generic);
         let mut root = add_perf_tabs_group(&mut builder, "rects-deep-leaf", 1);
-        let mut horizontal_levels = 0;
 
         for level in 0..depth {
             let sibling = add_perf_tabs_group(
@@ -2539,17 +2538,15 @@ mod tests {
                 &format!("rects-deep-level{level}"),
                 1,
             );
-            let axis = if level % 2 == 0 {
-                horizontal_levels += 1;
-                Axis::X
-            } else {
-                Axis::Y
-            };
-            root = builder.split(axis, vec![sibling, root], vec![0.5, 0.5]);
+            // Keep this fixture focused on recursion depth. The wide fixture
+            // already exercises horizontal allocation; alternating X/Y splits
+            // here can generate a minimum-width stress case that is unrelated
+            // to repeated minimum-size traversal.
+            root = builder.split(Axis::Y, vec![sibling, root], vec![0.5, 0.5]);
         }
         builder.main_area(DockSide::Left, root);
 
-        let viewport_width = metrics.default_column_width * (horizontal_levels + 2) as f32
+        let viewport_width = metrics.default_column_width
             + metrics.min_canvas_width
             + 800.0;
         let viewport_height = depth as f32
@@ -2558,7 +2555,7 @@ mod tests {
         (
             builder.build(),
             viewport(viewport_width, viewport_height),
-            "deep-alternating-24",
+            "deep-vertical-24",
         )
     }
 
