@@ -1,8 +1,8 @@
 use crate::layout_builder::LayoutBuilder;
 use crate::{
-    Axis, CanvasState, ChromeMode, ColumnMode, DockMetrics, DockSide, Layout, PanelConstraints,
-    PanelKey, PanelState, Point, Profile, Rect, Size, WORKSPACE_VERSION, WorkspaceDiagnostic,
-    WorkspaceFile, WorkspaceFileError, WorkspaceLoadOptions, WorkspaceNode,
+    Axis, CanvasState, ChromeMode, ColumnMode, DockMetrics, DockSide, GeometryError, Layout,
+    PanelConstraints, PanelKey, PanelState, Point, Profile, Rect, Size, WORKSPACE_VERSION,
+    WorkspaceDiagnostic, WorkspaceFile, WorkspaceFileError, WorkspaceLoadOptions, WorkspaceNode,
 };
 
 fn key(value: &str) -> PanelKey {
@@ -498,7 +498,9 @@ fn invalid_visible_region_returns_an_error() {
                 &metrics,
                 WorkspaceLoadOptions::new(Some(region)),
             ),
-            Err(WorkspaceFileError::InvalidVisibleClientRegion(_))
+            Err(WorkspaceFileError::InvalidVisibleClientRegion(
+                GeometryError::NonPositiveDimension
+            ))
         ));
     }
 }
