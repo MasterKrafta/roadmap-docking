@@ -332,9 +332,12 @@ fn expanding_a_rail_restores_enough_width_for_panel_minimums() {
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
     let (panel, panel_node) = builder.panel(key("rail-wide-panel"), wide_constraints);
     let group = builder.tabs(vec![panel_node], 0, false);
+    // Start in a rail with no remembered expanded width, as can happen for
+    // legacy/restored rail state. Expanding must clamp the default width to the
+    // panel's minimum rather than relying on an already-valid Expanded layout.
     let column = builder.column(
-        metrics.default_column_width,
-        ColumnMode::Expanded,
+        metrics.rail_width,
+        ColumnMode::IconsOnly,
         vec![group],
         vec![1.0],
     );
