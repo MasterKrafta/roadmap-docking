@@ -180,10 +180,17 @@ Workspace-проверки объединяют миграцию v1→v2, отс
 cargo test -p dock-core --release benchmark_hit_test_multiple_floating_subtrees -- --ignored --nocapture --test-threads=1
 ```
 
-The baseline result is still awaiting a local run before any algorithm change. A regression test also asserts that blank space inside the topmost floating window returns that window's `FloatingGroup` hit and does not fall through to a lower window or the Canvas.
+**Pre-change baseline:** three runs on the local Windows release build, 500 iterations per point (geometry construction excluded). Values are microseconds per call; the run-to-run spread is a reminder to compare medians rather than single timings.
 
-- [ ] Record the release benchmark baseline for both points, preferably across three runs.
-- [ ] Check whether collecting the union of every floating subtree can be deferred until the point falls outside all floating windows, avoiding a second traversal of the selected subtree.
+| Point | Run 1 | Run 2 | Run 3 | Median |
+|---|---:|---:|---:|---:|
+| `inside-front-floating` | 211.403 | 225.658 | 230.031 | **225.658** |
+| `outside-floating` | 207.845 | 190.114 | 196.613 | **196.613** |
+
+The benchmark asserts a panel hit inside the frontmost window and a Canvas hit outside every floating window. The separate regression test asserts that blank space inside the topmost floating window returns that window's `FloatingGroup` hit instead of falling through to a lower window or the Canvas.
+
+- [x] Record the release benchmark baseline for both points across three runs.
+- [ ] Compare the lazy union collection with this baseline across three release runs; keep the change only if the measured result is useful and correctness is preserved.
 - [ ] Preserve priority: Z-order → floating resize/title → internal targets → flyout → main dock/canvas.
 - [ ] Confirm blank space in the topmost floating window never leaks hits to lower windows or Canvas.
 
