@@ -23,9 +23,12 @@ pub(crate) struct MainWindow {
     /// Core removes empty columns and collapses their parent Split. These flags keep
     /// the view aligned with that topology; the last remaining column stays open.
     column_open: [bool; 2],
+    /// The left column has one tab group; the right column has upper and lower groups.
+    column_has_bottom_group: [bool; 2],
     top_tab_groups: [NodeId; 2],
     bottom_tab_groups: [NodeId; 2],
-    /// Panel IDs per column, ordered: Layers, Color, Properties, History.
+    /// Panel IDs per column, ordered: Layers, Color, Properties, History. Unused
+    /// slots alias an existing ID but are never exposed as tabs or menu entries.
     panels_by_column: [[PanelId; 4]; 2],
     /// Visibility choices exposed by the Windows menu. Hidden panels retain
     /// their Core nodes and active-tab state so they can be restored without
@@ -55,7 +58,6 @@ impl MainWindow {
         let color_key = PanelKey::new("color").expect("built-in panel key must be valid");
         let properties_key =
             PanelKey::new("properties").expect("built-in panel key must be valid");
-        let history_key = PanelKey::new("history").expect("built-in panel key must be valid");
 
         let constraints_for = |key: &PanelKey, title: &str| {
             panels
@@ -65,7 +67,6 @@ impl MainWindow {
         let layers_constraints = constraints_for(&layers_key, "Layers")?;
         let color_constraints = constraints_for(&color_key, "Color")?;
         let properties_constraints = constraints_for(&properties_key, "Properties")?;
-        let history_constraints = constraints_for(&history_key, "History")?;
 
         let mut layout = Layout::new(Profile::Photoshop);
 
@@ -120,20 +121,6 @@ impl MainWindow {
             .ok_or_else(|| "Dock Core did not create the lower tab group".to_owned())?;
         layout
             .apply(
-                DockCommand::OpenPanel {
-                    key: history_key.clone(),
-                    constraints: history_constraints,
-                    target: Some(DropTarget::Tabs {
-                        group: initial_bottom_group,
-                        index: 1,
-                    }),
-                },
-                &dock_metrics,
-            )
-            .map_err(|error| format!("Could not add the History tab: {error}"))?;
-
-        layout
-            .apply(
                 DockCommand::RestoreGroupRatios {
                     column: initial_right_column,
                     ratios: vec![split_ratio, 1.0 - split_ratio],
@@ -178,83 +165,27 @@ impl MainWindow {
         let left_top_group = first_group_in_column(&layout, column_ids[0])
             .ok_or_else(|| "Dock Core did not create the left upper group".to_owned())?;
 
-        layout
-            .apply(
-                DockCommand::OpenPanel {
-                    key: color_key.clone(),
-                    constraints: color_constraints,
-                    target: Some(DropTarget::Tabs {
-                        group: left_top_group,
-                        index: 1,
-                    }),
-                },
-                &dock_metrics,
-            )
-            .map_err(|error| format!("Could not add the left Color tab: {error}"))?;
-
-        layout
-            .apply(
-                DockCommand::OpenPanel {
-                    key: properties_key.clone(),
-                    constraints: properties_constraints,
-                    target: Some(DropTarget::GroupEdge {
-                        group: left_top_group,
-                        zone: DropZone::Bottom,
-                    }),
-                },
-                &dock_metrics,
-            )
-            .map_err(|error| format!("Could not create the left lower group: {error}"))?;
-
-        let left_bottom_group = second_group_in_column(&layout, column_ids[0])
-            .ok_or_else(|| "Dock Core did not create the left lower tab group".to_owned())?;
-        layout
-            .apply(
-                DockCommand::OpenPanel {
-                    key: history_key.clone(),
-                    constraints: history_constraints,
-                    target: Some(DropTarget::Tabs {
-                        group: left_bottom_group,
-                        index: 1,
-                    }),
-                },
-                &dock_metrics,
-            )
-            .map_err(|error| format!("Could not add the left History tab: {error}"))?;
-
-        layout
-            .apply(
-                DockCommand::RestoreGroupRatios {
-                    column: column_ids[0],
-                    ratios: vec![split_ratio, 1.0 - split_ratio],
-                },
-                &dock_metrics,
-            )
-            .map_err(|error| format!("Could not apply the left column split ratio: {error}"))?;
-
         let top_tab_groups = [left_top_group, initial_top_group];
-        let bottom_tab_groups = [left_bottom_group, initial_bottom_group];
+        // This ID is a harmless placeholder for the left column, which has no
+        // lower group and therefore never renders or targets a bottom splitter.
+        let bottom_tab_groups = [left_top_group, initial_bottom_group];
         let panel_id_for_group = |group: NodeId, key: &PanelKey, title: &str| {
             panel_id_in_group(&layout, group, key)
                 .ok_or_else(|| format!("Dock Core did not retain {title} in its tab group"))
         };
 
+        let left_layers = panel_id_for_group(left_top_group, &layers_key, "left Layers")?;
+        let right_layers = panel_id_for_group(initial_top_group, &layers_key, "right Layers")?;
+        let right_color = panel_id_for_group(initial_top_group, &color_key, "right Color")?;
+        let right_properties =
+            panel_id_for_group(initial_bottom_group, &properties_key, "right Properties")?;
+        let column_has_bottom_group = [false, true];
         let panels_by_column = [
-            [
-                panel_id_for_group(left_top_group, &layers_key, "left Layers")?,
-                panel_id_for_group(left_top_group, &color_key, "left Color")?,
-                panel_id_for_group(left_bottom_group, &properties_key, "left Properties")?,
-                panel_id_for_group(left_bottom_group, &history_key, "left History")?,
-            ],
-            [
-                panel_id_for_group(initial_top_group, &layers_key, "right Layers")?,
-                panel_id_for_group(initial_top_group, &color_key, "right Color")?,
-                panel_id_for_group(initial_bottom_group, &properties_key, "right Properties")?,
-                panel_id_for_group(initial_bottom_group, &history_key, "right History")?,
-            ],
+            [left_layers, left_layers, left_layers, left_layers],
+            [right_layers, right_color, right_properties, right_properties],
         ];
 
-        // Both columns start with their first tab active in both groups.
+        // The left column has one active tab; the right column has two tab groups.
         for column_index in 0..2 {
             layout
                 .apply(
@@ -264,16 +195,18 @@ impl MainWindow {
                     },
                     &dock_metrics,
                 )
-                .map_err(|error| format!("Could not activate Layers in column {column_index}: {error}"))?;
-            layout
-                .apply(
-                    DockCommand::ActivateTab {
-                        group: bottom_tab_groups[column_index],
-                        panel: panels_by_column[column_index][2],
-                    },
-                    &dock_metrics,
-                )
-                .map_err(|error| format!("Could not activate Properties in column {column_index}: {error}"))?;
+                .map_err(|error| format!("Could not activate the first tab in column {column_index}: {error}"))?;
+            if column_has_bottom_group[column_index] {
+                layout
+                    .apply(
+                        DockCommand::ActivateTab {
+                            group: bottom_tab_groups[column_index],
+                            panel: panels_by_column[column_index][2],
+                        },
+                        &dock_metrics,
+                    )
+                    .map_err(|error| format!("Could not activate Properties in column {column_index}: {error}"))?;
+            }
         }
 
         Ok(Self {
@@ -283,6 +216,7 @@ impl MainWindow {
             dock_metrics,
             column_ids,
             column_open: [true; 2],
+            column_has_bottom_group,
             top_tab_groups,
             bottom_tab_groups,
             panels_by_column,
