@@ -9,6 +9,7 @@ use ui::Theme;
 enum MouseContextMenuKind {
     Header,
     TabStrip,
+    CollapsedGroupHeader,
 }
 
 #[derive(Clone, Copy)]
@@ -353,10 +354,10 @@ impl Render for MainWindow {
 
                         if let Some(menu) = this.mouse_context_menu {
                             let menu_width = 190.0;
-                            let menu_height = if menu.kind == MouseContextMenuKind::Header {
-                                36.0
-                            } else {
+                            let menu_height = if menu.kind == MouseContextMenuKind::TabStrip {
                                 4.0 * 28.0 + 3.0 * 4.0 + 8.0
+                            } else {
+                                36.0
                             };
                             let menu_left = menu.x.clamp(0.0, (window_width - menu_width).max(0.0));
                             let menu_top = menu.y.clamp(0.0, (window_height - menu_height).max(0.0));
@@ -899,7 +900,7 @@ fn render_column(
         if column_index == 0 {
             if upper_tabs_visible[0] || upper_tabs_visible[1] {
                 icon_rail = icon_rail.child(render_collapsed_group_header(
-                    0, column_width, theme,
+                    0, column_index, column_width, theme, cx,
                 ));
                 if upper_tabs_visible[0] {
                     icon_rail = icon_rail.child(render_collapsed_tab_icon(
@@ -924,7 +925,7 @@ fn render_column(
                     );
                 }
                 icon_rail = icon_rail.child(render_collapsed_group_header(
-                    1, column_width, theme,
+                    1, column_index, column_width, theme, cx,
                 ));
                 if lower_tabs_visible[0] {
                     icon_rail = icon_rail.child(render_collapsed_tab_icon(
@@ -939,7 +940,7 @@ fn render_column(
             }
         } else if upper_tabs_visible[0] {
             icon_rail = icon_rail.child(render_collapsed_group_header(
-                2, column_width, theme,
+                2, column_index, column_width, theme, cx,
             ));
             icon_rail = icon_rail.child(render_collapsed_tab_icon(
                 4, "☷", column_width, theme, cx,
@@ -1091,8 +1092,10 @@ fn render_column(
 
 fn render_collapsed_group_header(
     group_index: usize,
+    column_index: usize,
     column_width: f32,
     theme: Theme,
+    cx: &mut Context<MainWindow>,
 ) -> impl IntoElement {
     let metrics = theme.metrics;
     let colors = theme.colors;
@@ -1108,6 +1111,21 @@ fn render_collapsed_group_header(
         .h(px(metrics.tab_strip_height))
         .flex_shrink_0()
         .bg(rgb(colors.dock_background))
+        .on_mouse_down(
+            MouseButton::Right,
+            cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
+                this.open_tab_context_menu = None;
+                this.mouse_context_menu = Some(MouseContextMenu {
+                    kind: MouseContextMenuKind::CollapsedGroupHeader,
+                    column_index,
+                    group_index,
+                    clicked_tab: None,
+                    x: event.position.x.as_f32(),
+                    y: event.position.y.as_f32(),
+                });
+                cx.notify();
+            }),
+        )
 }
 
 fn render_collapsed_tab_icon(
@@ -1198,6 +1216,29 @@ fn render_mouse_context_menu(
                     cx.notify();
                 }))
                 .child("Collapse to Icons"),
+        );
+        return popup;
+    }
+
+    if menu.kind == MouseContextMenuKind::CollapsedGroupHeader {
+        let column_index = menu.column_index;
+        let group_index = menu.group_index;
+        popup = popup.child(
+            div()
+                .id("collapsed-group-context-expand-tabs")
+                .flex()
+                .items_center()
+                .h(px(28.0))
+                .p(px(6.0))
+                .text_color(rgb(colors.primary_text))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.collapsed_columns[column_index] = false;
+                    this.collapsed_group_content[group_index] = false;
+                    this.open_tab_context_menu = None;
+                    this.mouse_context_menu = None;
+                    cx.notify();
+                }))
+                .child("Expand Tabs"),
         );
         return popup;
     }
