@@ -305,7 +305,8 @@ impl MainWindow {
             && !matches!(payload, DragPayload::FloatingGroup { .. })
         {
             let target = source_for_payload(payload).and_then(|source| {
-                let rects = self.layout.compute_rects(viewport, &self.metrics).ok()?;
+                let mut rects = self.layout.compute_rects(viewport, &self.metrics).ok()?;
+                dock_gpui::normalize_docked_group_geometry(&self.layout, &self.metrics, &mut rects);
                 let core_position = self.core_drop_position(position, &rects);
                 self.layout
                     .resolve_drop(core_position, source, &rects, &self.metrics)
@@ -331,7 +332,10 @@ impl MainWindow {
             return;
         };
 
-        let geometry = self.layout.compute_rects(viewport, &self.metrics).ok();
+        let geometry = self.layout.compute_rects(viewport, &self.metrics).ok().map(|mut rects| {
+            dock_gpui::normalize_docked_group_geometry(&self.layout, &self.metrics, &mut rects);
+            rects
+        });
         let target = if matches!(payload, DragPayload::FloatingGroup { .. }) {
             None
         } else {
@@ -422,9 +426,10 @@ impl MainWindow {
         if !position.is_finite() {
             return;
         }
-        let Ok(rects) = self.layout.compute_rects(viewport, &self.metrics) else {
+        let Ok(mut rects) = self.layout.compute_rects(viewport, &self.metrics) else {
             return;
         };
+        dock_gpui::normalize_docked_group_geometry(&self.layout, &self.metrics, &mut rects);
 
         let operation = match handle {
             dock_gpui::ResizeHandle::Splitter {
@@ -957,7 +962,7 @@ impl Render for MainWindow {
         let dock_height = (height - MENU_BAR_HEIGHT).max(1.0);
         let dock_viewport = Rect::new(Point::ZERO, Size::new(width, dock_height));
 
-        let rects = match self.layout.compute_rects(dock_viewport, &self.metrics) {
+        let mut rects = match self.layout.compute_rects(dock_viewport, &self.metrics) {
             Ok(rects) => rects,
             Err(error) => {
                 return div()
@@ -969,6 +974,7 @@ impl Render for MainWindow {
                     .into_any_element();
             }
         };
+        dock_gpui::normalize_docked_group_geometry(&self.layout, &self.metrics, &mut rects);
 
         let live_columns: HashSet<NodeId> = self
             .layout

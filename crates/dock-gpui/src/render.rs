@@ -1,9 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
 use dock_core::{
-    Axis, ColumnMode, DockCommand, DockSide, DragHandle, DragPayload, DragPreview, DropTarget,
-    DropZoneRect, FloatingGroupId, Layout, LayoutRects, Node, NodeId, PanelId, PanelInstance, Point,
-    Rect, ResizeEdge, Size, Tabs,
+    Axis, ColumnMode, DockCommand, DockMetrics, DockSide, DragHandle, DragPayload, DragPreview,
+    DropTarget, DropZoneRect, FloatingGroupId, Layout, LayoutRects, Node, NodeId, PanelId,
+    PanelInstance, Point, Rect, ResizeEdge, Size, Tabs,
 };
 use gpui::{
     AnyElement, App, AppContext, ClickEvent, Context, Div, InteractiveElement, IntoElement, MouseButton,
@@ -47,6 +47,180 @@ impl Render for DragGhost {
             .bg(rgb(0x0C8CE9))
             .text_color(rgb(0xFFFFFF))
             .child(self.title.clone())
+    }
+}
+
+
+const GROUP_MENU_BUTTON_WIDTH: f32 = 28.0;
+const GROUP_DRAG_FREE_WIDTH: f32 = 16.0;
+const GROUP_DRAG_GRIP_HEIGHT: f32 = 4.0;
+
+#[derive(Clone, Copy)]
+struct GroupChromeGeometry {
+    vertical_shift: f32,
+}
+
+/// Adapts Core's generic header-plus-tabs geometry to Photoshop's tabs-only
+/// anatomy. The title-bar strip that belongs to a floating window is preserved;
+/// any additional Tabs group header is removed. The same adjusted snapshot is
+/// used by rendering and drop resolution so their hit targets remain aligned.
+///
+/// Call exactly once on a fresh LayoutRects snapshot.
+pub fn normalize_docked_group_geometry(
+    layout: &Layout,
+    metrics: &DockMetrics,
+    rects: &mut LayoutRects,
+) {
+    let mut rail_groups = HashSet::<NodeId>::new();
+    for column_rect in &rects.columns {
+        let Some(Node::Column(column)) = layout.node(column_rect.column) else {
+            continue;
+        };
+        if column.mode.is_rail() {
+            rail_groups.extend(column.groups.iter().copied());
+        }
+    }
+
+    // A floating window owns one title bar. Its topmost Tabs group shares that
+    // row; lower groups in a floating stack still use the normal tabs-only form.
+    let mut floating_title_groups = HashSet::<NodeId>::new();
+    for (floating_id, floating) in layout.floating_groups_in_paint_order() {
+        let Some(area) = layout.dock_area(floating.area) else {
+            continue;
+        };
+        let Some(bounds) = rects
+            .floating_groups
+            .iter()
+            .find(|entry| entry.group == floating_id)
+            .map(|entry| entry.rect)
+        else {
+            continue;
+        };
+        let nodes = subtree_nodes(layout, area.root);
+        if let Some(top_group) = rects
+            .groups
+            .iter()
+            .filter(|entry| nodes.contains(&entry.group))
+            .min_by(|left, right| {
+                left.rect
+                    .origin
+                    .y
+                    .partial_cmp(&right.rect.origin.y)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|entry| entry.group)
+            && bounds.size.height > 0.0
+        {
+            floating_title_groups.insert(top_group);
+        }
+    }
+
+    let mut groups = HashMap::<NodeId, GroupChromeGeometry>::new();
+    let mut active_panel_shifts = HashMap::<PanelId, f32>::new();
+    for group_rect in &rects.groups {
+        let group_id = group_rect.group;
+        if rail_groups.contains(&group_id) || floating_title_groups.contains(&group_id) {
+            continue;
+        }
+        let Some(Node::Tabs(tabs)) = layout.node(group_id) else {
+            continue;
+        };
+        let grip_height = if tabs.collapsed {
+            0.0
+        } else {
+            GROUP_DRAG_GRIP_HEIGHT.min(metrics.header_height)
+        };
+        let vertical_shift = if tabs.collapsed {
+            0.0
+        } else {
+            (metrics.header_height - grip_height).max(0.0)
+        };
+        groups.insert(group_id, GroupChromeGeometry { vertical_shift });
+        if vertical_shift > 0.0
+            && let Some(panel) = active_panel(layout, tabs)
+        {
+            active_panel_shifts.insert(panel, vertical_shift);
+        }
+    }
+
+    // Shift each normalized strip and its interaction targets into the old
+    // header row. Grow active content by the same amount to keep the bottom edge.
+    for strip in &mut rects.tab_strips {
+        if let Some(group) = groups.get(&strip.group) {
+            strip.rect.origin.y -= group.vertical_shift;
+        }
+    }
+    for header in &mut rects.tab_headers {
+        if let Some(group) = groups.get(&header.group) {
+            header.rect.origin.y -= group.vertical_shift;
+        }
+    }
+    for overflow in &mut rects.tab_overflows {
+        if let Some(group) = groups.get(&overflow.group) {
+            overflow.button_rect.origin.y -= group.vertical_shift;
+        }
+    }
+    for panel in &mut rects.panels {
+        if let Some(shift) = active_panel_shifts.get(&panel.panel) {
+            panel.rect.origin.y -= *shift;
+            panel.rect.size.height += *shift;
+        }
+    }
+
+    // Reserve separate horizontal areas for the panel menu and group dragging.
+    // This is applied to floating Tabs groups too, so their menu never covers a tab.
+    for group_rect in &rects.groups {
+        let group_id = group_rect.group;
+        if rail_groups.contains(&group_id) || !matches!(layout.node(group_id), Some(Node::Tabs(_))) {
+            continue;
+        }
+        let width = group_rect.rect.size.width.max(0.0);
+        let menu_width = GROUP_MENU_BUTTON_WIDTH.min(width);
+        let has_overflow = rects.tab_overflows.iter().any(|entry| entry.group == group_id);
+        let overflow_width = if has_overflow {
+            metrics
+                .tab_overflow_button_width
+                .min((width - menu_width - GROUP_DRAG_FREE_WIDTH).max(0.0))
+        } else {
+            0.0
+        };
+        let drag_free_width = GROUP_DRAG_FREE_WIDTH
+            .min((width - menu_width - overflow_width).max(0.0));
+        let tabs_width = (width - menu_width - overflow_width - drag_free_width).max(0.0);
+
+        let mut header_indices = rects
+            .tab_headers
+            .iter()
+            .enumerate()
+            .filter_map(|(index, header)| (header.group == group_id).then_some(index))
+            .collect::<Vec<_>>();
+        header_indices.sort_by_key(|index| rects.tab_headers[*index].index);
+        let visible_count = header_indices.len();
+        if visible_count > 0 {
+            for (visible_index, header_index) in header_indices.into_iter().enumerate() {
+                let left = group_rect.rect.origin.x
+                    + tabs_width * visible_index as f32 / visible_count as f32;
+                let right = if visible_index + 1 == visible_count {
+                    group_rect.rect.origin.x + tabs_width
+                } else {
+                    group_rect.rect.origin.x
+                        + tabs_width * (visible_index + 1) as f32 / visible_count as f32
+                };
+                let header = &mut rects.tab_headers[header_index];
+                header.rect.origin.x = left;
+                header.rect.size.width = (right - left).max(0.0);
+            }
+        }
+
+        if has_overflow
+            && let Some(overflow) = rects
+                .tab_overflows
+                .iter_mut()
+                .find(|entry| entry.group == group_id)
+        {
+            overflow.button_rect.origin.x = group_rect.rect.origin.x + tabs_width;
+            overflow.button_rect.size.width = overflow_width;
+        }
     }
 }
 
@@ -507,82 +681,78 @@ where
                 .into_any_element(),
         );
 
-        // Expanded groups have a header row above the tab strip. Collapsed groups
-        // use their full reduced height for the strip and therefore skip this row.
-        if !rail_groups.contains(&group.group)
-            && let Some(Node::Tabs(tabs)) = layout.node(group.group)
+        // A 4 px drag grip is emitted only when this group's strip was moved
+        // into the former header row. A floating window's top group uses its
+        // actual title bar instead.
+        if let Some(Node::Tabs(tabs)) = layout.node(group.group)
             && !tabs.collapsed
+            && let Some(strip) = rects.tab_strips.iter().find(|strip| strip.group == group.group)
         {
-            let title = active_panel(layout, tabs)
-                .and_then(|panel_id| layout.panel_instance(panel_id))
-                .map(panel_title)
-                .unwrap_or_else(|| "Panel group".to_owned());
-            let header_rect = Rect::new(
-                group.rect.origin,
-                Size::new(
-                    group.rect.size.width,
-                    theme.metrics.column_header_height.min(group.rect.size.height),
-                ),
-            );
-            elements.push(
-                rect_element(header_rect, theme.colors.toolbar_background)
-                    .text_color(rgb(theme.colors.primary_text))
-                    .child(format!("▾ {title}"))
-                    .into_any_element(),
-            );
-
-            // Separate group grip: menu and group drag have independent semantics.
-            let button_width = header_rect.size.width.min(28.0);
-            let grip_rect = Rect::new(
-                Point::new(
-                    header_rect.origin.x + header_rect.size.width - button_width * 2.0,
-                    header_rect.origin.y,
-                ),
-                Size::new(button_width, header_rect.size.height),
-            );
-            let payload = DragPayload::Group { group: group.group };
-            let ghost_title = format!("Move group: {title}");
-            elements.push(
-                rect_element(grip_rect, theme.colors.toolbar_background)
-                    .text_color(rgb(theme.colors.primary_text))
-                    .child("⠿")
-                    .id(format!("dock-group-grip-{:?}", group.group))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        make_drag_start_handler(payload, DragHandle::GroupGrip),
-                    )
-                    .on_drag(payload, move |_payload, _offset, _window, app| {
-                        let title = ghost_title.clone();
-                        app.new(|_| DragGhost { title })
-                    })
-                    .into_any_element(),
-            );
-            let menu_rect = Rect::new(
-                Point::new(
-                    header_rect.origin.x + header_rect.size.width - button_width,
-                    header_rect.origin.y,
-                ),
-                Size::new(button_width, header_rect.size.height),
-            );
-            elements.push(
-                rect_element(menu_rect, theme.colors.toolbar_background)
-                    .text_color(rgb(theme.colors.primary_text))
-                    .child("⋯")
-                    .id(format!("dock-group-menu-{:?}", group.group))
-                    .focusable()
-                    .focus_visible(|style| style.border_2().border_color(rgb(theme.colors.focus)))
-                    .on_click(make_menu_handler(DockMenuRequest::PanelGroup {
-                        group: group.group,
-                        panel: active_panel(layout, tabs),
-                    }))
-                    .into_any_element(),
-            );
+            let grip_height = GROUP_DRAG_GRIP_HEIGHT
+                .min(theme.metrics.column_header_height)
+                .min(group.rect.size.height);
+            let strip_offset = strip.rect.origin.y - group.rect.origin.y;
+            if grip_height > 0.0 && (strip_offset - grip_height).abs() < 0.01 {
+                let title = active_panel(layout, tabs)
+                    .and_then(|panel_id| layout.panel_instance(panel_id))
+                    .map(panel_title)
+                    .unwrap_or_else(|| "Panel group".to_owned());
+                let payload = DragPayload::Group { group: group.group };
+                let ghost_title = format!("Move group: {title}");
+                let grip_rect = Rect::new(
+                    group.rect.origin,
+                    Size::new(group.rect.size.width, grip_height),
+                );
+                elements.push(
+                    rect_element(grip_rect, theme.colors.toolbar_background)
+                        .id(format!("dock-group-grip-{:?}", group.group))
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            make_drag_start_handler(payload, DragHandle::GroupGrip),
+                        )
+                        .on_drag(payload, move |_payload, _offset, _window, app| {
+                            let title = ghost_title.clone();
+                            app.new(|_| DragGhost { title })
+                        })
+                        .into_any_element(),
+                );
+            }
         }
     }
 
+    // Empty strip space is a group-drag surface. Tabs, overflow and the panel
+    // menu are separate higher-layer controls and keep their own click semantics.
     for strip in rects.tab_strips.iter().filter(|entry| nodes.contains(&entry.group)) {
+        if rail_groups.contains(&strip.group) {
+            elements.push(
+                rect_element(strip.rect, theme.colors.toolbar_background).into_any_element(),
+            );
+            continue;
+        }
+        let Some(Node::Tabs(tabs)) = layout.node(strip.group) else {
+            elements.push(
+                rect_element(strip.rect, theme.colors.toolbar_background).into_any_element(),
+            );
+            continue;
+        };
+        let title = active_panel(layout, tabs)
+            .and_then(|panel_id| layout.panel_instance(panel_id))
+            .map(panel_title)
+            .unwrap_or_else(|| "Panel group".to_owned());
+        let payload = DragPayload::Group { group: strip.group };
+        let ghost_title = format!("Move group: {title}");
         elements.push(
-            rect_element(strip.rect, theme.colors.toolbar_background).into_any_element(),
+            rect_element(strip.rect, theme.colors.toolbar_background)
+                .id(format!("dock-group-strip-{:?}", strip.group))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    make_drag_start_handler(payload, DragHandle::GroupGrip),
+                )
+                .on_drag(payload, move |_payload, _offset, _window, app| {
+                    let title = ghost_title.clone();
+                    app.new(|_| DragGhost { title })
+                })
+                .into_any_element(),
         );
     }
 
@@ -657,6 +827,39 @@ where
                 .focus_visible(|style| style.border_2().border_color(rgb(theme.colors.focus)))
                 .on_click(make_menu_handler(DockMenuRequest::TabOverflow {
                     group: overflow.group,
+                }))
+                .into_any_element(),
+        );
+    }
+
+    for strip in rects
+        .tab_strips
+        .iter()
+        .filter(|entry| nodes.contains(&entry.group) && !rail_groups.contains(&entry.group))
+    {
+        let Some(Node::Tabs(tabs)) = layout.node(strip.group) else {
+            continue;
+        };
+        let button_width = GROUP_MENU_BUTTON_WIDTH.min(strip.rect.size.width);
+        let menu_rect = Rect::new(
+            Point::new(
+                strip.rect.origin.x + strip.rect.size.width - button_width,
+                strip.rect.origin.y,
+            ),
+            Size::new(button_width, strip.rect.size.height),
+        );
+        elements.push(
+            rect_element(menu_rect, theme.colors.toolbar_background)
+                .border_1()
+                .border_color(rgb(theme.colors.border))
+                .text_color(rgb(theme.colors.primary_text))
+                .child("≡")
+                .id(format!("dock-group-menu-{:?}", strip.group))
+                .focusable()
+                .focus_visible(|style| style.border_2().border_color(rgb(theme.colors.focus)))
+                .on_click(make_menu_handler(DockMenuRequest::PanelGroup {
+                    group: strip.group,
+                    panel: active_panel(layout, tabs),
                 }))
                 .into_any_element(),
         );
@@ -958,8 +1161,15 @@ fn tab_header_label(title: &str, collapsed: bool, tab_index: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{rail_entry_label, scroll_rect_in_viewport, tab_header_label};
-    use dock_core::ColumnMode;
+    use super::{
+        normalize_docked_group_geometry, rail_entry_label, scroll_rect_in_viewport,
+        tab_header_label, GROUP_DRAG_FREE_WIDTH, GROUP_DRAG_GRIP_HEIGHT,
+        GROUP_MENU_BUTTON_WIDTH,
+    };
+    use dock_core::{
+        create_initial_layout, ColumnMode, DockMetrics, DockSide, Node, PanelConstraints, PanelKey,
+        Point, Profile, Rect, Size,
+    };
 
     #[test]
     fn rail_modes_have_distinct_icon_and_label_presentations() {
@@ -1011,4 +1221,72 @@ mod tests {
             ),
         );
     }
+    #[test]
+    fn docked_tabs_replace_header_row_and_reserve_distinct_menu_and_drag_space() {
+        let constraints = PanelConstraints::new(
+            Size::new(80.0, 80.0),
+            Size::new(180.0, 140.0),
+            Some(Size::new(800.0, 600.0)),
+            false,
+        );
+        let descriptors = ["layers", "color", "properties", "history"]
+            .into_iter()
+            .map(|key| (PanelKey::new(key).unwrap(), constraints))
+            .collect::<Vec<_>>();
+        let metrics = DockMetrics {
+            header_height: 32.0,
+            tab_strip_height: 24.0,
+            ..DockMetrics::default()
+        };
+        let layout = create_initial_layout(Profile::Photoshop, &descriptors, metrics).unwrap();
+        let viewport = Rect::new(Point::new(0.0, 0.0), Size::new(1000.0, 700.0));
+        let mut rects = layout.compute_rects(viewport, &metrics).unwrap();
+        let before = rects.clone();
+
+        let column_id = layout.main_area(DockSide::Right).unwrap().root;
+        let Node::Column(column) = layout.node(column_id).unwrap() else {
+            panic!("Photoshop main area should use a column");
+        };
+        let group_id = column.groups[0];
+        let group_rect = before.groups.iter().find(|entry| entry.group == group_id).unwrap().rect;
+        let before_strip = before.tab_strips.iter().find(|entry| entry.group == group_id).unwrap().rect;
+        assert_eq!(before_strip.origin.y, group_rect.origin.y + metrics.header_height);
+        let Node::Tabs(tabs) = layout.node(group_id).unwrap() else {
+            panic!("column children should be tab groups");
+        };
+        let active_panel_id = super::active_panel(&layout, tabs).unwrap();
+        let before_panel = before.panels.iter().find(|entry| entry.panel == active_panel_id).unwrap().rect;
+
+        normalize_docked_group_geometry(&layout, &metrics, &mut rects);
+
+        let after_strip = rects.tab_strips.iter().find(|entry| entry.group == group_id).unwrap().rect;
+        assert_eq!(
+            after_strip.origin.y,
+            group_rect.origin.y + GROUP_DRAG_GRIP_HEIGHT
+        );
+        let after_panel = rects.panels.iter().find(|entry| entry.panel == active_panel_id).unwrap().rect;
+        assert_eq!(
+            after_panel.origin.y,
+            group_rect.origin.y + GROUP_DRAG_GRIP_HEIGHT + metrics.tab_strip_height
+        );
+        let before_bottom = before_panel.origin.y + before_panel.size.height;
+        let after_bottom = after_panel.origin.y + after_panel.size.height;
+        assert!((before_bottom - after_bottom).abs() < 0.001);
+
+        let headers = rects
+            .tab_headers
+            .iter()
+            .filter(|header| header.group == group_id)
+            .collect::<Vec<_>>();
+        let tab_right = headers
+            .iter()
+            .map(|header| header.rect.origin.x + header.rect.size.width)
+            .fold(group_rect.origin.x, f32::max);
+        let menu_left = group_rect.origin.x + group_rect.size.width - GROUP_MENU_BUTTON_WIDTH;
+        assert!(
+            menu_left - tab_right >= GROUP_DRAG_FREE_WIDTH - 0.001,
+            "tabs must leave a separate group-drag gap before the panel-menu button"
+        );
+    }
+
 }
