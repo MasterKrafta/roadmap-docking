@@ -20,6 +20,9 @@ pub(crate) struct MainWindow {
     dock_metrics: DockMetrics,
     /// Main-dock column IDs in visual order: left, right.
     column_ids: [NodeId; 2],
+    /// Core removes empty columns and collapses their parent Split. These flags keep
+    /// the view aligned with that topology; the last remaining column stays open.
+    column_open: [bool; 2],
     top_tab_groups: [NodeId; 2],
     bottom_tab_groups: [NodeId; 2],
     /// Panel IDs per column, ordered: Layers, Color, Properties, History.
@@ -279,6 +282,7 @@ impl MainWindow {
             layout,
             dock_metrics,
             column_ids,
+            column_open: [true; 2],
             top_tab_groups,
             bottom_tab_groups,
             panels_by_column,
@@ -328,6 +332,9 @@ impl MainWindow {
         // Keep Core's active-tab selection aligned with the visible tabs. A tab
         // group can be intentionally empty from the view's perspective.
         for column_index in 0..self.column_ids.len() {
+            if !self.column_open[column_index] {
+                continue;
+            }
             let groups = [
                 (self.top_tab_groups[column_index], [0usize, 1usize]),
                 (self.bottom_tab_groups[column_index], [2usize, 3usize]),
@@ -347,6 +354,42 @@ impl MainWindow {
                 }
             }
         }
+    }
+
+    fn close_column(&mut self, column_index: usize) {
+        if column_index >= self.column_open.len() || !self.column_open[column_index] {
+            return;
+        }
+        let other_index = 1 - column_index;
+        // Keep one dock column alive so the user can still interact with the
+        // workspace and use the remaining column's controls.
+        if !self.column_open[other_index] {
+            return;
+        }
+
+        for group in [
+            self.top_tab_groups[column_index],
+            self.bottom_tab_groups[column_index],
+        ] {
+            if self.layout.node(group).is_none() {
+                continue;
+            }
+            if let Err(error) = self.layout.apply(
+                DockCommand::CloseGroup { group },
+                &self.dock_metrics,
+            ) {
+                eprintln!("Could not close dock group: {error}");
+                return;
+            }
+        }
+
+        // Core normalization removes the now-empty Column and reduces the
+        // two-child Split to the remaining column. The UI stops rendering the
+        // removed IDs and lets the surviving column move next to the workspace.
+        self.column_open[column_index] = false;
+        self.is_resizing_column = false;
+        self.resizing_outer_column = None;
+        self.resizing_groups_column = None;
     }
 
     fn column_width(&self, column_index: usize) -> f32 {
@@ -432,10 +475,12 @@ impl MainWindow {
                 .map(|panel| self.panels.title(panel))
                 .unwrap_or_else(|| fallback.to_owned())
         };
-        let layers_title = get_title(panel_ids[0], "Layers");
-        let color_title = get_title(panel_ids[1], "Color");
-        let properties_title = get_title(panel_ids[2], "Properties");
-        let history_title = get_title(panel_ids[3], "History");
+        let column_label = if column_index == 0 { "Left" } else { "Right" };
+        let layers_title = format!("{column_label} {}", get_title(panel_ids[0], "Layers"));
+        let color_title = format!("{column_label} {}", get_title(panel_ids[1], "Color"));
+        let properties_title =
+            format!("{column_label} {}", get_title(panel_ids[2], "Properties"));
+        let history_title = format!("{column_label} {}", get_title(panel_ids[3], "History"));
 
         let top_content = active_top_panel
             .and_then(|panel_id| self.layout.panel_instance(panel_id))
@@ -701,6 +746,11 @@ impl MainWindow {
                     .child(div().w(px(button_gap)).h(px(1.0)))
                     .child(
                         div()
+                            .id(if column_index == 0 {
+                                "left-dock-close-column"
+                            } else {
+                                "right-dock-close-column"
+                            })
                             .flex()
                             .items_center()
                             .justify_center()
@@ -708,6 +758,10 @@ impl MainWindow {
                             .h(px(button_size))
                             .bg(rgb(colors.hover))
                             .text_color(rgb(colors.primary_text))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.close_column(column_index);
+                                cx.notify();
+                            }))
                             .child("×"),
                     )
                     .child(div().w(px(content_padding)).h(px(1.0))),
@@ -755,19 +809,40 @@ impl Render for MainWindow {
         let menu_height = metrics.column_header_height.min(window_height);
         let dock_height = (window_height - menu_height).max(1.0);
 
-        let left_width = self.column_width(0).min(window_width);
-        let right_width = self.column_width(1).min(window_width);
+        let left_is_open = self.column_open[0];
+        let right_is_open = self.column_open[1];
+        let both_columns_open = left_is_open && right_is_open;
+        let left_width = if left_is_open {
+            self.column_width(0).min(window_width)
+        } else {
+            0.0
+        };
+        let right_width = if right_is_open {
+            self.column_width(1).min(window_width)
+        } else {
+            0.0
+        };
         let splitter_width = metrics.splitter_thickness;
         let outer_splitter_width = splitter_width;
+        let center_splitter_width = if both_columns_open { splitter_width } else { 0.0 };
         let dock_width =
-            left_width + outer_splitter_width + splitter_width + right_width;
+            left_width + outer_splitter_width + center_splitter_width + right_width;
         let workspace_width = (window_width - dock_width).max(0.0);
         let split_hit_width = metrics.splitter_hit_zone.max(splitter_width);
 
-        let left_column = self.render_column(cx, 0, dock_height, menu_height);
-        let right_column = self.render_column(cx, 1, dock_height, menu_height);
+        let left_column = if left_is_open {
+            self.render_column(cx, 0, dock_height, menu_height)
+        } else {
+            div().w(px(0.0)).h(px(dock_height))
+        };
+        let right_column = if right_is_open {
+            self.render_column(cx, 1, dock_height, menu_height)
+        } else {
+            div().w(px(0.0)).h(px(dock_height))
+        };
         let outer_splitter_center_x = workspace_width + outer_splitter_width / 2.0;
-        let outer_column_id = self.column_ids[0];
+        let outer_column_index = if left_is_open { 0 } else { 1 };
+        let outer_column_id = self.column_ids[outer_column_index];
         let outer_column_splitter = div()
             .relative()
             .w(px(outer_splitter_width))
@@ -804,41 +879,45 @@ impl Render for MainWindow {
             );
         let column_splitter_center_x =
             workspace_width + outer_splitter_width + left_width + splitter_width / 2.0;
-        let column_splitter = div()
-            .relative()
-            .w(px(splitter_width))
-            .h(px(dock_height))
-            .bg(rgb(colors.splitter))
-            .child(
-                div()
-                    .absolute()
-                    .left(px((splitter_width - split_hit_width) / 2.0))
-                    .top(px(0.0))
-                    .w(px(split_hit_width))
-                    .h(px(dock_height))
-                    .cursor(CursorStyle::ResizeLeftRight)
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
-                            this.is_resizing_column = true;
-                            this.resizing_outer_column = None;
-                            this.resize_column_pointer_offset_x =
-                                event.position.x.as_f32() - column_splitter_center_x;
-                            this.resizing_groups_column = None;
-                            cx.notify();
-                        }),
-                    )
-                    .child(
-                        div()
-                            .absolute()
-                            .left(px((split_hit_width - splitter_width) / 2.0))
-                            .top(px(0.0))
-                            .w(px(splitter_width))
-                            .h(px(dock_height))
-                            .bg(rgb(colors.splitter)),
-                    ),
-            );
-
+        let column_splitter = if both_columns_open {
+            let column_splitter = div()
+                .relative()
+                .w(px(splitter_width))
+                .h(px(dock_height))
+                .bg(rgb(colors.splitter))
+                .child(
+                    div()
+                        .absolute()
+                        .left(px((splitter_width - split_hit_width) / 2.0))
+                        .top(px(0.0))
+                        .w(px(split_hit_width))
+                        .h(px(dock_height))
+                        .cursor(CursorStyle::ResizeLeftRight)
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
+                                this.is_resizing_column = true;
+                                this.resizing_outer_column = None;
+                                this.resize_column_pointer_offset_x =
+                                    event.position.x.as_f32() - column_splitter_center_x;
+                                this.resizing_groups_column = None;
+                                cx.notify();
+                            }),
+                        )
+                        .child(
+                            div()
+                                .absolute()
+                                .left(px((split_hit_width - splitter_width) / 2.0))
+                                .top(px(0.0))
+                                .w(px(splitter_width))
+                                .h(px(dock_height))
+                                .bg(rgb(colors.splitter)),
+                        ),
+                );
+    
+        } else {
+            div().w(px(0.0)).h(px(dock_height))
+        };
         let windows_button = div()
             .id("windows-menu-button")
             .flex()
@@ -942,35 +1021,47 @@ impl Render for MainWindow {
                     let pointer_x = event.position.x.as_f32();
                     let window_width = window.viewport_size().width.as_f32().max(1.0);
                     let splitter_width = this.theme.metrics.splitter_thickness;
-                    let left_width = this.column_width(0).min(window_width);
-                    let right_width = this.column_width(1).min(window_width);
+                    let left_is_open = this.column_open[0];
+                    let right_is_open = this.column_open[1];
+                    let left_width = if left_is_open {
+                        this.column_width(0).min(window_width)
+                    } else {
+                        0.0
+                    };
+                    let right_width = if right_is_open {
+                        this.column_width(1).min(window_width)
+                    } else {
+                        0.0
+                    };
                     let outer_splitter_width = splitter_width;
+                    let center_splitter_width =
+                        if left_is_open && right_is_open { splitter_width } else { 0.0 };
                     let workspace_width = (window_width
                         - left_width
                         - right_width
-                        - splitter_width
+                        - center_splitter_width
                         - outer_splitter_width)
                         .max(0.0);
                     let current_splitter_center_x =
                         workspace_width + outer_splitter_width / 2.0;
                     let target_splitter_center_x =
                         pointer_x - this.resize_column_pointer_offset_x;
-                    let current_left_width = this.column_width(0);
+                    let current_outer_width = this.column_width(if left_is_open { 0 } else { 1 });
                     let width_delta = current_splitter_center_x - target_splitter_center_x;
-                    let requested_width = (current_left_width + width_delta).max(1.0);
+                    let requested_width = (current_outer_width + width_delta).max(1.0);
                     let max_width = (window_width
-                        - right_width
-                        - splitter_width
+                        - (if left_is_open { right_width } else { 0.0 })
+                        - center_splitter_width
                         - outer_splitter_width
                         - this.theme.metrics.min_document_width)
                         .max(0.0);
                     // Keep a usable workspace even when Core has no measured canvas
                     // bounds yet. If the current column already exceeds this limit
                     // (for example after a window shrink), allow dragging inward.
-                    let requested_width = if max_width >= current_left_width {
+                    let requested_width = if max_width >= current_outer_width {
                         requested_width.min(max_width.max(1.0))
                     } else if width_delta > 0.0 {
-                        current_left_width
+                        current_outer_width
                     } else {
                         requested_width
                     };
@@ -1008,7 +1099,7 @@ impl Render for MainWindow {
                     let target_splitter_center_x =
                         pointer_x - this.resize_column_pointer_offset_x;
                     let delta_x = target_splitter_center_x - current_splitter_center_x;
-                    if delta_x != 0.0 {
+                    if this.column_open.iter().all(|is_open| *is_open) && delta_x != 0.0 {
                         if let Err(error) = this.layout.apply(
                             DockCommand::ResizeColumnBoundary {
                                 side: DockSide::Right,
