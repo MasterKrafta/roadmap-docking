@@ -443,7 +443,7 @@ mod tests {
                     280.0,
                     ColumnMode::Expanded,
                     groups,
-                    vec![1.0; GROUPS_PER_COLUMN],
+                    vec![1.0 / GROUPS_PER_COLUMN as f32; GROUPS_PER_COLUMN],
                 ));
             }
 
