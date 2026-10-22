@@ -196,6 +196,162 @@ fn version_one_workspace_migrates_to_current_version_with_diagnostic() {
 }
 
 #[test]
+fn migrated_recoverable_damage_is_normalized_and_round_trips_without_losing_unknown_panels() {
+    let metrics = DockMetrics::default();
+    let (layout, descriptors) = sample_layout();
+    let known_descriptors = descriptors
+        .into_iter()
+        .filter(|(panel_key, _)| panel_key.as_str() != "history")
+        .collect::<Vec<_>>();
+
+    let file = WorkspaceFile::from_layout(&layout).unwrap();
+    let mut legacy: serde_json::Value = serde_json::to_value(&file).unwrap();
+    legacy["version"] = serde_json::json!(1);
+    legacy["layout"]["right"]
+        .as_object_mut()
+        .unwrap()
+        .remove("last_expanded_width");
+    legacy["layout"]["right"]["group_ratios"] = serde_json::json!([0.25]);
+    legacy["layout"]["right"]["groups"][0]["active_index"] = serde_json::json!(99);
+    let legacy_json = legacy.to_string();
+
+    let report = WorkspaceFile::load_json(
+        &legacy_json,
+        &known_descriptors,
+        &metrics,
+        WorkspaceLoadOptions::default(),
+    )
+    .expect("safe, deterministic v1 data damage should be normalized");
+
+    assert!(report.diagnostics.contains(&WorkspaceDiagnostic::SchemaMigrated {
+        from: 1,
+        to: WORKSPACE_VERSION,
+    }));
+    assert!(report.diagnostics.contains(
+        &WorkspaceDiagnostic::UnknownPanelKeyPreserved {
+            key: "history".to_owned()
+        }
+    ));
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        matches!(diagnostic, WorkspaceDiagnostic::LayoutNormalized { issues }
+            if issues.iter().any(|issue| issue.contains("ratios must sum to 1.0"))
+                && issues.iter().any(|issue| issue.contains("active_index is outside children")))
+    }));
+
+    assert_eq!(report.layout.validate(&metrics), Ok(()));
+    report
+        .layout
+        .compute_rects(
+            Rect::new(Point::ZERO, Size::new(2400.0, 1600.0)),
+            &metrics,
+        )
+        .expect("normalized layout should resolve geometry in a sufficient viewport");
+
+    let right = report.layout.main_area(DockSide::Right).unwrap().root;
+    let Some(crate::Node::Column(column)) = report.layout.node(right) else {
+        panic!("right root must remain a column after recovery");
+    };
+    assert_eq!(column.group_ratios, vec![1.0]);
+    assert_eq!(column.last_expanded_width, Some(280.0));
+    let Some(crate::Node::Tabs(tabs)) = report.layout.node(column.groups[0]) else {
+        panic!("first column group must remain tabs after recovery");
+    };
+    assert_eq!(tabs.active_index, tabs.children.len() - 1);
+
+    assert_eq!(
+        report
+            .layout
+            .panel_instances()
+            .filter(|(_, panel)| panel.key.as_str() == "history")
+            .count(),
+        1,
+        "unknown panel key should remain present rather than being discarded"
+    );
+
+    // Export the recovered in-memory model as canonical v2 JSON and reopen it.
+    let canonical_file = report.layout.to_workspace_file().unwrap();
+    assert_eq!(canonical_file.version, WORKSPACE_VERSION);
+    let canonical_json = canonical_file.to_json_pretty().unwrap();
+    assert_eq!(
+        WorkspaceFile::from_json(&canonical_json).unwrap(),
+        canonical_file
+    );
+
+    let reopened = WorkspaceFile::load_json(
+        &canonical_json,
+        &known_descriptors,
+        &metrics,
+        WorkspaceLoadOptions::default(),
+    )
+    .expect("canonical v2 workspace should reopen after recovery");
+    assert_eq!(reopened.layout.validate(&metrics), Ok(()));
+    reopened
+        .layout
+        .compute_rects(
+            Rect::new(Point::ZERO, Size::new(2400.0, 1600.0)),
+            &metrics,
+        )
+        .expect("round-tripped workspace should still resolve geometry");
+    assert!(reopened.diagnostics.contains(
+        &WorkspaceDiagnostic::UnknownPanelKeyPreserved {
+            key: "history".to_owned()
+        }
+    ));
+    assert!(
+        !reopened
+            .diagnostics
+            .iter()
+            .any(|diagnostic| matches!(diagnostic, WorkspaceDiagnostic::SchemaMigrated { .. })),
+        "canonical v2 workspace should not be migrated again"
+    );
+    assert!(
+        !reopened
+            .diagnostics
+            .iter()
+            .any(|diagnostic| matches!(diagnostic, WorkspaceDiagnostic::LayoutNormalized { .. })),
+        "canonical v2 workspace should need no further normalization"
+    );
+    assert_eq!(
+        reopened.layout.to_workspace_file().unwrap(),
+        canonical_file,
+        "recover → serialize → reload should stabilize the workspace representation"
+    );
+}
+
+#[test]
+fn damaged_workspace_schema_is_rejected_before_layout_normalization() {
+    let (layout, descriptors) = sample_layout();
+    let file = WorkspaceFile::from_layout(&layout).unwrap();
+    let original: serde_json::Value = serde_json::to_value(&file).unwrap();
+
+    let mut unknown_node_type = original.clone();
+    unknown_node_type["layout"]["right"]["type"] = serde_json::json!("not_a_workspace_node");
+    let unknown_node_type = unknown_node_type.to_string();
+    assert!(matches!(
+        WorkspaceFile::load_json(
+            &unknown_node_type,
+            &descriptors,
+            &DockMetrics::default(),
+            WorkspaceLoadOptions::default(),
+        ),
+        Err(WorkspaceFileError::Json(_))
+    ));
+
+    let mut invalid_field_type = original;
+    invalid_field_type["layout"]["right"]["width"] = serde_json::json!("wide");
+    let invalid_field_type = invalid_field_type.to_string();
+    assert!(matches!(
+        WorkspaceFile::load_json(
+            &invalid_field_type,
+            &descriptors,
+            &DockMetrics::default(),
+            WorkspaceLoadOptions::default(),
+        ),
+        Err(WorkspaceFileError::Json(_))
+    ));
+}
+
+#[test]
 fn current_schema_missing_expanded_width_is_repaired_with_diagnostic() {
     let metrics = DockMetrics::default();
     let (layout, descriptors) = sample_layout();
