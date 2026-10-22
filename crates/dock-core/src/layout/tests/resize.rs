@@ -971,3 +971,127 @@ fn c45_column_boundary_and_ratio_reset_reject_non_finite_or_non_positive_inputs(
     }
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
+
+
+#[test]
+fn c46_resize_groups_clamps_against_tab_chrome_and_restores_inverse_atomically() {
+    let metrics = DockMetrics {
+        header_height: 36.0,
+        tab_strip_height: 44.0,
+        ..DockMetrics::default()
+    };
+    assert_eq!(metrics.validate(), Ok(()));
+
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+    let (_, panel_a) = builder.panel(
+        PanelKey::new("c46-chrome-resize-a").unwrap(),
+        PanelConstraints::new(
+            Size::new(120.0, 120.0),
+            Size::new(200.0, 180.0),
+            None,
+            false,
+        ),
+    );
+    let (_, panel_b) = builder.panel(
+        PanelKey::new("c46-chrome-resize-b").unwrap(),
+        PanelConstraints::new(
+            Size::new(120.0, 80.0),
+            Size::new(200.0, 120.0),
+            None,
+            false,
+        ),
+    );
+    let group_a = builder.tabs(vec![panel_a], 0, false);
+    let group_b = builder.tabs(vec![panel_b], 0, false);
+    let column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![group_a, group_b],
+        vec![0.5, 0.5],
+    );
+    builder.main_area(DockSide::Right, column);
+    let mut layout = builder.build();
+
+    // The command minimum must include the header, tab strip and panel content.
+    assert_eq!(layout.minimum_node_size(group_a, &metrics).unwrap().height, 200.0);
+    assert_eq!(layout.minimum_node_size(group_b, &metrics).unwrap().height, 160.0);
+
+    // 359 px cannot fit both group minima (200 + 160), even before the splitter.
+    let before = format!("{layout:?}");
+    let before_version = layout.version();
+    let error = layout
+        .apply(
+            DockCommand::ResizeGroups {
+                column,
+                boundary_index: 0,
+                delta: 1.0,
+                available_height: 359.0,
+            },
+            &metrics,
+        )
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        CommandError::InvalidValue {
+            field: "available_height",
+            ..
+        }
+    ));
+    assert_eq!(format!("{layout:?}"), before);
+    assert_eq!(layout.version(), before_version);
+
+    // The requested +500 px clamps to +90 px so group B retains its 160 px
+    // minimum (36 header + 44 tab strip + 80 panel content).
+    let outcome = layout
+        .apply(
+            DockCommand::ResizeGroups {
+                column,
+                boundary_index: 0,
+                delta: 500.0,
+                available_height: 500.0,
+            },
+            &metrics,
+        )
+        .unwrap();
+    assert!(matches!(
+        outcome.actual_value,
+        Some(CommandValue::GroupBoundaryDelta(delta)) if (delta - 90.0).abs() < 1.0e-3
+    ));
+    let inverse = outcome.inverse.expect("successful resize must provide inverse");
+
+    let rects = layout
+        .compute_rects(
+            Rect::new(Point::ZERO, Size::new(1000.0, 504.0)),
+            &metrics,
+        )
+        .unwrap();
+    assert!((rects.groups.iter().find(|item| item.group == group_a).unwrap().rect.size.height
+        - 340.0)
+        .abs()
+        < 1.0e-3);
+    assert!((rects.groups.iter().find(|item| item.group == group_b).unwrap().rect.size.height
+        - 160.0)
+        .abs()
+        < 1.0e-3);
+
+    layout.apply(inverse, &metrics).unwrap();
+    assert!(matches!(
+        layout.node(column),
+        Some(Node::Column(value)) if value.group_ratios == vec![0.5, 0.5]
+    ));
+    let restored = layout
+        .compute_rects(
+            Rect::new(Point::ZERO, Size::new(1000.0, 504.0)),
+            &metrics,
+        )
+        .unwrap();
+    assert!((restored.groups.iter().find(|item| item.group == group_a).unwrap().rect.size.height
+        - 250.0)
+        .abs()
+        < 1.0e-3);
+    assert!((restored.groups.iter().find(|item| item.group == group_b).unwrap().rect.size.height
+        - 250.0)
+        .abs()
+        < 1.0e-3);
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
