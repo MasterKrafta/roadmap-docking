@@ -439,39 +439,43 @@ fn client_region_smaller_than_floating_minimum_is_reported_not_shrunk_below_mini
 #[test]
 fn stale_profile_rail_width_is_repaired_and_reported() {
     let metrics = DockMetrics::default();
-    let mut builder = LayoutBuilder::new(Profile::Photoshop);
-    let (_, panel_node) = builder.panel(key("layers"), constraints());
-    let group = builder.tabs(vec![panel_node], 0, false);
-    let rail = builder.column(
-        metrics.rail_width + 12.0,
-        ColumnMode::IconsOnly,
-        vec![group],
-        vec![1.0],
-    );
-    builder.main_area(DockSide::Right, rail);
-    let layout = builder.build();
-    let file = WorkspaceFile::from_layout(&layout).unwrap();
-    let json = serde_json::to_string(&file).unwrap();
+    let descriptors = vec![(key("layers"), constraints())];
 
-    let report = WorkspaceFile::load_json(
-        &json,
-        &[(key("layers"), constraints())],
-        &metrics,
-        WorkspaceLoadOptions::default(),
-    )
-    .unwrap();
+    for profile in [Profile::Generic, Profile::Photoshop] {
+        let mut builder = LayoutBuilder::new(profile);
+        let (_, panel_node) = builder.panel(key("layers"), constraints());
+        let group = builder.tabs(vec![panel_node], 0, false);
+        let rail = builder.column(
+            metrics.rail_width + 12.0,
+            ColumnMode::IconsOnly,
+            vec![group],
+            vec![1.0],
+        );
+        builder.main_area(DockSide::Right, rail);
+        let file = WorkspaceFile::from_layout(&builder.build()).unwrap();
+        let json = serde_json::to_string(&file).unwrap();
 
-    assert!(report.diagnostics.iter().any(|diagnostic| {
-        matches!(diagnostic, WorkspaceDiagnostic::LayoutNormalized { issues }
-            if issues.iter().any(|issue| issue.contains("IconsOnly width reset")))
-    }));
-    let root = report.layout.main_area(DockSide::Right).unwrap().root;
-    let Some(crate::Node::Column(column)) = report.layout.node(root) else {
-        panic!("restored rail must stay a column");
-    };
-    assert_eq!(column.mode, ColumnMode::IconsOnly);
-    assert_eq!(column.width, metrics.rail_width);
-    assert!(report.layout.validate(&metrics).is_ok());
+        let report = WorkspaceFile::load_json(
+            &json,
+            &descriptors,
+            &metrics,
+            WorkspaceLoadOptions::default(),
+        )
+        .unwrap();
+
+        assert_eq!(report.layout.profile(), profile);
+        assert!(report.diagnostics.iter().any(|diagnostic| {
+            matches!(diagnostic, WorkspaceDiagnostic::LayoutNormalized { issues }
+                if issues.iter().any(|issue| issue.contains("IconsOnly width reset")))
+        }));
+        let root = report.layout.main_area(DockSide::Right).unwrap().root;
+        let Some(crate::Node::Column(column)) = report.layout.node(root) else {
+            panic!("restored rail must stay a column");
+        };
+        assert_eq!(column.mode, ColumnMode::IconsOnly);
+        assert_eq!(column.width, metrics.rail_width);
+        assert!(report.layout.validate(&metrics).is_ok());
+    }
 }
 
 #[test]
@@ -536,7 +540,19 @@ fn workspace_load_expands_narrow_expanded_column_and_preserves_restore_width() {
         *last_expanded_width = Some(500.0);
 
         let descriptors = vec![(key("wide-panel"), wide_constraints)];
-        let report = file.into_layout(&descriptors, &metrics).unwrap();
+        // Exercise the actual serde JSON boundary instead of calling into_layout
+        // directly, so width restoration and profile preservation are covered
+        // by the same path users take when reopening a workspace file.
+        let json = serde_json::to_string(&file).unwrap();
+        let report = WorkspaceFile::load_json(
+            &json,
+            &descriptors,
+            &metrics,
+            WorkspaceLoadOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(report.layout.profile(), profile);
+
         let root = report.layout.main_area(DockSide::Right).unwrap().root;
         let Some(crate::Node::Column(restored)) = report.layout.node(root) else {
             panic!("restored main root must be a Column");
@@ -574,25 +590,32 @@ fn workspace_load_reports_conflicting_expanded_content_minimum_and_maximum() {
         Some(Size::new(350.0, 300.0)),
         false,
     );
-
-    let mut builder = LayoutBuilder::new(Profile::Photoshop);
-    let (_, wide_panel) = builder.panel(key("wide-panel"), wide_constraints);
-    let (_, narrow_panel) = builder.panel(key("narrow-panel"), narrow_constraints);
-    let group = builder.tabs(vec![wide_panel, narrow_panel], 0, false);
-    let column = builder.column(400.0, ColumnMode::Expanded, vec![group], vec![1.0]);
-    builder.main_area(DockSide::Right, column);
-    let file = WorkspaceFile::from_layout(&builder.build()).unwrap();
     let descriptors = vec![
         (key("wide-panel"), wide_constraints),
         (key("narrow-panel"), narrow_constraints),
     ];
 
-    assert!(matches!(
-        file.into_layout(&descriptors, &metrics),
-        Err(WorkspaceFileError::InvalidLayout(errors))
-            if errors.iter().any(|error| error.to_string().contains(
-                "minimum width required by expanded contents exceeds panel maximum width"
-            ))
-    ));
-}
+    for profile in [Profile::Generic, Profile::Photoshop] {
+        let mut builder = LayoutBuilder::new(profile);
+        let (_, wide_panel) = builder.panel(key("wide-panel"), wide_constraints);
+        let (_, narrow_panel) = builder.panel(key("narrow-panel"), narrow_constraints);
+        let group = builder.tabs(vec![wide_panel, narrow_panel], 0, false);
+        let column = builder.column(400.0, ColumnMode::Expanded, vec![group], vec![1.0]);
+        builder.main_area(DockSide::Right, column);
+        let file = WorkspaceFile::from_layout(&builder.build()).unwrap();
+        let json = serde_json::to_string(&file).unwrap();
 
+        assert!(matches!(
+            WorkspaceFile::load_json(
+                &json,
+                &descriptors,
+                &metrics,
+                WorkspaceLoadOptions::default(),
+            ),
+            Err(WorkspaceFileError::InvalidLayout(errors))
+                if errors.iter().any(|error| error.to_string().contains(
+                    "minimum width required by expanded contents exceeds panel maximum width"
+                ))
+        ), "incompatible min/max constraints must fail for {profile:?}");
+    }
+}
