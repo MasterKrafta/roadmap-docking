@@ -368,6 +368,7 @@ impl Layout {
     pub(super) fn maximum_expanded_column_width(
         &self,
         column_id: NodeId,
+        metrics: &DockMetrics,
     ) -> Result<Option<f32>, CommandError> {
         let column = match self.nodes.get(column_id) {
             Some(Node::Column(column)) => column,
@@ -378,30 +379,95 @@ impl Layout {
             }
             None => return Err(CommandError::MissingNode { node: column_id }),
         };
-        let mut maximum: Option<f32> = None;
+        let mut maximum = None;
+        // Groups share one column width; the narrowest finite group limit wins.
         for group in &column.groups {
-            for panel_node in self.panel_nodes_in_subtree(*group) {
-                let Some(Node::Panel(panel)) = self.nodes.get(panel_node) else {
-                    continue;
-                };
-                let instance =
-                    self.panel_instances
-                        .get(panel.panel_id)
-                        .ok_or(CommandError::MissingPanel {
-                            panel: panel.panel_id,
-                        })?;
-                if let Some(max_size) = instance.constraints.max_size {
-                    maximum =
-                        Some(maximum.map_or(max_size.width, |current| current.min(max_size.width)));
-                }
-            }
+            maximum = minimum_width_limit(
+                maximum,
+                self.maximum_content_width(*group, metrics)?,
+            );
         }
         Ok(maximum)
+    }
+
+    fn maximum_content_width(
+        &self,
+        node_id: NodeId,
+        metrics: &DockMetrics,
+    ) -> Result<Option<f32>, CommandError> {
+        let node = self
+            .nodes
+            .get(node_id)
+            .ok_or(CommandError::MissingNode { node: node_id })?;
+        match node {
+            Node::Panel(panel) => Ok(self
+                .panel_instances
+                .get(panel.panel_id)
+                .ok_or(CommandError::MissingPanel {
+                    panel: panel.panel_id,
+                })?
+                .constraints
+                .max_size
+                .map(|size| size.width)),
+            Node::Tabs(tabs) => {
+                let mut maximum = None;
+                for child in &tabs.children {
+                    maximum = minimum_width_limit(
+                        maximum,
+                        self.maximum_content_width(*child, metrics)?,
+                    );
+                }
+                Ok(maximum)
+            }
+            Node::Split(split) if split.axis == Axis::X => {
+                let mut width = 0.0_f32;
+                for child in &split.children {
+                    let Some(child_maximum) = self.maximum_content_width(*child, metrics)? else {
+                        // One unbounded child makes the combined horizontal
+                        // limit unbounded as well.
+                        return Ok(None);
+                    };
+                    width += child_maximum;
+                }
+                width += metrics.splitter_thickness
+                    * split.children.len().saturating_sub(1) as f32;
+                if width.is_finite() {
+                    Ok(Some(width))
+                } else {
+                    Err(CommandError::InvalidValue {
+                        field: "width",
+                        reason: "maximum panel-content width overflowed",
+                    })
+                }
+            }
+            Node::Split(split) => {
+                let mut maximum = None;
+                for child in &split.children {
+                    maximum = minimum_width_limit(
+                        maximum,
+                        self.maximum_content_width(*child, metrics)?,
+                    );
+                }
+                Ok(maximum)
+            }
+            Node::Column(column) if column.mode.is_rail() => Ok(Some(column.width)),
+            Node::Column(column) => {
+                let mut maximum = None;
+                for group in &column.groups {
+                    maximum = minimum_width_limit(
+                        maximum,
+                        self.maximum_content_width(*group, metrics)?,
+                    );
+                }
+                Ok(maximum)
+            }
+        }
     }
 
     pub(super) fn maximum_column_width(
         &self,
         column_id: NodeId,
+        metrics: &DockMetrics,
     ) -> Result<Option<f32>, CommandError> {
         let column = match self.nodes.get(column_id) {
             Some(Node::Column(column)) => column,
@@ -415,8 +481,9 @@ impl Layout {
         if column.mode.is_rail() {
             return Ok(Some(column.width));
         }
-        self.maximum_expanded_column_width(column_id)
+        self.maximum_expanded_column_width(column_id, metrics)
     }
+
     /// Computes a floating window's minimum size.
     ///
     /// A collapsed root Tabs group is rendered as a strip, but its floating
@@ -558,5 +625,14 @@ impl Layout {
             }),
             None => Ok(0),
         }
+    }
+}
+
+fn minimum_width_limit(current: Option<f32>, candidate: Option<f32>) -> Option<f32> {
+    match (current, candidate) {
+        (Some(current), Some(candidate)) => Some(current.min(candidate)),
+        (Some(current), None) => Some(current),
+        (None, Some(candidate)) => Some(candidate),
+        (None, None) => None,
     }
 }
