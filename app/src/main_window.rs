@@ -17,6 +17,7 @@ pub(crate) struct MainWindow {
     resize_start_top_height: f32,
     split_ratios: [f32; 2],
     visible_tabs: [bool; 5],
+    open_tab_context_menu: Option<usize>,
     collapsed_columns: [bool; 2],
     collapsed_group_content: [bool; 3],
     windows_menu_open: bool,
@@ -43,6 +44,7 @@ impl MainWindow {
             resize_start_top_height: 0.0,
             split_ratios: [default_split, default_split],
             visible_tabs: [true, true, true, true, true],
+            open_tab_context_menu: None,
             collapsed_columns: [false, false],
             collapsed_group_content: [false, false, false],
             windows_menu_open: false,
@@ -443,6 +445,7 @@ impl Render for MainWindow {
                 left_horizontal_divider,
                 self.collapsed_group_content[0],
                 self.collapsed_group_content[1],
+                self.open_tab_context_menu,
                 cx,
             ));
         }
@@ -503,6 +506,7 @@ impl Render for MainWindow {
                 right_horizontal_divider,
                 self.collapsed_group_content[2],
                 false,
+                self.open_tab_context_menu,
                 cx,
             ));
         }
@@ -636,6 +640,7 @@ fn render_column(
     horizontal_splitter_height: f32,
     upper_content_collapsed: bool,
     lower_content_collapsed: bool,
+    open_tab_context_menu: Option<usize>,
     cx: &mut Context<MainWindow>,
 ) -> impl IntoElement {
     let colors = theme.colors;
@@ -742,6 +747,7 @@ fn render_column(
         .w(px(column_width))
         .h(px(column_height))
         .flex_shrink_0()
+        .relative()
         .bg(rgb(colors.window_background))
         .child(header);
 
@@ -899,6 +905,30 @@ fn render_column(
         column = column.child(lower_group);
     }
 
+    if let Some(menu_group) = open_tab_context_menu {
+        let menu_is_in_this_column =
+            (column_index == 0 && menu_group < 2) || (column_index == 1 && menu_group == 2);
+        if menu_is_in_this_column {
+            let menu_is_lower = menu_group == 1;
+            let menu_top = if menu_is_lower {
+                metrics.column_header_height
+                    + top_panel_height
+                    + horizontal_splitter_height
+                    + metrics.tab_strip_height
+            } else {
+                metrics.column_header_height + metrics.tab_strip_height
+            };
+            column = column.child(render_tab_context_menu(
+                menu_group,
+                column_index,
+                menu_is_lower,
+                menu_top,
+                theme,
+                cx,
+            ));
+        }
+    }
+
     column
 }
 
@@ -941,6 +971,127 @@ fn render_collapsed_tab_icon(
             cx.notify();
         }))
         .child(icon)
+}
+
+fn render_tab_context_menu(
+    group_index: usize,
+    column_index: usize,
+    is_lower: bool,
+    top: f32,
+    theme: Theme,
+    cx: &mut Context<MainWindow>,
+) -> impl IntoElement {
+    let colors = theme.colors;
+    let (close_tab_id, close_group_id) = match group_index {
+        0 => ("left-upper-close-tab", "left-upper-close-group"),
+        1 => ("left-lower-close-tab", "left-lower-close-group"),
+        _ => ("right-close-tab", "right-close-group"),
+    };
+
+    let close_tab = div()
+        .id(close_tab_id)
+        .flex()
+        .items_center()
+        .h(px(28.0))
+        .p(px(6.0))
+        .text_color(rgb(colors.primary_text))
+        .on_click(cx.listener(move |this, _, _, cx| {
+            match (column_index, is_lower) {
+                (0, false) => {
+                    let active = this.active_tabs[0].min(1);
+                    this.visible_tabs[active] = false;
+                    if this.visible_tabs[0] {
+                        this.active_tabs[0] = 0;
+                    } else if this.visible_tabs[1] {
+                        this.active_tabs[0] = 1;
+                    }
+                    if !this.visible_tabs[0]
+                        && !this.visible_tabs[1]
+                        && !this.visible_tabs[2]
+                        && !this.visible_tabs[3]
+                    {
+                        this.collapsed_columns[0] = false;
+                    }
+                }
+                (0, true) => {
+                    let active = this.lower_active_tabs[0].min(1);
+                    this.visible_tabs[2 + active] = false;
+                    if this.visible_tabs[2] {
+                        this.lower_active_tabs[0] = 0;
+                    } else if this.visible_tabs[3] {
+                        this.lower_active_tabs[0] = 1;
+                    }
+                    if !this.visible_tabs[0]
+                        && !this.visible_tabs[1]
+                        && !this.visible_tabs[2]
+                        && !this.visible_tabs[3]
+                    {
+                        this.collapsed_columns[0] = false;
+                    }
+                }
+                (1, false) => {
+                    this.visible_tabs[4] = false;
+                    this.collapsed_columns[1] = false;
+                    this.collapsed_group_content[2] = false;
+                }
+                _ => {}
+            }
+            this.open_tab_context_menu = None;
+            cx.notify();
+        }))
+        .child("Close Tab");
+
+    let close_group = div()
+        .id(close_group_id)
+        .flex()
+        .items_center()
+        .h(px(28.0))
+        .p(px(6.0))
+        .text_color(rgb(colors.primary_text))
+        .on_click(cx.listener(move |this, _, _, cx| {
+            match (column_index, is_lower) {
+                (0, false) => {
+                    this.visible_tabs[0] = false;
+                    this.visible_tabs[1] = false;
+                    this.collapsed_group_content[0] = false;
+                    if !this.visible_tabs[2] && !this.visible_tabs[3] {
+                        this.collapsed_columns[0] = false;
+                    }
+                }
+                (0, true) => {
+                    this.visible_tabs[2] = false;
+                    this.visible_tabs[3] = false;
+                    this.collapsed_group_content[1] = false;
+                    if !this.visible_tabs[0] && !this.visible_tabs[1] {
+                        this.collapsed_columns[0] = false;
+                    }
+                }
+                (1, false) => {
+                    this.visible_tabs[4] = false;
+                    this.collapsed_columns[1] = false;
+                    this.collapsed_group_content[2] = false;
+                }
+                _ => {}
+            }
+            this.open_tab_context_menu = None;
+            cx.notify();
+        }))
+        .child("Close Tab Group");
+
+    div()
+        .absolute()
+        .top(px(top))
+        .right(px(0.0))
+        .w(px(176.0))
+        .flex()
+        .flex_col()
+        .p(px(4.0))
+        .gap_1()
+        .bg(rgb(colors.group_background))
+        .border_b_1()
+        .border_color(rgb(colors.border))
+        .child(close_tab)
+        .child(close_group)
 }
 
 fn render_panel_content(
@@ -1075,13 +1226,27 @@ fn render_tab_strip(
             }
         });
 
+    let control_id = match content_index {
+        0 => "left-upper-tab-menu-button",
+        1 => "left-lower-tab-menu-button",
+        _ => "right-tab-menu-button",
+    };
     let control = div()
+        .id(control_id)
         .flex()
         .items_center()
         .justify_center()
         .w(px(metrics.button_size))
         .h(px(metrics.button_size))
         .text_color(rgb(colors.muted_text))
+        .on_click(cx.listener(move |this, _, _, cx| {
+            this.open_tab_context_menu = if this.open_tab_context_menu == Some(content_index) {
+                None
+            } else {
+                Some(content_index)
+            };
+            cx.notify();
+        }))
         .child("☰");
 
     let mut strip = div()
