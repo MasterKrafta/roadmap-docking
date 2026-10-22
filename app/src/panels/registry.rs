@@ -62,14 +62,6 @@ impl Default for PanelRegistry {
                     render_properties,
                     no_panel_menu,
                 ),
-                (
-                    PanelKey::new("history").expect("valid built-in key"),
-                    "History",
-                    "↶",
-                    constraints,
-                    render_history,
-                    no_panel_menu,
-                ),
             ],
         }
     }
@@ -80,13 +72,6 @@ impl PanelRegistry {
         self.entries
             .iter()
             .map(|(key, _, _, constraints, _, _)| (key.clone(), *constraints))
-            .collect()
-    }
-
-    pub(crate) fn menu_descriptors(&self) -> Vec<(PanelKey, String)> {
-        self.entries
-            .iter()
-            .map(|(key, title, _, _, _, _)| (key.clone(), (*title).to_owned()))
             .collect()
     }
 
@@ -169,10 +154,6 @@ fn render_properties(theme: &Theme) -> AnyElement {
     panel_content(theme, "Properties", "Properties for the current selection")
 }
 
-fn render_history(theme: &Theme) -> AnyElement {
-    panel_content(theme, "History", "Recent document operations")
-}
-
 #[cfg(test)]
 mod tests {
     use super::PanelRegistry;
@@ -185,6 +166,6 @@ mod tests {
             .iter()
             .map(|(_, _, icon, _, _, _)| *icon)
             .collect::<Vec<_>>();
-        assert_eq!(icons, vec!["▱", "◉", "☷", "↶"]);
+        assert_eq!(icons, vec!["▱", "◉", "☷"]);
     }
 }
