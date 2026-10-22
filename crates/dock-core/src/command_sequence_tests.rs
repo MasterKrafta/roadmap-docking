@@ -490,6 +490,74 @@ fn source_equals_target_and_same_position_commands_are_successful_noops() {
     }
 }
 
+fn resize_groups_preconditions_hold(
+    layout: &Layout,
+    groups: &[NodeId],
+    ratios: &[f32],
+    available_height: f32,
+    metrics: &DockMetrics,
+) -> bool {
+    if groups.is_empty()
+        || groups.len() != ratios.len()
+        || !available_height.is_finite()
+        || available_height <= 0.0
+    {
+        return false;
+    }
+
+    let mut minimums = Vec::with_capacity(groups.len());
+    let mut collapsed = Vec::with_capacity(groups.len());
+    let mut fixed_height = 0.0_f32;
+    let mut expanded_weight_sum = 0.0_f32;
+    let mut expanded_count = 0usize;
+
+    for (group, ratio) in groups.iter().zip(ratios) {
+        let Ok(minimum) = layout.minimum_node_size(*group, metrics) else {
+            return false;
+        };
+        let is_collapsed = matches!(layout.node(*group), Some(Node::Tabs(tabs)) if tabs.collapsed);
+        minimums.push(minimum.height);
+        collapsed.push(is_collapsed);
+        if is_collapsed {
+            fixed_height += minimum.height;
+        } else {
+            expanded_weight_sum += *ratio;
+            expanded_count += 1;
+        }
+    }
+
+    let required_height: f32 = minimums.iter().sum();
+    if !required_height.is_finite() || available_height < required_height {
+        return false;
+    }
+
+    let free_height = available_height - fixed_height;
+    if !free_height.is_finite() || free_height < 0.0 {
+        return false;
+    }
+    if expanded_count == 0 {
+        return true;
+    }
+
+    for index in 0..groups.len() {
+        if collapsed[index] {
+            continue;
+        }
+        let height = if expanded_weight_sum <= f32::EPSILON {
+            free_height / expanded_count as f32
+        } else {
+            free_height * ratios[index] / expanded_weight_sum
+        };
+        // Match ResizeGroups' precondition: it rejects a current ratio layout
+        // when an expanded group's proportional height is below its minimum.
+        if !height.is_finite() || height + 1.0e-3 < minimums[index] {
+            return false;
+        }
+    }
+
+    true
+}
+
 fn valid_commands(layout: &Layout, metrics: &DockMetrics, serial: &mut usize) -> Vec<DockCommand> {
     let groups = tab_groups(layout);
     let main_groups = main_tab_groups(layout);
@@ -661,7 +729,15 @@ fn valid_commands(layout: &Layout, metrics: &DockMetrics, serial: &mut usize) ->
             column: *column,
             ratios: ratios.clone(),
         });
-        if owned_groups.len() > 1 {
+        if owned_groups.len() > 1
+            && resize_groups_preconditions_hold(
+                layout,
+                owned_groups,
+                ratios,
+                height,
+                metrics,
+            )
+        {
             commands.push(DockCommand::ResizeGroups {
                 column: *column,
                 boundary_index: 0,
@@ -807,6 +883,37 @@ mod tests {
     use proptest::prelude::*;
 
     use super::*;
+
+    #[test]
+    fn generated_resize_groups_skip_columns_with_under_minimum_ratios() {
+        let metrics = DockMetrics::default();
+        let mut builder = LayoutBuilder::new(crate::Profile::Generic);
+
+        let (_, first_panel) =
+            builder.panel(PanelKey::new("generated-resize-small").unwrap(), constraints());
+        let (_, second_panel) =
+            builder.panel(PanelKey::new("generated-resize-large").unwrap(), constraints());
+        let first_group = builder.tabs(vec![first_panel], 0, false);
+        let second_group = builder.tabs(vec![second_panel], 0, false);
+        let column = builder.column(
+            metrics.default_column_width,
+            ColumnMode::Expanded,
+            vec![first_group, second_group],
+            vec![0.001, 0.999],
+        );
+        builder.main_area(DockSide::Right, column);
+        let layout = builder.build();
+
+        assert_eq!(layout.validate(&metrics), Ok(()));
+        let mut serial = 0;
+        let commands = valid_commands(&layout, &metrics, &mut serial);
+        assert!(
+            !commands.iter().any(
+                |command| matches!(command, DockCommand::ResizeGroups { column: target, .. } if *target == column)
+            ),
+            "the generator must not label a ResizeGroups command valid when a group starts below its minimum"
+        );
+    }
 
     proptest! {
         #![proptest_config(ProptestConfig {
