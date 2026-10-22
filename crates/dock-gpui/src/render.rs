@@ -52,7 +52,6 @@ impl Render for DragGhost {
 
 
 const GROUP_MENU_BUTTON_WIDTH: f32 = 28.0;
-const GROUP_DRAG_FREE_WIDTH: f32 = 16.0;
 const GROUP_DRAG_GRIP_HEIGHT: f32 = 4.0;
 
 #[derive(Clone, Copy)]
@@ -180,13 +179,11 @@ pub fn normalize_docked_group_geometry(
         let overflow_width = if has_overflow {
             metrics
                 .tab_overflow_button_width
-                .min((width - menu_width - GROUP_DRAG_FREE_WIDTH).max(0.0))
+                .min((width - menu_width).max(0.0))
         } else {
             0.0
         };
-        let drag_free_width = GROUP_DRAG_FREE_WIDTH
-            .min((width - menu_width - overflow_width).max(0.0));
-        let tabs_width = (width - menu_width - overflow_width - drag_free_width).max(0.0);
+        let tabs_width = (width - menu_width - overflow_width).max(0.0);
 
         let mut header_indices = rects
             .tab_headers
@@ -720,39 +717,11 @@ where
         }
     }
 
-    // Empty strip space is a group-drag surface. Tabs, overflow and the panel
-    // menu are separate higher-layer controls and keep their own click semantics.
+    // The strip background is presentation only. Group dragging belongs to
+    // the separate thin grip above it; menu and tab controls remain independent.
     for strip in rects.tab_strips.iter().filter(|entry| nodes.contains(&entry.group)) {
-        if rail_groups.contains(&strip.group) {
-            elements.push(
-                rect_element(strip.rect, theme.colors.toolbar_background).into_any_element(),
-            );
-            continue;
-        }
-        let Some(Node::Tabs(tabs)) = layout.node(strip.group) else {
-            elements.push(
-                rect_element(strip.rect, theme.colors.toolbar_background).into_any_element(),
-            );
-            continue;
-        };
-        let title = active_panel(layout, tabs)
-            .and_then(|panel_id| layout.panel_instance(panel_id))
-            .map(panel_title)
-            .unwrap_or_else(|| "Panel group".to_owned());
-        let payload = DragPayload::Group { group: strip.group };
-        let ghost_title = format!("Move group: {title}");
         elements.push(
-            rect_element(strip.rect, theme.colors.toolbar_background)
-                .id(format!("dock-group-strip-{:?}", strip.group))
-                .on_mouse_down(
-                    MouseButton::Left,
-                    make_drag_start_handler(payload, DragHandle::GroupGrip),
-                )
-                .on_drag(payload, move |_payload, _offset, _window, app| {
-                    let title = ghost_title.clone();
-                    app.new(|_| DragGhost { title })
-                })
-                .into_any_element(),
+            rect_element(strip.rect, theme.colors.toolbar_background).into_any_element(),
         );
     }
 
@@ -853,7 +822,7 @@ where
                 .border_1()
                 .border_color(rgb(theme.colors.border))
                 .text_color(rgb(theme.colors.primary_text))
-                .child("≡")
+                .child("☰")
                 .id(format!("dock-group-menu-{:?}", strip.group))
                 .focusable()
                 .focus_visible(|style| style.border_2().border_color(rgb(theme.colors.focus)))
@@ -1163,8 +1132,7 @@ fn tab_header_label(title: &str, collapsed: bool, tab_index: usize) -> String {
 mod tests {
     use super::{
         normalize_docked_group_geometry, rail_entry_label, scroll_rect_in_viewport,
-        tab_header_label, GROUP_DRAG_FREE_WIDTH, GROUP_DRAG_GRIP_HEIGHT,
-        GROUP_MENU_BUTTON_WIDTH,
+        tab_header_label, GROUP_DRAG_GRIP_HEIGHT, GROUP_MENU_BUTTON_WIDTH,
     };
     use dock_core::{
         create_initial_layout, ColumnMode, DockMetrics, DockSide, Node, PanelConstraints, PanelKey,
@@ -1284,8 +1252,8 @@ mod tests {
             .fold(group_rect.origin.x, f32::max);
         let menu_left = group_rect.origin.x + group_rect.size.width - GROUP_MENU_BUTTON_WIDTH;
         assert!(
-            menu_left - tab_right >= GROUP_DRAG_FREE_WIDTH - 0.001,
-            "tabs must leave a separate group-drag gap before the panel-menu button"
+            (menu_left - tab_right).abs() < 0.001,
+            "the menu button should sit directly after the tabs, without sharing their hit area"
         );
     }
 
