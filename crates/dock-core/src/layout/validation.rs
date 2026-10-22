@@ -476,7 +476,7 @@ impl Layout {
                         continue;
                     }
                 };
-                let maximum = match self.maximum_expanded_column_width(node_id, metrics) {
+                let maximum = match self.maximum_expanded_column_width(node_id) {
                     Ok(maximum) => maximum,
                     Err(_) => {
                         errors.push(ValidationError::InvalidColumn {
