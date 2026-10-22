@@ -47,7 +47,7 @@ fn c45_resize_groups_changes_only_adjacent_pair_and_reports_minimum_clamp() {
                 column,
                 boundary_index: 0,
                 delta: 500.0,
-                available_height: 600.0,
+                available_height: 824.0,
             },
             &metrics,
         )
@@ -60,8 +60,9 @@ fn c45_resize_groups_changes_only_adjacent_pair_and_reports_minimum_clamp() {
     let Node::Column(value) = layout.node(column).unwrap() else {
         panic!("target should remain a Column");
     };
-    assert!((value.group_ratios[0] - (5.0 / 12.0)).abs() < 1.0e-4);
-    assert!((value.group_ratios[1] - (1.0 / 6.0)).abs() < 1.0e-4);
+    let expected_weight_delta = 50.0 / 824.0;
+    assert!((value.group_ratios[0] - (1.0 / 3.0 + expected_weight_delta)).abs() < 1.0e-4);
+    assert!((value.group_ratios[1] - (0.25 - expected_weight_delta)).abs() < 1.0e-4);
     assert_eq!(value.group_ratios[2], before_ratios[2]);
     assert_eq!(layout.validate(&metrics), Ok(()));
 
@@ -78,20 +79,187 @@ fn c45_resize_groups_changes_only_adjacent_pair_and_reports_minimum_clamp() {
                 column,
                 boundary_index: 0,
                 delta: -500.0,
-                available_height: 600.0,
+                available_height: 824.0,
             },
             &metrics,
         )
         .unwrap();
+    let expected_min_delta = 176.0 - 824.0 / 3.0;
     assert!(matches!(
         min_clamp.actual_value,
-        Some(CommandValue::GroupBoundaryDelta(delta)) if (delta + 80.0).abs() < 1.0e-3
+        Some(CommandValue::GroupBoundaryDelta(delta)) if (delta - expected_min_delta).abs() < 1.0e-3
     ));
     assert!(matches!(
         layout.node(column),
-        Some(Node::Column(value)) if (value.group_ratios[0] - 0.2).abs() < 1.0e-4
+        Some(Node::Column(value)) if (value.group_ratios[0] - (176.0 / 824.0)).abs() < 1.0e-4
     ));
     assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
+fn c45_resize_groups_cannot_shrink_below_tab_chrome_and_panel_minimum() {
+    let metrics = DockMetrics::default();
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+    let constraints = |min_height: f32| {
+        PanelConstraints::new(
+            Size::new(120.0, min_height),
+            Size::new(200.0, min_height.max(140.0)),
+            None,
+            false,
+        )
+    };
+    let (_, panel_a) = builder.panel(
+        PanelKey::new("c45-chrome-minimum-a").unwrap(),
+        constraints(120.0),
+    );
+    let (_, panel_b) = builder.panel(
+        PanelKey::new("c45-chrome-minimum-b").unwrap(),
+        constraints(100.0),
+    );
+    let group_a = builder.tabs(vec![panel_a], 0, false);
+    let group_b = builder.tabs(vec![panel_b], 0, false);
+    let column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![group_a, group_b],
+        vec![0.5, 0.5],
+    );
+    builder.main_area(DockSide::Right, column);
+    let mut layout = builder.build();
+    let before = format!("{layout:?}");
+
+    // available_height excludes the 4 px splitter. Both groups start at 176 px;
+    // group A requires 28 px header + 28 px strip + 120 px panel content.
+    let outcome = layout
+        .apply(
+            DockCommand::ResizeGroups {
+                column,
+                boundary_index: 0,
+                delta: -1.0,
+                available_height: 352.0,
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    assert_eq!(
+        outcome.actual_value,
+        Some(CommandValue::GroupBoundaryDelta(0.0))
+    );
+    assert_eq!(outcome.inverse, None);
+    assert_eq!(outcome.new_version, 0);
+    assert_eq!(format!("{layout:?}"), before);
+
+    let rects = layout
+        .compute_rects(
+            Rect::new(Point::ZERO, Size::new(1000.0, 356.0)),
+            &metrics,
+        )
+        .unwrap();
+    assert_eq!(
+        rects.groups.iter().find(|item| item.group == group_a).unwrap().rect.size.height,
+        176.0
+    );
+    assert_eq!(
+        rects.groups.iter().find(|item| item.group == group_b).unwrap().rect.size.height,
+        176.0
+    );
+    assert!(rects.vertical_overflow.is_empty());
+}
+
+#[test]
+fn c45_resize_groups_uses_effective_collapsed_height_when_tab_strip_is_taller() {
+    let metrics = DockMetrics {
+        collapsed_group_height: 28.0,
+        tab_strip_height: 42.0,
+        ..DockMetrics::default()
+    };
+    let constraints = PanelConstraints::new(
+        Size::new(120.0, 100.0),
+        Size::new(200.0, 140.0),
+        None,
+        false,
+    );
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+    let (_, collapsed_panel) = builder.panel(
+        PanelKey::new("c45-effective-collapsed-height").unwrap(),
+        constraints,
+    );
+    let (_, expanded_panel) = builder.panel(
+        PanelKey::new("c45-effective-expanded-height").unwrap(),
+        constraints,
+    );
+    let collapsed = builder.tabs(vec![collapsed_panel], 0, true);
+    let expanded = builder.tabs(vec![expanded_panel], 0, false);
+    let column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![collapsed, expanded],
+        vec![0.5, 0.5],
+    );
+    builder.main_area(DockSide::Right, column);
+    let mut layout = builder.build();
+    let before = format!("{layout:?}");
+
+    // The effective collapsed height is 42 px, leaving only 169 px for an
+    // expanded group whose minimum is 28 + 42 + 100 = 170 px.
+    let error = layout
+        .apply(
+            DockCommand::ResizeGroups {
+                column,
+                boundary_index: 0,
+                delta: 5.0,
+                available_height: 211.0,
+            },
+            &metrics,
+        )
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        CommandError::InvalidValue {
+            field: "available_height",
+            ..
+        }
+    ));
+    assert_eq!(format!("{layout:?}"), before);
+    assert_eq!(layout.version(), 0);
+
+    let outcome = layout
+        .apply(
+            DockCommand::ResizeGroups {
+                column,
+                boundary_index: 0,
+                delta: 5.0,
+                available_height: 212.0,
+            },
+            &metrics,
+        )
+        .unwrap();
+    assert_eq!(
+        outcome.actual_value,
+        Some(CommandValue::GroupBoundaryDelta(0.0))
+    );
+    assert_eq!(outcome.inverse, None);
+    assert_eq!(outcome.new_version, 0);
+    assert_eq!(layout.validate(&metrics), Ok(()));
+
+    // Geometry consumes the same minimum contract: 42 px collapsed strip,
+    // 170 px expanded group, and one 4 px splitter.
+    let rects = layout
+        .compute_rects(
+            Rect::new(Point::ZERO, Size::new(1000.0, 216.0)),
+            &metrics,
+        )
+        .unwrap();
+    assert_eq!(
+        rects.groups.iter().find(|item| item.group == collapsed).unwrap().rect.size.height,
+        42.0
+    );
+    assert_eq!(
+        rects.groups.iter().find(|item| item.group == expanded).unwrap().rect.size.height,
+        170.0
+    );
+    assert!(rects.vertical_overflow.is_empty());
 }
 
 #[test]
@@ -170,12 +338,12 @@ fn c45_collapsed_group_has_fixed_height_and_cannot_be_resized_at_its_boundary() 
         .unwrap();
     assert!(matches!(
         expanded_boundary.actual_value,
-        Some(CommandValue::GroupBoundaryDelta(delta)) if (delta - 156.0).abs() < 1.0e-3
+        Some(CommandValue::GroupBoundaryDelta(delta)) if (delta - 100.0).abs() < 1.0e-3
     ));
     let Node::Column(value) = layout.node(column).unwrap() else {
         panic!("target should remain a Column");
     };
-    let expected_weight_delta = 156.0 * 0.5 / 472.0;
+    let expected_weight_delta = 100.0 * 0.5 / 472.0;
     assert_eq!(value.group_ratios[0], 0.5);
     assert!((value.group_ratios[1] - (0.25 + expected_weight_delta)).abs() < 1.0e-4);
     assert!((value.group_ratios[2] - (0.25 - expected_weight_delta)).abs() < 1.0e-4);
@@ -267,14 +435,14 @@ fn c45_reset_group_ratios_respects_minimums_when_equal_share_would_be_too_small(
         .apply(
             DockCommand::ResetColumnRatios {
                 column,
-                available_height: 240.0,
+                available_height: 360.0,
             },
             &metrics,
         )
         .unwrap();
     assert_eq!(
         outcome.actual_value,
-        Some(CommandValue::GroupRatios(vec![2.0 / 3.0, 1.0 / 3.0]))
+        Some(CommandValue::GroupRatios(vec![0.6, 0.4]))
     );
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
