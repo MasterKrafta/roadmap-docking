@@ -253,85 +253,12 @@ fn minimum_node_size(
     id: NodeId,
     metrics: &DockMetrics,
 ) -> Result<Size, ComputeRectsError> {
-    let node = layout.node(id).ok_or(ComputeRectsError::InvalidLayout)?;
-    let size = match node {
-        Node::Panel(panel) => {
-            layout
-                .panel_instance(panel.panel_id)
-                .ok_or(ComputeRectsError::InvalidLayout)?
-                .constraints
-                .min_size
+    layout.minimum_node_size(id, metrics).map_err(|error| match error {
+        crate::CommandError::InvalidValue { field: "size", .. } => {
+            ComputeRectsError::Geometry(GeometryError::ArithmeticOverflow)
         }
-        Node::Tabs(tabs) if tabs.collapsed => Size::new(
-            0.0,
-            metrics.collapsed_group_height.max(metrics.tab_strip_height),
-        ),
-        Node::Tabs(tabs) => {
-            let mut width = 0.0_f32;
-            let mut content_height = 0.0_f32;
-            for child in &tabs.children {
-                let child_size = minimum_node_size(layout, *child, metrics)?;
-                width = width.max(child_size.width);
-                content_height = content_height.max(child_size.height);
-            }
-            let height = metrics
-                .min_group_height
-                .max(metrics.header_height + metrics.tab_strip_height + content_height);
-            Size::new(width, height)
-        }
-        Node::Split(split) => {
-            let mut width = 0.0_f32;
-            let mut height = 0.0_f32;
-            for child in &split.children {
-                let child_size = minimum_node_size(layout, *child, metrics)?;
-                match split.axis {
-                    Axis::X => {
-                        width += child_size.width;
-                        height = height.max(child_size.height);
-                    }
-                    Axis::Y => {
-                        width = width.max(child_size.width);
-                        height += child_size.height;
-                    }
-                }
-            }
-            let gaps = metrics.splitter_thickness * split.children.len().saturating_sub(1) as f32;
-            match split.axis {
-                Axis::X => width += gaps,
-                Axis::Y => height += gaps,
-            }
-            Size::new(width, height)
-        }
-        Node::Column(column) => {
-            let width = effective_column_width(column, metrics);
-            if column.mode.is_rail() {
-                let slot_count = layout
-                    .column_display_order(id)
-                    .map_err(|_| ComputeRectsError::InvalidLayout)?
-                    .len();
-                Size::new(
-                    width,
-                    metrics.collapsed_group_height.max(metrics.tab_strip_height)
-                        * slot_count as f32,
-                )
-            } else {
-                let mut height = 0.0_f32;
-                for group in &column.groups {
-                    height += minimum_node_size(layout, *group, metrics)?.height;
-                }
-                height += metrics.splitter_thickness * column.groups.len().saturating_sub(1) as f32;
-                Size::new(width, height)
-            }
-        }
-    };
-
-    if !size.width.is_finite() || !size.height.is_finite() || size.width < 0.0 || size.height <= 0.0
-    {
-        return Err(ComputeRectsError::Geometry(
-            GeometryError::ArithmeticOverflow,
-        ));
-    }
-    Ok(size)
+        _ => ComputeRectsError::InvalidLayout,
+    })
 }
 
 fn layout_node(
@@ -410,7 +337,7 @@ fn layout_column(
     // canonical: groups top-to-bottom, then tabs inside each group left-to-right.
     // Only geometry changes; the underlying Tabs/Column tree remains untouched.
     if column.mode.is_rail() {
-        let slot_height = metrics.collapsed_group_height.max(metrics.tab_strip_height);
+        let slot_height = metrics.effective_collapsed_group_height();
         let display_order = layout
             .column_display_order(id)
             .map_err(|_| ComputeRectsError::InvalidLayout)?;
@@ -498,7 +425,7 @@ fn layout_tabs(
     output: &mut LayoutRects,
 ) -> Result<(), ComputeRectsError> {
     let collapsed = tabs.collapsed;
-    let collapsed_height = metrics.collapsed_group_height.max(metrics.tab_strip_height);
+    let collapsed_height = metrics.effective_collapsed_group_height();
     let minimum_size = minimum_node_size(layout, id, metrics)?;
     let minimum_height = if collapsed {
         collapsed_height
@@ -772,7 +699,7 @@ fn allocate_stack_heights(
         });
     }
 
-    let collapsed_height = metrics.collapsed_group_height.max(metrics.tab_strip_height);
+    let collapsed_height = metrics.effective_collapsed_group_height();
     let mut collapsed = Vec::with_capacity(children.len());
     let mut minimums = Vec::with_capacity(children.len());
     for child in children {
@@ -2096,7 +2023,7 @@ mod tests {
         let rects = layout
             .compute_rects(viewport(1000.0, 20.0), &metrics)
             .unwrap();
-        let slot_height = metrics.collapsed_group_height.max(metrics.tab_strip_height);
+        let slot_height = metrics.effective_collapsed_group_height();
 
         assert_eq!(rects.vertical_overflow.len(), 1);
         assert_eq!(rects.vertical_overflow[0].owner, column);
