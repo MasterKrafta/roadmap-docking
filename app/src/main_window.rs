@@ -84,6 +84,14 @@ impl MainWindow {
             is_resizing_height: false,
         })
     }
+
+    fn reset_floating_if_empty(&mut self) {
+        if !self.visible_tabs.iter().any(|visible| *visible) {
+            self.composition_floating = false;
+            self.dragging_composition = false;
+            self.floating_composition_position = [0.0, 0.0];
+        }
+    }
 }
 
 impl Render for MainWindow {
@@ -401,6 +409,8 @@ impl Render for MainWindow {
                     let window_width = window_width;
                     let window_height = window_height;
                     let menu_bar_height = menu_bar_height;
+                    let composition_floating = self.composition_floating;
+                    let floating_position = self.floating_composition_position;
                     let header_height = metrics.column_header_height;
                     let tab_strip_height = metrics.tab_strip_height;
                     let button_size = metrics.button_size;
@@ -437,7 +447,9 @@ impl Render for MainWindow {
                         }
 
                         if let Some(group) = this.open_tab_context_menu {
-                            let left_column_left = if right_column_visible {
+                            let left_column_left = if composition_floating {
+                                floating_position[0]
+                            } else if right_column_visible {
                                 (window_width
                                     - left_column_width
                                     - right_column_width
@@ -446,19 +458,34 @@ impl Render for MainWindow {
                             } else {
                                 (window_width - left_column_width).max(0.0)
                             };
+                            let right_column_left = if composition_floating {
+                                floating_position[0]
+                                    + if left_column_visible {
+                                        left_column_width + divider_width
+                                    } else {
+                                        0.0
+                                    }
+                            } else {
+                                window_width - right_column_width
+                            };
+                            let vertical_origin = if composition_floating {
+                                floating_position[1]
+                            } else {
+                                menu_bar_height
+                            };
                             let (strip_top, menu_left) = match group {
                                 0 => (
-                                    menu_bar_height + header_height,
+                                    vertical_origin + header_height,
                                     left_column_left + left_column_width - 176.0,
                                 ),
                                 1 => (
-                                    menu_bar_height + header_height + left_top_height
+                                    vertical_origin + header_height + left_top_height
                                         + left_horizontal_divider,
                                     left_column_left + left_column_width - 176.0,
                                 ),
                                 _ => (
-                                    menu_bar_height + header_height,
-                                    window_width - 176.0,
+                                    vertical_origin + header_height,
+                                    right_column_left + right_column_width - 176.0,
                                 ),
                             };
 
@@ -469,7 +496,7 @@ impl Render for MainWindow {
 
                             let button_left = match group {
                                 0 | 1 => left_column_left + left_column_width - button_size,
-                                _ => window_width - button_size,
+                                _ => right_column_left + right_column_width - button_size,
                             };
                             let button_inside = x >= button_left
                                 && x <= button_left + button_size
@@ -545,7 +572,7 @@ impl Render for MainWindow {
         let mut dock_row = div()
             .flex()
             .flex_row()
-            .w(px(if self.composition_floating {
+            .w(px(if self.composition_floating && any_column_visible {
                 composition_width
             } else {
                 window_width
@@ -554,7 +581,7 @@ impl Render for MainWindow {
             .flex_shrink_0()
             .bg(rgb(colors.window_background));
 
-        if self.composition_floating {
+        if self.composition_floating && any_column_visible {
             dock_row = dock_row
                 .absolute()
                 .left(px(self.floating_composition_position[0]))
@@ -805,6 +832,7 @@ fn render_panel_menu_item(
         .text_color(rgb(colors.primary_text))
         .on_click(cx.listener(move |this, _, _, cx| {
             this.visible_tabs[index] = !this.visible_tabs[index];
+            this.reset_floating_if_empty();
 
             // Keep a visible tab selected whenever exactly one tab remains in a group.
             match index {
@@ -923,11 +951,7 @@ fn render_column(
             this.visible_tabs[4] = false;
         }
         this.collapsed_columns[column_index] = false;
-        if !this.visible_tabs.iter().any(|visible| *visible) {
-            this.composition_floating = false;
-            this.dragging_composition = false;
-            this.floating_composition_position = [0.0, 0.0];
-        }
+        this.reset_floating_if_empty();
         this.is_resizing_columns = false;
         this.is_resizing_outer_splitter = false;
         this.is_resizing_height = false;
@@ -1322,7 +1346,8 @@ fn render_mouse_context_menu(
                 .text_color(rgb(colors.primary_text))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.collapsed_columns[column_index] = true;
-                    this.open_tab_context_menu = None;
+                    this.reset_floating_if_empty();
+            this.open_tab_context_menu = None;
                     this.mouse_context_menu = None;
                     cx.notify();
                 }))
@@ -1345,7 +1370,8 @@ fn render_mouse_context_menu(
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.collapsed_columns[column_index] = false;
                     this.collapsed_group_content[group_index] = false;
-                    this.open_tab_context_menu = None;
+                    this.reset_floating_if_empty();
+            this.open_tab_context_menu = None;
                     this.mouse_context_menu = None;
                     cx.notify();
                 }))
@@ -1406,6 +1432,7 @@ fn render_mouse_context_menu(
                     this.collapsed_group_content[2] = false;
                 }
             }
+            this.reset_floating_if_empty();
             this.open_tab_context_menu = None;
             this.mouse_context_menu = None;
             cx.notify();
@@ -1444,6 +1471,7 @@ fn render_mouse_context_menu(
                     this.collapsed_group_content[2] = false;
                 }
             }
+            this.reset_floating_if_empty();
             this.open_tab_context_menu = None;
             this.mouse_context_menu = None;
             cx.notify();
@@ -1461,6 +1489,7 @@ fn render_mouse_context_menu(
         .text_color(rgb(colors.primary_text))
         .on_click(cx.listener(move |this, _, _, cx| {
             this.collapsed_group_content[group_to_minimize] = !group_is_minimized;
+            this.reset_floating_if_empty();
             this.open_tab_context_menu = None;
             this.mouse_context_menu = None;
             cx.notify();
@@ -1481,6 +1510,7 @@ fn render_mouse_context_menu(
         .text_color(rgb(colors.primary_text))
         .on_click(cx.listener(move |this, _, _, cx| {
             this.collapsed_columns[column_to_collapse] = true;
+            this.reset_floating_if_empty();
             this.open_tab_context_menu = None;
             this.mouse_context_menu = None;
             cx.notify();
@@ -1557,6 +1587,7 @@ fn render_tab_context_menu(
                 }
                 _ => {}
             }
+            this.reset_floating_if_empty();
             this.open_tab_context_menu = None;
             cx.notify();
         }))
@@ -1594,6 +1625,7 @@ fn render_tab_context_menu(
                 }
                 _ => {}
             }
+            this.reset_floating_if_empty();
             this.open_tab_context_menu = None;
             cx.notify();
         }))
