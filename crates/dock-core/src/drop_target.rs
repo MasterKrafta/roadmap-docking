@@ -24,11 +24,60 @@ pub enum DropTarget {
     FreeArea,
 }
 
+impl DropTarget {
+    /// Returns the node directly referenced by this target.
+    ///
+    /// Area-only targets have no referenced node. Keeping this mapping here
+    /// gives validation and drag/drop resolution one source of truth.
+    pub(crate) fn referenced_node_id(self) -> Option<NodeId> {
+        match self {
+            Self::Tabs { group, .. }
+            | Self::GroupTabs { group, .. }
+            | Self::GroupEdge { group, .. } => Some(group),
+            Self::ColumnSlot { column, .. } | Self::RailSlot { column, .. } => Some(column),
+            Self::MainColumn { .. } | Self::FreeArea => None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::DropTarget;
     use crate::{DockSide, DropZone, NodeId};
     use slotmap::Key;
+
+    #[test]
+    fn referenced_node_id_uses_the_group_or_column_and_omits_area_targets() {
+        let mut nodes = slotmap::SlotMap::<NodeId, ()>::with_key();
+        let group = nodes.insert(());
+        let column = nodes.insert(());
+
+        assert_eq!(
+            DropTarget::Tabs { group, index: 2 }.referenced_node_id(),
+            Some(group)
+        );
+        assert_eq!(
+            DropTarget::GroupTabs { group, index: 2 }.referenced_node_id(),
+            Some(group)
+        );
+        assert_eq!(
+            DropTarget::GroupEdge { group, zone: DropZone::Top }.referenced_node_id(),
+            Some(group)
+        );
+        assert_eq!(
+            DropTarget::ColumnSlot { column, index: 2 }.referenced_node_id(),
+            Some(column)
+        );
+        assert_eq!(
+            DropTarget::RailSlot { column, index: 2 }.referenced_node_id(),
+            Some(column)
+        );
+        assert_eq!(
+            DropTarget::MainColumn { side: DockSide::Right, index: 0 }.referenced_node_id(),
+            None
+        );
+        assert_eq!(DropTarget::FreeArea.referenced_node_id(), None);
+    }
 
     #[test]
     fn targets_preserve_explicit_positions_and_semantics() {
