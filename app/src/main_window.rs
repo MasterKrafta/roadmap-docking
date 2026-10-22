@@ -4,8 +4,8 @@ use dock_core::{
     Node, NodeId, PanelId, PanelKey, Point, Profile, Rect, Size,
 };
 use gpui::{
-    App, ClickEvent, Context, InteractiveElement, IntoElement, ParentElement, Render,
-    StatefulInteractiveElement, Styled, Window, div, px, rgb,
+    App, ClickEvent, Context, InteractiveElement, IntoElement, MouseDownEvent, ParentElement,
+    Render, StatefulInteractiveElement, Styled, Window, div, px, rgb,
 };
 use ui::Theme;
 
@@ -475,7 +475,8 @@ impl Render for MainWindow {
                     .h(px(height))
                     .bg(rgb(self.theme.colors.window_background))
                     .text_color(rgb(self.theme.colors.primary_text))
-                    .child(format!("Dock geometry error: {error:?}"));
+                    .child(format!("Dock geometry error: {error:?}"))
+                    .into_any_element();
             }
         };
 
@@ -563,7 +564,7 @@ impl Render for MainWindow {
             },
             move |payload, handle| {
                 let weak = drag_start_weak.clone();
-                Box::new(move |event, _window: &mut Window, app: &mut App| {
+                Box::new(move |event: &MouseDownEvent, _window: &mut Window, app: &mut App| {
                     let position = Point::new(
                         event.position.x.as_f32(),
                         event.position.y.as_f32() - MENU_BAR_HEIGHT,
@@ -636,6 +637,6 @@ impl Render for MainWindow {
             root = root.child(menu_element);
         }
 
-        root
+        root.into_any_element()
     }
 }
