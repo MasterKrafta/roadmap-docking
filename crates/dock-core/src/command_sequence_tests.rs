@@ -10,8 +10,9 @@ use slotmap::Key;
 
 use crate::layout_builder::LayoutBuilder;
 use crate::{
-    Axis, ChromeMode, ColumnMode, DockCommand, DockMetrics, DockSide, DropTarget, DropZone, Layout,
-    Node, NodeId, PanelConstraints, PanelId, PanelKey, Point, Profile, Rect, Size,
+    Axis, ChromeMode, ColumnMode, ComputeRectsError, DockCommand, DockMetrics, DockSide,
+    DropTarget, DropZone, Layout, Node, NodeId, PanelConstraints, PanelId, PanelKey, Point,
+    Profile, Rect, Size, UndoRedoHistory,
 };
 
 fn constraints() -> PanelConstraints {
@@ -966,6 +967,399 @@ fn logical_snapshot(layout: &Layout) -> String {
     parts.push(format!("flyout={flyout}"));
 
     parts.join("\n")
+}
+
+fn persistent_logical_snapshot(layout: &Layout) -> String {
+    logical_snapshot(layout)
+        .lines()
+        .filter(|line| !line.starts_with("flyout="))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+type RuntimeIdSets = (
+    HashSet<NodeId>,
+    HashSet<PanelId>,
+    HashSet<crate::DockAreaId>,
+    HashSet<crate::FloatingGroupId>,
+);
+
+fn runtime_id_sets(layout: &Layout) -> RuntimeIdSets {
+    (
+        layout.nodes().map(|(id, _)| id).collect(),
+        layout.panel_instances().map(|(id, _)| id).collect(),
+        layout.dock_areas().map(|(id, _)| id).collect(),
+        layout.floating_groups().map(|(id, _)| id).collect(),
+    )
+}
+
+fn assert_layout_state_invariants(layout: &Layout, metrics: &DockMetrics) {
+    assert_eq!(layout.validate(metrics), Ok(()), "layout must validate");
+
+    for (node_id, node) in layout.nodes() {
+        match node {
+            Node::Panel(panel) => assert!(
+                layout.panel_instance(panel.panel_id).is_some(),
+                "panel node {node_id:?} references missing PanelId {:?}",
+                panel.panel_id
+            ),
+            Node::Split(split) => {
+                for child in &split.children {
+                    assert!(
+                        layout.node(*child).is_some(),
+                        "split {node_id:?} references missing child {child:?}"
+                    );
+                }
+            }
+            Node::Tabs(tabs) => {
+                for child in &tabs.children {
+                    assert!(
+                        layout.node(*child).is_some(),
+                        "tabs {node_id:?} references missing child {child:?}"
+                    );
+                }
+            }
+            Node::Column(column) => {
+                for group in &column.groups {
+                    assert!(
+                        layout.node(*group).is_some(),
+                        "column {node_id:?} references missing group {group:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    for (area_id, area) in layout.dock_areas() {
+        assert!(
+            layout.node(area.root).is_some(),
+            "dock area {area_id:?} references missing root {:?}",
+            area.root
+        );
+    }
+    for (floating_id, floating) in layout.floating_groups() {
+        assert!(
+            layout.dock_area(floating.area).is_some(),
+            "floating group {floating_id:?} references missing dock area {:?}",
+            floating.area
+        );
+    }
+    for side in [DockSide::Left, DockSide::Right] {
+        if let Some(area) = layout.main_area(side) {
+            assert!(
+                layout.node(area.root).is_some(),
+                "{side:?} main area references missing root {:?}",
+                area.root
+            );
+        }
+    }
+    if let Some(flyout) = layout.flyout() {
+        assert!(
+            layout.node(flyout.column).is_some(),
+            "flyout references missing column {:?}",
+            flyout.column
+        );
+        assert!(
+            layout.node(flyout.group).is_some(),
+            "flyout references missing group {:?}",
+            flyout.group
+        );
+    }
+
+    let rects = layout
+        .compute_rects(Rect::new(Point::ZERO, Size::new(32_768.0, 32_768.0)), metrics)
+        .unwrap_or_else(|error| panic!("valid layout failed large-viewport geometry: {error}"));
+    crate::layout_rects::assert_layout_rects_invariants(&rects);
+}
+
+fn assert_retired_ids_stay_stale(
+    layout: &Layout,
+    before: &RuntimeIdSets,
+    after: &RuntimeIdSets,
+    context: &str,
+) {
+    for id in before
+        .0
+        .difference(&after.0)
+        .chain(after.0.difference(&before.0))
+    {
+        assert!(
+            layout.node(*id).is_none(),
+            "{context}: retired/replaced NodeId {id:?} became live again"
+        );
+    }
+    for id in before
+        .1
+        .difference(&after.1)
+        .chain(after.1.difference(&before.1))
+    {
+        assert!(
+            layout.panel_instance(*id).is_none(),
+            "{context}: retired/replaced PanelId {id:?} became live again"
+        );
+    }
+    for id in before
+        .2
+        .difference(&after.2)
+        .chain(after.2.difference(&before.2))
+    {
+        assert!(
+            layout.dock_area(*id).is_none(),
+            "{context}: retired/replaced DockAreaId {id:?} became live again"
+        );
+    }
+    for id in before
+        .3
+        .difference(&after.3)
+        .chain(after.3.difference(&before.3))
+    {
+        assert!(
+            layout.floating_group(*id).is_none(),
+            "{context}: retired/replaced FloatingGroupId {id:?} became live again"
+        );
+    }
+}
+
+fn first_valid_command(
+    layout: &Layout,
+    metrics: &DockMetrics,
+    serial: &mut usize,
+    predicate: impl Fn(&DockCommand) -> bool,
+) -> DockCommand {
+    valid_commands(layout, metrics, serial)
+        .into_iter()
+        .find(predicate)
+        .expect("test fixture must expose a valid command for the requested operation")
+}
+
+fn assert_history_round_trip(
+    layout: &mut Layout,
+    history: &mut UndoRedoHistory,
+    command: DockCommand,
+    metrics: &DockMetrics,
+    expect_persistent_change: bool,
+) {
+    let description = format!("{command:?}");
+    let before_snapshot = persistent_logical_snapshot(layout);
+    let before_ids = runtime_id_sets(layout);
+    let before_version = layout.version();
+    let undo_len = history.undo_len();
+    let redo_len = history.redo_len();
+
+    let outcome = history
+        .apply(layout, command.clone(), metrics)
+        .unwrap_or_else(|error| panic!("history command {description} failed: {error}"));
+    assert_layout_state_invariants(layout, metrics);
+
+    if expect_persistent_change {
+        assert_ne!(
+            outcome.new_version, before_version,
+            "{description} should make a persistent revision"
+        );
+        let after_snapshot = persistent_logical_snapshot(layout);
+        assert_ne!(
+            after_snapshot, before_snapshot,
+            "{description} should change logical state"
+        );
+        let after_ids = runtime_id_sets(layout);
+
+        assert!(
+            history.undo(layout, metrics).unwrap(),
+            "Undo must be available after {description}"
+        );
+        assert_eq!(
+            persistent_logical_snapshot(layout),
+            before_snapshot,
+            "Undo failed to restore logical state for {description}"
+        );
+        assert_layout_state_invariants(layout, metrics);
+        assert_retired_ids_stay_stale(
+            layout,
+            &before_ids,
+            &after_ids,
+            &format!("after undo of {description}"),
+        );
+
+        assert!(
+            history.redo(layout, metrics).unwrap(),
+            "Redo must be available after undoing {description}"
+        );
+        assert_eq!(
+            persistent_logical_snapshot(layout),
+            after_snapshot,
+            "Redo failed to restore logical state for {description}"
+        );
+        assert_layout_state_invariants(layout, metrics);
+        assert_retired_ids_stay_stale(
+            layout,
+            &before_ids,
+            &after_ids,
+            &format!("after redo of {description}"),
+        );
+    } else {
+        assert_eq!(
+            outcome.new_version, before_version,
+            "{description} is transient and must not advance persistent revision"
+        );
+        assert_eq!(
+            history.undo_len(),
+            undo_len,
+            "{description} must not create an undo checkpoint"
+        );
+        assert_eq!(
+            history.redo_len(),
+            redo_len,
+            "{description} must not alter the redo stack"
+        );
+        assert_eq!(
+            persistent_logical_snapshot(layout),
+            before_snapshot,
+            "{description} must not change persistent logical state"
+        );
+    }
+}
+
+#[test]
+fn expected_small_viewport_errors_are_constraints_not_layout_regressions() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Generic);
+    let (_, panel_node) =
+        builder.panel(PanelKey::new("small-viewport-canvas").unwrap(), constraints());
+    let group = builder.tabs(vec![panel_node], 0, false);
+    let column = builder.column(280.0, ColumnMode::Expanded, vec![group], vec![1.0]);
+    builder.main_area(DockSide::Left, column);
+    let layout = builder.build();
+    assert_eq!(layout.validate(&metrics), Ok(()));
+
+    // The model is valid, but a 280px dock leaves only 319px for Canvas in a
+    // 599px viewport. This is an expected sizing result, not a model failure.
+    assert!(matches!(
+        layout.compute_rects(
+            Rect::new(Point::ZERO, Size::new(599.0, 600.0)),
+            &metrics
+        ),
+        Err(ComputeRectsError::InsufficientCanvasWidth { available, minimum })
+            if available == 319.0 && minimum == metrics.min_canvas_width
+    ));
+
+    // The same valid layout computes successfully when enough width is available.
+    assert!(layout
+        .compute_rects(
+            Rect::new(Point::ZERO, Size::new(800.0, 900.0)),
+            &metrics
+        )
+        .is_ok());
+
+    // A floating group's minimum content height also cannot be fitted into a
+    // viewport that is shorter than the required content. Keep this failure
+    // typed separately from InvalidLayout and Geometry errors.
+    let mut builder = LayoutBuilder::new(Profile::Generic);
+    let (_, panel_node) = builder.panel(
+        PanelKey::new("short-floating-viewport").unwrap(),
+        constraints(),
+    );
+    let group = builder.tabs(vec![panel_node], 0, false);
+    builder.floating_group(
+        group,
+        Rect::new(Point::new(30.0, 20.0), Size::new(320.0, 220.0)),
+        1,
+    );
+    let floating_layout = builder.build();
+    assert_eq!(floating_layout.validate(&metrics), Ok(()));
+    assert!(matches!(
+        floating_layout.compute_rects(
+            Rect::new(Point::ZERO, Size::new(1000.0, 100.0)),
+            &metrics
+        ),
+        Err(ComputeRectsError::InsufficientSpace { axis: Axis::Y, .. })
+    ));
+    assert_eq!(floating_layout.validate(&metrics), Ok(()));
+    assert!(floating_layout
+        .compute_rects(
+            Rect::new(Point::ZERO, Size::new(1000.0, 600.0)),
+            &metrics
+        )
+        .is_ok());
+}
+
+#[test]
+fn mutation_sequences_round_trip_through_undo_redo_without_reviving_stale_ids() {
+    let metrics = DockMetrics::default();
+    let mut layout = sequence_layout();
+    let mut history = UndoRedoHistory::new();
+    let mut serial = 0usize;
+
+    // Move a group to another column.
+    let command = first_valid_command(&layout, &metrics, &mut serial, |command| {
+        matches!(command, DockCommand::MoveGroup { group, column, .. } if {
+            let source_column = [DockSide::Left, DockSide::Right]
+                .into_iter()
+                .flat_map(|side| main_columns(&layout, side))
+                .find(|(_, groups, _, _, _)| groups.contains(group))
+                .map(|(id, _, _, _, _)| id);
+            source_column.is_some_and(|source| source != *column)
+        })
+    });
+    assert_history_round_trip(&mut layout, &mut history, command, &metrics, true);
+
+    let command = first_valid_command(&layout, &metrics, &mut serial, |command| {
+        matches!(command, DockCommand::ResizeGroups { .. })
+    });
+    assert_history_round_trip(&mut layout, &mut history, command, &metrics, true);
+
+    let command = first_valid_command(&layout, &metrics, &mut serial, |command| {
+        matches!(command, DockCommand::ResizeColumn { .. })
+    });
+    assert_history_round_trip(&mut layout, &mut history, command, &metrics, true);
+
+    let command = first_valid_command(&layout, &metrics, &mut serial, |command| {
+        matches!(command, DockCommand::CollapseGroup { .. })
+    });
+    assert_history_round_trip(&mut layout, &mut history, command, &metrics, true);
+
+    let command = first_valid_command(&layout, &metrics, &mut serial, |command| {
+        matches!(command, DockCommand::MovePanel { .. })
+    });
+    assert_history_round_trip(&mut layout, &mut history, command, &metrics, true);
+
+    let command = first_valid_command(&layout, &metrics, &mut serial, |command| {
+        matches!(command, DockCommand::Float { .. })
+    });
+    assert_history_round_trip(&mut layout, &mut history, command, &metrics, true);
+
+    let command = first_valid_command(&layout, &metrics, &mut serial, |command| {
+        matches!(command, DockCommand::MoveFloating { .. })
+    });
+    assert_history_round_trip(&mut layout, &mut history, command, &metrics, true);
+
+    let command = first_valid_command(&layout, &metrics, &mut serial, |command| {
+        matches!(command, DockCommand::ResizeFloating { .. })
+    });
+    assert_history_round_trip(&mut layout, &mut history, command, &metrics, true);
+
+    let command = first_valid_command(&layout, &metrics, &mut serial, |command| {
+        matches!(command, DockCommand::DockFloating { .. })
+    });
+    assert_history_round_trip(&mut layout, &mut history, command, &metrics, true);
+
+    // Rail mode and flyout are separate transitions; flyout visibility is
+    // transient and must not enter persistent undo history.
+    let command = first_valid_command(&layout, &metrics, &mut serial, |command| {
+        matches!(command, DockCommand::SetColumnMode { mode: ColumnMode::IconsOnly, .. })
+    });
+    assert_history_round_trip(&mut layout, &mut history, command, &metrics, true);
+
+    let command = first_valid_command(&layout, &metrics, &mut serial, |command| {
+        matches!(command, DockCommand::OpenFlyout { .. })
+    });
+    assert_history_round_trip(&mut layout, &mut history, command, &metrics, false);
+    assert!(layout.flyout().is_some(), "OpenFlyout should set transient state");
+
+    let command = first_valid_command(&layout, &metrics, &mut serial, |command| {
+        matches!(command, DockCommand::CloseFlyout)
+    });
+    assert_history_round_trip(&mut layout, &mut history, command, &metrics, false);
+    assert!(layout.flyout().is_none(), "CloseFlyout should clear transient state");
 }
 
 #[cfg(feature = "serde")]
