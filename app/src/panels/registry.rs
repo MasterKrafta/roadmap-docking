@@ -93,14 +93,14 @@ impl PanelRegistry {
     pub(crate) fn constraints_for_key(&self, wanted: &PanelKey) -> Option<PanelConstraints> {
         self.entries
             .iter()
-            .find(|(key, _, _, _, _)| key.as_str() == wanted.as_str())
+            .find(|(key, _, _, _, _, _)| key.as_str() == wanted.as_str())
             .map(|(_, _, _, constraints, _, _)| *constraints)
     }
 
     pub(crate) fn title(&self, instance: &PanelInstance) -> String {
         self.entries
             .iter()
-            .find(|(key, _, _, _, _)| key.as_str() == instance.key.as_str())
+            .find(|(key, _, _, _, _, _)| key.as_str() == instance.key.as_str())
             .map(|(_, title, _, _, _, _)| (*title).to_owned())
             .unwrap_or_else(|| format!("Unavailable: {}", instance.key.as_str()))
     }
@@ -116,7 +116,7 @@ impl PanelRegistry {
     pub(crate) fn menu_items(&self, instance: &PanelInstance) -> Vec<PanelMenuItem> {
         self.entries
             .iter()
-            .find(|(key, _, _, _, _)| key.as_str() == instance.key.as_str())
+            .find(|(key, _, _, _, _, _)| key.as_str() == instance.key.as_str())
             .map(|(_, _, _, _, _, menu_factory)| menu_factory(instance))
             .unwrap_or_default()
     }
@@ -124,7 +124,7 @@ impl PanelRegistry {
     pub(crate) fn render(&self, instance: &PanelInstance, theme: &Theme) -> AnyElement {
         self.entries
             .iter()
-            .find(|(key, _, _, _, _)| key.as_str() == instance.key.as_str())
+            .find(|(key, _, _, _, _, _)| key.as_str() == instance.key.as_str())
             .map(|(_, _, _, _, factory, _)| factory(theme))
             .unwrap_or_else(|| {
                 panel_content(theme, "Unavailable panel", instance.key.as_str())
