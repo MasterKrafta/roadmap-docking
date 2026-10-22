@@ -1155,7 +1155,6 @@ fn collect_main_columns(layout: &Layout, root: NodeId, output: &mut Vec<NodeId>)
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
