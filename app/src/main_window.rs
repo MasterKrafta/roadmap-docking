@@ -481,8 +481,23 @@ impl Render for MainWindow {
                         let delta_x = cursor_x - this.tab_drag_start_cursor[0];
                         let delta_y = cursor_y - this.tab_drag_start_cursor[1];
 
-                        // At least a small vertical movement is required; pure horizontal drag stays docked.
-                        if this.floating_tabs[tab_index] || delta_y.abs() >= drag_threshold {
+                        // A single-tab group can be torn off in any direction.
+                        // With multiple tabs, keep horizontal-only dragging docked.
+                        let group_has_single_tab = match tab_index {
+                            0 | 1 => {
+                                (this.visible_tabs[0] && !this.floating_tabs[0])
+                                    != (this.visible_tabs[1] && !this.floating_tabs[1])
+                            }
+                            2 | 3 => {
+                                (this.visible_tabs[2] && !this.floating_tabs[2])
+                                    != (this.visible_tabs[3] && !this.floating_tabs[3])
+                            }
+                            4 => true,
+                            _ => false,
+                        };
+                        let drag_threshold_reached = delta_y.abs() >= drag_threshold
+                            || (group_has_single_tab && delta_x.abs() >= drag_threshold);
+                        if this.floating_tabs[tab_index] || drag_threshold_reached {
                             if !this.floating_tabs[tab_index] {
                                 match tab_index {
                                     0 if this.active_tabs[0] == 0
