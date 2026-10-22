@@ -332,13 +332,17 @@ impl Render for MainWindow {
                         this.column_widths = [left_width, total_width - left_width];
                         cx.notify();
                     } else if this.is_resizing_height {
-                        let actual_window_height = (window
-                            .viewport_size()
-                            .height
-                            .as_f32()
-                            .max(1.0)
-                            - menu_area_height)
-                            .max(1.0);
+                        let actual_window_height = if this.composition_floating {
+                            floating_composition_height
+                        } else {
+                            (window
+                                .viewport_size()
+                                .height
+                                .as_f32()
+                                .max(1.0)
+                                - menu_area_height)
+                                .max(1.0)
+                        };
                         let actual_header_height =
                             column_header_height.min(actual_window_height);
                         let actual_divider_height = hit_zone
