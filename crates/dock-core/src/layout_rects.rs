@@ -37,6 +37,129 @@ pub struct LayoutRects {
     pub vertical_overflow: Vec<VerticalOverflow>,
 }
 
+/// Shared invariant checker for geometry snapshots produced by layout tests.
+#[cfg(test)]
+pub(crate) fn assert_layout_rects_invariants(rects: &LayoutRects) {
+    let mut emitted = Vec::<(&'static str, Rect)>::new();
+    emitted.extend(rects.viewport.map(|rect| ("viewport", rect)));
+    emitted.extend(rects.canvas.map(|rect| ("canvas", rect)));
+    emitted.extend(rects.columns.iter().map(|item| ("column", item.rect)));
+    emitted.extend(rects.groups.iter().map(|item| ("group", item.rect)));
+    emitted.extend(rects.tab_strips.iter().map(|item| ("tab strip", item.rect)));
+    emitted.extend(rects.tab_headers.iter().map(|item| ("tab header", item.rect)));
+    emitted.extend(
+        rects
+            .tab_overflows
+            .iter()
+            .map(|item| ("tab overflow button", item.button_rect)),
+    );
+    emitted.extend(rects.panels.iter().map(|item| ("panel", item.rect)));
+    emitted.extend(rects.splitters.iter().map(|item| ("splitter", item.rect)));
+    emitted.extend(
+        rects
+            .floating_groups
+            .iter()
+            .map(|item| ("floating group", item.rect)),
+    );
+    emitted.extend(
+        rects
+            .floating_resize_edges
+            .iter()
+            .map(|item| ("floating resize edge", item.rect)),
+    );
+    emitted.extend(rects.flyout.map(|item| ("flyout", item.rect)));
+    emitted.extend(rects.drop_zones.iter().map(|item| ("drop zone", item.rect)));
+    for overflow in &rects.vertical_overflow {
+        emitted.push(("vertical overflow viewport", overflow.viewport));
+        emitted.push(("vertical overflow content", overflow.content_extent));
+    }
+
+    for (kind, rect) in &emitted {
+        assert!(
+            rect.origin.is_finite(),
+            "non-finite origin for emitted {kind}: {rect:?}"
+        );
+        assert!(
+            rect.size.is_finite(),
+            "non-finite size for emitted {kind}: {rect:?}"
+        );
+        assert!(
+            rect.size.width >= 0.0 && rect.size.height >= 0.0,
+            "negative dimension for emitted {kind}: {rect:?}"
+        );
+        assert_eq!(
+            rect.validate(),
+            Ok(()),
+            "invalid or unrepresentable edge in emitted {kind}: {rect:?}"
+        );
+
+        let right = rect
+            .checked_right()
+            .expect("validated emitted rectangle must have a finite right edge");
+        let bottom = rect
+            .checked_bottom()
+            .expect("validated emitted rectangle must have a finite bottom edge");
+        assert!(right.is_finite(), "non-finite right edge for {kind}: {rect:?}");
+        assert!(
+            bottom.is_finite(),
+            "non-finite bottom edge for {kind}: {rect:?}"
+        );
+        if rect.size.width > 0.0 {
+            assert!(
+                right > rect.origin.x,
+                "positive width has no distinct right edge for {kind}: {rect:?}"
+            );
+        }
+        if rect.size.height > 0.0 {
+            assert!(
+                bottom > rect.origin.y,
+                "positive height has no distinct bottom edge for {kind}: {rect:?}"
+            );
+        }
+    }
+
+    // These rectangles are used directly as hit targets or resize/drop affordances.
+    let mut interactive = Vec::<(&'static str, Rect)>::new();
+    interactive.extend(
+        rects
+            .tab_headers
+            .iter()
+            .map(|item| ("tab header hit target", item.rect)),
+    );
+    interactive.extend(
+        rects
+            .tab_overflows
+            .iter()
+            .map(|item| ("tab overflow hit target", item.button_rect)),
+    );
+    interactive.extend(
+        rects
+            .splitters
+            .iter()
+            .map(|item| ("splitter hit target", item.rect)),
+    );
+    interactive.extend(
+        rects
+            .floating_resize_edges
+            .iter()
+            .map(|item| ("floating resize hit target", item.rect)),
+    );
+    interactive.extend(
+        rects
+            .drop_zones
+            .iter()
+            .map(|item| ("drop zone hit target", item.rect)),
+    );
+
+    for (kind, rect) in interactive {
+        assert_eq!(
+            rect.validate_non_empty(),
+            Ok(()),
+            "empty or invalid {kind}: {rect:?}"
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::LayoutRects;
