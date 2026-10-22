@@ -329,6 +329,104 @@ impl Render for MainWindow {
                     }
                 })
             })
+            .on_mouse_down(
+                MouseButton::Left,
+                {
+                    let window_width = window_width;
+                    let window_height = window_height;
+                    let menu_bar_height = menu_bar_height;
+                    let header_height = metrics.column_header_height;
+                    let tab_strip_height = metrics.tab_strip_height;
+                    let button_size = metrics.button_size;
+                    let left_column_visible = left_column_visible;
+                    let right_column_visible = right_column_visible;
+                    let left_column_width = left_column_width;
+                    let right_column_width = right_column_width;
+                    let divider_width = divider_width;
+                    let left_top_height = left_top_height;
+                    let left_horizontal_divider = left_horizontal_divider;
+
+                    cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
+                        let x = event.position.x.as_f32();
+                        let y = event.position.y.as_f32();
+                        let mut changed = false;
+
+                        if let Some(menu) = this.mouse_context_menu {
+                            let menu_width = 190.0;
+                            let menu_height = if menu.kind == MouseContextMenuKind::Header {
+                                36.0
+                            } else {
+                                4.0 * 28.0 + 3.0 * 4.0 + 8.0
+                            };
+                            let menu_left = menu.x.clamp(0.0, (window_width - menu_width).max(0.0));
+                            let menu_top = menu.y.clamp(0.0, (window_height - menu_height).max(0.0));
+                            let inside = x >= menu_left
+                                && x <= menu_left + menu_width
+                                && y >= menu_top
+                                && y <= menu_top + menu_height;
+                            if !inside {
+                                this.mouse_context_menu = None;
+                                changed = true;
+                            }
+                        }
+
+                        if let Some(group) = this.open_tab_context_menu {
+                            let (strip_top, menu_left) = match group {
+                                0 => (
+                                    menu_bar_height + header_height,
+                                    left_column_width - 176.0,
+                                ),
+                                1 => (
+                                    menu_bar_height + header_height + left_top_height
+                                        + left_horizontal_divider,
+                                    left_column_width - 176.0,
+                                ),
+                                _ => {
+                                    let right_left = if left_column_visible {
+                                        left_column_width + divider_width
+                                    } else {
+                                        0.0
+                                    };
+                                    (
+                                        menu_bar_height + header_height,
+                                        right_left + right_column_width - 176.0,
+                                    )
+                                }
+                            };
+
+                            let menu_inside = x >= menu_left
+                                && x <= menu_left + 176.0
+                                && y >= strip_top + tab_strip_height
+                                && y <= strip_top + tab_strip_height + 68.0;
+
+                            let button_left = match group {
+                                0 | 1 => left_column_width - button_size,
+                                _ => {
+                                    let right_left = if left_column_visible {
+                                        left_column_width + divider_width
+                                    } else {
+                                        0.0
+                                    };
+                                    right_left + right_column_width - button_size
+                                }
+                            };
+                            let button_inside = x >= button_left
+                                && x <= button_left + button_size
+                                && y >= strip_top
+                                && y <= strip_top + tab_strip_height;
+
+                            if !menu_inside && !button_inside {
+                                this.open_tab_context_menu = None;
+                                changed = true;
+                            }
+                        }
+
+                        if changed {
+                            cx.notify();
+                        }
+                    })
+                },
+            )
             .on_mouse_up(
                 MouseButton::Left,
                 cx.listener(|this, _event, _window, cx| {
