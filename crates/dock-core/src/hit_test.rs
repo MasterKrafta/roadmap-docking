@@ -413,7 +413,9 @@ mod tests {
         const TABS_PER_GROUP: usize = 8;
 
         let metrics = DockMetrics::default();
-        let mut builder = LayoutBuilder::new(Profile::Photoshop);
+        // This fixture deliberately uses a horizontal split of columns inside each
+        // floating window. The Photoshop profile forbids that floating-root shape.
+        let mut builder = LayoutBuilder::new(Profile::Generic);
         let mut top_floating = None;
         let mut top_panel = None;
 
