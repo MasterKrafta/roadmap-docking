@@ -27,6 +27,15 @@ pub struct DockMetrics {
 }
 
 impl DockMetrics {
+    /// Height occupied by a collapsed group, never smaller than its tab strip.
+    pub(crate) const fn effective_collapsed_group_height(self) -> f32 {
+        if self.collapsed_group_height > self.tab_strip_height {
+            self.collapsed_group_height
+        } else {
+            self.tab_strip_height
+        }
+    }
+
     /// Validates finiteness, positivity, and the required metric relationships.
     pub fn validate(self) -> Result<(), &'static str> {
         let positive = [
