@@ -194,6 +194,87 @@ impl Layout {
             }
         }
 
+        // Repair finite Expanded widths against the content's complete min/max
+        // contract before the normalized candidate is validated or exposed.
+        let column_ids = candidate
+            .nodes
+            .iter()
+            .filter_map(|(node_id, node)| matches!(node, Node::Column(_)).then_some(node_id))
+            .collect::<Vec<_>>();
+        for node_id in column_ids {
+            let Some(Node::Column(column)) = candidate.nodes.get(node_id).cloned() else {
+                continue;
+            };
+            if column.mode != ColumnMode::Expanded
+                || !column.width.is_finite()
+                || column.width <= 0.0
+            {
+                continue;
+            }
+
+            let minimum = candidate
+                .minimum_expanded_column_width(node_id, metrics)
+                .map_err(|_| {
+                    vec![ValidationError::InvalidColumn {
+                        node: node_id,
+                        reason: "cannot compute minimum width required by expanded contents",
+                    }]
+                })?;
+            let maximum = candidate
+                .maximum_expanded_column_width(node_id)
+                .map_err(|_| {
+                    vec![ValidationError::InvalidColumn {
+                        node: node_id,
+                        reason: "cannot compute maximum width allowed by expanded contents",
+                    }]
+                })?;
+            if maximum.is_some_and(|maximum| maximum < minimum) {
+                return Err(vec![ValidationError::InvalidColumn {
+                    node: node_id,
+                    reason: "minimum width required by expanded contents exceeds panel maximum width",
+                }]);
+            }
+            let upper = maximum.unwrap_or(f32::MAX);
+            let repaired_width = column.width.max(minimum).min(upper);
+            if repaired_width != column.width {
+                let note = if repaired_width > column.width {
+                    format!(
+                        "column {node_id:?}: width raised to content minimum from {} to {}",
+                        column.width, repaired_width
+                    )
+                } else {
+                    format!(
+                        "column {node_id:?}: width reduced to panel maximum from {} to {}",
+                        column.width, repaired_width
+                    )
+                };
+                repair_notes.push(note);
+            }
+
+            let repaired_last_expanded_width = match column.last_expanded_width {
+                Some(width) if width.is_finite() && width > 0.0 => {
+                    let repaired = width.max(minimum).min(upper);
+                    if repaired != width {
+                        repair_notes.push(format!(
+                            "column {node_id:?}: last_expanded_width clamped from {width} to {repaired}"
+                        ));
+                    }
+                    Some(repaired)
+                }
+                _ => {
+                    repair_notes.push(format!(
+                        "column {node_id:?}: missing or invalid last_expanded_width restored from current width {repaired_width}"
+                    ));
+                    Some(repaired_width)
+                }
+            };
+
+            if let Some(Node::Column(value)) = candidate.nodes.get_mut(node_id) {
+                value.width = repaired_width;
+                value.last_expanded_width = repaired_last_expanded_width;
+            }
+        }
+
         let mut diagnostic_issues: Vec<String> =
             original_issues.iter().map(ToString::to_string).collect();
         diagnostic_issues.extend(repair_notes);

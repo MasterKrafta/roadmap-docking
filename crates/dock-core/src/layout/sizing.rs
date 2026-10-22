@@ -285,7 +285,9 @@ impl Layout {
         };
         let mut minimum = metrics.min_column_width;
         for group in &column.groups {
-            minimum = minimum.max(self.minimum_node_size(*group, metrics)?.width);
+            // Collapsed geometry hides panel content, but the column must keep
+            // enough width to expand that group without producing invalid rects.
+            minimum = minimum.max(self.minimum_content_width(*group, metrics)?);
         }
         if minimum.is_finite() {
             Ok(minimum)
@@ -293,6 +295,72 @@ impl Layout {
             Err(CommandError::InvalidValue {
                 field: "width",
                 reason: "minimum column width overflowed",
+            })
+        }
+    }
+
+    fn minimum_content_width(
+        &self,
+        node_id: NodeId,
+        metrics: &DockMetrics,
+    ) -> Result<f32, CommandError> {
+        let node = self
+            .nodes
+            .get(node_id)
+            .ok_or(CommandError::MissingNode { node: node_id })?;
+        let width = match node {
+            Node::Panel(panel) => self
+                .panel_instances
+                .get(panel.panel_id)
+                .ok_or(CommandError::MissingPanel {
+                    panel: panel.panel_id,
+                })?
+                .constraints
+                .min_size
+                .width,
+            Node::Tabs(tabs) => {
+                let mut width = 0.0_f32;
+                for child in &tabs.children {
+                    width = width.max(self.minimum_content_width(*child, metrics)?);
+                }
+                width
+            }
+            Node::Split(split) => {
+                let mut width = 0.0_f32;
+                for child in &split.children {
+                    let child_width = self.minimum_content_width(*child, metrics)?;
+                    match split.axis {
+                        Axis::X => width += child_width,
+                        Axis::Y => width = width.max(child_width),
+                    }
+                }
+                if split.axis == Axis::X {
+                    width += metrics.splitter_thickness
+                        * split.children.len().saturating_sub(1) as f32;
+                }
+                width
+            }
+            Node::Column(column) if column.mode.is_rail() => {
+                if column.mode == ColumnMode::IconsOnly {
+                    metrics.rail_width
+                } else {
+                    metrics.min_column_width
+                }
+            }
+            Node::Column(column) => {
+                let mut width = column.width.max(metrics.min_column_width);
+                for group in &column.groups {
+                    width = width.max(self.minimum_content_width(*group, metrics)?);
+                }
+                width
+            }
+        };
+        if width.is_finite() && width >= 0.0 {
+            Ok(width)
+        } else {
+            Err(CommandError::InvalidValue {
+                field: "width",
+                reason: "minimum panel-content width overflowed",
             })
         }
     }
@@ -349,6 +417,7 @@ impl Layout {
         }
         self.maximum_expanded_column_width(column_id)
     }
+
     /// Computes a floating window's minimum size.
     ///
     /// A collapsed root Tabs group is rendered as a strip, but its floating

@@ -60,6 +60,45 @@ pub fn create_initial_layout(
         descriptor("properties").expect("required key checked");
     let (history_key, history_constraints) = descriptor("history").expect("required key checked");
 
+    // Both built-in groups are tab stacks, so their minimum width is the widest
+    // panel minimum in that group. The column must satisfy both groups and the
+    // configured minimum column metric.
+    let minimum_column_width = metrics.min_column_width.max(
+        layers_constraints
+            .min_size
+            .width
+            .max(color_constraints.min_size.width)
+            .max(properties_constraints.min_size.width)
+            .max(history_constraints.min_size.width),
+    );
+    let tab_group_maximum = |left: PanelConstraints, right: PanelConstraints| {
+        match (left.max_size, right.max_size) {
+            (Some(left), Some(right)) => Some(left.width.min(right.width)),
+            (Some(left), None) => Some(left.width),
+            (None, Some(right)) => Some(right.width),
+            (None, None) => None,
+        }
+    };
+    let mut maximum_column_width: Option<f32> = None;
+    for group_maximum in [
+        tab_group_maximum(layers_constraints, color_constraints),
+        tab_group_maximum(properties_constraints, history_constraints),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        maximum_column_width = Some(
+            maximum_column_width.map_or(group_maximum, |current| current.min(group_maximum)),
+        );
+    }
+    if maximum_column_width.is_some_and(|maximum| minimum_column_width > maximum) {
+        return Err("panel minimum width exceeds the maximum width allowed by its tab group");
+    }
+    let column_width = metrics
+        .default_column_width
+        .max(minimum_column_width)
+        .min(maximum_column_width.unwrap_or(f32::MAX));
+
     let mut panel_instances = SlotMap::<PanelId, PanelInstance>::with_key();
     let layers_id = panel_instances.insert(PanelInstance::new(layers_key, layers_constraints));
     let color_id = panel_instances.insert(PanelInstance::new(color_key, color_constraints));
@@ -85,11 +124,11 @@ pub fn create_initial_layout(
     }));
 
     let column_root = nodes.insert(Node::Column(Column {
-        width: metrics.default_column_width,
+        width: column_width,
         mode: ColumnMode::Expanded,
         groups: vec![appearance_group, information_group],
         group_ratios: vec![0.5, 0.5],
-        last_expanded_width: Some(metrics.default_column_width),
+        last_expanded_width: Some(column_width),
     }));
 
     let mut dock_areas = SlotMap::<DockAreaId, DockArea>::with_key();
@@ -113,7 +152,10 @@ pub fn create_initial_layout(
 #[cfg(test)]
 mod tests {
     use super::create_initial_layout;
-    use crate::{Column, DockMetrics, DockSide, Node, PanelConstraints, PanelKey, Profile, Size};
+    use crate::{
+        Column, ColumnMode, DockMetrics, DockSide, Node, PanelConstraints, PanelKey, Point, Profile,
+        Rect, Size,
+    };
 
     fn baseline_panel_constraints() -> PanelConstraints {
         PanelConstraints::new(Size::new(120.0, 80.0), Size::new(280.0, 220.0), None, false)
@@ -219,4 +261,58 @@ mod tests {
             Some(Node::Column(Column { .. }))
         ));
     }
+    #[test]
+    fn factory_expands_column_to_fit_panel_minimum_width_for_both_profiles() {
+        let metrics = DockMetrics::default();
+        let wide_constraints =
+            PanelConstraints::new(Size::new(400.0, 80.0), Size::new(450.0, 220.0), None, false);
+        let items = descriptors()
+            .into_iter()
+            .map(|(key, _)| (key, wide_constraints))
+            .collect::<Vec<_>>();
+
+        for profile in [Profile::Generic, Profile::Photoshop] {
+            let layout = create_initial_layout(profile, &items, metrics).unwrap();
+            let root = layout.main_area(DockSide::Right).unwrap().root;
+            let Node::Column(column) = layout.node(root).unwrap() else {
+                panic!("main root must be a Column");
+            };
+
+            assert_eq!(column.mode, ColumnMode::Expanded);
+            assert_eq!(column.width, 400.0);
+            assert_eq!(column.last_expanded_width, Some(400.0));
+            assert_eq!(layout.validate(&metrics), Ok(()));
+            layout
+                .compute_rects(
+                    Rect::new(Point::new(0.0, 0.0), Size::new(800.0, 600.0)),
+                    &metrics,
+                )
+                .expect("factory layout must be placeable at its required minimum width");
+        }
+    }
+
+    #[test]
+    fn factory_rejects_conflicting_panel_minimum_and_tab_maximum_widths() {
+        let mut items = descriptors();
+        items[0].1 = PanelConstraints::new(
+            Size::new(400.0, 80.0),
+            Size::new(420.0, 220.0),
+            Some(Size::new(450.0, 300.0)),
+            false,
+        );
+        items[1].1 = PanelConstraints::new(
+            Size::new(120.0, 80.0),
+            Size::new(200.0, 220.0),
+            Some(Size::new(350.0, 300.0)),
+            false,
+        );
+
+        for profile in [Profile::Generic, Profile::Photoshop] {
+            assert_eq!(
+                create_initial_layout(profile, &items, DockMetrics::default()).unwrap_err(),
+                "panel minimum width exceeds the maximum width allowed by its tab group"
+            );
+        }
+    }
+
 }
