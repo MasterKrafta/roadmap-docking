@@ -420,7 +420,7 @@ impl Layout {
                 let width = match column.mode {
                     ColumnMode::IconsAndLabels => metrics.min_column_width,
                     ColumnMode::IconsOnly => metrics.rail_width,
-                    ColumnMode::Expanded => unreachable!("Expanded columns are not rails"),
+                    ColumnMode::Expanded => column.width,
                 };
                 let slot_count = self.column_display_order(node_id)?.len();
                 Size::new(
