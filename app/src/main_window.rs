@@ -1,30 +1,42 @@
 use gpui::{
-    Context, InteractiveElement, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, ParentElement, Render,
-    StatefulInteractiveElement, Styled, Window, div, px, rgb,
+    Context, CursorStyle, InteractiveElement, IntoElement, MouseButton, MouseDownEvent,
+    MouseMoveEvent, ParentElement, Render, StatefulInteractiveElement, Styled, Window, div, px,
+    rgb,
 };
 use ui::Theme;
 
-/// Minimal application window containing one empty docking column with a two-tab group.
+/// Minimal application window containing one right-docked column with two stacked tab groups.
 pub(crate) struct MainWindow {
     theme: Theme,
     active_tab: usize,
+    lower_active_tab: usize,
     column_width: f32,
     resize_start_x: f32,
+    resize_start_y: f32,
     resize_start_width: f32,
+    resize_start_top_height: f32,
+    split_ratio: f32,
     is_resizing: bool,
+    is_resizing_height: bool,
 }
 
 impl MainWindow {
     pub(crate) fn new(theme: Theme) -> Result<Self, String> {
         let column_width = theme.metrics.default_column_width;
+        let split_ratio = theme.metrics.default_column_split_ratio;
 
         Ok(Self {
             theme,
             active_tab: 0,
+            lower_active_tab: 0,
             column_width,
             resize_start_x: 0.0,
+            resize_start_y: 0.0,
             resize_start_width: column_width,
+            resize_start_top_height: 0.0,
+            split_ratio,
             is_resizing: false,
+            is_resizing_height: false,
         })
     }
 }
@@ -75,40 +87,98 @@ impl Render for MainWindow {
         } else {
             colors.muted_text
         };
-        let splitter_color = if self.is_resizing {
+        let lower_first_tab_background = if self.lower_active_tab == 0 {
+            colors.active_tab
+        } else {
+            colors.dock_background
+        };
+        let lower_first_tab_text = if self.lower_active_tab == 0 {
+            colors.primary_text
+        } else {
+            colors.muted_text
+        };
+        let lower_second_tab_background = if self.lower_active_tab == 1 {
+            colors.active_tab
+        } else {
+            colors.dock_background
+        };
+        let lower_second_tab_text = if self.lower_active_tab == 1 {
+            colors.primary_text
+        } else {
+            colors.muted_text
+        };
+
+        let vertical_splitter_color = if self.is_resizing {
+            colors.focus
+        } else {
+            colors.splitter
+        };
+        let horizontal_splitter_color = if self.is_resizing_height {
             colors.focus
         } else {
             colors.splitter
         };
 
-        // The root fills the entire window; the dock column is attached to the right.
-        div()
+        // The root fills the window. While dragging a splitter, keep its resize
+        // cursor even when the pointer travels outside the narrow handle.
+        let root = div()
             .flex()
             .flex_row()
             .w(px(width))
             .h(px(height))
-            .bg(rgb(colors.window_background))
+            .bg(rgb(colors.window_background));
+        let root = if self.is_resizing {
+            root.cursor(CursorStyle::ResizeLeftRight)
+        } else if self.is_resizing_height {
+            root.cursor(CursorStyle::ResizeUpDown)
+        } else {
+            root
+        };
+
+        root
             .on_mouse_move({
                 let min_width = metrics.min_column_width;
                 let hit_zone = metrics.splitter_hit_zone;
+                let header_height = metrics.column_header_height;
+                let splitter_height = metrics.splitter_hit_zone;
+                let min_group_height = metrics.min_group_height;
                 cx.listener(move |this, event: &MouseMoveEvent, window, cx| {
-                    if !this.is_resizing {
-                        return;
+                    if this.is_resizing {
+                        let window_width = window.viewport_size().width.as_f32().max(1.0);
+                        let max_width = (window_width - hit_zone).max(min_width);
+                        let delta = this.resize_start_x - event.position.x.as_f32();
+                        this.column_width =
+                            (this.resize_start_width + delta).clamp(min_width, max_width);
+                        cx.notify();
+                    } else if this.is_resizing_height {
+                        let window_height = window.viewport_size().height.as_f32().max(1.0);
+                        let actual_header_height = header_height.min(window_height);
+                        let actual_splitter_height =
+                            splitter_height.min((window_height - actual_header_height).max(0.0));
+                        let available_height = (window_height
+                            - actual_header_height
+                            - actual_splitter_height)
+                            .max(0.0);
+                        let min_height = min_group_height.min(available_height / 2.0);
+                        let max_height = (available_height - min_height).max(min_height);
+                        let delta = event.position.y.as_f32() - this.resize_start_y;
+                        let upper_height = (this.resize_start_top_height + delta)
+                            .clamp(min_height, max_height);
+                        this.split_ratio = if available_height > 0.0 {
+                            upper_height / available_height
+                        } else {
+                            0.5
+                        };
+                        cx.notify();
                     }
-
-                    let window_width = window.viewport_size().width.as_f32().max(1.0);
-                    let max_width = (window_width - hit_zone).max(min_width);
-                    let delta = this.resize_start_x - event.position.x.as_f32();
-                    this.column_width =
-                        (this.resize_start_width + delta).clamp(min_width, max_width);
-                    cx.notify();
                 })
             })
             .on_mouse_up(
                 MouseButton::Left,
                 cx.listener(|this, _event, _window, cx| {
-                    if this.is_resizing {
+                    if this.is_resizing || this.is_resizing_height {
                         this.is_resizing = false;
+                        this.is_resizing_height = false;
                         cx.notify();
                     }
                 }),
@@ -120,7 +190,7 @@ impl Render for MainWindow {
                     .h(px(height))
                     .bg(rgb(colors.window_background)),
             )
-            // Resizer lives on the column's unattached (left) edge.
+            // Width splitter on the column's unattached (left) edge.
             .child(
                 div()
                     .flex()
@@ -130,13 +200,13 @@ impl Render for MainWindow {
                     .h(px(height))
                     .flex_shrink_0()
                     .bg(rgb(colors.window_background))
+                    .cursor(CursorStyle::ResizeLeftRight)
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
-                            // Start from the displayed width, which may already be clamped
-                            // if the window was resized to a narrower size.
                             this.column_width = column_width;
                             this.is_resizing = true;
+                            this.is_resizing_height = false;
                             this.resize_start_x = event.position.x.as_f32();
                             this.resize_start_width = column_width;
                             cx.notify();
@@ -146,7 +216,7 @@ impl Render for MainWindow {
                         div()
                             .w(px(metrics.splitter_thickness))
                             .h(px(height))
-                            .bg(rgb(splitter_color)),
+                            .bg(rgb(vertical_splitter_color)),
                     ),
             )
             .child(
@@ -158,13 +228,13 @@ impl Render for MainWindow {
                     .h(px(height))
                     .flex_shrink_0()
                     .bg(rgb(colors.window_background))
-                    // 1. Header: empty space on the left, controls on the right.
+                    // Shared column header.
                     .child(
                         div()
                             .flex()
                             .flex_row()
                             .items_center()
-                            .h(px(metrics.column_header_height))
+                            .h(px(column_header_height))
                             .flex_shrink_0()
                             .bg(rgb(colors.group_background))
                             .border_b_1()
@@ -173,58 +243,153 @@ impl Render for MainWindow {
                             .child(control(">>"))
                             .child(control("x")),
                     )
-                    // 2. Tab strip: two switchable tabs, empty space, and the menu on the right.
+                    // Upper panel: tabs plus an empty content area.
                     .child(
                         div()
                             .flex()
-                            .flex_row()
-                            .items_center()
-                            .h(px(metrics.tab_strip_height))
+                            .flex_col()
+                            .h(px(top_panel_height))
                             .flex_shrink_0()
-                            .bg(rgb(colors.dock_background))
-                            .border_b_1()
-                            .border_color(rgb(colors.border))
+                            .min_h(px(0.0))
                             .child(
                                 div()
-                                    .id("main-window-tab-1")
                                     .flex()
+                                    .flex_row()
                                     .items_center()
-                                    .justify_center()
-                                    .w(px(tab_width))
                                     .h(px(metrics.tab_strip_height))
-                                    .bg(rgb(first_tab_background))
-                                    .text_color(rgb(first_tab_text))
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.active_tab = 0;
-                                        cx.notify();
-                                    }))
-                                    .child("Вкладка 1"),
+                                    .flex_shrink_0()
+                                    .bg(rgb(colors.dock_background))
+                                    .border_b_1()
+                                    .border_color(rgb(colors.border))
+                                    .child(
+                                        div()
+                                            .id("main-window-tab-1")
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .w(px(tab_width))
+                                            .h(px(metrics.tab_strip_height))
+                                            .bg(rgb(first_tab_background))
+                                            .text_color(rgb(first_tab_text))
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.active_tab = 0;
+                                                cx.notify();
+                                            }))
+                                            .child("Вкладка 1"),
+                                    )
+                                    .child(
+                                        div()
+                                            .id("main-window-tab-2")
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .w(px(tab_width))
+                                            .h(px(metrics.tab_strip_height))
+                                            .bg(rgb(second_tab_background))
+                                            .text_color(rgb(second_tab_text))
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.active_tab = 1;
+                                                cx.notify();
+                                            }))
+                                            .child("Вкладка 2"),
+                                    )
+                                    .child(div().flex_1().h(px(metrics.tab_strip_height)))
+                                    .child(control("☰")),
                             )
                             .child(
                                 div()
-                                    .id("main-window-tab-2")
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .w(px(tab_width))
-                                    .h(px(metrics.tab_strip_height))
-                                    .bg(rgb(second_tab_background))
-                                    .text_color(rgb(second_tab_text))
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.active_tab = 1;
-                                        cx.notify();
-                                    }))
-                                    .child("Вкладка 2"),
-                            )
-                            .child(div().flex_1().h(px(metrics.tab_strip_height)))
-                            .child(control("☰")),
+                                    .flex_1()
+                                    .min_h(px(0.0))
+                                    .bg(rgb(colors.canvas_background)),
+                            ),
                     )
-                    // 3. Content: deliberately blank for now.
+                    // Horizontal splitter separates the upper and lower tab groups.
                     .child(
                         div()
-                            .flex_1()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .w(px(column_width))
+                            .h(px(horizontal_splitter_height))
+                            .flex_shrink_0()
+                            .bg(rgb(colors.window_background))
+                            .cursor(CursorStyle::ResizeUpDown)
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
+                                    this.is_resizing = false;
+                                    this.is_resizing_height = true;
+                                    this.resize_start_y = event.position.y.as_f32();
+                                    this.resize_start_top_height = top_panel_height;
+                                    cx.notify();
+                                }),
+                            )
+                            .child(
+                                div()
+                                    .w(px(column_width))
+                                    .h(px(metrics.splitter_thickness.min(horizontal_splitter_height)))
+                                    .bg(rgb(horizontal_splitter_color)),
+                            ),
+                    )
+                    // Lower panel: its own independent tabs plus an empty content area.
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .h(px(bottom_panel_height))
+                            .flex_shrink_0()
                             .min_h(px(0.0))
-                            .bg(rgb(colors.canvas_background)),
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_row()
+                                    .items_center()
+                                    .h(px(metrics.tab_strip_height))
+                                    .flex_shrink_0()
+                                    .bg(rgb(colors.dock_background))
+                                    .border_b_1()
+                                    .border_color(rgb(colors.border))
+                                    .child(
+                                        div()
+                                            .id("main-window-bottom-tab-1")
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .w(px(tab_width))
+                                            .h(px(metrics.tab_strip_height))
+                                            .bg(rgb(lower_first_tab_background))
+                                            .text_color(rgb(lower_first_tab_text))
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.lower_active_tab = 0;
+                                                cx.notify();
+                                            }))
+                                            .child("Вкладка 1"),
+                                    )
+                                    .child(
+                                        div()
+                                            .id("main-window-bottom-tab-2")
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .w(px(tab_width))
+                                            .h(px(metrics.tab_strip_height))
+                                            .bg(rgb(lower_second_tab_background))
+                                            .text_color(rgb(lower_second_tab_text))
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.lower_active_tab = 1;
+                                                cx.notify();
+                                            }))
+                                            .child("Вкладка 2"),
+                                    )
+                                    .child(div().flex_1().h(px(metrics.tab_strip_height)))
+                                    .child(control("☰")),
+                            )
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_h(px(0.0))
+                                    .bg(rgb(colors.canvas_background)),
+                            ),
                     ),
             )
     }
