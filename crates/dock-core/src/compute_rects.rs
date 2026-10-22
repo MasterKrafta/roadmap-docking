@@ -2203,7 +2203,6 @@ mod tests {
         assert!(rects.vertical_overflow.is_empty());
     }
 
-
     #[test]
     fn compute_rects_rejects_child_rect_with_unrepresentable_edge() {
         let metrics = DockMetrics::default();
@@ -2216,9 +2215,9 @@ mod tests {
         let (_, panel_b) = builder.panel(key("large-origin-b"), constraints());
         let group_a = builder.tabs(vec![panel_a], 0, false);
         let group_b = builder.tabs(vec![panel_b], 0, false);
-        // The first child gets the minimum column width. At this coordinate
-        // magnitude the f32 spacing is 512px, so origin + 180 collapses to
-        // origin and the child must not be emitted with a zero effective width.
+        // The first child gets the 200px minimum column width. At this
+        // coordinate magnitude, f32 spacing is 512px, so that width rounds
+        // back to the origin and must not produce a zero-width child.
         let split = builder.split(Axis::X, vec![group_a, group_b], vec![0.01, 0.99]);
         builder.main_area(DockSide::Left, split);
         let layout = builder.build();
@@ -2254,5 +2253,4 @@ mod tests {
             ))
         );
     }
-
 }
