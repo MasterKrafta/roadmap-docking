@@ -526,3 +526,104 @@ fn history_limit_is_bounded() {
     assert!(history.undo(&mut fixture.layout, &metrics).unwrap());
     assert!(!history.can_undo());
 }
+
+
+#[test]
+fn resize_groups_with_tab_chrome_supports_history_undo_and_redo_after_clamping() {
+    let metrics = DockMetrics {
+        header_height: 36.0,
+        tab_strip_height: 44.0,
+        ..DockMetrics::default()
+    };
+    let mut builder = LayoutBuilder::new(Profile::Generic);
+    let (_, panel_a) = builder.panel(
+        key("history-chrome-resize-a"),
+        PanelConstraints::new(
+            Size::new(120.0, 120.0),
+            Size::new(200.0, 180.0),
+            None,
+            false,
+        ),
+    );
+    let (_, panel_b) = builder.panel(
+        key("history-chrome-resize-b"),
+        PanelConstraints::new(
+            Size::new(120.0, 80.0),
+            Size::new(200.0, 120.0),
+            None,
+            false,
+        ),
+    );
+    let group_a = builder.tabs(vec![panel_a], 0, false);
+    let group_b = builder.tabs(vec![panel_b], 0, false);
+    let column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![group_a, group_b],
+        vec![0.5, 0.5],
+    );
+    builder.main_area(DockSide::Right, column);
+    let mut layout = builder.build();
+    assert_eq!(layout.validate(&metrics), Ok(()));
+
+    let viewport = Rect::new(Point::ZERO, Size::new(1000.0, 504.0));
+    let group_heights = |layout: &Layout| {
+        let rects = layout.compute_rects(viewport, &metrics).unwrap();
+        let height_a = rects
+            .groups
+            .iter()
+            .find(|item| item.group == group_a)
+            .unwrap()
+            .rect
+            .size
+            .height;
+        let height_b = rects
+            .groups
+            .iter()
+            .find(|item| item.group == group_b)
+            .unwrap()
+            .rect
+            .size
+            .height;
+        (height_a, height_b)
+    };
+    let assert_heights = |layout: &Layout, expected_a: f32, expected_b: f32| {
+        let (height_a, height_b) = group_heights(layout);
+        assert!((height_a - expected_a).abs() < 1.0e-3);
+        assert!((height_b - expected_b).abs() < 1.0e-3);
+    };
+
+    let mut history = UndoRedoHistory::new();
+    let before = persistent_shape(&layout);
+    assert_heights(&layout, 250.0, 250.0);
+    let outcome = history
+        .apply(
+            &mut layout,
+            DockCommand::ResizeGroups {
+                column,
+                boundary_index: 0,
+                delta: 500.0,
+                available_height: 500.0,
+            },
+            &metrics,
+        )
+        .unwrap();
+    assert!(matches!(
+        outcome.actual_value,
+        Some(crate::CommandValue::GroupBoundaryDelta(delta)) if (delta - 90.0).abs() < 1.0e-3
+    ));
+    let after = persistent_shape(&layout);
+    assert_ne!(after, before);
+    assert_heights(&layout, 340.0, 160.0);
+    assert!(history.can_undo());
+
+    assert!(history.undo(&mut layout, &metrics).unwrap());
+    assert_eq!(persistent_shape(&layout), before);
+    assert_heights(&layout, 250.0, 250.0);
+    assert!(history.can_redo());
+
+    assert!(history.redo(&mut layout, &metrics).unwrap());
+    assert_eq!(persistent_shape(&layout), after);
+    assert_heights(&layout, 340.0, 160.0);
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
