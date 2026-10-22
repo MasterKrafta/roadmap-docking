@@ -264,6 +264,24 @@ impl Layout {
             || (zone == DropZone::Bottom && target_index + 1 == source_index)
     }
 
+    /// Returns whether a group insertion slot leaves the group in the same
+    /// place. The index is measured after removing the source group, matching
+    /// the command and drop-zone insertion-slot contract.
+    pub(crate) fn group_slot_is_noop(
+        &self,
+        group: NodeId,
+        column_id: NodeId,
+        index: usize,
+    ) -> bool {
+        let Some(Node::Column(column)) = self.nodes.get(column_id) else {
+            return false;
+        };
+        let Some(source_index) = column.groups.iter().position(|id| *id == group) else {
+            return false;
+        };
+        index == source_index || index == source_index + 1
+    }
+
     pub(super) fn find_owner_column(&self, group: NodeId) -> Option<NodeId> {
         self.nodes.iter().find_map(|(id, node)| match node {
             Node::Column(column) if column.groups.contains(&group) => Some(id),
