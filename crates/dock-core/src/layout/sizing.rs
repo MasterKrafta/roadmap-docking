@@ -459,6 +459,8 @@ impl Layout {
         node_id: NodeId,
         metrics: &DockMetrics,
     ) -> Result<Size, CommandError> {
+        #[cfg(test)]
+        crate::compute_rects::record_recursive_minimum_node_size(node_id);
         let node = self
             .nodes
             .get(node_id)
