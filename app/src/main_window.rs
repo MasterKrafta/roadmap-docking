@@ -1,5 +1,6 @@
 use dock_core::{
-    DockCommand, DockMetrics, DockSide, DropTarget, Layout, Node, NodeId, PanelId, PanelKey, Profile,
+    DockCommand, DockMetrics, DockSide, DropTarget, DropZone, Layout, Node, NodeId, PanelId,
+    PanelKey, Profile,
 };
 use dock_gpui::dock_metrics_from_theme;
 use gpui::{
@@ -11,16 +12,19 @@ use ui::Theme;
 
 use crate::panels::PanelRegistry;
 
-/// Main window with one Core-owned right column and a two-tab group.
+/// Main window with one Core-owned right column and two vertically stacked tab groups.
 pub(crate) struct MainWindow {
     theme: Theme,
     panels: PanelRegistry,
     layout: Layout,
     dock_metrics: DockMetrics,
-    tab_group: NodeId,
     column_id: NodeId,
+    top_tab_group: NodeId,
+    bottom_tab_group: NodeId,
     layers_panel: PanelId,
     color_panel: PanelId,
+    properties_panel: PanelId,
+    history_panel: PanelId,
     is_resizing_column: bool,
     resize_start_x: f32,
     resize_start_width: f32,
@@ -30,18 +34,29 @@ impl MainWindow {
     pub(crate) fn new(theme: Theme) -> Result<Self, String> {
         let panels = PanelRegistry::default();
         let dock_metrics = dock_metrics_from_theme(&theme);
+        let split_ratio = theme.metrics.default_column_split_ratio;
+        if !split_ratio.is_finite() || split_ratio <= 0.0 || split_ratio >= 1.0 {
+            return Err("Theme default_column_split_ratio must be between zero and one".to_owned());
+        }
+
         let layers_key = PanelKey::new("layers").expect("built-in panel key must be valid");
         let color_key = PanelKey::new("color").expect("built-in panel key must be valid");
+        let properties_key =
+            PanelKey::new("properties").expect("built-in panel key must be valid");
+        let history_key = PanelKey::new("history").expect("built-in panel key must be valid");
 
-        let layers_constraints = panels
-            .constraints_for_key(&layers_key)
-            .ok_or_else(|| "Layers panel is missing from the panel registry".to_owned())?;
-        let color_constraints = panels
-            .constraints_for_key(&color_key)
-            .ok_or_else(|| "Color panel is missing from the panel registry".to_owned())?;
+        let constraints_for = |key: &PanelKey, title: &str| {
+            panels
+                .constraints_for_key(key)
+                .ok_or_else(|| format!("{title} panel is missing from the panel registry"))
+        };
+        let layers_constraints = constraints_for(&layers_key, "Layers")?;
+        let color_constraints = constraints_for(&color_key, "Color")?;
+        let properties_constraints = constraints_for(&properties_key, "Properties")?;
+        let history_constraints = constraints_for(&history_key, "History")?;
 
-        // Build the initial composition through Dock Core commands instead of
-        // maintaining a separate UI-only list of tabs.
+        // Create both groups and their tabs through Dock Core commands. The
+        // registry owns panel presentation; Core owns placement and active tabs.
         let mut layout = Layout::new(Profile::Photoshop);
         layout
             .apply(
@@ -64,10 +79,10 @@ impl MainWindow {
         else {
             return Err("Dock Core right dock root is not a column".to_owned());
         };
-        let tab_group = *column
+        let top_tab_group = *column
             .groups
             .first()
-            .ok_or_else(|| "Dock Core did not create a tab group".to_owned())?;
+            .ok_or_else(|| "Dock Core did not create the upper tab group".to_owned())?;
 
         layout
             .apply(
@@ -75,7 +90,7 @@ impl MainWindow {
                     key: color_key.clone(),
                     constraints: color_constraints,
                     target: Some(DropTarget::Tabs {
-                        group: tab_group,
+                        group: top_tab_group,
                         index: 1,
                     }),
                 },
@@ -83,55 +98,116 @@ impl MainWindow {
             )
             .map_err(|error| format!("Could not add the Color tab: {error}"))?;
 
-        let layers_panel = layout
-            .panel_instances()
-            .find_map(|(id, panel)| (panel.key == layers_key).then_some(id))
-            .ok_or_else(|| "Dock Core did not retain the Layers panel".to_owned())?;
-        let color_panel = layout
-            .panel_instances()
-            .find_map(|(id, panel)| (panel.key == color_key).then_some(id))
-            .ok_or_else(|| "Dock Core did not retain the Color panel".to_owned())?;
+        // Opening a panel at the bottom edge creates a second Tabs group in the
+        // same Core column, with the provisional 50/50 split corrected to Theme's ratio below.
+        layout
+            .apply(
+                DockCommand::OpenPanel {
+                    key: properties_key.clone(),
+                    constraints: properties_constraints,
+                    target: Some(DropTarget::GroupEdge {
+                        group: top_tab_group,
+                        zone: DropZone::Bottom,
+                    }),
+                },
+                &dock_metrics,
+            )
+            .map_err(|error| format!("Could not create the lower tab group: {error}"))?;
 
-        // OpenPanel selects the inserted tab. Start with the first tab selected.
+        let Node::Column(column) = layout
+            .node(column_id)
+            .ok_or_else(|| "Dock Core lost the right column after splitting it".to_owned())?
+        else {
+            return Err("Dock Core right dock root changed from a column".to_owned());
+        };
+        let bottom_tab_group = *column
+            .groups
+            .get(1)
+            .ok_or_else(|| "Dock Core did not create the lower tab group".to_owned())?;
+
+        layout
+            .apply(
+                DockCommand::OpenPanel {
+                    key: history_key.clone(),
+                    constraints: history_constraints,
+                    target: Some(DropTarget::Tabs {
+                        group: bottom_tab_group,
+                        index: 1,
+                    }),
+                },
+                &dock_metrics,
+            )
+            .map_err(|error| format!("Could not add the History tab: {error}"))?;
+
+        layout
+            .apply(
+                DockCommand::RestoreGroupRatios {
+                    column: column_id,
+                    ratios: vec![split_ratio, 1.0 - split_ratio],
+                },
+                &dock_metrics,
+            )
+            .map_err(|error| format!("Could not apply the Theme group split ratio: {error}"))?;
+
+        let panel_id_for = |key: &PanelKey, title: &str| {
+            layout
+                .panel_instances()
+                .find_map(|(id, panel)| (panel.key == *key).then_some(id))
+                .ok_or_else(|| format!("Dock Core did not retain the {title} panel"))
+        };
+        let layers_panel = panel_id_for(&layers_key, "Layers")?;
+        let color_panel = panel_id_for(&color_key, "Color")?;
+        let properties_panel = panel_id_for(&properties_key, "Properties")?;
+        let history_panel = panel_id_for(&history_key, "History")?;
+
         layout
             .apply(
                 DockCommand::ActivateTab {
-                    group: tab_group,
+                    group: top_tab_group,
                     panel: layers_panel,
                 },
                 &dock_metrics,
             )
             .map_err(|error| format!("Could not activate the Layers tab: {error}"))?;
+        layout
+            .apply(
+                DockCommand::ActivateTab {
+                    group: bottom_tab_group,
+                    panel: properties_panel,
+                },
+                &dock_metrics,
+            )
+            .map_err(|error| format!("Could not activate the Properties tab: {error}"))?;
 
         Ok(Self {
             theme,
             panels,
             layout,
             dock_metrics,
-            tab_group,
             column_id,
+            top_tab_group,
+            bottom_tab_group,
             layers_panel,
             color_panel,
+            properties_panel,
+            history_panel,
             is_resizing_column: false,
             resize_start_x: 0.0,
             resize_start_width: dock_metrics.default_column_width,
         })
     }
 
-    fn activate_tab(&mut self, panel: PanelId) {
+    fn activate_tab(&mut self, group: NodeId, panel: PanelId) {
         if let Err(error) = self.layout.apply(
-            DockCommand::ActivateTab {
-                group: self.tab_group,
-                panel,
-            },
+            DockCommand::ActivateTab { group, panel },
             &self.dock_metrics,
         ) {
             eprintln!("Could not activate dock tab: {error}");
         }
     }
 
-    fn active_panel_id(&self) -> Option<PanelId> {
-        let Node::Tabs(tabs) = self.layout.node(self.tab_group)? else {
+    fn active_panel_id(&self, group: NodeId) -> Option<PanelId> {
+        let Node::Tabs(tabs) = self.layout.node(group)? else {
             return None;
         };
         let active_node = tabs.active_child()?;
@@ -151,6 +227,16 @@ impl MainWindow {
             })
             .unwrap_or(self.theme.metrics.default_column_width)
     }
+
+    fn group_split_ratio(&self) -> f32 {
+        self.layout
+            .node(self.column_id)
+            .and_then(|node| match node {
+                Node::Column(column) => column.group_ratios.first().copied(),
+                _ => None,
+            })
+            .unwrap_or(self.theme.metrics.default_column_split_ratio)
+    }
 }
 
 impl Render for MainWindow {
@@ -162,20 +248,22 @@ impl Render for MainWindow {
         let colors = self.theme.colors;
         let metrics = self.theme.metrics;
 
-        // The visible column width comes from the Core layout, clamped only to
-        // the current viewport so the UI never paints beyond the window edge.
         let column_width = self.column_width().min(window_width);
         let workspace_width = (window_width - column_width).max(0.0);
         let header_height = metrics.column_header_height.min(window_height);
-        let tab_strip_height = metrics
-            .tab_strip_height
-            .min((window_height - header_height).max(0.0));
-        let content_height = (window_height - header_height - tab_strip_height).max(0.0);
+        let available_below_header = (window_height - header_height).max(0.0);
+        let splitter_height = metrics.splitter_thickness.min(available_below_header);
+        let groups_height = (available_below_header - splitter_height).max(0.0);
+        let top_group_height = groups_height * self.group_split_ratio().clamp(0.0, 1.0);
+        let bottom_group_height = (groups_height - top_group_height).max(0.0);
+        let top_tab_strip_height = metrics.tab_strip_height.min(top_group_height);
+        let top_content_height = (top_group_height - top_tab_strip_height).max(0.0);
+        let bottom_tab_strip_height = metrics.tab_strip_height.min(bottom_group_height);
+        let bottom_content_height = (bottom_group_height - bottom_tab_strip_height).max(0.0);
 
         let button_size = metrics.button_size.min(column_width);
         let button_gap = metrics.button_gap;
         let content_padding = metrics.content_padding.min(column_width / 2.0);
-
         let header_spacer_width =
             (column_width - content_padding - button_size * 2.0 - button_gap).max(0.0);
         let tab_width = metrics
@@ -183,6 +271,9 @@ impl Render for MainWindow {
             .min(((column_width - content_padding * 2.0 - button_size) / 2.0).max(0.0));
         let tab_spacer_width =
             (column_width - content_padding * 2.0 - tab_width * 2.0 - button_size).max(0.0);
+
+        let top_active_panel = self.active_panel_id(self.top_tab_group);
+        let bottom_active_panel = self.active_panel_id(self.bottom_tab_group);
 
         let layers_title = self
             .layout
@@ -194,15 +285,37 @@ impl Render for MainWindow {
             .panel_instance(self.color_panel)
             .map(|panel| self.panels.title(panel))
             .unwrap_or_else(|| "Color".to_owned());
-        let active_content = self
-            .active_panel_id()
+        let properties_title = self
+            .layout
+            .panel_instance(self.properties_panel)
+            .map(|panel| self.panels.title(panel))
+            .unwrap_or_else(|| "Properties".to_owned());
+        let history_title = self
+            .layout
+            .panel_instance(self.history_panel)
+            .map(|panel| self.panels.title(panel))
+            .unwrap_or_else(|| "History".to_owned());
+
+        let top_content = top_active_panel
             .and_then(|panel_id| self.layout.panel_instance(panel_id))
             .map(|panel| self.panels.render(panel, &self.theme))
             .unwrap_or_else(|| div().into_any_element());
-        let layers_active = self.active_panel_id() == Some(self.layers_panel);
-        let color_active = self.active_panel_id() == Some(self.color_panel);
+        let bottom_content = bottom_active_panel
+            .and_then(|panel_id| self.layout.panel_instance(panel_id))
+            .map(|panel| self.panels.render(panel, &self.theme))
+            .unwrap_or_else(|| div().into_any_element());
+
+        let layers_active = top_active_panel == Some(self.layers_panel);
+        let color_active = top_active_panel == Some(self.color_panel);
+        let properties_active = bottom_active_panel == Some(self.properties_panel);
+        let history_active = bottom_active_panel == Some(self.history_panel);
+
+        let top_tab_group = self.top_tab_group;
+        let bottom_tab_group = self.bottom_tab_group;
         let layers_panel_id = self.layers_panel;
         let color_panel_id = self.color_panel;
+        let properties_panel_id = self.properties_panel;
+        let history_panel_id = self.history_panel;
 
         let header = div()
             .flex()
@@ -245,7 +358,7 @@ impl Render for MainWindow {
             .items_center()
             .justify_center()
             .w(px(tab_width))
-            .h(px(tab_strip_height))
+            .h(px(top_tab_strip_height))
             .bg(rgb(if layers_active {
                 colors.active_tab
             } else {
@@ -259,7 +372,7 @@ impl Render for MainWindow {
                 colors.muted_text
             }))
             .on_click(cx.listener(move |this, _, _, cx| {
-                this.activate_tab(layers_panel_id);
+                this.activate_tab(top_tab_group, layers_panel_id);
                 cx.notify();
             }))
             .child(layers_title);
@@ -270,7 +383,7 @@ impl Render for MainWindow {
             .items_center()
             .justify_center()
             .w(px(tab_width))
-            .h(px(tab_strip_height))
+            .h(px(top_tab_strip_height))
             .bg(rgb(if color_active {
                 colors.active_tab
             } else {
@@ -284,17 +397,17 @@ impl Render for MainWindow {
                 colors.muted_text
             }))
             .on_click(cx.listener(move |this, _, _, cx| {
-                this.activate_tab(color_panel_id);
+                this.activate_tab(top_tab_group, color_panel_id);
                 cx.notify();
             }))
             .child(color_title);
 
-        let tab_strip = div()
+        let top_tab_strip = div()
             .flex()
             .flex_row()
             .items_center()
             .w(px(column_width))
-            .h(px(tab_strip_height))
+            .h(px(top_tab_strip_height))
             .bg(rgb(colors.dock_background))
             .border_1()
             .border_color(rgb(colors.border))
@@ -315,13 +428,118 @@ impl Render for MainWindow {
             )
             .child(div().w(px(content_padding)).h(px(1.0)));
 
-        let content = div()
+        let properties_tab = div()
+            .id("dock-tab-properties")
+            .flex()
+            .items_center()
+            .justify_center()
+            .w(px(tab_width))
+            .h(px(bottom_tab_strip_height))
+            .bg(rgb(if properties_active {
+                colors.active_tab
+            } else {
+                colors.dock_background
+            }))
+            .border_1()
+            .border_color(rgb(colors.border))
+            .text_color(rgb(if properties_active {
+                colors.primary_text
+            } else {
+                colors.muted_text
+            }))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.activate_tab(bottom_tab_group, properties_panel_id);
+                cx.notify();
+            }))
+            .child(properties_title);
+
+        let history_tab = div()
+            .id("dock-tab-history")
+            .flex()
+            .items_center()
+            .justify_center()
+            .w(px(tab_width))
+            .h(px(bottom_tab_strip_height))
+            .bg(rgb(if history_active {
+                colors.active_tab
+            } else {
+                colors.dock_background
+            }))
+            .border_1()
+            .border_color(rgb(colors.border))
+            .text_color(rgb(if history_active {
+                colors.primary_text
+            } else {
+                colors.muted_text
+            }))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.activate_tab(bottom_tab_group, history_panel_id);
+                cx.notify();
+            }))
+            .child(history_title);
+
+        let bottom_tab_strip = div()
+            .flex()
+            .flex_row()
+            .items_center()
             .w(px(column_width))
-            .h(px(content_height))
+            .h(px(bottom_tab_strip_height))
+            .bg(rgb(colors.dock_background))
+            .border_1()
+            .border_color(rgb(colors.border))
+            .child(div().w(px(content_padding)).h(px(1.0)))
+            .child(properties_tab)
+            .child(history_tab)
+            .child(div().w(px(tab_spacer_width)).h(px(1.0)))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .w(px(button_size))
+                    .h(px(button_size))
+                    .text_color(rgb(colors.primary_text))
+                    .bg(rgb(colors.hover))
+                    .child("☰"),
+            )
+            .child(div().w(px(content_padding)).h(px(1.0)));
+
+        let top_content_area = div()
+            .w(px(column_width))
+            .h(px(top_content_height))
             .bg(rgb(colors.group_background))
             .border_1()
             .border_color(rgb(colors.border))
-            .child(active_content);
+            .child(top_content);
+
+        let bottom_content_area = div()
+            .w(px(column_width))
+            .h(px(bottom_content_height))
+            .bg(rgb(colors.group_background))
+            .border_1()
+            .border_color(rgb(colors.border))
+            .child(bottom_content);
+
+        let top_group = div()
+            .flex()
+            .flex_col()
+            .w(px(column_width))
+            .h(px(top_group_height))
+            .child(top_tab_strip)
+            .child(top_content_area);
+
+        let bottom_group = div()
+            .flex()
+            .flex_col()
+            .w(px(column_width))
+            .h(px(bottom_group_height))
+            .child(bottom_tab_strip)
+            .child(bottom_content_area);
+
+        let splitter = div()
+            .w(px(column_width))
+            .h(px(splitter_height))
+            .bg(rgb(colors.splitter));
 
         // The free, canvas-facing edge of the right dock column owns this
         // resize handle. Width changes are committed through Dock Core.
@@ -361,9 +579,9 @@ impl Render for MainWindow {
             .h(px(window_height))
             .bg(rgb(colors.dock_background))
             .child(header)
-            .child(tab_strip)
-            .child(content)
-            // Put the handle last so it remains visible above the column edge.
+            .child(top_group)
+            .child(splitter)
+            .child(bottom_group)
             .child(resize_handle);
 
         div()
