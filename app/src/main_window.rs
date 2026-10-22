@@ -768,8 +768,25 @@ impl Render for MainWindow {
                         workspace_width + outer_splitter_width / 2.0;
                     let target_splitter_center_x =
                         pointer_x - this.resize_column_pointer_offset_x;
+                    let current_left_width = this.column_width(0);
                     let width_delta = current_splitter_center_x - target_splitter_center_x;
-                    let requested_width = this.column_width(0) + width_delta;
+                    let requested_width = (current_left_width + width_delta).max(1.0);
+                    let max_width = (window_width
+                        - right_width
+                        - splitter_width
+                        - outer_splitter_width
+                        - this.theme.metrics.min_document_width)
+                        .max(0.0);
+                    // Keep a usable workspace even when Core has no measured canvas
+                    // bounds yet. If the current column already exceeds this limit
+                    // (for example after a window shrink), allow dragging inward.
+                    let requested_width = if max_width >= current_left_width {
+                        requested_width.min(max_width.max(1.0))
+                    } else if width_delta > 0.0 {
+                        current_left_width
+                    } else {
+                        requested_width
+                    };
                     if width_delta != 0.0 {
                         if let Err(error) = this.layout.apply(
                             DockCommand::ResizeColumn {
