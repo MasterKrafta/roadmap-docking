@@ -923,6 +923,11 @@ fn render_column(
             this.visible_tabs[4] = false;
         }
         this.collapsed_columns[column_index] = false;
+        if !this.visible_tabs.iter().any(|visible| *visible) {
+            this.composition_floating = false;
+            this.dragging_composition = false;
+            this.floating_composition_position = [0.0, 0.0];
+        }
         this.is_resizing_columns = false;
         this.is_resizing_outer_splitter = false;
         this.is_resizing_height = false;
