@@ -56,6 +56,17 @@ impl Render for MainWindow {
         let tab_width =
             metrics.column_tab_width.min(((column_width - metrics.button_size).max(0.0)) / 2.0);
 
+        let column_header_height = metrics.column_header_height.min(height);
+        let horizontal_splitter_height =
+            metrics.splitter_hit_zone.min((height - column_header_height).max(0.0));
+        let available_panel_height =
+            (height - column_header_height - horizontal_splitter_height).max(0.0);
+        let min_panel_height = metrics.min_group_height.min(available_panel_height / 2.0);
+        let max_top_height = (available_panel_height - min_panel_height).max(min_panel_height);
+        let top_panel_height =
+            (available_panel_height * self.split_ratio).clamp(min_panel_height, max_top_height);
+        let bottom_panel_height = (available_panel_height - top_panel_height).max(0.0);
+
         let control = |label: &'static str| {
             div()
                 .flex()
