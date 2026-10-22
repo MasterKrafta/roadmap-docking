@@ -1,5 +1,5 @@
 use gpui::{
-    Context, InteractiveElement, IntoElement, MouseButton, MouseMoveEvent, ParentElement, Render,
+    Context, InteractiveElement, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, ParentElement, Render,
     StatefulInteractiveElement, Styled, Window, div, px, rgb,
 };
 use ui::Theme;
@@ -132,7 +132,7 @@ impl Render for MainWindow {
                     .bg(rgb(colors.window_background))
                     .on_mouse_down(
                         MouseButton::Left,
-                        cx.listener(move |this, event, _window, cx| {
+                        cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
                             // Start from the displayed width, which may already be clamped
                             // if the window was resized to a narrower size.
                             this.column_width = column_width;
