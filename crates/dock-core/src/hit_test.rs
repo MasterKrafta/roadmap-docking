@@ -401,6 +401,149 @@ mod tests {
         Rect::new(Point::ZERO, Size::new(width, height))
     }
 
+    fn large_floating_fixture() -> (
+        crate::Layout,
+        crate::LayoutRects,
+        crate::FloatingGroupId,
+        crate::PanelId,
+    ) {
+        const WINDOW_COUNT: usize = 8;
+        const COLUMNS_PER_WINDOW: usize = 2;
+        const GROUPS_PER_COLUMN: usize = 3;
+        const TABS_PER_GROUP: usize = 8;
+
+        let metrics = DockMetrics::default();
+        let mut builder = LayoutBuilder::new(Profile::Photoshop);
+        let mut top_floating = None;
+        let mut top_panel = None;
+
+        for window_index in 0..WINDOW_COUNT {
+            let mut columns = Vec::with_capacity(COLUMNS_PER_WINDOW);
+            for column_index in 0..COLUMNS_PER_WINDOW {
+                let mut groups = Vec::with_capacity(GROUPS_PER_COLUMN);
+                for group_index in 0..GROUPS_PER_COLUMN {
+                    let mut panel_nodes = Vec::with_capacity(TABS_PER_GROUP);
+                    for tab_index in 0..TABS_PER_GROUP {
+                        let panel_key = key(&format!(
+                            "hit-bench-{window_index}-{column_index}-{group_index}-{tab_index}"
+                        ));
+                        let (panel_id, panel_node) = builder.panel(panel_key, constraints());
+                        if window_index + 1 == WINDOW_COUNT
+                            && column_index == 0
+                            && group_index == 0
+                            && tab_index == 0
+                        {
+                            top_panel = Some(panel_id);
+                        }
+                        panel_nodes.push(panel_node);
+                    }
+                    groups.push(builder.tabs(panel_nodes, 0, false));
+                }
+                columns.push(builder.column(
+                    280.0,
+                    ColumnMode::Expanded,
+                    groups,
+                    vec![1.0; GROUPS_PER_COLUMN],
+                ));
+            }
+
+            let root = builder.split(Axis::X, columns, vec![0.5; COLUMNS_PER_WINDOW]);
+            let bounds = Rect::new(
+                Point::new(
+                    100.0 + window_index as f32 * 5.0,
+                    100.0 + window_index as f32 * 3.0,
+                ),
+                Size::new(800.0, 700.0),
+            );
+            let floating = builder.floating_group(root, bounds, window_index as i32);
+            if window_index + 1 == WINDOW_COUNT {
+                top_floating = Some(floating);
+            }
+        }
+
+        let layout = builder.build();
+        let rects = layout
+            .compute_rects(viewport(1600.0, 1000.0), &metrics)
+            .unwrap();
+        (
+            layout,
+            rects,
+            top_floating.expect("fixture must contain a frontmost floating window"),
+            top_panel.expect("fixture must contain a frontmost panel"),
+        )
+    }
+
+    #[test]
+    fn blank_space_in_frontmost_floating_window_does_not_leak_through() {
+        let metrics = DockMetrics::default();
+        let (layout, rects, top_floating, _) = large_floating_fixture();
+        // The floating root is a horizontal split of two 280px columns inside
+        // an 800px window, leaving an intentional blank region on the right.
+        let blank_point = Point::new(900.0, 250.0);
+        let floating_rect = rects
+            .floating_groups
+            .iter()
+            .find(|floating| floating.group == top_floating)
+            .unwrap()
+            .rect;
+        assert!(floating_rect.contains(blank_point).unwrap());
+
+        assert_eq!(
+            layout.hit_test(blank_point, &rects, &metrics).unwrap(),
+            HitResult::FloatingGroup { group: top_floating }
+        );
+    }
+
+    /// Manual release-mode benchmark for hit-testing large floating subtrees.
+    ///
+    /// Run with one test thread:
+    /// cargo test -p dock-core --release benchmark_hit_test_multiple_floating_subtrees -- --ignored --nocapture --test-threads=1
+    #[test]
+    #[ignore = "manual performance baseline; run the documented release-mode command"]
+    fn benchmark_hit_test_multiple_floating_subtrees() {
+        let metrics = DockMetrics::default();
+        let (layout, rects, top_floating, top_panel) = large_floating_fixture();
+        let node_count = layout.nodes().count();
+        let active_panel_rects = rects.panels.len();
+        let panel_instances = 8 * 2 * 3 * 8;
+        let iterations = 500;
+
+        let measure = |label: &str, point: Point, expected: HitResult| {
+            let start = std::time::Instant::now();
+            let mut actual = HitResult::Miss;
+            for _ in 0..iterations {
+                actual = std::hint::black_box(
+                    layout.hit_test(point, &rects, &metrics).unwrap(),
+                );
+            }
+            let elapsed = start.elapsed();
+            assert_eq!(actual, expected);
+            eprintln!(
+                "hit-test baseline [{label}]: floating_windows={}, nodes={node_count}, panel_instances={panel_instances}, active_panel_rects={active_panel_rects}, iterations={iterations}, elapsed_ms={:.3}, us/call={:.3}, final_hit={actual:?}",
+                rects.floating_groups.len(),
+                elapsed.as_secs_f64() * 1000.0,
+                elapsed.as_secs_f64() * 1_000_000.0 / iterations as f64,
+            );
+        };
+
+        measure(
+            "inside-front-floating",
+            Point::new(250.0, 250.0),
+            HitResult::Panel { panel: top_panel },
+        );
+        measure(
+            "outside-floating",
+            Point::new(1500.0, 900.0),
+            HitResult::Canvas,
+        );
+        assert!(
+            rects
+                .floating_groups
+                .iter()
+                .any(|item| item.group == top_floating)
+        );
+    }
+
     #[test]
     fn every_floating_resize_zone_beats_title_drag() {
         let metrics = DockMetrics::default();
