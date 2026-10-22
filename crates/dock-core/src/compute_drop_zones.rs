@@ -2163,7 +2163,10 @@ mod tests {
             zone_count = zones.len();
             let _ = black_box(zones);
         }
-        assert!(zone_count > 0, "benchmark case {label} should emit legal drop zones");
+        assert!(
+            zone_count > 0,
+            "benchmark case {label} should emit legal drop zones"
+        );
         let elapsed = start.elapsed();
         let micros_per_call = elapsed.as_secs_f64() * 1_000_000.0 / iterations as f64;
         let calls_per_second = iterations as f64 / elapsed.as_secs_f64();
