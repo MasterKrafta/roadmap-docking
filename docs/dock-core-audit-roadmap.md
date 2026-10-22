@@ -174,10 +174,18 @@ Workspace-проверки объединяют миграцию v1→v2, отс
 
 ### 3.3 — hit-test floating-поддеревьев · средний потенциал
 
-- [ ] Измерить `hit_test()` с несколькими floating windows и большими поддеревьями.
-- [ ] Проверить, можно ли не обходить все floating-поддеревья заранее и не собирать повторно множества для уже выбранного окна.
-- [ ] Сохранить приоритет: Z-order → floating resize/title → внутренние targets → flyout → main dock/canvas.
-- [ ] Убедиться, что пустое место верхнего floating window не пропускает hit в нижнее окно или Canvas.
+**Baseline probe:** ignored release-test `benchmark_hit_test_multiple_floating_subtrees` builds 8 overlapping floating windows. Each window contains 2 columns × 3 tab groups × 8 panel instances (456 nodes overall); it measures both a hit inside the frontmost floating window and a point outside all floating windows. Geometry construction is outside the timed loop. Run with:
+
+```sh
+cargo test -p dock-core --release benchmark_hit_test_multiple_floating_subtrees -- --ignored --nocapture --test-threads=1
+```
+
+The baseline result is still awaiting a local run before any algorithm change. A regression test also asserts that blank space inside the topmost floating window returns that window's `FloatingGroup` hit and does not fall through to a lower window or the Canvas.
+
+- [ ] Record the release benchmark baseline for both points, preferably across three runs.
+- [ ] Check whether collecting the union of every floating subtree can be deferred until the point falls outside all floating windows, avoiding a second traversal of the selected subtree.
+- [ ] Preserve priority: Z-order → floating resize/title → internal targets → flyout → main dock/canvas.
+- [ ] Confirm blank space in the topmost floating window never leaks hits to lower windows or Canvas.
 
 ### 3.4 — Undo/Redo и другие аллокации · низкий/средний потенциал
 
