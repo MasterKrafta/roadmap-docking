@@ -696,6 +696,7 @@ fn render_column(
         .child(
             div()
                 .flex_1()
+                .h(px(metrics.column_header_height))
                 .on_mouse_down(MouseButton::Left, toggle_collapse_on_double_click),
         )
         .child(
