@@ -2151,7 +2151,7 @@ mod tests {
             let zones = layout
                 .compute_drop_zones(source, rects, metrics)
                 .expect("benchmark layout must produce drop zones");
-            black_box(zones.len());
+            let _ = black_box(zones.len());
         }
 
         let start = Instant::now();
@@ -2161,8 +2161,9 @@ mod tests {
                 .compute_drop_zones(source, rects, metrics)
                 .expect("benchmark layout must produce drop zones");
             zone_count = zones.len();
-            black_box(zones);
+            let _ = black_box(zones);
         }
+        assert!(zone_count > 0, "benchmark case {label} should emit legal drop zones");
         let elapsed = start.elapsed();
         let micros_per_call = elapsed.as_secs_f64() * 1_000_000.0 / iterations as f64;
         let calls_per_second = iterations as f64 / elapsed.as_secs_f64();
