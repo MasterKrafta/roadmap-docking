@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use super::helpers::*;
 use super::*;
 
@@ -461,44 +459,12 @@ impl Layout {
         node_id: NodeId,
         metrics: &DockMetrics,
     ) -> Result<Size, CommandError> {
-        let mut cache: Option<&mut HashMap<NodeId, Size>> = None;
-        self.minimum_node_size_inner(node_id, metrics, &mut cache)
-    }
-
-    /// Computes minimum geometry while memoizing composite nodes for one
-    /// caller-owned geometry pass. Leaf Panel nodes are deliberately not cached:
-    /// resolving their minimum is a direct constraints lookup, and HashMap
-    /// bookkeeping can cost more than recomputing that value. The caller must
-    /// keep Layout and DockMetrics unchanged for the lifetime of the cache.
-    pub(crate) fn minimum_node_size_with_cache(
-        &self,
-        node_id: NodeId,
-        metrics: &DockMetrics,
-        cache: &mut HashMap<NodeId, Size>,
-    ) -> Result<Size, CommandError> {
-        let mut cache = Some(cache);
-        self.minimum_node_size_inner(node_id, metrics, &mut cache)
-    }
-
-    fn minimum_node_size_inner(
-        &self,
-        node_id: NodeId,
-        metrics: &DockMetrics,
-        cache: &mut Option<&mut HashMap<NodeId, Size>>,
-    ) -> Result<Size, CommandError> {
+        #[cfg(test)]
+        crate::compute_rects::record_recursive_minimum_node_size(node_id);
         let node = self
             .nodes
             .get(node_id)
             .ok_or(CommandError::MissingNode { node: node_id })?;
-        let cacheable = !matches!(node, Node::Panel(_));
-        if cacheable {
-            if let Some(size) = cache.as_deref().and_then(|values| values.get(&node_id)) {
-                return Ok(*size);
-            }
-        }
-
-        #[cfg(test)]
-        crate::compute_rects::record_recursive_minimum_node_size(node_id);
         let size = match node {
             Node::Panel(panel) => self
                 .panel_instances
@@ -515,7 +481,7 @@ impl Layout {
                 let mut width = 0.0_f32;
                 let mut content_height = 0.0_f32;
                 for child in &tabs.children {
-                    let child_size = self.minimum_node_size_inner(*child, metrics, cache)?;
+                    let child_size = self.minimum_node_size(*child, metrics)?;
                     width = width.max(child_size.width);
                     content_height = content_height.max(child_size.height);
                 }
@@ -530,7 +496,7 @@ impl Layout {
                 let mut width = 0.0_f32;
                 let mut height = 0.0_f32;
                 for child in &split.children {
-                    let child_size = self.minimum_node_size_inner(*child, metrics, cache)?;
+                    let child_size = self.minimum_node_size(*child, metrics)?;
                     match split.axis {
                         Axis::X => {
                             width += child_size.width;
@@ -565,7 +531,7 @@ impl Layout {
             Node::Column(column) => {
                 let mut height = 0.0_f32;
                 for group in &column.groups {
-                    height += self.minimum_node_size_inner(*group, metrics, cache)?.height;
+                    height += self.minimum_node_size(*group, metrics)?.height;
                 }
                 height += metrics.splitter_thickness
                     * column.groups.len().saturating_sub(1) as f32;
@@ -578,11 +544,6 @@ impl Layout {
                 field: "size",
                 reason: "computed minimum size is non-finite or has invalid dimensions",
             });
-        }
-        if cacheable {
-            if let Some(cache) = cache.as_deref_mut() {
-                cache.insert(node_id, size);
-            }
         }
         Ok(size)
     }
