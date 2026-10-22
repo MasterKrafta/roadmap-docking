@@ -1189,9 +1189,9 @@ impl Layout {
                 } else {
                     let left_min = self.minimum_column_width(left_id, metrics)?;
                     let right_min = self.minimum_column_width(right_id, metrics)?;
-                    let left_max = self.maximum_column_width(left_id)?.unwrap_or(f32::INFINITY);
+                    let left_max = self.maximum_column_width(left_id, metrics)?.unwrap_or(f32::INFINITY);
                     let right_max = self
-                        .maximum_column_width(right_id)?
+                        .maximum_column_width(right_id, metrics)?
                         .unwrap_or(f32::INFINITY);
                     let lower_delta = (left_min - left.width).max(right.width - right_max);
                     let upper_delta = (right.width - right_min).min(left_max - left.width);
@@ -1581,7 +1581,7 @@ impl Layout {
                     ColumnMode::Expanded if current.mode.is_rail() => {
                         let minimum = self.minimum_expanded_column_width(*column, metrics)?;
                         let maximum = self
-                            .maximum_expanded_column_width(*column)?
+                            .maximum_expanded_column_width(*column, metrics)?
                             .unwrap_or(f32::MAX);
                         if maximum < minimum {
                             return Err(CommandError::InvalidValue {
