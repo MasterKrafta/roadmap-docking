@@ -74,8 +74,10 @@
 
 ## Этап 2 — расширить проверку инвариантов и регрессий
 
-- [ ] В property-тестах последовательностей команд после каждой успешной команды проверять не только `Layout::validate()`, но и построение geometry на достаточно большом тестовом viewport.
-- [ ] Добавить проверку всех выданных прямоугольников: конечные координаты/размеры, корректные края, непустые интерактивные зоны там, где это требуется контрактом.
+- [x] В property-тестах последовательностей команд после каждой успешной команды проверять не только `Layout::validate()`, но и построение geometry на достаточно большом тестовом viewport.
+- [x] Добавить проверку всех выданных прямоугольников: конечные координаты/размеры, корректные края, непустые интерактивные зоны там, где это требуется контрактом.
+
+**Результат:** generated property sequences now compute geometry after every successful command in a 32768 × 32768 logical-pixel viewport. A shared `LayoutRects` invariant checker covers every emitted rectangle field, finite coordinates/sizes, non-negative dimensions, finite/representable edges, and non-empty tab headers, overflow buttons, splitters, floating resize handles, and drop zones. Existing geometry tests use the same checker. These checks intentionally treat successful model validation and successful geometry computation as separate invariants.
 - [ ] Отдельно тестировать ожидемые ошибки малого viewport; не считать `InsufficientCanvasWidth` багом автоматически.
 - [ ] Усилить последовательности операций move/resize/collapse/rail/floating/flyout и undo/redo; проверять восстановление логического состояния и валидность ID.
 - [ ] Добавить крайние случаи ratios: нули, один доминирующий вес, только collapsed groups, несколько уровней вложенности.
