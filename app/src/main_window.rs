@@ -137,7 +137,7 @@ impl Render for MainWindow {
             root
         };
 
-        root
+        let root = root
             .on_mouse_move({
                 let min_width = metrics.min_column_width;
                 let hit_zone = metrics.splitter_hit_zone;
