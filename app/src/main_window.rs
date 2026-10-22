@@ -16,7 +16,7 @@ pub(crate) struct MainWindow {
     resize_start_column_widths: [f32; 2],
     resize_start_top_height: f32,
     split_ratios: [f32; 2],
-    visible_panels: [bool; 4],
+    visible_tabs: [bool; 5],
     windows_menu_open: bool,
     resizing_height_column: usize,
     is_resizing_columns: bool,
@@ -39,7 +39,7 @@ impl MainWindow {
             resize_start_column_widths: [default_width, default_width],
             resize_start_top_height: 0.0,
             split_ratios: [default_split, default_split],
-            visible_panels: [true, true, true, true],
+            visible_tabs: [true, true, true, true, true],
             windows_menu_open: false,
             resizing_height_column: 0,
             is_resizing_columns: false,
@@ -60,8 +60,8 @@ impl Render for MainWindow {
         let menu_bar_height = 32.0_f32.min(window_height);
         let menu_item_height = 28.0;
         let menu_dropdown_height = if self.windows_menu_open {
-            // Four 28px items, vertical padding, and three row gaps.
-            menu_item_height * 4.0 + 28.0
+            // Five 28px items, vertical padding, and four row gaps.
+            menu_item_height * 5.0 + 32.0
         } else {
             0.0
         };
@@ -107,21 +107,17 @@ impl Render for MainWindow {
             }
         };
 
-        let (left_top_height, left_bottom_height, left_horizontal_divider) =
-            panel_heights(self.split_ratios[0], self.visible_panels[0], self.visible_panels[1]);
-        let (right_top_height, right_bottom_height, right_horizontal_divider) =
-            panel_heights(self.split_ratios[1], self.visible_panels[2], self.visible_panels[3]);
+        let left_upper_group_visible = self.visible_tabs[0] || self.visible_tabs[1];
+        let left_lower_group_visible = self.visible_tabs[2] || self.visible_tabs[3];
+        let right_group_visible = self.visible_tabs[4];
 
-        let vertical_splitter_color = if self.is_resizing_columns {
-            colors.focus
-        } else {
-            colors.splitter
-        };
-        let outer_splitter_color = if self.is_resizing_outer_splitter {
-            colors.focus
-        } else {
-            colors.splitter
-        };
+        let (left_top_height, left_bottom_height, left_horizontal_divider) = panel_heights(
+            self.split_ratios[0],
+            left_upper_group_visible,
+            left_lower_group_visible,
+        );
+        let (right_top_height, right_bottom_height, right_horizontal_divider) =
+            panel_heights(self.split_ratios[1], right_group_visible, false);
         let root = div()
             .flex()
             .flex_col()
@@ -273,29 +269,36 @@ impl Render for MainWindow {
                     .border_color(rgb(colors.border))
                     .child(render_panel_menu_item(
                         0,
-                        "Layers",
-                        self.visible_panels[0],
+                        "Левая верхняя — Вкладка 1",
+                        self.visible_tabs[0],
                         self.theme,
                         cx,
                     ))
                     .child(render_panel_menu_item(
                         1,
-                        "Color",
-                        self.visible_panels[1],
+                        "Левая верхняя — Вкладка 2",
+                        self.visible_tabs[1],
                         self.theme,
                         cx,
                     ))
                     .child(render_panel_menu_item(
                         2,
-                        "Properties",
-                        self.visible_panels[2],
+                        "Левая нижняя — Вкладка 1",
+                        self.visible_tabs[2],
                         self.theme,
                         cx,
                     ))
                     .child(render_panel_menu_item(
                         3,
-                        "History",
-                        self.visible_panels[3],
+                        "Левая нижняя — Вкладка 2",
+                        self.visible_tabs[3],
+                        self.theme,
+                        cx,
+                    ))
+                    .child(render_panel_menu_item(
+                        4,
+                        "Правая — Вкладка 1",
+                        self.visible_tabs[4],
                         self.theme,
                         cx,
                     )),
@@ -345,7 +348,7 @@ impl Render for MainWindow {
                             div()
                                 .w(px(metrics.splitter_thickness))
                                 .h(px(workspace_height))
-                                .bg(rgb(outer_splitter_color)),
+                                .bg(rgb(colors.splitter)),
                         ),
                 )
                 .child(render_column(
@@ -353,8 +356,10 @@ impl Render for MainWindow {
                     left_column_width,
                     left_top_height,
                     left_bottom_height,
-                    self.visible_panels[0],
-                    self.visible_panels[1],
+                    left_upper_group_visible,
+                    left_lower_group_visible,
+                    [self.visible_tabs[0], self.visible_tabs[1]],
+                    [self.visible_tabs[2], self.visible_tabs[3]],
                     self.theme,
                     self.active_tabs[0],
                     self.lower_active_tabs[0],
@@ -391,7 +396,7 @@ impl Render for MainWindow {
                             div()
                                 .w(px(metrics.splitter_thickness))
                                 .h(px(workspace_height))
-                                .bg(rgb(vertical_splitter_color)),
+                                .bg(rgb(colors.splitter)),
                         ),
                 )
                 .child(render_column(
@@ -399,8 +404,10 @@ impl Render for MainWindow {
                     right_column_width,
                     right_top_height,
                     right_bottom_height,
-                    self.visible_panels[2],
-                    self.visible_panels[3],
+                    right_group_visible,
+                    false,
+                    [self.visible_tabs[4], false],
+                    [false, false],
                     self.theme,
                     self.active_tabs[1],
                     self.lower_active_tabs[1],
@@ -422,10 +429,11 @@ fn render_panel_menu_item(
 ) -> impl IntoElement {
     let colors = theme.colors;
     let id = match index {
-        0 => "windows-menu-left-upper",
-        1 => "windows-menu-left-lower",
-        2 => "windows-menu-right-upper",
-        _ => "windows-menu-right-lower",
+        0 => "windows-menu-left-upper-tab-1",
+        1 => "windows-menu-left-upper-tab-2",
+        2 => "windows-menu-left-lower-tab-1",
+        3 => "windows-menu-left-lower-tab-2",
+        _ => "windows-menu-right-tab-1",
     };
 
     div()
@@ -438,7 +446,27 @@ fn render_panel_menu_item(
         .p(px(4.0))
         .text_color(rgb(colors.primary_text))
         .on_click(cx.listener(move |this, _, _, cx| {
-            this.visible_panels[index] = !this.visible_panels[index];
+            this.visible_tabs[index] = !this.visible_tabs[index];
+
+            // Keep a visible tab selected whenever exactly one tab remains in a group.
+            match index {
+                0 | 1 => {
+                    if this.visible_tabs[0] && !this.visible_tabs[1] {
+                        this.active_tabs[0] = 0;
+                    } else if !this.visible_tabs[0] && this.visible_tabs[1] {
+                        this.active_tabs[0] = 1;
+                    }
+                }
+                2 | 3 => {
+                    if this.visible_tabs[2] && !this.visible_tabs[3] {
+                        this.lower_active_tabs[0] = 0;
+                    } else if !this.visible_tabs[2] && this.visible_tabs[3] {
+                        this.lower_active_tabs[0] = 1;
+                    }
+                }
+                _ => {}
+            }
+
             cx.notify();
         }))
         .child(if checked { "☑" } else { "☐" })
@@ -452,6 +480,8 @@ fn render_column(
     bottom_panel_height: f32,
     show_upper_panel: bool,
     show_lower_panel: bool,
+    upper_tabs_visible: [bool; 2],
+    lower_tabs_visible: [bool; 2],
     theme: Theme,
     active_tab: usize,
     lower_active_tab: usize,
@@ -462,11 +492,6 @@ fn render_column(
 ) -> impl IntoElement {
     let colors = theme.colors;
     let metrics = theme.metrics;
-    let horizontal_splitter_color = if is_resizing_height {
-        colors.focus
-    } else {
-        colors.splitter
-    };
     let (first_tab_id, second_tab_id, lower_first_tab_id, lower_second_tab_id) =
         if column_index == 0 {
             (
@@ -539,6 +564,8 @@ fn render_column(
                     active_tab,
                     first_tab_id,
                     second_tab_id,
+                    upper_tabs_visible[0],
+                    upper_tabs_visible[1],
                     cx,
                 ))
                 .child(
@@ -584,7 +611,7 @@ fn render_column(
                     div()
                         .w(px(column_width))
                         .h(px(metrics.splitter_thickness.min(horizontal_splitter_height)))
-                        .bg(rgb(horizontal_splitter_color)),
+                        .bg(rgb(colors.splitter)),
                 ),
         );
     }
@@ -605,6 +632,8 @@ fn render_column(
                     lower_active_tab,
                     lower_first_tab_id,
                     lower_second_tab_id,
+                    lower_tabs_visible[0],
+                    lower_tabs_visible[1],
                     cx,
                 ))
                 .child(
@@ -676,6 +705,8 @@ fn render_tab_strip(
     active_tab: usize,
     first_tab_id: &'static str,
     second_tab_id: &'static str,
+    first_tab_visible: bool,
+    second_tab_visible: bool,
     cx: &mut Context<MainWindow>,
 ) -> impl IntoElement {
     let colors = theme.colors;
@@ -730,7 +761,7 @@ fn render_tab_strip(
         .text_color(rgb(colors.muted_text))
         .child("☰");
 
-    div()
+    let mut strip = div()
         .flex()
         .flex_row()
         .items_center()
@@ -738,8 +769,10 @@ fn render_tab_strip(
         .flex_shrink_0()
         .bg(rgb(colors.dock_background))
         .border_b_1()
-        .border_color(rgb(colors.border))
-        .child(
+        .border_color(rgb(colors.border));
+
+    if first_tab_visible {
+        strip = strip.child(
             div()
                 .id(first_tab_id)
                 .flex()
@@ -751,8 +784,11 @@ fn render_tab_strip(
                 .text_color(rgb(first_tab_text))
                 .on_click(activate_first)
                 .child("Вкладка 1"),
-        )
-        .child(
+        );
+    }
+
+    if second_tab_visible {
+        strip = strip.child(
             div()
                 .id(second_tab_id)
                 .flex()
@@ -764,7 +800,8 @@ fn render_tab_strip(
                 .text_color(rgb(second_tab_text))
                 .on_click(activate_second)
                 .child("Вкладка 2"),
-        )
-        .child(div().flex_1().h(px(metrics.tab_strip_height)))
-        .child(control)
+        );
+    }
+
+    strip.child(div().flex_1().h(px(metrics.tab_strip_height))).child(control)
 }
