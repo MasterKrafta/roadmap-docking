@@ -4,7 +4,7 @@ use ui::Theme;
 /// Minimal application window containing one empty docking column.
 ///
 /// The column has three independent rows:
-/// 1. Header: the two requested controls on the left and empty space to the right.
+/// 1. Header: empty space on the left and the two requested controls on the right.
 /// 2. Tabs strip: empty tab area and a menu control on the right.
 /// 3. Content: an empty area that will be filled in later.
 pub(crate) struct MainWindow {
@@ -41,7 +41,7 @@ impl Render for MainWindow {
             .w(px(width))
             .h(px(height))
             .bg(rgb(colors.window_background))
-            // 1. Header: controls at the left, remaining space intentionally empty.
+            // 1. Header: empty space on the left, controls on the right.
             .child(
                 div()
                     .flex()
@@ -52,9 +52,9 @@ impl Render for MainWindow {
                     .bg(rgb(colors.group_background))
                     .border_b_1()
                     .border_color(rgb(colors.border))
+                    .child(div().flex_1())
                     .child(control(">>"))
-                    .child(control("x"))
-                    .child(div().flex_1()),
+                    .child(control("x")),
             )
             // 2. Tabs strip: an empty tab area with the hamburger at the right.
             .child(
