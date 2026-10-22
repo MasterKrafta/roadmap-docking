@@ -887,18 +887,6 @@ fn render_column(
         .child(header);
 
     if is_collapsed {
-        let expand_from_mini_header =
-            cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
-                if event.click_count >= 2 {
-                    this.collapsed_columns[column_index] = false;
-                    cx.notify();
-                }
-            });
-        let mini_header_id = if column_index == 0 {
-            "left-collapsed-mini-header"
-        } else {
-            "right-collapsed-mini-header"
-        };
         let mut icon_rail = div()
             .flex()
             .flex_col()
@@ -907,41 +895,44 @@ fn render_column(
             .w(px(column_width))
             .h(px((column_height - metrics.column_header_height).max(0.0)))
             .flex_shrink_0()
-            .bg(rgb(colors.group_background))
-            .child(
-                div()
-                    .id(mini_header_id)
-                    .w(px(column_width))
-                    .h(px(metrics.tab_strip_height))
-                    .flex_shrink_0()
-                    .bg(rgb(colors.dock_background))
-                    .border_b_1()
-                    .border_color(rgb(colors.border))
-                    .on_mouse_down(MouseButton::Left, expand_from_mini_header),
-            );
+            .bg(rgb(colors.group_background));
 
         if column_index == 0 {
-            if upper_tabs_visible[0] {
-                icon_rail = icon_rail.child(render_collapsed_tab_icon(
-                    0, "▱", column_width, theme, cx,
+            if upper_tabs_visible[0] || upper_tabs_visible[1] {
+                icon_rail = icon_rail.child(render_collapsed_group_header(
+                    0, column_index, column_width, theme, cx,
                 ));
+                if upper_tabs_visible[0] {
+                    icon_rail = icon_rail.child(render_collapsed_tab_icon(
+                        0, "▱", column_width, theme, cx,
+                    ));
+                }
+                if upper_tabs_visible[1] {
+                    icon_rail = icon_rail.child(render_collapsed_tab_icon(
+                        1, "◇", column_width, theme, cx,
+                    ));
+                }
             }
-            if upper_tabs_visible[1] {
-                icon_rail = icon_rail.child(render_collapsed_tab_icon(
-                    1, "◇", column_width, theme, cx,
+
+            if lower_tabs_visible[0] || lower_tabs_visible[1] {
+                icon_rail = icon_rail.child(render_collapsed_group_header(
+                    1, column_index, column_width, theme, cx,
                 ));
-            }
-            if lower_tabs_visible[0] {
-                icon_rail = icon_rail.child(render_collapsed_tab_icon(
-                    2, "◉", column_width, theme, cx,
-                ));
-            }
-            if lower_tabs_visible[1] {
-                icon_rail = icon_rail.child(render_collapsed_tab_icon(
-                    3, "↶", column_width, theme, cx,
-                ));
+                if lower_tabs_visible[0] {
+                    icon_rail = icon_rail.child(render_collapsed_tab_icon(
+                        2, "◉", column_width, theme, cx,
+                    ));
+                }
+                if lower_tabs_visible[1] {
+                    icon_rail = icon_rail.child(render_collapsed_tab_icon(
+                        3, "↶", column_width, theme, cx,
+                    ));
+                }
             }
         } else if upper_tabs_visible[0] {
+            icon_rail = icon_rail.child(render_collapsed_group_header(
+                2, column_index, column_width, theme, cx,
+            ));
             icon_rail = icon_rail.child(render_collapsed_tab_icon(
                 4, "☷", column_width, theme, cx,
             ));
@@ -1088,6 +1079,41 @@ fn render_column(
     }
 
     column
+}
+
+fn render_collapsed_group_header(
+    group_index: usize,
+    column_index: usize,
+    column_width: f32,
+    theme: Theme,
+    cx: &mut Context<MainWindow>,
+) -> impl IntoElement {
+    let metrics = theme.metrics;
+    let colors = theme.colors;
+    let id = match group_index {
+        0 => "left-collapsed-upper-group-header",
+        1 => "left-collapsed-lower-group-header",
+        _ => "right-collapsed-group-header",
+    };
+
+    div()
+        .id(id)
+        .w(px(column_width))
+        .h(px(metrics.tab_strip_height))
+        .flex_shrink_0()
+        .bg(rgb(colors.dock_background))
+        .border_b_1()
+        .border_color(rgb(colors.border))
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
+                if event.click_count >= 2 {
+                    this.collapsed_columns[column_index] = false;
+                    this.collapsed_group_content[group_index] = false;
+                    cx.notify();
+                }
+            }),
+        )
 }
 
 fn render_collapsed_tab_icon(
