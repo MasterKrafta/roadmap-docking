@@ -915,6 +915,18 @@ fn weighted_sizes(
         });
     }
 
+    // Collapsed children keep their fixed minimum height and are excluded
+    // before this function is called. If that leaves only zero-weight expanded
+    // children, use equal weights so a valid parent ratio vector still fills the
+    // available stack space. Positive weights retain their original proportions.
+    let equal_weights;
+    let weights = if weights.iter().all(|weight| *weight == 0.0) {
+        equal_weights = vec![1.0; weights.len()];
+        equal_weights.as_slice()
+    } else {
+        weights
+    };
+
     let mut output = vec![0.0; weights.len()];
     let mut active: Vec<usize> = (0..weights.len()).collect();
     let mut remaining = available;
