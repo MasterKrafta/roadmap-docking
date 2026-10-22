@@ -100,6 +100,10 @@ impl PanelRegistry {
             .unwrap_or_else(|| format!("Unavailable: {}", instance.key.as_str()))
     }
 
+    pub(crate) fn icon(&self, instance: &PanelInstance) -> &'static str {
+        panel_icon_for_key(instance.key.as_str())
+    }
+
     pub(crate) fn menu_items(&self, instance: &PanelInstance) -> Vec<PanelMenuItem> {
         self.entries
             .iter()
@@ -116,6 +120,16 @@ impl PanelRegistry {
             .unwrap_or_else(|| {
                 panel_content(theme, "Unavailable panel", instance.key.as_str())
             })
+    }
+}
+
+fn panel_icon_for_key(key: &str) -> &'static str {
+    match key {
+        "layers" => "▱",
+        "color" => "◉",
+        "properties" => "☷",
+        "history" => "↶",
+        _ => "◇",
     }
 }
 
@@ -158,4 +172,18 @@ fn render_properties(theme: &Theme) -> AnyElement {
 
 fn render_history(theme: &Theme) -> AnyElement {
     panel_content(theme, "History", "Recent document operations")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::panel_icon_for_key;
+
+    #[test]
+    fn panel_icons_are_keyed_to_panel_identity_not_title_initials() {
+        assert_eq!(panel_icon_for_key("layers"), "▱");
+        assert_eq!(panel_icon_for_key("color"), "◉");
+        assert_eq!(panel_icon_for_key("properties"), "☷");
+        assert_eq!(panel_icon_for_key("history"), "↶");
+        assert_eq!(panel_icon_for_key("unregistered"), "◇");
+    }
 }

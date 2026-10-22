@@ -923,6 +923,7 @@ impl Render for MainWindow {
             theme,
             |instance| panel_registry.render(instance, theme),
             |instance| panel_registry.title(instance),
+            |instance| panel_registry.icon(instance),
             move |command| {
                 let weak = command_weak.clone();
                 Box::new(move |_event: &ClickEvent, _window: &mut Window, app: &mut App| {

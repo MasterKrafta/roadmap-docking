@@ -60,12 +60,13 @@ pub enum DockMenuRequest {
 ///
 /// The adapter reads Layout and emits typed command/menu requests; it does not mutate or clone
 /// Layout. The app supplies panel content factories and owns all menu state.
-pub fn render<F, T, H, M, D, R>(
+pub fn render<F, T, I, H, M, D, R>(
     layout: &Layout,
     rects: &LayoutRects,
     theme: &Theme,
     mut render_panel: F,
     panel_title: T,
+    panel_icon: I,
     make_command_handler: H,
     make_menu_handler: M,
     make_drag_start_handler: D,
@@ -75,6 +76,7 @@ pub fn render<F, T, H, M, D, R>(
 where
     F: FnMut(&PanelInstance) -> AnyElement,
     T: Fn(&PanelInstance) -> String,
+    I: Fn(&PanelInstance) -> &'static str,
     H: Fn(DockCommand) -> CommandClickHandler,
     M: Fn(DockMenuRequest) -> CommandClickHandler,
     D: Fn(DragPayload, DragHandle) -> DragStartHandler,
@@ -103,6 +105,7 @@ where
             theme,
             &mut render_panel,
             &panel_title,
+            &panel_icon,
             &make_command_handler,
             &make_menu_handler,
             &make_drag_start_handler,
@@ -178,6 +181,7 @@ where
             theme,
             &mut render_panel,
             &panel_title,
+            &panel_icon,
             &make_command_handler,
             &make_menu_handler,
             &make_drag_start_handler,
@@ -345,13 +349,14 @@ where
     root
 }
 
-fn tree_elements<F, T, H, M, D, R>(
+fn tree_elements<F, T, I, H, M, D, R>(
     layout: &Layout,
     rects: &LayoutRects,
     nodes: &HashSet<NodeId>,
     theme: &Theme,
     render_panel: &mut F,
     panel_title: &T,
+    panel_icon: &I,
     make_command_handler: &H,
     make_menu_handler: &M,
     make_drag_start_handler: &D,
@@ -360,6 +365,7 @@ fn tree_elements<F, T, H, M, D, R>(
 where
     F: FnMut(&PanelInstance) -> AnyElement,
     T: Fn(&PanelInstance) -> String,
+    I: Fn(&PanelInstance) -> &'static str,
     H: Fn(DockCommand) -> CommandClickHandler,
     M: Fn(DockMenuRequest) -> CommandClickHandler,
     D: Fn(DragPayload, DragHandle) -> DragStartHandler,
@@ -633,7 +639,7 @@ where
                 continue;
             };
             let label = panel_title(instance);
-            let icon = panel_icon(instance.key.as_str());
+            let icon = panel_icon(instance);
             let display_label = rail_entry_label(column.mode, icon, &label);
             let active_in_model = matches!(
                 layout.node(item.group),
@@ -777,16 +783,6 @@ fn active_panel(layout: &Layout, tabs: &Tabs) -> Option<PanelId> {
     }
 }
 
-fn panel_icon(key: &str) -> &'static str {
-    match key {
-        "layers" => "▱",
-        "color" => "◉",
-        "properties" => "☷",
-        "history" => "↶",
-        _ => "◇",
-    }
-}
-
 fn rail_entry_label(mode: ColumnMode, icon: &str, title: &str) -> String {
     match mode {
         ColumnMode::IconsOnly => icon.to_owned(),
@@ -805,17 +801,8 @@ fn tab_header_label(title: &str, collapsed: bool, tab_index: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{panel_icon, rail_entry_label, tab_header_label};
+    use super::{rail_entry_label, tab_header_label};
     use dock_core::ColumnMode;
-
-    #[test]
-    fn rail_icons_are_keyed_to_panel_identity_not_title_initials() {
-        assert_eq!(panel_icon("layers"), "▱");
-        assert_eq!(panel_icon("color"), "◉");
-        assert_eq!(panel_icon("properties"), "☷");
-        assert_eq!(panel_icon("history"), "↶");
-        assert_eq!(panel_icon("unregistered"), "◇");
-    }
 
     #[test]
     fn rail_modes_have_distinct_icon_and_label_presentations() {
