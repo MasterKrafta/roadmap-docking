@@ -1,4 +1,3 @@
-use super::helpers::*;
 use super::*;
 
 impl Layout {
@@ -128,8 +127,10 @@ impl Layout {
     pub(super) fn first_tabs_in_subtree(&self, root: NodeId) -> Option<NodeId> {
         match self.nodes.get(root)? {
             Node::Tabs(_) => Some(root),
-            node => node_children(node)
-                .into_iter()
+            node => node
+                .children()
+                .iter()
+                .copied()
                 .find_map(|child| self.first_tabs_in_subtree(child)),
         }
     }
@@ -148,7 +149,7 @@ impl Layout {
             panels.push(root);
             return;
         }
-        for child in node_children(node) {
+        for child in node.children().iter().copied() {
             self.collect_panel_nodes(child, panels);
         }
     }
@@ -223,7 +224,7 @@ impl Layout {
     pub(super) fn find_parent(&self, child: NodeId) -> Option<NodeId> {
         self.nodes
             .iter()
-            .find_map(|(parent, node)| node_children(node).contains(&child).then_some(parent))
+            .find_map(|(parent, node)| node.children().contains(&child).then_some(parent))
     }
 
     pub(super) fn find_owner_column(&self, group: NodeId) -> Option<NodeId> {
@@ -280,8 +281,9 @@ impl Layout {
         let Some(node) = self.nodes.get(root) else {
             return false;
         };
-        node_children(node)
-            .into_iter()
+        node.children()
+            .iter()
+            .copied()
             .any(|child| self.is_descendant_or_same(child, target))
     }
 
@@ -430,7 +432,7 @@ impl Layout {
         let Some(node) = self.nodes.get(node_id).cloned() else {
             return;
         };
-        for child in node_children(&node) {
+        for child in node.children().iter().copied() {
             self.remove_subtree(child);
         }
         if let Node::Panel(panel) = node {
