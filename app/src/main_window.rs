@@ -5,6 +5,22 @@ use gpui::{
 };
 use ui::Theme;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MouseContextMenuKind {
+    Header,
+    TabStrip,
+}
+
+#[derive(Clone, Copy)]
+struct MouseContextMenu {
+    kind: MouseContextMenuKind,
+    column_index: usize,
+    group_index: usize,
+    clicked_tab: Option<usize>,
+    x: f32,
+    y: f32,
+}
+
 /// Two dock columns: the left has two groups with two tabs each; the right has one group and one tab.
 pub(crate) struct MainWindow {
     theme: Theme,
@@ -18,6 +34,7 @@ pub(crate) struct MainWindow {
     split_ratios: [f32; 2],
     visible_tabs: [bool; 5],
     open_tab_context_menu: Option<usize>,
+    mouse_context_menu: Option<MouseContextMenu>,
     collapsed_columns: [bool; 2],
     collapsed_group_content: [bool; 3],
     windows_menu_open: bool,
@@ -45,6 +62,7 @@ impl MainWindow {
             split_ratios: [default_split, default_split],
             visible_tabs: [true, true, true, true, true],
             open_tab_context_menu: None,
+            mouse_context_menu: None,
             collapsed_columns: [false, false],
             collapsed_group_content: [false, false, false],
             windows_menu_open: false,
@@ -566,6 +584,16 @@ impl Render for MainWindow {
             );
         }
 
+        if let Some(menu) = self.mouse_context_menu {
+            root = root.child(render_mouse_context_menu(
+                menu,
+                self.theme,
+                window_width,
+                window_height,
+                cx,
+            ));
+        }
+
         root
     }
 }
@@ -673,6 +701,19 @@ fn render_column(
                 cx.notify();
             }
         });
+    let open_header_context_menu =
+        cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
+            this.open_tab_context_menu = None;
+            this.mouse_context_menu = Some(MouseContextMenu {
+                kind: MouseContextMenuKind::Header,
+                column_index,
+                group_index: if column_index == 0 { 0 } else { 2 },
+                clicked_tab: None,
+                x: event.position.x.as_f32(),
+                y: event.position.y.as_f32(),
+            });
+            cx.notify();
+        });
     let close_column = cx.listener(move |this, _, _, cx| {
         if column_index == 0 {
             this.visible_tabs[0] = false;
@@ -698,6 +739,7 @@ fn render_column(
         .bg(rgb(colors.group_background))
         .border_b_1()
         .border_color(rgb(colors.border))
+        .on_mouse_down(MouseButton::Right, open_header_context_menu)
         .child(
             div()
                 .flex_1()
@@ -973,6 +1015,192 @@ fn render_collapsed_tab_icon(
         .child(icon)
 }
 
+fn render_mouse_context_menu(
+    menu: MouseContextMenu,
+    theme: Theme,
+    window_width: f32,
+    window_height: f32,
+    cx: &mut Context<MainWindow>,
+) -> impl IntoElement {
+    let colors = theme.colors;
+    let menu_width = 190.0;
+    let menu_height = if menu.kind == MouseContextMenuKind::Header {
+        36.0
+    } else {
+        4.0 * 28.0 + 8.0
+    };
+    let left = menu.x.clamp(0.0, (window_width - menu_width).max(0.0));
+    let top = menu.y.clamp(0.0, (window_height - menu_height).max(0.0));
+
+    let mut popup = div()
+        .absolute()
+        .left(px(left))
+        .top(px(top))
+        .w(px(menu_width))
+        .flex()
+        .flex_col()
+        .p(px(4.0))
+        .gap_1()
+        .bg(rgb(colors.group_background))
+        .border_b_1()
+        .border_color(rgb(colors.border));
+
+    if menu.kind == MouseContextMenuKind::Header {
+        let column_index = menu.column_index;
+        popup = popup.child(
+            div()
+                .id("header-context-collapse-to-icons")
+                .flex()
+                .items_center()
+                .h(px(28.0))
+                .p(px(6.0))
+                .text_color(rgb(colors.primary_text))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.collapsed_columns[column_index] = true;
+                    this.open_tab_context_menu = None;
+                    this.mouse_context_menu = None;
+                    cx.notify();
+                }))
+                .child("Collapse to Icons"),
+        );
+        return popup;
+    }
+
+    let group_index = menu.group_index;
+    let clicked_tab = menu.clicked_tab;
+    let close_tab = div()
+        .id("mouse-context-close-tab")
+        .flex()
+        .items_center()
+        .h(px(28.0))
+        .p(px(6.0))
+        .text_color(rgb(colors.primary_text))
+        .on_click(cx.listener(move |this, _, _, cx| {
+            match group_index {
+                0 => {
+                    let tab = clicked_tab.unwrap_or(this.active_tabs[0]).min(1);
+                    this.visible_tabs[tab] = false;
+                    if this.active_tabs[0] == tab && this.visible_tabs[1 - tab] {
+                        this.active_tabs[0] = 1 - tab;
+                    }
+                    if !this.visible_tabs[0] && !this.visible_tabs[1] {
+                        this.collapsed_group_content[0] = false;
+                    }
+                    if !this.visible_tabs[0]
+                        && !this.visible_tabs[1]
+                        && !this.visible_tabs[2]
+                        && !this.visible_tabs[3]
+                    {
+                        this.collapsed_columns[0] = false;
+                    }
+                }
+                1 => {
+                    let tab = clicked_tab.unwrap_or(this.lower_active_tabs[0]).min(1);
+                    let tab_index = 2 + tab;
+                    this.visible_tabs[tab_index] = false;
+                    if this.lower_active_tabs[0] == tab && this.visible_tabs[2 + (1 - tab)] {
+                        this.lower_active_tabs[0] = 1 - tab;
+                    }
+                    if !this.visible_tabs[2] && !this.visible_tabs[3] {
+                        this.collapsed_group_content[1] = false;
+                    }
+                    if !this.visible_tabs[0]
+                        && !this.visible_tabs[1]
+                        && !this.visible_tabs[2]
+                        && !this.visible_tabs[3]
+                    {
+                        this.collapsed_columns[0] = false;
+                    }
+                }
+                _ => {
+                    this.visible_tabs[4] = false;
+                    this.collapsed_columns[1] = false;
+                    this.collapsed_group_content[2] = false;
+                }
+            }
+            this.open_tab_context_menu = None;
+            this.mouse_context_menu = None;
+            cx.notify();
+        }))
+        .child("Close Tab");
+
+    let group_to_close = menu.group_index;
+    let close_group = div()
+        .id("mouse-context-close-tab-group")
+        .flex()
+        .items_center()
+        .h(px(28.0))
+        .p(px(6.0))
+        .text_color(rgb(colors.primary_text))
+        .on_click(cx.listener(move |this, _, _, cx| {
+            match group_to_close {
+                0 => {
+                    this.visible_tabs[0] = false;
+                    this.visible_tabs[1] = false;
+                    this.collapsed_group_content[0] = false;
+                    if !this.visible_tabs[2] && !this.visible_tabs[3] {
+                        this.collapsed_columns[0] = false;
+                    }
+                }
+                1 => {
+                    this.visible_tabs[2] = false;
+                    this.visible_tabs[3] = false;
+                    this.collapsed_group_content[1] = false;
+                    if !this.visible_tabs[0] && !this.visible_tabs[1] {
+                        this.collapsed_columns[0] = false;
+                    }
+                }
+                _ => {
+                    this.visible_tabs[4] = false;
+                    this.collapsed_columns[1] = false;
+                    this.collapsed_group_content[2] = false;
+                }
+            }
+            this.open_tab_context_menu = None;
+            this.mouse_context_menu = None;
+            cx.notify();
+        }))
+        .child("Close Tab Group");
+
+    let group_to_minimize = menu.group_index;
+    let minimize = div()
+        .id("mouse-context-minimize")
+        .flex()
+        .items_center()
+        .h(px(28.0))
+        .p(px(6.0))
+        .text_color(rgb(colors.primary_text))
+        .on_click(cx.listener(move |this, _, _, cx| {
+            this.collapsed_group_content[group_to_minimize] = true;
+            this.open_tab_context_menu = None;
+            this.mouse_context_menu = None;
+            cx.notify();
+        }))
+        .child("Minimize");
+
+    let column_to_collapse = menu.column_index;
+    let collapse_to_icons = div()
+        .id("mouse-context-collapse-to-icons")
+        .flex()
+        .items_center()
+        .h(px(28.0))
+        .p(px(6.0))
+        .text_color(rgb(colors.primary_text))
+        .on_click(cx.listener(move |this, _, _, cx| {
+            this.collapsed_columns[column_to_collapse] = true;
+            this.open_tab_context_menu = None;
+            this.mouse_context_menu = None;
+            cx.notify();
+        }))
+        .child("Collapse to Icons");
+
+    popup
+        .child(close_tab)
+        .child(close_group)
+        .child(minimize)
+        .child(collapse_to_icons)
+}
+
 fn render_tab_context_menu(
     group_index: usize,
     column_index: usize,
@@ -1225,6 +1453,45 @@ fn render_tab_strip(
                 cx.notify();
             }
         });
+    let open_tab_context_menu_first =
+        cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
+            this.open_tab_context_menu = None;
+            this.mouse_context_menu = Some(MouseContextMenu {
+                kind: MouseContextMenuKind::TabStrip,
+                column_index,
+                group_index: content_index,
+                clicked_tab: Some(0),
+                x: event.position.x.as_f32(),
+                y: event.position.y.as_f32(),
+            });
+            cx.notify();
+        });
+    let open_tab_context_menu_second =
+        cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
+            this.open_tab_context_menu = None;
+            this.mouse_context_menu = Some(MouseContextMenu {
+                kind: MouseContextMenuKind::TabStrip,
+                column_index,
+                group_index: content_index,
+                clicked_tab: Some(1),
+                x: event.position.x.as_f32(),
+                y: event.position.y.as_f32(),
+            });
+            cx.notify();
+        });
+    let open_tab_context_menu_empty =
+        cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
+            this.open_tab_context_menu = None;
+            this.mouse_context_menu = Some(MouseContextMenu {
+                kind: MouseContextMenuKind::TabStrip,
+                column_index,
+                group_index: content_index,
+                clicked_tab: None,
+                x: event.position.x.as_f32(),
+                y: event.position.y.as_f32(),
+            });
+            cx.notify();
+        });
 
     let control_id = match content_index {
         0 => "left-upper-tab-menu-button",
@@ -1240,6 +1507,7 @@ fn render_tab_strip(
         .h(px(metrics.button_size))
         .text_color(rgb(colors.muted_text))
         .on_click(cx.listener(move |this, _, _, cx| {
+            this.mouse_context_menu = None;
             this.open_tab_context_menu = if this.open_tab_context_menu == Some(content_index) {
                 None
             } else {
@@ -1272,6 +1540,7 @@ fn render_tab_strip(
                 .text_color(rgb(first_tab_text))
                 .on_click(activate_first)
                 .on_mouse_down(MouseButton::Left, toggle_content_first)
+                .on_mouse_down(MouseButton::Right, open_tab_context_menu_first)
                 .child(first_tab_label),
         );
     }
@@ -1289,6 +1558,7 @@ fn render_tab_strip(
                 .text_color(rgb(second_tab_text))
                 .on_click(activate_second)
                 .on_mouse_down(MouseButton::Left, toggle_content_second)
+                .on_mouse_down(MouseButton::Right, open_tab_context_menu_second)
                 .child(second_tab_label),
         );
     }
@@ -1298,7 +1568,8 @@ fn render_tab_strip(
             div()
                 .flex_1()
                 .h(px(metrics.tab_strip_height))
-                .on_mouse_down(MouseButton::Left, toggle_content_empty),
+                .on_mouse_down(MouseButton::Left, toggle_content_empty)
+                .on_mouse_down(MouseButton::Right, open_tab_context_menu_empty),
         )
         .child(control)
 }
