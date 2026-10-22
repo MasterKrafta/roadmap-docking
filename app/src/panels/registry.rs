@@ -1,5 +1,5 @@
 use dock_core::{PanelConstraints, PanelInstance, PanelKey, Size};
-use gpui::{AnyElement, ParentElement, Styled, div, px, rgb};
+use gpui::{AnyElement, IntoElement, ParentElement, Styled, div, px, rgb};
 use ui::Theme;
 
 /// App-owned panel descriptors and content factories.
@@ -37,10 +37,18 @@ impl PanelRegistry {
             .collect()
     }
 
+    pub(crate) fn title(&self, instance: &PanelInstance) -> String {
+        self.entries
+            .iter()
+            .find(|(key, _, _, _)| key.as_str() == instance.key.as_str())
+            .map(|(_, title, _, _)| (*title).to_owned())
+            .unwrap_or_else(|| format!("Unavailable: {}", instance.key.as_str()))
+    }
+
     pub(crate) fn render(&self, instance: &PanelInstance, theme: &Theme) -> AnyElement {
         self.entries
             .iter()
-            .find(|(key, _, _, _)| key == &instance.key)
+            .find(|(key, _, _, _)| key.as_str() == instance.key.as_str())
             .map(|(_, _, _, factory)| factory(theme))
             .unwrap_or_else(|| panel_content(theme, "Unavailable panel", instance.key.as_str()))
     }

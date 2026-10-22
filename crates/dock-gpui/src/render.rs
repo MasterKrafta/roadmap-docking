@@ -19,15 +19,17 @@ pub type CommandClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 
 ///
 /// `render_panel` is called only for content rectangles emitted by Core. Core omits
 /// inactive tab contents from those rectangles, so their UI trees are never constructed.
-pub fn render<F, H>(
+pub fn render<F, T, H>(
     layout: &Layout,
     rects: &LayoutRects,
     theme: &Theme,
     mut render_panel: F,
+    panel_title: T,
     make_command_handler: H,
 ) -> Div
 where
     F: FnMut(&PanelInstance) -> AnyElement,
+    T: Fn(&PanelInstance) -> String,
     H: Fn(DockCommand) -> CommandClickHandler,
 {
     let mut root = div()
@@ -54,6 +56,7 @@ where
             &nodes,
             theme,
             &mut render_panel,
+            &panel_title,
             &make_command_handler,
         ) {
             root = root.child(element);
@@ -110,16 +113,18 @@ where
     root
 }
 
-fn tree_elements<F, H>(
+fn tree_elements<F, T, H>(
     layout: &Layout,
     rects: &LayoutRects,
     nodes: &HashSet<NodeId>,
     theme: &Theme,
     render_panel: &mut F,
+    panel_title: &T,
     make_command_handler: &H,
 ) -> Vec<AnyElement>
 where
     F: FnMut(&PanelInstance) -> AnyElement,
+    T: Fn(&PanelInstance) -> String,
     H: Fn(DockCommand) -> CommandClickHandler,
 {
     let mut elements = Vec::new();
@@ -138,6 +143,30 @@ where
                 .border_color(rgb(theme.colors.border))
                 .into_any_element(),
         );
+
+        // Expanded groups have a header row above the tab strip. Collapsed groups
+        // use their full reduced height for the strip and therefore skip this row.
+        if let Some(Node::Tabs(tabs)) = layout.node(group.group)
+            && !tabs.collapsed
+        {
+            let title = active_panel(layout, tabs)
+                .and_then(|panel_id| layout.panel_instance(panel_id))
+                .map(panel_title)
+                .unwrap_or_else(|| "Panel group".to_owned());
+            let header_rect = Rect::new(
+                group.rect.origin,
+                Size::new(
+                    group.rect.size.width,
+                    theme.metrics.column_header_height.min(group.rect.size.height),
+                ),
+            );
+            elements.push(
+                rect_element(header_rect, theme.colors.toolbar_background)
+                    .text_color(rgb(theme.colors.primary_text))
+                    .child(title)
+                    .into_any_element(),
+            );
+        }
     }
 
     for strip in rects.tab_strips.iter().filter(|entry| nodes.contains(&entry.group)) {
@@ -153,7 +182,7 @@ where
     {
         let label = layout
             .panel_instance(header.panel)
-            .map(|instance| instance.key.as_str().to_owned())
+            .map(panel_title)
             .unwrap_or_else(|| "Missing panel".to_owned());
         let active = matches!(
             layout.node(header.group),
@@ -172,6 +201,21 @@ where
                 panel: header.panel,
             }));
         elements.push(element.into_any_element());
+    }
+
+    // The overflow menu itself belongs to the app. The adapter only draws Core's
+    // button geometry and does not create or own menu state.
+    for overflow in rects
+        .tab_overflows
+        .iter()
+        .filter(|entry| nodes.contains(&entry.group))
+    {
+        elements.push(
+            rect_element(overflow.button_rect, theme.colors.toolbar_background)
+                .text_color(rgb(theme.colors.primary_text))
+                .child("⋯")
+                .into_any_element(),
+        );
     }
 
     let panel_node_ids: HashMap<PanelId, NodeId> = layout

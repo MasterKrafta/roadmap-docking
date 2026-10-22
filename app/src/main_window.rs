@@ -66,6 +66,7 @@ impl Render for MainWindow {
             &rects,
             theme,
             |instance| panel_registry.render(instance, theme),
+            |instance| panel_registry.title(instance),
             move |command| {
                 let weak_window = weak_window.clone();
                 Box::new(move |_event: &ClickEvent, _window: &mut Window, app: &mut App| {
