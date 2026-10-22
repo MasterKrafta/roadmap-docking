@@ -550,13 +550,15 @@ where
             splitter.boundary_index,
             splitter.axis,
         );
-        let element = if let Some(handle) = handle {
-            base.id(format!("dock-splitter-{:?}-{}", splitter.owner, splitter.boundary_index))
-                .on_mouse_down(MouseButton::Left, make_resize_start_handler(handle))
+        if let Some(handle) = handle {
+            elements.push(
+                base.id(format!("dock-splitter-{:?}-{}", splitter.owner, splitter.boundary_index))
+                    .on_mouse_down(MouseButton::Left, make_resize_start_handler(handle))
+                    .into_any_element(),
+            );
         } else {
-            base
-        };
-        elements.push(element.into_any_element());
+            elements.push(base.into_any_element());
+        }
     }
 
     // Rail columns flatten their panel list for presentation while retaining the Core tree.
