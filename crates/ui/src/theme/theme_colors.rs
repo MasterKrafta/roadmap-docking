@@ -23,19 +23,42 @@ pub struct ThemeColors {
 impl Default for ThemeColors {
     fn default() -> Self {
         Self {
-            window_background: 0x202124,
-            canvas_background: 0x17181A,
-            dock_background: 0x2B2D31,
-            group_background: 0x25272B,
-            border: 0x41444A,
-            splitter: 0x50545B,
-            primary_text: 0xE4E6EB,
-            muted_text: 0xA5A9B2,
-            active_tab: 0x3A3D43,
-            hover: 0x383B41,
-            focus: 0x7AA2F7,
-            drop_target: 0x7AA2F7,
-            toolbar_background: 0x303238,
+            window_background: 0x1E1E1E,
+            canvas_background: 0x121212,
+            dock_background: 0x2C2C2C,
+            group_background: 0x252525,
+            border: 0x383838,
+            splitter: 0x444444,
+            primary_text: 0xFFFFFF,
+            muted_text: 0xB3B3B3,
+            active_tab: 0x383838,
+            hover: 0x383838,
+            focus: 0x0C8CE9,
+            drop_target: 0x0C8CE9,
+            toolbar_background: 0x2C2C2C,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ThemeColors;
+
+    #[test]
+    fn default_palette_matches_figma_dark_colors() {
+        let colors = ThemeColors::default();
+        assert_eq!(colors.window_background, 0x1E1E1E);
+        assert_eq!(colors.canvas_background, 0x121212);
+        assert_eq!(colors.dock_background, 0x2C2C2C);
+        assert_eq!(colors.group_background, 0x252525);
+        assert_eq!(colors.border, 0x383838);
+        assert_eq!(colors.splitter, 0x444444);
+        assert_eq!(colors.primary_text, 0xFFFFFF);
+        assert_eq!(colors.muted_text, 0xB3B3B3);
+        assert_eq!(colors.active_tab, 0x383838);
+        assert_eq!(colors.hover, 0x383838);
+        assert_eq!(colors.focus, 0x0C8CE9);
+        assert_eq!(colors.drop_target, 0x0C8CE9);
+        assert_eq!(colors.toolbar_background, 0x2C2C2C);
     }
 }
