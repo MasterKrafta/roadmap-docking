@@ -108,7 +108,9 @@ fn history_benchmark_layout(
             groups,
             vec![1.0 / groups_per_column as f32; groups_per_column],
         );
-        first_column.get_or_insert(column);
+        if first_column.is_none() {
+            first_column = Some(column);
+        }
         columns.push(column);
     }
 
