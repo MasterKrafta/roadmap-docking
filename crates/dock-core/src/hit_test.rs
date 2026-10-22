@@ -401,9 +401,12 @@ mod tests {
         Rect::new(Point::ZERO, Size::new(width, height))
     }
 
-
-    fn large_floating_fixture(
-    ) -> (crate::Layout, crate::LayoutRects, crate::FloatingGroupId, crate::PanelId) {
+    fn large_floating_fixture() -> (
+        crate::Layout,
+        crate::LayoutRects,
+        crate::FloatingGroupId,
+        crate::PanelId,
+    ) {
         const WINDOW_COUNT: usize = 8;
         const COLUMNS_PER_WINDOW: usize = 2;
         const GROUPS_PER_COLUMN: usize = 3;
@@ -509,7 +512,9 @@ mod tests {
             let start = std::time::Instant::now();
             let mut actual = HitResult::Miss;
             for _ in 0..iterations {
-                actual = std::hint::black_box(layout.hit_test(point, &rects, &metrics).unwrap());
+                actual = std::hint::black_box(
+                    layout.hit_test(point, &rects, &metrics).unwrap(),
+                );
             }
             let elapsed = start.elapsed();
             assert_eq!(actual, expected);
@@ -531,7 +536,12 @@ mod tests {
             Point::new(1500.0, 900.0),
             HitResult::Canvas,
         );
-        assert!(rects.floating_groups.iter().any(|item| item.group == top_floating));
+        assert!(
+            rects
+                .floating_groups
+                .iter()
+                .any(|item| item.group == top_floating)
+        );
     }
 
     #[test]
