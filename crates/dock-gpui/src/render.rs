@@ -162,21 +162,22 @@ where
         else {
             continue;
         };
-
-        root = root.child(
-            rect_element(rect, theme.colors.dock_background)
-                .border_1()
-                .border_color(rgb(theme.colors.border))
-                .into_any_element(),
-        );
-
         let Some(area) = layout.dock_area(floating.area) else {
             continue;
         };
+
+        // Floating stacks are rendered as a single clipped container. Core geometry stays
+        // in window coordinates; a translated snapshot lets its descendants render locally.
+        let local_rects = localize_tree_rects(rects, rect.origin);
         let nodes = subtree_nodes(layout, area.root);
+        let mut container = rect_element(rect, theme.colors.dock_background)
+            .overflow_hidden()
+            .border_1()
+            .border_color(rgb(theme.colors.border));
+
         for element in tree_elements(
             layout,
-            rects,
+            &local_rects,
             &nodes,
             theme,
             &mut render_panel,
@@ -187,7 +188,7 @@ where
             &make_drag_start_handler,
             &make_resize_start_handler,
         ) {
-            root = root.child(element);
+            container = container.child(element);
         }
 
         let title = first_panel_in_subtree(layout, area.root)
@@ -195,10 +196,10 @@ where
             .map(&panel_title)
             .unwrap_or_else(|| "Floating group".to_owned());
         let title_height = theme.metrics.column_header_height.min(rect.size.height);
-        let title_rect = Rect::new(rect.origin, Size::new(rect.size.width, title_height));
+        let title_rect = Rect::new(Point::ZERO, Size::new(rect.size.width, title_height));
         let payload = DragPayload::FloatingGroup { group: floating_id };
         let ghost_title = format!("Move floating: {title}");
-        root = root.child(
+        container = container.child(
             rect_element(title_rect, theme.colors.toolbar_background)
                 .text_color(rgb(theme.colors.primary_text))
                 .child(title)
@@ -213,6 +214,7 @@ where
                 })
                 .into_any_element(),
         );
+        root = root.child(container.into_any_element());
     }
 
     // Floating resize hit zones come from Core geometry. Put corners above long edges.
@@ -727,6 +729,45 @@ fn first_panel_in_subtree(layout: &Layout, node_id: NodeId) -> Option<PanelId> {
     }
 }
 
+fn translate_rect_to_local(rect: Rect, origin: Point) -> Rect {
+    Rect::new(
+        Point::new(rect.origin.x - origin.x, rect.origin.y - origin.y),
+        rect.size,
+    )
+}
+
+/// Produces tree geometry relative to a floating-container origin. Floating bounds, Canvas,
+/// and drop-zone geometry stay in window coordinates and are intentionally left untouched.
+fn localize_tree_rects(rects: &LayoutRects, origin: Point) -> LayoutRects {
+    let mut local = rects.clone();
+    for entry in &mut local.columns {
+        entry.rect = translate_rect_to_local(entry.rect, origin);
+    }
+    for entry in &mut local.groups {
+        entry.rect = translate_rect_to_local(entry.rect, origin);
+    }
+    for entry in &mut local.tab_strips {
+        entry.rect = translate_rect_to_local(entry.rect, origin);
+    }
+    for entry in &mut local.tab_headers {
+        entry.rect = translate_rect_to_local(entry.rect, origin);
+    }
+    for entry in &mut local.tab_overflows {
+        entry.button_rect = translate_rect_to_local(entry.button_rect, origin);
+    }
+    for entry in &mut local.panels {
+        entry.rect = translate_rect_to_local(entry.rect, origin);
+    }
+    for entry in &mut local.splitters {
+        entry.rect = translate_rect_to_local(entry.rect, origin);
+    }
+    for entry in &mut local.vertical_overflow {
+        entry.viewport = translate_rect_to_local(entry.viewport, origin);
+        entry.content_extent = translate_rect_to_local(entry.content_extent, origin);
+    }
+    local
+}
+
 fn rect_element(rect: Rect, color: u32) -> Div {
     div()
         .absolute()
@@ -815,5 +856,20 @@ mod tests {
         assert_eq!(tab_header_label("Layers", true, 0), "▸ Layers");
         assert_eq!(tab_header_label("Color", true, 1), "Color");
         assert_eq!(tab_header_label("Layers", false, 0), "Layers");
+    }
+
+    #[test]
+    fn floating_descendant_rects_are_relative_to_the_container_origin() {
+        let rect = crate::Rect::new(
+            crate::Point::new(145.0, 92.0),
+            crate::Size::new(180.0, 48.0),
+        );
+        assert_eq!(
+            super::translate_rect_to_local(rect, crate::Point::new(100.0, 60.0)),
+            crate::Rect::new(
+                crate::Point::new(45.0, 32.0),
+                crate::Size::new(180.0, 48.0),
+            ),
+        );
     }
 }
