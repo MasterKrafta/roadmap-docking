@@ -51,7 +51,7 @@ impl Render for MainWindow {
             .bg(rgb(colors.toolbar_background))
             .border_1()
             .border_color(rgb(colors.border))
-            .child(div().w(px(content_padding)).h(px(1.0)))
+            .child(div().w(px(header_spacer_width)).h(px(1.0)))
             .child(
                 div()
                     .flex()
@@ -75,7 +75,7 @@ impl Render for MainWindow {
                     .text_color(rgb(colors.primary_text))
                     .child("×"),
             )
-            .child(div().w(px(header_spacer_width)).h(px(1.0)));
+            .child(div().w(px(content_padding)).h(px(1.0)));
 
         let tab_strip = div()
             .flex()
