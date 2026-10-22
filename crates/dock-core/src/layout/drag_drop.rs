@@ -72,7 +72,10 @@ impl Layout {
                     .and_then(|floating| self.dock_area(floating.area))
                     .map(|area| area.root)
                     .ok_or(CommandError::MissingFloatingGroup { group })?;
-                if target.referenced_node_id().is_some_and(|node| self.is_descendant_or_same(root, node)) {
+                if target
+                    .referenced_node_id()
+                    .is_some_and(|node| self.is_descendant_or_same(root, node))
+                {
                     return Ok(DragDropAction::NoOp);
                 }
                 let moving_panels = self.panel_ids_in_subtree(root);
