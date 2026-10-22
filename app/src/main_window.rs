@@ -1,9 +1,10 @@
 use dock_core::{
-    create_initial_layout, DockCommand, DockMetrics, FlyoutState, Layout, LayoutRects, Node, NodeId,
-    PanelId, PanelKey, Point, Profile, Rect, Size,
+    create_initial_layout, DragDropAction, DragDropRequest, DragHandle, DragPayload, DragSession,
+    DragState, DockCommand, DockMetrics, DropSource, DropTarget, FlyoutState, Layout, LayoutRects,
+    Node, NodeId, PanelId, PanelKey, Point, Profile, Rect, Size,
 };
 use gpui::{
-    App, ClickEvent, Context, InteractiveElement, IntoElement, ParentElement, Render,
+    App, ClickEvent, Context, InteractiveElement, IntoElement, MouseButton, ParentElement, Render,
     StatefulInteractiveElement, Styled, Window, div, px, rgb,
 };
 use ui::Theme;
@@ -51,6 +52,7 @@ pub(crate) struct MainWindow {
     metrics: DockMetrics,
     panels: PanelRegistry,
     menu: Option<DockMenuState>,
+    drag_session: DragSession,
 }
 
 impl MainWindow {
@@ -60,6 +62,8 @@ impl MainWindow {
         let descriptors = panels.core_descriptors();
         let layout = create_initial_layout(Profile::Photoshop, &descriptors, metrics)
             .map_err(str::to_owned)?;
+        let drag_session = DragSession::new(&metrics)
+            .map_err(|error| format!("cannot create drag session: {error:?}"))?;
 
         Ok(Self {
             layout,
@@ -67,6 +71,7 @@ impl MainWindow {
             metrics,
             panels,
             menu: None,
+            drag_session,
         })
     }
 
@@ -79,6 +84,150 @@ impl MainWindow {
                 cx.notify();
             }
         }
+    }
+
+    fn begin_drag(
+        &mut self,
+        payload: DragPayload,
+        handle: DragHandle,
+        position: Point,
+        cx: &mut Context<Self>,
+    ) {
+        match self.drag_session.state() {
+            DragState::Pressed { .. } | DragState::Dragging { .. } => return,
+            DragState::Dropped { .. } | DragState::Cancelled { .. } => {
+                if self.drag_session.reset().is_err() {
+                    return;
+                }
+            }
+            DragState::Idle => {}
+        }
+        if let Err(error) = self
+            .drag_session
+            .pointer_down_with_handle(payload, handle, position)
+        {
+            eprintln!("Could not begin dock drag: {error:?}");
+        }
+    }
+
+    fn update_drag_position(
+        &mut self,
+        position: Point,
+        viewport: Rect,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(payload) = active_drag_payload(self.drag_session.state()) else {
+            return;
+        };
+        let previous_state = self.drag_session.state();
+        if let Err(error) = self.drag_session.pointer_move(position) {
+            eprintln!("Could not update dock drag: {error:?}");
+            return;
+        }
+
+        if matches!(self.drag_session.state(), DragState::Dragging { .. })
+            && !matches!(payload, DragPayload::FloatingGroup { .. })
+        {
+            let target = source_for_payload(payload).and_then(|source| {
+                let rects = self.layout.compute_rects(viewport, &self.metrics).ok()?;
+                self.layout
+                    .resolve_drop(position, source, &rects, &self.metrics)
+                    .ok()
+                    .flatten()
+            });
+            let _ = self.drag_session.set_drop_target(target);
+        }
+        if matches!(previous_state, DragState::Dragging { .. })
+            || matches!(self.drag_session.state(), DragState::Dragging { .. })
+        {
+            cx.notify();
+        }
+    }
+
+    fn finish_drag_at(
+        &mut self,
+        position: Point,
+        viewport: Rect,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(payload) = active_drag_payload(self.drag_session.state()) else {
+            return;
+        };
+
+        let geometry = self.layout.compute_rects(viewport, &self.metrics).ok();
+        let target = if matches!(payload, DragPayload::FloatingGroup { .. }) {
+            None
+        } else {
+            source_for_payload(payload).and_then(|source| {
+                let rects = geometry.as_ref()?;
+                self.layout
+                    .resolve_drop(position, source, rects, &self.metrics)
+                    .ok()
+                    .flatten()
+            })
+        };
+
+        let mut command = None;
+        match self.drag_session.pointer_up(position, target) {
+            Ok(Some(mut request)) => {
+                if request.target == Some(DropTarget::FreeArea) {
+                    let floating_bounds = geometry.as_ref().and_then(|rects| {
+                        self.floating_bounds_for_request(&request, viewport, rects)
+                    });
+                    request.floating_bounds = floating_bounds;
+                }
+                match self.layout.resolve_drag_drop(&request, &self.metrics) {
+                    Ok(DragDropAction::NoOp) => {}
+                    Ok(DragDropAction::Command(resolved)) => command = Some(resolved),
+                    Err(error) => eprintln!("Dock drop rejected by Core: {error:?}"),
+                }
+            }
+            Ok(None) => {}
+            Err(error) => eprintln!("Could not finish dock drag: {error:?}"),
+        }
+
+        let _ = self.drag_session.reset();
+        cx.notify();
+        if let Some(command) = command {
+            self.apply_command(command, cx);
+        }
+    }
+
+    fn floating_bounds_for_request(
+        &self,
+        request: &DragDropRequest,
+        viewport: Rect,
+        rects: &LayoutRects,
+    ) -> Option<Rect> {
+        let size = match request.payload {
+            DragPayload::Panel { panel } => {
+                let instance = self.layout.panel_instance(panel)?;
+                instance
+                    .state
+                    .last_known_size()
+                    .unwrap_or(instance.constraints.preferred_size)
+            }
+            DragPayload::Group { group } => rects
+                .groups
+                .iter()
+                .find(|entry| entry.group == group)
+                .map(|entry| entry.rect.size)
+                .unwrap_or(Size::new(
+                    self.metrics.default_column_width,
+                    self.metrics.min_group_height,
+                )),
+            DragPayload::FloatingGroup { group } => self.layout.floating_group(group)?.bounds.size,
+        };
+        if !size.is_finite() || size.width <= 0.0 || size.height <= 0.0 {
+            return None;
+        }
+        let origin = Point::new(
+            (request.point.x - size.width / 2.0)
+                .clamp(0.0, (viewport.size.width - size.width).max(0.0)),
+            (request.point.y - size.height / 2.0)
+                .clamp(0.0, (viewport.size.height - size.height).max(0.0)),
+        );
+        Some(Rect::new(origin, size))
     }
 
     fn show_menu(&mut self, menu: DockMenuState, cx: &mut Context<Self>) {
@@ -296,6 +445,21 @@ impl MainWindow {
     }
 }
 
+fn active_drag_payload(state: DragState) -> Option<DragPayload> {
+    match state {
+        DragState::Pressed { payload, .. } | DragState::Dragging { payload, .. } => Some(payload),
+        DragState::Idle | DragState::Dropped { .. } | DragState::Cancelled { .. } => None,
+    }
+}
+
+fn source_for_payload(payload: DragPayload) -> Option<DropSource> {
+    match payload {
+        DragPayload::Panel { panel } => Some(DropSource::Panel { panel }),
+        DragPayload::Group { group } => Some(DropSource::Group { group }),
+        DragPayload::FloatingGroup { .. } => None,
+    }
+}
+
 impl Render for MainWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let window_size = window.viewport_size();
@@ -316,11 +480,35 @@ impl Render for MainWindow {
             }
         };
 
+        let drag_viewport = dock_viewport;
+        let move_weak = cx.weak_entity();
+        let release_weak = cx.weak_entity();
         let mut root = div()
             .relative()
             .w(px(width))
             .h(px(height))
-            .bg(rgb(self.theme.colors.window_background));
+            .bg(rgb(self.theme.colors.window_background))
+            .id("main-window-drag-root")
+            .on_drag_move::<DragPayload>(move |event, _window, app| {
+                let position = Point::new(
+                    event.event.position.x.as_f32(),
+                    event.event.position.y.as_f32() - MENU_BAR_HEIGHT,
+                );
+                let weak = move_weak.clone();
+                let _ = weak.update(app, |view, cx| {
+                    view.update_drag_position(position, drag_viewport, cx);
+                });
+            })
+            .capture_any_mouse_up(move |event, _window, app| {
+                let position = Point::new(
+                    event.position.x.as_f32(),
+                    event.position.y.as_f32() - MENU_BAR_HEIGHT,
+                );
+                let weak = release_weak.clone();
+                let _ = weak.update(app, |view, cx| {
+                    view.finish_drag_at(position, drag_viewport, cx);
+                });
+            });
 
         let window_menu_weak = cx.weak_entity();
         let window_menu_button = div()
@@ -341,10 +529,17 @@ impl Render for MainWindow {
             });
         root = root.child(window_menu_button.into_any_element());
 
+        let drag_overlay = self.drag_session.preview().and_then(|preview| {
+            let source = source_for_payload(preview.payload)?;
+            let zones = self.layout.compute_drop_zones(source, &rects, &self.metrics).ok()?;
+            Some(dock_gpui::DragOverlay { preview, zones })
+        });
+
         let panel_registry = &self.panels;
         let theme = &self.theme;
         let command_weak = cx.weak_entity();
         let menu_weak = cx.weak_entity();
+        let drag_start_weak = cx.weak_entity();
         let dock_view = dock_gpui::render(
             &self.layout,
             &rects,
@@ -367,6 +562,19 @@ impl Render for MainWindow {
                     });
                 }) as dock_gpui::CommandClickHandler
             },
+            move |payload, handle| {
+                let weak = drag_start_weak.clone();
+                Box::new(move |event, _window: &mut Window, app: &mut App| {
+                    let position = Point::new(
+                        event.position.x.as_f32(),
+                        event.position.y.as_f32() - MENU_BAR_HEIGHT,
+                    );
+                    let _ = weak.update(app, |view, cx| {
+                        view.begin_drag(payload, handle, position, cx);
+                    });
+                }) as dock_gpui::DragStartHandler
+            },
+            drag_overlay.as_ref(),
         );
         root = root.child(
             div()

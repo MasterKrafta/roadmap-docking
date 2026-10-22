@@ -1,17 +1,41 @@
 use std::collections::{HashMap, HashSet};
 
 use dock_core::{
-    ColumnMode, DockCommand, DockSide, Layout, LayoutRects, Node, NodeId, PanelId, PanelInstance,
-    Point, Rect, Size, Tabs,
+    ColumnMode, DockCommand, DockSide, DragHandle, DragPayload, DragPreview, DropZoneRect, Layout,
+    LayoutRects, Node, NodeId, PanelId, PanelInstance, Point, Rect, Size, Tabs,
 };
 use gpui::{
-    AnyElement, App, ClickEvent, Div, InteractiveElement, IntoElement, ParentElement,
-    StatefulInteractiveElement, Styled, Window, div, px, rgb,
+    AnyElement, App, ClickEvent, Context, Div, InteractiveElement, IntoElement, MouseButton,
+    MouseDownEvent, ParentElement, Render, StatefulInteractiveElement, Styled, Window, div, px, rgb,
 };
 use ui::Theme;
 
 /// A GPUI click handler created by the app for a command or a menu request.
 pub type CommandClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
+
+/// Begins a pure Core drag session from a UI interaction surface.
+pub type DragStartHandler = Box<dyn Fn(&MouseDownEvent, &mut Window, &mut App) + 'static>;
+
+/// Source-aware, transient overlay produced from Core's drag preview and drop-zone geometry.
+#[derive(Clone, Debug)]
+pub struct DragOverlay {
+    pub preview: DragPreview,
+    pub zones: Vec<DropZoneRect>,
+}
+
+struct DragGhost {
+    title: String,
+}
+
+impl Render for DragGhost {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .p(px(8.0))
+            .bg(rgb(0x0C8CE9))
+            .text_color(rgb(0xFFFFFF))
+            .child(self.title.clone())
+    }
+}
 
 /// Requests app-owned menu state without transferring ownership of the layout to the adapter.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -24,7 +48,7 @@ pub enum DockMenuRequest {
 ///
 /// The adapter reads Layout and emits typed command/menu requests; it does not mutate or clone
 /// Layout. The app supplies panel content factories and owns all menu state.
-pub fn render<F, T, H, M>(
+pub fn render<F, T, H, M, D>(
     layout: &Layout,
     rects: &LayoutRects,
     theme: &Theme,
@@ -32,12 +56,15 @@ pub fn render<F, T, H, M>(
     panel_title: T,
     make_command_handler: H,
     make_menu_handler: M,
+    make_drag_start_handler: D,
+    drag_overlay: Option<&DragOverlay>,
 ) -> Div
 where
     F: FnMut(&PanelInstance) -> AnyElement,
     T: Fn(&PanelInstance) -> String,
     H: Fn(DockCommand) -> CommandClickHandler,
     M: Fn(DockMenuRequest) -> CommandClickHandler,
+    D: Fn(DragPayload, DragHandle) -> DragStartHandler,
 {
     let mut root = div()
         .relative()
@@ -64,6 +91,7 @@ where
             &panel_title,
             &make_command_handler,
             &make_menu_handler,
+            &make_drag_start_handler,
         ) {
             root = root.child(element);
         }
@@ -99,6 +127,7 @@ where
             &panel_title,
             &make_command_handler,
             &make_menu_handler,
+            &make_drag_start_handler,
         ) {
             root = root.child(element);
         }
@@ -170,9 +199,51 @@ where
                 (flyout.rect.size.height - header_height).max(0.0),
             ),
         );
+        let payload = DragPayload::Panel { panel: flyout.panel };
+        let ghost_title = panel_title(instance);
         root = root.child(
             rect_element(content_rect, theme.colors.group_background)
                 .child(render_panel(instance))
+                .id(format!("dock-flyout-panel-{:?}", flyout.panel))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    make_drag_start_handler(payload, DragHandle::FlyoutPanel),
+                )
+                .on_drag(payload, move |_payload, _offset, _window, app| {
+                    let title = ghost_title.clone();
+                    app.new(|_| DragGhost { title })
+                })
+                .into_any_element(),
+        );
+    }
+
+    if let Some(overlay) = drag_overlay {
+        for zone in &overlay.zones {
+            let active = overlay.preview.target == Some(zone.target);
+            let weight = if active { 0.38 } else { 0.13 };
+            let fill = blend_rgb(theme.colors.drop_target, theme.colors.canvas_background, weight);
+            root = root.child(
+                rect_element(zone.rect, fill)
+                    .border_1()
+                    .border_color(rgb(if active {
+                        theme.colors.focus
+                    } else {
+                        theme.colors.drop_target
+                    }))
+                    .into_any_element(),
+            );
+        }
+        let marker = Rect::new(
+            Point::new(
+                (overlay.preview.point.x - 5.0).max(0.0),
+                (overlay.preview.point.y - 5.0).max(0.0),
+            ),
+            Size::new(10.0, 10.0),
+        );
+        root = root.child(
+            rect_element(marker, theme.colors.focus)
+                .border_1()
+                .border_color(rgb(theme.colors.primary_text))
                 .into_any_element(),
         );
     }
@@ -180,7 +251,7 @@ where
     root
 }
 
-fn tree_elements<F, T, H, M>(
+fn tree_elements<F, T, H, M, D>(
     layout: &Layout,
     rects: &LayoutRects,
     nodes: &HashSet<NodeId>,
@@ -189,12 +260,14 @@ fn tree_elements<F, T, H, M>(
     panel_title: &T,
     make_command_handler: &H,
     make_menu_handler: &M,
+    make_drag_start_handler: &D,
 ) -> Vec<AnyElement>
 where
     F: FnMut(&PanelInstance) -> AnyElement,
     T: Fn(&PanelInstance) -> String,
     H: Fn(DockCommand) -> CommandClickHandler,
     M: Fn(DockMenuRequest) -> CommandClickHandler,
+    D: Fn(DragPayload, DragHandle) -> DragStartHandler,
 {
     let mut elements = Vec::new();
 
@@ -231,11 +304,36 @@ where
             elements.push(
                 rect_element(header_rect, theme.colors.toolbar_background)
                     .text_color(rgb(theme.colors.primary_text))
-                    .child(title)
+                    .child(title.clone())
                     .into_any_element(),
             );
 
+            // Separate group grip: menu and group drag have independent semantics.
             let button_width = header_rect.size.width.min(28.0);
+            let grip_rect = Rect::new(
+                Point::new(
+                    header_rect.origin.x + header_rect.size.width - button_width * 2.0,
+                    header_rect.origin.y,
+                ),
+                Size::new(button_width, header_rect.size.height),
+            );
+            let payload = DragPayload::Group { group: group.group };
+            let ghost_title = format!("Move group: {title}");
+            elements.push(
+                rect_element(grip_rect, theme.colors.toolbar_background)
+                    .text_color(rgb(theme.colors.primary_text))
+                    .child("⠿")
+                    .id(format!("dock-group-grip-{:?}", group.group))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        make_drag_start_handler(payload, DragHandle::GroupGrip),
+                    )
+                    .on_drag(payload, move |_payload, _offset, _window, app| {
+                        let title = ghost_title.clone();
+                        app.new(|_| DragGhost { title })
+                    })
+                    .into_any_element(),
+            );
             let menu_rect = Rect::new(
                 Point::new(
                     header_rect.origin.x + header_rect.size.width - button_width,
@@ -281,10 +379,20 @@ where
         } else {
             theme.colors.toolbar_background
         };
+        let payload = DragPayload::Panel { panel: header.panel };
+        let ghost_title = format!("Move panel: {label}");
         let element = rect_element(header.rect, background)
             .text_color(rgb(theme.colors.primary_text))
             .child(label)
             .id(format!("dock-tab-{:?}-{:?}", header.group, header.panel))
+            .on_mouse_down(
+                MouseButton::Left,
+                make_drag_start_handler(payload, DragHandle::PanelTab),
+            )
+            .on_drag(payload, move |_payload, _offset, _window, app| {
+                let title = ghost_title.clone();
+                app.new(|_| DragGhost { title })
+            })
             .on_click(make_command_handler(DockCommand::ActivateTab {
                 group: header.group,
                 panel: header.panel,
@@ -402,6 +510,18 @@ fn rect_element(rect: Rect, color: u32) -> Div {
         .w(px(rect.size.width))
         .h(px(rect.size.height))
         .bg(rgb(color))
+}
+
+fn blend_rgb(foreground: u32, background: u32, foreground_weight: f32) -> u32 {
+    let weight = foreground_weight.clamp(0.0, 1.0);
+    let channel = |shift: u32| {
+        let foreground = ((foreground >> shift) & 0xFF) as f32;
+        let background = ((background >> shift) & 0xFF) as f32;
+        (foreground * weight + background * (1.0 - weight))
+            .round()
+            .clamp(0.0, 255.0) as u32
+    };
+    (channel(16) << 16) | (channel(8) << 8) | channel(0)
 }
 
 fn subtree_nodes(layout: &Layout, root: NodeId) -> HashSet<NodeId> {
