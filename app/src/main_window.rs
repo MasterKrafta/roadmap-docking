@@ -167,7 +167,7 @@ impl Render for MainWindow {
         let content_padding = metrics.content_padding.min(column_width / 2.0);
 
         let header_spacer_width =
-            (column_width - content_padding * 2.0 - button_size * 2.0 - button_gap).max(0.0);
+            (column_width - content_padding - button_size * 2.0 - button_gap).max(0.0);
         let tab_width = metrics
             .column_tab_width
             .min(((column_width - content_padding * 2.0 - button_size) / 2.0).max(0.0));
