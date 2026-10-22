@@ -125,6 +125,9 @@ impl Render for MainWindow {
         let right_column_visible = right_group_visible;
         let both_columns_visible = left_column_visible && right_column_visible;
         let any_column_visible = left_column_visible || right_column_visible;
+        let docked_tab_context_menu = self
+            .open_tab_context_menu
+            .filter(|group_index| !self.floating_tab_groups[*group_index]);
         let center_splitter_resizable = both_columns_visible
             && !self.collapsed_columns[0]
             && !self.collapsed_columns[1];
@@ -762,7 +765,7 @@ impl Render for MainWindow {
                 left_horizontal_divider,
                 self.collapsed_group_content[0],
                 self.collapsed_group_content[1],
-                self.open_tab_context_menu,
+                docked_tab_context_menu,
                 docked_composition_position,
                 tab_group_origins,
                 cx,
@@ -825,7 +828,7 @@ impl Render for MainWindow {
                 right_horizontal_divider,
                 self.collapsed_group_content[2],
                 false,
-                self.open_tab_context_menu,
+                docked_tab_context_menu,
                 docked_composition_position,
                 tab_group_origins,
                 cx,
