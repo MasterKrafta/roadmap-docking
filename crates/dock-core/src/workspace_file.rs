@@ -198,20 +198,12 @@ impl WorkspaceFile {
             .map_err(WorkspaceFileError::InvalidMetrics)?;
 
         let visible_region = if let Some(region) = options.visible_client_region {
+            // Rect owns the edge-representability contract: this rejects
+            // positive dimensions that round back to their origins as well as
+            // empty client regions, preserving the typed geometry error.
             region
                 .validate_non_empty()
                 .map_err(WorkspaceFileError::InvalidVisibleClientRegion)?;
-            let right = region
-                .checked_right()
-                .map_err(WorkspaceFileError::InvalidVisibleClientRegion)?;
-            let bottom = region
-                .checked_bottom()
-                .map_err(WorkspaceFileError::InvalidVisibleClientRegion)?;
-            if right <= region.origin.x || bottom <= region.origin.y {
-                return Err(WorkspaceFileError::InvalidVisibleClientRegion(
-                    GeometryError::NonPositiveDimension,
-                ));
-            }
             Some(region)
         } else {
             None
