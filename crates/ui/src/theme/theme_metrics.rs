@@ -17,6 +17,8 @@ pub struct ThemeMetrics {
     pub drag_start_threshold: f32,
     pub default_column_width: f32,
     pub min_column_width: f32,
+    /// Width of each tab in the main window's simple column.
+    pub column_tab_width: f32,
     pub rail_width: f32,
     pub min_group_height: f32,
     pub collapsed_group_height: f32,
@@ -40,6 +42,7 @@ impl Default for ThemeMetrics {
             drag_start_threshold: 4.0,
             default_column_width: 280.0,
             min_column_width: 200.0,
+            column_tab_width: 104.0,
             rail_width: 36.0,
             min_group_height: 80.0,
             collapsed_group_height: 28.0,
@@ -51,6 +54,7 @@ impl Default for ThemeMetrics {
 #[cfg(test)]
 mod tests {
     use super::ThemeMetrics;
+
     #[test]
     fn preserves_initial_metrics_from_the_roadmap_fragment() {
         let m = ThemeMetrics::default();
@@ -59,6 +63,7 @@ mod tests {
         assert!((m.rail_width - 36.0).abs() < 1e-3);
         assert_eq!(m.max_columns, 4);
     }
+
     #[test]
     fn includes_drag_and_drop_threshold_metrics() {
         let m = ThemeMetrics::default();
@@ -67,5 +72,16 @@ mod tests {
         assert!((m.drag_start_threshold - 4.0).abs() < 1e-3);
         assert!((m.drop_indicator_thickness - 4.0).abs() < 1e-3);
         assert!((m.drop_outline_thickness - 3.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn includes_main_window_column_metrics() {
+        let m = ThemeMetrics::default();
+        assert!((m.column_header_height - 32.0).abs() < 1e-3);
+        assert!((m.default_column_width - 280.0).abs() < 1e-3);
+        assert!((m.min_column_width - 200.0).abs() < 1e-3);
+        assert!((m.column_tab_width - 104.0).abs() < 1e-3);
+        assert!((m.splitter_thickness - 4.0).abs() < 1e-3);
+        assert!((m.splitter_hit_zone - 8.0).abs() < 1e-3);
     }
 }
