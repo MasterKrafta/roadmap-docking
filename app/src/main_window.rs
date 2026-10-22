@@ -12,7 +12,7 @@ use ui::Theme;
 
 use crate::panels::PanelRegistry;
 
-/// Two adjacent Core-owned columns, each with two vertically stacked tab groups.
+/// A single-panel left column beside a right column with two upper tabs and one lower tab.
 pub(crate) struct MainWindow {
     theme: Theme,
     panels: PanelRegistry,
