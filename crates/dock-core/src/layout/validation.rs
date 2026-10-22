@@ -1,5 +1,5 @@
-use super::*;
 use super::helpers::*;
+use super::*;
 
 impl Layout {
     /// Validates the entire model and returns every detected issue.
@@ -105,8 +105,7 @@ impl Layout {
                     } else if metrics_are_valid {
                         match column.mode {
                             ColumnMode::Expanded
-                                if column.width + PIXEL_TOLERANCE
-                                    < metrics.min_column_width =>
+                                if column.width + PIXEL_TOLERANCE < metrics.min_column_width =>
                             {
                                 errors.push(ValidationError::InvalidColumn {
                                     node: node_id,
@@ -123,8 +122,7 @@ impl Layout {
                                 });
                             }
                             ColumnMode::IconsOnly
-                                if (column.width - metrics.rail_width).abs()
-                                    > PIXEL_TOLERANCE =>
+                                if (column.width - metrics.rail_width).abs() > PIXEL_TOLERANCE =>
                             {
                                 errors.push(ValidationError::InvalidColumn {
                                     node: node_id,
@@ -278,8 +276,12 @@ impl Layout {
                     group: group_id,
                     reason: match reason {
                         GeometryError::NonFinite => "bounds contain a non-finite value",
-                        GeometryError::NegativeDimension => "bounds dimensions must not be negative",
-                        GeometryError::NonPositiveDimension => "bounds must have positive dimensions",
+                        GeometryError::NegativeDimension => {
+                            "bounds dimensions must not be negative"
+                        }
+                        GeometryError::NonPositiveDimension => {
+                            "bounds must have positive dimensions"
+                        }
                         GeometryError::ArithmeticOverflow => "bounds edges overflow",
                         GeometryError::InconsistentConstraints => "invalid bounds",
                     },
@@ -314,12 +316,7 @@ impl Layout {
             if self.nodes.contains_key(area.root) {
                 roots.push(area.root);
                 if self.profile == Profile::Photoshop {
-                    validate_photoshop_floating_root(
-                        &self.nodes,
-                        group_id,
-                        area.root,
-                        &mut errors,
-                    );
+                    validate_photoshop_floating_root(&self.nodes, group_id, area.root, &mut errors);
                 }
             } else {
                 errors.push(ValidationError::MissingNode {
@@ -345,7 +342,8 @@ impl Layout {
             }
         }
 
-        if metrics_are_valid && self.profile == Profile::Photoshop
+        if metrics_are_valid
+            && self.profile == Profile::Photoshop
             && photoshop_main_columns > metrics.max_columns
         {
             errors.push(ValidationError::TooManyColumns {
@@ -369,7 +367,11 @@ impl Layout {
                             reason: "flyout column must use a rail mode",
                         });
                     }
-                    if !column.groups.iter().any(|root| self.is_descendant_or_same(*root, flyout.group)) {
+                    if !column
+                        .groups
+                        .iter()
+                        .any(|root| self.is_descendant_or_same(*root, flyout.group))
+                    {
                         errors.push(ValidationError::InvalidFlyout {
                             column: flyout.column,
                             group: flyout.group,
@@ -459,5 +461,4 @@ impl Layout {
             Err(errors)
         }
     }
-
 }

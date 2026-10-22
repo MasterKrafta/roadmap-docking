@@ -19,15 +19,14 @@ pub enum WorkspaceFileError {
     DuplicatePanelDescriptor { key: String },
 
     #[error("panel descriptor '{key}' has invalid constraints: {reason:?}")]
-    InvalidPanelDescriptor {
-        key: String,
-        reason: GeometryError,
-    },
+    InvalidPanelDescriptor { key: String, reason: GeometryError },
 
     #[error("floating group {index} has invalid bounds: {reason:?}")]
     InvalidFloatingBounds { index: usize, reason: GeometryError },
 
-    #[error("floating group {index} cannot fit in the visible client region: {axis:?} has {available} available, {required} required")]
+    #[error(
+        "floating group {index} cannot fit in the visible client region: {axis:?} has {available} available, {required} required"
+    )]
     FloatingBoundsInsufficientSpace {
         index: usize,
         axis: Axis,

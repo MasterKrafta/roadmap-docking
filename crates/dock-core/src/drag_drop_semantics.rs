@@ -10,12 +10,7 @@ fn key(value: &str) -> PanelKey {
 }
 
 fn constraints() -> PanelConstraints {
-    PanelConstraints::new(
-        Size::new(80.0, 60.0),
-        Size::new(180.0, 140.0),
-        None,
-        false,
-    )
+    PanelConstraints::new(Size::new(80.0, 60.0), Size::new(180.0, 140.0), None, false)
 }
 
 fn bounds(x: f32, y: f32) -> Rect {
@@ -38,7 +33,10 @@ fn tab_parent_of(layout: &Layout, panel_node: NodeId) -> Option<NodeId> {
 
 fn floating_root(layout: &Layout, id: FloatingGroupId) -> NodeId {
     let floating = layout.floating_group(id).expect("floating group exists");
-    layout.dock_area(floating.area).expect("floating area exists").root
+    layout
+        .dock_area(floating.area)
+        .expect("floating area exists")
+        .root
 }
 
 #[test]
@@ -100,7 +98,10 @@ fn panel_tab_joins_another_tabs_group_and_only_that_panel_moves() {
         .apply(
             DockCommand::MovePanel {
                 panel: moving_panel,
-                target: DropTarget::Tabs { group: target, index: 1 },
+                target: DropTarget::Tabs {
+                    group: target,
+                    index: 1,
+                },
             },
             &metrics,
         )
@@ -167,7 +168,8 @@ fn panel_tab_can_split_into_a_new_group() {
         )
         .unwrap();
 
-    let new_group = tab_parent_of(&layout, moving_node).expect("moved panel is wrapped as a new group");
+    let new_group =
+        tab_parent_of(&layout, moving_node).expect("moved panel is wrapped as a new group");
     assert_ne!(new_group, source_group);
     assert_ne!(new_group, target_group);
     assert_tabs(
@@ -216,13 +218,19 @@ fn panel_tab_can_become_a_new_main_dock_column() {
         .apply(
             DockCommand::MovePanel {
                 panel: moving_panel,
-                target: DropTarget::MainColumn { side: DockSide::Right, index: 0 },
+                target: DropTarget::MainColumn {
+                    side: DockSide::Right,
+                    index: 0,
+                },
             },
             &metrics,
         )
         .unwrap();
 
-    let Some(Node::Split(split)) = layout.main_area(DockSide::Right).and_then(|area| layout.node(area.root)) else {
+    let Some(Node::Split(split)) = layout
+        .main_area(DockSide::Right)
+        .and_then(|area| layout.node(area.root))
+    else {
         panic!("adding a new column beside an existing one forms a horizontal split");
     };
     assert_eq!(split.axis, Axis::X);
@@ -286,7 +294,9 @@ fn panel_tab_can_float_without_detaching_its_sibling_tabs() {
         panic!("Photoshop floating panel roots are wrapped in Tabs");
     };
     assert_eq!(float_tabs.children, vec![moving_node]);
-    assert!(matches!(layout.node(moving_node), Some(Node::Panel(panel)) if panel.panel_id == moving_panel));
+    assert!(
+        matches!(layout.node(moving_node), Some(Node::Panel(panel)) if panel.panel_id == moving_panel)
+    );
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
 
@@ -308,7 +318,10 @@ fn panel_tab_can_move_between_floating_groups() {
         .apply(
             DockCommand::MovePanel {
                 panel: moving_panel,
-                target: DropTarget::Tabs { group: target_group, index: 1 },
+                target: DropTarget::Tabs {
+                    group: target_group,
+                    index: 1,
+                },
             },
             &metrics,
         )
@@ -404,7 +417,11 @@ fn group_grip_split_into_a_new_column_preserves_the_group_node_and_state() {
     let (_, p0) = builder.panel(key("group-split-a"), constraints());
     let (_, p1) = builder.panel(key("group-split-b"), constraints());
     let source_group = builder.tabs(vec![p0, p1], 1, true);
-    let original_group = Tabs { children: vec![p0, p1], active_index: 1, collapsed: true };
+    let original_group = Tabs {
+        children: vec![p0, p1],
+        active_index: 1,
+        collapsed: true,
+    };
     let (_, source_keep_panel) = builder.panel(key("group-split-keep"), constraints());
     let source_keep = builder.tabs(vec![source_keep_panel], 0, false);
     let source_column = builder.column(
@@ -439,7 +456,10 @@ fn group_grip_split_into_a_new_column_preserves_the_group_node_and_state() {
         .unwrap();
 
     assert_tabs(&layout, source_group, &original_group);
-    let Some(Node::Split(split)) = layout.main_area(DockSide::Right).and_then(|area| layout.node(area.root)) else {
+    let Some(Node::Split(split)) = layout
+        .main_area(DockSide::Right)
+        .and_then(|area| layout.node(area.root))
+    else {
         panic!("horizontal group-edge drop creates an X split of columns");
     };
     assert_eq!(split.axis, Axis::X);
@@ -458,7 +478,11 @@ fn group_grip_floats_the_entire_tabs_node_without_losing_group_state() {
     let (_, p0) = builder.panel(key("group-float-a"), constraints());
     let (_, p1) = builder.panel(key("group-float-b"), constraints());
     let source_group = builder.tabs(vec![p0, p1], 1, true);
-    let original_group = Tabs { children: vec![p0, p1], active_index: 1, collapsed: true };
+    let original_group = Tabs {
+        children: vec![p0, p1],
+        active_index: 1,
+        collapsed: true,
+    };
     let (_, sibling_panel) = builder.panel(key("group-float-sibling"), constraints());
     let sibling = builder.tabs(vec![sibling_panel], 0, false);
     let column = builder.column(
@@ -518,7 +542,10 @@ fn merging_a_group_moves_every_tab_and_activates_its_previous_active_tab() {
         )
         .unwrap();
 
-    assert!(layout.node(source).is_none(), "a merged group no longer has a separate container");
+    assert!(
+        layout.node(source).is_none(),
+        "a merged group no longer has a separate container"
+    );
     assert_tabs(
         &layout,
         target,
@@ -561,7 +588,10 @@ fn drop_request_keeps_group_grip_semantics_distinct_from_panel_tab_drag() {
     let mut session = DragSession::new(&metrics).unwrap();
     session.pointer_down(group_payload, Point::ZERO).unwrap();
     session.pointer_move(Point::new(4.0, 0.0)).unwrap();
-    let target = DropTarget::GroupTabs { group: target_group, index: 1 };
+    let target = DropTarget::GroupTabs {
+        group: target_group,
+        index: 1,
+    };
     session.set_drop_target(Some(target)).unwrap();
 
     let request = session
@@ -576,8 +606,8 @@ fn drop_request_keeps_group_grip_semantics_distinct_from_panel_tab_drag() {
             origin: Point::ZERO,
             point: Point::new(12.0, 8.0),
             target: Some(target),
-        floating_bounds: None,
-}
+            floating_bounds: None,
+        }
     );
     assert!(matches!(request.payload, DragPayload::Group { group: id } if id == group));
     assert!(!matches!(request.payload, DragPayload::Panel { .. }));

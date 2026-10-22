@@ -108,13 +108,19 @@ pub enum DockCommand {
     /// Detach a Panel or Tabs node into a floating group at these bounds.
     Float { node: NodeId, bounds: Rect },
     /// Move a floating window by setting its new origin.
-    MoveFloating { group: FloatingGroupId, origin: Point },
+    MoveFloating {
+        group: FloatingGroupId,
+        origin: Point,
+    },
     /// Resize a floating window by setting its requested size.
     ResizeFloating { group: FloatingGroupId, size: Size },
     /// Raise a floating group to the front of the stacking order.
     RaiseFloating { group: FloatingGroupId },
     /// Dock a floating group at an explicit destination.
-    DockFloating { group: FloatingGroupId, target: DropTarget },
+    DockFloating {
+        group: FloatingGroupId,
+        target: DropTarget,
+    },
     /// Collapse or expand a Tabs group while preserving its children, active tab,
     /// and its parent container's existing size/ratio state.
     ///
@@ -154,36 +160,60 @@ pub enum DockCommand {
 
 #[cfg(test)]
 mod tests {
-    use slotmap::Key;
     use super::DockCommand;
     use crate::{
         ChromeMode, ColumnMode, DockSide, DropTarget, DropZone, FloatingGroupId, NodeId,
         PanelConstraints, PanelId, PanelKey, Point, Rect, Size,
     };
+    use slotmap::Key;
 
     #[test]
     fn every_command_can_be_constructed_without_ui_types() {
         let key = PanelKey::new("layers").unwrap();
-        let constraints = PanelConstraints::new(
-            Size::new(120.0, 80.0),
-            Size::new(280.0, 220.0),
-            None,
-            false,
-        );
-        let target = DropTarget::RailSlot { column: NodeId::null(), index: 1 };
+        let constraints =
+            PanelConstraints::new(Size::new(120.0, 80.0), Size::new(280.0, 220.0), None, false);
+        let target = DropTarget::RailSlot {
+            column: NodeId::null(),
+            index: 1,
+        };
         let commands = [
-            DockCommand::OpenPanel { key, constraints, target: Some(target) },
-            DockCommand::ClosePanel { panel: PanelId::null() },
-            DockCommand::CloseGroup { group: NodeId::null() },
-            DockCommand::ActivateTab { group: NodeId::null(), panel: PanelId::null() },
-            DockCommand::ReorderTab { group: NodeId::null(), panel: PanelId::null(), to_index: 0 },
-            DockCommand::MovePanel { panel: PanelId::null(), target },
-            DockCommand::MovePanelFromFlyout { panel: PanelId::null(), target },
+            DockCommand::OpenPanel {
+                key,
+                constraints,
+                target: Some(target),
+            },
+            DockCommand::ClosePanel {
+                panel: PanelId::null(),
+            },
+            DockCommand::CloseGroup {
+                group: NodeId::null(),
+            },
+            DockCommand::ActivateTab {
+                group: NodeId::null(),
+                panel: PanelId::null(),
+            },
+            DockCommand::ReorderTab {
+                group: NodeId::null(),
+                panel: PanelId::null(),
+                to_index: 0,
+            },
+            DockCommand::MovePanel {
+                panel: PanelId::null(),
+                target,
+            },
+            DockCommand::MovePanelFromFlyout {
+                panel: PanelId::null(),
+                target,
+            },
             DockCommand::FloatPanelFromFlyout {
                 panel: PanelId::null(),
                 bounds: Rect::new(Point::ZERO, Size::new(400.0, 300.0)),
             },
-            DockCommand::MoveGroup { group: NodeId::null(), column: NodeId::null(), index: 0 },
+            DockCommand::MoveGroup {
+                group: NodeId::null(),
+                column: NodeId::null(),
+                index: 0,
+            },
             DockCommand::MoveGroupToMainColumn {
                 group: NodeId::null(),
                 side: DockSide::Right,
@@ -206,7 +236,10 @@ mod tests {
                 delta: 12.0,
                 available_height: 480.0,
             },
-            DockCommand::ResizeColumn { column: NodeId::null(), width: 280.0 },
+            DockCommand::ResizeColumn {
+                column: NodeId::null(),
+                width: 280.0,
+            },
             DockCommand::ResizeColumnBoundary {
                 side: DockSide::Right,
                 boundary_index: 0,
@@ -216,27 +249,54 @@ mod tests {
                 column: NodeId::null(),
                 available_height: 480.0,
             },
-            DockCommand::ResetMainColumnRatios { side: DockSide::Right },
-            DockCommand::RestoreGroupRatios { column: NodeId::null(), ratios: vec![1.0] },
+            DockCommand::ResetMainColumnRatios {
+                side: DockSide::Right,
+            },
+            DockCommand::RestoreGroupRatios {
+                column: NodeId::null(),
+                ratios: vec![1.0],
+            },
             DockCommand::Float {
                 node: NodeId::null(),
                 bounds: Rect::new(Point::ZERO, Size::new(400.0, 300.0)),
             },
-            DockCommand::MoveFloating { group: FloatingGroupId::null(), origin: Point::ZERO },
+            DockCommand::MoveFloating {
+                group: FloatingGroupId::null(),
+                origin: Point::ZERO,
+            },
             DockCommand::ResizeFloating {
                 group: FloatingGroupId::null(),
                 size: Size::new(500.0, 400.0),
             },
-            DockCommand::RaiseFloating { group: FloatingGroupId::null() },
-            DockCommand::DockFloating { group: FloatingGroupId::null(), target },
-            DockCommand::CollapseGroup { group: NodeId::null(), collapsed: true },
-            DockCommand::SetColumnMode { column: NodeId::null(), mode: ColumnMode::IconsOnly },
-            DockCommand::OpenFlyout { column: NodeId::null(), panel: PanelId::null() },
+            DockCommand::RaiseFloating {
+                group: FloatingGroupId::null(),
+            },
+            DockCommand::DockFloating {
+                group: FloatingGroupId::null(),
+                target,
+            },
+            DockCommand::CollapseGroup {
+                group: NodeId::null(),
+                collapsed: true,
+            },
+            DockCommand::SetColumnMode {
+                column: NodeId::null(),
+                mode: ColumnMode::IconsOnly,
+            },
+            DockCommand::OpenFlyout {
+                column: NodeId::null(),
+                panel: PanelId::null(),
+            },
             DockCommand::CloseFlyout,
             DockCommand::DismissFlyout,
             DockCommand::SetFlyoutAutoCollapse { enabled: true },
-            DockCommand::ResizeFlyout { panel: PanelId::null(), width: 280.0 },
-            DockCommand::SetChrome { mode: ChromeMode::AllHidden },
+            DockCommand::ResizeFlyout {
+                panel: PanelId::null(),
+                width: 280.0,
+            },
+            DockCommand::SetChrome {
+                mode: ChromeMode::AllHidden,
+            },
         ];
         assert_eq!(commands.len(), 31);
     }
@@ -250,6 +310,9 @@ mod tests {
             delta: -16.0,
         };
         let encoded = serde_json::to_string(&command).unwrap();
-        assert_eq!(serde_json::from_str::<DockCommand>(&encoded).unwrap(), command);
+        assert_eq!(
+            serde_json::from_str::<DockCommand>(&encoded).unwrap(),
+            command
+        );
     }
 }

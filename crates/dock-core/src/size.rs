@@ -9,7 +9,10 @@ pub struct Size {
 }
 
 impl Size {
-    pub const ZERO: Self = Self { width: 0.0, height: 0.0 };
+    pub const ZERO: Self = Self {
+        width: 0.0,
+        height: 0.0,
+    };
 
     pub const fn new(width: f32, height: f32) -> Self {
         Self { width, height }
@@ -57,13 +60,22 @@ mod tests {
     #[test]
     fn size_can_be_empty_but_never_negative() {
         assert_eq!(Size::ZERO.validate(), Ok(()));
-        assert_eq!(Size::new(-1.0, 2.0).validate(), Err(GeometryError::NegativeDimension));
-        assert_eq!(Size::new(0.0, 2.0).validate_positive(), Err(GeometryError::NonPositiveDimension));
+        assert_eq!(
+            Size::new(-1.0, 2.0).validate(),
+            Err(GeometryError::NegativeDimension)
+        );
+        assert_eq!(
+            Size::new(0.0, 2.0).validate_positive(),
+            Err(GeometryError::NonPositiveDimension)
+        );
     }
 
     #[test]
     fn size_rejects_non_finite_values_and_area_overflow() {
-        assert_eq!(Size::new(f32::INFINITY, 1.0).validate(), Err(GeometryError::NonFinite));
+        assert_eq!(
+            Size::new(f32::INFINITY, 1.0).validate(),
+            Err(GeometryError::NonFinite)
+        );
         assert_eq!(
             Size::new(f32::MAX, 2.0).checked_area(),
             Err(GeometryError::ArithmeticOverflow)

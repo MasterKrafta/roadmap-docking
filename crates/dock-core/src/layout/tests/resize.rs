@@ -12,9 +12,18 @@ fn c45_resize_groups_changes_only_adjacent_pair_and_reports_minimum_clamp() {
             false,
         )
     };
-    let (_, panel_a) = builder.panel(PanelKey::new("c45-group-a").unwrap(), constraints(120.0, 500.0));
-    let (_, panel_b) = builder.panel(PanelKey::new("c45-group-b").unwrap(), constraints(100.0, 500.0));
-    let (_, panel_c) = builder.panel(PanelKey::new("c45-group-c").unwrap(), constraints(250.0, 500.0));
+    let (_, panel_a) = builder.panel(
+        PanelKey::new("c45-group-a").unwrap(),
+        constraints(120.0, 500.0),
+    );
+    let (_, panel_b) = builder.panel(
+        PanelKey::new("c45-group-b").unwrap(),
+        constraints(100.0, 500.0),
+    );
+    let (_, panel_c) = builder.panel(
+        PanelKey::new("c45-group-c").unwrap(),
+        constraints(250.0, 500.0),
+    );
     let group_a = builder.tabs(vec![panel_a], 0, false);
     let group_b = builder.tabs(vec![panel_b], 0, false);
     let group_c = builder.tabs(vec![panel_c], 0, false);
@@ -32,15 +41,17 @@ fn c45_resize_groups_changes_only_adjacent_pair_and_reports_minimum_clamp() {
         _ => unreachable!(),
     };
 
-    let outcome = layout.apply(
-        DockCommand::ResizeGroups {
-            column,
-            boundary_index: 0,
-            delta: 500.0,
-            available_height: 600.0,
-        },
-        &metrics,
-    ).unwrap();
+    let outcome = layout
+        .apply(
+            DockCommand::ResizeGroups {
+                column,
+                boundary_index: 0,
+                delta: 500.0,
+                available_height: 600.0,
+            },
+            &metrics,
+        )
+        .unwrap();
 
     assert!(matches!(
         outcome.actual_value,
@@ -61,15 +72,17 @@ fn c45_resize_groups_changes_only_adjacent_pair_and_reports_minimum_clamp() {
     ));
     assert_eq!(layout.validate(&metrics), Ok(()));
 
-    let min_clamp = layout.apply(
-        DockCommand::ResizeGroups {
-            column,
-            boundary_index: 0,
-            delta: -500.0,
-            available_height: 600.0,
-        },
-        &metrics,
-    ).unwrap();
+    let min_clamp = layout
+        .apply(
+            DockCommand::ResizeGroups {
+                column,
+                boundary_index: 0,
+                delta: -500.0,
+                available_height: 600.0,
+            },
+            &metrics,
+        )
+        .unwrap();
     assert!(matches!(
         min_clamp.actual_value,
         Some(CommandValue::GroupBoundaryDelta(delta)) if (delta + 80.0).abs() < 1.0e-3
@@ -85,9 +98,12 @@ fn c45_resize_groups_changes_only_adjacent_pair_and_reports_minimum_clamp() {
 fn c45_collapsed_group_has_fixed_height_and_cannot_be_resized_at_its_boundary() {
     let metrics = DockMetrics::default();
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
-    let (_, collapsed_panel) = builder.panel(PanelKey::new("c45-collapsed").unwrap(), descriptors()[0].1);
-    let (_, expanded_a_panel) = builder.panel(PanelKey::new("c45-expanded-a").unwrap(), descriptors()[0].1);
-    let (_, expanded_b_panel) = builder.panel(PanelKey::new("c45-expanded-b").unwrap(), descriptors()[0].1);
+    let (_, collapsed_panel) =
+        builder.panel(PanelKey::new("c45-collapsed").unwrap(), descriptors()[0].1);
+    let (_, expanded_a_panel) =
+        builder.panel(PanelKey::new("c45-expanded-a").unwrap(), descriptors()[0].1);
+    let (_, expanded_b_panel) =
+        builder.panel(PanelKey::new("c45-expanded-b").unwrap(), descriptors()[0].1);
     let collapsed = builder.tabs(vec![collapsed_panel], 0, true);
     let expanded_a = builder.tabs(vec![expanded_a_panel], 0, false);
     let expanded_b = builder.tabs(vec![expanded_b_panel], 0, false);
@@ -101,45 +117,57 @@ fn c45_collapsed_group_has_fixed_height_and_cannot_be_resized_at_its_boundary() 
     let mut layout = builder.build();
     let before = format!("{layout:?}");
 
-    let fixed_boundary = layout.apply(
-        DockCommand::ResizeGroups {
-            column,
-            boundary_index: 0,
-            delta: 100.0,
-            available_height: 500.0,
-        },
-        &metrics,
-    ).unwrap();
-    assert_eq!(fixed_boundary.actual_value, Some(CommandValue::GroupBoundaryDelta(0.0)));
+    let fixed_boundary = layout
+        .apply(
+            DockCommand::ResizeGroups {
+                column,
+                boundary_index: 0,
+                delta: 100.0,
+                available_height: 500.0,
+            },
+            &metrics,
+        )
+        .unwrap();
+    assert_eq!(
+        fixed_boundary.actual_value,
+        Some(CommandValue::GroupBoundaryDelta(0.0))
+    );
     assert_eq!(fixed_boundary.inverse, None);
     assert_eq!(format!("{layout:?}"), before);
     assert_eq!(layout.version(), 0);
 
-    let too_short = layout.apply(
-        DockCommand::ResizeGroups {
-            column,
-            boundary_index: 0,
-            delta: 10.0,
-            available_height: 10.0,
-        },
-        &metrics,
-    ).unwrap_err();
+    let too_short = layout
+        .apply(
+            DockCommand::ResizeGroups {
+                column,
+                boundary_index: 0,
+                delta: 10.0,
+                available_height: 10.0,
+            },
+            &metrics,
+        )
+        .unwrap_err();
     assert!(matches!(
         too_short,
-        CommandError::InvalidValue { field: "available_height", .. }
+        CommandError::InvalidValue {
+            field: "available_height",
+            ..
+        }
     ));
     assert_eq!(format!("{layout:?}"), before);
     assert_eq!(layout.version(), 0);
 
-    let expanded_boundary = layout.apply(
-        DockCommand::ResizeGroups {
-            column,
-            boundary_index: 1,
-            delta: 10_000.0,
-            available_height: 500.0,
-        },
-        &metrics,
-    ).unwrap();
+    let expanded_boundary = layout
+        .apply(
+            DockCommand::ResizeGroups {
+                column,
+                boundary_index: 1,
+                delta: 10_000.0,
+                available_height: 500.0,
+            },
+            &metrics,
+        )
+        .unwrap();
     assert!(matches!(
         expanded_boundary.actual_value,
         Some(CommandValue::GroupBoundaryDelta(delta)) if (delta - 156.0).abs() < 1.0e-3
@@ -177,13 +205,15 @@ fn c45_reset_column_ratios_shares_free_height_only_between_expanded_groups() {
     builder.main_area(DockSide::Right, column);
     let mut layout = builder.build();
 
-    let outcome = layout.apply(
-        DockCommand::ResetColumnRatios {
-            column,
-            available_height: 500.0,
-        },
-        &metrics,
-    ).unwrap();
+    let outcome = layout
+        .apply(
+            DockCommand::ResetColumnRatios {
+                column,
+                available_height: 500.0,
+            },
+            &metrics,
+        )
+        .unwrap();
     assert_eq!(
         outcome.actual_value,
         Some(CommandValue::GroupRatios(vec![0.0, 0.5, 0.0, 0.5]))
@@ -233,14 +263,19 @@ fn c45_reset_group_ratios_respects_minimums_when_equal_share_would_be_too_small(
     builder.main_area(DockSide::Right, column);
     let mut layout = builder.build();
 
-    let outcome = layout.apply(
-        DockCommand::ResetColumnRatios {
-            column,
-            available_height: 240.0,
-        },
-        &metrics,
-    ).unwrap();
-    assert_eq!(outcome.actual_value, Some(CommandValue::GroupRatios(vec![2.0 / 3.0, 1.0 / 3.0])));
+    let outcome = layout
+        .apply(
+            DockCommand::ResetColumnRatios {
+                column,
+                available_height: 240.0,
+            },
+            &metrics,
+        )
+        .unwrap();
+    assert_eq!(
+        outcome.actual_value,
+        Some(CommandValue::GroupRatios(vec![2.0 / 3.0, 1.0 / 3.0]))
+    );
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
 
@@ -265,18 +300,34 @@ fn c45_resize_column_clamps_min_and_max_and_canvas_gets_remainder() {
     builder.main_area(DockSide::Right, column);
     let mut layout = builder.build();
 
-    let min_outcome = layout.apply(
-        DockCommand::ResizeColumn { column, width: 100.0 },
-        &metrics,
-    ).unwrap();
-    assert_eq!(min_outcome.actual_value, Some(CommandValue::ColumnWidth(240.0)));
+    let min_outcome = layout
+        .apply(
+            DockCommand::ResizeColumn {
+                column,
+                width: 100.0,
+            },
+            &metrics,
+        )
+        .unwrap();
+    assert_eq!(
+        min_outcome.actual_value,
+        Some(CommandValue::ColumnWidth(240.0))
+    );
     assert!(matches!(layout.node(column), Some(Node::Column(value)) if value.width == 240.0));
 
-    let max_outcome = layout.apply(
-        DockCommand::ResizeColumn { column, width: 900.0 },
-        &metrics,
-    ).unwrap();
-    assert_eq!(max_outcome.actual_value, Some(CommandValue::ColumnWidth(500.0)));
+    let max_outcome = layout
+        .apply(
+            DockCommand::ResizeColumn {
+                column,
+                width: 900.0,
+            },
+            &metrics,
+        )
+        .unwrap();
+    assert_eq!(
+        max_outcome.actual_value,
+        Some(CommandValue::ColumnWidth(500.0))
+    );
     assert!(matches!(layout.node(column), Some(Node::Column(value)) if value.width == 500.0));
     assert_eq!(layout.validate(&metrics), Ok(()));
 
@@ -298,11 +349,19 @@ fn c45_resize_column_clamps_min_and_max_and_canvas_gets_remainder() {
         Size::new(800.0, 600.0),
     ))));
     let mut canvas_layout = canvas_builder.build();
-    let canvas_outcome = canvas_layout.apply(
-        DockCommand::ResizeColumn { column: canvas_column, width: 900.0 },
-        &metrics,
-    ).unwrap();
-    assert_eq!(canvas_outcome.actual_value, Some(CommandValue::ColumnWidth(760.0)));
+    let canvas_outcome = canvas_layout
+        .apply(
+            DockCommand::ResizeColumn {
+                column: canvas_column,
+                width: 900.0,
+            },
+            &metrics,
+        )
+        .unwrap();
+    assert_eq!(
+        canvas_outcome.actual_value,
+        Some(CommandValue::ColumnWidth(760.0))
+    );
     let bounds = canvas_layout.canvas().last_known_bounds().unwrap();
     assert_eq!(bounds.origin.x, 760.0);
     assert_eq!(bounds.size.width, metrics.min_canvas_width);
@@ -332,13 +391,15 @@ fn c45_resize_column_rejects_interior_main_column_target() {
     let mut layout = builder.build();
     let before = format!("{layout:?}");
 
-    let error = layout.apply(
-        DockCommand::ResizeColumn {
-            column: columns[1],
-            width: 340.0,
-        },
-        &metrics,
-    ).unwrap_err();
+    let error = layout
+        .apply(
+            DockCommand::ResizeColumn {
+                column: columns[1],
+                width: 340.0,
+            },
+            &metrics,
+        )
+        .unwrap_err();
 
     assert!(matches!(error, CommandError::InvalidTarget { .. }));
     assert_eq!(format!("{layout:?}"), before);
@@ -362,26 +423,47 @@ fn c45_resize_column_boundary_preserves_pair_sum_and_clamps_min_max() {
         false,
     );
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
-    let (_, left_panel) = builder.panel(PanelKey::new("c45-boundary-left").unwrap(), left_constraints);
-    let (_, right_panel) = builder.panel(PanelKey::new("c45-boundary-right").unwrap(), right_constraints);
+    let (_, left_panel) = builder.panel(
+        PanelKey::new("c45-boundary-left").unwrap(),
+        left_constraints,
+    );
+    let (_, right_panel) = builder.panel(
+        PanelKey::new("c45-boundary-right").unwrap(),
+        right_constraints,
+    );
     let left_group = builder.tabs(vec![left_panel], 0, false);
     let right_group = builder.tabs(vec![right_panel], 0, false);
-    let left_column = builder.column(280.0, crate::ColumnMode::Expanded, vec![left_group], vec![1.0]);
-    let right_column = builder.column(280.0, crate::ColumnMode::Expanded, vec![right_group], vec![1.0]);
+    let left_column = builder.column(
+        280.0,
+        crate::ColumnMode::Expanded,
+        vec![left_group],
+        vec![1.0],
+    );
+    let right_column = builder.column(
+        280.0,
+        crate::ColumnMode::Expanded,
+        vec![right_group],
+        vec![1.0],
+    );
     let root = builder.split(Axis::X, vec![left_column, right_column], vec![0.5, 0.5]);
     builder.main_area(DockSide::Right, root);
     let mut layout = builder.build();
     let pair_sum = 560.0;
 
-    let max_clamp = layout.apply(
-        DockCommand::ResizeColumnBoundary {
-            side: DockSide::Right,
-            boundary_index: 0,
-            delta: 10_000.0,
-        },
-        &metrics,
-    ).unwrap();
-    assert_eq!(max_clamp.actual_value, Some(CommandValue::ColumnBoundaryDelta(20.0)));
+    let max_clamp = layout
+        .apply(
+            DockCommand::ResizeColumnBoundary {
+                side: DockSide::Right,
+                boundary_index: 0,
+                delta: 10_000.0,
+            },
+            &metrics,
+        )
+        .unwrap();
+    assert_eq!(
+        max_clamp.actual_value,
+        Some(CommandValue::ColumnBoundaryDelta(20.0))
+    );
     let left_width = match layout.node(left_column).unwrap() {
         Node::Column(value) => value.width,
         _ => unreachable!(),
@@ -394,15 +476,20 @@ fn c45_resize_column_boundary_preserves_pair_sum_and_clamps_min_max() {
     assert_eq!(right_width, 260.0);
     assert!((left_width + right_width - pair_sum).abs() < 1.0e-4);
 
-    let min_clamp = layout.apply(
-        DockCommand::ResizeColumnBoundary {
-            side: DockSide::Right,
-            boundary_index: 0,
-            delta: -10_000.0,
-        },
-        &metrics,
-    ).unwrap();
-    assert_eq!(min_clamp.actual_value, Some(CommandValue::ColumnBoundaryDelta(-100.0)));
+    let min_clamp = layout
+        .apply(
+            DockCommand::ResizeColumnBoundary {
+                side: DockSide::Right,
+                boundary_index: 0,
+                delta: -10_000.0,
+            },
+            &metrics,
+        )
+        .unwrap();
+    assert_eq!(
+        min_clamp.actual_value,
+        Some(CommandValue::ColumnBoundaryDelta(-100.0))
+    );
     let left_width = match layout.node(left_column).unwrap() {
         Node::Column(value) => value.width,
         _ => unreachable!(),
@@ -425,41 +512,56 @@ fn c45_resize_rejects_non_finite_or_non_positive_inputs_atomically() {
     let before = format!("{layout:?}");
 
     for width in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, 0.0, -1.0] {
-        let error = layout.apply(
-            DockCommand::ResizeColumn { column, width },
-            &metrics,
-        ).unwrap_err();
-        assert!(matches!(error, CommandError::InvalidValue { field: "width", .. }));
+        let error = layout
+            .apply(DockCommand::ResizeColumn { column, width }, &metrics)
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            CommandError::InvalidValue { field: "width", .. }
+        ));
         assert_eq!(format!("{layout:?}"), before);
         assert_eq!(layout.version(), 0);
     }
 
     for delta in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
-        let error = layout.apply(
-            DockCommand::ResizeGroups {
-                column,
-                boundary_index: 0,
-                delta,
-                available_height: 400.0,
-            },
-            &metrics,
-        ).unwrap_err();
-        assert!(matches!(error, CommandError::InvalidValue { field: "delta", .. }));
+        let error = layout
+            .apply(
+                DockCommand::ResizeGroups {
+                    column,
+                    boundary_index: 0,
+                    delta,
+                    available_height: 400.0,
+                },
+                &metrics,
+            )
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            CommandError::InvalidValue { field: "delta", .. }
+        ));
         assert_eq!(format!("{layout:?}"), before);
         assert_eq!(layout.version(), 0);
     }
 
     for available_height in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, 0.0, -1.0] {
-        let error = layout.apply(
-            DockCommand::ResizeGroups {
-                column,
-                boundary_index: 0,
-                delta: 1.0,
-                available_height,
-            },
-            &metrics,
-        ).unwrap_err();
-        assert!(matches!(error, CommandError::InvalidValue { field: "available_height", .. }));
+        let error = layout
+            .apply(
+                DockCommand::ResizeGroups {
+                    column,
+                    boundary_index: 0,
+                    delta: 1.0,
+                    available_height,
+                },
+                &metrics,
+            )
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            CommandError::InvalidValue {
+                field: "available_height",
+                ..
+            }
+        ));
         assert_eq!(format!("{layout:?}"), before);
         assert_eq!(layout.version(), 0);
     }
@@ -492,16 +594,26 @@ fn c45_group_resize_rejects_insufficient_available_height_transactionally() {
     let mut layout = builder.build();
     let before = format!("{layout:?}");
 
-    let error = layout.apply(
-        DockCommand::ResetColumnRatios { column, available_height: 150.0 },
-        &metrics,
-    ).unwrap_err();
-    assert!(matches!(error, CommandError::InvalidValue { field: "available_height", .. }));
+    let error = layout
+        .apply(
+            DockCommand::ResetColumnRatios {
+                column,
+                available_height: 150.0,
+            },
+            &metrics,
+        )
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        CommandError::InvalidValue {
+            field: "available_height",
+            ..
+        }
+    ));
     assert_eq!(format!("{layout:?}"), before);
     assert_eq!(layout.version(), 0);
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
-
 
 #[test]
 fn c45_column_boundary_and_ratio_reset_reject_non_finite_or_non_positive_inputs() {
@@ -522,25 +634,41 @@ fn c45_column_boundary_and_ratio_reset_reject_non_finite_or_non_positive_inputs(
     let before = format!("{layout:?}");
 
     for delta in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
-        let error = layout.apply(
-            DockCommand::ResizeColumnBoundary {
-                side: DockSide::Right,
-                boundary_index: 0,
-                delta,
-            },
-            &metrics,
-        ).unwrap_err();
-        assert!(matches!(error, CommandError::InvalidValue { field: "delta", .. }));
+        let error = layout
+            .apply(
+                DockCommand::ResizeColumnBoundary {
+                    side: DockSide::Right,
+                    boundary_index: 0,
+                    delta,
+                },
+                &metrics,
+            )
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            CommandError::InvalidValue { field: "delta", .. }
+        ));
         assert_eq!(format!("{layout:?}"), before);
         assert_eq!(layout.version(), 0);
     }
 
     for available_height in [f32::NAN, f32::INFINITY, 0.0, -10.0] {
-        let error = layout.apply(
-            DockCommand::ResetColumnRatios { column, available_height },
-            &metrics,
-        ).unwrap_err();
-        assert!(matches!(error, CommandError::InvalidValue { field: "available_height", .. }));
+        let error = layout
+            .apply(
+                DockCommand::ResetColumnRatios {
+                    column,
+                    available_height,
+                },
+                &metrics,
+            )
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            CommandError::InvalidValue {
+                field: "available_height",
+                ..
+            }
+        ));
         assert_eq!(format!("{layout:?}"), before);
         assert_eq!(layout.version(), 0);
     }

@@ -40,7 +40,14 @@ fn layout_with_tabs() -> (Layout, NodeId, NodeId, PanelId, PanelId, PanelId) {
     );
     builder.main_area(DockSide::Left, column);
 
-    (builder.build(), group, column, first_panel, active_panel, other_panel)
+    (
+        builder.build(),
+        group,
+        column,
+        first_panel,
+        active_panel,
+        other_panel,
+    )
 }
 
 #[test]
@@ -85,7 +92,10 @@ fn collapse_and_expand_preserve_tabs_active_index_and_saved_group_ratios() {
             assert!(tabs.collapsed);
             assert_eq!(tabs.children, children_before);
             assert_eq!(tabs.active_index, active_index_before);
-            assert_eq!(tabs.active_child(), Some(children_before[active_index_before]));
+            assert_eq!(
+                tabs.active_child(),
+                Some(children_before[active_index_before])
+            );
         }
         other => panic!("expected Tabs group, found {other:?}"),
     }
@@ -134,7 +144,10 @@ fn collapse_and_expand_preserve_tabs_active_index_and_saved_group_ratios() {
             assert!(!tabs.collapsed);
             assert_eq!(tabs.children, children_before);
             assert_eq!(tabs.active_index, active_index_before);
-            assert_eq!(tabs.active_child(), Some(children_before[active_index_before]));
+            assert_eq!(
+                tabs.active_child(),
+                Some(children_before[active_index_before])
+            );
         }
         other => panic!("expected Tabs group, found {other:?}"),
     }
@@ -159,7 +172,12 @@ fn collapsed_geometry_keeps_tab_strip_and_headers_but_hides_panel_content() {
     let viewport = viewport(1200.0, 800.0);
 
     let expanded_rects = layout.compute_rects(viewport, &metrics).unwrap();
-    assert!(expanded_rects.panels.iter().any(|panel| panel.panel == active_panel));
+    assert!(
+        expanded_rects
+            .panels
+            .iter()
+            .any(|panel| panel.panel == active_panel)
+    );
 
     let children_before = match layout.node(group).unwrap() {
         Node::Tabs(tabs) => tabs.children.clone(),
@@ -177,8 +195,17 @@ fn collapsed_geometry_keeps_tab_strip_and_headers_but_hides_panel_content() {
         .unwrap();
 
     let rects = layout.compute_rects(viewport, &metrics).unwrap();
-    let group_rect = rects.groups.iter().find(|item| item.group == group).unwrap().rect;
-    let strip = rects.tab_strips.iter().find(|item| item.group == group).unwrap();
+    let group_rect = rects
+        .groups
+        .iter()
+        .find(|item| item.group == group)
+        .unwrap()
+        .rect;
+    let strip = rects
+        .tab_strips
+        .iter()
+        .find(|item| item.group == group)
+        .unwrap();
     let collapsed_height = metrics.collapsed_group_height.max(metrics.tab_strip_height);
 
     assert_eq!(group_rect.size.height, collapsed_height);
@@ -192,7 +219,10 @@ fn collapsed_geometry_keeps_tab_strip_and_headers_but_hides_panel_content() {
     assert_eq!(headers, vec![(first_panel, 0), (active_panel, 1)]);
 
     assert!(
-        rects.panels.iter().all(|panel| panel.panel != first_panel && panel.panel != active_panel),
+        rects
+            .panels
+            .iter()
+            .all(|panel| panel.panel != first_panel && panel.panel != active_panel),
         "collapsed tabs must not emit visible content rectangles for their child panels",
     );
     assert!(rects.panels.iter().any(|panel| panel.panel == other_panel));
@@ -206,7 +236,6 @@ fn collapsed_geometry_keeps_tab_strip_and_headers_but_hides_panel_content() {
         other => panic!("expected Tabs group, found {other:?}"),
     }
 }
-
 
 #[test]
 fn reexpand_after_resize_and_reorder_restores_saved_weights_with_current_viewport_minima() {
@@ -348,11 +377,18 @@ fn reexpand_after_resize_and_reorder_restores_saved_weights_with_current_viewpor
             .size
             .height
     };
-    assert!(groups
-        .iter()
-        .all(|group| small_height_for(*group) >= minimum_group_height - 1.0e-3));
     assert!(
-        (groups.iter().map(|group| small_height_for(*group)).sum::<f32>() - 392.0).abs()
+        groups
+            .iter()
+            .all(|group| small_height_for(*group) >= minimum_group_height - 1.0e-3)
+    );
+    assert!(
+        (groups
+            .iter()
+            .map(|group| small_height_for(*group))
+            .sum::<f32>()
+            - 392.0)
+            .abs()
             < 1.0e-3
     );
     assert!(layout.validate(&metrics).is_ok());
@@ -361,13 +397,11 @@ fn reexpand_after_resize_and_reorder_restores_saved_weights_with_current_viewpor
 #[test]
 fn center_drop_of_panel_expands_collapsed_target_in_photoshop_profile() {
     let metrics = DockMetrics::default();
-    let (mut layout, target_group, _, first_panel, active_panel, source_panel) =
-        layout_with_tabs();
+    let (mut layout, target_group, _, first_panel, active_panel, source_panel) = layout_with_tabs();
     let source_node = layout
         .nodes()
         .find_map(|(node, value)| {
-            matches!(value, Node::Panel(panel) if panel.panel_id == source_panel)
-                .then_some(node)
+            matches!(value, Node::Panel(panel) if panel.panel_id == source_panel).then_some(node)
         })
         .unwrap();
 
@@ -397,13 +431,27 @@ fn center_drop_of_panel_expands_collapsed_target_in_photoshop_profile() {
     match layout.node(target_group).unwrap() {
         Node::Tabs(tabs) => {
             assert!(!tabs.collapsed);
-            assert_eq!(tabs.children[0], layout.nodes().find_map(|(id, node)|
-                matches!(node, Node::Panel(panel) if panel.panel_id == first_panel).then_some(id)
-            ).unwrap());
+            assert_eq!(
+                tabs.children[0],
+                layout
+                    .nodes()
+                    .find_map(|(id, node)| {
+                        matches!(node, Node::Panel(panel) if panel.panel_id == first_panel)
+                            .then_some(id)
+                    })
+                    .unwrap()
+            );
             assert_eq!(tabs.children[1], source_node);
-            assert_eq!(tabs.children[2], layout.nodes().find_map(|(id, node)|
-                matches!(node, Node::Panel(panel) if panel.panel_id == active_panel).then_some(id)
-            ).unwrap());
+            assert_eq!(
+                tabs.children[2],
+                layout
+                    .nodes()
+                    .find_map(|(id, node)| {
+                        matches!(node, Node::Panel(panel) if panel.panel_id == active_panel)
+                            .then_some(id)
+                    })
+                    .unwrap()
+            );
             assert_eq!(tabs.active_index, 1);
         }
         other => panic!("expected Tabs group, found {other:?}"),
@@ -419,13 +467,8 @@ fn center_drop_of_whole_group_expands_collapsed_target_in_photoshop_profile() {
         builder.panel(key("merge-center-target-first"), constraints());
     let (target_second, target_second_node) =
         builder.panel(key("merge-center-target-second"), constraints());
-    let target_group = builder.tabs(
-        vec![target_first_node, target_second_node],
-        0,
-        true,
-    );
-    let (source_panel, source_node) =
-        builder.panel(key("merge-center-source"), constraints());
+    let target_group = builder.tabs(vec![target_first_node, target_second_node], 0, true);
+    let (source_panel, source_node) = builder.panel(key("merge-center-source"), constraints());
     let source_group = builder.tabs(vec![source_node], 0, false);
     let column = builder.column(
         metrics.default_column_width,
@@ -450,7 +493,10 @@ fn center_drop_of_whole_group_expands_collapsed_target_in_photoshop_profile() {
     match layout.node(target_group).unwrap() {
         Node::Tabs(tabs) => {
             assert!(!tabs.collapsed);
-            assert_eq!(tabs.children, vec![target_first_node, source_node, target_second_node]);
+            assert_eq!(
+                tabs.children,
+                vec![target_first_node, source_node, target_second_node]
+            );
             assert_eq!(tabs.active_index, 1);
         }
         other => panic!("expected Tabs group, found {other:?}"),
@@ -500,10 +546,13 @@ fn generic_profile_does_not_implicitly_expand_collapsed_group_on_center_drop() {
     let mut builder = LayoutBuilder::new(Profile::Generic);
     let (_, target_node) = builder.panel(key("generic-center-target"), constraints());
     let target_group = builder.tabs(vec![target_node], 0, true);
-    let (source_panel, source_node) =
-        builder.panel(key("generic-center-source"), constraints());
+    let (source_panel, source_node) = builder.panel(key("generic-center-source"), constraints());
     let source_group = builder.tabs(vec![source_node], 0, false);
-    let root = builder.split(crate::Axis::Y, vec![target_group, source_group], vec![0.5, 0.5]);
+    let root = builder.split(
+        crate::Axis::Y,
+        vec![target_group, source_group],
+        vec![0.5, 0.5],
+    );
     builder.main_area(DockSide::Left, root);
     let mut layout = builder.build();
 
@@ -511,7 +560,10 @@ fn generic_profile_does_not_implicitly_expand_collapsed_group_on_center_drop() {
         .apply(
             DockCommand::MovePanel {
                 panel: source_panel,
-                target: crate::DropTarget::Tabs { group: target_group, index: 1 },
+                target: crate::DropTarget::Tabs {
+                    group: target_group,
+                    index: 1,
+                },
             },
             &metrics,
         )

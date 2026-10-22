@@ -1,7 +1,7 @@
 use crate::layout_builder::LayoutBuilder;
 use crate::{
-    ColumnMode, DockMetrics, DockSide, HitResult, PanelConstraints, PanelId, PanelKey,
-    Point, Profile, Rect, Size,
+    ColumnMode, DockMetrics, DockSide, HitResult, PanelConstraints, PanelId, PanelKey, Point,
+    Profile, Rect, Size,
 };
 
 fn constraints() -> PanelConstraints {
@@ -93,7 +93,12 @@ fn all_tabs_remain_visible_and_share_width_when_minimums_fit() {
     assert_eq!(rects.tab_headers[0].panel, panels[0]);
     assert_eq!(rects.tab_headers[1].panel, panels[1]);
     assert!(rects.tab_headers.iter().all(|header| header.group == group));
-    assert!(rects.tab_headers.iter().all(|header| header.rect.size.width == 100.0));
+    assert!(
+        rects
+            .tab_headers
+            .iter()
+            .all(|header| header.rect.size.width == 100.0)
+    );
 }
 
 #[test]

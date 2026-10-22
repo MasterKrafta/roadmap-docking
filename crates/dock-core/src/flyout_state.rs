@@ -14,6 +14,10 @@ pub struct FlyoutState {
 
 impl FlyoutState {
     pub const fn new(column: NodeId, group: NodeId, panel: PanelId) -> Self {
-        Self { column, group, panel }
+        Self {
+            column,
+            group,
+            panel,
+        }
     }
 }

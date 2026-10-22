@@ -50,6 +50,9 @@ mod tests {
     fn serde_round_trip_preserves_effective_value() {
         let value = CommandValue::GroupRatios(vec![0.3, 0.7]);
         let encoded = serde_json::to_string(&value).unwrap();
-        assert_eq!(serde_json::from_str::<CommandValue>(&encoded).unwrap(), value);
+        assert_eq!(
+            serde_json::from_str::<CommandValue>(&encoded).unwrap(),
+            value
+        );
     }
 }

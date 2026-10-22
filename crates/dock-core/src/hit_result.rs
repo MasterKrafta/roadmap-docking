@@ -1,6 +1,4 @@
-use crate::{
-    Axis, DropTarget, DropZone, FloatingGroupId, NodeId, PanelId, ResizeEdge,
-};
+use crate::{Axis, DropTarget, DropZone, FloatingGroupId, NodeId, PanelId, ResizeEdge};
 
 /// Semantic result of hit-testing a point against a LayoutRects snapshot.
 ///
@@ -74,9 +72,9 @@ mod tests {
     use slotmap::Key;
 
     use super::HitResult;
-    use crate::{Axis, DropTarget, DropZone, NodeId, ResizeEdge};
     #[cfg(feature = "serde")]
     use crate::PanelId;
+    use crate::{Axis, DropTarget, DropZone, NodeId, ResizeEdge};
 
     #[test]
     fn hit_results_are_pure_semantic_values() {
@@ -95,10 +93,19 @@ mod tests {
         ));
 
         let hit = HitResult::DropZone {
-            target: DropTarget::Tabs { group: NodeId::null(), index: 2 },
+            target: DropTarget::Tabs {
+                group: NodeId::null(),
+                index: 2,
+            },
             zone: DropZone::Bottom,
         };
-        assert!(matches!(hit, HitResult::DropZone { zone: DropZone::Bottom, .. }));
+        assert!(matches!(
+            hit,
+            HitResult::DropZone {
+                zone: DropZone::Bottom,
+                ..
+            }
+        ));
 
         let hit = HitResult::TabOverflowButton {
             group: NodeId::null(),
@@ -111,7 +118,10 @@ mod tests {
         };
         assert!(matches!(
             hit,
-            HitResult::FloatingResizeEdge { edge: ResizeEdge::BottomRight, .. }
+            HitResult::FloatingResizeEdge {
+                edge: ResizeEdge::BottomRight,
+                ..
+            }
         ));
     }
 
@@ -130,6 +140,9 @@ mod tests {
             group: NodeId::null(),
         };
         let encoded = serde_json::to_string(&overflow).unwrap();
-        assert_eq!(serde_json::from_str::<HitResult>(&encoded).unwrap(), overflow);
+        assert_eq!(
+            serde_json::from_str::<HitResult>(&encoded).unwrap(),
+            overflow
+        );
     }
 }

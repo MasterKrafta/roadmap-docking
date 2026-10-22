@@ -22,6 +22,12 @@ impl FlyoutRect {
         rect: Rect,
         resize_edge: ResizeEdge,
     ) -> Self {
-        Self { column, group, panel, rect, resize_edge }
+        Self {
+            column,
+            group,
+            panel,
+            rect,
+            resize_edge,
+        }
     }
 }

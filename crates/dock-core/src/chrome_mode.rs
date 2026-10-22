@@ -69,16 +69,34 @@ mod tests {
 
     #[test]
     fn tab_shortcut_toggles_all_chrome_and_keeps_other_mode_explicit() {
-        assert_eq!(ChromeMode::Visible.after_tab_shortcut(), ChromeMode::AllHidden);
-        assert_eq!(ChromeMode::AllHidden.after_tab_shortcut(), ChromeMode::Visible);
-        assert_eq!(ChromeMode::DockHidden.after_tab_shortcut(), ChromeMode::AllHidden);
+        assert_eq!(
+            ChromeMode::Visible.after_tab_shortcut(),
+            ChromeMode::AllHidden
+        );
+        assert_eq!(
+            ChromeMode::AllHidden.after_tab_shortcut(),
+            ChromeMode::Visible
+        );
+        assert_eq!(
+            ChromeMode::DockHidden.after_tab_shortcut(),
+            ChromeMode::AllHidden
+        );
     }
 
     #[test]
     fn shift_tab_shortcut_toggles_only_dock_visibility() {
-        assert_eq!(ChromeMode::Visible.after_shift_tab_shortcut(), ChromeMode::DockHidden);
-        assert_eq!(ChromeMode::DockHidden.after_shift_tab_shortcut(), ChromeMode::Visible);
-        assert_eq!(ChromeMode::AllHidden.after_shift_tab_shortcut(), ChromeMode::DockHidden);
+        assert_eq!(
+            ChromeMode::Visible.after_shift_tab_shortcut(),
+            ChromeMode::DockHidden
+        );
+        assert_eq!(
+            ChromeMode::DockHidden.after_shift_tab_shortcut(),
+            ChromeMode::Visible
+        );
+        assert_eq!(
+            ChromeMode::AllHidden.after_shift_tab_shortcut(),
+            ChromeMode::DockHidden
+        );
     }
 
     #[cfg(feature = "serde")]

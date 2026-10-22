@@ -31,7 +31,9 @@ mod tests {
         }));
 
         assert!(matches!(nodes.get(panel_node), Some(Node::Panel(_))));
-        assert!(matches!(nodes.get(tabs_node), Some(Node::Tabs(tabs)) if tabs.children == vec![panel_node]));
+        assert!(
+            matches!(nodes.get(tabs_node), Some(Node::Tabs(tabs)) if tabs.children == vec![panel_node])
+        );
     }
 
     #[test]

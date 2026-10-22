@@ -3,11 +3,11 @@ use std::collections::{HashMap, HashSet};
 use slotmap::SlotMap;
 
 use crate::{
-    command_application::CommandApplication, Axis, CanvasState, ChromeMode, Column, ColumnMode,
-    CommandError, CommandOutcome, CommandValue, DockArea, DockAreaId, DockAreaKind, DockCommand,
-    DockMetrics, DockSide, DropTarget, DropZone, FloatingGroup, FloatingGroupId, FlyoutState,
-    GeometryError, LastDockLocation, Node, NodeId, Panel, PanelId, PanelInstance, PanelKey, Point,
-    Profile, Rect, Size, Split, Tabs, ValidationError,
+    Axis, CanvasState, ChromeMode, Column, ColumnMode, CommandError, CommandOutcome, CommandValue,
+    DockArea, DockAreaId, DockAreaKind, DockCommand, DockMetrics, DockSide, DropTarget, DropZone,
+    FloatingGroup, FloatingGroupId, FlyoutState, GeometryError, LastDockLocation, Node, NodeId,
+    Panel, PanelId, PanelInstance, PanelKey, Point, Profile, Rect, Size, Split, Tabs,
+    ValidationError, command_application::CommandApplication,
 };
 
 const RATIO_TOLERANCE: f32 = 1.0e-4;
@@ -223,10 +223,13 @@ impl Layout {
         snapshot: &Self,
         metrics: &DockMetrics,
     ) -> Result<(), CommandError> {
-        let next_version = self.version.checked_add(1).ok_or(CommandError::InvalidValue {
-            field: "version",
-            reason: "layout version overflow",
-        })?;
+        let next_version = self
+            .version
+            .checked_add(1)
+            .ok_or(CommandError::InvalidValue {
+                field: "version",
+                reason: "layout version overflow",
+            })?;
 
         // Rebuild into a clone of the *current* arenas instead of replacing them
         // with the historical arenas. Keys for entities that still exist in
@@ -287,11 +290,19 @@ impl Layout {
                 .ok_or(CommandError::MissingNode { node: target_id })?;
             let rebuilt = match source {
                 Node::Split(split) => {
-                    let children = split.children
+                    let children = split
+                        .children
                         .iter()
-                        .map(|child| rebuild_node(
-                            snapshot, *child, target_nodes, panel_map, node_map, visiting,
-                        ))
+                        .map(|child| {
+                            rebuild_node(
+                                snapshot,
+                                *child,
+                                target_nodes,
+                                panel_map,
+                                node_map,
+                                visiting,
+                            )
+                        })
                         .collect::<Result<_, _>>()?;
                     Node::Split(Split {
                         axis: split.axis,
@@ -300,11 +311,19 @@ impl Layout {
                     })
                 }
                 Node::Tabs(tabs) => {
-                    let children = tabs.children
+                    let children = tabs
+                        .children
                         .iter()
-                        .map(|child| rebuild_node(
-                            snapshot, *child, target_nodes, panel_map, node_map, visiting,
-                        ))
+                        .map(|child| {
+                            rebuild_node(
+                                snapshot,
+                                *child,
+                                target_nodes,
+                                panel_map,
+                                node_map,
+                                visiting,
+                            )
+                        })
                         .collect::<Result<_, _>>()?;
                     Node::Tabs(Tabs {
                         children,
@@ -314,16 +333,26 @@ impl Layout {
                 }
                 Node::Panel(panel) => {
                     let panel_id = panel_map.get(&panel.panel_id).copied().ok_or(
-                        CommandError::MissingPanel { panel: panel.panel_id },
+                        CommandError::MissingPanel {
+                            panel: panel.panel_id,
+                        },
                     )?;
                     Node::Panel(Panel::new(panel_id))
                 }
                 Node::Column(column) => {
-                    let groups = column.groups
+                    let groups = column
+                        .groups
                         .iter()
-                        .map(|group| rebuild_node(
-                            snapshot, *group, target_nodes, panel_map, node_map, visiting,
-                        ))
+                        .map(|group| {
+                            rebuild_node(
+                                snapshot,
+                                *group,
+                                target_nodes,
+                                panel_map,
+                                node_map,
+                                visiting,
+                            )
+                        })
                         .collect::<Result<_, _>>()?;
                     Node::Column(Column {
                         width: column.width,
@@ -367,9 +396,10 @@ impl Layout {
         }
         let mut area_map = HashMap::<DockAreaId, DockAreaId>::new();
         for (old_id, area) in snapshot.dock_areas.iter() {
-            let root = node_map.get(&area.root).copied().ok_or(
-                CommandError::MissingNode { node: area.root },
-            )?;
+            let root = node_map
+                .get(&area.root)
+                .copied()
+                .ok_or(CommandError::MissingNode { node: area.root })?;
             let restored_area = DockArea { root, ..*area };
             let new_id = if let Some(current) = candidate.dock_areas.get_mut(old_id) {
                 *current = restored_area;
@@ -382,15 +412,19 @@ impl Layout {
 
         candidate.main_areas = [
             match snapshot.main_areas[0] {
-                Some(old_id) => Some(*area_map.get(&old_id).ok_or(
-                    CommandError::InvalidTarget { reason: "history checkpoint has a missing left dock area" },
-                )?),
+                Some(old_id) => {
+                    Some(*area_map.get(&old_id).ok_or(CommandError::InvalidTarget {
+                        reason: "history checkpoint has a missing left dock area",
+                    })?)
+                }
                 None => None,
             },
             match snapshot.main_areas[1] {
-                Some(old_id) => Some(*area_map.get(&old_id).ok_or(
-                    CommandError::InvalidTarget { reason: "history checkpoint has a missing right dock area" },
-                )?),
+                Some(old_id) => {
+                    Some(*area_map.get(&old_id).ok_or(CommandError::InvalidTarget {
+                        reason: "history checkpoint has a missing right dock area",
+                    })?)
+                }
                 None => None,
             },
         ];
@@ -402,9 +436,12 @@ impl Layout {
             }
         }
         for (old_id, group) in snapshot.floating_groups.iter() {
-            let area = area_map.get(&group.area).copied().ok_or(
-                CommandError::InvalidTarget { reason: "history checkpoint has a missing floating area" },
-            )?;
+            let area = area_map
+                .get(&group.area)
+                .copied()
+                .ok_or(CommandError::InvalidTarget {
+                    reason: "history checkpoint has a missing floating area",
+                })?;
             let restored_group = FloatingGroup {
                 area,
                 bounds: group.bounds,
@@ -422,7 +459,9 @@ impl Layout {
         candidate.profile = snapshot.profile;
         candidate.chrome = snapshot.chrome;
         candidate.version = next_version;
-        candidate.validate(metrics).map_err(|errors| CommandError::InvalidLayout { errors })?;
+        candidate
+            .validate(metrics)
+            .map_err(|errors| CommandError::InvalidLayout { errors })?;
         *self = candidate;
         Ok(())
     }
@@ -517,14 +556,14 @@ impl Layout {
     }
 }
 
-mod commands;
 mod column_display_order;
+mod commands;
 mod drag_drop;
-mod tree;
-mod sizing;
-mod validation;
-mod normalization;
 mod helpers;
+mod normalization;
+mod sizing;
+mod tree;
+mod validation;
 
 #[cfg(test)]
 mod tests;

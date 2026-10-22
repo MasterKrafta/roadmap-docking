@@ -1,8 +1,8 @@
 use crate::layout_builder::LayoutBuilder;
 use crate::{
     Axis, ColumnMode, DockCommand, DockMetrics, DockSide, DragDropAction, DragDropRequest,
-    DragHandle, DragPayload, DragSession, DragSessionError, DropTarget, FloatingGroupId, Layout, Node, NodeId, PanelConstraints, PanelKey, Point, Profile,
-    Rect, Size, Tabs,
+    DragHandle, DragPayload, DragSession, DragSessionError, DropTarget, FloatingGroupId, Layout,
+    Node, NodeId, PanelConstraints, PanelKey, Point, Profile, Rect, Size, Tabs,
 };
 
 fn key(value: &str) -> PanelKey {
@@ -10,12 +10,7 @@ fn key(value: &str) -> PanelKey {
 }
 
 fn constraints() -> PanelConstraints {
-    PanelConstraints::new(
-        Size::new(80.0, 60.0),
-        Size::new(180.0, 140.0),
-        None,
-        false,
-    )
+    PanelConstraints::new(Size::new(80.0, 60.0), Size::new(180.0, 140.0), None, false)
 }
 
 fn bounds(x: f32, y: f32) -> Rect {
@@ -79,16 +74,15 @@ fn floating_title_and_capture_handles_are_explicit_and_payload_checked() {
     );
     assert_eq!(session.state(), crate::DragState::Idle);
 
-    session.pointer_down_with_handle(
-        DragPayload::FloatingGroup { group: floating_id },
-        DragHandle::FloatingCapture,
-        Point::ZERO,
-    ).unwrap();
+    session
+        .pointer_down_with_handle(
+            DragPayload::FloatingGroup { group: floating_id },
+            DragHandle::FloatingCapture,
+            Point::ZERO,
+        )
+        .unwrap();
     session.pointer_move(Point::new(4.0, 0.0)).unwrap();
-    assert_eq!(
-        session.set_drop_target(None),
-        Ok(())
-    );
+    assert_eq!(session.set_drop_target(None), Ok(()));
     assert!(session.preview().unwrap().target.is_none());
 }
 
@@ -108,7 +102,10 @@ fn floating_title_drag_resolves_to_window_move_without_any_drop_target() {
         session.set_drop_target(Some(DropTarget::FreeArea)),
         Err(DragSessionError::NotDockingDrag)
     );
-    let request = session.pointer_up(Point::new(30.0, 25.0), None).unwrap().unwrap();
+    let request = session
+        .pointer_up(Point::new(30.0, 25.0), None)
+        .unwrap()
+        .unwrap();
 
     assert_eq!(request.handle, DragHandle::FloatingTitle);
     assert_eq!(request.target, None);
@@ -121,10 +118,15 @@ fn floating_title_drag_resolves_to_window_move_without_any_drop_target() {
         })
     );
 
-    let DragDropAction::Command(command) = action else { panic!("window moved"); };
+    let DragDropAction::Command(command) = action else {
+        panic!("window moved");
+    };
     let outcome = layout.apply(command, &metrics).unwrap();
     assert_eq!(outcome.new_version, version + 1);
-    assert_eq!(layout.floating_group(floating_id).unwrap().bounds.origin, Point::new(120.0, 205.0));
+    assert_eq!(
+        layout.floating_group(floating_id).unwrap().bounds.origin,
+        Point::new(120.0, 205.0)
+    );
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
 
@@ -136,26 +138,35 @@ fn floating_title_released_at_its_original_point_is_a_noop_without_version_chang
     let payload = DragPayload::FloatingGroup { group: floating_id };
     let mut session = DragSession::new(&metrics).unwrap();
 
-    session.pointer_down_with_handle(
-        payload,
-        DragHandle::FloatingTitle,
-        Point::new(40.0, 50.0),
-    ).unwrap();
+    session
+        .pointer_down_with_handle(payload, DragHandle::FloatingTitle, Point::new(40.0, 50.0))
+        .unwrap();
     session.pointer_move(Point::new(44.0, 50.0)).unwrap();
-    let request = session.pointer_up(Point::new(40.0, 50.0), None).unwrap().unwrap();
+    let request = session
+        .pointer_up(Point::new(40.0, 50.0), None)
+        .unwrap()
+        .unwrap();
 
-    assert_eq!(layout.resolve_drag_drop(&request, &metrics).unwrap(), DragDropAction::NoOp);
+    assert_eq!(
+        layout.resolve_drag_drop(&request, &metrics).unwrap(),
+        DragDropAction::NoOp
+    );
     assert_eq!(layout.version(), version);
-    let outcome = layout.apply(
-        DockCommand::MoveFloating {
-            group: floating_id,
-            origin: Point::new(100.0, 200.0),
-        },
-        &metrics,
-    ).unwrap();
+    let outcome = layout
+        .apply(
+            DockCommand::MoveFloating {
+                group: floating_id,
+                origin: Point::new(100.0, 200.0),
+            },
+            &metrics,
+        )
+        .unwrap();
     assert_eq!(outcome.new_version, version);
     assert_eq!(layout.version(), version);
-    assert_eq!(layout.floating_group(floating_id).unwrap().bounds.origin, Point::new(100.0, 200.0));
+    assert_eq!(
+        layout.floating_group(floating_id).unwrap().bounds.origin,
+        Point::new(100.0, 200.0)
+    );
 }
 
 #[test]
@@ -182,9 +193,12 @@ fn panel_self_and_same_tab_position_resolve_to_noop() {
             origin: Point::ZERO,
             point: Point::new(4.0, 0.0),
             target: Some(DropTarget::Tabs { group, index }),
-        floating_bounds: None,
-};
-        assert_eq!(layout.resolve_drag_drop(&request, &metrics).unwrap(), DragDropAction::NoOp);
+            floating_bounds: None,
+        };
+        assert_eq!(
+            layout.resolve_drag_drop(&request, &metrics).unwrap(),
+            DragDropAction::NoOp
+        );
     }
     assert_eq!(layout.version(), version);
 }
@@ -209,15 +223,21 @@ fn panel_tab_may_split_from_its_own_group_edge() {
         handle: DragHandle::PanelTab,
         origin: Point::ZERO,
         point: Point::new(4.0, 0.0),
-        target: Some(DropTarget::GroupEdge { group, zone: crate::DropZone::Bottom }),
-    floating_bounds: None,
-};
+        target: Some(DropTarget::GroupEdge {
+            group,
+            zone: crate::DropZone::Bottom,
+        }),
+        floating_bounds: None,
+    };
 
     assert_eq!(
         layout.resolve_drag_drop(&request, &metrics).unwrap(),
         DragDropAction::Command(DockCommand::MovePanel {
             panel,
-            target: DropTarget::GroupEdge { group, zone: crate::DropZone::Bottom },
+            target: DropTarget::GroupEdge {
+                group,
+                zone: crate::DropZone::Bottom
+            },
         })
     );
 }
@@ -297,9 +317,12 @@ fn group_self_drop_and_same_column_slot_are_noops_without_version_increment() {
         origin: Point::ZERO,
         point: Point::new(4.0, 0.0),
         target: Some(DropTarget::GroupTabs { group, index: 0 }),
-    floating_bounds: None,
-};
-    assert_eq!(layout.resolve_drag_drop(&self_request, &metrics).unwrap(), DragDropAction::NoOp);
+        floating_bounds: None,
+    };
+    assert_eq!(
+        layout.resolve_drag_drop(&self_request, &metrics).unwrap(),
+        DragDropAction::NoOp
+    );
 
     for index in [0, 1] {
         let slot_request = DragDropRequest {
@@ -307,10 +330,22 @@ fn group_self_drop_and_same_column_slot_are_noops_without_version_increment() {
             floating_bounds: None,
             ..self_request
         };
-        assert_eq!(layout.resolve_drag_drop(&slot_request, &metrics).unwrap(), DragDropAction::NoOp);
+        assert_eq!(
+            layout.resolve_drag_drop(&slot_request, &metrics).unwrap(),
+            DragDropAction::NoOp
+        );
     }
 
-    let outcome = layout.apply(DockCommand::MoveGroup { group, column, index: 0 }, &metrics).unwrap();
+    let outcome = layout
+        .apply(
+            DockCommand::MoveGroup {
+                group,
+                column,
+                index: 0,
+            },
+            &metrics,
+        )
+        .unwrap();
     assert_eq!(outcome.new_version, version);
     assert_eq!(layout.version(), version);
     assert!(tabs(&layout, group).collapsed);
@@ -326,9 +361,12 @@ fn group_drag_to_main_column_becomes_one_command_and_preserves_tabs_state() {
         handle: DragHandle::GroupGrip,
         origin: Point::ZERO,
         point: Point::new(12.0, 8.0),
-        target: Some(DropTarget::MainColumn { side: DockSide::Right, index: 0 }),
-    floating_bounds: None,
-};
+        target: Some(DropTarget::MainColumn {
+            side: DockSide::Right,
+            index: 0,
+        }),
+        floating_bounds: None,
+    };
 
     let action = layout.resolve_drag_drop(&request, &metrics).unwrap();
     assert_eq!(
@@ -339,11 +377,16 @@ fn group_drag_to_main_column_becomes_one_command_and_preserves_tabs_state() {
             index: 0,
         })
     );
-    let DragDropAction::Command(command) = action else { panic!("main column action"); };
+    let DragDropAction::Command(command) = action else {
+        panic!("main column action");
+    };
     layout.apply(command, &metrics).unwrap();
     assert_eq!(tabs(&layout, source), &original);
     assert!(layout.main_area(DockSide::Left).is_none());
-    let Some(Node::Split(split)) = layout.main_area(DockSide::Right).and_then(|area| layout.node(area.root)) else {
+    let Some(Node::Split(split)) = layout
+        .main_area(DockSide::Right)
+        .and_then(|area| layout.node(area.root))
+    else {
         panic!("main-dock insertion produces a horizontal split");
     };
     assert_eq!(split.axis, Axis::X);
@@ -376,19 +419,27 @@ fn sole_group_column_same_position_is_a_noop_command() {
         handle: DragHandle::GroupGrip,
         origin: Point::ZERO,
         point: Point::new(4.0, 0.0),
-        target: Some(DropTarget::MainColumn { side: DockSide::Left, index: 0 }),
-    floating_bounds: None,
-};
-    assert_eq!(layout.resolve_drag_drop(&request, &metrics).unwrap(), DragDropAction::NoOp);
-
-    let outcome = layout.apply(
-        DockCommand::MoveGroupToMainColumn {
-            group,
+        target: Some(DropTarget::MainColumn {
             side: DockSide::Left,
             index: 0,
-        },
-        &metrics,
-    ).unwrap();
+        }),
+        floating_bounds: None,
+    };
+    assert_eq!(
+        layout.resolve_drag_drop(&request, &metrics).unwrap(),
+        DragDropAction::NoOp
+    );
+
+    let outcome = layout
+        .apply(
+            DockCommand::MoveGroupToMainColumn {
+                group,
+                side: DockSide::Left,
+                index: 0,
+            },
+            &metrics,
+        )
+        .unwrap();
     assert_eq!(outcome.new_version, version);
     assert_eq!(layout.version(), version);
     assert!(tabs(&layout, group).collapsed);
@@ -405,10 +456,16 @@ fn floating_capture_resolves_to_dock_floating_but_self_drop_is_noop() {
         handle: DragHandle::FloatingCapture,
         origin: Point::ZERO,
         point: Point::new(4.0, 0.0),
-        target: Some(DropTarget::GroupTabs { group: floating_root_group, index: 1 }),
-    floating_bounds: None,
-};
-    assert_eq!(layout.resolve_drag_drop(&self_request, &metrics).unwrap(), DragDropAction::NoOp);
+        target: Some(DropTarget::GroupTabs {
+            group: floating_root_group,
+            index: 1,
+        }),
+        floating_bounds: None,
+    };
+    assert_eq!(
+        layout.resolve_drag_drop(&self_request, &metrics).unwrap(),
+        DragDropAction::NoOp
+    );
     assert_eq!(layout.version(), before);
 
     // Build a fresh layout with a main target and a floating source so all IDs
@@ -421,7 +478,12 @@ fn floating_capture_resolves_to_dock_floating_but_self_drop_is_noop() {
     let floating = builder.floating_group(floating_tabs, bounds(100.0, 200.0), 1);
     let (_, p2) = builder.panel(key("capture-target"), constraints());
     let main_tabs = builder.tabs(vec![p2], 0, false);
-    let column = builder.column(metrics.default_column_width, ColumnMode::Expanded, vec![main_tabs], vec![1.0]);
+    let column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![main_tabs],
+        vec![1.0],
+    );
     builder.main_area(DockSide::Right, column);
     let mut layout = builder.build();
     let request = DragDropRequest {
@@ -429,28 +491,43 @@ fn floating_capture_resolves_to_dock_floating_but_self_drop_is_noop() {
         handle: DragHandle::FloatingCapture,
         origin: Point::ZERO,
         point: Point::new(4.0, 0.0),
-        target: Some(DropTarget::GroupTabs { group: main_tabs, index: 1 }),
-    floating_bounds: None,
-};
+        target: Some(DropTarget::GroupTabs {
+            group: main_tabs,
+            index: 1,
+        }),
+        floating_bounds: None,
+    };
     assert_eq!(
         layout.resolve_drag_drop(&request, &metrics).unwrap(),
         DragDropAction::Command(DockCommand::DockFloating {
             group: floating,
-            target: DropTarget::GroupTabs { group: main_tabs, index: 1 },
+            target: DropTarget::GroupTabs {
+                group: main_tabs,
+                index: 1
+            },
         })
     );
     let action = layout.resolve_drag_drop(&request, &metrics).unwrap();
-    let DragDropAction::Command(command) = action else { panic!("floating capture docks"); };
+    let DragDropAction::Command(command) = action else {
+        panic!("floating capture docks");
+    };
     layout.apply(command, &metrics).unwrap();
     assert_eq!(layout.floating_groups().count(), 0);
     assert_tabs_state(&layout, main_tabs, 2, false);
-    let Node::Tabs(merged) = layout.node(main_tabs).unwrap() else { panic!("target remains Tabs"); };
-    assert_eq!(merged.children, vec![p2, original_floating_tabs[0], original_floating_tabs[1]]);
+    let Node::Tabs(merged) = layout.node(main_tabs).unwrap() else {
+        panic!("target remains Tabs");
+    };
+    assert_eq!(
+        merged.children,
+        vec![p2, original_floating_tabs[0], original_floating_tabs[1]]
+    );
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
 
 fn assert_tabs_state(layout: &Layout, group: NodeId, active_index: usize, collapsed: bool) {
-    let Node::Tabs(tabs) = layout.node(group).unwrap() else { panic!("expected Tabs"); };
+    let Node::Tabs(tabs) = layout.node(group).unwrap() else {
+        panic!("expected Tabs");
+    };
     assert_eq!(tabs.active_index, active_index);
     assert_eq!(tabs.collapsed, collapsed);
 }

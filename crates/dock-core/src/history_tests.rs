@@ -77,13 +77,17 @@ fn fixture() -> Fixture {
 fn node_shape(layout: &Layout, id: crate::NodeId) -> String {
     match layout.node(id) {
         Some(Node::Split(split)) => {
-            let children = split.children.iter()
+            let children = split
+                .children
+                .iter()
                 .map(|child| node_shape(layout, *child))
                 .collect::<Vec<_>>();
             format!("Split({:?},{children:?},{:?})", split.axis, split.ratios)
         }
         Some(Node::Tabs(tabs)) => {
-            let children = tabs.children.iter()
+            let children = tabs
+                .children
+                .iter()
                 .map(|child| node_shape(layout, *child))
                 .collect::<Vec<_>>();
             format!(
@@ -101,7 +105,9 @@ fn node_shape(layout: &Layout, id: crate::NodeId) -> String {
             )
         }
         Some(Node::Column(column)) => {
-            let groups = column.groups.iter()
+            let groups = column
+                .groups
+                .iter()
                 .map(|group| node_shape(layout, *group))
                 .collect::<Vec<_>>();
             format!(
@@ -115,12 +121,16 @@ fn node_shape(layout: &Layout, id: crate::NodeId) -> String {
 
 fn persistent_shape(layout: &Layout) -> String {
     let main = [DockSide::Left, DockSide::Right].map(|side| {
-        layout.main_area(side).map(|area| node_shape(layout, area.root))
+        layout
+            .main_area(side)
+            .map(|area| node_shape(layout, area.root))
     });
-    let floating: Vec<_> = layout.floating_groups_in_paint_order()
+    let floating: Vec<_> = layout
+        .floating_groups_in_paint_order()
         .into_iter()
         .map(|(_, group)| {
-            let root = layout.dock_area(group.area)
+            let root = layout
+                .dock_area(group.area)
                 .map(|area| node_shape(layout, area.root));
             (group.bounds, group.z_order, root)
         })
@@ -163,11 +173,17 @@ fn assert_round_trip(
 
     assert!(history.undo(layout, metrics).unwrap());
     assert_eq!(persistent_shape(layout), before);
-    assert!(layout.version() > after_version, "undo must advance revision");
+    assert!(
+        layout.version() > after_version,
+        "undo must advance revision"
+    );
 
     assert!(history.redo(layout, metrics).unwrap());
     assert_eq!(persistent_shape(layout), after);
-    assert!(layout.version() > after_version, "redo must advance revision");
+    assert!(
+        layout.version() > after_version,
+        "redo must advance revision"
+    );
 
     assert!(history.undo(layout, metrics).unwrap());
     assert_eq!(persistent_shape(layout), before);
@@ -272,15 +288,17 @@ fn no_ops_failures_and_transient_flyouts_do_not_create_history() {
     assert_eq!(history.undo_len(), 0);
     assert!(!history.can_undo());
 
-    assert!(history
-        .apply(
-            &mut fixture.layout,
-            DockCommand::ClosePanel {
-                panel: PanelId::null(),
-            },
-            &metrics,
-        )
-        .is_err());
+    assert!(
+        history
+            .apply(
+                &mut fixture.layout,
+                DockCommand::ClosePanel {
+                    panel: PanelId::null(),
+                },
+                &metrics,
+            )
+            .is_err()
+    );
     assert_eq!(history.undo_len(), 0);
     assert!(!history.can_undo());
 
@@ -435,7 +453,9 @@ fn undo_and_redo_never_revive_stale_panel_ids() {
         )
         .unwrap();
 
-    let old_id = fixture.layout.panel_instances()
+    let old_id = fixture
+        .layout
+        .panel_instances()
         .find(|(_, instance)| instance.key == panel_key)
         .map(|(id, _)| id)
         .expect("opened panel instance must exist");
@@ -443,7 +463,9 @@ fn undo_and_redo_never_revive_stale_panel_ids() {
     assert!(fixture.layout.panel_instance(old_id).is_none());
 
     assert!(history.redo(&mut fixture.layout, &metrics).unwrap());
-    let new_id = fixture.layout.panel_instances()
+    let new_id = fixture
+        .layout
+        .panel_instances()
         .find(|(_, instance)| instance.key == panel_key)
         .map(|(id, _)| id)
         .expect("redone panel instance must exist");

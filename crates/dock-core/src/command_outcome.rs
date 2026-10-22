@@ -18,9 +18,9 @@ pub struct CommandOutcome {
 
 #[cfg(test)]
 mod tests {
-    use slotmap::Key;
     use super::CommandOutcome;
     use crate::{CommandValue, DockCommand, NodeId};
+    use slotmap::Key;
 
     #[test]
     fn outcome_can_report_a_clamped_value_and_inverse() {
@@ -28,7 +28,10 @@ mod tests {
             changed_nodes: vec![NodeId::null()],
             new_version: 4,
             actual_value: Some(CommandValue::ColumnWidth(240.0)),
-            inverse: Some(DockCommand::ResizeColumn { column: NodeId::null(), width: 280.0 }),
+            inverse: Some(DockCommand::ResizeColumn {
+                column: NodeId::null(),
+                width: 280.0,
+            }),
         };
         assert_eq!(outcome.new_version, 4);
         assert_eq!(outcome.actual_value, Some(CommandValue::ColumnWidth(240.0)));
@@ -45,6 +48,9 @@ mod tests {
             inverse: Some(DockCommand::CloseFlyout),
         };
         let encoded = serde_json::to_string(&outcome).unwrap();
-        assert_eq!(serde_json::from_str::<CommandOutcome>(&encoded).unwrap(), outcome);
+        assert_eq!(
+            serde_json::from_str::<CommandOutcome>(&encoded).unwrap(),
+            outcome
+        );
     }
 }

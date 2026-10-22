@@ -13,10 +13,18 @@ pub(crate) struct CommandApplication {
 
 impl CommandApplication {
     pub(crate) fn persistent() -> Self {
-        Self { actual_value: None, inverse: None, persistent: true }
+        Self {
+            actual_value: None,
+            inverse: None,
+            persistent: true,
+        }
     }
 
     pub(crate) fn transient() -> Self {
-        Self { actual_value: None, inverse: None, persistent: false }
+        Self {
+            actual_value: None,
+            inverse: None,
+            persistent: false,
+        }
     }
 }

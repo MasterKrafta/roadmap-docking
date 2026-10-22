@@ -11,7 +11,11 @@ pub struct FloatingGroupRect {
 
 impl FloatingGroupRect {
     pub const fn new(group: FloatingGroupId, rect: Rect, z_order: i32) -> Self {
-        Self { group, rect, z_order }
+        Self {
+            group,
+            rect,
+            z_order,
+        }
     }
 }
 
@@ -42,6 +46,9 @@ mod tests {
             7,
         );
         let encoded = serde_json::to_string(&group).unwrap();
-        assert_eq!(serde_json::from_str::<FloatingGroupRect>(&encoded).unwrap(), group);
+        assert_eq!(
+            serde_json::from_str::<FloatingGroupRect>(&encoded).unwrap(),
+            group
+        );
     }
 }

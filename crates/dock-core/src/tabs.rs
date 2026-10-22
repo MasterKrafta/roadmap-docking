@@ -25,8 +25,8 @@ impl Tabs {
 mod tests {
     use slotmap::SlotMap;
 
-    use crate::NodeId;
     use super::Tabs;
+    use crate::NodeId;
 
     #[test]
     fn active_child_uses_the_ordered_node_ids() {

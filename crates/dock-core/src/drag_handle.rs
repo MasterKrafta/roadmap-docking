@@ -35,8 +35,14 @@ impl DragHandle {
             (Self::PanelTab, crate::DragPayload::Panel { .. })
                 | (Self::FlyoutPanel, crate::DragPayload::Panel { .. })
                 | (Self::GroupGrip, crate::DragPayload::Group { .. })
-                | (Self::FloatingTitle, crate::DragPayload::FloatingGroup { .. })
-                | (Self::FloatingCapture, crate::DragPayload::FloatingGroup { .. })
+                | (
+                    Self::FloatingTitle,
+                    crate::DragPayload::FloatingGroup { .. }
+                )
+                | (
+                    Self::FloatingCapture,
+                    crate::DragPayload::FloatingGroup { .. }
+                )
         )
     }
 }

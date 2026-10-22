@@ -17,8 +17,12 @@ pub(super) fn distribute_heights_with_minimums(
             reason: "group weights must match expanded group count",
         });
     }
-    if minimums.iter().any(|value| !value.is_finite() || *value <= 0.0)
-        || weights.iter().any(|value| !value.is_finite() || *value < 0.0)
+    if minimums
+        .iter()
+        .any(|value| !value.is_finite() || *value <= 0.0)
+        || weights
+            .iter()
+            .any(|value| !value.is_finite() || *value < 0.0)
     {
         return Err(CommandError::InvalidValue {
             field: "weights",
@@ -43,14 +47,17 @@ pub(super) fn distribute_heights_with_minimums(
     while !active.is_empty() {
         let weight_sum: f32 = active.iter().map(|index| weights[*index]).sum();
         let equal_share = weight_sum <= f32::EPSILON;
-        let proposed: Vec<(usize, f32)> = active.iter().map(|index| {
-            let height = if equal_share {
-                remaining / active.len() as f32
-            } else {
-                remaining * weights[*index] / weight_sum
-            };
-            (*index, height)
-        }).collect();
+        let proposed: Vec<(usize, f32)> = active
+            .iter()
+            .map(|index| {
+                let height = if equal_share {
+                    remaining / active.len() as f32
+                } else {
+                    remaining * weights[*index] / weight_sum
+                };
+                (*index, height)
+            })
+            .collect();
         let mut constrained = Vec::new();
         for (index, height) in proposed {
             if height < minimums[index] {
@@ -74,7 +81,10 @@ pub(super) fn distribute_heights_with_minimums(
         active.retain(|index| !constrained.contains(index));
     }
 
-    if result.iter().any(|height| !height.is_finite() || *height <= 0.0) {
+    if result
+        .iter()
+        .any(|height| !height.is_finite() || *height <= 0.0)
+    {
         return Err(CommandError::InvalidValue {
             field: "available_height",
             reason: "computed group heights are not finite and positive",
@@ -95,7 +105,10 @@ pub(super) fn ratio_issues(ratios: &[f32], expected_len: usize) -> Vec<&'static 
     if ratios.len() != expected_len {
         issues.push("ratio count must match child/group count");
     }
-    if ratios.iter().any(|ratio| !ratio.is_finite() || *ratio < 0.0) {
+    if ratios
+        .iter()
+        .any(|ratio| !ratio.is_finite() || *ratio < 0.0)
+    {
         issues.push("ratios must be finite and non-negative");
     }
     let sum: f32 = ratios.iter().copied().sum();
@@ -146,10 +159,15 @@ pub(super) fn normalized_ratios(ratios: Vec<Option<f32>>) -> Vec<f32> {
         return Vec::new();
     }
 
-    let values: Option<Vec<f32>> = ratios
-        .into_iter()
-        .collect::<Option<Vec<f32>>>()
-        .filter(|values| values.iter().all(|value| value.is_finite() && *value >= 0.0));
+    let values: Option<Vec<f32>> =
+        ratios
+            .into_iter()
+            .collect::<Option<Vec<f32>>>()
+            .filter(|values| {
+                values
+                    .iter()
+                    .all(|value| value.is_finite() && *value >= 0.0)
+            });
 
     let Some(values) = values else {
         return equal_ratios(len);
@@ -349,4 +367,3 @@ pub(super) fn geometry_error_reason(error: GeometryError) -> &'static str {
         GeometryError::InconsistentConstraints => "geometry constraints are inconsistent",
     }
 }
-

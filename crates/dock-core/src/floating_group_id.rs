@@ -7,8 +7,8 @@ new_key_type! {
 
 #[cfg(test)]
 mod tests {
-    use slotmap::SlotMap;
     use super::FloatingGroupId;
+    use slotmap::SlotMap;
 
     #[test]
     fn removed_floating_group_id_no_longer_resolves() {

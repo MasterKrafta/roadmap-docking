@@ -59,7 +59,10 @@ mod tests {
             Size::new(f32::NAN, 10.0),
             Size::new(10.0, f32::INFINITY),
         ] {
-            assert!(PanelState::new(Some(size)).validate().is_err(), "size: {size:?}");
+            assert!(
+                PanelState::new(Some(size)).validate().is_err(),
+                "size: {size:?}"
+            );
         }
 
         assert_eq!(

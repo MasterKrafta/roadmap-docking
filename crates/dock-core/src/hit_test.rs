@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 
 use crate::{
-    ComputeRectsError, DockMetrics, DropTarget, DropZone, FloatingGroupRect, FlyoutRect, HitResult, Layout,
-    LayoutRects, Node, NodeId, PanelId, Point, Rect, ResizeEdge, Size,
+    ComputeRectsError, DockMetrics, DropTarget, DropZone, FloatingGroupRect, FlyoutRect, HitResult,
+    Layout, LayoutRects, Node, NodeId, PanelId, Point, Rect, ResizeEdge, Size,
 };
 
 impl Layout {
@@ -24,7 +24,9 @@ impl Layout {
         rects: &LayoutRects,
         metrics: &DockMetrics,
     ) -> Result<HitResult, ComputeRectsError> {
-        metrics.validate().map_err(|_| ComputeRectsError::InvalidMetrics)?;
+        metrics
+            .validate()
+            .map_err(|_| ComputeRectsError::InvalidMetrics)?;
         point.validate().map_err(ComputeRectsError::Geometry)?;
 
         let floating_order = floating_front_to_back(&rects.floating_groups);
@@ -52,7 +54,9 @@ impl Layout {
                 crate::Size::new(floating.rect.size.width, title_height),
             );
             if contains(title, point)? {
-                return Ok(HitResult::FloatingTitle { group: floating.group });
+                return Ok(HitResult::FloatingTitle {
+                    group: floating.group,
+                });
             }
 
             if let Some((nodes, panels)) = floating_subtree(self, floating.group)?
@@ -64,7 +68,9 @@ impl Layout {
 
             // A floating window is opaque for hit dispatch purposes: even blank
             // space in a front window must not activate a dock beneath it.
-            return Ok(HitResult::FloatingGroup { group: floating.group });
+            return Ok(HitResult::FloatingGroup {
+                group: floating.group,
+            });
         }
 
         // The flyout overlays the main dock and Canvas, but floating windows
@@ -218,7 +224,9 @@ fn hit_layout_geometry(
     // Splitters win over the column/panel areas they overlap. Reversing the
     // deterministic geometry order gives nested/outer boundaries a stable tie.
     for splitter in rects.splitters.iter().rev() {
-        if node_in_scope(splitter.owner, scope_nodes, include_only) && contains(splitter.rect, point)? {
+        if node_in_scope(splitter.owner, scope_nodes, include_only)
+            && contains(splitter.rect, point)?
+        {
             return Ok(Some(HitResult::Splitter {
                 owner: splitter.owner,
                 boundary_index: splitter.boundary_index,
@@ -233,7 +241,11 @@ fn hit_layout_geometry(
         if !node_in_scope(group.group, scope_nodes, include_only) {
             continue;
         }
-        if !rects.tab_strips.iter().any(|strip| strip.group == group.group) {
+        if !rects
+            .tab_strips
+            .iter()
+            .any(|strip| strip.group == group.group)
+        {
             continue;
         }
         if matches!(layout.node(group.group), Some(Node::Tabs(tabs)) if tabs.collapsed) {
@@ -255,7 +267,9 @@ fn hit_layout_geometry(
         if node_in_scope(overflow.group, scope_nodes, include_only)
             && contains(overflow.button_rect, point)?
         {
-            return Ok(Some(HitResult::TabOverflowButton { group: overflow.group }));
+            return Ok(Some(HitResult::TabOverflowButton {
+                group: overflow.group,
+            }));
         }
     }
 
@@ -274,7 +288,8 @@ fn hit_layout_geometry(
     // Use the same explicit priority as resolve_drop when zones overlap.
     let mut best_drop_zone = None;
     for (index, zone) in rects.drop_zones.iter().enumerate().rev() {
-        if !target_in_scope(zone.target, scope_nodes, include_only) || !contains(zone.rect, point)? {
+        if !target_in_scope(zone.target, scope_nodes, include_only) || !contains(zone.rect, point)?
+        {
             continue;
         }
         let priority = drop_zone_priority(zone.zone);
@@ -312,8 +327,11 @@ fn hit_layout_geometry(
     }
 
     for column in rects.columns.iter().rev() {
-        if node_in_scope(column.column, scope_nodes, include_only) && contains(column.rect, point)? {
-            return Ok(Some(HitResult::Column { column: column.column }));
+        if node_in_scope(column.column, scope_nodes, include_only) && contains(column.rect, point)?
+        {
+            return Ok(Some(HitResult::Column {
+                column: column.column,
+            }));
         }
     }
 
@@ -328,11 +346,7 @@ fn panel_in_scope(panel: PanelId, scope_panels: &HashSet<PanelId>, include_only:
     scope_panels.contains(&panel) == include_only
 }
 
-fn target_in_scope(
-    target: DropTarget,
-    scope_nodes: &HashSet<NodeId>,
-    include_only: bool,
-) -> bool {
+fn target_in_scope(target: DropTarget, scope_nodes: &HashSet<NodeId>, include_only: bool) -> bool {
     let target_node = match target {
         DropTarget::Tabs { group, .. }
         | DropTarget::GroupTabs { group, .. }
@@ -366,8 +380,8 @@ mod tests {
     use super::{ComputeRectsError, HitResult, Point, Rect};
     use crate::layout_builder::LayoutBuilder;
     use crate::{
-        Axis, ColumnMode, DockMetrics, DockSide, DropSource, DropTarget, GeometryError, PanelConstraints,
-        PanelKey, Profile, ResizeEdge, Size,
+        Axis, ColumnMode, DockMetrics, DockSide, DropSource, DropTarget, GeometryError,
+        PanelConstraints, PanelKey, Profile, ResizeEdge, Size,
     };
 
     fn constraints() -> PanelConstraints {
@@ -396,7 +410,9 @@ mod tests {
         let bounds = Rect::new(Point::new(100.0, 100.0), Size::new(300.0, 200.0));
         let floating = builder.floating_group(group, bounds, 1);
         let layout = builder.build();
-        let rects = layout.compute_rects(viewport(1000.0, 700.0), &metrics).unwrap();
+        let rects = layout
+            .compute_rects(viewport(1000.0, 700.0), &metrics)
+            .unwrap();
 
         for (point, expected) in [
             (Point::new(250.0, 102.0), ResizeEdge::Top),
@@ -410,12 +426,17 @@ mod tests {
         ] {
             assert_eq!(
                 layout.hit_test(point, &rects, &metrics).unwrap(),
-                HitResult::FloatingResizeEdge { group: floating, edge: expected }
+                HitResult::FloatingResizeEdge {
+                    group: floating,
+                    edge: expected
+                }
             );
         }
 
         assert_eq!(
-            layout.hit_test(Point::new(140.0, 112.0), &rects, &metrics).unwrap(),
+            layout
+                .hit_test(Point::new(140.0, 112.0), &rects, &metrics)
+                .unwrap(),
             HitResult::FloatingTitle { group: floating }
         );
     }
@@ -434,31 +455,42 @@ mod tests {
         let upper = builder.floating_group(upper_group, bounds, 2);
 
         let layout = builder.build();
-        let rects = layout.compute_rects(viewport(1000.0, 700.0), &metrics).unwrap();
+        let rects = layout
+            .compute_rects(viewport(1000.0, 700.0), &metrics)
+            .unwrap();
 
         assert_eq!(
-            rects.floating_groups.iter().map(|group| group.z_order).collect::<Vec<_>>(),
+            rects
+                .floating_groups
+                .iter()
+                .map(|group| group.z_order)
+                .collect::<Vec<_>>(),
             vec![1, 2]
         );
         assert_eq!(
-            layout.hit_test(Point::new(180.0, 170.0), &rects, &metrics).unwrap(),
+            layout
+                .hit_test(Point::new(180.0, 170.0), &rects, &metrics)
+                .unwrap(),
             HitResult::Panel { panel: upper_panel }
         );
         assert_ne!(lower_panel, upper_panel);
 
         // Drop zones are contextual: compute them for the dragged panel and
         // keep the front window's target from leaking through to the lower one.
-        let drop_zones = layout.compute_drop_zones(
-            DropSource::Panel { panel: lower_panel },
-            &rects,
-            &metrics,
-        ).unwrap();
+        let drop_zones = layout
+            .compute_drop_zones(DropSource::Panel { panel: lower_panel }, &rects, &metrics)
+            .unwrap();
         let mut drag_rects = rects.clone();
         drag_rects.drop_zones = drop_zones;
         assert_eq!(
-            layout.hit_test(Point::new(390.0, 280.0), &drag_rects, &metrics).unwrap(),
+            layout
+                .hit_test(Point::new(390.0, 280.0), &drag_rects, &metrics)
+                .unwrap(),
             HitResult::DropZone {
-                target: DropTarget::GroupEdge { group: upper_group, zone: crate::DropZone::Bottom },
+                target: DropTarget::GroupEdge {
+                    group: upper_group,
+                    zone: crate::DropZone::Bottom
+                },
                 zone: crate::DropZone::FloatingBottom,
             }
         );
@@ -471,20 +503,30 @@ mod tests {
         let mut builder = LayoutBuilder::new(Profile::Photoshop);
         let (_, first_panel_node) = builder.panel(key("split-left"), constraints());
         let first_group = builder.tabs(vec![first_panel_node], 0, false);
-        let first_column = builder.column(280.0, ColumnMode::Expanded, vec![first_group], vec![1.0]);
+        let first_column =
+            builder.column(280.0, ColumnMode::Expanded, vec![first_group], vec![1.0]);
 
         let (_, second_panel_node) = builder.panel(key("split-right"), constraints());
         let second_group = builder.tabs(vec![second_panel_node], 0, false);
-        let second_column = builder.column(280.0, ColumnMode::Expanded, vec![second_group], vec![1.0]);
+        let second_column =
+            builder.column(280.0, ColumnMode::Expanded, vec![second_group], vec![1.0]);
 
         let split = builder.split(Axis::X, vec![first_column, second_column], vec![0.5, 0.5]);
         builder.main_area(DockSide::Left, split);
         let layout = builder.build();
-        let rects = layout.compute_rects(viewport(1200.0, 500.0), &metrics).unwrap();
+        let rects = layout
+            .compute_rects(viewport(1200.0, 500.0), &metrics)
+            .unwrap();
 
         assert_eq!(
-            layout.hit_test(Point::new(279.0, 120.0), &rects, &metrics).unwrap(),
-            HitResult::Splitter { owner: split, boundary_index: 0, axis: Axis::X }
+            layout
+                .hit_test(Point::new(279.0, 120.0), &rects, &metrics)
+                .unwrap(),
+            HitResult::Splitter {
+                owner: split,
+                boundary_index: 0,
+                axis: Axis::X
+            }
         );
     }
 
@@ -497,14 +539,20 @@ mod tests {
         let column = builder.column(280.0, ColumnMode::Expanded, vec![group], vec![1.0]);
         builder.main_area(DockSide::Left, column);
         let layout = builder.build();
-        let rects = layout.compute_rects(viewport(1000.0, 500.0), &metrics).unwrap();
+        let rects = layout
+            .compute_rects(viewport(1000.0, 500.0), &metrics)
+            .unwrap();
 
         assert_eq!(
-            layout.hit_test(Point::new(100.0, 10.0), &rects, &metrics).unwrap(),
+            layout
+                .hit_test(Point::new(100.0, 10.0), &rects, &metrics)
+                .unwrap(),
             HitResult::Group { group }
         );
         assert_eq!(
-            layout.hit_test(Point::new(100.0, 100.0), &rects, &metrics).unwrap(),
+            layout
+                .hit_test(Point::new(100.0, 100.0), &rects, &metrics)
+                .unwrap(),
             HitResult::Panel { panel: panel_id }
         );
     }
@@ -515,24 +563,40 @@ mod tests {
         let mut builder = LayoutBuilder::new(Profile::Photoshop);
         let (_, first_panel_node) = builder.panel(key("split-gap-left"), constraints());
         let first_group = builder.tabs(vec![first_panel_node], 0, false);
-        let first_column = builder.column(280.0, ColumnMode::Expanded, vec![first_group], vec![1.0]);
+        let first_column =
+            builder.column(280.0, ColumnMode::Expanded, vec![first_group], vec![1.0]);
 
         let (_, second_panel_node) = builder.panel(key("split-gap-right"), constraints());
         let second_group = builder.tabs(vec![second_panel_node], 0, false);
-        let second_column = builder.column(280.0, ColumnMode::Expanded, vec![second_group], vec![1.0]);
+        let second_column =
+            builder.column(280.0, ColumnMode::Expanded, vec![second_group], vec![1.0]);
 
         let split = builder.split(Axis::X, vec![first_column, second_column], vec![0.5, 0.5]);
         builder.main_area(DockSide::Left, split);
         let layout = builder.build();
-        let rects = layout.compute_rects(viewport(1200.0, 500.0), &metrics).unwrap();
+        let rects = layout
+            .compute_rects(viewport(1200.0, 500.0), &metrics)
+            .unwrap();
 
         assert_eq!(
-            layout.hit_test(Point::new(285.999, 120.0), &rects, &metrics).unwrap(),
-            HitResult::Splitter { owner: split, boundary_index: 0, axis: Axis::X }
+            layout
+                .hit_test(Point::new(285.999, 120.0), &rects, &metrics)
+                .unwrap(),
+            HitResult::Splitter {
+                owner: split,
+                boundary_index: 0,
+                axis: Axis::X
+            }
         );
         assert_ne!(
-            layout.hit_test(Point::new(286.0, 120.0), &rects, &metrics).unwrap(),
-            HitResult::Splitter { owner: split, boundary_index: 0, axis: Axis::X }
+            layout
+                .hit_test(Point::new(286.0, 120.0), &rects, &metrics)
+                .unwrap(),
+            HitResult::Splitter {
+                owner: split,
+                boundary_index: 0,
+                axis: Axis::X
+            }
         );
     }
 
@@ -546,16 +610,31 @@ mod tests {
         let column = builder.column(280.0, ColumnMode::Expanded, vec![group], vec![1.0]);
         builder.main_area(DockSide::Left, column);
         let layout = builder.build();
-        let rects = layout.compute_rects(viewport(1000.0, 500.0), &metrics).unwrap();
+        let rects = layout
+            .compute_rects(viewport(1000.0, 500.0), &metrics)
+            .unwrap();
 
         assert_eq!(
-            layout.hit_test(Point::new(139.999, 40.0), &rects, &metrics).unwrap(),
-            HitResult::TabHeader { group, panel: left_panel, index: 0 }
+            layout
+                .hit_test(Point::new(139.999, 40.0), &rects, &metrics)
+                .unwrap(),
+            HitResult::TabHeader {
+                group,
+                panel: left_panel,
+                index: 0
+            }
         );
         let boundary = Point::new(140.0, 40.0);
-        let expected = HitResult::TabHeader { group, panel: right_panel, index: 1 };
+        let expected = HitResult::TabHeader {
+            group,
+            panel: right_panel,
+            index: 1,
+        };
         for _ in 0..3 {
-            assert_eq!(layout.hit_test(boundary, &rects, &metrics).unwrap(), expected);
+            assert_eq!(
+                layout.hit_test(boundary, &rects, &metrics).unwrap(),
+                expected
+            );
         }
     }
 
@@ -571,12 +650,21 @@ mod tests {
         let column = builder.column(280.0, ColumnMode::Expanded, groups, vec![0.2, 0.3, 0.5]);
         builder.main_area(DockSide::Left, column);
         let layout = builder.build();
-        let rects = layout.compute_rects(viewport(1000.0, 120.0), &metrics).unwrap();
+        let rects = layout
+            .compute_rects(viewport(1000.0, 120.0), &metrics)
+            .unwrap();
 
         assert!(!rects.vertical_overflow.is_empty());
-        assert!(rects.panels.iter().any(|panel| panel.rect.origin.y + panel.rect.size.height > 120.0));
+        assert!(
+            rects
+                .panels
+                .iter()
+                .any(|panel| panel.rect.origin.y + panel.rect.size.height > 120.0)
+        );
         assert_eq!(
-            layout.hit_test(Point::new(100.0, 130.0), &rects, &metrics).unwrap(),
+            layout
+                .hit_test(Point::new(100.0, 130.0), &rects, &metrics)
+                .unwrap(),
             HitResult::Miss
         );
     }
@@ -585,22 +673,32 @@ mod tests {
     fn canvas_and_empty_space_are_distinct_and_right_bottom_edges_are_exclusive() {
         let metrics = DockMetrics::default();
         let layout = LayoutBuilder::new(Profile::Photoshop).build();
-        let rects = layout.compute_rects(viewport(1000.0, 600.0), &metrics).unwrap();
+        let rects = layout
+            .compute_rects(viewport(1000.0, 600.0), &metrics)
+            .unwrap();
 
         assert_eq!(
-            layout.hit_test(Point::new(0.0, 0.0), &rects, &metrics).unwrap(),
+            layout
+                .hit_test(Point::new(0.0, 0.0), &rects, &metrics)
+                .unwrap(),
             HitResult::Canvas
         );
         assert_eq!(
-            layout.hit_test(Point::new(999.999, 599.999), &rects, &metrics).unwrap(),
+            layout
+                .hit_test(Point::new(999.999, 599.999), &rects, &metrics)
+                .unwrap(),
             HitResult::Canvas
         );
         assert_eq!(
-            layout.hit_test(Point::new(1000.0, 300.0), &rects, &metrics).unwrap(),
+            layout
+                .hit_test(Point::new(1000.0, 300.0), &rects, &metrics)
+                .unwrap(),
             HitResult::Miss
         );
         assert_eq!(
-            layout.hit_test(Point::new(500.0, 600.0), &rects, &metrics).unwrap(),
+            layout
+                .hit_test(Point::new(500.0, 600.0), &rects, &metrics)
+                .unwrap(),
             HitResult::Miss
         );
         assert!(matches!(
@@ -618,11 +716,19 @@ mod tests {
         let column = builder.column(280.0, ColumnMode::Expanded, vec![group], vec![1.0]);
         builder.main_area(DockSide::Left, column);
         let layout = builder.build();
-        let rects = layout.compute_rects(viewport(1000.0, 500.0), &metrics).unwrap();
+        let rects = layout
+            .compute_rects(viewport(1000.0, 500.0), &metrics)
+            .unwrap();
 
         assert_eq!(
-            layout.hit_test(Point::new(100.0, 10.0), &rects, &metrics).unwrap(),
-            HitResult::TabHeader { group, panel: panel_id, index: 0 }
+            layout
+                .hit_test(Point::new(100.0, 10.0), &rects, &metrics)
+                .unwrap(),
+            HitResult::TabHeader {
+                group,
+                panel: panel_id,
+                index: 0
+            }
         );
     }
 }

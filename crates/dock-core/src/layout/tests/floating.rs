@@ -23,13 +23,15 @@ fn c46_float_panel_keeps_panel_instance_and_id() {
     let mut layout = builder.build();
     assert_eq!(layout.validate(&metrics), Ok(()));
 
-    layout.apply(
-        DockCommand::Float {
-            node: moving_panel_node,
-            bounds: Rect::new(Point::new(80.0, 60.0), Size::new(320.0, 220.0)),
-        },
-        &metrics,
-    ).unwrap();
+    layout
+        .apply(
+            DockCommand::Float {
+                node: moving_panel_node,
+                bounds: Rect::new(Point::new(80.0, 60.0), Size::new(320.0, 220.0)),
+            },
+            &metrics,
+        )
+        .unwrap();
 
     let (floating_id, floating) = layout.floating_groups().next().unwrap();
     let floating_root = layout.dock_area(floating.area).unwrap().root;
@@ -45,7 +47,10 @@ fn c46_float_panel_keeps_panel_instance_and_id() {
         Some(Node::Panel(panel)) if panel.panel_id == moving_panel_id
     ));
     assert!(layout.panel_instance(moving_panel_id).is_some());
-    assert_eq!(layout.floating_group(floating_id).unwrap().bounds.size, Size::new(320.0, 220.0));
+    assert_eq!(
+        layout.floating_group(floating_id).unwrap().bounds.size,
+        Size::new(320.0, 220.0)
+    );
     assert!(matches!(
         layout.node(source_group),
         Some(Node::Tabs(tabs)) if tabs.children == vec![sibling_panel_node]
@@ -71,14 +76,10 @@ fn c46_move_resize_raise_and_center_dock_floating_preserve_source_active_tab() {
     );
     builder.main_area(DockSide::Right, column);
 
-    let (source_panel_a, source_node_a) = builder.panel(
-        PanelKey::new("c46-floating-a").unwrap(),
-        descriptors()[0].1,
-    );
-    let (source_panel_b, source_node_b) = builder.panel(
-        PanelKey::new("c46-floating-b").unwrap(),
-        descriptors()[0].1,
-    );
+    let (source_panel_a, source_node_a) =
+        builder.panel(PanelKey::new("c46-floating-a").unwrap(), descriptors()[0].1);
+    let (source_panel_b, source_node_b) =
+        builder.panel(PanelKey::new("c46-floating-b").unwrap(), descriptors()[0].1);
     let source_tabs = builder.tabs(vec![source_node_a, source_node_b], 1, true);
     let source_floating = builder.floating_group(
         source_tabs,
@@ -100,30 +101,42 @@ fn c46_move_resize_raise_and_center_dock_floating_preserve_source_active_tab() {
     let mut layout = builder.build();
     assert_eq!(layout.validate(&metrics), Ok(()));
 
-    let moved = layout.apply(
-        DockCommand::MoveFloating {
-            group: source_floating,
-            origin: Point::new(140.0, 150.0),
-        },
-        &metrics,
-    ).unwrap();
+    let moved = layout
+        .apply(
+            DockCommand::MoveFloating {
+                group: source_floating,
+                origin: Point::new(140.0, 150.0),
+            },
+            &metrics,
+        )
+        .unwrap();
     assert_eq!(
-        layout.floating_group(source_floating).unwrap().bounds.origin,
+        layout
+            .floating_group(source_floating)
+            .unwrap()
+            .bounds
+            .origin,
         Point::new(140.0, 150.0)
     );
     layout.apply(moved.inverse.unwrap(), &metrics).unwrap();
     assert_eq!(
-        layout.floating_group(source_floating).unwrap().bounds.origin,
+        layout
+            .floating_group(source_floating)
+            .unwrap()
+            .bounds
+            .origin,
         Point::new(20.0, 30.0)
     );
 
-    let resized = layout.apply(
-        DockCommand::ResizeFloating {
-            group: source_floating,
-            size: Size::new(10.0, 10.0),
-        },
-        &metrics,
-    ).unwrap();
+    let resized = layout
+        .apply(
+            DockCommand::ResizeFloating {
+                group: source_floating,
+                size: Size::new(10.0, 10.0),
+            },
+            &metrics,
+        )
+        .unwrap();
     assert_eq!(
         resized.actual_value,
         Some(CommandValue::FloatingSize(Size::new(120.0, 80.0)))
@@ -138,18 +151,30 @@ fn c46_move_resize_raise_and_center_dock_floating_preserve_source_active_tab() {
         Size::new(420.0, 300.0)
     );
 
-    layout.apply(DockCommand::RaiseFloating { group: source_floating }, &metrics).unwrap();
+    layout
+        .apply(
+            DockCommand::RaiseFloating {
+                group: source_floating,
+            },
+            &metrics,
+        )
+        .unwrap();
     assert_eq!(layout.floating_group(source_floating).unwrap().z_order, 3);
     assert_eq!(layout.floating_group(other_floating).unwrap().z_order, 2);
     assert_eq!(layout.validate(&metrics), Ok(()));
 
-    layout.apply(
-        DockCommand::DockFloating {
-            group: source_floating,
-            target: DropTarget::Tabs { group: dock_group, index: 1 },
-        },
-        &metrics,
-    ).unwrap();
+    layout
+        .apply(
+            DockCommand::DockFloating {
+                group: source_floating,
+                target: DropTarget::Tabs {
+                    group: dock_group,
+                    index: 1,
+                },
+            },
+            &metrics,
+        )
+        .unwrap();
     assert!(layout.floating_group(source_floating).is_none());
     assert!(layout.floating_group(other_floating).is_some());
     assert!(matches!(
@@ -192,13 +217,18 @@ fn c46_move_one_panel_between_groups_inside_floating_stack() {
     let mut layout = builder.build();
     assert_eq!(layout.validate(&metrics), Ok(()));
 
-    layout.apply(
-        DockCommand::MovePanel {
-            panel: moving_panel,
-            target: DropTarget::Tabs { group: target_group, index: 1 },
-        },
-        &metrics,
-    ).unwrap();
+    layout
+        .apply(
+            DockCommand::MovePanel {
+                panel: moving_panel,
+                target: DropTarget::Tabs {
+                    group: target_group,
+                    index: 1,
+                },
+            },
+            &metrics,
+        )
+        .unwrap();
 
     assert!(matches!(
         layout.node(source_group),
@@ -230,14 +260,10 @@ fn c46_move_one_panel_between_groups_inside_floating_stack() {
 fn c46_move_whole_tabs_group_to_top_of_floating_stack_preserves_tabs_state() {
     let metrics = DockMetrics::default();
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
-    let (moving_panel_a, moving_node_a) = builder.panel(
-        PanelKey::new("c46-whole-a").unwrap(),
-        descriptors()[0].1,
-    );
-    let (moving_panel_b, moving_node_b) = builder.panel(
-        PanelKey::new("c46-whole-b").unwrap(),
-        descriptors()[0].1,
-    );
+    let (moving_panel_a, moving_node_a) =
+        builder.panel(PanelKey::new("c46-whole-a").unwrap(), descriptors()[0].1);
+    let (moving_panel_b, moving_node_b) =
+        builder.panel(PanelKey::new("c46-whole-b").unwrap(), descriptors()[0].1);
     let moving_group = builder.tabs(vec![moving_node_a, moving_node_b], 1, true);
     let main_column = builder.column(
         metrics.default_column_width,
@@ -260,15 +286,17 @@ fn c46_move_whole_tabs_group_to_top_of_floating_stack_preserves_tabs_state() {
     let mut layout = builder.build();
     assert_eq!(layout.validate(&metrics), Ok(()));
 
-    layout.apply(
-        DockCommand::SplitGroup {
-            group: moving_group,
-            target_group,
-            zone: DropZone::Top,
-            ratio: 0.3,
-        },
-        &metrics,
-    ).unwrap();
+    layout
+        .apply(
+            DockCommand::SplitGroup {
+                group: moving_group,
+                target_group,
+                zone: DropZone::Top,
+                ratio: 0.3,
+            },
+            &metrics,
+        )
+        .unwrap();
 
     let floating = layout.floating_group(floating_id).unwrap();
     let root = layout.dock_area(floating.area).unwrap().root;
@@ -295,13 +323,18 @@ fn c46_move_whole_tabs_group_to_top_of_floating_stack_preserves_tabs_state() {
 
     // Docking the whole floating stack creates a Column without flattening
     // the Tabs groups or losing their order and panel instances.
-    layout.apply(
-        DockCommand::DockFloating {
-            group: floating_id,
-            target: DropTarget::MainColumn { side: DockSide::Left, index: 0 },
-        },
-        &metrics,
-    ).unwrap();
+    layout
+        .apply(
+            DockCommand::DockFloating {
+                group: floating_id,
+                target: DropTarget::MainColumn {
+                    side: DockSide::Left,
+                    index: 0,
+                },
+            },
+            &metrics,
+        )
+        .unwrap();
     assert!(layout.floating_group(floating_id).is_none());
     let docked_column = layout.main_area(DockSide::Left).unwrap().root;
     assert!(matches!(
@@ -360,26 +393,28 @@ fn c46_photoshop_rejects_horizontal_split_inside_floating_stack_atomically() {
     assert_eq!(layout.validate(&metrics), Ok(()));
     let before = format!("{layout:?}");
 
-    let error = layout.apply(
-        DockCommand::SplitGroup {
-            group: source_group,
-            target_group: top_group,
-            zone: DropZone::Left,
-            ratio: 0.5,
-        },
-        &metrics,
-    ).unwrap_err();
+    let error = layout
+        .apply(
+            DockCommand::SplitGroup {
+                group: source_group,
+                target_group: top_group,
+                zone: DropZone::Left,
+                ratio: 0.5,
+            },
+            &metrics,
+        )
+        .unwrap_err();
 
     assert!(matches!(
         error,
-        CommandError::InvalidTarget { reason: "horizontal splits are not supported inside a floating stack" }
+        CommandError::InvalidTarget {
+            reason: "horizontal splits are not supported inside a floating stack"
+        }
     ));
     assert_eq!(format!("{layout:?}"), before);
     assert_eq!(layout.version(), 0);
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
-
-
 
 #[test]
 fn c46_successful_move_of_last_panel_cleans_up_floating_area() {
@@ -413,13 +448,18 @@ fn c46_successful_move_of_last_panel_cleans_up_floating_area() {
     let area_id = layout.floating_group(floating_id).unwrap().area;
     assert_eq!(layout.validate(&metrics), Ok(()));
 
-    layout.apply(
-        DockCommand::MovePanel {
-            panel: floating_panel,
-            target: DropTarget::Tabs { group: dock_group, index: 1 },
-        },
-        &metrics,
-    ).unwrap();
+    layout
+        .apply(
+            DockCommand::MovePanel {
+                panel: floating_panel,
+                target: DropTarget::Tabs {
+                    group: dock_group,
+                    index: 1,
+                },
+            },
+            &metrics,
+        )
+        .unwrap();
 
     assert!(layout.floating_group(floating_id).is_none());
     assert!(layout.dock_area(area_id).is_none());
@@ -467,13 +507,18 @@ fn c46_failed_dock_preserves_the_floating_group_and_area_atomically() {
     let before = format!("{layout:?}");
     assert_eq!(layout.validate(&metrics), Ok(()));
 
-    let error = layout.apply(
-        DockCommand::DockFloating {
-            group: floating_id,
-            target: DropTarget::Tabs { group: NodeId::null(), index: 0 },
-        },
-        &metrics,
-    ).unwrap_err();
+    let error = layout
+        .apply(
+            DockCommand::DockFloating {
+                group: floating_id,
+                target: DropTarget::Tabs {
+                    group: NodeId::null(),
+                    index: 0,
+                },
+            },
+            &metrics,
+        )
+        .unwrap_err();
 
     assert!(matches!(error, CommandError::MissingNode { node } if node == NodeId::null()));
     assert_eq!(format!("{layout:?}"), before);
@@ -493,10 +538,8 @@ fn c46_failed_dock_preserves_the_floating_group_and_area_atomically() {
 fn c46_floating_bounds_are_model_space_and_are_not_screen_clamped() {
     let metrics = DockMetrics::default();
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
-    let (_, panel_node) = builder.panel(
-        PanelKey::new("c46-offscreen").unwrap(),
-        descriptors()[0].1,
-    );
+    let (_, panel_node) =
+        builder.panel(PanelKey::new("c46-offscreen").unwrap(), descriptors()[0].1);
     let tabs = builder.tabs(vec![panel_node], 0, false);
     let floating_id = builder.floating_group(
         tabs,
@@ -510,13 +553,15 @@ fn c46_floating_bounds_are_model_space_and_are_not_screen_clamped() {
         Point::new(-9000.0, -7000.0)
     );
 
-    let moved = layout.apply(
-        DockCommand::MoveFloating {
-            group: floating_id,
-            origin: Point::new(-12000.0, 3000.0),
-        },
-        &metrics,
-    ).unwrap();
+    let moved = layout
+        .apply(
+            DockCommand::MoveFloating {
+                group: floating_id,
+                origin: Point::new(-12000.0, 3000.0),
+            },
+            &metrics,
+        )
+        .unwrap();
     assert_eq!(
         layout.floating_group(floating_id).unwrap().bounds.origin,
         Point::new(-12000.0, 3000.0)
@@ -534,16 +579,15 @@ fn c46_paint_and_hit_test_orders_are_inverse_views_of_z_order() {
     let metrics = DockMetrics::default();
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
     let mut ids = Vec::new();
-    for (key, z_order) in [
-        ("c46-z-high", 9),
-        ("c46-z-low", 1),
-        ("c46-z-mid", 4),
-    ] {
+    for (key, z_order) in [("c46-z-high", 9), ("c46-z-low", 1), ("c46-z-mid", 4)] {
         let (_, panel_node) = builder.panel(PanelKey::new(key).unwrap(), descriptors()[0].1);
         let tabs = builder.tabs(vec![panel_node], 0, false);
         ids.push(builder.floating_group(
             tabs,
-            Rect::new(Point::new(20.0 * z_order as f32, 30.0), Size::new(300.0, 220.0)),
+            Rect::new(
+                Point::new(20.0 * z_order as f32, 30.0),
+                Size::new(300.0, 220.0),
+            ),
             z_order,
         ));
     }
@@ -552,22 +596,40 @@ fn c46_paint_and_hit_test_orders_are_inverse_views_of_z_order() {
     let [high, low, mid] = [ids[0], ids[1], ids[2]];
 
     assert_eq!(
-        layout.floating_groups_in_paint_order().iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+        layout
+            .floating_groups_in_paint_order()
+            .iter()
+            .map(|(id, _)| *id)
+            .collect::<Vec<_>>(),
         vec![low, mid, high]
     );
     assert_eq!(
-        layout.floating_groups_in_hit_test_order().iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+        layout
+            .floating_groups_in_hit_test_order()
+            .iter()
+            .map(|(id, _)| *id)
+            .collect::<Vec<_>>(),
         vec![high, mid, low]
     );
 
-    layout.apply(DockCommand::RaiseFloating { group: low }, &metrics).unwrap();
+    layout
+        .apply(DockCommand::RaiseFloating { group: low }, &metrics)
+        .unwrap();
     assert_eq!(layout.floating_group(low).unwrap().z_order, 10);
     assert_eq!(
-        layout.floating_groups_in_paint_order().iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+        layout
+            .floating_groups_in_paint_order()
+            .iter()
+            .map(|(id, _)| *id)
+            .collect::<Vec<_>>(),
         vec![mid, high, low]
     );
     assert_eq!(
-        layout.floating_groups_in_hit_test_order().iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+        layout
+            .floating_groups_in_hit_test_order()
+            .iter()
+            .map(|(id, _)| *id)
+            .collect::<Vec<_>>(),
         vec![low, high, mid]
     );
     assert_eq!(layout.validate(&metrics), Ok(()));
@@ -607,13 +669,18 @@ fn c46_center_merge_between_floating_windows_keeps_panel_instances_and_cleans_so
     let source_area = layout.floating_group(source_floating).unwrap().area;
     assert_eq!(layout.validate(&metrics), Ok(()));
 
-    layout.apply(
-        DockCommand::DockFloating {
-            group: source_floating,
-            target: DropTarget::Tabs { group: target_tabs, index: 1 },
-        },
-        &metrics,
-    ).unwrap();
+    layout
+        .apply(
+            DockCommand::DockFloating {
+                group: source_floating,
+                target: DropTarget::Tabs {
+                    group: target_tabs,
+                    index: 1,
+                },
+            },
+            &metrics,
+        )
+        .unwrap();
 
     assert!(layout.floating_group(source_floating).is_none());
     assert!(layout.dock_area(source_area).is_none());

@@ -48,11 +48,7 @@ mod tests {
     fn rejects_empty_or_non_finite_bounds() {
         let mut areas = SlotMap::<DockAreaId, ()>::with_key();
         let area = areas.insert(());
-        let empty = FloatingGroup::new(
-            area,
-            Rect::new(Point::ZERO, Size::ZERO),
-            0,
-        );
+        let empty = FloatingGroup::new(area, Rect::new(Point::ZERO, Size::ZERO), 0);
         assert_eq!(empty.validate(), Err(GeometryError::NonPositiveDimension));
 
         let invalid = FloatingGroup::new(

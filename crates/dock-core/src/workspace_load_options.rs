@@ -11,6 +11,8 @@ pub struct WorkspaceLoadOptions {
 
 impl WorkspaceLoadOptions {
     pub const fn new(visible_client_region: Option<Rect>) -> Self {
-        Self { visible_client_region }
+        Self {
+            visible_client_region,
+        }
     }
 }

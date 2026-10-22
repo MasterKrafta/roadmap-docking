@@ -56,6 +56,9 @@ mod tests {
     fn policies_round_trip_through_serde() {
         let policy = AllowedArea::MAIN_DOCK | AllowedArea::ICON_RAIL;
         let encoded = serde_json::to_string(&policy).unwrap();
-        assert_eq!(serde_json::from_str::<AllowedArea>(&encoded).unwrap(), policy);
+        assert_eq!(
+            serde_json::from_str::<AllowedArea>(&encoded).unwrap(),
+            policy
+        );
     }
 }

@@ -118,7 +118,10 @@ mod tests {
     #[test]
     fn rejects_overflowed_edges_and_non_finite_points() {
         let overflowing = Rect::new(Point::new(f32::MAX, 0.0), Size::new(f32::MAX, 1.0));
-        assert_eq!(overflowing.validate(), Err(GeometryError::ArithmeticOverflow));
+        assert_eq!(
+            overflowing.validate(),
+            Err(GeometryError::ArithmeticOverflow)
+        );
 
         let valid = Rect::new(Point::ZERO, Size::new(1.0, 1.0));
         assert_eq!(

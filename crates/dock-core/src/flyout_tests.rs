@@ -1,12 +1,12 @@
 //! C7.3 regression coverage for transient flyout state, geometry and dismissal.
 
 use crate::layout_builder::LayoutBuilder;
-use slotmap::Key;
 use crate::{
     ColumnMode, DockCommand, DockMetrics, DockSide, DragDropAction, DragHandle, DragPayload,
     DragSession, DragState, DropTarget, FlyoutState, HitResult, Layout, Node, NodeId,
     PanelConstraints, PanelId, PanelKey, Point, Profile, Rect, ResizeEdge, Size,
 };
+use slotmap::Key;
 
 fn constraints() -> PanelConstraints {
     PanelConstraints::new(
@@ -74,7 +74,10 @@ fn put_in_icon_rail(fixture: &mut Fixture, metrics: &DockMetrics) {
 }
 
 fn tree_snapshot(layout: &Layout) -> Vec<(NodeId, Node)> {
-    layout.nodes().map(|(id, node)| (id, node.clone())).collect()
+    layout
+        .nodes()
+        .map(|(id, node)| (id, node.clone()))
+        .collect()
 }
 
 fn active_index(layout: &Layout, group: NodeId) -> usize {
@@ -118,16 +121,26 @@ fn opening_switching_and_explicitly_closing_flyouts_preserves_the_dock_tree() {
     assert_transient_outcome(&opened, version);
     assert_eq!(
         fixture.layout.flyout(),
-        Some(FlyoutState::new(fixture.column, fixture.group, fixture.first_panel)),
+        Some(FlyoutState::new(
+            fixture.column,
+            fixture.group,
+            fixture.first_panel
+        )),
     );
     let open_rects = fixture.layout.compute_rects(viewport(), &metrics).unwrap();
     assert_eq!(open_rects.canvas, rects_before.canvas);
     assert_eq!(open_rects.columns, rects_before.columns);
     let flyout_rect = open_rects.flyout.unwrap();
     assert_eq!(flyout_rect.panel, fixture.first_panel);
-    assert_eq!(flyout_rect.rect.size.width, constraints().preferred_size.width);
+    assert_eq!(
+        flyout_rect.rect.size.width,
+        constraints().preferred_size.width
+    );
     assert_eq!(flyout_rect.resize_edge, ResizeEdge::Right);
-    assert_eq!(active_index(&fixture.layout, fixture.group), original_active_index);
+    assert_eq!(
+        active_index(&fixture.layout, fixture.group),
+        original_active_index
+    );
     assert_eq!(tree_snapshot(&fixture.layout), tree_before);
     assert_eq!(*fixture.layout.canvas(), canvas_before);
 
@@ -145,20 +158,33 @@ fn opening_switching_and_explicitly_closing_flyouts_preserves_the_dock_tree() {
     assert_transient_outcome(&switched, version);
     assert_eq!(
         fixture.layout.flyout(),
-        Some(FlyoutState::new(fixture.column, fixture.group, fixture.second_panel)),
+        Some(FlyoutState::new(
+            fixture.column,
+            fixture.group,
+            fixture.second_panel
+        )),
     );
     let switched_rects = fixture.layout.compute_rects(viewport(), &metrics).unwrap();
     assert_eq!(switched_rects.flyout.unwrap().panel, fixture.second_panel);
     assert_eq!(switched_rects.canvas, rects_before.canvas);
     assert_eq!(switched_rects.columns, rects_before.columns);
-    assert_eq!(active_index(&fixture.layout, fixture.group), original_active_index);
+    assert_eq!(
+        active_index(&fixture.layout, fixture.group),
+        original_active_index
+    );
     assert_eq!(tree_snapshot(&fixture.layout), tree_before);
     assert_eq!(*fixture.layout.canvas(), canvas_before);
 
-    let closed = fixture.layout.apply(DockCommand::CloseFlyout, &metrics).unwrap();
+    let closed = fixture
+        .layout
+        .apply(DockCommand::CloseFlyout, &metrics)
+        .unwrap();
     assert_transient_outcome(&closed, version);
     assert_eq!(fixture.layout.flyout(), None);
-    assert_eq!(fixture.layout.compute_rects(viewport(), &metrics).unwrap(), rects_before);
+    assert_eq!(
+        fixture.layout.compute_rects(viewport(), &metrics).unwrap(),
+        rects_before
+    );
     assert_eq!(tree_snapshot(&fixture.layout), tree_before);
     assert_eq!(*fixture.layout.canvas(), canvas_before);
 }
@@ -195,7 +221,10 @@ fn same_icon_and_passive_dismissal_obey_auto_collapse_policy() {
 
     let changed_policy = fixture
         .layout
-        .apply(DockCommand::SetFlyoutAutoCollapse { enabled: false }, &metrics)
+        .apply(
+            DockCommand::SetFlyoutAutoCollapse { enabled: false },
+            &metrics,
+        )
         .unwrap();
     assert_transient_outcome(&changed_policy, version);
     assert!(!fixture.layout.flyout_auto_collapse_enabled());
@@ -251,14 +280,20 @@ fn same_icon_and_passive_dismissal_obey_auto_collapse_policy() {
     assert_eq!(fixture.layout.flyout(), None);
     fixture
         .layout
-        .apply(DockCommand::OpenFlyout {
-            column: fixture.column,
-            panel: fixture.second_panel,
-        }, &metrics)
+        .apply(
+            DockCommand::OpenFlyout {
+                column: fixture.column,
+                panel: fixture.second_panel,
+            },
+            &metrics,
+        )
         .unwrap();
     fixture
         .layout
-        .apply(DockCommand::SetFlyoutAutoCollapse { enabled: true }, &metrics)
+        .apply(
+            DockCommand::SetFlyoutAutoCollapse { enabled: true },
+            &metrics,
+        )
         .unwrap();
     fixture
         .layout
@@ -300,7 +335,12 @@ fn resizing_remembers_panel_specific_width_and_exposes_canvas_facing_hit_target(
     assert_transient_outcome(&resized, version);
     assert_eq!(tree_snapshot(&fixture.layout), tree_before);
     assert_eq!(
-        fixture.layout.panel_instance(fixture.first_panel).unwrap().state.last_known_size(),
+        fixture
+            .layout
+            .panel_instance(fixture.first_panel)
+            .unwrap()
+            .state
+            .last_known_size(),
         Some(Size::new(420.0, constraints().preferred_size.height)),
     );
 
@@ -328,30 +368,58 @@ fn resizing_remembers_panel_specific_width_and_exposes_canvas_facing_hit_target(
             if column == fixture.column && group == fixture.group && panel == fixture.first_panel
     ));
 
-    fixture.layout.apply(DockCommand::CloseFlyout, &metrics).unwrap();
-    fixture.layout.apply(
-        DockCommand::OpenFlyout {
-            column: fixture.column,
-            panel: fixture.second_panel,
-        },
-        &metrics,
-    ).unwrap();
+    fixture
+        .layout
+        .apply(DockCommand::CloseFlyout, &metrics)
+        .unwrap();
+    fixture
+        .layout
+        .apply(
+            DockCommand::OpenFlyout {
+                column: fixture.column,
+                panel: fixture.second_panel,
+            },
+            &metrics,
+        )
+        .unwrap();
     assert_eq!(
-        fixture.layout.compute_rects(viewport(), &metrics).unwrap().flyout.unwrap().rect.size.width,
+        fixture
+            .layout
+            .compute_rects(viewport(), &metrics)
+            .unwrap()
+            .flyout
+            .unwrap()
+            .rect
+            .size
+            .width,
         constraints().preferred_size.width,
         "another panel should start from its own preferred/remembered width",
     );
 
-    fixture.layout.apply(DockCommand::CloseFlyout, &metrics).unwrap();
-    fixture.layout.apply(
-        DockCommand::OpenFlyout {
-            column: fixture.column,
-            panel: fixture.first_panel,
-        },
-        &metrics,
-    ).unwrap();
+    fixture
+        .layout
+        .apply(DockCommand::CloseFlyout, &metrics)
+        .unwrap();
+    fixture
+        .layout
+        .apply(
+            DockCommand::OpenFlyout {
+                column: fixture.column,
+                panel: fixture.first_panel,
+            },
+            &metrics,
+        )
+        .unwrap();
     assert_eq!(
-        fixture.layout.compute_rects(viewport(), &metrics).unwrap().flyout.unwrap().rect.size.width,
+        fixture
+            .layout
+            .compute_rects(viewport(), &metrics)
+            .unwrap()
+            .flyout
+            .unwrap()
+            .rect
+            .size
+            .width,
         420.0,
         "reopening a panel should restore its remembered width",
     );
@@ -363,13 +431,16 @@ fn right_side_flyout_resizes_toward_canvas_from_its_left_edge() {
     let metrics = DockMetrics::default();
     let mut fixture = fixture_on(DockSide::Right);
     put_in_icon_rail(&mut fixture, &metrics);
-    fixture.layout.apply(
-        DockCommand::OpenFlyout {
-            column: fixture.column,
-            panel: fixture.first_panel,
-        },
-        &metrics,
-    ).unwrap();
+    fixture
+        .layout
+        .apply(
+            DockCommand::OpenFlyout {
+                column: fixture.column,
+                panel: fixture.first_panel,
+            },
+            &metrics,
+        )
+        .unwrap();
 
     let rects = fixture.layout.compute_rects(viewport(), &metrics).unwrap();
     let flyout = rects.flyout.unwrap();
@@ -449,7 +520,9 @@ fn flyout_panel_drag_keeps_source_open_until_successful_drop_then_closes_it() {
 
     session
         .pointer_down_with_handle(
-            DragPayload::Panel { panel: fixture.dragged_panel },
+            DragPayload::Panel {
+                panel: fixture.dragged_panel,
+            },
             DragHandle::FlyoutPanel,
             origin,
         )
@@ -471,7 +544,10 @@ fn flyout_panel_drag_keeps_source_open_until_successful_drop_then_closes_it() {
     assert_eq!(request.handle, DragHandle::FlyoutPanel);
     assert_eq!(fixture.layout.flyout(), Some(flyout_before));
 
-    let action = fixture.layout.resolve_drag_drop(&request, &metrics).unwrap();
+    let action = fixture
+        .layout
+        .resolve_drag_drop(&request, &metrics)
+        .unwrap();
     assert_eq!(
         action,
         DragDropAction::Command(DockCommand::MovePanelFromFlyout {
@@ -485,11 +561,21 @@ fn flyout_panel_drag_keeps_source_open_until_successful_drop_then_closes_it() {
     fixture.layout.apply(command, &metrics).unwrap();
 
     assert_eq!(fixture.layout.flyout(), None);
-    assert_eq!(fixture.layout.version(), 1, "the accepted dock move is one persistent transaction");
+    assert_eq!(
+        fixture.layout.version(),
+        1,
+        "the accepted dock move is one persistent transaction"
+    );
     assert!(fixture.layout.validate(&metrics).is_ok());
     let after = fixture.layout.compute_rects(viewport(), &metrics).unwrap();
-    assert_eq!(after.canvas, before.canvas, "the flyout overlays instead of moving Canvas");
-    assert_eq!(after.columns, before.columns, "the flyout overlay does not resize dock columns");
+    assert_eq!(
+        after.canvas, before.canvas,
+        "the flyout overlays instead of moving Canvas"
+    );
+    assert_eq!(
+        after.columns, before.columns,
+        "the flyout overlay does not resize dock columns"
+    );
     let Node::Tabs(target_tabs) = fixture.layout.node(fixture.target_group).unwrap() else {
         panic!("target should remain a tab group");
     };
@@ -514,7 +600,9 @@ fn successful_same_position_flyout_drop_closes_flyout_without_creating_undo_or_v
 
     session
         .pointer_down_with_handle(
-            DragPayload::Panel { panel: fixture.dragged_panel },
+            DragPayload::Panel {
+                panel: fixture.dragged_panel,
+            },
             DragHandle::FlyoutPanel,
             Point::new(40.0, 40.0),
         )
@@ -525,7 +613,10 @@ fn successful_same_position_flyout_drop_closes_flyout_without_creating_undo_or_v
         .unwrap()
         .unwrap();
 
-    let action = fixture.layout.resolve_drag_drop(&request, &metrics).unwrap();
+    let action = fixture
+        .layout
+        .resolve_drag_drop(&request, &metrics)
+        .unwrap();
     assert_eq!(
         action,
         DragDropAction::Command(DockCommand::MovePanelFromFlyout {
@@ -556,7 +647,9 @@ fn cancelled_flyout_panel_drag_leaves_the_source_flyout_open() {
 
     session
         .pointer_down_with_handle(
-            DragPayload::Panel { panel: fixture.dragged_panel },
+            DragPayload::Panel {
+                panel: fixture.dragged_panel,
+            },
             DragHandle::FlyoutPanel,
             origin,
         )
@@ -564,10 +657,7 @@ fn cancelled_flyout_panel_drag_leaves_the_source_flyout_open() {
     session.pointer_move(Point::new(45.0, 40.0)).unwrap();
     session.escape().unwrap();
 
-    assert!(matches!(
-        session.state(),
-        DragState::Cancelled { .. }
-    ));
+    assert!(matches!(session.state(), DragState::Cancelled { .. }));
     assert_eq!(fixture.layout.flyout(), flyout_before);
     let after = fixture.layout.compute_rects(viewport(), &metrics).unwrap();
     assert_eq!(after.canvas, before.canvas);
@@ -610,7 +700,9 @@ fn flyout_panel_drop_to_free_area_floats_panel_and_closes_flyout() {
 
     session
         .pointer_down_with_handle(
-            DragPayload::Panel { panel: fixture.dragged_panel },
+            DragPayload::Panel {
+                panel: fixture.dragged_panel,
+            },
             DragHandle::FlyoutPanel,
             Point::new(40.0, 40.0),
         )
@@ -620,12 +712,12 @@ fn flyout_panel_drop_to_free_area_floats_panel_and_closes_flyout() {
         .pointer_up(Point::new(650.0, 340.0), Some(DropTarget::FreeArea))
         .unwrap()
         .unwrap();
-    request.floating_bounds = Some(Rect::new(
-        Point::new(520.0, 180.0),
-        Size::new(420.0, 280.0),
-    ));
+    request.floating_bounds = Some(Rect::new(Point::new(520.0, 180.0), Size::new(420.0, 280.0)));
 
-    let action = fixture.layout.resolve_drag_drop(&request, &metrics).unwrap();
+    let action = fixture
+        .layout
+        .resolve_drag_drop(&request, &metrics)
+        .unwrap();
     assert_eq!(
         action,
         DragDropAction::Command(DockCommand::FloatPanelFromFlyout {

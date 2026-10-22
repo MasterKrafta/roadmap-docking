@@ -1,5 +1,5 @@
-use super::*;
 use super::helpers::*;
+use super::*;
 
 impl Layout {
     pub(super) fn main_columns(&self, side: DockSide) -> Result<Vec<NodeId>, CommandError> {
@@ -9,13 +9,23 @@ impl Layout {
         match self.nodes.get(area.root) {
             Some(Node::Column(_)) => Ok(vec![area.root]),
             Some(Node::Split(split)) if split.axis == Axis::X => {
-                if split.children.iter().any(|id| !matches!(self.nodes.get(*id), Some(Node::Column(_)))) {
-                    return Err(CommandError::InvalidTarget { reason: "main horizontal split must contain only Column nodes" });
+                if split
+                    .children
+                    .iter()
+                    .any(|id| !matches!(self.nodes.get(*id), Some(Node::Column(_))))
+                {
+                    return Err(CommandError::InvalidTarget {
+                        reason: "main horizontal split must contain only Column nodes",
+                    });
                 }
                 Ok(split.children.clone())
             }
-            Some(_) => Err(CommandError::InvalidTarget { reason: "main dock root must be a Column or Split(X) of Columns" }),
-            None => Err(CommandError::InvalidTarget { reason: "main dock root is missing" }),
+            Some(_) => Err(CommandError::InvalidTarget {
+                reason: "main dock root must be a Column or Split(X) of Columns",
+            }),
+            None => Err(CommandError::InvalidTarget {
+                reason: "main dock root is missing",
+            }),
         }
     }
 
@@ -33,7 +43,10 @@ impl Layout {
         self.default_open_target()
     }
 
-    pub(super) fn target_for_dock_location(&self, location: LastDockLocation) -> Option<DropTarget> {
+    pub(super) fn target_for_dock_location(
+        &self,
+        location: LastDockLocation,
+    ) -> Option<DropTarget> {
         if let Ok(columns) = self.main_columns(location.side())
             && let Some(column_id) = columns.get(location.column_index()).copied()
             && let Some(Node::Column(column)) = self.nodes.get(column_id)
@@ -41,23 +54,33 @@ impl Layout {
             if let Some(root_group) = column.groups.get(location.group_index()).copied() {
                 if column.mode.is_rail() {
                     let order = self.column_display_order(column_id).ok()?;
-                    let index = order.iter().position(|item| {
-                        self.is_descendant_or_same(root_group, item.group)
-                    }).unwrap_or(order.len());
-                    return Some(DropTarget::RailSlot { column: column_id, index });
+                    let index = order
+                        .iter()
+                        .position(|item| self.is_descendant_or_same(root_group, item.group))
+                        .unwrap_or(order.len());
+                    return Some(DropTarget::RailSlot {
+                        column: column_id,
+                        index,
+                    });
                 }
                 if let Some(group) = self.first_tabs_in_subtree(root_group) {
                     let child_count = match self.nodes.get(group) {
                         Some(Node::Tabs(tabs)) => tabs.children.len(),
                         _ => return None,
                     };
-                    return Some(DropTarget::Tabs { group, index: child_count });
+                    return Some(DropTarget::Tabs {
+                        group,
+                        index: child_count,
+                    });
                 }
             }
 
             if !column.groups.is_empty() && column.mode.is_rail() {
                 let index = self.column_display_order(column_id).ok()?.len();
-                return Some(DropTarget::RailSlot { column: column_id, index });
+                return Some(DropTarget::RailSlot {
+                    column: column_id,
+                    index,
+                });
             } else if let Some(last_group) = column.groups.last().copied() {
                 return Some(DropTarget::GroupEdge {
                     group: last_group,
@@ -87,9 +110,11 @@ impl Layout {
             if let Some(group) = self.first_tabs_in_subtree(area.root) {
                 let index = match self.nodes.get(group) {
                     Some(Node::Tabs(tabs)) => tabs.children.len(),
-                    _ => return Err(CommandError::InvalidTarget {
-                        reason: "profile default placement did not resolve to a Tabs node",
-                    }),
+                    _ => {
+                        return Err(CommandError::InvalidTarget {
+                            reason: "profile default placement did not resolve to a Tabs node",
+                        });
+                    }
                 };
                 return Ok(DropTarget::Tabs { group, index });
             }
@@ -160,9 +185,11 @@ impl Layout {
                     let Some(Node::Column(column)) = self.nodes.get(column_id) else {
                         continue;
                     };
-                    if let Some(group_index) = column.groups.iter().position(|group| {
-                        self.is_descendant_or_same(*group, node_id)
-                    }) {
+                    if let Some(group_index) = column
+                        .groups
+                        .iter()
+                        .position(|group| self.is_descendant_or_same(*group, node_id))
+                    {
                         return Some(LastDockLocation::new(side, column_index, group_index));
                     }
                 }
@@ -184,15 +211,19 @@ impl Layout {
     pub(super) fn tab_parent_index(&self, node_id: NodeId) -> Option<(NodeId, usize)> {
         let parent = self.find_parent(node_id)?;
         match self.nodes.get(parent) {
-            Some(Node::Tabs(tabs)) => tabs.children.iter().position(|id| *id == node_id).map(|index| (parent, index)),
+            Some(Node::Tabs(tabs)) => tabs
+                .children
+                .iter()
+                .position(|id| *id == node_id)
+                .map(|index| (parent, index)),
             _ => None,
         }
     }
 
     pub(super) fn find_parent(&self, child: NodeId) -> Option<NodeId> {
-        self.nodes.iter().find_map(|(parent, node)| {
-            node_children(node).contains(&child).then_some(parent)
-        })
+        self.nodes
+            .iter()
+            .find_map(|(parent, node)| node_children(node).contains(&child).then_some(parent))
     }
 
     pub(super) fn find_owner_column(&self, group: NodeId) -> Option<NodeId> {
@@ -210,8 +241,13 @@ impl Layout {
         self.nodes.iter().find_map(|(column_id, node)| match node {
             Node::Column(column)
                 if column.mode.is_rail()
-                    && main_roots.iter().any(|root| self.is_descendant_or_same(*root, column_id))
-                    && column.groups.iter().any(|root| self.is_descendant_or_same(*root, group_id)) =>
+                    && main_roots
+                        .iter()
+                        .any(|root| self.is_descendant_or_same(*root, column_id))
+                    && column
+                        .groups
+                        .iter()
+                        .any(|root| self.is_descendant_or_same(*root, group_id)) =>
             {
                 Some(column_id)
             }
@@ -244,7 +280,9 @@ impl Layout {
         let Some(node) = self.nodes.get(root) else {
             return false;
         };
-        node_children(node).into_iter().any(|child| self.is_descendant_or_same(child, target))
+        node_children(node)
+            .into_iter()
+            .any(|child| self.is_descendant_or_same(child, target))
     }
 
     pub(super) fn replace_child(
@@ -257,24 +295,51 @@ impl Layout {
             return Err(CommandError::MissingNode { node: parent });
         };
         let replaced = match parent_node {
-            Node::Split(split) => split.children.iter_mut().find(|id| **id == old_child).map(|id| *id = new_child).is_some(),
-            Node::Tabs(tabs) => tabs.children.iter_mut().find(|id| **id == old_child).map(|id| *id = new_child).is_some(),
-            Node::Column(column) => column.groups.iter_mut().find(|id| **id == old_child).map(|id| *id = new_child).is_some(),
+            Node::Split(split) => split
+                .children
+                .iter_mut()
+                .find(|id| **id == old_child)
+                .map(|id| *id = new_child)
+                .is_some(),
+            Node::Tabs(tabs) => tabs
+                .children
+                .iter_mut()
+                .find(|id| **id == old_child)
+                .map(|id| *id = new_child)
+                .is_some(),
+            Node::Column(column) => column
+                .groups
+                .iter_mut()
+                .find(|id| **id == old_child)
+                .map(|id| *id = new_child)
+                .is_some(),
             Node::Panel(_) => false,
         };
         if replaced {
             Ok(())
         } else {
-            Err(CommandError::InvalidTarget { reason: "target node is not a child of the expected parent" })
+            Err(CommandError::InvalidTarget {
+                reason: "target node is not a child of the expected parent",
+            })
         }
     }
 
-    pub(super) fn set_area_root(&mut self, old_root: NodeId, new_root: NodeId) -> Result<(), CommandError> {
-        if let Some(area) = self.dock_areas.values_mut().find(|area| area.root == old_root) {
+    pub(super) fn set_area_root(
+        &mut self,
+        old_root: NodeId,
+        new_root: NodeId,
+    ) -> Result<(), CommandError> {
+        if let Some(area) = self
+            .dock_areas
+            .values_mut()
+            .find(|area| area.root == old_root)
+        {
             area.root = new_root;
             return Ok(());
         }
-        Err(CommandError::InvalidTarget { reason: "target node is not a registered dock-area root" })
+        Err(CommandError::InvalidTarget {
+            reason: "target node is not a registered dock-area root",
+        })
     }
 
     pub(super) fn detach_node(&mut self, node_id: NodeId) -> Result<(), CommandError> {
@@ -302,9 +367,14 @@ impl Layout {
                             if active_node == Some(node_id) {
                                 tabs.active_index = index;
                             } else if let Some(active_node) = active_node {
-                                tabs.active_index = tabs.children.iter().position(|id| *id == active_node).unwrap_or(index);
+                                tabs.active_index = tabs
+                                    .children
+                                    .iter()
+                                    .position(|id| *id == active_node)
+                                    .unwrap_or(index);
                             } else {
-                                tabs.active_index = index.min(tabs.children.len().saturating_sub(1));
+                                tabs.active_index =
+                                    index.min(tabs.children.len().saturating_sub(1));
                             }
                         } else {
                             tabs.active_index = tabs.children.len().saturating_sub(1);
@@ -319,14 +389,21 @@ impl Layout {
                         }
                     }
                 }
-                Node::Panel(_) => return Err(CommandError::InvalidTarget { reason: "Panel leaves cannot own child nodes" }),
+                Node::Panel(_) => {
+                    return Err(CommandError::InvalidTarget {
+                        reason: "Panel leaves cannot own child nodes",
+                    });
+                }
             }
             return Ok(());
         }
 
         for index in 0..self.main_areas.len() {
             if let Some(area_id) = self.main_areas[index]
-                && self.dock_areas.get(area_id).is_some_and(|area| area.root == node_id)
+                && self
+                    .dock_areas
+                    .get(area_id)
+                    .is_some_and(|area| area.root == node_id)
             {
                 self.main_areas[index] = None;
                 self.dock_areas.remove(area_id);
@@ -334,14 +411,19 @@ impl Layout {
             }
         }
         let floating = self.floating_groups.iter().find_map(|(id, group)| {
-            self.dock_areas.get(group.area).is_some_and(|area| area.root == node_id).then_some((id, group.area))
+            self.dock_areas
+                .get(group.area)
+                .is_some_and(|area| area.root == node_id)
+                .then_some((id, group.area))
         });
         if let Some((group_id, area_id)) = floating {
             self.floating_groups.remove(group_id);
             self.dock_areas.remove(area_id);
             return Ok(());
         }
-        Err(CommandError::InvalidTarget { reason: "node is not attached to a registered dock area or parent" })
+        Err(CommandError::InvalidTarget {
+            reason: "node is not attached to a registered dock area or parent",
+        })
     }
 
     pub(super) fn remove_subtree(&mut self, node_id: NodeId) {
@@ -357,7 +439,10 @@ impl Layout {
         self.nodes.remove(node_id);
     }
 
-    pub(super) fn sync_main_column_ratios(&mut self, column_id: NodeId) -> Result<(), CommandError> {
+    pub(super) fn sync_main_column_ratios(
+        &mut self,
+        column_id: NodeId,
+    ) -> Result<(), CommandError> {
         let Some((side, _)) = self.main_column_position(column_id) else {
             return Ok(());
         };
@@ -365,10 +450,15 @@ impl Layout {
         if columns.len() < 2 {
             return Ok(());
         }
-        let widths: Vec<f32> = columns.iter().map(|id| match self.nodes.get(*id) {
-            Some(Node::Column(column)) => Ok(column.width),
-            _ => Err(CommandError::InvalidTarget { reason: "main horizontal split contains a non-Column child" }),
-        }).collect::<Result<_, _>>()?;
+        let widths: Vec<f32> = columns
+            .iter()
+            .map(|id| match self.nodes.get(*id) {
+                Some(Node::Column(column)) => Ok(column.width),
+                _ => Err(CommandError::InvalidTarget {
+                    reason: "main horizontal split contains a non-Column child",
+                }),
+            })
+            .collect::<Result<_, _>>()?;
         let total: f32 = widths.iter().copied().sum();
         if !total.is_finite() || total <= 0.0 {
             return Err(CommandError::InvalidValue {
@@ -377,9 +467,12 @@ impl Layout {
             });
         }
         let ratios: Vec<f32> = widths.iter().map(|width| *width / total).collect();
-        let area = self.main_area(side).copied().ok_or(CommandError::InvalidTarget {
-            reason: "main dock area disappeared while synchronizing column ratios",
-        })?;
+        let area = self
+            .main_area(side)
+            .copied()
+            .ok_or(CommandError::InvalidTarget {
+                reason: "main dock area disappeared while synchronizing column ratios",
+            })?;
         if let Some(Node::Split(split)) = self.nodes.get_mut(area.root) {
             if split.axis != Axis::X {
                 return Err(CommandError::InvalidTarget {
@@ -390,5 +483,4 @@ impl Layout {
         }
         Ok(())
     }
-
 }

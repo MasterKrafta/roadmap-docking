@@ -23,7 +23,13 @@ impl PanelConstraints {
         max_size: Option<Size>,
         singleton: bool,
     ) -> Self {
-        Self { min_size, preferred_size, max_size, singleton, allowed_areas: AllowedArea::ANY }
+        Self {
+            min_size,
+            preferred_size,
+            max_size,
+            singleton,
+            allowed_areas: AllowedArea::ANY,
+        }
     }
 
     /// Returns the same constraints with an explicit area policy.
@@ -84,13 +90,12 @@ mod tests {
 
     #[test]
     fn rejects_inconsistent_or_non_finite_constraints() {
-        let constraints = PanelConstraints::new(
-            Size::new(300.0, 80.0),
-            Size::new(280.0, 220.0),
-            None,
-            false,
+        let constraints =
+            PanelConstraints::new(Size::new(300.0, 80.0), Size::new(280.0, 220.0), None, false);
+        assert_eq!(
+            constraints.validate(),
+            Err(GeometryError::InconsistentConstraints)
         );
-        assert_eq!(constraints.validate(), Err(GeometryError::InconsistentConstraints));
 
         let constraints = PanelConstraints::new(
             Size::new(1.0, 1.0),

@@ -16,6 +16,11 @@ pub struct SplitterRect {
 
 impl SplitterRect {
     pub const fn new(owner: NodeId, boundary_index: usize, axis: Axis, rect: Rect) -> Self {
-        Self { owner, boundary_index, axis, rect }
+        Self {
+            owner,
+            boundary_index,
+            axis,
+            rect,
+        }
     }
 }

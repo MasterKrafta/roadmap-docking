@@ -7,8 +7,8 @@ new_key_type! {
 
 #[cfg(test)]
 mod tests {
-    use slotmap::SlotMap;
     use super::NodeId;
+    use slotmap::SlotMap;
 
     #[test]
     fn removed_node_id_no_longer_resolves() {

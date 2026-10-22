@@ -3,11 +3,11 @@ use std::collections::{BTreeSet, HashMap};
 use slotmap::SlotMap;
 
 use crate::{
-    layout::WorkspaceLayoutParts, Column, ComputeRectsError, DockArea, DockAreaId, DockMetrics,
-    DockSide, FloatingGroup, FloatingGroupId, GeometryError, Layout, Node, NodeId, Panel,
-    PanelConstraints, PanelId, PanelInstance, PanelKey, Size, Split, Tabs, WorkspaceDiagnostic,
-    WorkspaceFileError, WorkspaceFloatingGroup, WorkspaceLayout, WorkspaceLoadOptions,
-    WorkspaceLoadResult, WorkspaceNode,
+    Column, ComputeRectsError, DockArea, DockAreaId, DockMetrics, DockSide, FloatingGroup,
+    FloatingGroupId, GeometryError, Layout, Node, NodeId, Panel, PanelConstraints, PanelId,
+    PanelInstance, PanelKey, Size, Split, Tabs, WorkspaceDiagnostic, WorkspaceFileError,
+    WorkspaceFloatingGroup, WorkspaceLayout, WorkspaceLoadOptions, WorkspaceLoadResult,
+    WorkspaceNode, layout::WorkspaceLayoutParts,
 };
 
 /// Marker identifying this file as a Roadmap Docking workspace.
@@ -57,9 +57,8 @@ impl WorkspaceFile {
                     "floating group {group_id:?} references a missing dock area"
                 ))
             })?;
-            area.validate_metadata().map_err(|reason| {
-                WorkspaceFileError::InvalidRuntimeLayout(reason.to_owned())
-            })?;
+            area.validate_metadata()
+                .map_err(|reason| WorkspaceFileError::InvalidRuntimeLayout(reason.to_owned()))?;
             let root = node_to_workspace(layout, area.root)?;
             floating_groups.push(WorkspaceFloatingGroup {
                 root,
@@ -107,9 +106,13 @@ impl WorkspaceFile {
         let version_u64 = value
             .get("version")
             .and_then(serde_json::Value::as_u64)
-            .ok_or_else(|| WorkspaceFileError::Json("missing non-negative integer field 'version'".to_owned()))?;
+            .ok_or_else(|| {
+                WorkspaceFileError::Json("missing non-negative integer field 'version'".to_owned())
+            })?;
         let version = u32::try_from(version_u64).map_err(|_| {
-            WorkspaceFileError::Json("workspace version is outside the supported integer range".to_owned())
+            WorkspaceFileError::Json(
+                "workspace version is outside the supported integer range".to_owned(),
+            )
         })?;
         if !matches!(version, 1 | WORKSPACE_VERSION) {
             return Err(WorkspaceFileError::UnsupportedVersion {
@@ -318,13 +321,13 @@ impl WorkspaceFile {
                         "cannot clamp floating group {index}: {other}"
                     )),
                 })?;
-            diagnostics.extend(changes.into_iter().map(
-                |(index, original, clamped)| WorkspaceDiagnostic::FloatingBoundsClamped {
+            diagnostics.extend(changes.into_iter().map(|(index, original, clamped)| {
+                WorkspaceDiagnostic::FloatingBoundsClamped {
                     index,
                     original,
                     clamped,
-                },
-            ));
+                }
+            }));
         }
 
         match layout.normalize_for_workspace_load(metrics) {
@@ -333,7 +336,10 @@ impl WorkspaceFile {
             Err(issues) => return Err(WorkspaceFileError::InvalidLayout(issues)),
         }
 
-        Ok(WorkspaceLoadResult { layout, diagnostics })
+        Ok(WorkspaceLoadResult {
+            layout,
+            diagnostics,
+        })
     }
 
     fn validate_header(&self) -> Result<(), WorkspaceFileError> {
@@ -472,7 +478,12 @@ fn restore_node(
                 .iter()
                 .map(|child| {
                     restore_node(
-                        child, descriptors, metrics, unknown_panel_keys, nodes, panel_instances,
+                        child,
+                        descriptors,
+                        metrics,
+                        unknown_panel_keys,
+                        nodes,
+                        panel_instances,
                     )
                 })
                 .collect::<Result<_, _>>()?;
@@ -491,7 +502,12 @@ fn restore_node(
                 .iter()
                 .map(|child| {
                     restore_node(
-                        child, descriptors, metrics, unknown_panel_keys, nodes, panel_instances,
+                        child,
+                        descriptors,
+                        metrics,
+                        unknown_panel_keys,
+                        nodes,
+                        panel_instances,
                     )
                 })
                 .collect::<Result<_, _>>()?;
@@ -506,11 +522,8 @@ fn restore_node(
                 unknown_panel_keys.insert(key.as_str().to_owned());
                 placeholder_constraints(metrics)
             });
-            let panel_id = panel_instances.insert(PanelInstance::with_state(
-                key.clone(),
-                constraints,
-                *state,
-            ));
+            let panel_id =
+                panel_instances.insert(PanelInstance::with_state(key.clone(), constraints, *state));
             Node::Panel(Panel::new(panel_id))
         }
         WorkspaceNode::Column {
@@ -524,7 +537,12 @@ fn restore_node(
                 .iter()
                 .map(|group| {
                     restore_node(
-                        group, descriptors, metrics, unknown_panel_keys, nodes, panel_instances,
+                        group,
+                        descriptors,
+                        metrics,
+                        unknown_panel_keys,
+                        nodes,
+                        panel_instances,
                     )
                 })
                 .collect::<Result<_, _>>()?;

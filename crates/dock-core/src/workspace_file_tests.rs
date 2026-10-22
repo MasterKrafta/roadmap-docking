@@ -1,8 +1,8 @@
 use crate::layout_builder::LayoutBuilder;
 use crate::{
     Axis, CanvasState, ChromeMode, ColumnMode, DockMetrics, DockSide, Layout, PanelConstraints,
-    PanelKey, PanelState, Point, Profile, Rect, Size, WorkspaceDiagnostic, WorkspaceFile,
-    WorkspaceFileError, WorkspaceLoadOptions, WorkspaceNode, WORKSPACE_VERSION,
+    PanelKey, PanelState, Point, Profile, Rect, Size, WORKSPACE_VERSION, WorkspaceDiagnostic,
+    WorkspaceFile, WorkspaceFileError, WorkspaceLoadOptions, WorkspaceNode,
 };
 
 fn key(value: &str) -> PanelKey {
@@ -25,12 +25,7 @@ fn sample_layout() -> (Layout, Vec<(PanelKey, PanelConstraints)>) {
     let (_, history_node) = builder.panel(key("history"), constraints());
 
     let group = builder.tabs(vec![layers_node, color_node], 1, true);
-    let column = builder.column(
-        280.0,
-        ColumnMode::Expanded,
-        vec![group],
-        vec![1.0],
-    );
+    let column = builder.column(280.0, ColumnMode::Expanded, vec![group], vec![1.0]);
     builder.main_area(DockSide::Right, column);
 
     let floating_root = builder.tabs(vec![history_node], 0, false);
@@ -101,10 +96,7 @@ fn versioned_json_round_trip_preserves_structure_without_runtime_keys() {
     assert_eq!(restored.chrome(), ChromeMode::DockHidden);
     assert_eq!(
         restored.canvas().last_known_bounds(),
-        Some(Rect::new(
-            Point::new(280.0, 0.0),
-            Size::new(800.0, 600.0)
-        ))
+        Some(Rect::new(Point::new(280.0, 0.0), Size::new(800.0, 600.0)))
     );
     assert_eq!(restored.version(), 0);
     assert!(restored.flyout().is_none());
@@ -128,10 +120,7 @@ fn versioned_json_round_trip_preserves_structure_without_runtime_keys() {
     };
     let panel = restored.panel_instance(panel_leaf.panel_id).unwrap();
     assert_eq!(panel.key.as_str(), "layers");
-    assert_eq!(
-        panel.state.last_known_size(),
-        Some(Size::new(240.0, 190.0))
-    );
+    assert_eq!(panel.state.last_known_size(), Some(Size::new(240.0, 190.0)));
 
     let floating = restored.floating_groups_in_paint_order();
     assert_eq!(floating.len(), 1);
@@ -144,8 +133,7 @@ fn versioned_json_round_trip_preserves_structure_without_runtime_keys() {
     let Some(crate::Node::Tabs(floating_tabs)) = restored.node(floating_area.root) else {
         panic!("restored floating root must be tabs");
     };
-    let Some(crate::Node::Panel(floating_panel_leaf)) =
-        restored.node(floating_tabs.children[0])
+    let Some(crate::Node::Panel(floating_panel_leaf)) = restored.node(floating_tabs.children[0])
     else {
         panic!("restored floating tab child must be a panel");
     };
@@ -175,10 +163,12 @@ fn version_one_workspace_migrates_to_current_version_with_diagnostic() {
     let (migrated, parse_diagnostics) =
         WorkspaceFile::from_json_with_diagnostics(&old_json).unwrap();
     assert_eq!(migrated.version, WORKSPACE_VERSION);
-    assert!(parse_diagnostics.contains(&WorkspaceDiagnostic::SchemaMigrated {
-        from: 1,
-        to: WORKSPACE_VERSION,
-    }));
+    assert!(
+        parse_diagnostics.contains(&WorkspaceDiagnostic::SchemaMigrated {
+            from: 1,
+            to: WORKSPACE_VERSION,
+        })
+    );
     assert!(matches!(
         migrated.layout.right,
         Some(WorkspaceNode::Column {
@@ -194,10 +184,14 @@ fn version_one_workspace_migrates_to_current_version_with_diagnostic() {
         WorkspaceLoadOptions::default(),
     )
     .unwrap();
-    assert!(report.diagnostics.contains(&WorkspaceDiagnostic::SchemaMigrated {
-        from: 1,
-        to: WORKSPACE_VERSION,
-    }));
+    assert!(
+        report
+            .diagnostics
+            .contains(&WorkspaceDiagnostic::SchemaMigrated {
+                from: 1,
+                to: WORKSPACE_VERSION,
+            })
+    );
     assert_eq!(report.layout.validate(&metrics), Ok(()));
 }
 
@@ -277,11 +271,13 @@ fn unknown_panel_keys_are_preserved_as_placeholders_with_warning() {
     )
     .unwrap();
 
-    assert!(report.diagnostics.contains(
-        &WorkspaceDiagnostic::UnknownPanelKeyPreserved {
-            key: "history".to_owned()
-        }
-    ));
+    assert!(
+        report
+            .diagnostics
+            .contains(&WorkspaceDiagnostic::UnknownPanelKeyPreserved {
+                key: "history".to_owned()
+            })
+    );
     assert!(report.layout.validate(&metrics).is_ok());
     assert_eq!(
         report
@@ -402,13 +398,15 @@ fn floating_bounds_are_clamped_to_current_visible_client_region() {
     .unwrap();
 
     let expected = Rect::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
-    assert!(report.diagnostics.contains(
-        &WorkspaceDiagnostic::FloatingBoundsClamped {
-            index: 0,
-            original: Rect::new(Point::new(44.0, 55.0), Size::new(420.0, 320.0)),
-            clamped: expected,
-        }
-    ));
+    assert!(
+        report
+            .diagnostics
+            .contains(&WorkspaceDiagnostic::FloatingBoundsClamped {
+                index: 0,
+                original: Rect::new(Point::new(44.0, 55.0), Size::new(420.0, 320.0)),
+                clamped: expected,
+            })
+    );
     let floating = report.layout.floating_groups_in_paint_order();
     assert_eq!(floating[0].1.bounds, expected);
     assert!(report.layout.validate(&metrics).is_ok());

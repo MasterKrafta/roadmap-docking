@@ -47,11 +47,21 @@ mod tests {
     #[test]
     fn serde_round_trip_preserves_zone_kinds() {
         for zone in [
-            DropZone::Left, DropZone::Right, DropZone::Top, DropZone::Bottom,
-            DropZone::Center, DropZone::TabInsertion, DropZone::ColumnLeft,
-            DropZone::ColumnRight, DropZone::ColumnEnd, DropZone::DockEdge,
-            DropZone::FloatingCenter, DropZone::FloatingTop, DropZone::FloatingBottom,
-            DropZone::FreeArea, DropZone::RailInsertion,
+            DropZone::Left,
+            DropZone::Right,
+            DropZone::Top,
+            DropZone::Bottom,
+            DropZone::Center,
+            DropZone::TabInsertion,
+            DropZone::ColumnLeft,
+            DropZone::ColumnRight,
+            DropZone::ColumnEnd,
+            DropZone::DockEdge,
+            DropZone::FloatingCenter,
+            DropZone::FloatingTop,
+            DropZone::FloatingBottom,
+            DropZone::FreeArea,
+            DropZone::RailInsertion,
         ] {
             let encoded = serde_json::to_string(&zone).unwrap();
             assert_eq!(serde_json::from_str::<DropZone>(&encoded).unwrap(), zone);

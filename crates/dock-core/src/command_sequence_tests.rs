@@ -10,9 +10,8 @@ use slotmap::Key;
 
 use crate::layout_builder::LayoutBuilder;
 use crate::{
-    Axis, ChromeMode, ColumnMode, DockCommand, DockMetrics, DockSide,
-    DropTarget, DropZone, Layout, Node, NodeId, PanelConstraints, PanelId,
-    PanelKey, Point, Profile, Rect, Size,
+    Axis, ChromeMode, ColumnMode, DockCommand, DockMetrics, DockSide, DropTarget, DropZone, Layout,
+    Node, NodeId, PanelConstraints, PanelId, PanelKey, Point, Profile, Rect, Size,
 };
 
 fn constraints() -> PanelConstraints {
@@ -53,12 +52,7 @@ fn sequence_layout() -> Layout {
             }
             groups.push(builder.tabs(panels, 0, false));
         }
-        columns.push(builder.column(
-            280.0,
-            ColumnMode::Expanded,
-            groups,
-            vec![0.5, 0.5],
-        ));
+        columns.push(builder.column(280.0, ColumnMode::Expanded, groups, vec![0.5, 0.5]));
     }
 
     let root = builder.split(Axis::X, columns, vec![0.5, 0.5]);
@@ -125,9 +119,7 @@ fn is_group_in_icon_rail(layout: &Layout, group: NodeId) -> bool {
     [DockSide::Left, DockSide::Right]
         .into_iter()
         .flat_map(|side| main_columns(layout, side))
-        .any(|(_, groups, _, mode, _)| {
-            mode.is_rail() && groups.contains(&group)
-        })
+        .any(|(_, groups, _, mode, _)| mode.is_rail() && groups.contains(&group))
 }
 
 fn nodes_in_subtree(layout: &Layout, root: NodeId) -> HashSet<NodeId> {
@@ -163,11 +155,7 @@ fn main_tab_groups(layout: &Layout) -> Vec<(NodeId, Vec<NodeId>, usize, bool)> {
         .collect()
 }
 
-fn assert_rejected_atomically(
-    layout: &mut Layout,
-    command: DockCommand,
-    metrics: &DockMetrics,
-) {
+fn assert_rejected_atomically(layout: &mut Layout, command: DockCommand, metrics: &DockMetrics) {
     let description = format!("{command:?}");
     let before = format!("{layout:?}");
     let version = layout.version();
@@ -177,9 +165,17 @@ fn assert_rejected_atomically(
         result.is_err(),
         "expected {description} to be rejected, got {result:?}"
     );
-    assert_eq!(format!("{layout:?}"), before, "{description} mutated Layout");
+    assert_eq!(
+        format!("{layout:?}"),
+        before,
+        "{description} mutated Layout"
+    );
     assert_eq!(layout.version(), version, "{description} changed version");
-    assert_eq!(layout.validate(metrics), Ok(()), "rollback left invalid Layout");
+    assert_eq!(
+        layout.validate(metrics),
+        Ok(()),
+        "rollback left invalid Layout"
+    );
 }
 
 #[test]
@@ -323,7 +319,10 @@ fn existing_but_wrong_node_types_and_forbidden_targets_are_rejected_atomically()
 
     let wrong_type_commands = vec![
         DockCommand::CloseGroup { group: column },
-        DockCommand::ActivateTab { group: column, panel },
+        DockCommand::ActivateTab {
+            group: column,
+            panel,
+        },
         DockCommand::ReorderTab {
             group: column,
             panel,
@@ -490,11 +489,7 @@ fn source_equals_target_and_same_position_commands_are_successful_noops() {
     }
 }
 
-fn valid_commands(
-    layout: &Layout,
-    metrics: &DockMetrics,
-    serial: &mut usize,
-) -> Vec<DockCommand> {
+fn valid_commands(layout: &Layout, metrics: &DockMetrics, serial: &mut usize) -> Vec<DockCommand> {
     let groups = tab_groups(layout);
     let main_groups = main_tab_groups(layout);
     let panels = panel_nodes(layout);
@@ -542,12 +537,13 @@ fn valid_commands(
 
     for (group, children, active_index, collapsed) in &groups {
         if children.len() > 1 {
-            if let Some(panel_id) = children
-                .get(*active_index)
-                .and_then(|node_id| match layout.node(*node_id) {
-                    Some(Node::Panel(panel)) => Some(panel.panel_id),
-                    _ => None,
-                })
+            if let Some(panel_id) =
+                children
+                    .get(*active_index)
+                    .and_then(|node_id| match layout.node(*node_id) {
+                        Some(Node::Panel(panel)) => Some(panel.panel_id),
+                        _ => None,
+                    })
             {
                 commands.push(DockCommand::ReorderTab {
                     group: *group,
@@ -593,8 +589,7 @@ fn valid_commands(
             .find(|(_, children, _, _)| children.contains(panel_node))
             .map(|(group, _, _, _)| *group);
         for (target_group, children, _, _) in &groups {
-            if Some(*target_group) != source_group
-                && !is_group_in_icon_rail(layout, *target_group)
+            if Some(*target_group) != source_group && !is_group_in_icon_rail(layout, *target_group)
             {
                 commands.push(DockCommand::MovePanel {
                     panel: *panel_id,
@@ -847,7 +842,6 @@ mod tests {
     }
 }
 
-
 fn logical_node(layout: &Layout, node_id: NodeId) -> String {
     match layout.node(node_id) {
         Some(Node::Panel(panel)) => match layout.panel_instance(panel.panel_id) {
@@ -873,7 +867,8 @@ fn logical_node(layout: &Layout, node_id: NodeId) -> String {
             "Split(axis={:?},ratios={:?},children=[{}])",
             split.axis,
             split.ratios,
-            split.children
+            split
+                .children
                 .iter()
                 .map(|child| logical_node(layout, *child))
                 .collect::<Vec<_>>()
@@ -917,13 +912,9 @@ fn logical_snapshot(layout: &Layout) -> String {
     let mut floating = layout
         .floating_groups()
         .filter_map(|(_, group)| {
-            layout.dock_area(group.area).map(|area| {
-                (
-                    group.z_order,
-                    group.bounds,
-                    logical_node(layout, area.root),
-                )
-            })
+            layout
+                .dock_area(group.area)
+                .map(|area| (group.z_order, group.bounds, logical_node(layout, area.root)))
         })
         .collect::<Vec<_>>();
     floating.sort_by_key(|(z_order, _, _)| *z_order);
@@ -963,9 +954,7 @@ fn floating_group_for_panel(layout: &Layout, wanted_panel: PanelId) -> crate::Fl
 fn panel_id_for_key(layout: &Layout, wanted: &str) -> PanelId {
     layout
         .panel_instances()
-        .find_map(|(panel_id, instance)| {
-            (instance.key.as_str() == wanted).then_some(panel_id)
-        })
+        .find_map(|(panel_id, instance)| (instance.key.as_str() == wanted).then_some(panel_id))
         .expect("test layout contains the requested panel key")
 }
 
@@ -985,8 +974,7 @@ fn reordered_id_layout() -> Layout {
     // allocate runtime instances/leaves in reverse key order.
     let mut builder = LayoutBuilder::new(Profile::Generic);
     let (_, history) = builder.panel(PanelKey::new("history").unwrap(), constraints());
-    let (_, properties) =
-        builder.panel(PanelKey::new("properties").unwrap(), constraints());
+    let (_, properties) = builder.panel(PanelKey::new("properties").unwrap(), constraints());
     let (_, color) = builder.panel(PanelKey::new("color").unwrap(), constraints());
     let (_, layers) = builder.panel(PanelKey::new("layers").unwrap(), constraints());
 

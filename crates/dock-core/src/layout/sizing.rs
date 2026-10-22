@@ -1,5 +1,5 @@
-use super::*;
 use super::helpers::*;
+use super::*;
 
 impl Layout {
     pub(super) fn group_is_collapsed(&self, group_id: NodeId) -> bool {
@@ -13,18 +13,26 @@ impl Layout {
     ) -> Result<Vec<f32>, CommandError> {
         let column = match self.nodes.get(column_id) {
             Some(Node::Column(column)) => column,
-            Some(_) => return Err(CommandError::InvalidTarget {
-                reason: "group height constraints require a Column node",
-            }),
+            Some(_) => {
+                return Err(CommandError::InvalidTarget {
+                    reason: "group height constraints require a Column node",
+                });
+            }
             None => return Err(CommandError::MissingNode { node: column_id }),
         };
-        column.groups.iter().map(|group| {
-            if self.group_is_collapsed(*group) {
-                Ok(0.0)
-            } else {
-                Ok(metrics.min_group_height.max(self.minimum_node_size(*group, metrics)?.height))
-            }
-        }).collect()
+        column
+            .groups
+            .iter()
+            .map(|group| {
+                if self.group_is_collapsed(*group) {
+                    Ok(0.0)
+                } else {
+                    Ok(metrics
+                        .min_group_height
+                        .max(self.minimum_node_size(*group, metrics)?.height))
+                }
+            })
+            .collect()
     }
 
     pub(super) fn group_heights_for_available_height(
@@ -35,9 +43,11 @@ impl Layout {
     ) -> Result<Vec<f32>, CommandError> {
         let ratios = match self.nodes.get(column_id) {
             Some(Node::Column(column)) => column.group_ratios.clone(),
-            Some(_) => return Err(CommandError::InvalidTarget {
-                reason: "group height calculation requires a Column node",
-            }),
+            Some(_) => {
+                return Err(CommandError::InvalidTarget {
+                    reason: "group height calculation requires a Column node",
+                });
+            }
             None => return Err(CommandError::MissingNode { node: column_id }),
         };
         self.group_heights_for_ratios(column_id, &ratios, available_height, metrics)
@@ -52,9 +62,11 @@ impl Layout {
     ) -> Result<Vec<f32>, CommandError> {
         let column = match self.nodes.get(column_id) {
             Some(Node::Column(column)) => column,
-            Some(_) => return Err(CommandError::InvalidTarget {
-                reason: "group height calculation requires a Column node",
-            }),
+            Some(_) => {
+                return Err(CommandError::InvalidTarget {
+                    reason: "group height calculation requires a Column node",
+                });
+            }
             None => return Err(CommandError::MissingNode { node: column_id }),
         };
         if ratios.len() != column.groups.len() {
@@ -101,7 +113,12 @@ impl Layout {
         }
         for (index, weight) in expanded_indices.into_iter().zip(weights) {
             heights[index] = if total_weight <= f32::EPSILON {
-                free_height / column.groups.iter().filter(|group| !self.group_is_collapsed(**group)).count() as f32
+                free_height
+                    / column
+                        .groups
+                        .iter()
+                        .filter(|group| !self.group_is_collapsed(**group))
+                        .count() as f32
             } else {
                 free_height * weight / total_weight
             };
@@ -117,9 +134,11 @@ impl Layout {
     ) -> Result<Vec<f32>, CommandError> {
         let column = match self.nodes.get(column_id) {
             Some(Node::Column(column)) => column,
-            Some(_) => return Err(CommandError::InvalidTarget {
-                reason: "group height reset requires a Column node",
-            }),
+            Some(_) => {
+                return Err(CommandError::InvalidTarget {
+                    reason: "group height reset requires a Column node",
+                });
+            }
             None => return Err(CommandError::MissingNode { node: column_id }),
         };
         let mut heights = vec![0.0; column.groups.len()];
@@ -138,9 +157,13 @@ impl Layout {
         }
         let free_height = available_height - fixed_height;
         let all_minimums = self.group_minimum_heights(column_id, metrics)?;
-        let minimums: Vec<f32> = expanded_indices.iter().map(|index| all_minimums[*index]).collect();
+        let minimums: Vec<f32> = expanded_indices
+            .iter()
+            .map(|index| all_minimums[*index])
+            .collect();
         let equal_weights = vec![1.0; expanded_indices.len()];
-        let expanded_heights = distribute_heights_with_minimums(free_height, &minimums, &equal_weights)?;
+        let expanded_heights =
+            distribute_heights_with_minimums(free_height, &minimums, &equal_weights)?;
         for (index, height) in expanded_indices.into_iter().zip(expanded_heights) {
             heights[index] = height;
         }
@@ -154,9 +177,11 @@ impl Layout {
     ) -> Result<Vec<f32>, CommandError> {
         let column = match self.nodes.get(column_id) {
             Some(Node::Column(column)) => column,
-            Some(_) => return Err(CommandError::InvalidTarget {
-                reason: "group ratio calculation requires a Column node",
-            }),
+            Some(_) => {
+                return Err(CommandError::InvalidTarget {
+                    reason: "group ratio calculation requires a Column node",
+                });
+            }
             None => return Err(CommandError::MissingNode { node: column_id }),
         };
         if heights.len() != column.groups.len() {
@@ -165,7 +190,10 @@ impl Layout {
                 reason: "group height count must match group count",
             });
         }
-        let expanded_height: f32 = column.groups.iter().enumerate()
+        let expanded_height: f32 = column
+            .groups
+            .iter()
+            .enumerate()
             .filter(|(_, group)| !self.group_is_collapsed(**group))
             .map(|(index, _)| heights[index])
             .sum();
@@ -211,10 +239,12 @@ impl Layout {
             });
         }
         let new_bounds = Rect::new(new_origin, Size::new(new_width, bounds.size.height));
-        new_bounds.validate_non_empty().map_err(|error| CommandError::InvalidValue {
-            field: "canvas_bounds",
-            reason: geometry_error_reason(error),
-        })?;
+        new_bounds
+            .validate_non_empty()
+            .map_err(|error| CommandError::InvalidValue {
+                field: "canvas_bounds",
+                reason: geometry_error_reason(error),
+            })?;
         self.canvas.last_known_bounds = Some(new_bounds);
         Ok(())
     }
@@ -226,7 +256,11 @@ impl Layout {
     ) -> Result<f32, CommandError> {
         let column = match self.nodes.get(column_id) {
             Some(Node::Column(column)) => column,
-            Some(_) => return Err(CommandError::InvalidTarget { reason: "target must be a Column node" }),
+            Some(_) => {
+                return Err(CommandError::InvalidTarget {
+                    reason: "target must be a Column node",
+                });
+            }
             None => return Err(CommandError::MissingNode { node: column_id }),
         };
         match column.mode {
@@ -243,9 +277,11 @@ impl Layout {
     ) -> Result<f32, CommandError> {
         let column = match self.nodes.get(column_id) {
             Some(Node::Column(column)) => column,
-            Some(_) => return Err(CommandError::InvalidTarget {
-                reason: "expanded minimum width requires a Column node",
-            }),
+            Some(_) => {
+                return Err(CommandError::InvalidTarget {
+                    reason: "expanded minimum width requires a Column node",
+                });
+            }
             None => return Err(CommandError::MissingNode { node: column_id }),
         };
         let mut minimum = metrics.min_column_width;
@@ -268,9 +304,11 @@ impl Layout {
     ) -> Result<Option<f32>, CommandError> {
         let column = match self.nodes.get(column_id) {
             Some(Node::Column(column)) => column,
-            Some(_) => return Err(CommandError::InvalidTarget {
-                reason: "column max-width calculation requires a Column node",
-            }),
+            Some(_) => {
+                return Err(CommandError::InvalidTarget {
+                    reason: "column max-width calculation requires a Column node",
+                });
+            }
             None => return Err(CommandError::MissingNode { node: column_id }),
         };
         let mut maximum: Option<f32> = None;
@@ -279,11 +317,15 @@ impl Layout {
                 let Some(Node::Panel(panel)) = self.nodes.get(panel_node) else {
                     continue;
                 };
-                let instance = self.panel_instances.get(panel.panel_id).ok_or(
-                    CommandError::MissingPanel { panel: panel.panel_id },
-                )?;
+                let instance =
+                    self.panel_instances
+                        .get(panel.panel_id)
+                        .ok_or(CommandError::MissingPanel {
+                            panel: panel.panel_id,
+                        })?;
                 if let Some(max_size) = instance.constraints.max_size {
-                    maximum = Some(maximum.map_or(max_size.width, |current| current.min(max_size.width)));
+                    maximum =
+                        Some(maximum.map_or(max_size.width, |current| current.min(max_size.width)));
                 }
             }
         }
@@ -296,9 +338,11 @@ impl Layout {
     ) -> Result<Option<f32>, CommandError> {
         let column = match self.nodes.get(column_id) {
             Some(Node::Column(column)) => column,
-            Some(_) => return Err(CommandError::InvalidTarget {
-                reason: "column max-width calculation requires a Column node",
-            }),
+            Some(_) => {
+                return Err(CommandError::InvalidTarget {
+                    reason: "column max-width calculation requires a Column node",
+                });
+            }
             None => return Err(CommandError::MissingNode { node: column_id }),
         };
         if column.mode.is_rail() {
@@ -311,11 +355,20 @@ impl Layout {
         node_id: NodeId,
         metrics: &DockMetrics,
     ) -> Result<Size, CommandError> {
-        let node = self.nodes.get(node_id).ok_or(CommandError::MissingNode { node: node_id })?;
+        let node = self
+            .nodes
+            .get(node_id)
+            .ok_or(CommandError::MissingNode { node: node_id })?;
         let size = match node {
-            Node::Panel(panel) => self.panel_instances.get(panel.panel_id).ok_or(
-                CommandError::MissingPanel { panel: panel.panel_id },
-            )?.constraints.min_size,
+            Node::Panel(panel) => {
+                self.panel_instances
+                    .get(panel.panel_id)
+                    .ok_or(CommandError::MissingPanel {
+                        panel: panel.panel_id,
+                    })?
+                    .constraints
+                    .min_size
+            }
             Node::Tabs(tabs) => {
                 let mut width: f32 = 0.0;
                 let mut height: f32 = 0.0;
@@ -368,12 +421,20 @@ impl Layout {
         if size.is_finite() && size.width > 0.0 && size.height > 0.0 {
             Ok(size)
         } else {
-            Err(CommandError::InvalidValue { field: "size", reason: "computed minimum size is not finite and positive" })
+            Err(CommandError::InvalidValue {
+                field: "size",
+                reason: "computed minimum size is not finite and positive",
+            })
         }
     }
 
     pub(super) fn next_floating_z_order(&self) -> Result<i32, CommandError> {
-        match self.floating_groups.values().map(|group| group.z_order).max() {
+        match self
+            .floating_groups
+            .values()
+            .map(|group| group.z_order)
+            .max()
+        {
             Some(value) => value.checked_add(1).ok_or(CommandError::InvalidValue {
                 field: "z_order",
                 reason: "floating z-order overflow",
@@ -381,5 +442,4 @@ impl Layout {
             None => Ok(0),
         }
     }
-
 }

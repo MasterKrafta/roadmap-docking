@@ -34,7 +34,10 @@ pub fn create_initial_layout(
     }
 
     for key in REQUIRED_PANEL_KEYS {
-        if !descriptors.iter().any(|(candidate, _)| candidate.as_str() == key) {
+        if !descriptors
+            .iter()
+            .any(|(candidate, _)| candidate.as_str() == key)
+        {
             return Err(match key {
                 "layers" => "missing required panel descriptor: layers",
                 "color" => "missing required panel descriptor: color",
@@ -55,8 +58,7 @@ pub fn create_initial_layout(
     let (color_key, color_constraints) = descriptor("color").expect("required key checked");
     let (properties_key, properties_constraints) =
         descriptor("properties").expect("required key checked");
-    let (history_key, history_constraints) =
-        descriptor("history").expect("required key checked");
+    let (history_key, history_constraints) = descriptor("history").expect("required key checked");
 
     let mut panel_instances = SlotMap::<PanelId, PanelInstance>::with_key();
     let layers_id = panel_instances.insert(PanelInstance::new(layers_key, layers_constraints));
@@ -114,12 +116,7 @@ mod tests {
     use crate::{Column, DockMetrics, DockSide, Node, PanelConstraints, PanelKey, Profile, Size};
 
     fn baseline_panel_constraints() -> PanelConstraints {
-        PanelConstraints::new(
-            Size::new(120.0, 80.0),
-            Size::new(280.0, 220.0),
-            None,
-            false,
-        )
+        PanelConstraints::new(Size::new(120.0, 80.0), Size::new(280.0, 220.0), None, false)
     }
 
     fn descriptors() -> Vec<(PanelKey, PanelConstraints)> {
@@ -206,12 +203,8 @@ mod tests {
         assert!(create_initial_layout(Profile::Generic, &descriptors(), metrics).is_err());
 
         let mut items = descriptors();
-        items[0].1 = PanelConstraints::new(
-            Size::new(400.0, 80.0),
-            Size::new(280.0, 220.0),
-            None,
-            false,
-        );
+        items[0].1 =
+            PanelConstraints::new(Size::new(400.0, 80.0), Size::new(280.0, 220.0), None, false);
         assert!(create_initial_layout(Profile::Generic, &items, DockMetrics::default()).is_err());
     }
 

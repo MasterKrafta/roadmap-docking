@@ -180,7 +180,11 @@ fn normalize_refuses_to_hide_missing_links_or_cycles_and_is_transactional() {
     column.group_ratios.push(0.0);
 
     let errors = broken_link.normalize(&DockMetrics::default()).unwrap_err();
-    assert!(errors.iter().any(|error| matches!(error, ValidationError::MissingNode { .. })));
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, ValidationError::MissingNode { .. }))
+    );
     assert_eq!(broken_link.nodes().count(), node_count);
     let Node::Column(column) = broken_link.node(root).unwrap() else {
         unreachable!();
@@ -196,13 +200,16 @@ fn normalize_refuses_to_hide_missing_links_or_cycles_and_is_transactional() {
     column.group_ratios.push(0.0);
 
     let errors = cycle.normalize(&DockMetrics::default()).unwrap_err();
-    assert!(errors.iter().any(|error| matches!(error, ValidationError::NodeCycle { .. })));
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, ValidationError::NodeCycle { .. }))
+    );
     let Node::Column(column) = cycle.node(root).unwrap() else {
         unreachable!();
     };
     assert_eq!(column.groups.last().copied(), Some(root));
 }
-
 
 #[test]
 fn normalize_removes_an_empty_column_and_its_main_area() {

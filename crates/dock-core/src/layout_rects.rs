@@ -65,6 +65,9 @@ mod tests {
     fn empty_snapshot_round_trips_through_serde() {
         let rects = LayoutRects::default();
         let encoded = serde_json::to_string(&rects).unwrap();
-        assert_eq!(serde_json::from_str::<LayoutRects>(&encoded).unwrap(), rects);
+        assert_eq!(
+            serde_json::from_str::<LayoutRects>(&encoded).unwrap(),
+            rects
+        );
     }
 }

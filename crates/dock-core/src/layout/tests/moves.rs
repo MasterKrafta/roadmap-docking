@@ -5,7 +5,10 @@ fn c44_horizontal_split_creates_a_neighbor_column_with_semantic_order() {
     let metrics = DockMetrics::default();
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
 
-    let (_, source_panel) = builder.panel(PanelKey::new("c44-horizontal-source").unwrap(), descriptors()[0].1);
+    let (_, source_panel) = builder.panel(
+        PanelKey::new("c44-horizontal-source").unwrap(),
+        descriptors()[0].1,
+    );
     let source_group = builder.tabs(vec![source_panel], 0, true);
     let source_column = builder.column(
         metrics.default_column_width,
@@ -15,7 +18,10 @@ fn c44_horizontal_split_creates_a_neighbor_column_with_semantic_order() {
     );
     builder.main_area(DockSide::Left, source_column);
 
-    let (_, target_panel) = builder.panel(PanelKey::new("c44-horizontal-target").unwrap(), descriptors()[0].1);
+    let (_, target_panel) = builder.panel(
+        PanelKey::new("c44-horizontal-target").unwrap(),
+        descriptors()[0].1,
+    );
     let target_group = builder.tabs(vec![target_panel], 0, false);
     let target_column = builder.column(
         metrics.default_column_width,
@@ -28,15 +34,17 @@ fn c44_horizontal_split_creates_a_neighbor_column_with_semantic_order() {
     let mut layout = builder.build();
     assert_eq!(layout.validate(&metrics), Ok(()));
 
-    layout.apply(
-        DockCommand::SplitGroup {
-            group: source_group,
-            target_group,
-            zone: DropZone::Right,
-            ratio: 0.25,
-        },
-        &metrics,
-    ).unwrap();
+    layout
+        .apply(
+            DockCommand::SplitGroup {
+                group: source_group,
+                target_group,
+                zone: DropZone::Right,
+                ratio: 0.25,
+            },
+            &metrics,
+        )
+        .unwrap();
 
     let root = layout.main_area(DockSide::Right).unwrap().root;
     let Node::Split(split) = layout.node(root).unwrap() else {
@@ -64,9 +72,12 @@ fn c44_group_move_preserves_tabs_state_across_column_floating_and_docking() {
     let metrics = DockMetrics::default();
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
 
-    let (panel_a, node_a) = builder.panel(PanelKey::new("c44-panel-a").unwrap(), descriptors()[0].1);
-    let (panel_b, node_b) = builder.panel(PanelKey::new("c44-panel-b").unwrap(), descriptors()[0].1);
-    let (panel_c, node_c) = builder.panel(PanelKey::new("c44-panel-c").unwrap(), descriptors()[0].1);
+    let (panel_a, node_a) =
+        builder.panel(PanelKey::new("c44-panel-a").unwrap(), descriptors()[0].1);
+    let (panel_b, node_b) =
+        builder.panel(PanelKey::new("c44-panel-b").unwrap(), descriptors()[0].1);
+    let (panel_c, node_c) =
+        builder.panel(PanelKey::new("c44-panel-c").unwrap(), descriptors()[0].1);
     let source_group = builder.tabs(vec![node_a, node_b, node_c], 1, true);
     let source_column = builder.column(
         metrics.default_column_width,
@@ -76,7 +87,8 @@ fn c44_group_move_preserves_tabs_state_across_column_floating_and_docking() {
     );
     builder.main_area(DockSide::Left, source_column);
 
-    let (target_panel, target_node) = builder.panel(PanelKey::new("c44-target").unwrap(), descriptors()[0].1);
+    let (target_panel, target_node) =
+        builder.panel(PanelKey::new("c44-target").unwrap(), descriptors()[0].1);
     let target_group = builder.tabs(vec![target_node], 0, false);
     let target_column = builder.column(
         metrics.default_column_width,
@@ -90,10 +102,16 @@ fn c44_group_move_preserves_tabs_state_across_column_floating_and_docking() {
     assert_eq!(layout.validate(&metrics), Ok(()));
     let expected_children = vec![node_a, node_b, node_c];
 
-    layout.apply(
-        DockCommand::MoveGroup { group: source_group, column: target_column, index: 1 },
-        &metrics,
-    ).unwrap();
+    layout
+        .apply(
+            DockCommand::MoveGroup {
+                group: source_group,
+                column: target_column,
+                index: 1,
+            },
+            &metrics,
+        )
+        .unwrap();
     assert!(layout.main_area(DockSide::Left).is_none());
     assert!(matches!(
         layout.node(source_group),
@@ -110,15 +128,20 @@ fn c44_group_move_preserves_tabs_state_across_column_floating_and_docking() {
     assert_eq!(layout.panel_instances().count(), 4);
     assert_eq!(layout.validate(&metrics), Ok(()));
 
-    layout.apply(
-        DockCommand::Float {
-            node: source_group,
-            bounds: Rect::new(Point::new(70.0, 60.0), Size::new(420.0, 300.0)),
-        },
-        &metrics,
-    ).unwrap();
+    layout
+        .apply(
+            DockCommand::Float {
+                node: source_group,
+                bounds: Rect::new(Point::new(70.0, 60.0), Size::new(420.0, 300.0)),
+            },
+            &metrics,
+        )
+        .unwrap();
     let floating_id = layout.floating_groups().next().unwrap().0;
-    let floating_root = layout.dock_area(layout.floating_group(floating_id).unwrap().area).unwrap().root;
+    let floating_root = layout
+        .dock_area(layout.floating_group(floating_id).unwrap().area)
+        .unwrap()
+        .root;
     assert_eq!(floating_root, source_group);
     assert!(matches!(
         layout.node(floating_root),
@@ -128,13 +151,18 @@ fn c44_group_move_preserves_tabs_state_across_column_floating_and_docking() {
     assert_eq!(layout.panel_instances().count(), 4);
     assert_eq!(layout.validate(&metrics), Ok(()));
 
-    layout.apply(
-        DockCommand::DockFloating {
-            group: floating_id,
-            target: DropTarget::MainColumn { side: DockSide::Left, index: 0 },
-        },
-        &metrics,
-    ).unwrap();
+    layout
+        .apply(
+            DockCommand::DockFloating {
+                group: floating_id,
+                target: DropTarget::MainColumn {
+                    side: DockSide::Left,
+                    index: 0,
+                },
+            },
+            &metrics,
+        )
+        .unwrap();
     let redocked_column = layout.main_area(DockSide::Left).unwrap().root;
     assert!(matches!(
         layout.node(redocked_column),
@@ -156,7 +184,10 @@ fn c44_group_move_preserves_tabs_state_across_column_floating_and_docking() {
 fn c44_drop_on_existing_neighbor_column_is_a_noop() {
     let metrics = DockMetrics::default();
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
-    let (_, source_panel) = builder.panel(PanelKey::new("c44-noop-source").unwrap(), descriptors()[0].1);
+    let (_, source_panel) = builder.panel(
+        PanelKey::new("c44-noop-source").unwrap(),
+        descriptors()[0].1,
+    );
     let source_group = builder.tabs(vec![source_panel], 0, false);
     let source_column = builder.column(
         metrics.default_column_width,
@@ -164,7 +195,10 @@ fn c44_drop_on_existing_neighbor_column_is_a_noop() {
         vec![source_group],
         vec![1.0],
     );
-    let (_, target_panel) = builder.panel(PanelKey::new("c44-noop-target").unwrap(), descriptors()[0].1);
+    let (_, target_panel) = builder.panel(
+        PanelKey::new("c44-noop-target").unwrap(),
+        descriptors()[0].1,
+    );
     let target_group = builder.tabs(vec![target_panel], 0, false);
     let target_column = builder.column(
         metrics.default_column_width,
@@ -172,20 +206,26 @@ fn c44_drop_on_existing_neighbor_column_is_a_noop() {
         vec![target_group],
         vec![1.0],
     );
-    let root = builder.split(Axis::X, vec![source_column, target_column], vec![0.35, 0.65]);
+    let root = builder.split(
+        Axis::X,
+        vec![source_column, target_column],
+        vec![0.35, 0.65],
+    );
     builder.main_area(DockSide::Right, root);
     let mut layout = builder.build();
     let before = format!("{layout:?}");
 
-    let outcome = layout.apply(
-        DockCommand::SplitGroup {
-            group: source_group,
-            target_group,
-            zone: DropZone::Left,
-            ratio: 0.5,
-        },
-        &metrics,
-    ).unwrap();
+    let outcome = layout
+        .apply(
+            DockCommand::SplitGroup {
+                group: source_group,
+                target_group,
+                zone: DropZone::Left,
+                ratio: 0.5,
+            },
+            &metrics,
+        )
+        .unwrap();
 
     assert_eq!(outcome.new_version, 0);
     assert!(outcome.changed_nodes.is_empty());
@@ -194,7 +234,6 @@ fn c44_drop_on_existing_neighbor_column_is_a_noop() {
     assert_eq!(format!("{layout:?}"), before);
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
-
 
 #[test]
 fn c44_move_group_and_vertical_split_to_existing_neighbor_are_noops() {
@@ -219,42 +258,48 @@ fn c44_move_group_and_vertical_split_to_existing_neighbor_are_noops() {
     let mut layout = builder.build();
     let before = format!("{layout:?}");
 
-    let same_slot = layout.apply(
-        DockCommand::MoveGroup {
-            group: groups[0],
-            column,
-            index: 1,
-        },
-        &metrics,
-    ).unwrap();
+    let same_slot = layout
+        .apply(
+            DockCommand::MoveGroup {
+                group: groups[0],
+                column,
+                index: 1,
+            },
+            &metrics,
+        )
+        .unwrap();
     assert_eq!(same_slot.new_version, 0);
     assert!(same_slot.changed_nodes.is_empty());
     assert!(same_slot.inverse.is_none());
     assert_eq!(format!("{layout:?}"), before);
 
-    let above_neighbor = layout.apply(
-        DockCommand::SplitGroup {
-            group: groups[0],
-            target_group: groups[1],
-            zone: DropZone::Top,
-            ratio: 0.5,
-        },
-        &metrics,
-    ).unwrap();
+    let above_neighbor = layout
+        .apply(
+            DockCommand::SplitGroup {
+                group: groups[0],
+                target_group: groups[1],
+                zone: DropZone::Top,
+                ratio: 0.5,
+            },
+            &metrics,
+        )
+        .unwrap();
     assert_eq!(above_neighbor.new_version, 0);
     assert!(above_neighbor.changed_nodes.is_empty());
     assert!(above_neighbor.inverse.is_none());
     assert_eq!(format!("{layout:?}"), before);
 
-    let below_neighbor = layout.apply(
-        DockCommand::SplitGroup {
-            group: groups[1],
-            target_group: groups[0],
-            zone: DropZone::Bottom,
-            ratio: 0.5,
-        },
-        &metrics,
-    ).unwrap();
+    let below_neighbor = layout
+        .apply(
+            DockCommand::SplitGroup {
+                group: groups[1],
+                target_group: groups[0],
+                zone: DropZone::Bottom,
+                ratio: 0.5,
+            },
+            &metrics,
+        )
+        .unwrap();
     assert_eq!(below_neighbor.new_version, 0);
     assert!(below_neighbor.changed_nodes.is_empty());
     assert!(below_neighbor.inverse.is_none());
@@ -297,15 +342,17 @@ fn c44_split_group_moves_whole_tabs_into_an_existing_floating_stack() {
     let mut layout = builder.build();
     assert_eq!(layout.validate(&metrics), Ok(()));
 
-    layout.apply(
-        DockCommand::SplitGroup {
-            group: source_group,
-            target_group,
-            zone: DropZone::Bottom,
-            ratio: 0.35,
-        },
-        &metrics,
-    ).unwrap();
+    layout
+        .apply(
+            DockCommand::SplitGroup {
+                group: source_group,
+                target_group,
+                zone: DropZone::Bottom,
+                ratio: 0.35,
+            },
+            &metrics,
+        )
+        .unwrap();
 
     let floating = layout.floating_group(floating_id).unwrap();
     let root = layout.dock_area(floating.area).unwrap().root;
@@ -355,15 +402,17 @@ fn c44_drop_on_adjacent_floating_stack_slot_is_a_noop() {
     assert_eq!(layout.validate(&metrics), Ok(()));
     let before = format!("{layout:?}");
 
-    let outcome = layout.apply(
-        DockCommand::SplitGroup {
-            group: top_group,
-            target_group: bottom_group,
-            zone: DropZone::Top,
-            ratio: 0.5,
-        },
-        &metrics,
-    ).unwrap();
+    let outcome = layout
+        .apply(
+            DockCommand::SplitGroup {
+                group: top_group,
+                target_group: bottom_group,
+                zone: DropZone::Top,
+                ratio: 0.5,
+            },
+            &metrics,
+        )
+        .unwrap();
 
     assert_eq!(outcome.new_version, 0);
     assert!(outcome.changed_nodes.is_empty());
@@ -396,20 +445,26 @@ fn c44_max_column_limit_allows_group_move_when_empty_source_column_collapses() {
         columns.push(column);
         panel_ids.push(panel_id);
     }
-    let root = builder.split(Axis::X, columns.clone(), vec![1.0 / metrics.max_columns as f32; metrics.max_columns]);
+    let root = builder.split(
+        Axis::X,
+        columns.clone(),
+        vec![1.0 / metrics.max_columns as f32; metrics.max_columns],
+    );
     builder.main_area(DockSide::Right, root);
     let mut layout = builder.build();
     assert_eq!(layout.validate(&metrics), Ok(()));
 
-    layout.apply(
-        DockCommand::SplitGroup {
-            group: groups[0],
-            target_group: groups[2],
-            zone: DropZone::Right,
-            ratio: 0.5,
-        },
-        &metrics,
-    ).unwrap();
+    layout
+        .apply(
+            DockCommand::SplitGroup {
+                group: groups[0],
+                target_group: groups[2],
+                zone: DropZone::Right,
+                ratio: 0.5,
+            },
+            &metrics,
+        )
+        .unwrap();
 
     let root = layout.main_area(DockSide::Right).unwrap().root;
     let Node::Split(split) = layout.node(root).unwrap() else {
@@ -486,15 +541,17 @@ fn c44_stale_horizontal_drop_at_column_limit_is_rejected_atomically() {
 
     // The source column retains sibling_group, so this horizontal move
     // would leave max_columns + 1 nonempty columns in the final layout.
-    let error = layout.apply(
-        DockCommand::SplitGroup {
-            group: source_group,
-            target_group: target_groups[0],
-            zone: DropZone::Left,
-            ratio: 0.5,
-        },
-        &metrics,
-    ).unwrap_err();
+    let error = layout
+        .apply(
+            DockCommand::SplitGroup {
+                group: source_group,
+                target_group: target_groups[0],
+                zone: DropZone::Left,
+                ratio: 0.5,
+            },
+            &metrics,
+        )
+        .unwrap_err();
 
     assert!(matches!(
         error,

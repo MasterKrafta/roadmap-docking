@@ -7,8 +7,8 @@ use slotmap::SlotMap;
 
 use crate::{
     CanvasState, ChromeMode, Column, ColumnMode, DockArea, DockAreaId, DockSide, FloatingGroup,
-    FloatingGroupId, Layout, Node, NodeId, Panel, PanelConstraints, PanelId, PanelInstance, PanelKey,
-    Profile, Rect, Split, Tabs,
+    FloatingGroupId, Layout, Node, NodeId, Panel, PanelConstraints, PanelId, PanelInstance,
+    PanelKey, Profile, Rect, Split, Tabs,
 };
 
 pub(crate) struct LayoutBuilder {
@@ -47,7 +47,11 @@ impl LayoutBuilder {
             .insert(PanelInstance::new(key, constraints))
     }
 
-    pub(crate) fn panel(&mut self, key: PanelKey, constraints: PanelConstraints) -> (PanelId, NodeId) {
+    pub(crate) fn panel(
+        &mut self,
+        key: PanelKey,
+        constraints: PanelConstraints,
+    ) -> (PanelId, NodeId) {
         let panel_id = self.panel_instance(key, constraints);
         let node_id = self.panel_node(panel_id);
         (panel_id, node_id)
@@ -157,8 +161,7 @@ mod tests {
     use super::LayoutBuilder;
     use crate::{
         Axis, CanvasState, ColumnMode, DockMetrics, DockSide, Node, NodeId, PanelConstraints,
-        PanelId, PanelKey, Point, Profile, Rect, Size,
-        ValidationError,
+        PanelId, PanelKey, Point, Profile, Rect, Size, ValidationError,
     };
     use proptest::prelude::*;
 
@@ -184,10 +187,8 @@ mod tests {
         for group_size in group_sizes {
             let mut panel_nodes = Vec::with_capacity(*group_size);
             for _ in 0..*group_size {
-                let (_, panel_node) = builder.panel(
-                    key(format!("prop-panel-{panel_index}")),
-                    constraints(false),
-                );
+                let (_, panel_node) =
+                    builder.panel(key(format!("prop-panel-{panel_index}")), constraints(false));
                 panel_index += 1;
                 panel_nodes.push(panel_node);
             }
@@ -201,7 +202,11 @@ mod tests {
         } else {
             vec![1.0 / groups.len() as f32; groups.len()]
         };
-        let chosen_ratios = if ratios.is_empty() { equal_ratios } else { ratios };
+        let chosen_ratios = if ratios.is_empty() {
+            equal_ratios
+        } else {
+            ratios
+        };
         let root = builder.column(
             DockMetrics::default().default_column_width,
             ColumnMode::Expanded,
@@ -273,8 +278,7 @@ mod tests {
         let panel_id = builder.panel_instance(key("layers"), constraints(false));
         let main_leaf = builder.panel_node(panel_id);
         let main_tabs = builder.tabs(vec![main_leaf], 0, false);
-        let main_column =
-            builder.column(280.0, ColumnMode::Expanded, vec![main_tabs], vec![1.0]);
+        let main_column = builder.column(280.0, ColumnMode::Expanded, vec![main_tabs], vec![1.0]);
         builder.main_area(DockSide::Right, main_column);
 
         let floating_leaf = builder.panel_node(panel_id);
@@ -309,9 +313,13 @@ mod tests {
         builder.main_area(DockSide::Right, root);
 
         let layout = builder.build();
-        assert!(layout.validate(&DockMetrics::default()).unwrap_err().iter().any(
-            |error| matches!(error, ValidationError::DuplicateSingletonPanel { .. })
-        ));
+        assert!(
+            layout
+                .validate(&DockMetrics::default())
+                .unwrap_err()
+                .iter()
+                .any(|error| matches!(error, ValidationError::DuplicateSingletonPanel { .. }))
+        );
     }
 
     #[test]
@@ -331,7 +339,11 @@ mod tests {
 
         let layout = builder.build();
         let errors = layout.validate(&DockMetrics::default()).unwrap_err();
-        assert!(errors.iter().any(|error| matches!(error, ValidationError::NodeCycle { .. })));
+        assert!(
+            errors
+                .iter()
+                .any(|error| matches!(error, ValidationError::NodeCycle { .. }))
+        );
         assert!(errors.iter().any(|error| matches!(
             error,
             ValidationError::UnreachableNode { node } if *node == orphan_leaf
@@ -351,10 +363,10 @@ mod tests {
         builder.main_area(DockSide::Right, root);
         let layout = builder.build();
 
-        assert_eq!(layout.canvas().last_known_bounds(), Some(Rect::new(
-            Point::new(200.0, 0.0),
-            Size::new(900.0, 700.0),
-        )));
+        assert_eq!(
+            layout.canvas().last_known_bounds(),
+            Some(Rect::new(Point::new(200.0, 0.0), Size::new(900.0, 700.0),))
+        );
         assert_eq!(layout.validate(&DockMetrics::default()), Ok(()));
         // Node has only Split/Tabs/Panel/Column variants. Canvas remains an
         // independent Layout field and cannot accidentally enter the tree.
@@ -369,7 +381,8 @@ mod tests {
         let mut builder = LayoutBuilder::new(Profile::Photoshop);
         let mut columns = Vec::new();
         for index in 0..5 {
-            let (_, panel) = builder.panel(key(format!("column-panel-{index}")), constraints(false));
+            let (_, panel) =
+                builder.panel(key(format!("column-panel-{index}")), constraints(false));
             let tabs = builder.tabs(vec![panel], 0, false);
             let column = builder.column(280.0, ColumnMode::Expanded, vec![tabs], vec![1.0]);
             columns.push(column);
@@ -379,10 +392,12 @@ mod tests {
 
         let layout = builder.build();
         let errors = layout.validate(&DockMetrics::default()).unwrap_err();
-        assert!(errors.iter().any(|error| matches!(
-            error,
-            ValidationError::TooManyColumns { actual: 5, max: 4 }
-        )));
+        assert!(
+            errors.iter().any(|error| matches!(
+                error,
+                ValidationError::TooManyColumns { actual: 5, max: 4 }
+            ))
+        );
     }
 
     #[test]
@@ -397,20 +412,25 @@ mod tests {
         assert_eq!(layout.validate(&DockMetrics::default()), Ok(()));
         layout.normalize_for_test(&DockMetrics::default()).unwrap();
         let root = layout.main_area(DockSide::Right).unwrap().root;
-        assert!(matches!(layout.node(root), Some(Node::Column(column)) if column.groups.len() == 1));
+        assert!(
+            matches!(layout.node(root), Some(Node::Column(column)) if column.groups.len() == 1)
+        );
     }
 
     #[test]
     fn empty_group_and_column_are_reported_then_removed_by_normalize() {
         let mut builder = LayoutBuilder::new(Profile::Generic);
         let empty_tabs = builder.tabs(Vec::new(), 0, false);
-        let empty_column =
-            builder.column(280.0, ColumnMode::Expanded, vec![empty_tabs], vec![1.0]);
+        let empty_column = builder.column(280.0, ColumnMode::Expanded, vec![empty_tabs], vec![1.0]);
         builder.main_area(DockSide::Right, empty_column);
         let mut layout = builder.build();
 
         let errors = layout.validate(&DockMetrics::default()).unwrap_err();
-        assert!(errors.iter().any(|error| matches!(error, ValidationError::InvalidTabs { .. })));
+        assert!(
+            errors
+                .iter()
+                .any(|error| matches!(error, ValidationError::InvalidTabs { .. }))
+        );
         layout.normalize_for_test(&DockMetrics::default()).unwrap();
         assert_eq!(layout.nodes().count(), 0);
         assert!(layout.main_area(DockSide::Right).is_none());

@@ -72,11 +72,17 @@ fn validation_collects_ratio_and_tabs_errors() {
     let errors = layout.validate(&DockMetrics::default()).unwrap_err();
     assert!(errors.iter().any(|error| matches!(
         error,
-        ValidationError::InvalidColumn { reason: "ratios must sum to 1.0 within 1e-4", .. }
+        ValidationError::InvalidColumn {
+            reason: "ratios must sum to 1.0 within 1e-4",
+            ..
+        }
     )));
     assert!(errors.iter().any(|error| matches!(
         error,
-        ValidationError::InvalidTabs { reason: "active_index is outside children", .. }
+        ValidationError::InvalidTabs {
+            reason: "active_index is outside children",
+            ..
+        }
     )));
 }
 
@@ -105,7 +111,11 @@ fn validation_detects_missing_node_and_cycle_even_in_broken_trees() {
         error,
         ValidationError::MissingNode { missing, .. } if *missing == NodeId::null()
     )));
-    assert!(errors.iter().any(|error| matches!(error, ValidationError::NodeCycle { .. })));
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, ValidationError::NodeCycle { .. }))
+    );
     assert!(errors.iter().any(|error| matches!(
         error,
         ValidationError::MultipleParents { node, .. } if *node == group_id
@@ -124,10 +134,14 @@ fn validation_detects_missing_node_and_cycle_even_in_broken_trees() {
 #[test]
 fn validation_detects_duplicate_panel_placement_and_singleton_keys() {
     let mut layout = initial_layout(Profile::Generic);
-    let ids: Vec<_> = layout.nodes.iter().filter_map(|(id, node)| match node {
-        Node::Panel(panel) => Some((id, panel.panel_id)),
-        _ => None,
-    }).collect();
+    let ids: Vec<_> = layout
+        .nodes
+        .iter()
+        .filter_map(|(id, node)| match node {
+            Node::Panel(panel) => Some((id, panel.panel_id)),
+            _ => None,
+        })
+        .collect();
     let (first_node, first_panel) = ids[0];
     let (second_node, second_panel) = ids[1];
     *layout.nodes.get_mut(second_node).unwrap() = Node::Panel(Panel::new(first_panel));
@@ -135,17 +149,23 @@ fn validation_detects_duplicate_panel_placement_and_singleton_keys() {
     let duplicate_instance = layout.panel_instances.get_mut(second_panel).unwrap();
     duplicate_instance.key = PanelKey::new("layers").unwrap();
     duplicate_instance.constraints.singleton = true;
-    layout.panel_instances.get_mut(first_panel).unwrap().constraints.singleton = true;
+    layout
+        .panel_instances
+        .get_mut(first_panel)
+        .unwrap()
+        .constraints
+        .singleton = true;
 
     let errors = layout.validate(&DockMetrics::default()).unwrap_err();
     assert!(errors.iter().any(|error| matches!(
         error,
         ValidationError::DuplicatePanelPlacement { panel, .. } if *panel == first_panel
     )));
-    assert!(errors.iter().any(|error| matches!(
-        error,
-        ValidationError::DuplicateSingletonPanel { .. }
-    )));
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, ValidationError::DuplicateSingletonPanel { .. }))
+    );
     assert!(errors.iter().any(|error| matches!(
         error,
         ValidationError::UnplacedPanelInstance { panel } if *panel == second_panel
@@ -170,7 +190,10 @@ fn photoshop_profile_rejects_vertical_main_split() {
     let errors = layout.validate(&DockMetrics::default()).unwrap_err();
     assert!(errors.iter().any(|error| matches!(
         error,
-        ValidationError::InvalidMainRoot { reason: "main Split must use axis X", .. }
+        ValidationError::InvalidMainRoot {
+            reason: "main Split must use axis X",
+            ..
+        }
     )));
 }
 
@@ -189,7 +212,11 @@ fn floating_bounds_and_duplicate_z_order_are_validated() {
     let mut floating = SlotMap::<FloatingGroupId, FloatingGroup>::with_key();
     let bounds = Rect::new(Point::ZERO, Size::new(0.0, 300.0));
     floating.insert(FloatingGroup::new(area_one, bounds, 1));
-    floating.insert(FloatingGroup::new(area_two, Rect::new(Point::ZERO, Size::new(400.0, 300.0)), 1));
+    floating.insert(FloatingGroup::new(
+        area_two,
+        Rect::new(Point::ZERO, Size::new(400.0, 300.0)),
+        1,
+    ));
 
     let layout = Layout::from_parts(
         nodes,
@@ -205,16 +232,20 @@ fn floating_bounds_and_duplicate_z_order_are_validated() {
     let errors = layout.validate(&DockMetrics::default()).unwrap_err();
     assert!(errors.iter().any(|error| matches!(
         error,
-        ValidationError::InvalidFloatingGroup { reason: "bounds must have positive dimensions", .. }
+        ValidationError::InvalidFloatingGroup {
+            reason: "bounds must have positive dimensions",
+            ..
+        }
     )));
     assert!(errors.iter().any(|error| matches!(
         error,
         ValidationError::DuplicateFloatingZOrder { z_order: 1, .. }
     )));
-    assert!(errors.iter().any(|error| matches!(
-        error,
-        ValidationError::InvalidTabs { .. }
-    )));
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, ValidationError::InvalidTabs { .. }))
+    );
 }
 
 #[test]
@@ -224,7 +255,9 @@ fn validation_rejects_invalid_metrics_and_canvas_width() {
     let errors = layout.validate(&DockMetrics::default()).unwrap_err();
     assert!(errors.iter().any(|error| matches!(
         error,
-        ValidationError::InvalidCanvas { reason: "canvas width is below min_canvas_width" }
+        ValidationError::InvalidCanvas {
+            reason: "canvas width is below min_canvas_width"
+        }
     )));
 
     let metrics = DockMetrics {
@@ -232,8 +265,9 @@ fn validation_rejects_invalid_metrics_and_canvas_width() {
         ..DockMetrics::default()
     };
     let errors = layout.validate(&metrics).unwrap_err();
-    assert!(errors.iter().any(|error| matches!(
-        error,
-        ValidationError::InvalidMetrics { .. }
-    )));
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, ValidationError::InvalidMetrics { .. }))
+    );
 }

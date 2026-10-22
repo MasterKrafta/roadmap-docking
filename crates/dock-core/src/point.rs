@@ -53,7 +53,10 @@ mod tests {
 
     #[test]
     fn point_rejects_non_finite_values_and_overflow() {
-        assert_eq!(Point::new(f32::NAN, 0.0).validate(), Err(GeometryError::NonFinite));
+        assert_eq!(
+            Point::new(f32::NAN, 0.0).validate(),
+            Err(GeometryError::NonFinite)
+        );
         assert_eq!(
             Point::new(f32::MAX, 0.0).checked_offset(f32::MAX, 0.0),
             Err(GeometryError::ArithmeticOverflow)

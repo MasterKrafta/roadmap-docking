@@ -29,7 +29,11 @@ impl std::fmt::Display for ComputeRectsError {
                 formatter,
                 "Canvas width {available} is below the minimum {minimum}"
             ),
-            Self::InsufficientSpace { axis, available, required } => write!(
+            Self::InsufficientSpace {
+                axis,
+                available,
+                required,
+            } => write!(
                 formatter,
                 "insufficient {axis:?}-axis space: {available} available, {required} required"
             ),

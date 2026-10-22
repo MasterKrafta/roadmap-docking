@@ -50,5 +50,4 @@ mod tests {
             assert_eq!(serde_json::from_str::<ColumnMode>(&encoded).unwrap(), mode);
         }
     }
-
 }

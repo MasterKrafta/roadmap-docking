@@ -12,6 +12,11 @@ pub struct TabHeaderRect {
 
 impl TabHeaderRect {
     pub const fn new(group: NodeId, panel: PanelId, index: usize, rect: Rect) -> Self {
-        Self { group, panel, index, rect }
+        Self {
+            group,
+            panel,
+            index,
+            rect,
+        }
     }
 }

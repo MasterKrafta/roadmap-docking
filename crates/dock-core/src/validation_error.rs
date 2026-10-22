@@ -1,6 +1,4 @@
-use crate::{
-    DockAreaId, DockSide, FloatingGroupId, GeometryError, NodeId, PanelId, PanelKey,
-};
+use crate::{DockAreaId, DockSide, FloatingGroupId, GeometryError, NodeId, PanelId, PanelKey};
 
 /// A diagnostic emitted when a Layout violates a core invariant.
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
@@ -35,7 +33,9 @@ pub enum ValidationError {
     #[error("panel leaf node {node:?} references missing panel instance {panel:?}")]
     MissingPanelInstance { node: NodeId, panel: PanelId },
 
-    #[error("panel instance {panel:?} is placed in more than one leaf: {first_node:?} and {second_node:?}")]
+    #[error(
+        "panel instance {panel:?} is placed in more than one leaf: {first_node:?} and {second_node:?}"
+    )]
     DuplicatePanelPlacement {
         panel: PanelId,
         first_node: NodeId,
@@ -53,22 +53,13 @@ pub enum ValidationError {
     },
 
     #[error("invalid Split node {node:?}: {reason}")]
-    InvalidSplit {
-        node: NodeId,
-        reason: &'static str,
-    },
+    InvalidSplit { node: NodeId, reason: &'static str },
 
     #[error("invalid Tabs node {node:?}: {reason}")]
-    InvalidTabs {
-        node: NodeId,
-        reason: &'static str,
-    },
+    InvalidTabs { node: NodeId, reason: &'static str },
 
     #[error("invalid Column node {node:?}: {reason}")]
-    InvalidColumn {
-        node: NodeId,
-        reason: &'static str,
-    },
+    InvalidColumn { node: NodeId, reason: &'static str },
 
     #[error("invalid DockArea {area:?}: {reason}")]
     InvalidDockArea {

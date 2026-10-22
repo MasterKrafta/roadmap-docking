@@ -20,7 +20,10 @@ fn key(value: &str) -> PanelKey {
 fn layout_with_two_main_docks() -> Layout {
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
 
-    for (side, id) in [(DockSide::Left, "chrome-left"), (DockSide::Right, "chrome-right")] {
+    for (side, id) in [
+        (DockSide::Left, "chrome-left"),
+        (DockSide::Right, "chrome-right"),
+    ] {
         let (_, panel) = builder.panel(key(id), constraints());
         let group = builder.tabs(vec![panel], 0, false);
         let column = builder.column(240.0, ColumnMode::Expanded, vec![group], vec![1.0]);
@@ -57,7 +60,16 @@ fn hidden_chrome_gives_canvas_the_full_viewport_without_deleting_dock_nodes() {
 
         assert_eq!(layout.chrome(), mode);
         assert!(outcome.changed_nodes.is_empty());
-        assert_eq!(outcome.inverse, Some(DockCommand::SetChrome { mode: if mode == ChromeMode::DockHidden { ChromeMode::Visible } else { ChromeMode::DockHidden } }));
+        assert_eq!(
+            outcome.inverse,
+            Some(DockCommand::SetChrome {
+                mode: if mode == ChromeMode::DockHidden {
+                    ChromeMode::Visible
+                } else {
+                    ChromeMode::DockHidden
+                }
+            })
+        );
         assert_eq!(node_snapshot(&layout), before_nodes);
 
         let hidden = layout.compute_rects(viewport(), &metrics).unwrap();
@@ -72,7 +84,12 @@ fn hidden_chrome_gives_canvas_the_full_viewport_without_deleting_dock_nodes() {
     }
 
     layout
-        .apply(DockCommand::SetChrome { mode: ChromeMode::Visible }, &metrics)
+        .apply(
+            DockCommand::SetChrome {
+                mode: ChromeMode::Visible,
+            },
+            &metrics,
+        )
         .unwrap();
     let restored = layout.compute_rects(viewport(), &metrics).unwrap();
     assert_eq!(restored.columns.len(), 2);
@@ -97,13 +114,23 @@ fn tab_shortcut_modes_can_be_applied_without_mutating_layout_structure() {
 
     let restored_mode = layout.chrome().after_tab_shortcut();
     layout
-        .apply(DockCommand::SetChrome { mode: restored_mode }, &metrics)
+        .apply(
+            DockCommand::SetChrome {
+                mode: restored_mode,
+            },
+            &metrics,
+        )
         .unwrap();
     assert_eq!(layout.chrome(), ChromeMode::Visible);
 
     let shift_tab_mode = layout.chrome().after_shift_tab_shortcut();
     layout
-        .apply(DockCommand::SetChrome { mode: shift_tab_mode }, &metrics)
+        .apply(
+            DockCommand::SetChrome {
+                mode: shift_tab_mode,
+            },
+            &metrics,
+        )
         .unwrap();
     assert_eq!(layout.chrome(), ChromeMode::DockHidden);
     assert!(!layout.chrome().dock_visible());
@@ -112,7 +139,12 @@ fn tab_shortcut_modes_can_be_applied_without_mutating_layout_structure() {
 
     let restored_mode = layout.chrome().after_shift_tab_shortcut();
     layout
-        .apply(DockCommand::SetChrome { mode: restored_mode }, &metrics)
+        .apply(
+            DockCommand::SetChrome {
+                mode: restored_mode,
+            },
+            &metrics,
+        )
         .unwrap();
     assert_eq!(layout.chrome(), ChromeMode::Visible);
     assert_eq!(node_snapshot(&layout), before_nodes);
@@ -121,10 +153,17 @@ fn tab_shortcut_modes_can_be_applied_without_mutating_layout_structure() {
 #[cfg(feature = "serde")]
 #[test]
 fn set_chrome_round_trips_every_visibility_mode() {
-    for mode in [ChromeMode::Visible, ChromeMode::DockHidden, ChromeMode::AllHidden] {
+    for mode in [
+        ChromeMode::Visible,
+        ChromeMode::DockHidden,
+        ChromeMode::AllHidden,
+    ] {
         let command = DockCommand::SetChrome { mode };
         let encoded = serde_json::to_string(&command).unwrap();
-        assert_eq!(serde_json::from_str::<DockCommand>(&encoded).unwrap(), command);
+        assert_eq!(
+            serde_json::from_str::<DockCommand>(&encoded).unwrap(),
+            command
+        );
     }
 }
 
@@ -216,7 +255,10 @@ fn hidden_chrome_hides_floating_windows_but_preserves_all_layout_state() {
             Some(crate::Node::Tabs(value))
                 if value.active_index == 1 && !value.collapsed
         ));
-        assert_eq!(layout.floating_group(floating_id).unwrap().bounds, floating_bounds);
+        assert_eq!(
+            layout.floating_group(floating_id).unwrap().bounds,
+            floating_bounds
+        );
         assert_eq!(layout.floating_group(floating_id).unwrap().z_order, 7);
     }
 
@@ -239,5 +281,8 @@ fn hidden_chrome_hides_floating_windows_but_preserves_all_layout_state() {
             .collect::<Vec<_>>(),
         before_floating,
     );
-    assert_eq!(layout.floating_group(floating_id).unwrap().bounds, floating_bounds);
+    assert_eq!(
+        layout.floating_group(floating_id).unwrap().bounds,
+        floating_bounds
+    );
 }

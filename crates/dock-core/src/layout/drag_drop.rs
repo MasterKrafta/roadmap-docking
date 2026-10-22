@@ -14,7 +14,8 @@ impl Layout {
             field: "metrics",
             reason: "dock metrics are invalid",
         })?;
-        self.validate(metrics).map_err(|errors| CommandError::InvalidLayout { errors })?;
+        self.validate(metrics)
+            .map_err(|errors| CommandError::InvalidLayout { errors })?;
         if !request.origin.is_finite() || !request.point.is_finite() {
             return Err(CommandError::InvalidValue {
                 field: "pointer",
@@ -34,12 +35,15 @@ impl Layout {
                         reason: "floating title drag moves the window and does not use a dock target",
                     });
                 }
-                let floating = self.floating_group(group).copied().ok_or(
-                    CommandError::MissingFloatingGroup { group },
-                )?;
+                let floating = self
+                    .floating_group(group)
+                    .copied()
+                    .ok_or(CommandError::MissingFloatingGroup { group })?;
                 let delta_x = request.point.x - request.origin.x;
                 let delta_y = request.point.y - request.origin.y;
-                let origin = floating.bounds.origin
+                let origin = floating
+                    .bounds
+                    .origin
                     .checked_offset(delta_x, delta_y)
                     .map_err(|_| CommandError::InvalidValue {
                         field: "origin",
@@ -48,7 +52,10 @@ impl Layout {
                 if origin == floating.bounds.origin {
                     return Ok(DragDropAction::NoOp);
                 }
-                Ok(DragDropAction::Command(DockCommand::MoveFloating { group, origin }))
+                Ok(DragDropAction::Command(DockCommand::MoveFloating {
+                    group,
+                    origin,
+                }))
             }
             (DragHandle::FloatingCapture, DragPayload::FloatingGroup { group }) => {
                 let target = request.target.ok_or(CommandError::InvalidTarget {
@@ -60,7 +67,8 @@ impl Layout {
                     });
                 }
                 self.validate_drop_target(target, metrics)?;
-                let root = self.floating_group(group)
+                let root = self
+                    .floating_group(group)
                     .and_then(|floating| self.dock_area(floating.area))
                     .map(|area| area.root)
                     .ok_or(CommandError::MissingFloatingGroup { group })?;
@@ -69,7 +77,10 @@ impl Layout {
                 }
                 let moving_panels = self.panel_ids_in_subtree(root);
                 self.validate_panel_ids_allowed_for_target(&moving_panels, target)?;
-                Ok(DragDropAction::Command(DockCommand::DockFloating { group, target }))
+                Ok(DragDropAction::Command(DockCommand::DockFloating {
+                    group,
+                    target,
+                }))
             }
             (DragHandle::PanelTab | DragHandle::FlyoutPanel, DragPayload::Panel { panel }) => {
                 if request.handle == DragHandle::FlyoutPanel
@@ -82,9 +93,9 @@ impl Layout {
                 if self.panel_instance(panel).is_none() {
                     return Err(CommandError::MissingPanel { panel });
                 }
-                let panel_node = self.find_panel_node(panel).ok_or(
-                    CommandError::MissingPanel { panel },
-                )?;
+                let panel_node = self
+                    .find_panel_node(panel)
+                    .ok_or(CommandError::MissingPanel { panel })?;
                 let target = request.target.ok_or(CommandError::InvalidTarget {
                     reason: "panel-tab drag requires a resolved drop target",
                 })?;
@@ -92,15 +103,20 @@ impl Layout {
                     let bounds = request.floating_bounds.ok_or(CommandError::InvalidTarget {
                         reason: "FreeArea Float requests require explicit window bounds",
                     })?;
-                    bounds.validate_non_empty().map_err(|_| CommandError::InvalidValue {
-                        field: "bounds",
-                        reason: "floating bounds must be finite and positive",
-                    })?;
+                    bounds
+                        .validate_non_empty()
+                        .map_err(|_| CommandError::InvalidValue {
+                            field: "bounds",
+                            reason: "floating bounds must be finite and positive",
+                        })?;
                     self.validate_panel_ids_allowed_for_area(&[panel], AllowedArea::FLOATING)?;
                     let command = if request.handle == DragHandle::FlyoutPanel {
                         DockCommand::FloatPanelFromFlyout { panel, bounds }
                     } else {
-                        DockCommand::Float { node: panel_node, bounds }
+                        DockCommand::Float {
+                            node: panel_node,
+                            bounds,
+                        }
                     };
                     return Ok(DragDropAction::Command(command));
                 }
@@ -135,10 +151,14 @@ impl Layout {
                         {
                             match target {
                                 DropTarget::MainColumn { side, index }
-                                    if side == source_side && (index == source_index || index == source_index + 1) =>
+                                    if side == source_side
+                                        && (index == source_index || index == source_index + 1) =>
                                 {
                                     return Ok(if request.handle == DragHandle::FlyoutPanel {
-                                        DragDropAction::Command(DockCommand::MovePanelFromFlyout { panel, target })
+                                        DragDropAction::Command(DockCommand::MovePanelFromFlyout {
+                                            panel,
+                                            target,
+                                        })
                                     } else {
                                         DragDropAction::NoOp
                                     });
@@ -146,14 +166,19 @@ impl Layout {
                                 DropTarget::ColumnSlot { column, index }
                                 | DropTarget::RailSlot { column, index }
                                     if column == source_column
-                                        && self.node(column).is_some_and(|node| matches!(
-                                            node,
-                                            Node::Column(value) if value.groups.len() == 1
-                                                && (index == 0 || index == 1)
-                                        )) =>
+                                        && self.node(column).is_some_and(|node| {
+                                            matches!(
+                                                node,
+                                                Node::Column(value) if value.groups.len() == 1
+                                                    && (index == 0 || index == 1)
+                                            )
+                                        }) =>
                                 {
                                     return Ok(if request.handle == DragHandle::FlyoutPanel {
-                                        DragDropAction::Command(DockCommand::MovePanelFromFlyout { panel, target })
+                                        DragDropAction::Command(DockCommand::MovePanelFromFlyout {
+                                            panel,
+                                            target,
+                                        })
                                     } else {
                                         DragDropAction::NoOp
                                     });
@@ -199,10 +224,12 @@ impl Layout {
                     let bounds = request.floating_bounds.ok_or(CommandError::InvalidTarget {
                         reason: "FreeArea Float requests require explicit window bounds",
                     })?;
-                    bounds.validate_non_empty().map_err(|_| CommandError::InvalidValue {
-                        field: "bounds",
-                        reason: "floating bounds must be finite and positive",
-                    })?;
+                    bounds
+                        .validate_non_empty()
+                        .map_err(|_| CommandError::InvalidValue {
+                            field: "bounds",
+                            reason: "floating bounds must be finite and positive",
+                        })?;
                     self.validate_panel_ids_allowed_for_area(
                         &self.panel_ids_in_subtree(group),
                         AllowedArea::FLOATING,
@@ -213,13 +240,19 @@ impl Layout {
                     }));
                 }
                 self.validate_drop_target(target, metrics)?;
-                self.validate_panel_ids_allowed_for_target(&self.panel_ids_in_subtree(group), target)?;
+                self.validate_panel_ids_allowed_for_target(
+                    &self.panel_ids_in_subtree(group),
+                    target,
+                )?;
 
                 match target {
                     DropTarget::Tabs { .. } => Err(CommandError::InvalidTarget {
                         reason: "group grip carries all tabs; use GroupTabs to merge into a tab stack",
                     }),
-                    DropTarget::GroupTabs { group: target_group, index } => {
+                    DropTarget::GroupTabs {
+                        group: target_group,
+                        index,
+                    } => {
                         if group == target_group {
                             Ok(DragDropAction::NoOp)
                         } else {
@@ -230,8 +263,13 @@ impl Layout {
                             }))
                         }
                     }
-                    DropTarget::GroupEdge { group: target_group, zone } => {
-                        if group == target_group || self.group_edge_is_same_position(group, target_group, zone) {
+                    DropTarget::GroupEdge {
+                        group: target_group,
+                        zone,
+                    } => {
+                        if group == target_group
+                            || self.group_edge_is_same_position(group, target_group, zone)
+                        {
                             return Ok(DragDropAction::NoOp);
                         }
                         Ok(DragDropAction::Command(DockCommand::SplitGroup {
@@ -251,7 +289,8 @@ impl Layout {
                                 self.node(source_column),
                                 Some(Node::Column(column)) if column.groups.len() == 1 && column.groups[0] == group
                             );
-                            if source_side == side && source_is_sole_group
+                            if source_side == side
+                                && source_is_sole_group
                                 && (index == source_index || index == source_index + 1)
                             {
                                 return Ok(DragDropAction::NoOp);
@@ -263,11 +302,9 @@ impl Layout {
                                 reason: "main-column insertion index is outside the dock",
                             });
                         }
-                        Ok(DragDropAction::Command(DockCommand::MoveGroupToMainColumn {
-                            group,
-                            side,
-                            index,
-                        }))
+                        Ok(DragDropAction::Command(
+                            DockCommand::MoveGroupToMainColumn { group, side, index },
+                        ))
                     }
                     DropTarget::ColumnSlot { column, index } => {
                         if self.find_owner_column(group) == Some(column)

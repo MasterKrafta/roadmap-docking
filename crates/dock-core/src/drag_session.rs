@@ -1,6 +1,6 @@
 use crate::{
-    DockMetrics, DragCancelReason, DragDropRequest, DragPayload, DragPreview,
-    DragHandle, DragSessionError, DragState, DropTarget, Point,
+    DockMetrics, DragCancelReason, DragDropRequest, DragHandle, DragPayload, DragPreview,
+    DragSessionError, DragState, DropTarget, Point,
 };
 
 /// A deterministic, UI-independent drag gesture state machine.
@@ -128,10 +128,7 @@ impl DragSession {
     ///
     /// Pass `None` when the pointer is outside actionable targets. The target
     /// is only a transient preview; command application must revalidate IDs.
-    pub fn set_drop_target(
-        &mut self,
-        target: Option<DropTarget>,
-    ) -> Result<(), DragSessionError> {
+    pub fn set_drop_target(&mut self, target: Option<DropTarget>) -> Result<(), DragSessionError> {
         if self.handle == Some(DragHandle::FloatingTitle) {
             return Err(DragSessionError::NotDockingDrag);
         }
@@ -187,11 +184,17 @@ impl DragSession {
 
         let current_state = self.state;
         let handle = self.handle.unwrap_or_else(|| match current_state {
-            DragState::Pressed { payload, .. } | DragState::Dragging { payload, .. } => DragHandle::default_for(payload),
-            DragState::Idle | DragState::Dropped { .. } | DragState::Cancelled { .. } => DragHandle::PanelTab,
+            DragState::Pressed { payload, .. } | DragState::Dragging { payload, .. } => {
+                DragHandle::default_for(payload)
+            }
+            DragState::Idle | DragState::Dropped { .. } | DragState::Cancelled { .. } => {
+                DragHandle::PanelTab
+            }
         });
         let request = match current_state {
-            DragState::Pressed { payload, origin, .. } => {
+            DragState::Pressed {
+                payload, origin, ..
+            } => {
                 if !Self::threshold_reached(origin, position, self.threshold) {
                     self.state = DragState::Cancelled {
                         payload,
@@ -202,7 +205,14 @@ impl DragSession {
                     return Ok(None);
                 }
 
-                Self::finish_release(payload, handle, origin, position, resolved_target, &mut self.state)
+                Self::finish_release(
+                    payload,
+                    handle,
+                    origin,
+                    position,
+                    resolved_target,
+                    &mut self.state,
+                )
             }
             DragState::Dragging {
                 payload, origin, ..
@@ -237,10 +247,7 @@ impl DragSession {
         self.cancel_with_reason(DragCancelReason::FocusLost)
     }
 
-    fn cancel_with_reason(
-        &mut self,
-        reason: DragCancelReason,
-    ) -> Result<(), DragSessionError> {
+    fn cancel_with_reason(&mut self, reason: DragCancelReason) -> Result<(), DragSessionError> {
         self.state = match self.state {
             DragState::Pressed {
                 payload,
@@ -317,8 +324,8 @@ impl DragSession {
             origin,
             point: position,
             target,
-        floating_bounds: None,
-})
+            floating_bounds: None,
+        })
     }
 
     fn validate_position(position: Point) -> Result<(), DragSessionError> {
@@ -342,9 +349,9 @@ mod tests {
 
     use super::DragSession;
     use crate::{
-        create_initial_layout, DockAreaId, DockMetrics, DragCancelReason, DragDropRequest, DragHandle,
-        DragPayload, DragPreview, DragSessionError, DragState, DropTarget, FloatingGroupId,
-        Layout, Node, NodeId, PanelConstraints, PanelId, PanelKey, Point, Profile, Size,
+        DockAreaId, DockMetrics, DragCancelReason, DragDropRequest, DragHandle, DragPayload,
+        DragPreview, DragSessionError, DragState, DropTarget, FloatingGroupId, Layout, Node,
+        NodeId, PanelConstraints, PanelId, PanelKey, Point, Profile, Size, create_initial_layout,
     };
 
     fn panel_payload() -> DragPayload {
@@ -359,12 +366,8 @@ mod tests {
     }
 
     fn test_layout() -> Layout {
-        let constraints = PanelConstraints::new(
-            Size::new(120.0, 80.0),
-            Size::new(280.0, 220.0),
-            None,
-            false,
-        );
+        let constraints =
+            PanelConstraints::new(Size::new(120.0, 80.0), Size::new(280.0, 220.0), None, false);
         let descriptors = ["layers", "color", "properties", "history"]
             .into_iter()
             .map(|key| (PanelKey::new(key).unwrap(), constraints))
@@ -435,12 +438,15 @@ mod tests {
             }
         );
 
-        session
-            .pointer_move(Point::new(13.9, 20.0))
-            .unwrap();
+        session.pointer_move(Point::new(13.9, 20.0)).unwrap();
         assert!(matches!(session.state(), DragState::Pressed { .. }));
 
-        assert_eq!(session.pointer_up(Point::new(13.5, 20.0), Some(DropTarget::FreeArea)).unwrap(), None);
+        assert_eq!(
+            session
+                .pointer_up(Point::new(13.5, 20.0), Some(DropTarget::FreeArea))
+                .unwrap(),
+            None
+        );
         assert_eq!(
             session.state(),
             DragState::Cancelled {
@@ -506,8 +512,8 @@ mod tests {
                 origin: Point::ZERO,
                 point: Point::new(8.0, 2.0),
                 target: Some(target),
-            floating_bounds: None,
-}
+                floating_bounds: None,
+            }
         );
         assert_eq!(
             session.state(),
@@ -535,7 +541,10 @@ mod tests {
 
         session.pointer_down(payload, Point::ZERO).unwrap();
         session.pointer_move(Point::new(4.0, 0.0)).unwrap();
-        assert_eq!(session.pointer_up(Point::new(5.0, 0.0), None).unwrap(), None);
+        assert_eq!(
+            session.pointer_up(Point::new(5.0, 0.0), None).unwrap(),
+            None
+        );
         assert_eq!(
             session.state(),
             DragState::Cancelled {

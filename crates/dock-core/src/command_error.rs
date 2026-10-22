@@ -19,10 +19,16 @@ pub enum CommandError {
     InvalidTarget { reason: &'static str },
 
     #[error("invalid command value for {field}: {reason}")]
-    InvalidValue { field: &'static str, reason: &'static str },
+    InvalidValue {
+        field: &'static str,
+        reason: &'static str,
+    },
 
     #[error("command is not supported by profile {profile:?}: {reason}")]
-    UnsupportedForProfile { profile: Profile, reason: &'static str },
+    UnsupportedForProfile {
+        profile: Profile,
+        reason: &'static str,
+    },
 
     #[error("command would produce an invalid layout: {errors:?}")]
     InvalidLayout { errors: Vec<ValidationError> },
@@ -30,13 +36,15 @@ pub enum CommandError {
 
 #[cfg(test)]
 mod tests {
-    use slotmap::Key;
     use super::CommandError;
     use crate::{NodeId, Profile};
+    use slotmap::Key;
 
     #[test]
     fn errors_are_typed_and_readable() {
-        let error = CommandError::MissingNode { node: NodeId::null() };
+        let error = CommandError::MissingNode {
+            node: NodeId::null(),
+        };
         assert!(error.to_string().contains("missing node"));
 
         let error = CommandError::UnsupportedForProfile {
