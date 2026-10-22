@@ -526,7 +526,7 @@ mod tests {
             let elapsed = start.elapsed();
             assert_eq!(actual, expected);
             eprintln!(
-                "hit-test baseline [{label}]: floating_windows={}, nodes={node_count}, panel_instances={panel_instances}, active_panel_rects={active_panel_rects}, iterations={iterations}, elapsed_ms={:.3}, us/call={:.3}, final_hit={actual:?}",
+                "hit-test benchmark [{label}]: floating_windows={}, nodes={node_count}, panel_instances={panel_instances}, active_panel_rects={active_panel_rects}, iterations={iterations}, elapsed_ms={:.3}, us/call={:.3}, final_hit={actual:?}",
                 rects.floating_groups.len(),
                 elapsed.as_secs_f64() * 1000.0,
                 elapsed.as_secs_f64() * 1_000_000.0 / iterations as f64,
