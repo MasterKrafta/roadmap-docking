@@ -1,13 +1,14 @@
 use std::collections::{HashMap, HashSet};
 
 use dock_core::{
-    Axis, ColumnMode, DockCommand, DockSide, DragHandle, DragPayload, DragPreview, DropZoneRect,
-    FloatingGroupId, Layout, LayoutRects, Node, NodeId, PanelId, PanelInstance, Point, Rect,
-    ResizeEdge, Size, Tabs,
+    Axis, ColumnMode, DockCommand, DockSide, DragHandle, DragPayload, DragPreview, DropTarget,
+    DropZoneRect, FloatingGroupId, Layout, LayoutRects, Node, NodeId, PanelId, PanelInstance, Point,
+    Rect, ResizeEdge, Size, Tabs,
 };
 use gpui::{
     AnyElement, App, AppContext, ClickEvent, Context, Div, InteractiveElement, IntoElement, MouseButton,
-    MouseDownEvent, ParentElement, Render, StatefulInteractiveElement, Styled, Window, div, px, rgb,
+    MouseDownEvent, ParentElement, Render, ScrollHandle, StatefulInteractiveElement, Styled, Window,
+    div, px, rgb,
 };
 use ui::Theme;
 
@@ -63,6 +64,7 @@ pub enum DockMenuRequest {
 pub fn render<F, T, I, H, M, D, R>(
     layout: &Layout,
     rects: &LayoutRects,
+    scroll_handles: &HashMap<NodeId, ScrollHandle>,
     theme: &Theme,
     mut render_panel: F,
     panel_title: T,
@@ -93,25 +95,96 @@ where
     }
 
     // Main dock areas are painted first; floating areas are layered above them.
+    // Core's overflow records decide which columns get an actual scroll viewport.
+    let mut main_column_overflows = Vec::new();
     for side in [DockSide::Left, DockSide::Right] {
         let Some(area) = layout.main_area(side) else {
             continue;
         };
         let nodes = subtree_nodes(layout, area.root);
-        for element in tree_elements(
-            layout,
-            rects,
-            &nodes,
-            theme,
-            &mut render_panel,
-            &panel_title,
-            &panel_icon,
-            &make_command_handler,
-            &make_menu_handler,
-            &make_drag_start_handler,
-            &make_resize_start_handler,
-        ) {
-            root = root.child(element);
+        let overflow_columns: Vec<_> = rects
+            .vertical_overflow
+            .iter()
+            .filter(|overflow| {
+                nodes.contains(&overflow.owner)
+                    && matches!(layout.node(overflow.owner), Some(Node::Column(_)))
+            })
+            .copied()
+            .collect();
+
+        let mut non_scrolling_nodes = nodes;
+        for overflow in &overflow_columns {
+            let column_nodes = subtree_nodes(layout, overflow.owner);
+            for node in &column_nodes {
+                non_scrolling_nodes.remove(node);
+            }
+            main_column_overflows.push((*overflow, column_nodes));
+        }
+
+        if !non_scrolling_nodes.is_empty() {
+            for element in tree_elements(
+                layout,
+                rects,
+                &non_scrolling_nodes,
+                theme,
+                &mut render_panel,
+                &panel_title,
+                &panel_icon,
+                &make_command_handler,
+                &make_menu_handler,
+                &make_drag_start_handler,
+                &make_resize_start_handler,
+            ) {
+                root = root.child(element);
+            }
+        }
+
+        for overflow in overflow_columns {
+            let Some(scroll_handle) = scroll_handles.get(&overflow.owner) else {
+                continue;
+            };
+            let column_nodes = subtree_nodes(layout, overflow.owner);
+            let mut local_rects = localize_tree_rects(rects, overflow.viewport.origin);
+            let Some(column_rect) = local_rects
+                .columns
+                .iter_mut()
+                .find(|column| column.column == overflow.owner)
+            else {
+                continue;
+            };
+            // The viewport is the scroll container; Core's content extent sets the inner
+            // column size, including rail entries that continue below the viewport.
+            column_rect.rect =
+                translate_rect_to_local(overflow.content_extent, overflow.viewport.origin);
+
+            let mut content = div()
+                .relative()
+                .w(px(overflow.content_extent.size.width))
+                .h(px(overflow.content_extent.size.height));
+            for element in tree_elements(
+                layout,
+                &local_rects,
+                &column_nodes,
+                theme,
+                &mut render_panel,
+                &panel_title,
+                &panel_icon,
+                &make_command_handler,
+                &make_menu_handler,
+                &make_drag_start_handler,
+                &make_resize_start_handler,
+            ) {
+                content = content.child(element);
+            }
+
+            root = root.child(
+                rect_element(overflow.viewport, theme.colors.dock_background)
+                    .id(format!("dock-column-scroll-{:?}", overflow.owner))
+                    .overflow_y_scroll()
+                    .track_scroll(scroll_handle)
+                    .child(content)
+                    .into_any_element(),
+            );
         }
     }
 
@@ -308,11 +381,28 @@ where
 
     if let Some(overlay) = drag_overlay {
         for zone in &overlay.zones {
+            let mut zone_rect = zone.rect;
+            if let Some(target_node) = drop_target_node(zone.target)
+                && let Some((overflow, _)) = main_column_overflows
+                    .iter()
+                    .find(|(_, nodes)| nodes.contains(&target_node))
+            {
+                let scroll_offset_y = scroll_handles
+                    .get(&overflow.owner)
+                    .map_or(0.0, |handle| handle.offset().y.as_f32());
+                let Some(scrolled_rect) =
+                    scroll_rect_in_viewport(zone.rect, overflow.viewport, scroll_offset_y)
+                else {
+                    continue;
+                };
+                zone_rect = scrolled_rect;
+            }
+
             let active = overlay.preview.target == Some(zone.target);
             let weight = if active { 0.38 } else { 0.13 };
             let fill = blend_rgb(theme.colors.drop_target, theme.colors.canvas_background, weight);
             root = root.child(
-                rect_element(zone.rect, fill)
+                rect_element(zone_rect, fill)
                     .border_1()
                     .border_color(rgb(if active {
                         theme.colors.focus
@@ -338,6 +428,35 @@ where
     }
 
     root
+}
+
+fn drop_target_node(target: DropTarget) -> Option<NodeId> {
+    match target {
+        DropTarget::Tabs { group, .. }
+        | DropTarget::GroupTabs { group, .. }
+        | DropTarget::GroupEdge { group, .. } => Some(group),
+        DropTarget::ColumnSlot { column, .. } | DropTarget::RailSlot { column, .. } => {
+            Some(column)
+        }
+        DropTarget::MainColumn { .. } | DropTarget::FreeArea => None,
+    }
+}
+
+/// Translates a Core drop zone by the GPUI scroll offset and clips it to the viewport.
+fn scroll_rect_in_viewport(rect: Rect, viewport: Rect, scroll_offset_y: f32) -> Option<Rect> {
+    if !scroll_offset_y.is_finite() {
+        return None;
+    }
+    let top = (rect.origin.y + scroll_offset_y).max(viewport.origin.y);
+    let bottom = (rect.origin.y + scroll_offset_y + rect.size.height)
+        .min(viewport.origin.y + viewport.size.height);
+    if !top.is_finite() || !bottom.is_finite() || bottom <= top {
+        return None;
+    }
+    Some(Rect::new(
+        Point::new(rect.origin.x, top),
+        Size::new(rect.size.width, bottom - top),
+    ))
 }
 
 fn tree_elements<F, T, I, H, M, D, R>(
@@ -839,7 +958,7 @@ fn tab_header_label(title: &str, collapsed: bool, tab_index: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{rail_entry_label, tab_header_label};
+    use super::{rail_entry_label, scroll_rect_in_viewport, tab_header_label};
     use dock_core::ColumnMode;
 
     #[test]
@@ -856,6 +975,26 @@ mod tests {
         assert_eq!(tab_header_label("Layers", true, 0), "▸ Layers");
         assert_eq!(tab_header_label("Color", true, 1), "Color");
         assert_eq!(tab_header_label("Layers", false, 0), "Layers");
+    }
+
+    #[test]
+    fn scrolled_drop_zones_are_translated_and_clipped_to_the_column_viewport() {
+        let viewport = super::Rect::new(
+            super::Point::new(20.0, 10.0),
+            super::Size::new(180.0, 100.0),
+        );
+        let zone = super::Rect::new(
+            super::Point::new(20.0, 120.0),
+            super::Size::new(180.0, 40.0),
+        );
+        assert_eq!(
+            scroll_rect_in_viewport(zone, viewport, -30.0),
+            Some(super::Rect::new(
+                super::Point::new(20.0, 90.0),
+                super::Size::new(180.0, 20.0),
+            ))
+        );
+        assert_eq!(scroll_rect_in_viewport(zone, viewport, f32::NAN), None);
     }
 
     #[test]

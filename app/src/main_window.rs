@@ -1,3 +1,5 @@
+use std::collections::{HashMap, HashSet};
+
 use dock_core::{
     create_initial_layout, Axis, DockCommand, DockMetrics, DockSide, DragDropAction,
     DragDropRequest, DragHandle, DragPayload, DragSession, DragState, DropSource, DropTarget,
@@ -6,7 +8,8 @@ use dock_core::{
 };
 use gpui::{
     App, ClickEvent, Context, FocusHandle, InteractiveElement, IntoElement, MouseDownEvent,
-    ParentElement, Render, StatefulInteractiveElement, Styled, Subscription, Window, div, px, rgb,
+    ParentElement, Render, ScrollHandle, StatefulInteractiveElement, Styled, Subscription, Window,
+    div, px, rgb,
 };
 use ui::Theme;
 
@@ -112,12 +115,31 @@ struct ResizeGesture {
 }
 
 
+fn scroll_content_position(
+    position: Point,
+    viewport: Rect,
+    scroll_offset_y: f32,
+) -> Option<Point> {
+    if !position.is_finite()
+        || !scroll_offset_y.is_finite()
+        || !viewport.contains(position).unwrap_or(false)
+    {
+        return None;
+    }
+
+    let content_y = position.y - scroll_offset_y;
+    content_y
+        .is_finite()
+        .then_some(Point::new(position.x, content_y))
+}
+
 /// The app is the only owner of the live Layout and applies adapter-returned commands.
 pub(crate) struct MainWindow {
     layout: Layout,
     theme: Theme,
     metrics: DockMetrics,
     panels: PanelRegistry,
+    scroll_handles: HashMap<NodeId, ScrollHandle>,
     menu: Option<DockMenuState>,
     drag_session: DragSession,
     resize_gesture: Option<ResizeGesture>,
@@ -141,12 +163,83 @@ impl MainWindow {
             theme,
             metrics,
             panels,
+            scroll_handles: HashMap::new(),
             menu: None,
             drag_session,
             resize_gesture: None,
             resize_frame_scheduled: false,
             focus_handle: None,
             _focus_subscription: None,
+        })
+    }
+
+    fn core_drop_position(&self, position: Point, rects: &LayoutRects) -> Point {
+        if !position.is_finite()
+            || rects
+                .floating_groups
+                .iter()
+                .any(|floating| floating.rect.contains(position).unwrap_or(false))
+        {
+            return position;
+        }
+
+        for overflow in &rects.vertical_overflow {
+            if !matches!(self.layout.node(overflow.owner), Some(Node::Column(_))) {
+                continue;
+            }
+            let Some(scroll_handle) = self.scroll_handles.get(&overflow.owner) else {
+                continue;
+            };
+            if let Some(content_position) = scroll_content_position(
+                position,
+                overflow.viewport,
+                scroll_handle.offset().y.as_f32(),
+            ) {
+                return content_position;
+            }
+        }
+        position
+    }
+
+    fn group_scroll_offset(&self, group: NodeId, rects: &LayoutRects) -> f32 {
+        for overflow in &rects.vertical_overflow {
+            if !matches!(self.layout.node(overflow.owner), Some(Node::Column(_)))
+                || !self.is_main_area_column(overflow.owner)
+            {
+                continue;
+            }
+            let Some(scroll_handle) = self.scroll_handles.get(&overflow.owner) else {
+                continue;
+            };
+            if self
+                .layout
+                .column_display_order(overflow.owner)
+                .is_ok_and(|items| items.iter().any(|item| item.group == group))
+            {
+                return scroll_handle.offset().y.as_f32();
+            }
+        }
+        0.0
+    }
+
+    fn is_main_area_column(&self, column_id: NodeId) -> bool {
+        [DockSide::Left, DockSide::Right].into_iter().any(|side| {
+            let Some(area) = self.layout.main_area(side) else {
+                return false;
+            };
+            match self.layout.node(area.root) {
+                Some(Node::Column(_)) => area.root == column_id,
+                Some(Node::Split(split))
+                    if split.axis == Axis::X
+                        && split
+                            .children
+                            .iter()
+                            .all(|child| matches!(self.layout.node(*child), Some(Node::Column(_)))) =>
+                {
+                    split.children.contains(&column_id)
+                }
+                _ => false,
+            }
         })
     }
 
@@ -213,8 +306,9 @@ impl MainWindow {
         {
             let target = source_for_payload(payload).and_then(|source| {
                 let rects = self.layout.compute_rects(viewport, &self.metrics).ok()?;
+                let core_position = self.core_drop_position(position, &rects);
                 self.layout
-                    .resolve_drop(position, source, &rects, &self.metrics)
+                    .resolve_drop(core_position, source, &rects, &self.metrics)
                     .ok()
                     .flatten()
             });
@@ -243,8 +337,9 @@ impl MainWindow {
         } else {
             source_for_payload(payload).and_then(|source| {
                 let rects = geometry.as_ref()?;
+                let core_position = self.core_drop_position(position, rects);
                 self.layout
-                    .resolve_drop(position, source, rects, &self.metrics)
+                    .resolve_drop(core_position, source, rects, &self.metrics)
                     .ok()
                     .flatten()
             })
@@ -345,7 +440,14 @@ impl MainWindow {
                 };
                 let gaps =
                     self.metrics.splitter_thickness * column.groups.len().saturating_sub(1) as f32;
-                let available_height = column_rect.rect.size.height - gaps;
+                let content_height = rects
+                    .vertical_overflow
+                    .iter()
+                    .find(|overflow| overflow.owner == owner)
+                    .map_or(column_rect.rect.size.height, |overflow| {
+                        overflow.content_extent.size.height
+                    });
+                let available_height = content_height - gaps;
                 if !available_height.is_finite() || available_height <= 0.0 {
                     return;
                 }
@@ -797,7 +899,8 @@ impl MainWindow {
                         overflow.button_rect.origin.x,
                         MENU_BAR_HEIGHT
                             + overflow.button_rect.origin.y
-                            + overflow.button_rect.size.height,
+                            + overflow.button_rect.size.height
+                            + self.group_scroll_offset(group, rects),
                     )
                 })
                 .unwrap_or((0.0, MENU_BAR_HEIGHT)),
@@ -821,7 +924,8 @@ impl MainWindow {
                             candidate.rect.origin.x + candidate.rect.size.width - MENU_WIDTH,
                             MENU_BAR_HEIGHT
                                 + candidate.rect.origin.y
-                                + self.theme.metrics.column_header_height,
+                                + self.theme.metrics.column_header_height
+                                + self.group_scroll_offset(group, rects),
                         )
                     })
                     .unwrap_or((0.0, MENU_BAR_HEIGHT))
@@ -865,6 +969,19 @@ impl Render for MainWindow {
                     .into_any_element();
             }
         };
+
+        let live_columns: HashSet<NodeId> = self
+            .layout
+            .nodes()
+            .filter_map(|(id, node)| matches!(node, Node::Column(_)).then_some(id))
+            .collect();
+        self.scroll_handles
+            .retain(|column, _| live_columns.contains(column));
+        for column in &rects.columns {
+            self.scroll_handles
+                .entry(column.column)
+                .or_insert_with(ScrollHandle::new);
+        }
 
         if self.focus_handle.is_none() {
             let focus_handle = cx.focus_handle();
@@ -981,6 +1098,7 @@ impl Render for MainWindow {
         let dock_view = dock_gpui::render(
             &self.layout,
             &rects,
+            &self.scroll_handles,
             theme,
             |instance| panel_registry.render(instance, theme),
             |instance| panel_registry.title(instance),
@@ -1093,6 +1211,29 @@ impl Render for MainWindow {
         }
 
         root.into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod scroll_position_tests {
+    use super::scroll_content_position;
+    use dock_core::{Point, Rect, Size};
+
+    #[test]
+    fn screen_position_maps_back_to_scrolled_core_geometry() {
+        let viewport = Rect::new(Point::new(20.0, 10.0), Size::new(120.0, 80.0));
+        assert_eq!(
+            scroll_content_position(Point::new(40.0, 40.0), viewport, -25.0),
+            Some(Point::new(40.0, 65.0))
+        );
+        assert_eq!(
+            scroll_content_position(Point::new(40.0, 5.0), viewport, -25.0),
+            None
+        );
+        assert_eq!(
+            scroll_content_position(Point::new(40.0, 40.0), viewport, f32::NAN),
+            None
+        );
     }
 }
 
