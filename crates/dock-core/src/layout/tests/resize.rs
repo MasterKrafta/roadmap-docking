@@ -157,11 +157,25 @@ fn c45_resize_groups_cannot_shrink_below_tab_chrome_and_panel_minimum() {
         )
         .unwrap();
     assert_eq!(
-        rects.groups.iter().find(|item| item.group == group_a).unwrap().rect.size.height,
+        rects
+            .groups
+            .iter()
+            .find(|item| item.group == group_a)
+            .unwrap()
+            .rect
+            .size
+            .height,
         176.0
     );
     assert_eq!(
-        rects.groups.iter().find(|item| item.group == group_b).unwrap().rect.size.height,
+        rects
+            .groups
+            .iter()
+            .find(|item| item.group == group_b)
+            .unwrap()
+            .rect
+            .size
+            .height,
         176.0
     );
     assert!(rects.vertical_overflow.is_empty());
@@ -252,11 +266,25 @@ fn c45_resize_groups_uses_effective_collapsed_height_when_tab_strip_is_taller() 
         )
         .unwrap();
     assert_eq!(
-        rects.groups.iter().find(|item| item.group == collapsed).unwrap().rect.size.height,
+        rects
+            .groups
+            .iter()
+            .find(|item| item.group == collapsed)
+            .unwrap()
+            .rect
+            .size
+            .height,
         42.0
     );
     assert_eq!(
-        rects.groups.iter().find(|item| item.group == expanded).unwrap().rect.size.height,
+        rects
+            .groups
+            .iter()
+            .find(|item| item.group == expanded)
+            .unwrap()
+            .rect
+            .size
+            .height,
         170.0
     );
     assert!(rects.vertical_overflow.is_empty());
