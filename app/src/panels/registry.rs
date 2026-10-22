@@ -1,14 +1,28 @@
-use dock_core::{PanelConstraints, PanelInstance, PanelKey, Size};
+use dock_core::{DockCommand, PanelConstraints, PanelInstance, PanelKey, Size};
 use gpui::{AnyElement, IntoElement, ParentElement, Styled, div, px, rgb};
 use ui::Theme;
 
 type PanelFactory = fn(&Theme) -> AnyElement;
-type PanelEntry = (PanelKey, &'static str, PanelConstraints, PanelFactory);
+type PanelMenuFactory = fn(&PanelInstance) -> Vec<PanelMenuItem>;
+type PanelEntry = (
+    PanelKey,
+    &'static str,
+    PanelConstraints,
+    PanelFactory,
+    PanelMenuFactory,
+);
 
-/// App-owned panel descriptors and content factories.
+/// A panel-owned menu contribution. Commands are intents; MainWindow applies them through Core.
+#[derive(Clone)]
+pub(crate) struct PanelMenuItem {
+    pub(crate) label: &'static str,
+    pub(crate) command: DockCommand,
+}
+
+/// App-owned panel descriptors, view factories, and panel menu sources.
 ///
 /// Dock Core receives only each stable key and its size constraints. GPUI trees
-/// are created lazily by `render`, which the adapter calls for visible active panels.
+/// are created lazily by render, which the adapter calls for visible active panels.
 pub(crate) struct PanelRegistry {
     entries: Vec<PanelEntry>,
 }
@@ -28,24 +42,28 @@ impl Default for PanelRegistry {
                     "Layers",
                     constraints,
                     render_layers,
+                    no_panel_menu,
                 ),
                 (
                     PanelKey::new("color").expect("valid built-in key"),
                     "Color",
                     constraints,
                     render_color,
+                    no_panel_menu,
                 ),
                 (
                     PanelKey::new("properties").expect("valid built-in key"),
                     "Properties",
                     constraints,
                     render_properties,
+                    no_panel_menu,
                 ),
                 (
                     PanelKey::new("history").expect("valid built-in key"),
                     "History",
                     constraints,
                     render_history,
+                    no_panel_menu,
                 ),
             ],
         }
@@ -56,27 +74,54 @@ impl PanelRegistry {
     pub(crate) fn core_descriptors(&self) -> Vec<(PanelKey, PanelConstraints)> {
         self.entries
             .iter()
-            .map(|(key, _, constraints, _)| (key.clone(), *constraints))
+            .map(|(key, _, constraints, _, _)| (key.clone(), *constraints))
             .collect()
+    }
+
+    pub(crate) fn menu_descriptors(&self) -> Vec<(PanelKey, String)> {
+        self.entries
+            .iter()
+            .map(|(key, title, _, _, _)| (key.clone(), (*title).to_owned()))
+            .collect()
+    }
+
+    pub(crate) fn constraints_for_key(&self, wanted: &PanelKey) -> Option<PanelConstraints> {
+        self.entries
+            .iter()
+            .find(|(key, _, _, _, _)| key.as_str() == wanted.as_str())
+            .map(|(_, _, constraints, _, _)| *constraints)
     }
 
     pub(crate) fn title(&self, instance: &PanelInstance) -> String {
         self.entries
             .iter()
-            .find(|(key, _, _, _)| key.as_str() == instance.key.as_str())
-            .map(|(_, title, _, _)| (*title).to_owned())
+            .find(|(key, _, _, _, _)| key.as_str() == instance.key.as_str())
+            .map(|(_, title, _, _, _)| (*title).to_owned())
             .unwrap_or_else(|| format!("Unavailable: {}", instance.key.as_str()))
+    }
+
+    pub(crate) fn menu_items(&self, instance: &PanelInstance) -> Vec<PanelMenuItem> {
+        self.entries
+            .iter()
+            .find(|(key, _, _, _, _)| key.as_str() == instance.key.as_str())
+            .map(|(_, _, _, _, menu_factory)| menu_factory(instance))
+            .unwrap_or_default()
     }
 
     pub(crate) fn render(&self, instance: &PanelInstance, theme: &Theme) -> AnyElement {
         self.entries
             .iter()
-            .find(|(key, _, _, _)| key.as_str() == instance.key.as_str())
-            .map(|(_, _, _, factory)| factory(theme))
+            .find(|(key, _, _, _, _)| key.as_str() == instance.key.as_str())
+            .map(|(_, _, _, factory, _)| factory(theme))
             .unwrap_or_else(|| {
                 panel_content(theme, "Unavailable panel", instance.key.as_str())
             })
     }
+}
+
+fn no_panel_menu(_instance: &PanelInstance) -> Vec<PanelMenuItem> {
+    // Built-in panels are placeholders and do not yet expose panel-specific actions.
+    Vec::new()
 }
 
 fn panel_content(theme: &Theme, title: &str, description: &str) -> AnyElement {
