@@ -20,10 +20,30 @@ impl Default for PanelRegistry {
         );
         Self {
             entries: vec![
-                (PanelKey::new("layers").expect("valid built-in key"), "Layers", constraints, render_layers),
-                (PanelKey::new("color").expect("valid built-in key"), "Color", constraints, render_color),
-                (PanelKey::new("properties").expect("valid built-in key"), "Properties", constraints, render_properties),
-                (PanelKey::new("history").expect("valid built-in key"), "History", constraints, render_history),
+                (
+                    PanelKey::new("layers").expect("valid built-in key"),
+                    "Layers",
+                    constraints,
+                    render_layers,
+                ),
+                (
+                    PanelKey::new("color").expect("valid built-in key"),
+                    "Color",
+                    constraints,
+                    render_color,
+                ),
+                (
+                    PanelKey::new("properties").expect("valid built-in key"),
+                    "Properties",
+                    constraints,
+                    render_properties,
+                ),
+                (
+                    PanelKey::new("history").expect("valid built-in key"),
+                    "History",
+                    constraints,
+                    render_history,
+                ),
             ],
         }
     }
@@ -50,7 +70,9 @@ impl PanelRegistry {
             .iter()
             .find(|(key, _, _, _)| key.as_str() == instance.key.as_str())
             .map(|(_, _, _, factory)| factory(theme))
-            .unwrap_or_else(|| panel_content(theme, "Unavailable panel", instance.key.as_str()))
+            .unwrap_or_else(|| {
+                panel_content(theme, "Unavailable panel", instance.key.as_str())
+            })
     }
 }
 
@@ -61,7 +83,11 @@ fn panel_content(theme: &Theme, title: &str, description: &str) -> AnyElement {
         .gap_2()
         .p(px(theme.metrics.content_padding))
         .text_color(rgb(theme.colors.primary_text))
-        .child(div().text_size(px(theme.typography.title_size)).child(title.to_owned()))
+        .child(
+            div()
+                .text_size(px(theme.typography.title_size))
+                .child(title.to_owned()),
+        )
         .child(
             div()
                 .text_color(rgb(theme.colors.muted_text))

@@ -80,20 +80,6 @@ where
                 .into_any_element(),
         );
 
-        let title_rect = Rect::new(
-            rect.origin,
-            dock_core::Size::new(
-                rect.size.width,
-                theme.metrics.column_header_height.min(rect.size.height),
-            ),
-        );
-        root = root.child(
-            rect_element(title_rect, theme.colors.toolbar_background)
-                .text_color(rgb(theme.colors.primary_text))
-                .child("Floating dock")
-                .into_any_element(),
-        );
-
         let Some(area) = layout.dock_area(floating.area) else {
             continue;
         };
@@ -104,6 +90,7 @@ where
             &nodes,
             theme,
             &mut render_panel,
+            &panel_title,
             &make_command_handler,
         ) {
             root = root.child(element);
@@ -151,7 +138,7 @@ where
         {
             let title = active_panel(layout, tabs)
                 .and_then(|panel_id| layout.panel_instance(panel_id))
-                .map(panel_title)
+                .map(|instance| panel_title(instance))
                 .unwrap_or_else(|| "Panel group".to_owned());
             let header_rect = Rect::new(
                 group.rect.origin,
