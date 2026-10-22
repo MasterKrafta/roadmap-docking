@@ -221,7 +221,7 @@ impl Layout {
                     }]
                 })?;
             let maximum = candidate
-                .maximum_expanded_column_width(node_id, metrics)
+                .maximum_expanded_column_width(node_id)
                 .map_err(|_| {
                     vec![ValidationError::InvalidColumn {
                         node: node_id,
