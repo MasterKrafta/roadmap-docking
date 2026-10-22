@@ -198,6 +198,8 @@ The benchmark asserts a panel hit inside the frontmost window and a Canvas hit o
 
 All timings are microseconds per call from 500 iterations per point on the same reported local Windows release build. Small benchmark samples can still be affected by machine load; the outside-window regression should be treated as a signal to verify, not a universal cost estimate.
 
+**Follow-up experiment:** direct union collection reuses the same node/panel sets across floating roots, and subtree traversal iterates child lists without cloning them. This targets the allocations and hashing still present on the outside-window path. The measurements above remain the comparator until three local release runs validate this variant.
+
 - [x] Record the release benchmark baseline for both points across three runs.
 - [x] Compare the lazy union collection with the baseline across three release runs.
 - [ ] Run and review the full fmt, test, serde-test and clippy checks before deciding whether to retain the workload trade-off.
