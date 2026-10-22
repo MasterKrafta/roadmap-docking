@@ -225,10 +225,10 @@ The follow-up measurements resolve the measured regression in this synthetic out
 
 - [x] Не создавать history snapshot в `UndoRedoHistory::apply()`, если `limit == 0`; команда при этом по-прежнему должна применяться обычным путём.
 - [x] Тестом подтвердить идентичность outcome/error и состояния при лимите истории 0.
-- [ ] Измерить overhead snapshot/clone для типичных layout перед другими изменениями.
-- [ ] Рассматривать замену `Vec::remove(0)` в bounded history на другую структуру только если большой лимит истории важен на практике.
+- [x] Измерить overhead snapshot/clone для типичных layout перед другими изменениями.
+- [x] Оценить bounded history на лимитах 100 и 1 000; пока оставить `Vec::remove(0)`, поскольку практическая регрессия не подтверждена.
 
-**Manual benchmark:** `benchmark_history_snapshot_and_bounded_history` (ignored release test) reports node, panel-instance and floating-window counts, and microseconds per call for both `Layout::clone()` and `Layout::history_snapshot()` on small/medium/large valid fixtures. It also measures command application with history disabled, at the default limit of 100, and at a saturated limit of 1,000; fixture creation and history prefill are outside the timed loop.
+**Benchmark:** ignored release test `benchmark_history_snapshot_and_bounded_history`. It compares `Layout::clone()` with `Layout::history_snapshot()` for small/medium/large layouts, then measures command application with a disabled history, the default limit (100), and a saturated limit (1,000). Setup and history prefill are excluded from timed sections.
 
 Run with:
 
@@ -236,7 +236,27 @@ Run with:
 cargo test -p dock-core --release benchmark_history_snapshot_and_bounded_history -- --ignored --nocapture --test-threads=1
 ```
 
-Use the results to decide whether a queue representation change would matter at the supported/default history limit. Do not replace `Vec::remove(0)` without a demonstrated practical regression, and do not mix such a change into the snapshot measurements.
+**Snapshot/clone measurements:** three release runs on the same local Windows build; times are microseconds per call. Layout creation is outside the timed loop.
+
+| Layout | Nodes | Panel instances | Floating windows | Clone runs | Clone median | Snapshot runs | Snapshot median |
+|---|---:|---:|---:|---|---:|---|---:|
+| Small | 10 | 6 | 1 | 2.525 / 2.977 / 3.025 | **2.977** | 2.501 / 3.025 / 2.604 | **2.604** |
+| Medium | 74 | 56 | 2 | 32.747 / 35.156 / 32.422 | **32.747** | 33.366 / 33.591 / 33.049 | **33.366** |
+| Large | 257 | 224 | 4 | 81.659 / 85.535 / 82.995 | **82.995** | 83.639 / 89.523 / 91.179 | **89.523** |
+
+These separate batched timings vary between runs, and `history_snapshot()` is a full clone plus clearing the transient flyout. The measured medians do not establish a stable, independent cost for that extra assignment: small is within noise, medium differs by about 1.9%, and the larger difference on the large fixture should be remeasured with paired/alternating batches before any targeted optimization. No change to snapshot implementation is justified by this probe alone.
+
+**Saturated history apply:** each run timed 1,000 applies for limits 0 and 100, and 250 applies for limit 1,000 (the latter was pre-filled before timing).
+
+| Limit | Run 1 | Run 2 | Run 3 | Median |
+|---|---:|---:|---:|---:|
+| 0 | 507.192 | 364.984 | 498.067 | **498.067** |
+| 100 | 319.425 | 328.113 | 340.418 | **328.113** |
+| 1,000 | 305.936 | 360.366 | 336.228 | **336.228** |
+
+The zero-limit path measured slower despite skipping the history snapshot, so this whole-command microbenchmark is evidently sensitive to factors beyond the snapshot alone; it must not be used to infer a regression from removing the clone. At limit 1,000 the median was about 2.5% above limit 100, within the run-to-run spread. This does not demonstrate a meaningful `Vec::remove(0)` bottleneck. Decision: retain the simple bounded `Vec`; consider `VecDeque` or a ring buffer only if real usage calls for much larger history limits and a better-isolated benchmark shows material cost.
+
+**Conclusion:** the snapshot/clone measurement is recorded and the bounded-history representation remains unchanged. No further production optimization is justified by these measurements without better-isolated paired timing or evidence of larger histories in real workloads.
 
 **Готово, когда:** есть воспроизводимый benchmark (размер дерева, число панелей/окон, время до/после), и ускорение не покупается ухудшением читаемости или корректности.
 
