@@ -272,26 +272,30 @@ impl Render for MainWindow {
                     .border_color(rgb(colors.border))
                     .child(render_panel_menu_item(
                         0,
-                        "Левая верхняя панель",
+                        "Layers",
                         self.visible_panels[0],
+                        self.theme,
                         cx,
                     ))
                     .child(render_panel_menu_item(
                         1,
-                        "Левая нижняя панель",
+                        "Color",
                         self.visible_panels[1],
+                        self.theme,
                         cx,
                     ))
                     .child(render_panel_menu_item(
                         2,
-                        "Правая верхняя панель",
+                        "Properties",
                         self.visible_panels[2],
+                        self.theme,
                         cx,
                     ))
                     .child(render_panel_menu_item(
                         3,
-                        "Правая нижняя панель",
+                        "History",
                         self.visible_panels[3],
+                        self.theme,
                         cx,
                     )),
             )
@@ -628,22 +632,22 @@ fn render_panel_content(
 ) -> impl IntoElement {
     let colors = theme.colors;
     let metrics = theme.metrics;
-    let column_name = if column_index == 0 {
-        "Левая колонка"
-    } else {
-        "Правая колонка"
-    };
-    let panel_name = if is_lower {
-        "Нижняя панель"
-    } else {
-        "Верхняя панель"
+    let panel_name = match (column_index, is_lower) {
+        (0, false) => "Layers",
+        (0, true) => "Color",
+        (1, false) => "Properties",
+        _ => "History",
     };
     let tab_name = if active_tab == 0 {
-        "Содержимое вкладки 1"
+        format!("{panel_name} — Вкладка 1")
     } else {
-        "Содержимое вкладки 2"
+        format!("{panel_name} — Вкладка 2")
     };
-    let details = format!("{column_name} · {panel_name}");
+    let details = if active_tab == 0 {
+        "Здесь отображается содержимое первой вкладки."
+    } else {
+        "Здесь отображается содержимое второй вкладки."
+    };
 
     div()
         .flex()
