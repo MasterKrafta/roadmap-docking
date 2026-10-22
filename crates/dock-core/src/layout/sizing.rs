@@ -79,10 +79,11 @@ impl Layout {
         let mut expanded_indices = Vec::new();
         let mut weights = Vec::new();
         let mut fixed_height = 0.0_f32;
+        let collapsed_height = metrics.effective_collapsed_group_height();
         for (index, group) in column.groups.iter().copied().enumerate() {
             if self.group_is_collapsed(group) {
-                heights[index] = metrics.collapsed_group_height;
-                fixed_height += metrics.collapsed_group_height;
+                heights[index] = collapsed_height;
+                fixed_height += collapsed_height;
             } else {
                 expanded_indices.push(index);
                 weights.push(ratios[index]);
@@ -144,10 +145,11 @@ impl Layout {
         let mut heights = vec![0.0; column.groups.len()];
         let mut expanded_indices = Vec::new();
         let mut fixed_height = 0.0_f32;
+        let collapsed_height = metrics.effective_collapsed_group_height();
         for (index, group) in column.groups.iter().copied().enumerate() {
             if self.group_is_collapsed(group) {
-                heights[index] = metrics.collapsed_group_height;
-                fixed_height += metrics.collapsed_group_height;
+                heights[index] = collapsed_height;
+                fixed_height += collapsed_height;
             } else {
                 expanded_indices.push(index);
             }
@@ -350,7 +352,10 @@ impl Layout {
         }
         self.maximum_expanded_column_width(column_id)
     }
-    pub(super) fn minimum_node_size(
+    /// Computes the minimum content size using the same rules as geometry.
+    /// Expanded Tabs include their header and strip; Split/Column stacks include
+    /// splitter gaps; collapsed Tabs require only the effective strip height.
+    pub(crate) fn minimum_node_size(
         &self,
         node_id: NodeId,
         metrics: &DockMetrics,
@@ -360,28 +365,36 @@ impl Layout {
             .get(node_id)
             .ok_or(CommandError::MissingNode { node: node_id })?;
         let size = match node {
-            Node::Panel(panel) => {
-                self.panel_instances
-                    .get(panel.panel_id)
-                    .ok_or(CommandError::MissingPanel {
-                        panel: panel.panel_id,
-                    })?
-                    .constraints
-                    .min_size
-            }
+            Node::Panel(panel) => self
+                .panel_instances
+                .get(panel.panel_id)
+                .ok_or(CommandError::MissingPanel {
+                    panel: panel.panel_id,
+                })?
+                .constraints
+                .min_size,
+            Node::Tabs(tabs) if tabs.collapsed => Size::new(
+                0.0,
+                metrics.effective_collapsed_group_height(),
+            ),
             Node::Tabs(tabs) => {
-                let mut width: f32 = 0.0;
-                let mut height: f32 = 0.0;
+                let mut width = 0.0_f32;
+                let mut content_height = 0.0_f32;
                 for child in &tabs.children {
                     let child_size = self.minimum_node_size(*child, metrics)?;
                     width = width.max(child_size.width);
-                    height = height.max(child_size.height);
+                    content_height = content_height.max(child_size.height);
                 }
-                Size::new(width, height)
+                Size::new(
+                    width,
+                    metrics
+                        .min_group_height
+                        .max(metrics.header_height + metrics.tab_strip_height + content_height),
+                )
             }
             Node::Split(split) => {
-                let mut width: f32 = 0.0;
-                let mut height: f32 = 0.0;
+                let mut width = 0.0_f32;
+                let mut height = 0.0_f32;
                 for child in &split.children {
                     let child_size = self.minimum_node_size(*child, metrics)?;
                     match split.axis {
@@ -395,37 +408,47 @@ impl Layout {
                         }
                     }
                 }
+                let gaps = metrics.splitter_thickness
+                    * split.children.len().saturating_sub(1) as f32;
+                match split.axis {
+                    Axis::X => width += gaps,
+                    Axis::Y => height += gaps,
+                }
                 Size::new(width, height)
             }
             Node::Column(column) if column.mode.is_rail() => {
                 let width = match column.mode {
-                    ColumnMode::Expanded => column.width,
                     ColumnMode::IconsAndLabels => metrics.min_column_width,
                     ColumnMode::IconsOnly => metrics.rail_width,
+                    ColumnMode::Expanded => unreachable!("Expanded columns are not rails"),
                 };
                 let slot_count = self.column_display_order(node_id)?.len();
-                let slot_height = metrics.collapsed_group_height.max(metrics.tab_strip_height);
-                Size::new(width, slot_height * slot_count as f32)
+                Size::new(
+                    width,
+                    metrics.effective_collapsed_group_height() * slot_count as f32,
+                )
             }
             Node::Column(column) => {
                 let mut width = metrics.min_column_width;
-                let mut height = 0.0;
+                let mut height = 0.0_f32;
                 for group in &column.groups {
                     let child_size = self.minimum_node_size(*group, metrics)?;
                     width = width.max(child_size.width);
                     height += child_size.height;
                 }
+                height += metrics.splitter_thickness
+                    * column.groups.len().saturating_sub(1) as f32;
                 Size::new(width, height)
             }
         };
-        if size.is_finite() && size.width > 0.0 && size.height > 0.0 {
-            Ok(size)
-        } else {
-            Err(CommandError::InvalidValue {
+
+        if !size.is_finite() || size.width < 0.0 || size.height <= 0.0 {
+            return Err(CommandError::InvalidValue {
                 field: "size",
-                reason: "computed minimum size is not finite and positive",
-            })
+                reason: "computed minimum size is non-finite or has invalid dimensions",
+            });
         }
+        Ok(size)
     }
 
     pub(super) fn next_floating_z_order(&self) -> Result<i32, CommandError> {
