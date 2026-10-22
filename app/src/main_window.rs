@@ -298,6 +298,7 @@ impl Render for MainWindow {
 
         if any_column_visible {
             let outer_right_only = !left_column_visible && right_column_visible;
+            let remembered_left_width = self.column_widths[0];
             let remembered_right_width = self.column_widths[1];
             dock_row = dock_row.child(
                 div()
@@ -318,10 +319,12 @@ impl Render for MainWindow {
                             this.is_resizing_height = false;
                             this.resize_start_x = event.position.x.as_f32();
                             this.resize_start_column_widths = [
-                                left_column_width.max(min_column_width),
-                                if both_columns_visible {
-                                    right_column_width
-                                } else if outer_right_only {
+                                if outer_right_only {
+                                    remembered_left_width
+                                } else {
+                                    left_column_width.max(min_column_width)
+                                },
+                                if both_columns_visible || outer_right_only {
                                     right_column_width
                                 } else {
                                     remembered_right_width
