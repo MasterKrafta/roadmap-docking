@@ -24,15 +24,10 @@ impl Layout {
             .groups
             .iter()
             .map(|group| {
-                if self.group_is_collapsed(*group) {
-                    // Collapsed height is fixed separately by the callers.
-                    Ok(0.0)
-                } else {
-                    // minimum_node_size is the shared contract with geometry;
-                    // expanded Tabs include header, strip, and panel minima.
-                    self.minimum_node_size(*group, metrics)
-                        .map(|size| size.height)
-                }
+                // Use the same minimum-size contract for expanded and collapsed
+                // groups. Resize commands account for every group's floor once.
+                self.minimum_node_size(*group, metrics)
+                    .map(|size| size.height)
             })
             .collect()
     }
