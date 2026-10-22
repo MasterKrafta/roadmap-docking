@@ -487,7 +487,7 @@ where
             .panel_instance(header.panel)
             .map(panel_title)
             .unwrap_or_else(|| "Missing panel".to_owned());
-        let display_label = tab_header_label(&label, collapsed, header.tab_index);
+        let display_label = tab_header_label(&label, collapsed, header.index);
         let active = matches!(
             layout.node(header.group),
             Some(Node::Tabs(tabs)) if active_panel(layout, tabs) == Some(header.panel)
