@@ -352,9 +352,9 @@ impl Layout {
         }
         self.maximum_expanded_column_width(column_id)
     }
-    /// Computes the minimum content size using the same rules as geometry.
+    /// Computes the minimum layout size using the same rules as geometry.
     /// Expanded Tabs include their header and strip; Split/Column stacks include
-    /// splitter gaps; collapsed Tabs require only the effective strip height.
+    /// splitter gaps; Expanded Columns retain their configured width.
     pub(crate) fn minimum_node_size(
         &self,
         node_id: NodeId,
@@ -427,16 +427,13 @@ impl Layout {
                 )
             }
             Node::Column(column) => {
-                let mut width = metrics.min_column_width;
                 let mut height = 0.0_f32;
                 for group in &column.groups {
-                    let child_size = self.minimum_node_size(*group, metrics)?;
-                    width = width.max(child_size.width);
-                    height += child_size.height;
+                    height += self.minimum_node_size(*group, metrics)?.height;
                 }
                 height += metrics.splitter_thickness
                     * column.groups.len().saturating_sub(1) as f32;
-                Size::new(width, height)
+                Size::new(column.width, height)
             }
         };
 
