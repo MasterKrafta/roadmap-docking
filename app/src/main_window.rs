@@ -5,7 +5,7 @@ use gpui::{
 };
 use ui::Theme;
 
-/// Two right-docked columns. Each column has its own top and bottom tab groups.
+/// Two dock columns: the left has two groups with two tabs each; the right has one group and one tab.
 pub(crate) struct MainWindow {
     theme: Theme,
     active_tabs: [usize; 2],
