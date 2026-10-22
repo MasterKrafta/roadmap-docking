@@ -27,6 +27,7 @@ pub(crate) struct MainWindow {
     theme: Theme,
     active_tabs: [usize; 2],
     lower_active_tabs: [usize; 2],
+    tab_order: [[usize; 2]; 3],
     column_widths: [f32; 2],
     resize_start_x: f32,
     resize_start_y: f32,
@@ -76,6 +77,7 @@ impl MainWindow {
             theme,
             active_tabs: [0, 0],
             lower_active_tabs: [0, 0],
+            tab_order: [[0, 1], [0, 1], [0, 1]],
             column_widths: [default_width, default_width],
             resize_start_x: 0.0,
             resize_start_y: 0.0,
@@ -421,6 +423,8 @@ impl Render for MainWindow {
                 let floating_group_header_height = column_header_height;
                 let floating_group_collapsed_width = collapsed_column_width;
                 let tab_strip_height = metrics.tab_strip_height;
+                let column_tab_width = metrics.column_tab_width;
+                let button_size = metrics.button_size;
                 let drag_threshold = 5.0_f32;
 
                 cx.listener(move |this, event: &MouseMoveEvent, window, cx| {
@@ -508,14 +512,84 @@ impl Render for MainWindow {
                             2 | 3 => 1,
                             _ => 2,
                         };
-                        let [group_x, group_y, group_width, group_height] =
-                            tab_group_drag_bounds[group_index];
+                        let (group_x, group_y, group_width, group_height) =
+                            if this.floating_tab_groups[group_index] {
+                                let group_width = if this.floating_tab_group_collapsed[group_index] {
+                                    floating_group_collapsed_width
+                                } else {
+                                    this.floating_tab_group_widths[group_index].max(1.0)
+                                };
+                                let group_height = if this.collapsed_group_content[group_index] {
+                                    tab_strip_height
+                                } else {
+                                    (floating_group_default_height - floating_group_header_height)
+                                        .max(tab_strip_height)
+                                };
+                                (
+                                    this.floating_tab_group_positions[group_index][0],
+                                    this.floating_tab_group_positions[group_index][1]
+                                        + floating_group_header_height,
+                                    group_width,
+                                    group_height,
+                                )
+                            } else {
+                                let bounds = tab_group_drag_bounds[group_index];
+                                (bounds[0], bounds[1], bounds[2], bounds[3])
+                            };
                         let cursor_outside_group = group_width > 0.0
                             && group_height > 0.0
                             && (cursor_x < group_x
                                 || cursor_x > group_x + group_width
                                 || cursor_y < group_y
                                 || cursor_y > group_y + group_height);
+
+                        let local_tab_index = match tab_index {
+                            0 | 2 => 0,
+                            1 | 3 => 1,
+                            _ => 0,
+                        };
+                        let group_has_multiple_tabs = match group_index {
+                            0 => {
+                                this.visible_tabs[0]
+                                    && !this.floating_tabs[0]
+                                    && this.visible_tabs[1]
+                                    && !this.floating_tabs[1]
+                            }
+                            1 => {
+                                this.visible_tabs[2]
+                                    && !this.floating_tabs[2]
+                                    && this.visible_tabs[3]
+                                    && !this.floating_tabs[3]
+                            }
+                            _ => false,
+                        };
+                        let tab_width =
+                            column_tab_width.min(((group_width - button_size).max(0.0)) / 2.0);
+                        let mut tab_reordered = false;
+                        if group_has_multiple_tabs
+                            && !this.floating_tabs[tab_index]
+                            && !this.floating_tab_group_collapsed[group_index]
+                            && tab_width > 0.0
+                            && cursor_y >= group_y
+                            && cursor_y <= group_y + tab_strip_height
+                            && cursor_x >= group_x
+                            && cursor_x <= group_x + tab_width * 2.0
+                        {
+                            let dragged_slot = if this.tab_order[group_index][0] == local_tab_index {
+                                0
+                            } else {
+                                1
+                            };
+                            let crossed_other_tab_midpoint = if dragged_slot == 0 {
+                                cursor_x >= group_x + tab_width * 1.5
+                            } else {
+                                cursor_x <= group_x + tab_width * 0.5
+                            };
+                            if crossed_other_tab_midpoint {
+                                this.tab_order[group_index].swap(0, 1);
+                                tab_reordered = true;
+                            }
+                        }
 
                         // A single-tab group can be torn off in any direction.
                         // Any tab also detaches as soon as the pointer leaves its group.
@@ -592,6 +666,8 @@ impl Render for MainWindow {
                             this.floating_tab_context_menu = None;
                             this.mouse_context_menu = None;
                             this.windows_menu_open = false;
+                            cx.notify();
+                        } else if tab_reordered {
                             cx.notify();
                         }
                     } else if let Some(group_index) = this.dragging_tab_group {
@@ -991,6 +1067,7 @@ impl Render for MainWindow {
                 docked_tab_context_menu,
                 docked_composition_position,
                 tab_group_origins,
+                self.tab_order,
                 cx,
             ));
         }
@@ -1054,6 +1131,7 @@ impl Render for MainWindow {
                 docked_tab_context_menu,
                 docked_composition_position,
                 tab_group_origins,
+                self.tab_order,
                 cx,
             ));
         }
@@ -1092,6 +1170,7 @@ impl Render for MainWindow {
                 self.visible_tabs[1] && !self.floating_tabs[1],
                 self.collapsed_group_content[0],
                 self.open_tab_context_menu,
+                self.tab_order[0],
                 cx,
             ));
         }
@@ -1127,6 +1206,7 @@ impl Render for MainWindow {
                 self.visible_tabs[3] && !self.floating_tabs[3],
                 self.collapsed_group_content[1],
                 self.open_tab_context_menu,
+                self.tab_order[1],
                 cx,
             ));
         }
@@ -1156,6 +1236,7 @@ impl Render for MainWindow {
                 false,
                 self.collapsed_group_content[2],
                 self.open_tab_context_menu,
+                self.tab_order[2],
                 cx,
             ));
         }
@@ -1373,6 +1454,7 @@ fn render_column(
     open_tab_context_menu: Option<usize>,
     docked_composition_position: [f32; 2],
     tab_group_origins: [[f32; 2]; 3],
+    tab_orders: [[usize; 2]; 3],
     cx: &mut Context<MainWindow>,
 ) -> impl IntoElement {
     let colors = theme.colors;
@@ -1610,6 +1692,7 @@ fn render_column(
                 upper_tabs_visible[0],
                 upper_tabs_visible[1],
                 tab_group_origins[if column_index == 0 { 0 } else { 2 }],
+                tab_orders[if column_index == 0 { 0 } else { 2 }],
                 cx,
             ));
 
@@ -1686,6 +1769,7 @@ fn render_column(
                 lower_tabs_visible[0],
                 lower_tabs_visible[1],
                 tab_group_origins[1],
+                tab_orders[1],
                 cx,
             ));
 
@@ -2148,6 +2232,7 @@ fn render_floating_tab_group(
     second_tab_visible: bool,
     content_collapsed: bool,
     open_tab_context_menu: Option<usize>,
+    tab_order: [usize; 2],
     cx: &mut Context<MainWindow>,
 ) -> impl IntoElement {
     let colors = theme.colors;
@@ -2356,6 +2441,7 @@ fn render_floating_tab_group(
             first_tab_visible,
             second_tab_visible,
             [position[0], position[1] + metrics.column_header_height],
+            tab_order,
             cx,
         ));
 
@@ -2928,6 +3014,7 @@ fn render_tab_strip(
     first_tab_visible: bool,
     second_tab_visible: bool,
     tab_group_position: [f32; 2],
+    tab_order: [usize; 2],
     cx: &mut Context<MainWindow>,
 ) -> impl IntoElement {
     let colors = theme.colors;
@@ -2940,22 +3027,75 @@ fn render_tab_strip(
         _ => ("Свойства", ""),
     };
 
-    let first_tab_background = if active_tab == 0 {
+    let content_index = match (column_index, is_lower) {
+        (0, false) => 0,
+        (0, true) => 1,
+        _ => 2,
+    };
+    let group_base_index = match content_index {
+        0 => 0,
+        1 => 2,
+        _ => 4,
+    };
+    let first_identity = tab_order[0].min(1);
+    let second_identity = tab_order[1].min(1);
+    let first_display_id = if first_identity == 0 {
+        first_tab_id
+    } else {
+        second_tab_id
+    };
+    let second_display_id = if second_identity == 0 {
+        first_tab_id
+    } else {
+        second_tab_id
+    };
+    let first_display_label = if first_identity == 0 {
+        first_tab_label
+    } else {
+        second_tab_label
+    };
+    let second_display_label = if second_identity == 0 {
+        first_tab_label
+    } else {
+        second_tab_label
+    };
+    let first_display_visible = if first_identity == 0 {
+        first_tab_visible
+    } else {
+        second_tab_visible
+    };
+    let second_display_visible = if second_identity == 0 {
+        first_tab_visible
+    } else {
+        second_tab_visible
+    };
+    let first_display_global_index = if content_index == 2 {
+        4
+    } else {
+        group_base_index + first_identity
+    };
+    let second_display_global_index = if content_index == 2 {
+        4
+    } else {
+        group_base_index + second_identity
+    };
+
+    let first_tab_background = if active_tab == first_identity {
         colors.active_tab
     } else {
         colors.dock_background
     };
-    let first_tab_text = if active_tab == 0 {
+    let first_tab_text = if active_tab == first_identity {
         colors.primary_text
     } else {
         colors.muted_text
     };
-    let second_tab_background = if active_tab == 1 {
+    let second_tab_background = if active_tab == second_identity {
         colors.active_tab
     } else {
         colors.dock_background
     };
-    let second_tab_text = if active_tab == 1 {
+    let second_tab_text = if active_tab == second_identity {
         colors.primary_text
     } else {
         colors.muted_text
@@ -2963,36 +3103,21 @@ fn render_tab_strip(
 
     let activate_first = cx.listener(move |this, _, _, cx| {
         if is_lower {
-            this.lower_active_tabs[column_index] = 0;
+            this.lower_active_tabs[column_index] = first_identity;
         } else {
-            this.active_tabs[column_index] = 0;
+            this.active_tabs[column_index] = first_identity;
         }
         cx.notify();
     });
     let activate_second = cx.listener(move |this, _, _, cx| {
         if is_lower {
-            this.lower_active_tabs[column_index] = 1;
+            this.lower_active_tabs[column_index] = second_identity;
         } else {
-            this.active_tabs[column_index] = 1;
+            this.active_tabs[column_index] = second_identity;
         }
         cx.notify();
     });
 
-    let content_index = match (column_index, is_lower) {
-        (0, false) => 0,
-        (0, true) => 1,
-        _ => 2,
-    };
-    let first_tab_index = match content_index {
-        0 => 0,
-        1 => 2,
-        _ => 4,
-    };
-    let second_tab_index = match content_index {
-        0 => 1,
-        1 => 3,
-        _ => 4,
-    };
     let start_drag_first =
         cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
             if event.click_count >= 2 {
@@ -3000,7 +3125,7 @@ fn render_tab_strip(
                     !this.collapsed_group_content[content_index];
                 this.dragging_tab = None;
             } else {
-                this.dragging_tab = Some(first_tab_index);
+                this.dragging_tab = Some(first_display_global_index);
                 this.tab_drag_start_cursor = [
                     event.position.x.as_f32(),
                     event.position.y.as_f32(),
@@ -3009,7 +3134,7 @@ fn render_tab_strip(
                     tab_group_position[0],
                     (tab_group_position[1] - metrics.column_header_height).max(0.0),
                 ];
-                this.floating_tab_widths[first_tab_index] = column_width;
+                this.floating_tab_widths[first_display_global_index] = column_width;
                 this.dragging_tab_group = None;
                 this.dragging_composition = false;
                 this.is_resizing_columns = false;
@@ -3028,7 +3153,7 @@ fn render_tab_strip(
                     !this.collapsed_group_content[content_index];
                 this.dragging_tab = None;
             } else {
-                this.dragging_tab = Some(second_tab_index);
+                this.dragging_tab = Some(second_display_global_index);
                 this.tab_drag_start_cursor = [
                     event.position.x.as_f32(),
                     event.position.y.as_f32(),
@@ -3037,7 +3162,7 @@ fn render_tab_strip(
                     tab_group_position[0],
                     (tab_group_position[1] - metrics.column_header_height).max(0.0),
                 ];
-                this.floating_tab_widths[second_tab_index] = column_width;
+                this.floating_tab_widths[second_display_global_index] = column_width;
                 this.dragging_tab_group = None;
                 this.dragging_composition = false;
                 this.is_resizing_columns = false;
@@ -3087,7 +3212,7 @@ fn render_tab_strip(
                 kind: MouseContextMenuKind::TabStrip,
                 column_index,
                 group_index: content_index,
-                clicked_tab: Some(0),
+                clicked_tab: Some(first_identity),
                 x: event.position.x.as_f32(),
                 y: event.position.y.as_f32(),
             });
@@ -3100,7 +3225,7 @@ fn render_tab_strip(
                 kind: MouseContextMenuKind::TabStrip,
                 column_index,
                 group_index: content_index,
-                clicked_tab: Some(1),
+                clicked_tab: Some(second_identity),
                 x: event.position.x.as_f32(),
                 y: event.position.y.as_f32(),
             });
@@ -3154,10 +3279,10 @@ fn render_tab_strip(
         .border_b_1()
         .border_color(rgb(colors.border));
 
-    if first_tab_visible {
+    if first_display_visible {
         strip = strip.child(
             div()
-                .id(first_tab_id)
+                .id(first_display_id)
                 .flex()
                 .items_center()
                 .justify_center()
@@ -3168,14 +3293,14 @@ fn render_tab_strip(
                 .on_click(activate_first)
                 .on_mouse_down(MouseButton::Left, start_drag_first)
                 .on_mouse_down(MouseButton::Right, open_tab_context_menu_first)
-                .child(first_tab_label),
+                .child(first_display_label),
         );
     }
 
-    if second_tab_visible {
+    if second_display_visible {
         strip = strip.child(
             div()
-                .id(second_tab_id)
+                .id(second_display_id)
                 .flex()
                 .items_center()
                 .justify_center()
@@ -3186,7 +3311,7 @@ fn render_tab_strip(
                 .on_click(activate_second)
                 .on_mouse_down(MouseButton::Left, start_drag_second)
                 .on_mouse_down(MouseButton::Right, open_tab_context_menu_second)
-                .child(second_tab_label),
+                .child(second_display_label),
         );
     }
 
