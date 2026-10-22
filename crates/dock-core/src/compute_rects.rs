@@ -427,11 +427,10 @@ fn layout_tabs(
     let collapsed = tabs.collapsed;
     let collapsed_height = metrics.effective_collapsed_group_height();
     let minimum_size = minimum_node_size(layout, id, metrics)?;
-    let minimum_height = if collapsed {
-        collapsed_height
-    } else {
-        minimum_size.height.max(metrics.min_group_height)
-    };
+    // Keep geometry on the same minimum-size contract used by ResizeGroups:
+    // expanded Tabs include header, tab strip, and panel constraints, while
+    // collapsed Tabs use the effective collapsed/tab-strip height.
+    let minimum_height = minimum_size.height;
     if rect.size.width < minimum_size.width && !collapsed {
         return Err(ComputeRectsError::InsufficientSpace {
             axis: Axis::X,
