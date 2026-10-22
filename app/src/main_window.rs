@@ -576,9 +576,13 @@ impl MainWindow {
     }
 
     fn handle_escape(&mut self, cx: &mut Context<Self>) {
-        let interaction_active =
-            active_drag_payload(self.drag_session.state()).is_some() || self.resize_gesture.is_some();
-        match escape_action(interaction_active, self.menu.is_some(), self.layout.flyout().is_some()) {
+        let interaction_active = active_drag_payload(self.drag_session.state()).is_some()
+            || self.resize_gesture.is_some();
+        match escape_action(
+            interaction_active,
+            self.menu.is_some(),
+            self.layout.flyout().is_some(),
+        ) {
             EscapeAction::CancelInteraction => self.cancel_active_interactions(true, cx),
             EscapeAction::DismissMenu => {
                 self.menu = None;
@@ -953,6 +957,7 @@ impl Render for MainWindow {
             .child("Window / Panels  ▾")
             .id("window-panels-menu-trigger")
             .focusable()
+            .focus_visible(|style| style.border_2().border_color(rgb(self.theme.colors.focus)))
             .on_click(move |_event: &ClickEvent, _window: &mut Window, app: &mut App| {
                 let weak = window_menu_weak.clone();
                 let _ = weak.update(app, |view, cx| {
@@ -1072,6 +1077,9 @@ impl Render for MainWindow {
                         .child(row.label)
                         .id(format!("dock-menu-row-{}", row.id))
                         .focusable()
+                        .focus_visible(|style| {
+                            style.border_2().border_color(rgb(self.theme.colors.focus))
+                        })
                         .on_click(move |_event: &ClickEvent, _window: &mut Window, app: &mut App| {
                             let weak = weak.clone();
                             let _ = weak.update(app, |view, cx| {
@@ -1087,7 +1095,6 @@ impl Render for MainWindow {
         root.into_any_element()
     }
 }
-
 
 #[cfg(test)]
 mod keyboard_handling_tests {
