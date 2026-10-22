@@ -514,6 +514,14 @@ fn workspace_load_expands_narrow_expanded_column_and_preserves_restore_width() {
         let column = builder.column(280.0, ColumnMode::Expanded, vec![group], vec![1.0]);
         builder.main_area(DockSide::Right, column);
         let source = builder.build();
+        assert!(source.validate(&metrics).is_err());
+        assert!(matches!(
+            source.compute_rects(
+                Rect::new(Point::new(0.0, 0.0), Size::new(1000.0, 600.0)),
+                &metrics,
+            ),
+            Err(crate::ComputeRectsError::InvalidLayout)
+        ));
 
         let mut file = WorkspaceFile::from_layout(&source).unwrap();
         let Some(WorkspaceNode::Column {
