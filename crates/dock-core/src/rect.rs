@@ -36,7 +36,8 @@ impl Rect {
         self.size.validate_positive()
     }
 
-    /// Computes the right edge, rejecting a positive width that rounds back to the origin.\n    pub fn checked_right(self) -> Result<f32, GeometryError> {
+    /// Computes the right edge, rejecting a positive width that rounds back to the origin.
+    pub fn checked_right(self) -> Result<f32, GeometryError> {
         if !self.origin.x.is_finite() || !self.size.width.is_finite() {
             return Err(GeometryError::NonFinite);
         }
@@ -55,7 +56,8 @@ impl Rect {
         Ok(right)
     }
 
-    /// Computes the bottom edge, rejecting a positive height that rounds back to the origin.\n    pub fn checked_bottom(self) -> Result<f32, GeometryError> {
+    /// Computes the bottom edge, rejecting a positive height that rounds back to the origin.
+    pub fn checked_bottom(self) -> Result<f32, GeometryError> {
         if !self.origin.y.is_finite() || !self.size.height.is_finite() {
             return Err(GeometryError::NonFinite);
         }
