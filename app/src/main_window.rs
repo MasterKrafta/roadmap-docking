@@ -21,6 +21,7 @@ pub(crate) struct MainWindow {
     resizing_height_column: usize,
     is_resizing_columns: bool,
     is_resizing_outer_splitter: bool,
+    resizing_outer_right: bool,
     is_resizing_height: bool,
 }
 
@@ -44,6 +45,7 @@ impl MainWindow {
             resizing_height_column: 0,
             is_resizing_columns: false,
             is_resizing_outer_splitter: false,
+            resizing_outer_right: false,
             is_resizing_height: false,
         })
     }
@@ -59,31 +61,47 @@ impl Render for MainWindow {
 
         let menu_bar_height = 32.0_f32.min(window_height);
         let menu_item_height = 28.0;
-        let menu_dropdown_height = if self.windows_menu_open {
-            // Five 28px items, vertical padding, and four row gaps.
-            menu_item_height * 5.0 + 32.0
-        } else {
-            0.0
-        };
-        let menu_area_height = (menu_bar_height + menu_dropdown_height).min(window_height - 1.0);
-        let workspace_height = (window_height - menu_area_height).max(1.0);
+        let menu_dropdown_height = menu_item_height * 5.0 + 32.0;
+        // The menu is an overlay; only the top menu bar occupies layout space.
+        let menu_area_height = menu_bar_height;
+        let workspace_height = (window_height - menu_bar_height).max(1.0);
 
         let min_column_width = metrics.min_column_width;
         let divider_width = metrics.splitter_hit_zone;
-        // The dock group has two vertical handles: its outer edge and the inter-column splitter.
+        let left_upper_group_visible = self.visible_tabs[0] || self.visible_tabs[1];
+        let left_lower_group_visible = self.visible_tabs[2] || self.visible_tabs[3];
+        let right_group_visible = self.visible_tabs[4];
+        let left_column_visible = left_upper_group_visible || left_lower_group_visible;
+        let right_column_visible = right_group_visible;
+        let both_columns_visible = left_column_visible && right_column_visible;
+        let any_column_visible = left_column_visible || right_column_visible;
+
+        let max_single_width = (window_width - divider_width).max(min_column_width);
         let max_pair_width = (window_width - divider_width * 2.0)
             .max(min_column_width * 2.0);
-        let pair_width = (self.column_widths[0] + self.column_widths[1])
-            .min(max_pair_width)
-            .max(min_column_width * 2.0);
-        let left_column_width = self.column_widths[0]
-            .clamp(min_column_width, pair_width - min_column_width);
-        let right_column_width = pair_width - left_column_width;
+        let (left_column_width, right_column_width) = match (left_column_visible, right_column_visible) {
+            (true, true) => {
+                let pair_width = (self.column_widths[0] + self.column_widths[1])
+                    .min(max_pair_width)
+                    .max(min_column_width * 2.0);
+                let left = self.column_widths[0]
+                    .clamp(min_column_width, pair_width - min_column_width);
+                (left, pair_width - left)
+            }
+            (true, false) => (
+                self.column_widths[0].clamp(min_column_width, max_single_width),
+                0.0,
+            ),
+            (false, true) => (
+                0.0,
+                self.column_widths[1].clamp(min_column_width, max_single_width),
+            ),
+            (false, false) => (0.0, 0.0),
+        };
 
         let header_height = metrics.column_header_height.min(workspace_height);
         let full_panel_height = (workspace_height - header_height).max(0.0);
-        let horizontal_divider_height =
-            metrics.splitter_hit_zone.min(full_panel_height);
+        let horizontal_divider_height = metrics.splitter_hit_zone.min(full_panel_height);
 
         let panel_heights = |ratio: f32, show_top: bool, show_bottom: bool| {
             let divider = if show_top && show_bottom {
@@ -107,10 +125,6 @@ impl Render for MainWindow {
             }
         };
 
-        let left_upper_group_visible = self.visible_tabs[0] || self.visible_tabs[1];
-        let left_lower_group_visible = self.visible_tabs[2] || self.visible_tabs[3];
-        let right_group_visible = self.visible_tabs[4];
-
         let (left_top_height, left_bottom_height, left_horizontal_divider) = panel_heights(
             self.split_ratios[0],
             left_upper_group_visible,
@@ -118,43 +132,55 @@ impl Render for MainWindow {
         );
         let (right_top_height, right_bottom_height, right_horizontal_divider) =
             panel_heights(self.split_ratios[1], right_group_visible, false);
-        let root = div()
+
+        let mut root = div()
+            .relative()
             .flex()
             .flex_col()
             .w(px(window_width))
             .h(px(window_height))
             .bg(rgb(colors.window_background));
 
-        let root = if self.is_resizing_columns || self.is_resizing_outer_splitter {
-            root.cursor(CursorStyle::ResizeLeftRight)
+        if self.is_resizing_columns || self.is_resizing_outer_splitter {
+            root = root.cursor(CursorStyle::ResizeLeftRight);
         } else if self.is_resizing_height {
-            root.cursor(CursorStyle::ResizeUpDown)
-        } else {
-            root
-        };
+            root = root.cursor(CursorStyle::ResizeUpDown);
+        }
 
-        let root = root
+        root = root
             .on_mouse_move({
                 let min_width = metrics.min_column_width;
                 let hit_zone = metrics.splitter_hit_zone;
                 let min_group_height = metrics.min_group_height;
                 let column_header_height = metrics.column_header_height;
                 let default_split = metrics.default_column_split_ratio;
+                let both_columns_visible = both_columns_visible;
 
                 cx.listener(move |this, event: &MouseMoveEvent, window, cx| {
                     if this.is_resizing_outer_splitter {
                         let actual_window_width =
                             window.viewport_size().width.as_f32().max(1.0);
-                        let max_total_width =
-                            (actual_window_width - hit_zone * 2.0).max(min_width * 2.0);
-                        let right_width = this.resize_start_column_widths[1]
-                            .clamp(min_width, max_total_width - min_width);
-                        let max_left_width = (max_total_width - right_width).max(min_width);
                         let delta = event.position.x.as_f32() - this.resize_start_x;
-                        let left_width = (this.resize_start_column_widths[0] - delta)
-                            .clamp(min_width, max_left_width);
 
-                        this.column_widths = [left_width, right_width];
+                        if this.resizing_outer_right {
+                            let max_width = (actual_window_width - hit_zone).max(min_width);
+                            let right_width = (this.resize_start_column_widths[1] - delta)
+                                .clamp(min_width, max_width);
+                            this.column_widths = [this.resize_start_column_widths[0], right_width];
+                        } else {
+                            let max_left_width = if both_columns_visible {
+                                let max_total_width =
+                                    (actual_window_width - hit_zone * 2.0).max(min_width * 2.0);
+                                (max_total_width - this.resize_start_column_widths[1])
+                                    .max(min_width)
+                            } else {
+                                (actual_window_width - hit_zone).max(min_width)
+                            };
+                            let left_width = (this.resize_start_column_widths[0] - delta)
+                                .clamp(min_width, max_left_width);
+                            this.column_widths =
+                                [left_width, this.resize_start_column_widths[1]];
+                        }
                         cx.notify();
                     } else if this.is_resizing_columns {
                         let actual_window_width =
@@ -256,12 +282,149 @@ impl Render for MainWindow {
                     .child(div().flex_1()),
             );
 
-        let root = if self.windows_menu_open {
-            root.child(
+        let mut dock_row = div()
+            .flex()
+            .flex_row()
+            .w(px(window_width))
+            .h(px(workspace_height))
+            .flex_shrink_0()
+            .bg(rgb(colors.window_background))
+            .child(
+                div()
+                    .flex_1()
+                    .h(px(workspace_height))
+                    .bg(rgb(colors.window_background)),
+            );
+
+        if any_column_visible {
+            let outer_right_only = !left_column_visible && right_column_visible;
+            let remembered_right_width = self.column_widths[1];
+            dock_row = dock_row.child(
                 div()
                     .flex()
+                    .items_center()
+                    .justify_center()
+                    .w(px(divider_width))
+                    .h(px(workspace_height))
+                    .flex_shrink_0()
+                    .bg(rgb(colors.window_background))
+                    .cursor(CursorStyle::ResizeLeftRight)
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
+                            this.is_resizing_columns = false;
+                            this.is_resizing_outer_splitter = true;
+                            this.resizing_outer_right = outer_right_only;
+                            this.is_resizing_height = false;
+                            this.resize_start_x = event.position.x.as_f32();
+                            this.resize_start_column_widths = [
+                                left_column_width.max(min_column_width),
+                                if both_columns_visible {
+                                    right_column_width
+                                } else if outer_right_only {
+                                    right_column_width
+                                } else {
+                                    remembered_right_width
+                                },
+                            ];
+                            cx.notify();
+                        }),
+                    )
+                    .child(
+                        div()
+                            .w(px(metrics.splitter_thickness))
+                            .h(px(workspace_height))
+                            .bg(rgb(colors.splitter)),
+                    ),
+            );
+        }
+
+        if left_column_visible {
+            dock_row = dock_row.child(render_column(
+                0,
+                left_column_width,
+                left_top_height,
+                left_bottom_height,
+                left_upper_group_visible,
+                left_lower_group_visible,
+                [self.visible_tabs[0], self.visible_tabs[1]],
+                [self.visible_tabs[2], self.visible_tabs[3]],
+                self.theme,
+                self.active_tabs[0],
+                self.lower_active_tabs[0],
+                self.split_ratios[0],
+                left_horizontal_divider,
+                self.is_resizing_height && self.resizing_height_column == 0,
+                cx,
+            ));
+        }
+
+        if both_columns_visible {
+            dock_row = dock_row.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .w(px(divider_width))
+                    .h(px(workspace_height))
+                    .flex_shrink_0()
+                    .bg(rgb(colors.window_background))
+                    .cursor(CursorStyle::ResizeLeftRight)
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
+                            this.column_widths = [left_column_width, right_column_width];
+                            this.is_resizing_columns = true;
+                            this.is_resizing_outer_splitter = false;
+                            this.resizing_outer_right = false;
+                            this.is_resizing_height = false;
+                            this.resize_start_x = event.position.x.as_f32();
+                            this.resize_start_column_widths =
+                                [left_column_width, right_column_width];
+                            cx.notify();
+                        }),
+                    )
+                    .child(
+                        div()
+                            .w(px(metrics.splitter_thickness))
+                            .h(px(workspace_height))
+                            .bg(rgb(colors.splitter)),
+                    ),
+            );
+        }
+
+        if right_column_visible {
+            dock_row = dock_row.child(render_column(
+                1,
+                right_column_width,
+                right_top_height,
+                right_bottom_height,
+                right_group_visible,
+                false,
+                [self.visible_tabs[4], false],
+                [false, false],
+                self.theme,
+                self.active_tabs[1],
+                self.lower_active_tabs[1],
+                self.split_ratios[1],
+                right_horizontal_divider,
+                self.is_resizing_height && self.resizing_height_column == 1,
+                cx,
+            ));
+        }
+
+        root = root.child(dock_row);
+
+        if self.windows_menu_open {
+            root = root.child(
+                div()
+                    .absolute()
+                    .top(px(menu_bar_height))
+                    .left(px(0.0))
+                    .w(px(300.0))
+                    .h(px(menu_dropdown_height))
+                    .flex()
                     .flex_col()
-                    .w(px(window_width))
                     .p(px(8.0))
                     .gap_1()
                     .bg(rgb(colors.group_background))
@@ -269,154 +432,43 @@ impl Render for MainWindow {
                     .border_color(rgb(colors.border))
                     .child(render_panel_menu_item(
                         0,
-                        "Левая верхняя — Вкладка 1",
+                        "Слои",
                         self.visible_tabs[0],
                         self.theme,
                         cx,
                     ))
                     .child(render_panel_menu_item(
                         1,
-                        "Левая верхняя — Вкладка 2",
+                        "Навигатор",
                         self.visible_tabs[1],
                         self.theme,
                         cx,
                     ))
                     .child(render_panel_menu_item(
                         2,
-                        "Левая нижняя — Вкладка 1",
+                        "Цвет",
                         self.visible_tabs[2],
                         self.theme,
                         cx,
                     ))
                     .child(render_panel_menu_item(
                         3,
-                        "Левая нижняя — Вкладка 2",
+                        "История",
                         self.visible_tabs[3],
                         self.theme,
                         cx,
                     ))
                     .child(render_panel_menu_item(
                         4,
-                        "Правая — Вкладка 1",
+                        "Свойства",
                         self.visible_tabs[4],
                         self.theme,
                         cx,
                     )),
-            )
-        } else {
-            root
-        };
+            );
+        }
 
-        root.child(
-            div()
-                .flex()
-                .flex_row()
-                .w(px(window_width))
-                .h(px(workspace_height))
-                .flex_shrink_0()
-                .bg(rgb(colors.window_background))
-                .child(
-                    div()
-                        .flex_1()
-                        .h(px(workspace_height))
-                        .bg(rgb(colors.window_background)),
-                )
-                // Outer splitter: resize only the left column, independently of the center splitter.
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .w(px(divider_width))
-                        .h(px(workspace_height))
-                        .flex_shrink_0()
-                        .bg(rgb(colors.window_background))
-                        .cursor(CursorStyle::ResizeLeftRight)
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
-                                this.is_resizing_columns = false;
-                                this.is_resizing_outer_splitter = true;
-                                this.is_resizing_height = false;
-                                this.resize_start_x = event.position.x.as_f32();
-                                this.resize_start_column_widths =
-                                    [left_column_width, right_column_width];
-                                cx.notify();
-                            }),
-                        )
-                        .child(
-                            div()
-                                .w(px(metrics.splitter_thickness))
-                                .h(px(workspace_height))
-                                .bg(rgb(colors.splitter)),
-                        ),
-                )
-                .child(render_column(
-                    0,
-                    left_column_width,
-                    left_top_height,
-                    left_bottom_height,
-                    left_upper_group_visible,
-                    left_lower_group_visible,
-                    [self.visible_tabs[0], self.visible_tabs[1]],
-                    [self.visible_tabs[2], self.visible_tabs[3]],
-                    self.theme,
-                    self.active_tabs[0],
-                    self.lower_active_tabs[0],
-                    self.split_ratios[0],
-                    left_horizontal_divider,
-                    self.is_resizing_height && self.resizing_height_column == 0,
-                    cx,
-                ))
-                // Shared vertical splitter: dragging it reallocates width between both columns.
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .w(px(divider_width))
-                        .h(px(workspace_height))
-                        .flex_shrink_0()
-                        .bg(rgb(colors.window_background))
-                        .cursor(CursorStyle::ResizeLeftRight)
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
-                                this.column_widths = [left_column_width, right_column_width];
-                                this.is_resizing_columns = true;
-                                this.is_resizing_outer_splitter = false;
-                                this.is_resizing_height = false;
-                                this.resize_start_x = event.position.x.as_f32();
-                                this.resize_start_column_widths =
-                                    [left_column_width, right_column_width];
-                                cx.notify();
-                            }),
-                        )
-                        .child(
-                            div()
-                                .w(px(metrics.splitter_thickness))
-                                .h(px(workspace_height))
-                                .bg(rgb(colors.splitter)),
-                        ),
-                )
-                .child(render_column(
-                    1,
-                    right_column_width,
-                    right_top_height,
-                    right_bottom_height,
-                    right_group_visible,
-                    false,
-                    [self.visible_tabs[4], false],
-                    [false, false],
-                    self.theme,
-                    self.active_tabs[1],
-                    self.lower_active_tabs[1],
-                    self.split_ratios[1],
-                    right_horizontal_divider,
-                    self.is_resizing_height && self.resizing_height_column == 1,
-                    cx,
-                )),
-        )
+        root
     }
 }
 
@@ -668,16 +720,15 @@ fn render_panel_content(
         (1, false) => "Properties",
         _ => "History",
     };
-    let tab_name = if active_tab == 0 {
-        format!("{panel_name} — Вкладка 1")
-    } else {
-        format!("{panel_name} — Вкладка 2")
+    let tab_name = match (column_index, is_lower, active_tab) {
+        (0, false, 0) => "Слои",
+        (0, false, _) => "Навигатор",
+        (0, true, 0) => "Цвет",
+        (0, true, _) => "История",
+        (1, false, _) => "Свойства",
+        _ => panel_name,
     };
-    let details = if active_tab == 0 {
-        "Здесь отображается содержимое первой вкладки."
-    } else {
-        "Здесь отображается содержимое второй вкладки."
-    };
+    let details = format!("Содержимое панели «{tab_name}».");
 
     div()
         .flex()
@@ -713,6 +764,11 @@ fn render_tab_strip(
     let metrics = theme.metrics;
     let tab_width =
         metrics.column_tab_width.min(((column_width - metrics.button_size).max(0.0)) / 2.0);
+    let (first_tab_label, second_tab_label) = match (column_index, is_lower) {
+        (0, false) => ("Слои", "Навигатор"),
+        (0, true) => ("Цвет", "История"),
+        _ => ("Свойства", ""),
+    };
 
     let first_tab_background = if active_tab == 0 {
         colors.active_tab
@@ -783,7 +839,7 @@ fn render_tab_strip(
                 .bg(rgb(first_tab_background))
                 .text_color(rgb(first_tab_text))
                 .on_click(activate_first)
-                .child("Вкладка 1"),
+                .child(first_tab_label),
         );
     }
 
@@ -799,7 +855,7 @@ fn render_tab_strip(
                 .bg(rgb(second_tab_background))
                 .text_color(rgb(second_tab_text))
                 .on_click(activate_second)
-                .child("Вкладка 2"),
+                .child(second_tab_label),
         );
     }
 
