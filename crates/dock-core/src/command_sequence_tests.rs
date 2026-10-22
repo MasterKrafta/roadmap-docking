@@ -1172,7 +1172,7 @@ fn assert_history_round_trip(
             before_snapshot,
             "Undo failed to restore logical state for {description}"
         );
-        assert_layout_ids_resolve(layout, metrics);
+        assert_layout_state_invariants(layout, metrics);
         assert_retired_ids_stay_stale(
             layout,
             &before_ids,
@@ -1189,7 +1189,7 @@ fn assert_history_round_trip(
             after_snapshot,
             "Redo failed to restore logical state for {description}"
         );
-        assert_layout_ids_resolve(layout, metrics);
+        assert_layout_state_invariants(layout, metrics);
         assert_retired_ids_stay_stale(
             layout,
             &before_ids,
