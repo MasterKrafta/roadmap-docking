@@ -459,12 +459,12 @@ impl Layout {
         node_id: NodeId,
         metrics: &DockMetrics,
     ) -> Result<Size, CommandError> {
+        #[cfg(test)]
+        crate::compute_rects::record_recursive_minimum_node_size(node_id);
         let node = self
             .nodes
             .get(node_id)
             .ok_or(CommandError::MissingNode { node: node_id })?;
-        #[cfg(test)]
-        crate::compute_rects::record_recursive_minimum_node_size(node_id);
         let size = match node {
             Node::Panel(panel) => self
                 .panel_instances
