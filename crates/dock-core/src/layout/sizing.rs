@@ -373,10 +373,9 @@ impl Layout {
                 })?
                 .constraints
                 .min_size,
-            Node::Tabs(tabs) if tabs.collapsed => Size::new(
-                0.0,
-                metrics.effective_collapsed_group_height(),
-            ),
+            Node::Tabs(tabs) if tabs.collapsed => {
+                Size::new(0.0, metrics.effective_collapsed_group_height())
+            }
             Node::Tabs(tabs) => {
                 let mut width = 0.0_f32;
                 let mut content_height = 0.0_f32;
@@ -408,8 +407,7 @@ impl Layout {
                         }
                     }
                 }
-                let gaps = metrics.splitter_thickness
-                    * split.children.len().saturating_sub(1) as f32;
+                let gaps = metrics.splitter_thickness * split.children.len().saturating_sub(1) as f32;
                 match split.axis {
                     Axis::X => width += gaps,
                     Axis::Y => height += gaps,
@@ -417,10 +415,10 @@ impl Layout {
                 Size::new(width, height)
             }
             Node::Column(column) if column.mode.is_rail() => {
-                let width = match column.mode {
-                    ColumnMode::IconsAndLabels => metrics.min_column_width,
-                    ColumnMode::IconsOnly => metrics.rail_width,
-                    ColumnMode::Expanded => column.width,
+                let width = if column.mode == ColumnMode::IconsOnly {
+                    metrics.rail_width
+                } else {
+                    metrics.min_column_width
                 };
                 let slot_count = self.column_display_order(node_id)?.len();
                 Size::new(
