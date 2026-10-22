@@ -1,8 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
 use dock_core::{
-    ColumnMode, DockCommand, DockSide, DragHandle, DragPayload, DragPreview, DropZoneRect, Layout,
-    LayoutRects, Node, NodeId, PanelId, PanelInstance, Point, Rect, Size, Tabs,
+    Axis, ColumnMode, DockCommand, DockSide, DragHandle, DragPayload, DragPreview, DropZoneRect,
+    FloatingGroupId, Layout, LayoutRects, Node, NodeId, PanelId, PanelInstance, Point, Rect,
+    ResizeEdge, Size, Tabs,
 };
 use gpui::{
     AnyElement, App, AppContext, ClickEvent, Context, Div, InteractiveElement, IntoElement, MouseButton,
@@ -15,6 +16,17 @@ pub type CommandClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 
 
 /// Begins a pure Core drag session from a UI interaction surface.
 pub type DragStartHandler = Box<dyn Fn(&MouseDownEvent, &mut Window, &mut App) + 'static>;
+
+/// Begins a resize gesture from Core-provided geometry.
+pub type ResizeStartHandler = Box<dyn Fn(&MouseDownEvent, &mut Window, &mut App) + 'static>;
+
+/// Semantic resize handle emitted by the GPUI adapter.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ResizeHandle {
+    Splitter { owner: NodeId, boundary_index: usize, axis: Axis },
+    OuterColumn { column: NodeId, side: DockSide },
+    FloatingEdge { group: FloatingGroupId, edge: ResizeEdge },
+}
 
 /// Source-aware, transient overlay produced from Core's drag preview and drop-zone geometry.
 #[derive(Clone, Debug)]
@@ -48,7 +60,7 @@ pub enum DockMenuRequest {
 ///
 /// The adapter reads Layout and emits typed command/menu requests; it does not mutate or clone
 /// Layout. The app supplies panel content factories and owns all menu state.
-pub fn render<F, T, H, M, D>(
+pub fn render<F, T, H, M, D, R>(
     layout: &Layout,
     rects: &LayoutRects,
     theme: &Theme,
@@ -57,6 +69,7 @@ pub fn render<F, T, H, M, D>(
     make_command_handler: H,
     make_menu_handler: M,
     make_drag_start_handler: D,
+    make_resize_start_handler: R,
     drag_overlay: Option<&DragOverlay>,
 ) -> Div
 where
@@ -65,6 +78,7 @@ where
     H: Fn(DockCommand) -> CommandClickHandler,
     M: Fn(DockMenuRequest) -> CommandClickHandler,
     D: Fn(DragPayload, DragHandle) -> DragStartHandler,
+    R: Fn(ResizeHandle) -> ResizeStartHandler,
 {
     let mut root = div()
         .relative()
@@ -92,9 +106,48 @@ where
             &make_command_handler,
             &make_menu_handler,
             &make_drag_start_handler,
+            &make_resize_start_handler,
         ) {
             root = root.child(element);
         }
+    }
+
+    // Canvas-facing edges resize the outer column through ResizeColumn.
+    for side in [DockSide::Left, DockSide::Right] {
+        let columns = main_column_ids(layout, side);
+        let column_id = if side == DockSide::Left {
+            columns.last().copied()
+        } else {
+            columns.first().copied()
+        };
+        let Some(column_id) = column_id else {
+            continue;
+        };
+        if !matches!(layout.node(column_id), Some(Node::Column(column)) if !column.mode.is_rail()) {
+            continue;
+        }
+        let Some(column_rect) = rects.columns.iter().find(|entry| entry.column == column_id) else {
+            continue;
+        };
+        let width = theme.metrics.splitter_hit_zone.min(column_rect.rect.size.width);
+        let edge_x = if side == DockSide::Left {
+            column_rect.rect.origin.x + column_rect.rect.size.width
+        } else {
+            column_rect.rect.origin.x
+        };
+        let handle_rect = Rect::new(
+            Point::new(edge_x - width / 2.0, column_rect.rect.origin.y),
+            Size::new(width, column_rect.rect.size.height),
+        );
+        root = root.child(
+            rect_element(handle_rect, theme.colors.splitter)
+                .id(format!("dock-outer-column-resize-{:?}", column_id))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    make_resize_start_handler(ResizeHandle::OuterColumn { column: column_id, side }),
+                )
+                .into_any_element(),
+        );
     }
 
     for (floating_id, floating) in layout.floating_groups_in_paint_order() {
@@ -128,9 +181,50 @@ where
             &make_command_handler,
             &make_menu_handler,
             &make_drag_start_handler,
+            &make_resize_start_handler,
         ) {
             root = root.child(element);
         }
+
+        let title = first_panel_in_subtree(layout, area.root)
+            .and_then(|panel| layout.panel_instance(panel))
+            .map(&panel_title)
+            .unwrap_or_else(|| "Floating group".to_owned());
+        let title_height = theme.metrics.column_header_height.min(rect.size.height);
+        let title_rect = Rect::new(rect.origin, Size::new(rect.size.width, title_height));
+        let payload = DragPayload::FloatingGroup { group: floating_id };
+        let ghost_title = format!("Move floating: {title}");
+        root = root.child(
+            rect_element(title_rect, theme.colors.toolbar_background)
+                .text_color(rgb(theme.colors.primary_text))
+                .child(title)
+                .id(format!("dock-floating-title-{:?}", floating_id))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    make_drag_start_handler(payload, DragHandle::FloatingTitle),
+                )
+                .on_drag(payload, move |_payload, _offset, _window, app| {
+                    let title = ghost_title.clone();
+                    app.new(|_| DragGhost { title })
+                })
+                .into_any_element(),
+        );
+    }
+
+    // Floating resize hit zones come from Core geometry. Put corners above long edges.
+    for handle in rects.floating_resize_edges.iter().rev() {
+        root = root.child(
+            rect_element(handle.rect, theme.colors.splitter)
+                .id(format!("dock-floating-resize-{:?}-{:?}", handle.group, handle.edge))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    make_resize_start_handler(ResizeHandle::FloatingEdge {
+                        group: handle.group,
+                        edge: handle.edge,
+                    }),
+                )
+                .into_any_element(),
+        );
     }
 
     // Core owns flyout selection and geometry. Only the selected flyout panel's factory is called.
@@ -251,7 +345,7 @@ where
     root
 }
 
-fn tree_elements<F, T, H, M, D>(
+fn tree_elements<F, T, H, M, D, R>(
     layout: &Layout,
     rects: &LayoutRects,
     nodes: &HashSet<NodeId>,
@@ -261,6 +355,7 @@ fn tree_elements<F, T, H, M, D>(
     make_command_handler: &H,
     make_menu_handler: &M,
     make_drag_start_handler: &D,
+    make_resize_start_handler: &R,
 ) -> Vec<AnyElement>
 where
     F: FnMut(&PanelInstance) -> AnyElement,
@@ -268,6 +363,7 @@ where
     H: Fn(DockCommand) -> CommandClickHandler,
     M: Fn(DockMenuRequest) -> CommandClickHandler,
     D: Fn(DragPayload, DragHandle) -> DragStartHandler,
+    R: Fn(ResizeHandle) -> ResizeStartHandler,
 {
     let mut elements = Vec::new();
 
@@ -447,7 +543,20 @@ where
         .iter()
         .filter(|entry| nodes.contains(&entry.owner))
     {
-        elements.push(rect_element(splitter.rect, theme.colors.splitter).into_any_element());
+        let base = rect_element(splitter.rect, theme.colors.splitter);
+        let handle = supported_splitter_handle(
+            layout,
+            splitter.owner,
+            splitter.boundary_index,
+            splitter.axis,
+        );
+        let element = if let Some(handle) = handle {
+            base.id(format!("dock-splitter-{:?}-{}", splitter.owner, splitter.boundary_index))
+                .on_mouse_down(MouseButton::Left, make_resize_start_handler(handle))
+        } else {
+            base
+        };
+        elements.push(element.into_any_element());
     }
 
     // Rail columns flatten their panel list for presentation while retaining the Core tree.
@@ -500,6 +609,63 @@ where
     }
 
     elements
+}
+
+fn main_column_ids(layout: &Layout, side: DockSide) -> Vec<NodeId> {
+    let Some(area) = layout.main_area(side) else {
+        return Vec::new();
+    };
+    match layout.node(area.root) {
+        Some(Node::Column(_)) => vec![area.root],
+        Some(Node::Split(split))
+            if split.axis == Axis::X
+                && split.children.iter().all(|child| matches!(layout.node(*child), Some(Node::Column(_)))) =>
+        {
+            split.children.clone()
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn supported_splitter_handle(
+    layout: &Layout,
+    owner: NodeId,
+    boundary_index: usize,
+    axis: Axis,
+) -> Option<ResizeHandle> {
+    match axis {
+        Axis::Y if matches!(layout.node(owner), Some(Node::Column(_))) => {
+            Some(ResizeHandle::Splitter { owner, boundary_index, axis })
+        }
+        Axis::X
+            if [DockSide::Left, DockSide::Right].into_iter().any(|side| {
+                layout.main_area(side).is_some_and(|area| area.root == owner)
+                    && !main_column_ids(layout, side).is_empty()
+            }) =>
+        {
+            Some(ResizeHandle::Splitter { owner, boundary_index, axis })
+        }
+        _ => None,
+    }
+}
+
+fn first_panel_in_subtree(layout: &Layout, node_id: NodeId) -> Option<PanelId> {
+    match layout.node(node_id)? {
+        Node::Panel(panel) => Some(panel.panel_id),
+        Node::Tabs(tabs) => active_panel(layout, tabs).or_else(|| {
+            tabs.children
+                .first()
+                .and_then(|child| first_panel_in_subtree(layout, *child))
+        }),
+        Node::Column(column) => column
+            .groups
+            .first()
+            .and_then(|group| first_panel_in_subtree(layout, *group)),
+        Node::Split(split) => split
+            .children
+            .first()
+            .and_then(|child| first_panel_in_subtree(layout, *child)),
+    }
 }
 
 fn rect_element(rect: Rect, color: u32) -> Div {

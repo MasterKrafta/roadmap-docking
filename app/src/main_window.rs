@@ -1,11 +1,12 @@
 use dock_core::{
-    create_initial_layout, DragDropAction, DragDropRequest, DragHandle, DragPayload, DragSession,
-    DragState, DockCommand, DockMetrics, DropSource, DropTarget, FlyoutState, Layout, LayoutRects,
-    Node, NodeId, PanelId, PanelKey, Point, Profile, Rect, Size,
+    create_initial_layout, Axis, DockCommand, DockMetrics, DockSide, DragDropAction,
+    DragDropRequest, DragHandle, DragPayload, DragSession, DragState, DropSource, DropTarget,
+    FloatingGroupId, FlyoutState, Layout, LayoutRects, Node, NodeId, PanelId, PanelKey, Point,
+    Profile, Rect, ResizeEdge, Size,
 };
 use gpui::{
-    App, ClickEvent, Context, InteractiveElement, IntoElement, MouseDownEvent, ParentElement,
-    Render, StatefulInteractiveElement, Styled, Window, div, px, rgb,
+    App, ClickEvent, Context, FocusHandle, InteractiveElement, IntoElement, MouseDownEvent,
+    ParentElement, Render, StatefulInteractiveElement, Styled, Subscription, Window, div, px, rgb,
 };
 use ui::Theme;
 
@@ -45,6 +46,38 @@ struct MenuRow {
     action: MenuAction,
 }
 
+#[derive(Clone, Copy, Debug)]
+enum ResizeOperation {
+    GroupBoundary {
+        column: NodeId,
+        boundary_index: usize,
+        available_height: f32,
+    },
+    ColumnBoundary {
+        side: DockSide,
+        boundary_index: usize,
+    },
+    OuterColumn {
+        column: NodeId,
+        side: DockSide,
+        initial_width: f32,
+    },
+    FloatingBounds {
+        group: FloatingGroupId,
+        edge: ResizeEdge,
+        initial_bounds: Rect,
+    },
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ResizeGesture {
+    operation: ResizeOperation,
+    origin: Point,
+    latest: Point,
+    last_applied: Point,
+}
+
+
 /// The app is the only owner of the live Layout and applies adapter-returned commands.
 pub(crate) struct MainWindow {
     layout: Layout,
@@ -53,6 +86,10 @@ pub(crate) struct MainWindow {
     panels: PanelRegistry,
     menu: Option<DockMenuState>,
     drag_session: DragSession,
+    resize_gesture: Option<ResizeGesture>,
+    resize_frame_scheduled: bool,
+    focus_handle: Option<FocusHandle>,
+    _focus_subscription: Option<Subscription>,
 }
 
 impl MainWindow {
@@ -72,6 +109,10 @@ impl MainWindow {
             panels,
             menu: None,
             drag_session,
+            resize_gesture: None,
+            resize_frame_scheduled: false,
+            focus_handle: None,
+            _focus_subscription: None,
         })
     }
 
@@ -91,7 +132,12 @@ impl MainWindow {
         payload: DragPayload,
         handle: DragHandle,
         position: Point,
+        window: &mut Window,
+        cx: &mut Context<Self>,
     ) {
+        if self.resize_gesture.is_some() {
+            return;
+        }
         match self.drag_session.state() {
             DragState::Pressed { .. } | DragState::Dragging { .. } => return,
             DragState::Dropped { .. } | DragState::Cancelled { .. } => {
@@ -106,6 +152,10 @@ impl MainWindow {
             .pointer_down_with_handle(payload, handle, position)
         {
             eprintln!("Could not begin dock drag: {error:?}");
+            return;
+        }
+        if let Some(focus_handle) = self.focus_handle.as_ref() {
+            window.focus(focus_handle, cx);
         }
     }
 
@@ -227,6 +277,290 @@ impl MainWindow {
                 .clamp(0.0, (viewport.size.height - size.height).max(0.0)),
         );
         Some(Rect::new(origin, size))
+    }
+
+    fn begin_resize(
+        &mut self,
+        handle: dock_gpui::ResizeHandle,
+        position: Point,
+        viewport: Rect,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if active_drag_payload(self.drag_session.state()).is_some() || self.resize_gesture.is_some() {
+            return;
+        }
+        if !position.is_finite() {
+            return;
+        }
+        let Ok(rects) = self.layout.compute_rects(viewport, &self.metrics) else {
+            return;
+        };
+
+        let operation = match handle {
+            dock_gpui::ResizeHandle::Splitter {
+                owner,
+                boundary_index,
+                axis: Axis::Y,
+            } => {
+                let Some(Node::Column(column)) = self.layout.node(owner) else {
+                    return;
+                };
+                let Some(column_rect) = rects.columns.iter().find(|item| item.column == owner) else {
+                    return;
+                };
+                let gaps =
+                    self.metrics.splitter_thickness * column.groups.len().saturating_sub(1) as f32;
+                let available_height = column_rect.rect.size.height - gaps;
+                if !available_height.is_finite() || available_height <= 0.0 {
+                    return;
+                }
+                ResizeOperation::GroupBoundary {
+                    column: owner,
+                    boundary_index,
+                    available_height,
+                }
+            }
+            dock_gpui::ResizeHandle::Splitter {
+                owner,
+                boundary_index,
+                axis: Axis::X,
+            } => {
+                let side = [DockSide::Left, DockSide::Right]
+                    .into_iter()
+                    .find(|side| self.layout.main_area(*side).is_some_and(|area| area.root == owner));
+                let Some(side) = side else {
+                    return;
+                };
+                let Some(Node::Split(split)) = self.layout.node(owner) else {
+                    return;
+                };
+                if split.axis != Axis::X || boundary_index >= split.children.len().saturating_sub(1) {
+                    return;
+                }
+                ResizeOperation::ColumnBoundary { side, boundary_index }
+            }
+            dock_gpui::ResizeHandle::OuterColumn { column, side } => {
+                let Some(Node::Column(value)) = self.layout.node(column) else {
+                    return;
+                };
+                if value.mode.is_rail() || !value.width.is_finite() || value.width <= 0.0 {
+                    return;
+                }
+                ResizeOperation::OuterColumn {
+                    column,
+                    side,
+                    initial_width: value.width,
+                }
+            }
+            dock_gpui::ResizeHandle::FloatingEdge { group, edge } => {
+                let Some(bounds) = rects
+                    .floating_groups
+                    .iter()
+                    .find(|item| item.group == group)
+                    .map(|item| item.rect)
+                else {
+                    return;
+                };
+                ResizeOperation::FloatingBounds {
+                    group,
+                    edge,
+                    initial_bounds: bounds,
+                }
+            }
+        };
+
+        self.resize_gesture = Some(ResizeGesture {
+            operation,
+            origin: position,
+            latest: position,
+            last_applied: position,
+        });
+        if let Some(focus_handle) = self.focus_handle.as_ref() {
+            window.focus(focus_handle, cx);
+        }
+    }
+
+    fn update_resize_position(
+        &mut self,
+        position: Point,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(mut gesture) = self.resize_gesture else {
+            return;
+        };
+        if !position.is_finite() {
+            return;
+        }
+        gesture.latest = position;
+        self.resize_gesture = Some(gesture);
+
+        if !self.resize_frame_scheduled {
+            self.resize_frame_scheduled = true;
+            cx.on_next_frame(window, |view, _window, cx| {
+                view.flush_resize(cx);
+            });
+        }
+    }
+
+    fn flush_resize(&mut self, cx: &mut Context<Self>) {
+        self.resize_frame_scheduled = false;
+        let Some(mut gesture) = self.resize_gesture else {
+            return;
+        };
+        if gesture.latest == gesture.last_applied {
+            return;
+        }
+        let Some(command) = self.resize_command(gesture) else {
+            gesture.last_applied = gesture.latest;
+            self.resize_gesture = Some(gesture);
+            return;
+        };
+
+        match self.layout.apply(command, &self.metrics) {
+            Ok(_) => {
+                gesture.last_applied = gesture.latest;
+                self.resize_gesture = Some(gesture);
+                cx.notify();
+            }
+            Err(error) => {
+                eprintln!("Dock resize command rejected by Core: {error:?}");
+            }
+        }
+    }
+
+    fn resize_command(&self, gesture: ResizeGesture) -> Option<DockCommand> {
+        let dx_total = gesture.latest.x - gesture.origin.x;
+        let dy_total = gesture.latest.y - gesture.origin.y;
+        let dx_frame = gesture.latest.x - gesture.last_applied.x;
+        let dy_frame = gesture.latest.y - gesture.last_applied.y;
+        match gesture.operation {
+            ResizeOperation::GroupBoundary {
+                column,
+                boundary_index,
+                available_height,
+            } => (dy_frame != 0.0).then_some(DockCommand::ResizeGroups {
+                column,
+                boundary_index,
+                delta: dy_frame,
+                available_height,
+            }),
+            ResizeOperation::ColumnBoundary {
+                side,
+                boundary_index,
+            } => (dx_frame != 0.0).then_some(DockCommand::ResizeColumnBoundary {
+                side,
+                boundary_index,
+                delta: dx_frame,
+            }),
+            ResizeOperation::OuterColumn {
+                column,
+                side,
+                initial_width,
+            } => {
+                let directed_delta = if side == DockSide::Left { dx_total } else { -dx_total };
+                (directed_delta != 0.0).then_some(DockCommand::ResizeColumn {
+                    column,
+                    width: initial_width + directed_delta,
+                })
+            }
+            ResizeOperation::FloatingBounds {
+                group,
+                edge,
+                initial_bounds,
+            } => {
+                let mut bounds = initial_bounds;
+                let initial_right = initial_bounds.origin.x + initial_bounds.size.width;
+                let initial_bottom = initial_bounds.origin.y + initial_bounds.size.height;
+                match edge {
+                    ResizeEdge::Left => {
+                        bounds.origin.x = initial_bounds.origin.x + dx_total;
+                        bounds.size.width = initial_bounds.size.width - dx_total;
+                    }
+                    ResizeEdge::Right => bounds.size.width = initial_bounds.size.width + dx_total,
+                    ResizeEdge::Top => {
+                        bounds.origin.y = initial_bounds.origin.y + dy_total;
+                        bounds.size.height = initial_bounds.size.height - dy_total;
+                    }
+                    ResizeEdge::Bottom => bounds.size.height = initial_bounds.size.height + dy_total,
+                    ResizeEdge::TopLeft => {
+                        bounds.origin.x = initial_bounds.origin.x + dx_total;
+                        bounds.size.width = initial_bounds.size.width - dx_total;
+                        bounds.origin.y = initial_bounds.origin.y + dy_total;
+                        bounds.size.height = initial_bounds.size.height - dy_total;
+                    }
+                    ResizeEdge::TopRight => {
+                        bounds.size.width = initial_bounds.size.width + dx_total;
+                        bounds.origin.y = initial_bounds.origin.y + dy_total;
+                        bounds.size.height = initial_bounds.size.height - dy_total;
+                    }
+                    ResizeEdge::BottomLeft => {
+                        bounds.origin.x = initial_bounds.origin.x + dx_total;
+                        bounds.size.width = initial_bounds.size.width - dx_total;
+                        bounds.size.height = initial_bounds.size.height + dy_total;
+                    }
+                    ResizeEdge::BottomRight => {
+                        bounds.size.width = initial_bounds.size.width + dx_total;
+                        bounds.size.height = initial_bounds.size.height + dy_total;
+                    }
+                }
+                // Keep the opposite edge fixed while preventing invalid dimensions. Core
+                // additionally applies panel-specific minimum-size constraints.
+                let min_width = self.metrics.min_column_width.min(initial_bounds.size.width);
+                let min_height = self.metrics.min_group_height.min(initial_bounds.size.height);
+                if bounds.size.width < min_width {
+                    bounds.size.width = min_width;
+                    if matches!(edge, ResizeEdge::Left | ResizeEdge::TopLeft | ResizeEdge::BottomLeft) {
+                        bounds.origin.x = initial_right - min_width;
+                    }
+                }
+                if bounds.size.height < min_height {
+                    bounds.size.height = min_height;
+                    if matches!(edge, ResizeEdge::Top | ResizeEdge::TopLeft | ResizeEdge::TopRight) {
+                        bounds.origin.y = initial_bottom - min_height;
+                    }
+                }
+                (bounds != initial_bounds).then_some(DockCommand::ResizeFloatingBounds { group, bounds })
+            }
+        }
+    }
+
+    fn finish_pointer_at(&mut self, position: Point, viewport: Rect, cx: &mut Context<Self>) {
+        if let Some(mut gesture) = self.resize_gesture {
+            gesture.latest = position;
+            self.resize_gesture = Some(gesture);
+            // Flush the final position now; the already-scheduled frame becomes a no-op
+            // after this gesture is cleared.
+            self.flush_resize(cx);
+            self.resize_gesture = None;
+            self.resize_frame_scheduled = false;
+            cx.notify();
+            return;
+        }
+        self.finish_drag_at(position, viewport, cx);
+    }
+
+    fn cancel_active_interactions(&mut self, escape: bool, cx: &mut Context<Self>) {
+        let mut changed = false;
+        if active_drag_payload(self.drag_session.state()).is_some() {
+            let result = if escape {
+                self.drag_session.escape()
+            } else {
+                self.drag_session.focus_lost()
+            };
+            if result.is_ok() {
+                let _ = self.drag_session.reset();
+                changed = true;
+            }
+        }
+        if self.resize_gesture.take().is_some() {
+            changed = true;
+        }
+        self.resize_frame_scheduled = false;
+        if changed {
+            cx.notify();
+        }
     }
 
     fn show_menu(&mut self, menu: DockMenuState, cx: &mut Context<Self>) {
@@ -480,14 +814,35 @@ impl Render for MainWindow {
             }
         };
 
+        if self.focus_handle.is_none() {
+            let focus_handle = cx.focus_handle();
+            let subscription = cx.on_focus_out(
+                &focus_handle,
+                window,
+                |view, _event, _window, cx| {
+                    view.cancel_active_interactions(false, cx);
+                },
+            );
+            self.focus_handle = Some(focus_handle);
+            self._focus_subscription = Some(subscription);
+        }
+        let root_focus_handle = self
+            .focus_handle
+            .as_ref()
+            .expect("focus handle initialized above")
+            .clone();
+
         let drag_viewport = dock_viewport;
         let move_weak = cx.weak_entity();
+        let resize_move_weak = cx.weak_entity();
         let release_weak = cx.weak_entity();
+        let escape_weak = cx.weak_entity();
         let mut root = div()
             .relative()
             .w(px(width))
             .h(px(height))
             .bg(rgb(self.theme.colors.window_background))
+            .track_focus(&root_focus_handle)
             .id("main-window-drag-root")
             .on_drag_move::<DragPayload>(move |event, _window, app| {
                 let position = Point::new(
@@ -499,15 +854,36 @@ impl Render for MainWindow {
                     view.update_drag_position(position, drag_viewport, cx);
                 });
             })
+            .on_mouse_move(move |event, window, app| {
+                let position = Point::new(
+                    event.position.x.as_f32(),
+                    event.position.y.as_f32() - MENU_BAR_HEIGHT,
+                );
+                let weak = resize_move_weak.clone();
+                let _ = weak.update(app, |view, cx| {
+                    view.update_resize_position(position, window, cx);
+                });
+            })
             .capture_any_mouse_up(move |event, _window, app| {
+                if event.button != gpui::MouseButton::Left {
+                    return;
+                }
                 let position = Point::new(
                     event.position.x.as_f32(),
                     event.position.y.as_f32() - MENU_BAR_HEIGHT,
                 );
                 let weak = release_weak.clone();
                 let _ = weak.update(app, |view, cx| {
-                    view.finish_drag_at(position, drag_viewport, cx);
+                    view.finish_pointer_at(position, drag_viewport, cx);
                 });
+            })
+            .on_key_down(move |event, _window, app| {
+                if event.keystroke.key == "escape" {
+                    let weak = escape_weak.clone();
+                    let _ = weak.update(app, |view, cx| {
+                        view.cancel_active_interactions(true, cx);
+                    });
+                }
             });
 
         let window_menu_weak = cx.weak_entity();
@@ -540,6 +916,7 @@ impl Render for MainWindow {
         let command_weak = cx.weak_entity();
         let menu_weak = cx.weak_entity();
         let drag_start_weak = cx.weak_entity();
+        let resize_start_weak = cx.weak_entity();
         let dock_view = dock_gpui::render(
             &self.layout,
             &rects,
@@ -564,15 +941,27 @@ impl Render for MainWindow {
             },
             move |payload, handle| {
                 let weak = drag_start_weak.clone();
-                Box::new(move |event: &MouseDownEvent, _window: &mut Window, app: &mut App| {
+                Box::new(move |event: &MouseDownEvent, window: &mut Window, app: &mut App| {
                     let position = Point::new(
                         event.position.x.as_f32(),
                         event.position.y.as_f32() - MENU_BAR_HEIGHT,
                     );
                     let _ = weak.update(app, |view, cx| {
-                        view.begin_drag(payload, handle, position);
+                        view.begin_drag(payload, handle, position, window, cx);
                     });
                 }) as dock_gpui::DragStartHandler
+            },
+            move |handle| {
+                let weak = resize_start_weak.clone();
+                Box::new(move |event: &MouseDownEvent, window: &mut Window, app: &mut App| {
+                    let position = Point::new(
+                        event.position.x.as_f32(),
+                        event.position.y.as_f32() - MENU_BAR_HEIGHT,
+                    );
+                    let _ = weak.update(app, |view, cx| {
+                        view.begin_resize(handle, position, drag_viewport, window, cx);
+                    });
+                }) as dock_gpui::ResizeStartHandler
             },
             drag_overlay.as_ref(),
         );

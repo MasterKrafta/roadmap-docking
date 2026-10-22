@@ -112,6 +112,10 @@ pub enum DockCommand {
         group: FloatingGroupId,
         origin: Point,
     },
+    /// Update a floating window's origin and size atomically during an edge/corner resize.
+    ///
+    /// This preserves one-command resize semantics when resizing from the top or left edges.
+    ResizeFloatingBounds { group: FloatingGroupId, bounds: Rect },
     /// Resize a floating window by setting its requested size.
     ResizeFloating { group: FloatingGroupId, size: Size },
     /// Raise a floating group to the front of the stacking order.
@@ -268,6 +272,10 @@ mod tests {
                 group: FloatingGroupId::null(),
                 size: Size::new(500.0, 400.0),
             },
+            DockCommand::ResizeFloatingBounds {
+                group: FloatingGroupId::null(),
+                bounds: Rect::new(Point::new(10.0, 20.0), Size::new(500.0, 400.0)),
+            },
             DockCommand::RaiseFloating {
                 group: FloatingGroupId::null(),
             },
@@ -298,7 +306,7 @@ mod tests {
                 mode: ChromeMode::AllHidden,
             },
         ];
-        assert_eq!(commands.len(), 31);
+        assert_eq!(commands.len(), 32);
     }
 
     #[cfg(feature = "serde")]
