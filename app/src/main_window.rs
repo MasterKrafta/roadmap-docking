@@ -132,10 +132,13 @@ impl Render for MainWindow {
                     .bg(rgb(colors.window_background))
                     .on_mouse_down(
                         MouseButton::Left,
-                        cx.listener(|this, event, _window, cx| {
+                        cx.listener(move |this, event, _window, cx| {
+                            // Start from the displayed width, which may already be clamped
+                            // if the window was resized to a narrower size.
+                            this.column_width = column_width;
                             this.is_resizing = true;
                             this.resize_start_x = event.position.x.as_f32();
-                            this.resize_start_width = this.column_width;
+                            this.resize_start_width = column_width;
                             cx.notify();
                         }),
                     )
