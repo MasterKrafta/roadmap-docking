@@ -17,6 +17,8 @@ pub struct ThemeMetrics {
     pub drag_start_threshold: f32,
     pub default_column_width: f32,
     pub min_column_width: f32,
+    /// Initial fraction of the column's content area allocated to the upper panel.
+    pub default_column_split_ratio: f32,
     /// Width of each tab in the main window's simple column.
     pub column_tab_width: f32,
     pub rail_width: f32,
@@ -42,6 +44,7 @@ impl Default for ThemeMetrics {
             drag_start_threshold: 4.0,
             default_column_width: 280.0,
             min_column_width: 200.0,
+            default_column_split_ratio: 0.5,
             column_tab_width: 104.0,
             rail_width: 36.0,
             min_group_height: 80.0,
@@ -80,6 +83,7 @@ mod tests {
         assert!((m.column_header_height - 32.0).abs() < 1e-3);
         assert!((m.default_column_width - 280.0).abs() < 1e-3);
         assert!((m.min_column_width - 200.0).abs() < 1e-3);
+        assert!((m.default_column_split_ratio - 0.5).abs() < 1e-3);
         assert!((m.column_tab_width - 104.0).abs() < 1e-3);
         assert!((m.splitter_thickness - 4.0).abs() < 1e-3);
         assert!((m.splitter_hit_zone - 8.0).abs() < 1e-3);
