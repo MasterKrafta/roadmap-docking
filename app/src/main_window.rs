@@ -41,6 +41,8 @@ impl Render for MainWindow {
         let column_width = self
             .column_width
             .clamp(metrics.min_column_width, max_column_width);
+        let tab_width =
+            metrics.column_tab_width.min(((column_width - metrics.button_size).max(0.0)) / 2.0);
 
         // Register window-level mouse handlers while resizing so the pointer can
         // leave the narrow splitter hit zone without interrupting the drag.
@@ -49,7 +51,7 @@ impl Render for MainWindow {
             let max_width = max_column_width;
             let move_listener = cx.listener(
                 move |this, event: &MouseMoveEvent, _window, cx| {
-                    if !this.is_resizing || event.pressed_button != Some(MouseButton::Left) {
+                    if !this.is_resizing {
                         return;
                     }
 
@@ -198,7 +200,7 @@ impl Render for MainWindow {
                                     .flex()
                                     .items_center()
                                     .justify_center()
-                                    .w(px(metrics.column_tab_width))
+                                    .w(px(tab_width))
                                     .h(px(metrics.tab_strip_height))
                                     .bg(rgb(first_tab_background))
                                     .text_color(rgb(first_tab_text))
@@ -214,7 +216,7 @@ impl Render for MainWindow {
                                     .flex()
                                     .items_center()
                                     .justify_center()
-                                    .w(px(metrics.column_tab_width))
+                                    .w(px(tab_width))
                                     .h(px(metrics.tab_strip_height))
                                     .bg(rgb(second_tab_background))
                                     .text_color(rgb(second_tab_text))
