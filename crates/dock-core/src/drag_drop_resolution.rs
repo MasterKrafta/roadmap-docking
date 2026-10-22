@@ -313,7 +313,7 @@ fn group_self_drop_and_same_column_slot_are_noops_without_version_increment() {
     let outcome = layout.apply(DockCommand::MoveGroup { group, column, index: 0 }, &metrics).unwrap();
     assert_eq!(outcome.new_version, version);
     assert_eq!(layout.version(), version);
-    assert_eq!(tabs(&layout, group).collapsed, true);
+    assert!(tabs(&layout, group).collapsed);
 }
 
 #[test]
@@ -351,7 +351,7 @@ fn group_drag_to_main_column_becomes_one_command_and_preserves_tabs_state() {
         panic!("first inserted child is a column");
     };
     assert_eq!(new_column.groups, vec![source]);
-    assert_eq!(layout.node(target_column).is_some(), true);
+    assert!(layout.node(target_column).is_some());
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
 
@@ -391,7 +391,7 @@ fn sole_group_column_same_position_is_a_noop_command() {
     ).unwrap();
     assert_eq!(outcome.new_version, version);
     assert_eq!(layout.version(), version);
-    assert_eq!(tabs(&layout, group).collapsed, true);
+    assert!(tabs(&layout, group).collapsed);
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
 
@@ -417,7 +417,7 @@ fn floating_capture_resolves_to_dock_floating_but_self_drop_is_noop() {
     let (_, p0) = builder.panel(key("capture-source-a"), constraints());
     let (_, p1) = builder.panel(key("capture-source-b"), constraints());
     let floating_tabs = builder.tabs(vec![p0, p1], 1, true);
-    let original_floating_tabs = vec![p0, p1];
+    let original_floating_tabs = [p0, p1];
     let floating = builder.floating_group(floating_tabs, bounds(100.0, 200.0), 1);
     let (_, p2) = builder.panel(key("capture-target"), constraints());
     let main_tabs = builder.tabs(vec![p2], 0, false);
