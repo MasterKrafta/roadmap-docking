@@ -194,8 +194,14 @@ impl Layout {
                 let area = self
                     .dock_area(floating.area)
                     .ok_or(ComputeRectsError::InvalidLayout)?;
-                let bounds =
-                    clamp_floating_bounds_with_cache(self, area.root, floating.bounds, viewport, metrics, &mut minimum_size_cache)?;
+                let bounds = clamp_floating_bounds_with_cache(
+                    self,
+                    area.root,
+                    floating.bounds,
+                    viewport,
+                    metrics,
+                    &mut minimum_size_cache,
+                )?;
                 output
                     .floating_groups
                     .push(FloatingGroupRect::new(id, bounds, floating.z_order));
@@ -379,8 +385,24 @@ fn layout_node(
     }
 
     match node {
-        Node::Column(column) => layout_column(layout, id, column, content_rect, metrics, output, minimum_size_cache),
-        Node::Tabs(tabs) => layout_tabs(layout, id, tabs, content_rect, metrics, output, minimum_size_cache),
+        Node::Column(column) => layout_column(
+            layout,
+            id,
+            column,
+            content_rect,
+            metrics,
+            output,
+            minimum_size_cache,
+        ),
+        Node::Tabs(tabs) => layout_tabs(
+            layout,
+            id,
+            tabs,
+            content_rect,
+            metrics,
+            output,
+            minimum_size_cache,
+        ),
         Node::Panel(panel) => {
             let minimum = layout
                 .panel_instance(panel.panel_id)
@@ -406,7 +428,15 @@ fn layout_node(
                 .push(PanelRect::new(panel.panel_id, content_rect));
             Ok(())
         }
-        Node::Split(split) => layout_split(layout, id, split, content_rect, metrics, output, minimum_size_cache),
+        Node::Split(split) => layout_split(
+            layout,
+            id,
+            split,
+            content_rect,
+            metrics,
+            output,
+            minimum_size_cache,
+        ),
     }
 }
 
@@ -2882,5 +2912,4 @@ mod tests {
         assert_eq!(expanded_rects.panels.len(), 1);
         assert!(collapsed_rects.panels.is_empty());
     }
-
 }
