@@ -663,7 +663,7 @@ impl Layout {
                         | DropZone::TabInsertion
                         | DropZone::Left
                         | DropZone::Right
-                ) && target_node(zone.target)
+                ) && zone.target.referenced_node_id()
                     .map(|node| contains_node(&tree_index, area.root, node))
                     .unwrap_or(false)
             });
@@ -1174,15 +1174,6 @@ fn group_slot_is_noop(layout: &Layout, source: DropSource, column: NodeId, index
     index == source_index || index == source_index + 1
 }
 
-fn target_node(target: DropTarget) -> Option<NodeId> {
-    match target {
-        DropTarget::Tabs { group, .. }
-        | DropTarget::GroupTabs { group, .. }
-        | DropTarget::GroupEdge { group, .. } => Some(group),
-        DropTarget::ColumnSlot { column, .. } | DropTarget::RailSlot { column, .. } => Some(column),
-        DropTarget::MainColumn { .. } | DropTarget::FreeArea => None,
-    }
-}
 
 #[cfg(test)]
 mod tests {
