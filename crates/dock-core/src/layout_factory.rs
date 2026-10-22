@@ -60,6 +60,45 @@ pub fn create_initial_layout(
         descriptor("properties").expect("required key checked");
     let (history_key, history_constraints) = descriptor("history").expect("required key checked");
 
+    // Both built-in groups are tab stacks, so their minimum width is the widest
+    // panel minimum in that group. The column must satisfy both groups and the
+    // configured minimum column metric.
+    let minimum_column_width = metrics.min_column_width.max(
+        layers_constraints
+            .min_size
+            .width
+            .max(color_constraints.min_size.width)
+            .max(properties_constraints.min_size.width)
+            .max(history_constraints.min_size.width),
+    );
+    let tab_group_maximum = |left: PanelConstraints, right: PanelConstraints| {
+        match (left.max_size, right.max_size) {
+            (Some(left), Some(right)) => Some(left.width.min(right.width)),
+            (Some(left), None) => Some(left.width),
+            (None, Some(right)) => Some(right.width),
+            (None, None) => None,
+        }
+    };
+    let mut maximum_column_width: Option<f32> = None;
+    for group_maximum in [
+        tab_group_maximum(layers_constraints, color_constraints),
+        tab_group_maximum(properties_constraints, history_constraints),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        maximum_column_width = Some(
+            maximum_column_width.map_or(group_maximum, |current| current.min(group_maximum)),
+        );
+    }
+    if maximum_column_width.is_some_and(|maximum| minimum_column_width > maximum) {
+        return Err("panel minimum width exceeds the maximum width allowed by its tab group");
+    }
+    let column_width = metrics
+        .default_column_width
+        .max(minimum_column_width)
+        .min(maximum_column_width.unwrap_or(f32::MAX));
+
     let mut panel_instances = SlotMap::<PanelId, PanelInstance>::with_key();
     let layers_id = panel_instances.insert(PanelInstance::new(layers_key, layers_constraints));
     let color_id = panel_instances.insert(PanelInstance::new(color_key, color_constraints));
@@ -85,11 +124,11 @@ pub fn create_initial_layout(
     }));
 
     let column_root = nodes.insert(Node::Column(Column {
-        width: metrics.default_column_width,
+        width: column_width,
         mode: ColumnMode::Expanded,
         groups: vec![appearance_group, information_group],
         group_ratios: vec![0.5, 0.5],
-        last_expanded_width: Some(metrics.default_column_width),
+        last_expanded_width: Some(column_width),
     }));
 
     let mut dock_areas = SlotMap::<DockAreaId, DockArea>::with_key();
