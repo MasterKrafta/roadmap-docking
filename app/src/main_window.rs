@@ -250,43 +250,65 @@ impl MainWindow {
         }
     }
 
+    fn visibility_index_for_slot(column_index: usize, panel_slot: usize) -> Option<usize> {
+        match (column_index, panel_slot) {
+            (0, 0) => Some(0), // Left Layers
+            (1, 0) => Some(1), // Right Layers
+            (1, 1) => Some(2), // Right Color
+            (1, 2) => Some(3), // Right Properties
+            _ => None,
+        }
+    }
+
+    fn panel_slot_visible(&self, column_index: usize, panel_slot: usize) -> bool {
+        Self::visibility_index_for_slot(column_index, panel_slot)
+            .is_some_and(|visibility_index| self.panel_visibility[visibility_index])
+    }
+
     fn panel_is_visible(&self, column_index: usize, panel_id: PanelId) -> bool {
         self.panels_by_column
             .get(column_index)
             .and_then(|panel_ids| panel_ids.iter().position(|candidate| *candidate == panel_id))
-            .is_some_and(|panel_index| self.panel_visibility[panel_index])
+            .is_some_and(|panel_slot| self.panel_slot_visible(column_index, panel_slot))
     }
 
-    fn toggle_panel_visibility(&mut self, panel_index: usize) {
-        if panel_index >= self.panel_visibility.len() {
+    fn toggle_panel_visibility(&mut self, menu_index: usize) {
+        if menu_index >= self.panel_visibility.len() {
             return;
         }
-        self.panel_visibility[panel_index] = !self.panel_visibility[panel_index];
+        let (column_index, panel_slot) = match menu_index {
+            0 => (0, 0), // Left Layers
+            1 => (1, 0), // Right Layers
+            2 => (1, 1), // Right Color
+            3 => (1, 2), // Right Properties
+            _ => return,
+        };
+        if !self.column_open[column_index] {
+            return;
+        }
 
-        // Keep Core's active-tab selection aligned with the visible tabs. A tab
-        // group can be intentionally empty from the view's perspective.
-        for column_index in 0..self.column_ids.len() {
-            if !self.column_open[column_index] {
-                continue;
-            }
-            let groups = [
-                (self.top_tab_groups[column_index], [0usize, 1usize]),
-                (self.bottom_tab_groups[column_index], [2usize, 3usize]),
-            ];
-            for (group, candidates) in groups {
-                let active_visible = self
-                    .active_panel_id(group)
-                    .is_some_and(|active| self.panel_is_visible(column_index, active));
-                if active_visible {
-                    continue;
-                }
-                if let Some(next_index) = candidates
-                    .into_iter()
-                    .find(|candidate| self.panel_visibility[*candidate])
-                {
-                    self.activate_tab(group, self.panels_by_column[column_index][next_index]);
-                }
-            }
+        self.panel_visibility[menu_index] = !self.panel_visibility[menu_index];
+        let group = if panel_slot < 2 {
+            self.top_tab_groups[column_index]
+        } else {
+            self.bottom_tab_groups[column_index]
+        };
+        let candidates = if panel_slot < 2 {
+            [0usize, 1usize]
+        } else {
+            [2usize, 3usize]
+        };
+        let active_visible = self
+            .active_panel_id(group)
+            .is_some_and(|active| self.panel_is_visible(column_index, active));
+        if active_visible {
+            return;
+        }
+        if let Some(next_slot) = candidates
+            .into_iter()
+            .find(|candidate| self.panel_slot_visible(column_index, *candidate))
+        {
+            self.activate_tab(group, self.panels_by_column[column_index][next_slot]);
         }
     }
 
@@ -363,10 +385,19 @@ impl MainWindow {
 
         let header_height = metrics.column_header_height.min(window_height);
         let available_below_header = (window_height - header_height).max(0.0);
-        let group_split_hit_height = metrics.splitter_hit_zone.max(metrics.splitter_thickness)
-            .min(available_below_header);
+        let has_bottom_group = self.column_has_bottom_group[column_index];
+        let group_split_hit_height = if has_bottom_group {
+            metrics.splitter_hit_zone.max(metrics.splitter_thickness)
+                .min(available_below_header)
+        } else {
+            0.0
+        };
         let groups_height = (available_below_header - group_split_hit_height).max(0.0);
-        let top_group_height = groups_height * self.group_split_ratio(column_index).clamp(0.0, 1.0);
+        let top_group_height = if has_bottom_group {
+            groups_height * self.group_split_ratio(column_index).clamp(0.0, 1.0)
+        } else {
+            groups_height
+        };
         let bottom_group_height = (groups_height - top_group_height).max(0.0);
         let top_tab_strip_height = metrics.tab_strip_height.min(top_group_height);
         let top_content_height = (top_group_height - top_tab_strip_height).max(0.0);
@@ -379,11 +410,14 @@ impl MainWindow {
         let header_spacer_width =
             (column_width - content_padding - button_size * 2.0 - button_gap).max(0.0);
         let visible_top_count =
-            (if self.panel_visibility[0] { 1usize } else { 0 })
-                + (if self.panel_visibility[1] { 1usize } else { 0 });
-        let visible_bottom_count =
-            (if self.panel_visibility[2] { 1usize } else { 0 })
-                + (if self.panel_visibility[3] { 1usize } else { 0 });
+            (if self.panel_slot_visible(column_index, 0) { 1usize } else { 0 })
+                + (if self.panel_slot_visible(column_index, 1) { 1usize } else { 0 });
+        let visible_bottom_count = if has_bottom_group {
+            (if self.panel_slot_visible(column_index, 2) { 1usize } else { 0 })
+                + (if self.panel_slot_visible(column_index, 3) { 1usize } else { 0 })
+        } else {
+            0
+        };
         let available_tab_width =
             (column_width - content_padding * 2.0 - button_size).max(0.0);
         let tab_width = metrics
@@ -400,9 +434,12 @@ impl MainWindow {
         let active_top_panel = self
             .active_panel_id(top_tab_group)
             .filter(|panel_id| self.panel_is_visible(column_index, *panel_id));
-        let active_bottom_panel = self
-            .active_panel_id(bottom_tab_group)
-            .filter(|panel_id| self.panel_is_visible(column_index, *panel_id));
+        let active_bottom_panel = if has_bottom_group {
+            self.active_panel_id(bottom_tab_group)
+                .filter(|panel_id| self.panel_is_visible(column_index, *panel_id))
+        } else {
+            None
+        };
         let get_title = |panel_id: PanelId, fallback: &str| {
             self.layout
                 .panel_instance(panel_id)
@@ -414,7 +451,6 @@ impl MainWindow {
         let color_title = format!("{column_label} {}", get_title(panel_ids[1], "Color"));
         let properties_title =
             format!("{column_label} {}", get_title(panel_ids[2], "Properties"));
-        let history_title = format!("{column_label} {}", get_title(panel_ids[3], "History"));
 
         let top_content = active_top_panel
             .and_then(|panel_id| self.layout.panel_instance(panel_id))
@@ -428,7 +464,6 @@ impl MainWindow {
         let layers_active = active_top_panel == Some(panel_ids[0]);
         let color_active = active_top_panel == Some(panel_ids[1]);
         let properties_active = active_bottom_panel == Some(panel_ids[2]);
-        let history_active = active_bottom_panel == Some(panel_ids[3]);
 
         let layers_tab = div()
             .id(if column_index == 0 { "left-dock-tab-layers" } else { "right-dock-tab-layers" })
@@ -474,10 +509,10 @@ impl MainWindow {
             .border_1()
             .border_color(rgb(colors.border))
             .child(div().w(px(content_padding)).h(px(1.0)));
-        if self.panel_visibility[0] {
+        if self.panel_slot_visible(column_index, 0) {
             top_tab_strip = top_tab_strip.child(layers_tab);
         }
-        if self.panel_visibility[1] {
+        if self.panel_slot_visible(column_index, 1) {
             top_tab_strip = top_tab_strip.child(color_tab);
         }
         if visible_top_count == 0 {
@@ -525,23 +560,6 @@ impl MainWindow {
             }))
             .child(properties_title);
 
-        let history_tab = div()
-            .id(if column_index == 0 { "left-dock-tab-history" } else { "right-dock-tab-history" })
-            .flex()
-            .items_center()
-            .justify_center()
-            .w(px(bottom_tab_width))
-            .h(px(bottom_tab_strip_height))
-            .bg(rgb(if history_active { colors.active_tab } else { colors.dock_background }))
-            .border_1()
-            .border_color(rgb(colors.border))
-            .text_color(rgb(if history_active { colors.primary_text } else { colors.muted_text }))
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.activate_tab(bottom_tab_group, panel_ids[3]);
-                cx.notify();
-            }))
-            .child(history_title);
-
         let mut bottom_tab_strip = div()
             .flex()
             .flex_row()
@@ -552,11 +570,8 @@ impl MainWindow {
             .border_1()
             .border_color(rgb(colors.border))
             .child(div().w(px(content_padding)).h(px(1.0)));
-        if self.panel_visibility[2] {
+        if has_bottom_group && self.panel_slot_visible(column_index, 2) {
             bottom_tab_strip = bottom_tab_strip.child(properties_tab);
-        }
-        if self.panel_visibility[3] {
-            bottom_tab_strip = bottom_tab_strip.child(history_tab);
         }
         if visible_bottom_count == 0 {
             bottom_tab_strip = bottom_tab_strip.child(
@@ -648,7 +663,7 @@ impl MainWindow {
                     .bg(rgb(colors.splitter)),
             );
 
-        div()
+        let mut column_view = div()
             .relative()
             .flex()
             .flex_col()
@@ -700,9 +715,11 @@ impl MainWindow {
                     )
                     .child(div().w(px(content_padding)).h(px(1.0))),
             )
-            .child(top_group)
-            .child(group_splitter)
-            .child(bottom_group)
+            .child(top_group);
+        if has_bottom_group {
+            column_view = column_view.child(group_splitter).child(bottom_group);
+        }
+        column_view
     }
 }
 
@@ -919,14 +936,20 @@ impl Render for MainWindow {
                 .border_1()
                 .border_color(rgb(colors.border))
                 .p(px(4.0));
-            for (index, (_key, title)) in self.panels.menu_descriptors().into_iter().enumerate().take(4) {
+            let panel_titles = [
+                "Left Layers",
+                "Right Layers",
+                "Right Color",
+                "Right Properties",
+            ];
+            for (index, title) in panel_titles.into_iter().enumerate() {
                 let visible = self.panel_visibility[index];
                 let panel_index = index;
                 let item_id = match index {
-                    0 => "windows-panel-layers",
-                    1 => "windows-panel-color",
-                    2 => "windows-panel-properties",
-                    _ => "windows-panel-history",
+                    0 => "windows-panel-left-layers",
+                    1 => "windows-panel-right-layers",
+                    2 => "windows-panel-right-color",
+                    _ => "windows-panel-right-properties",
                 };
                 let item = div()
                     .id(item_id)
