@@ -2323,23 +2323,39 @@ fn render_mouse_context_menu(
         .on_click(cx.listener(move |this, _, _, cx| {
             match group_to_close {
                 0 => {
-                    this.visible_tabs[0] = false;
-                    this.visible_tabs[1] = false;
+                    if !this.floating_tabs[0] {
+                        this.visible_tabs[0] = false;
+                    }
+                    if !this.floating_tabs[1] {
+                        this.visible_tabs[1] = false;
+                    }
+                    this.floating_tab_groups[0] = false;
+                    this.floating_tab_group_collapsed[0] = false;
                     this.collapsed_group_content[0] = false;
                     if !this.visible_tabs[2] && !this.visible_tabs[3] {
                         this.collapsed_columns[0] = false;
                     }
                 }
                 1 => {
-                    this.visible_tabs[2] = false;
-                    this.visible_tabs[3] = false;
+                    if !this.floating_tabs[2] {
+                        this.visible_tabs[2] = false;
+                    }
+                    if !this.floating_tabs[3] {
+                        this.visible_tabs[3] = false;
+                    }
+                    this.floating_tab_groups[1] = false;
+                    this.floating_tab_group_collapsed[1] = false;
                     this.collapsed_group_content[1] = false;
                     if !this.visible_tabs[0] && !this.visible_tabs[1] {
                         this.collapsed_columns[0] = false;
                     }
                 }
                 _ => {
-                    this.visible_tabs[4] = false;
+                    if !this.floating_tabs[4] {
+                        this.visible_tabs[4] = false;
+                    }
+                    this.floating_tab_groups[2] = false;
+                    this.floating_tab_group_collapsed[2] = false;
                     this.collapsed_columns[1] = false;
                     this.collapsed_group_content[2] = false;
                 }
@@ -2472,23 +2488,39 @@ fn render_tab_context_menu(
         .on_click(cx.listener(move |this, _, _, cx| {
             match (column_index, is_lower) {
                 (0, false) => {
-                    this.visible_tabs[0] = false;
-                    this.visible_tabs[1] = false;
+                    if !this.floating_tabs[0] {
+                        this.visible_tabs[0] = false;
+                    }
+                    if !this.floating_tabs[1] {
+                        this.visible_tabs[1] = false;
+                    }
+                    this.floating_tab_groups[0] = false;
+                    this.floating_tab_group_collapsed[0] = false;
                     this.collapsed_group_content[0] = false;
                     if !this.visible_tabs[2] && !this.visible_tabs[3] {
                         this.collapsed_columns[0] = false;
                     }
                 }
                 (0, true) => {
-                    this.visible_tabs[2] = false;
-                    this.visible_tabs[3] = false;
+                    if !this.floating_tabs[2] {
+                        this.visible_tabs[2] = false;
+                    }
+                    if !this.floating_tabs[3] {
+                        this.visible_tabs[3] = false;
+                    }
+                    this.floating_tab_groups[1] = false;
+                    this.floating_tab_group_collapsed[1] = false;
                     this.collapsed_group_content[1] = false;
                     if !this.visible_tabs[0] && !this.visible_tabs[1] {
                         this.collapsed_columns[0] = false;
                     }
                 }
                 (1, false) => {
-                    this.visible_tabs[4] = false;
+                    if !this.floating_tabs[4] {
+                        this.visible_tabs[4] = false;
+                    }
+                    this.floating_tab_groups[2] = false;
+                    this.floating_tab_group_collapsed[2] = false;
                     this.collapsed_columns[1] = false;
                     this.collapsed_group_content[2] = false;
                 }
