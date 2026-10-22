@@ -1700,12 +1700,12 @@ fn render_floating_tab(
 ) -> impl IntoElement {
     let colors = theme.colors;
     let metrics = theme.metrics;
-    let (column_index, is_lower, active_tab, group_index, tab_label, icon) = match tab_index {
-        0 => (0, false, 0, 0, "Слои", "▱"),
-        1 => (0, false, 1, 0, "Навигатор", "◇"),
-        2 => (0, true, 0, 1, "Цвет", "◉"),
-        3 => (0, true, 1, 1, "История", "↶"),
-        _ => (1, false, 0, 2, "Свойства", "☷"),
+    let (column_index, is_lower, active_tab, tab_label, icon) = match tab_index {
+        0 => (0, false, 0, "Слои", "▱"),
+        1 => (0, false, 1, "Навигатор", "◇"),
+        2 => (0, true, 0, "Цвет", "◉"),
+        3 => (0, true, 1, "История", "↶"),
+        _ => (1, false, 0, "Свойства", "☷"),
     };
     let tab_width =
         metrics.column_tab_width.min(((column_width - metrics.button_size).max(0.0)) / 2.0);
