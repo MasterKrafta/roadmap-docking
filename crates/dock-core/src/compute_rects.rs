@@ -2148,4 +2148,59 @@ mod tests {
         assert!(rects.vertical_overflow.is_empty());
     }
 
+
+    #[test]
+    fn zero_weight_child_keeps_its_minimum_without_changing_positive_weight_proportions() {
+        let metrics = DockMetrics::default();
+        let mut builder = LayoutBuilder::new(Profile::Photoshop);
+        let (_, panel_zero) = builder.panel(key("mixed-weights-zero"), constraints());
+        let (_, panel_quarter) = builder.panel(key("mixed-weights-quarter"), constraints());
+        let (_, panel_three_quarters) =
+            builder.panel(key("mixed-weights-three-quarters"), constraints());
+        let group_zero = builder.tabs(vec![panel_zero], 0, false);
+        let group_quarter = builder.tabs(vec![panel_quarter], 0, false);
+        let group_three_quarters = builder.tabs(vec![panel_three_quarters], 0, false);
+        let column = builder.column(
+            metrics.default_column_width,
+            ColumnMode::Expanded,
+            vec![group_zero, group_quarter, group_three_quarters],
+            vec![0.0, 0.25, 0.75],
+        );
+        builder.main_area(DockSide::Left, column);
+        let layout = builder.build();
+
+        // ratio_issues must accept zero entries when the full vector still sums to one.
+        assert_eq!(layout.validate(&metrics), Ok(()));
+
+        let rects = layout
+            .compute_rects(viewport(1000.0, 1000.0), &metrics)
+            .expect("zero-weight children should be clamped without invalidating other weights");
+        let height = |group| {
+            rects
+                .groups
+                .iter()
+                .find(|item| item.group == group)
+                .unwrap()
+                .rect
+                .size
+                .height
+        };
+        let zero_height = height(group_zero);
+        let quarter_height = height(group_quarter);
+        let three_quarters_height = height(group_three_quarters);
+
+        let minimum = metrics
+            .header_height
+            + metrics.tab_strip_height
+            + constraints().min_size.height;
+        assert!((zero_height - minimum).abs() < PIXEL_TOLERANCE);
+        assert!((quarter_height - 219.0).abs() < PIXEL_TOLERANCE);
+        assert!((three_quarters_height - 657.0).abs() < PIXEL_TOLERANCE);
+        assert!(
+            (quarter_height / three_quarters_height - 0.25 / 0.75).abs()
+                < PIXEL_TOLERANCE
+        );
+        assert!(rects.vertical_overflow.is_empty());
+    }
+
 }
