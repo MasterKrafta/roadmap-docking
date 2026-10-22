@@ -880,7 +880,7 @@ impl Render for MainWindow {
         let column_splitter_center_x =
             workspace_width + outer_splitter_width + left_width + splitter_width / 2.0;
         let column_splitter = if both_columns_open {
-            let column_splitter = div()
+            div()
                 .relative()
                 .w(px(splitter_width))
                 .h(px(dock_height))
@@ -913,8 +913,8 @@ impl Render for MainWindow {
                                 .h(px(dock_height))
                                 .bg(rgb(colors.splitter)),
                         ),
-                );
-    
+                )
+
         } else {
             div().w(px(0.0)).h(px(dock_height))
         };
