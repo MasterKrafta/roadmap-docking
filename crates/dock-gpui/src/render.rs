@@ -366,6 +366,16 @@ where
     R: Fn(ResizeHandle) -> ResizeStartHandler,
 {
     let mut elements = Vec::new();
+    let mut rail_groups = HashSet::new();
+    for column_rect in rects.columns.iter().filter(|entry| nodes.contains(&entry.column)) {
+        if matches!(
+            layout.node(column_rect.column),
+            Some(Node::Column(column)) if column.mode.is_rail()
+        ) && let Ok(items) = layout.column_display_order(column_rect.column)
+        {
+            rail_groups.extend(items.into_iter().map(|item| item.group));
+        }
+    }
 
     for column in rects.columns.iter().filter(|entry| nodes.contains(&entry.column)) {
         elements.push(
@@ -383,7 +393,8 @@ where
 
         // Expanded groups have a header row above the tab strip. Collapsed groups
         // use their full reduced height for the strip and therefore skip this row.
-        if let Some(Node::Tabs(tabs)) = layout.node(group.group)
+        if !rail_groups.contains(&group.group)
+            && let Some(Node::Tabs(tabs)) = layout.node(group.group)
             && !tabs.collapsed
         {
             let title = active_panel(layout, tabs)
@@ -400,7 +411,7 @@ where
             elements.push(
                 rect_element(header_rect, theme.colors.toolbar_background)
                     .text_color(rgb(theme.colors.primary_text))
-                    .child(title.clone())
+                    .child(format!("▾ {title}"))
                     .into_any_element(),
             );
 
@@ -460,12 +471,17 @@ where
     for header in rects
         .tab_headers
         .iter()
-        .filter(|entry| nodes.contains(&entry.group))
+        .filter(|entry| nodes.contains(&entry.group) && !rail_groups.contains(&entry.group))
     {
+        let collapsed = matches!(
+            layout.node(header.group),
+            Some(Node::Tabs(tabs)) if tabs.collapsed
+        );
         let label = layout
             .panel_instance(header.panel)
             .map(panel_title)
             .unwrap_or_else(|| "Missing panel".to_owned());
+        let display_label = tab_header_label(&label, collapsed, header.tab_index);
         let active = matches!(
             layout.node(header.group),
             Some(Node::Tabs(tabs)) if active_panel(layout, tabs) == Some(header.panel)
@@ -477,9 +493,17 @@ where
         };
         let payload = DragPayload::Panel { panel: header.panel };
         let ghost_title = format!("Move panel: {label}");
+        let activate_handler = make_command_handler(DockCommand::ActivateTab {
+            group: header.group,
+            panel: header.panel,
+        });
+        let collapse_handler = make_command_handler(DockCommand::CollapseGroup {
+            group: header.group,
+            collapsed: !collapsed,
+        });
         let element = rect_element(header.rect, background)
             .text_color(rgb(theme.colors.primary_text))
-            .child(label)
+            .child(display_label)
             .id(format!("dock-tab-{:?}-{:?}", header.group, header.panel))
             .on_mouse_down(
                 MouseButton::Left,
@@ -489,10 +513,13 @@ where
                 let title = ghost_title.clone();
                 app.new(|_| DragGhost { title })
             })
-            .on_click(make_command_handler(DockCommand::ActivateTab {
-                group: header.group,
-                panel: header.panel,
-            }));
+            .on_click(move |event, window, app| {
+                if event.click_count() >= 2 {
+                    collapse_handler(event, window, app);
+                } else {
+                    activate_handler(event, window, app);
+                }
+            });
         elements.push(element.into_any_element());
     }
 
@@ -562,7 +589,7 @@ where
     }
 
     // Rail columns flatten their panel list for presentation while retaining the Core tree.
-    let row_height = theme.metrics.tab_strip_height.max(28.0);
+    // Use Core's rectangles rather than re-deriving slot height/position in GPUI.
     for column_rect in rects.columns.iter().filter(|entry| nodes.contains(&entry.column)) {
         let Some(Node::Column(column)) = layout.node(column_rect.column) else {
             continue;
@@ -573,33 +600,60 @@ where
         let Ok(items) = layout.column_display_order(column_rect.column) else {
             continue;
         };
+        let selected_flyout = layout
+            .flyout()
+            .filter(|flyout| flyout.column == column_rect.column)
+            .map(|flyout| flyout.panel);
+        let visible_bottom = column_rect.rect.origin.y + column_rect.rect.size.height;
 
         for item in items {
-            let y_offset = item.display_index as f32 * row_height;
-            if y_offset >= column_rect.rect.size.height {
+            let Some(header) = rects
+                .tab_headers
+                .iter()
+                .find(|header| header.group == item.group && header.panel == item.panel)
+            else {
+                continue;
+            };
+            if header.rect.origin.y >= visible_bottom {
                 break;
             }
-            let item_height = row_height.min(column_rect.rect.size.height - y_offset);
-            if item_height <= 0.0 {
+            let height = header
+                .rect
+                .size
+                .height
+                .min(visible_bottom - header.rect.origin.y);
+            if height <= 0.0 {
                 continue;
             }
             let item_rect = Rect::new(
-                Point::new(column_rect.rect.origin.x, column_rect.rect.origin.y + y_offset),
-                Size::new(column_rect.rect.size.width, item_height),
+                header.rect.origin,
+                Size::new(header.rect.size.width, height),
             );
-            let label = layout
-                .panel_instance(item.panel)
-                .map(panel_title)
-                .unwrap_or_else(|| "Missing panel".to_owned());
-            let label = if column.mode == ColumnMode::IconsOnly {
-                label.chars().next().unwrap_or('•').to_string()
+            let Some(instance) = layout.panel_instance(item.panel) else {
+                continue;
+            };
+            let label = panel_title(instance);
+            let icon = panel_icon(instance.key.as_str());
+            let display_label = rail_entry_label(column.mode, icon, &label);
+            let active_in_model = matches!(
+                layout.node(item.group),
+                Some(Node::Tabs(tabs)) if active_panel(layout, tabs) == Some(item.panel)
+            );
+            let active = selected_flyout.map_or(active_in_model, |panel| panel == item.panel);
+            let background = if active {
+                theme.colors.active_tab
             } else {
-                label
+                theme.colors.toolbar_background
+            };
+            let entry = rect_element(item_rect, background)
+                .text_color(rgb(theme.colors.primary_text));
+            let entry = if column.mode == ColumnMode::IconsOnly {
+                entry.flex().items_center().justify_center().child(display_label)
+            } else {
+                entry.flex().items_center().child(display_label)
             };
             elements.push(
-                rect_element(item_rect, theme.colors.toolbar_background)
-                    .text_color(rgb(theme.colors.primary_text))
-                    .child(label)
+                entry
                     .id(format!("dock-rail-{:?}-{:?}", column_rect.column, item.panel))
                     .on_click(make_command_handler(DockCommand::OpenFlyout {
                         column: column_rect.column,
@@ -720,5 +774,62 @@ fn active_panel(layout: &Layout, tabs: &Tabs) -> Option<PanelId> {
     match layout.node(node_id) {
         Some(Node::Panel(panel)) => Some(panel.panel_id),
         _ => None,
+    }
+}
+
+fn panel_icon(key: &str) -> &'static str {
+    match key {
+        "layers" => "▱",
+        "color" => "◉",
+        "properties" => "☷",
+        "history" => "↶",
+        _ => "◇",
+    }
+}
+
+fn rail_entry_label(mode: ColumnMode, icon: &str, title: &str) -> String {
+    match mode {
+        ColumnMode::IconsOnly => icon.to_owned(),
+        ColumnMode::IconsAndLabels => format!("{icon}  {title}"),
+        ColumnMode::Expanded => title.to_owned(),
+    }
+}
+
+fn tab_header_label(title: &str, collapsed: bool, tab_index: usize) -> String {
+    if collapsed && tab_index == 0 {
+        format!("▸ {title}")
+    } else {
+        title.to_owned()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{panel_icon, rail_entry_label, tab_header_label};
+    use dock_core::ColumnMode;
+
+    #[test]
+    fn rail_icons_are_keyed_to_panel_identity_not_title_initials() {
+        assert_eq!(panel_icon("layers"), "▱");
+        assert_eq!(panel_icon("color"), "◉");
+        assert_eq!(panel_icon("properties"), "☷");
+        assert_eq!(panel_icon("history"), "↶");
+        assert_eq!(panel_icon("unregistered"), "◇");
+    }
+
+    #[test]
+    fn rail_modes_have_distinct_icon_and_label_presentations() {
+        assert_eq!(rail_entry_label(ColumnMode::IconsOnly, "▱", "Layers"), "▱");
+        assert_eq!(
+            rail_entry_label(ColumnMode::IconsAndLabels, "▱", "Layers"),
+            "▱  Layers"
+        );
+    }
+
+    #[test]
+    fn collapsed_stack_marker_appears_only_on_the_first_tab() {
+        assert_eq!(tab_header_label("Layers", true, 0), "▸ Layers");
+        assert_eq!(tab_header_label("Color", true, 1), "Color");
+        assert_eq!(tab_header_label("Layers", false, 0), "Layers");
     }
 }
