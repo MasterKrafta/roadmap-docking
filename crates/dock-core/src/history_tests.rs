@@ -2,7 +2,7 @@ use slotmap::Key;
 
 use crate::layout_builder::LayoutBuilder;
 use crate::{
-    ChromeMode, ColumnMode, DockCommand, DockMetrics, DockSide, DropTarget, Layout, Node,
+    Axis, ChromeMode, ColumnMode, DockCommand, DockMetrics, DockSide, DropTarget, Layout, Node,
     PanelConstraints, PanelId, PanelKey, Point, Profile, Rect, Size, UndoRedoHistory,
 };
 
@@ -72,6 +72,99 @@ fn fixture() -> Fixture {
         properties,
         floating_a,
     }
+}
+
+fn history_benchmark_layout(
+    main_columns: usize,
+    groups_per_column: usize,
+    panels_per_group: usize,
+    floating_windows: usize,
+    panels_per_floating: usize,
+) -> (Layout, crate::NodeId) {
+    assert!(main_columns > 0);
+    assert!(groups_per_column > 0);
+    assert!(panels_per_group > 0);
+    let mut builder = LayoutBuilder::new(Profile::Generic);
+    let mut columns = Vec::with_capacity(main_columns);
+    let mut first_column = None;
+
+    for column_index in 0..main_columns {
+        let mut groups = Vec::with_capacity(groups_per_column);
+        for group_index in 0..groups_per_column {
+            let mut panel_nodes = Vec::with_capacity(panels_per_group);
+            for panel_index in 0..panels_per_group {
+                let panel_key = format!(
+                    "history-bench-main-{column_index}-{group_index}-{panel_index}"
+                );
+                let (_, panel_node) = builder.panel(key(&panel_key), constraints());
+                panel_nodes.push(panel_node);
+            }
+            groups.push(builder.tabs(panel_nodes, 0, false));
+        }
+
+        let column = builder.column(
+            280.0,
+            ColumnMode::Expanded,
+            groups,
+            vec![1.0 / groups_per_column as f32; groups_per_column],
+        );
+        first_column.get_or_insert(column);
+        columns.push(column);
+    }
+
+    let main_root = if columns.len() == 1 {
+        columns[0]
+    } else {
+        builder.split(
+            Axis::X,
+            columns,
+            vec![1.0 / main_columns as f32; main_columns],
+        )
+    };
+    builder.main_area(DockSide::Right, main_root);
+
+    for floating_index in 0..floating_windows {
+        let mut panel_nodes = Vec::with_capacity(panels_per_floating);
+        for panel_index in 0..panels_per_floating {
+            let panel_key = format!("history-bench-floating-{floating_index}-{panel_index}");
+            let (_, panel_node) = builder.panel(key(&panel_key), constraints());
+            panel_nodes.push(panel_node);
+        }
+        let tabs = builder.tabs(panel_nodes, 0, false);
+        builder.floating_group(
+            tabs,
+            Rect::new(
+                Point::new(40.0 + floating_index as f32 * 12.0, 50.0 + floating_index as f32 * 9.0),
+                Size::new(400.0, 300.0),
+            ),
+            floating_index as i32,
+        );
+    }
+
+    (
+        builder.build(),
+        first_column.expect("benchmark layout must contain a main column"),
+    )
+}
+
+fn report_history_benchmark(
+    label: &str,
+    nodes: usize,
+    panels: usize,
+    floating_windows: usize,
+    iterations: usize,
+    mut operation: impl FnMut(),
+) {
+    let start = std::time::Instant::now();
+    for _ in 0..iterations {
+        operation();
+    }
+    let elapsed = start.elapsed();
+    eprintln!(
+        "history benchmark [{label}]: nodes={nodes}, panel_instances={panels}, floating_windows={floating_windows}, iterations={iterations}, elapsed_ms={:.3}, us/call={:.3}",
+        elapsed.as_secs_f64() * 1000.0,
+        elapsed.as_secs_f64() * 1_000_000.0 / iterations as f64,
+    );
 }
 
 fn node_shape(layout: &Layout, id: crate::NodeId) -> String {
@@ -187,6 +280,111 @@ fn assert_round_trip(
 
     assert!(history.undo(layout, metrics).unwrap());
     assert_eq!(persistent_shape(layout), before);
+}
+
+/// Manual release-mode benchmark for history snapshot and bounded-history costs.
+///
+/// Run with:
+/// cargo test -p dock-core --release benchmark_history_snapshot_and_bounded_history -- --ignored --nocapture --test-threads=1
+///
+/// Layout creation and history pre-filling are excluded from timed sections.
+#[test]
+#[ignore = "manual performance probe; run the documented release-mode command"]
+fn benchmark_history_snapshot_and_bounded_history() {
+    let metrics = DockMetrics::default();
+    let scenarios = [
+        ("small", 1, 2, 2, 1, 2, 10_000usize),
+        ("medium", 3, 4, 4, 2, 4, 5_000usize),
+        ("large", 4, 6, 8, 4, 8, 2_000usize),
+    ];
+
+    for (name, columns, groups, panels_per_group, floats, panels_per_float, iterations) in scenarios
+    {
+        let (layout, _) = history_benchmark_layout(
+            columns,
+            groups,
+            panels_per_group,
+            floats,
+            panels_per_float,
+        );
+        layout
+            .validate(&metrics)
+            .expect("benchmark layout must satisfy normal layout invariants");
+        let nodes = layout.nodes().count();
+        let panels = layout.panel_instances().count();
+        let floating_windows = layout.floating_groups().count();
+
+        report_history_benchmark(
+            &format!("{name}/Layout::clone"),
+            nodes,
+            panels,
+            floating_windows,
+            iterations,
+            || {
+                std::hint::black_box(layout.clone());
+            },
+        );
+        report_history_benchmark(
+            &format!("{name}/Layout::history_snapshot"),
+            nodes,
+            panels,
+            floating_windows,
+            iterations,
+            || {
+                std::hint::black_box(layout.history_snapshot());
+            },
+        );
+    }
+
+    // Use one medium-sized layout and compare disabled history, the default-sized
+    // bounded Vec and a deliberately large saturated history. Fill history before
+    // timing, so the latter two runs include the steady-state push/remove path.
+    for limit in [0usize, 100, 1_000] {
+        let (mut layout, column) = history_benchmark_layout(3, 4, 4, 2, 4);
+        layout
+            .validate(&metrics)
+            .expect("history benchmark layout must be valid");
+        let nodes = layout.nodes().count();
+        let panels = layout.panel_instances().count();
+        let floating_windows = layout.floating_groups().count();
+        let mut history = UndoRedoHistory::with_limit(limit);
+
+        for index in 0..limit {
+            let width = if index % 2 == 0 { 310.0 } else { 320.0 };
+            history
+                .apply(
+                    &mut layout,
+                    DockCommand::ResizeColumn { column, width },
+                    &metrics,
+                )
+                .expect("history prefill command must succeed");
+        }
+        assert_eq!(history.undo_len(), limit);
+
+        let iterations = if limit >= 1_000 { 250 } else { 1_000 };
+        let mut index = limit;
+        report_history_benchmark(
+            &format!("medium/saturated-history-limit-{limit}"),
+            nodes,
+            panels,
+            floating_windows,
+            iterations,
+            || {
+                let width = if index % 2 == 0 { 310.0 } else { 320.0 };
+                index += 1;
+                std::hint::black_box(
+                    history
+                        .apply(
+                            &mut layout,
+                            DockCommand::ResizeColumn { column, width },
+                            &metrics,
+                        )
+                        .expect("history benchmark command must succeed"),
+                );
+            },
+        );
+        assert_eq!(history.undo_len(), limit);
+    }
 }
 
 #[test]
