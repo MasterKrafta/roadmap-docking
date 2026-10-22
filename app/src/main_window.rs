@@ -18,6 +18,7 @@ pub(crate) struct MainWindow {
     split_ratios: [f32; 2],
     visible_tabs: [bool; 5],
     collapsed_columns: [bool; 2],
+    collapsed_group_content: [bool; 3],
     windows_menu_open: bool,
     resizing_height_column: usize,
     is_resizing_columns: bool,
@@ -43,6 +44,7 @@ impl MainWindow {
             split_ratios: [default_split, default_split],
             visible_tabs: [true, true, true, true, true],
             collapsed_columns: [false, false],
+            collapsed_group_content: [false, false, false],
             windows_menu_open: false,
             resizing_height_column: 0,
             is_resizing_columns: false,
@@ -136,23 +138,59 @@ impl Render for MainWindow {
         let full_panel_height = (workspace_height - header_height).max(0.0);
         let horizontal_divider_height = metrics.splitter_hit_zone.min(full_panel_height);
 
-        let panel_heights = |ratio: f32, show_top: bool, show_bottom: bool| {
-            let divider = if show_top && show_bottom {
-                horizontal_divider_height
-            } else {
-                0.0
-            };
-            let available = (full_panel_height - divider).max(0.0);
-
+        let panel_heights = |
+            ratio: f32,
+            show_top: bool,
+            show_bottom: bool,
+            top_content_collapsed: bool,
+            bottom_content_collapsed: bool,
+        | {
             if show_top && show_bottom {
-                let min_height = metrics.min_group_height.min(available / 2.0);
-                let max_top_height = (available - min_height).max(min_height);
-                let top = (available * ratio).clamp(min_height, max_top_height);
-                (top, (available - top).max(0.0), divider)
+                if top_content_collapsed || bottom_content_collapsed {
+                    if top_content_collapsed && bottom_content_collapsed {
+                        // Both groups retain their tab strips, but neither owns content height.
+                        (metrics.tab_strip_height, metrics.tab_strip_height, 0.0)
+                    } else if top_content_collapsed {
+                        (
+                            metrics.tab_strip_height,
+                            (full_panel_height - metrics.tab_strip_height).max(0.0),
+                            0.0,
+                        )
+                    } else {
+                        (
+                            (full_panel_height - metrics.tab_strip_height).max(0.0),
+                            metrics.tab_strip_height,
+                            0.0,
+                        )
+                    }
+                } else {
+                    let divider = horizontal_divider_height;
+                    let available = (full_panel_height - divider).max(0.0);
+                    let min_height = metrics.min_group_height.min(available / 2.0);
+                    let max_top_height = (available - min_height).max(min_height);
+                    let top = (available * ratio).clamp(min_height, max_top_height);
+                    (top, (available - top).max(0.0), divider)
+                }
             } else if show_top {
-                (available, 0.0, 0.0)
+                (
+                    if top_content_collapsed {
+                        metrics.tab_strip_height
+                    } else {
+                        full_panel_height
+                    },
+                    0.0,
+                    0.0,
+                )
             } else if show_bottom {
-                (0.0, available, 0.0)
+                (
+                    0.0,
+                    if bottom_content_collapsed {
+                        metrics.tab_strip_height
+                    } else {
+                        full_panel_height
+                    },
+                    0.0,
+                )
             } else {
                 (0.0, 0.0, 0.0)
             }
@@ -162,9 +200,17 @@ impl Render for MainWindow {
             self.split_ratios[0],
             left_upper_group_visible,
             left_lower_group_visible,
+            self.collapsed_group_content[0],
+            self.collapsed_group_content[1],
         );
         let (right_top_height, right_bottom_height, right_horizontal_divider) =
-            panel_heights(self.split_ratios[1], right_group_visible, false);
+            panel_heights(
+                self.split_ratios[1],
+                right_group_visible,
+                false,
+                self.collapsed_group_content[2],
+                false,
+            );
 
         let mut root = div()
             .relative()
@@ -390,6 +436,8 @@ impl Render for MainWindow {
                 [self.visible_tabs[0], self.visible_tabs[1]],
                 [self.visible_tabs[2], self.visible_tabs[3]],
                 self.collapsed_columns[0],
+                self.collapsed_group_content[0],
+                self.collapsed_group_content[1],
                 self.theme,
                 self.active_tabs[0],
                 self.lower_active_tabs[0],
@@ -448,6 +496,8 @@ impl Render for MainWindow {
                 [self.visible_tabs[4], false],
                 [false, false],
                 self.collapsed_columns[1],
+                self.collapsed_group_content[2],
+                false,
                 self.theme,
                 self.active_tabs[1],
                 self.lower_active_tabs[1],
@@ -584,6 +634,8 @@ fn render_column(
     lower_active_tab: usize,
     split_ratio: f32,
     horizontal_splitter_height: f32,
+    upper_content_collapsed: bool,
+    lower_content_collapsed: bool,
     cx: &mut Context<MainWindow>,
 ) -> impl IntoElement {
     let colors = theme.colors;
@@ -609,6 +661,13 @@ fn render_column(
         this.collapsed_columns[column_index] = !this.collapsed_columns[column_index];
         cx.notify();
     });
+    let toggle_collapse_on_double_click =
+        cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
+            if event.click_count >= 2 {
+                this.collapsed_columns[column_index] = !this.collapsed_columns[column_index];
+                cx.notify();
+            }
+        });
     let close_column = cx.listener(move |this, _, _, cx| {
         if column_index == 0 {
             this.visible_tabs[0] = false;
@@ -634,7 +693,11 @@ fn render_column(
         .bg(rgb(colors.group_background))
         .border_b_1()
         .border_color(rgb(colors.border))
-        .child(div().flex_1())
+        .child(
+            div()
+                .flex_1()
+                .on_mouse_down(MouseButton::Left, toggle_collapse_on_double_click),
+        )
         .child(
             div()
                 .id(if column_index == 0 {
@@ -723,41 +786,48 @@ fn render_column(
     }
 
     if show_upper_panel {
-        column = column.child(
-            div()
-                .flex()
-                .flex_col()
-                .h(px(top_panel_height))
-                .flex_shrink_0()
-                .min_h(px(0.0))
-                .child(render_tab_strip(
-                    column_index,
-                    false,
-                    column_width,
-                    theme,
-                    active_tab,
-                    first_tab_id,
-                    second_tab_id,
-                    upper_tabs_visible[0],
-                    upper_tabs_visible[1],
-                    cx,
-                ))
-                .child(
-                    div()
-                        .flex_1()
-                        .min_h(px(0.0))
-                        .bg(rgb(colors.canvas_background))
-                        .child(render_panel_content(
-                            column_index,
-                            false,
-                            active_tab,
-                            theme,
-                        )),
-                ),
-        );
+        let mut upper_group = div()
+            .flex()
+            .flex_col()
+            .h(px(top_panel_height))
+            .flex_shrink_0()
+            .min_h(px(0.0))
+            .child(render_tab_strip(
+                column_index,
+                false,
+                column_width,
+                theme,
+                active_tab,
+                first_tab_id,
+                second_tab_id,
+                upper_tabs_visible[0],
+                upper_tabs_visible[1],
+                cx,
+            ));
+
+        if !upper_content_collapsed {
+            upper_group = upper_group.child(
+                div()
+                    .flex_1()
+                    .min_h(px(0.0))
+                    .bg(rgb(colors.canvas_background))
+                    .child(render_panel_content(
+                        column_index,
+                        false,
+                        active_tab,
+                        theme,
+                    )),
+            );
+        }
+
+        column = column.child(upper_group);
     }
 
-    if show_upper_panel && show_lower_panel {
+    if show_upper_panel
+        && show_lower_panel
+        && !upper_content_collapsed
+        && !lower_content_collapsed
+    {
         column = column.child(
             div()
                 .flex()
@@ -791,38 +861,41 @@ fn render_column(
     }
 
     if show_lower_panel {
-        column = column.child(
-            div()
-                .flex()
-                .flex_col()
-                .h(px(bottom_panel_height))
-                .flex_shrink_0()
-                .min_h(px(0.0))
-                .child(render_tab_strip(
-                    column_index,
-                    true,
-                    column_width,
-                    theme,
-                    lower_active_tab,
-                    lower_first_tab_id,
-                    lower_second_tab_id,
-                    lower_tabs_visible[0],
-                    lower_tabs_visible[1],
-                    cx,
-                ))
-                .child(
-                    div()
-                        .flex_1()
-                        .min_h(px(0.0))
-                        .bg(rgb(colors.canvas_background))
-                        .child(render_panel_content(
-                            column_index,
-                            true,
-                            lower_active_tab,
-                            theme,
-                        )),
-                ),
-        );
+        let mut lower_group = div()
+            .flex()
+            .flex_col()
+            .h(px(bottom_panel_height))
+            .flex_shrink_0()
+            .min_h(px(0.0))
+            .child(render_tab_strip(
+                column_index,
+                true,
+                column_width,
+                theme,
+                lower_active_tab,
+                lower_first_tab_id,
+                lower_second_tab_id,
+                lower_tabs_visible[0],
+                lower_tabs_visible[1],
+                cx,
+            ));
+
+        if !lower_content_collapsed {
+            lower_group = lower_group.child(
+                div()
+                    .flex_1()
+                    .min_h(px(0.0))
+                    .bg(rgb(colors.canvas_background))
+                    .child(render_panel_content(
+                        column_index,
+                        true,
+                        lower_active_tab,
+                        theme,
+                    )),
+            );
+        }
+
+        column = column.child(lower_group);
     }
 
     column
@@ -971,6 +1044,36 @@ fn render_tab_strip(
         cx.notify();
     });
 
+    let content_index = match (column_index, is_lower) {
+        (0, false) => 0,
+        (0, true) => 1,
+        _ => 2,
+    };
+    let toggle_content_first =
+        cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
+            if event.click_count >= 2 {
+                this.collapsed_group_content[content_index] =
+                    !this.collapsed_group_content[content_index];
+                cx.notify();
+            }
+        });
+    let toggle_content_second =
+        cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
+            if event.click_count >= 2 {
+                this.collapsed_group_content[content_index] =
+                    !this.collapsed_group_content[content_index];
+                cx.notify();
+            }
+        });
+    let toggle_content_empty =
+        cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
+            if event.click_count >= 2 {
+                this.collapsed_group_content[content_index] =
+                    !this.collapsed_group_content[content_index];
+                cx.notify();
+            }
+        });
+
     let control = div()
         .flex()
         .items_center()
@@ -1002,6 +1105,7 @@ fn render_tab_strip(
                 .bg(rgb(first_tab_background))
                 .text_color(rgb(first_tab_text))
                 .on_click(activate_first)
+                .on_mouse_down(MouseButton::Left, toggle_content_first)
                 .child(first_tab_label),
         );
     }
@@ -1018,9 +1122,17 @@ fn render_tab_strip(
                 .bg(rgb(second_tab_background))
                 .text_color(rgb(second_tab_text))
                 .on_click(activate_second)
+                .on_mouse_down(MouseButton::Left, toggle_content_second)
                 .child(second_tab_label),
         );
     }
 
-    strip.child(div().flex_1().h(px(metrics.tab_strip_height))).child(control)
+    strip
+        .child(
+            div()
+                .flex_1()
+                .h(px(metrics.tab_strip_height))
+                .on_mouse_down(MouseButton::Left, toggle_content_empty),
+        )
+        .child(control)
 }
