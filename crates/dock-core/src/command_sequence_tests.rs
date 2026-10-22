@@ -853,9 +853,26 @@ mod tests {
                     command,
                     rects
                 );
-                crate::layout_rects::assert_layout_rects_invariants(
-                    rects.as_ref().expect("geometry success was asserted"),
+                let mut rects = rects.expect("geometry success was asserted");
+
+                // Drop-zone rectangles are computed separately because their
+                // legality depends on the dragged source. Include a real source
+                // so the snapshot checker also validates every emitted drop zone.
+                let panels = panel_nodes(&layout);
+                prop_assert!(!panels.is_empty(), "generated layout lost every panel");
+                let drop_zones = layout.compute_drop_zones(
+                    crate::DropSource::Panel { panel: panels[0].1 },
+                    &rects,
+                    &metrics,
                 );
+                prop_assert!(
+                    drop_zones.is_ok(),
+                    "drop-zone geometry failed after successful command {:?}: {:?}",
+                    command,
+                    drop_zones
+                );
+                rects.drop_zones = drop_zones.expect("drop-zone success was asserted");
+                crate::layout_rects::assert_layout_rects_invariants(&rects);
             }
         }
     }
