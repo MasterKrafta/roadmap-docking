@@ -698,17 +698,13 @@ fn allocate_stack_heights(
         });
     }
 
-    let collapsed_height = metrics.effective_collapsed_group_height();
     let mut collapsed = Vec::with_capacity(children.len());
     let mut minimums = Vec::with_capacity(children.len());
     for child in children {
-        let is_collapsed = matches!(layout.node(*child), Some(Node::Tabs(tabs)) if tabs.collapsed);
-        collapsed.push(is_collapsed);
-        if is_collapsed {
-            minimums.push(collapsed_height);
-        } else {
-            minimums.push(minimum_node_size(layout, *child, metrics)?.height);
-        }
+        collapsed.push(matches!(layout.node(*child), Some(Node::Tabs(tabs)) if tabs.collapsed));
+        // Query the common contract for every child; collapsed nodes report
+        // their effective strip height from Layout::minimum_node_size too.
+        minimums.push(minimum_node_size(layout, *child, metrics)?.height);
     }
 
     let gap_total = metrics.splitter_thickness * children.len().saturating_sub(1) as f32;
@@ -751,9 +747,10 @@ fn allocate_stack_heights(
     let mut normal_index = 0;
     let sizes = collapsed
         .iter()
-        .map(|is_collapsed| {
+        .enumerate()
+        .map(|(index, is_collapsed)| {
             if *is_collapsed {
-                collapsed_height
+                minimums[index]
             } else {
                 let size = normal_sizes[normal_index];
                 normal_index += 1;
