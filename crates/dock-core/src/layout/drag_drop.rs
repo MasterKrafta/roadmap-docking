@@ -72,7 +72,7 @@ impl Layout {
                     .and_then(|floating| self.dock_area(floating.area))
                     .map(|area| area.root)
                     .ok_or(CommandError::MissingFloatingGroup { group })?;
-                if target_node(target).is_some_and(|node| self.is_descendant_or_same(root, node)) {
+                if target.referenced_node_id().is_some_and(|node| self.is_descendant_or_same(root, node)) {
                     return Ok(DragDropAction::NoOp);
                 }
                 let moving_panels = self.panel_ids_in_subtree(root);
@@ -357,24 +357,15 @@ impl Layout {
         if source_group == target_group {
             return true;
         }
-        if matches!(zone, DropZone::Top | DropZone::Bottom)
-            && let (Some(source_parent), Some(target_parent)) = (
-                self.find_parent(source_group),
-                self.find_parent(target_group),
-            )
-            && source_parent == target_parent
-            && let Some(siblings) = match self.node(source_parent) {
-                Some(Node::Column(column)) => Some(&column.groups),
-                Some(Node::Split(split)) if split.axis == Axis::Y => Some(&split.children),
-                _ => None,
-            }
-            && let (Some(source_index), Some(target_index)) = (
-                siblings.iter().position(|id| *id == source_group),
-                siblings.iter().position(|id| *id == target_group),
-            )
-            && ((zone == DropZone::Top && source_index + 1 == target_index)
-                || (zone == DropZone::Bottom && target_index + 1 == source_index))
-        {
+        let source_parent = self.find_parent(source_group);
+        let target_parent = self.find_parent(target_group);
+        if self.adjacent_group_edge_is_noop(
+            source_group,
+            target_group,
+            zone,
+            source_parent,
+            target_parent,
+        ) {
             return true;
         }
         if matches!(zone, DropZone::Left | DropZone::Right) {
@@ -408,12 +399,3 @@ impl Layout {
     }
 }
 
-fn target_node(target: DropTarget) -> Option<NodeId> {
-    match target {
-        DropTarget::Tabs { group, .. }
-        | DropTarget::GroupTabs { group, .. }
-        | DropTarget::GroupEdge { group, .. } => Some(group),
-        DropTarget::ColumnSlot { column, .. } | DropTarget::RailSlot { column, .. } => Some(column),
-        DropTarget::MainColumn { .. } | DropTarget::FreeArea => None,
-    }
-}
