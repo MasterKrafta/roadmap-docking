@@ -38,6 +38,11 @@ pub(crate) struct MainWindow {
     mouse_context_menu: Option<MouseContextMenu>,
     collapsed_columns: [bool; 2],
     collapsed_group_content: [bool; 3],
+    composition_floating: bool,
+    dragging_composition: bool,
+    composition_drag_start_cursor: [f32; 2],
+    composition_drag_start_position: [f32; 2],
+    floating_composition_position: [f32; 2],
     windows_menu_open: bool,
     resizing_height_column: usize,
     is_resizing_columns: bool,
@@ -66,6 +71,11 @@ impl MainWindow {
             mouse_context_menu: None,
             collapsed_columns: [false, false],
             collapsed_group_content: [false, false, false],
+            composition_floating: false,
+            dragging_composition: false,
+            composition_drag_start_cursor: [0.0, 0.0],
+            composition_drag_start_position: [0.0, 0.0],
+            floating_composition_position: [0.0, 0.0],
             windows_menu_open: false,
             resizing_height_column: 0,
             is_resizing_columns: false,
@@ -155,8 +165,28 @@ impl Render for MainWindow {
                 (false, false) => (0.0, 0.0),
             };
 
-        let header_height = metrics.column_header_height.min(workspace_height);
-        let full_panel_height = (workspace_height - header_height).max(0.0);
+        let composition_width = match (left_column_visible, right_column_visible) {
+            (true, true) => left_column_width + divider_width + right_column_width,
+            (true, false) => left_column_width,
+            (false, true) => right_column_width,
+            (false, false) => 0.0,
+        };
+        let docked_composition_position = [
+            (window_width - composition_width).max(0.0),
+            menu_bar_height,
+        ];
+        let floating_composition_height = (workspace_height * 0.72)
+            .min(620.0)
+            .max(metrics.column_header_height + metrics.min_group_height * 2.0)
+            .min(window_height);
+        let composition_height = if self.composition_floating {
+            floating_composition_height
+        } else {
+            workspace_height
+        };
+
+        let header_height = metrics.column_header_height.min(composition_height);
+        let full_panel_height = (composition_height - header_height).max(0.0);
         let horizontal_divider_height = metrics.splitter_hit_zone.min(full_panel_height);
 
         let panel_heights = |
@@ -255,6 +285,9 @@ impl Render for MainWindow {
                 let column_header_height = metrics.column_header_height;
                 let default_split = metrics.default_column_split_ratio;
                 let both_columns_visible = both_columns_visible;
+                let composition_width = composition_width;
+                let floating_composition_height = floating_composition_height;
+                let drag_threshold = 5.0_f32;
 
                 cx.listener(move |this, event: &MouseMoveEvent, window, cx| {
                     if this.is_resizing_outer_splitter {
@@ -327,6 +360,34 @@ impl Render for MainWindow {
                             default_split
                         };
                         cx.notify();
+                    } else if this.dragging_composition {
+                        let cursor_x = event.position.x.as_f32();
+                        let cursor_y = event.position.y.as_f32();
+                        let delta_x = cursor_x - this.composition_drag_start_cursor[0];
+                        let delta_y = cursor_y - this.composition_drag_start_cursor[1];
+
+                        if this.composition_floating
+                            || delta_x.abs() >= drag_threshold
+                            || delta_y.abs() >= drag_threshold
+                        {
+                            this.composition_floating = true;
+                            let actual_size = window.viewport_size();
+                            let max_x =
+                                (actual_size.width.as_f32() - composition_width).max(0.0);
+                            let max_y = (actual_size.height.as_f32()
+                                - floating_composition_height)
+                                .max(0.0);
+                            this.floating_composition_position = [
+                                (this.composition_drag_start_position[0] + delta_x)
+                                    .clamp(0.0, max_x),
+                                (this.composition_drag_start_position[1] + delta_y)
+                                    .clamp(0.0, max_y),
+                            ];
+                            this.open_tab_context_menu = None;
+                            this.mouse_context_menu = None;
+                            this.windows_menu_open = false;
+                            cx.notify();
+                        }
                     }
                 })
             })
@@ -429,10 +490,12 @@ impl Render for MainWindow {
                     if this.is_resizing_columns
                         || this.is_resizing_outer_splitter
                         || this.is_resizing_height
+                        || this.dragging_composition
                     {
                         this.is_resizing_columns = false;
                         this.is_resizing_outer_splitter = false;
                         this.is_resizing_height = false;
+                        this.dragging_composition = false;
                         cx.notify();
                     }
                 }),
@@ -478,16 +541,30 @@ impl Render for MainWindow {
         let mut dock_row = div()
             .flex()
             .flex_row()
-            .w(px(window_width))
-            .h(px(workspace_height))
+            .w(px(if self.composition_floating {
+                composition_width
+            } else {
+                window_width
+            }))
+            .h(px(composition_height))
             .flex_shrink_0()
-            .bg(rgb(colors.window_background))
-            .child(
+            .bg(rgb(colors.window_background));
+
+        if self.composition_floating {
+            dock_row = dock_row
+                .absolute()
+                .left(px(self.floating_composition_position[0]))
+                .top(px(self.floating_composition_position[1]))
+                .border_1()
+                .border_color(rgb(colors.border));
+        } else {
+            dock_row = dock_row.child(
                 div()
                     .flex_1()
                     .h(px(workspace_height))
                     .bg(rgb(colors.window_background)),
             );
+        }
 
         if any_column_visible {
             let outer_right_only = !left_column_visible && right_column_visible;
@@ -498,13 +575,13 @@ impl Render for MainWindow {
                 .items_center()
                 .justify_center()
                 .w(px(divider_width))
-                .h(px(workspace_height))
+                .h(px(composition_height))
                 .flex_shrink_0()
                 .bg(rgb(colors.window_background))
                 .child(
                     div()
                         .w(px(metrics.splitter_thickness))
-                        .h(px(workspace_height))
+                        .h(px(composition_height))
                         .bg(rgb(colors.splitter)),
                 );
 
@@ -536,7 +613,9 @@ impl Render for MainWindow {
                     );
             }
 
-            dock_row = dock_row.child(outer_splitter);
+            if !self.composition_floating {
+                dock_row = dock_row.child(outer_splitter);
+            }
         }
 
         if left_column_visible {
@@ -558,6 +637,7 @@ impl Render for MainWindow {
                 self.collapsed_group_content[0],
                 self.collapsed_group_content[1],
                 self.open_tab_context_menu,
+                docked_composition_position,
                 cx,
             ));
         }
@@ -568,13 +648,13 @@ impl Render for MainWindow {
                 .items_center()
                 .justify_center()
                 .w(px(divider_width))
-                .h(px(workspace_height))
+                .h(px(composition_height))
                 .flex_shrink_0()
                 .bg(rgb(colors.window_background))
                 .child(
                     div()
                         .w(px(metrics.splitter_thickness))
-                        .h(px(workspace_height))
+                        .h(px(composition_height))
                         .bg(rgb(colors.splitter)),
                 );
 
@@ -619,6 +699,7 @@ impl Render for MainWindow {
                 self.collapsed_group_content[2],
                 false,
                 self.open_tab_context_menu,
+                docked_composition_position,
                 cx,
             ));
         }
@@ -764,6 +845,7 @@ fn render_column(
     upper_content_collapsed: bool,
     lower_content_collapsed: bool,
     open_tab_context_menu: Option<usize>,
+    docked_composition_position: [f32; 2],
     cx: &mut Context<MainWindow>,
 ) -> impl IntoElement {
     let colors = theme.colors;
@@ -789,12 +871,30 @@ fn render_column(
         this.collapsed_columns[column_index] = !this.collapsed_columns[column_index];
         cx.notify();
     });
-    let toggle_collapse_on_double_click =
+    let drag_composition_or_toggle_collapse =
         cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
             if event.click_count >= 2 {
                 this.collapsed_columns[column_index] = !this.collapsed_columns[column_index];
-                cx.notify();
+                this.dragging_composition = false;
+            } else {
+                this.dragging_composition = true;
+                this.composition_drag_start_cursor = [
+                    event.position.x.as_f32(),
+                    event.position.y.as_f32(),
+                ];
+                this.composition_drag_start_position = if this.composition_floating {
+                    this.floating_composition_position
+                } else {
+                    docked_composition_position
+                };
+                this.is_resizing_columns = false;
+                this.is_resizing_outer_splitter = false;
+                this.is_resizing_height = false;
+                this.open_tab_context_menu = None;
+                this.mouse_context_menu = None;
+                this.windows_menu_open = false;
             }
+            cx.notify();
         });
     let open_header_context_menu =
         cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
@@ -839,7 +939,7 @@ fn render_column(
             div()
                 .flex_1()
                 .h(px(metrics.column_header_height))
-                .on_mouse_down(MouseButton::Left, toggle_collapse_on_double_click),
+                .on_mouse_down(MouseButton::Left, drag_composition_or_toggle_collapse),
         )
         .child(
             div()
