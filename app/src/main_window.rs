@@ -1,4 +1,4 @@
-use gpui::{Context, IntoElement, Render, Styled, Window, div, px, rgb};
+use gpui::{Context, IntoElement, ParentElement, Render, Styled, Window, div, px, rgb};
 use ui::Theme;
 
 /// Minimal application window containing one empty docking column.
