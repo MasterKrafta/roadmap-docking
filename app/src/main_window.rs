@@ -635,8 +635,12 @@ impl Render for MainWindow {
                             4 => true,
                             _ => false,
                         };
+                        let horizontal_drag_dominates = delta_x.abs() >= drag_threshold
+                            && delta_x.abs() >= delta_y.abs();
+                        let vertical_drag_dominates =
+                            delta_y.abs() >= drag_threshold && delta_y.abs() > delta_x.abs();
                         let drag_threshold_reached = cursor_outside_group
-                            || delta_y.abs() >= drag_threshold
+                            || (vertical_drag_dominates && !group_has_multiple_tabs.not())
                             || (group_has_single_tab && delta_x.abs() >= drag_threshold);
                         if this.floating_tabs[tab_index] || drag_threshold_reached {
                             if !this.floating_tabs[tab_index] {
