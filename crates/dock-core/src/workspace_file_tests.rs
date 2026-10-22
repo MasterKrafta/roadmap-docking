@@ -551,3 +551,40 @@ fn workspace_load_expands_narrow_expanded_column_and_preserves_restore_width() {
     }
 }
 
+#[test]
+fn workspace_load_reports_conflicting_expanded_content_minimum_and_maximum() {
+    let metrics = DockMetrics::default();
+    let wide_constraints = PanelConstraints::new(
+        Size::new(400.0, 80.0),
+        Size::new(420.0, 220.0),
+        Some(Size::new(450.0, 300.0)),
+        false,
+    );
+    let narrow_constraints = PanelConstraints::new(
+        Size::new(120.0, 80.0),
+        Size::new(200.0, 220.0),
+        Some(Size::new(350.0, 300.0)),
+        false,
+    );
+
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+    let (_, wide_panel) = builder.panel(key("wide-panel"), wide_constraints);
+    let (_, narrow_panel) = builder.panel(key("narrow-panel"), narrow_constraints);
+    let group = builder.tabs(vec![wide_panel, narrow_panel], 0, false);
+    let column = builder.column(400.0, ColumnMode::Expanded, vec![group], vec![1.0]);
+    builder.main_area(DockSide::Right, column);
+    let file = WorkspaceFile::from_layout(&builder.build()).unwrap();
+    let descriptors = vec![
+        (key("wide-panel"), wide_constraints),
+        (key("narrow-panel"), narrow_constraints),
+    ];
+
+    assert!(matches!(
+        file.into_layout(&descriptors, &metrics),
+        Err(WorkspaceFileError::InvalidLayout(errors))
+            if errors.iter().any(|error| error.to_string().contains(
+                "minimum width required by expanded contents exceeds panel maximum width"
+            ))
+    ));
+}
+
