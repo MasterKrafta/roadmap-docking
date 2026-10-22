@@ -18,6 +18,7 @@ pub(crate) struct MainWindow {
     split_ratios: [f32; 2],
     resizing_height_column: usize,
     is_resizing_columns: bool,
+    is_resizing_outer_splitter: bool,
     is_resizing_height: bool,
 }
 
@@ -38,6 +39,7 @@ impl MainWindow {
             split_ratios: [default_split, default_split],
             resizing_height_column: 0,
             is_resizing_columns: false,
+            is_resizing_outer_splitter: false,
             is_resizing_height: false,
         })
     }
@@ -53,7 +55,8 @@ impl Render for MainWindow {
 
         let min_column_width = metrics.min_column_width;
         let divider_width = metrics.splitter_hit_zone;
-        let max_pair_width = (window_width - divider_width)
+        // The dock group has two vertical handles: its outer edge and the inter-column splitter.
+        let max_pair_width = (window_width - divider_width * 2.0)
             .max(min_column_width * 2.0);
         let pair_width = (self.column_widths[0] + self.column_widths[1])
             .min(max_pair_width)
@@ -80,11 +83,12 @@ impl Render for MainWindow {
         let (left_top_height, left_bottom_height) = panel_heights(self.split_ratios[0]);
         let (right_top_height, right_bottom_height) = panel_heights(self.split_ratios[1]);
 
-        let vertical_splitter_color = if self.is_resizing_columns {
-            colors.focus
-        } else {
-            colors.splitter
-        };
+        let vertical_splitter_color =
+            if self.is_resizing_columns || self.is_resizing_outer_splitter {
+                colors.focus
+            } else {
+                colors.splitter
+            };
         let root = div()
             .flex()
             .flex_row()
@@ -92,7 +96,7 @@ impl Render for MainWindow {
             .h(px(window_height))
             .bg(rgb(colors.window_background));
 
-        let root = if self.is_resizing_columns {
+        let root = if self.is_resizing_columns || self.is_resizing_outer_splitter {
             root.cursor(CursorStyle::ResizeLeftRight)
         } else if self.is_resizing_height {
             root.cursor(CursorStyle::ResizeUpDown)
@@ -109,11 +113,33 @@ impl Render for MainWindow {
                 let default_split = metrics.default_column_split_ratio;
 
                 cx.listener(move |this, event: &MouseMoveEvent, window, cx| {
-                    if this.is_resizing_columns {
+                    if this.is_resizing_outer_splitter {
                         let actual_window_width =
                             window.viewport_size().width.as_f32().max(1.0);
                         let max_total_width =
-                            (actual_window_width - hit_zone).max(min_width * 2.0);
+                            (actual_window_width - hit_zone * 2.0).max(min_width * 2.0);
+                        let start_total_width = this.resize_start_column_widths[0]
+                            + this.resize_start_column_widths[1];
+                        let delta = event.position.x.as_f32() - this.resize_start_x;
+                        // The outer handle moves opposite to the dock group's width:
+                        // dragging left grows the group; dragging right shrinks it.
+                        let total_width = (start_total_width - delta)
+                            .clamp(min_width * 2.0, max_total_width);
+                        let start_left_ratio = if start_total_width > 0.0 {
+                            this.resize_start_column_widths[0] / start_total_width
+                        } else {
+                            0.5
+                        };
+                        let left_width = (total_width * start_left_ratio)
+                            .clamp(min_width, total_width - min_width);
+
+                        this.column_widths = [left_width, total_width - left_width];
+                        cx.notify();
+                    } else if this.is_resizing_columns {
+                        let actual_window_width =
+                            window.viewport_size().width.as_f32().max(1.0);
+                        let max_total_width =
+                            (actual_window_width - hit_zone * 2.0).max(min_width * 2.0);
                         let start_total_width = this.resize_start_column_widths[0]
                             + this.resize_start_column_widths[1];
                         let total_width = start_total_width
@@ -155,8 +181,12 @@ impl Render for MainWindow {
             .on_mouse_up(
                 MouseButton::Left,
                 cx.listener(|this, _event, _window, cx| {
-                    if this.is_resizing_columns || this.is_resizing_height {
+                    if this.is_resizing_columns
+                        || this.is_resizing_outer_splitter
+                        || this.is_resizing_height
+                    {
                         this.is_resizing_columns = false;
+                        this.is_resizing_outer_splitter = false;
                         this.is_resizing_height = false;
                         cx.notify();
                     }
@@ -168,6 +198,36 @@ impl Render for MainWindow {
                     .flex_1()
                     .h(px(window_height))
                     .bg(rgb(colors.window_background)),
+            )
+            // Outer splitter: resize the combined dock group against the workspace.
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .w(px(divider_width))
+                    .h(px(window_height))
+                    .flex_shrink_0()
+                    .bg(rgb(colors.window_background))
+                    .cursor(CursorStyle::ResizeLeftRight)
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
+                            this.is_resizing_columns = false;
+                            this.is_resizing_outer_splitter = true;
+                            this.is_resizing_height = false;
+                            this.resize_start_x = event.position.x.as_f32();
+                            this.resize_start_column_widths =
+                                [left_column_width, right_column_width];
+                            cx.notify();
+                        }),
+                    )
+                    .child(
+                        div()
+                            .w(px(metrics.splitter_thickness))
+                            .h(px(window_height))
+                            .bg(rgb(vertical_splitter_color)),
+                    ),
             )
             .child(render_column(
                 0,
@@ -198,6 +258,7 @@ impl Render for MainWindow {
                         cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
                             this.column_widths = [left_column_width, right_column_width];
                             this.is_resizing_columns = true;
+                            this.is_resizing_outer_splitter = false;
                             this.is_resizing_height = false;
                             this.resize_start_x = event.position.x.as_f32();
                             this.resize_start_column_widths =
@@ -343,6 +404,7 @@ fn render_column(
                     MouseButton::Left,
                     cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
                         this.is_resizing_columns = false;
+                        this.is_resizing_outer_splitter = false;
                         this.is_resizing_height = true;
                         this.resizing_height_column = column_index;
                         this.resize_start_y = event.position.y.as_f32();
