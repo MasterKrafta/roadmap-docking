@@ -1,8 +1,8 @@
 use crate::layout_builder::LayoutBuilder;
 use crate::{
-    Axis, CanvasState, ChromeMode, ColumnMode, DockMetrics, DockSide, GeometryError, Layout, PanelConstraints,
-    PanelKey, PanelState, Point, Profile, Rect, Size, WORKSPACE_VERSION, WorkspaceDiagnostic,
-    WorkspaceFile, WorkspaceFileError, WorkspaceLoadOptions, WorkspaceNode,
+    Axis, CanvasState, ChromeMode, ColumnMode, DockMetrics, DockSide, GeometryError, Layout,
+    PanelConstraints, PanelKey, PanelState, Point, Profile, Rect, Size, WORKSPACE_VERSION,
+    WorkspaceDiagnostic, WorkspaceFile, WorkspaceFileError, WorkspaceLoadOptions, WorkspaceNode,
 };
 
 fn key(value: &str) -> PanelKey {
@@ -492,15 +492,16 @@ fn invalid_visible_region_returns_an_error() {
         Rect::new(Point::new(f32::MAX, 0.0), Size::new(1.0, 100.0)),
     ] {
         let fresh_file = WorkspaceFile::from_layout(&layout).unwrap();
-        assert_eq!(
+        assert!(matches!(
             fresh_file.into_layout_with_options(
                 &descriptors,
                 &metrics,
                 WorkspaceLoadOptions::new(Some(region)),
-            )
-            .unwrap_err(),
-            WorkspaceFileError::InvalidVisibleClientRegion(GeometryError::NonPositiveDimension),
-        );
+            ),
+            Err(WorkspaceFileError::InvalidVisibleClientRegion(
+                GeometryError::NonPositiveDimension
+            ))
+        ));
     }
 }
 
