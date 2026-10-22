@@ -836,8 +836,8 @@ fn render_panel_menu_item(
         .text_color(rgb(colors.primary_text))
         .on_click(cx.listener(move |this, _, _, cx| {
             this.visible_tabs[index] = !this.visible_tabs[index];
-            this.reset_floating_if_empty();
 
+            // Visibility toggles are temporary: preserve floating position even when all panels are hidden.
             // Keep a visible tab selected whenever exactly one tab remains in a group.
             match index {
                 0 | 1 => {
