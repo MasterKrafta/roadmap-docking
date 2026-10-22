@@ -960,13 +960,17 @@ impl Layout {
                 let heights =
                     self.group_heights_for_available_height(*column, *available_height, metrics)?;
                 let minimums = self.group_minimum_heights(*column, metrics)?;
-                if current.groups.iter().enumerate().any(|(index, group)| {
-                    !self.group_is_collapsed(*group)
-                        && heights[index] + PIXEL_TOLERANCE < minimums[index]
-                }) {
+                let collapsed_height = metrics.effective_collapsed_group_height();
+                let collapsed_count = current
+                    .groups
+                    .iter()
+                    .filter(|group| self.group_is_collapsed(**group))
+                    .count() as f32;
+                let required_height = minimums.iter().sum::<f32>() + collapsed_count * collapsed_height;
+                if !required_height.is_finite() || *available_height < required_height {
                     return Err(CommandError::InvalidValue {
                         field: "available_height",
-                        reason: "current group ratios place an expanded group below its minimum; reset ratios before resizing",
+                        reason: "available height is below the sum of group minimum heights",
                     });
                 }
                 if self.group_is_collapsed(left_group) || self.group_is_collapsed(right_group) {
@@ -993,6 +997,15 @@ impl Layout {
                         actual_value: Some(CommandValue::GroupBoundaryDelta(0.0)),
                         inverse: None,
                         persistent: true,
+                    });
+                }
+                if current.groups.iter().enumerate().any(|(index, group)| {
+                    !self.group_is_collapsed(*group)
+                        && heights[index] + PIXEL_TOLERANCE < minimums[index]
+                }) {
+                    return Err(CommandError::InvalidValue {
+                        field: "available_height",
+                        reason: "current group ratios place an expanded group below its minimum; reset ratios before resizing",
                     });
                 }
 
