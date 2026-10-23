@@ -40,7 +40,7 @@ impl MainWindow {
         self.open_tab_context_menu(column_index, group, active_panel, pointer_x, pointer_y);
     }
 
-    fn open_tab_context_menu(
+    pub(super) fn open_tab_context_menu(
         &mut self,
         column_index: usize,
         group: NodeId,
