@@ -598,9 +598,11 @@ impl DockController {
                             .child("×")
                             .on_click({
                                 let entity = entity.clone();
-                                let focus_handle = focus_handle.clone();
+                                let focus_handle = self.focus_handle.clone();
                                 Box::new(move |_: &ClickEvent, gpui_window: &mut Window, app: &mut App| {
-                                    focus_handle.focus(gpui_window, app);
+                                    if let Some(focus_handle) = &focus_handle {
+                                        focus_handle.focus(gpui_window, app);
+                                    }
                                     entity.update(app, |window, cx| {
                                         window.dock.menu_request = None;
                                         cx.notify();
