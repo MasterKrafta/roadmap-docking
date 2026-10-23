@@ -1,5 +1,4 @@
 mod column;
-mod tabs_panel;
 
 use column::Column;
 use gpui::{Context, IntoElement, ParentElement, Render, Styled, Window, div, px, rgb};
