@@ -304,6 +304,17 @@ impl MainWindow {
     /// Core node IDs are authoritative for active membership, while stale slot IDs
     /// and snapshots are retained so closed columns can still be restored.
     fn sync_column_slots_from_core(&mut self) {
+        if self
+            .floating_composition
+            .is_some_and(|group_id| self.layout.floating_group(group_id).is_none())
+        {
+            self.floating_composition = None;
+            self.composition_drag_pending = false;
+            self.composition_dragging = false;
+            self.composition_drag_source = None;
+            self.composition_drag_group = None;
+        }
+
         let mut active_column_ids = Vec::new();
         if let Some(root) = self.layout.main_area(DockSide::Right).map(|area| area.root) {
             active_column_ids.extend(self.core_column_ids_in_order(root));
