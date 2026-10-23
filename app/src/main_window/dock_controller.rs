@@ -11,9 +11,9 @@ use dock_gpui::{
     ResizeStartHandler, dock_metrics_from_theme, normalize_docked_group_geometry, render,
 };
 use gpui::{
-    AnyElement, Context, Div, InteractiveElement, IntoElement, KeyDownEvent, MouseButton,
+    AnyElement, App, ClickEvent, Context, Div, InteractiveElement, IntoElement, KeyDownEvent, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point as GpuiPoint,
-    FocusHandle, ScrollHandle, StatefulInteractiveElement, Styled, div, px, rgb,
+    FocusHandle, ScrollHandle, StatefulInteractiveElement, Styled, Window, div, px, rgb,
 };
 use ui::Theme;
 
@@ -541,7 +541,7 @@ impl DockController {
                             .child("×")
                             .on_click({
                                 let entity = entity.clone();
-                                Box::new(move |_, _, app| {
+                                Box::new(move |_: &ClickEvent, _: &mut Window, app: &mut App| {
                                     entity.update(app, |window, cx| {
                                         window.dock.menu_request = None;
                                         cx.notify();
