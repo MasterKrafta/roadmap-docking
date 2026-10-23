@@ -1,6 +1,6 @@
 mod tabs_panel;
 
-use gpui::{Context, IntoElement, Render, Styled, Window, div, px, rgb};
+use gpui::{Context, IntoElement, ParentElement, Render, Styled, Window, div, px, rgb};
 use tabs_panel::TabsPanel;
 use ui::Theme;
 
