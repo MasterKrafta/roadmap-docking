@@ -1216,9 +1216,6 @@ impl MainWindow {
     }
 
     fn main_column_indices_in_core_order(&self) -> Vec<usize> {
-        if self.floating_composition.is_some() {
-            return Vec::new();
-        }
         self.layout
             .main_area(DockSide::Right)
             .map(|area| self.column_indices_in_core_order(area.root))
