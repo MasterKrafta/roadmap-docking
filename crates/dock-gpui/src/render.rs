@@ -6,7 +6,7 @@ use dock_core::{
     PanelInstance, Point, Rect, ResizeEdge, Size, Tabs,
 };
 use gpui::{
-    AnyElement, App, AppContext, ClickEvent, Div, InteractiveElement, IntoElement, MouseButton,
+    AnyElement, App, ClickEvent, Div, InteractiveElement, IntoElement, MouseButton,
     MouseDownEvent, ParentElement, ScrollHandle, StatefulInteractiveElement, Styled, Window, div,
     px, rgb,
 };
