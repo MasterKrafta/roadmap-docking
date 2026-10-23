@@ -726,7 +726,9 @@ fn floating_branch_starts_collapsed(layout: &Layout, id: NodeId) -> bool {
         Some(Node::Column(column)) => column
             .groups
             .first()
-            .is_some_and(|group| matches!(layout.node(*group), Some(Node::Tabs(tabs)) if tabs.collapsed)),
+            .is_some_and(|group| {
+                matches!(layout.node(*group), Some(Node::Tabs(tabs)) if tabs.collapsed)
+            }),
         Some(Node::Split(split)) if split.axis == Axis::Y => split
             .children
             .first()
