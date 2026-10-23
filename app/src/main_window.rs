@@ -262,11 +262,21 @@ impl MainWindow {
         })
     }
 
+    /// Apply a Core layout mutation and then reconcile floating composition geometry.
+    ///
+    /// Keeping this in one path means column mode changes, group removal, and resize
+    /// commands all refresh the outer floating bounds from the actual child columns.
+    fn apply_dock_command(&mut self, command: DockCommand) -> Result<(), String> {
+        self.layout
+            .apply(command, &self.dock_metrics)
+            .map_err(|error| error.to_string())?;
+        self.sync_floating_composition_bounds();
+        Ok(())
+    }
+
     fn activate_tab(&mut self, group: NodeId, panel: PanelId) {
-        if let Err(error) = self.layout.apply(
-            DockCommand::ActivateTab { group, panel },
-            &self.dock_metrics,
-        ) {
+        if let Err(error) = self.apply_dock_command(
+            DockCommand::ActivateTab { group, panel }) {
             eprintln!("Could not activate dock tab: {error}");
         }
     }
@@ -680,10 +690,8 @@ impl MainWindow {
             if self.layout.node(group).is_none() {
                 continue;
             }
-            if let Err(error) = self.layout.apply(
-                DockCommand::CloseGroup { group },
-                &self.dock_metrics,
-            ) {
+            if let Err(error) = self.apply_dock_command(
+                DockCommand::CloseGroup { group }) {
                 eprintln!("Could not close dock group: {error}");
                 return;
             }
@@ -701,7 +709,6 @@ impl MainWindow {
         self.is_resizing_column = false;
         self.resizing_outer_column = None;
         self.resizing_groups_column = None;
-        self.sync_floating_composition_bounds();
     }
 
     fn column_width(&self, column_index: usize) -> f32 {
@@ -723,10 +730,8 @@ impl MainWindow {
             return;
         };
         let collapsed = !tabs.collapsed;
-        if let Err(error) = self.layout.apply(
-            DockCommand::CollapseGroup { group, collapsed },
-            &self.dock_metrics,
-        ) {
+        if let Err(error) = self.apply_dock_command(
+            DockCommand::CollapseGroup { group, collapsed }) {
             eprintln!("Could not change dock group collapse state: {error}");
         }
     }
@@ -743,13 +748,11 @@ impl MainWindow {
         } else {
             ColumnMode::IconsOnly
         };
-        if let Err(error) = self.layout.apply(
+        if let Err(error) = self.apply_dock_command(
             DockCommand::SetColumnMode {
                 column: self.column_ids[column_index],
                 mode,
-            },
-            &self.dock_metrics,
-        ) {
+            }) {
             eprintln!("Could not change dock column mode: {error}");
         }
     }
@@ -763,13 +766,11 @@ impl MainWindow {
         {
             return;
         }
-        if let Err(error) = self.layout.apply(
+        if let Err(error) = self.apply_dock_command(
             DockCommand::SetColumnMode {
                 column: self.column_ids[column_index],
                 mode: ColumnMode::IconsOnly,
-            },
-            &self.dock_metrics,
-        ) {
+            }) {
             eprintln!("Could not collapse dock column to icons: {error}");
         }
     }
@@ -788,13 +789,11 @@ impl MainWindow {
         if menu.column_index >= self.column_ids.len() {
             return;
         }
-        if let Err(error) = self.layout.apply(
+        if let Err(error) = self.apply_dock_command(
             DockCommand::SetColumnMode {
                 column: self.column_ids[menu.column_index],
                 mode: ColumnMode::Expanded,
-            },
-            &self.dock_metrics,
-        ) {
+            }) {
             eprintln!("Could not expand dock tabs: {error}");
         }
     }
@@ -804,13 +803,11 @@ impl MainWindow {
             return;
         };
         let collapsed = !self.group_is_collapsed(menu.group);
-        if let Err(error) = self.layout.apply(
+        if let Err(error) = self.apply_dock_command(
             DockCommand::CollapseGroup {
                 group: menu.group,
                 collapsed,
-            },
-            &self.dock_metrics,
-        ) {
+            }) {
             eprintln!("Could not change dock group collapse state: {error}");
         }
     }
@@ -904,7 +901,7 @@ impl MainWindow {
             DockCommand::ResizeFloatingBounds { group: group_id, bounds },
             &self.dock_metrics,
         ) {
-            eprintln!("Could not resize floating dock composition after closing a column: {error}");
+            eprintln!("Could not synchronize floating dock composition bounds: {error}");
         }
     }
 
@@ -993,10 +990,8 @@ impl MainWindow {
             window_height,
         );
         let bounds = Rect::new(origin, size);
-        if let Err(error) = self.layout.apply(
-            DockCommand::Float { node, bounds },
-            &self.dock_metrics,
-        ) {
+        if let Err(error) = self.apply_dock_command(
+            DockCommand::Float { node, bounds }) {
             eprintln!("Could not float dock composition: {error}");
             return None;
         }
@@ -1038,13 +1033,11 @@ impl MainWindow {
             window_width,
             window_height,
         );
-        if let Err(error) = self.layout.apply(
+        if let Err(error) = self.apply_dock_command(
             DockCommand::MoveFloating {
                 group: group_id,
                 origin,
-            },
-            &self.dock_metrics,
-        ) {
+            }) {
             eprintln!("Could not move floating dock composition: {error}");
         }
     }
@@ -2460,13 +2453,11 @@ impl Render for MainWindow {
                         requested_width
                     };
                     if width_delta != 0.0 {
-                        if let Err(error) = this.layout.apply(
+                        if let Err(error) = this.apply_dock_command(
                             DockCommand::ResizeColumn {
                                 column: column_id,
                                 width: requested_width,
-                            },
-                            &this.dock_metrics,
-                        ) {
+                            }) {
                             eprintln!("Could not resize outer dock column: {error}");
                             this.resizing_outer_column = None;
                         }
@@ -2494,14 +2485,12 @@ impl Render for MainWindow {
                         pointer_x - this.resize_column_pointer_offset_x;
                     let delta_x = target_splitter_center_x - current_splitter_center_x;
                     if this.column_open.iter().all(|is_open| *is_open) && delta_x != 0.0 {
-                        if let Err(error) = this.layout.apply(
+                        if let Err(error) = this.apply_dock_command(
                             DockCommand::ResizeColumnBoundary {
                                 side: DockSide::Right,
                                 boundary_index: 0,
                                 delta: delta_x,
-                            },
-                            &this.dock_metrics,
-                        ) {
+                            }) {
                             eprintln!("Could not resize adjacent dock columns: {error}");
                             this.is_resizing_column = false;
                         }
@@ -2544,15 +2533,13 @@ impl Render for MainWindow {
                         pointer_y - this.resize_group_pointer_offset_y;
                     let delta_y = target_splitter_center_y - current_splitter_center_y;
                     if delta_y != 0.0 {
-                        if let Err(error) = this.layout.apply(
+                        if let Err(error) = this.apply_dock_command(
                             DockCommand::ResizeGroups {
                                 column: column_id,
                                 boundary_index: 0,
                                 delta: delta_y,
                                 available_height,
-                            },
-                            &this.dock_metrics,
-                        ) {
+                            }) {
                             eprintln!("Could not resize dock groups: {error}");
                             this.resizing_groups_column = None;
                         }
