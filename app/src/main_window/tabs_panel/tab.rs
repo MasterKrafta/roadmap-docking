@@ -1,6 +1,6 @@
 use gpui::{
-    App, ClickEvent, Div, InteractiveElement, ParentElement, StatefulInteractiveElement, Styled,
-    Window, div, px, rgb,
+    App, ClickEvent, InteractiveElement, IntoElement, ParentElement, StatefulInteractiveElement,
+    Styled, Window, div, px, rgb,
 };
 use ui::Theme;
 
@@ -29,7 +29,7 @@ impl Tab {
         height: f32,
         active: bool,
         on_click: F,
-    ) -> Div
+    ) -> impl IntoElement + use<F>
     where
         F: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     {
