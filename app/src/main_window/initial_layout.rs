@@ -273,8 +273,15 @@ mod tests {
     #[test]
     fn initial_group_ratios_support_any_positive_group_count() {
         assert_eq!(initial_group_ratios(1, 0.6).unwrap(), vec![1.0]);
-        assert_eq!(initial_group_ratios(2, 0.6).unwrap(), vec![0.6, 0.39999998]);
-        assert_eq!(initial_group_ratios(3, 0.6).unwrap(), vec![0.6, 0.19999999, 0.19999999]);
+
+        for group_count in 2..=8 {
+            let ratios = initial_group_ratios(group_count, 0.6).unwrap();
+            assert_eq!(ratios.len(), group_count);
+            assert!((ratios[0] - 0.6).abs() < 0.000_001);
+            assert!(ratios.iter().skip(1).all(|ratio| (*ratio - ratios[1]).abs() < 0.000_001));
+            assert!((ratios.iter().sum::<f32>() - 1.0).abs() < 0.000_1);
+        }
+
         assert!(initial_group_ratios(0, 0.6).is_err());
         assert!(initial_group_ratios(2, f32::NAN).is_err());
     }
