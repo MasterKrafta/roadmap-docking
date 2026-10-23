@@ -1,20 +1,17 @@
-mod group_column;
+mod dock_controller;
 
-use group_column::GroupColumn;
-use gpui::{Context, IntoElement, ParentElement, Render, Styled, Window, div, px, rgb};
-use ui::Theme;
+use dock_controller::DockController;
+use gpui::{Context, IntoElement, Render, Window};
 
-/// Root window for the rebuilt docking layout.
+/// Root application window. The actual docking model and GPUI integration live in DockController.
 pub(crate) struct MainWindow {
-    theme: Theme,
-    group_column: GroupColumn,
+    dock: DockController,
 }
 
 impl MainWindow {
-    pub(crate) fn new(theme: Theme) -> Result<Self, String> {
+    pub(crate) fn new(theme: ui::Theme) -> Result<Self, String> {
         Ok(Self {
-            theme,
-            group_column: GroupColumn::new(theme),
+            dock: DockController::new(theme)?,
         })
     }
 }
@@ -22,14 +19,7 @@ impl MainWindow {
 impl Render for MainWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let viewport = window.viewport_size();
-
-        let width = viewport.width.as_f32().max(1.0);
-        let height = viewport.height.as_f32().max(1.0);
-
-        div()
-            .w(px(width))
-            .h(px(height))
-            .bg(rgb(self.theme.colors.canvas_background))
-            .child(self.group_column.render(cx, width, height))
+        self.dock
+            .render(cx, viewport.width.as_f32(), viewport.height.as_f32())
     }
 }
