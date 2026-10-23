@@ -288,6 +288,7 @@ impl MainWindow {
         pointer_x: f32,
         pointer_y: f32,
     ) {
+        self.windows_menu_open = false;
         self.tab_context_menu = Some(DockTabContextMenu {
             column_index,
             group,
@@ -305,6 +306,7 @@ impl MainWindow {
         pointer_x: f32,
         pointer_y: f32,
     ) {
+        self.windows_menu_open = false;
         self.tab_context_menu = Some(DockTabContextMenu {
             column_index,
             group,
@@ -355,6 +357,50 @@ impl MainWindow {
                 self.toggle_panel_visibility(menu_index);
             }
         }
+    }
+
+    fn dismiss_menus_if_outside(
+        &mut self,
+        pointer_x: f32,
+        pointer_y: f32,
+        window_width: f32,
+        window_height: f32,
+    ) -> bool {
+        let menu_height = self
+            .theme
+            .metrics
+            .column_header_height
+            .min(window_height.max(1.0));
+        let inside_context_menu = self.tab_context_menu.is_some_and(|menu| {
+            let menu_height = if menu.header_only { 42.0 } else { 132.0 };
+            pointer_x >= menu.left
+                && pointer_x <= menu.left + 192.0
+                && pointer_y >= menu.top
+                && pointer_y <= menu.top + menu_height
+        });
+        let inside_windows_menu = self.windows_menu_open
+            && pointer_x >= 0.0
+            && pointer_x <= 224.0
+            && pointer_y >= menu_height
+            && pointer_y <= menu_height + 136.0;
+        // The Windows button itself is a trigger, not an outside click. It can
+        // open or close that dropdown while still dismissing the other menu.
+        let on_windows_button = pointer_x >= 0.0
+            && pointer_x <= 112.0
+            && pointer_y >= 0.0
+            && pointer_y <= menu_height;
+        if inside_context_menu || inside_windows_menu || on_windows_button {
+            if on_windows_button && self.tab_context_menu.is_some() {
+                self.tab_context_menu = None;
+                return true;
+            }
+            return false;
+        }
+
+        let had_open_menu = self.tab_context_menu.is_some() || self.windows_menu_open;
+        self.tab_context_menu = None;
+        self.windows_menu_open = false;
+        had_open_menu
     }
 
     fn visibility_index_for_slot(column_index: usize, panel_slot: usize) -> Option<usize> {
@@ -1695,6 +1741,7 @@ impl Render for MainWindow {
             .bg(rgb(if self.windows_menu_open { colors.hover } else { colors.toolbar_background }))
             .text_color(rgb(colors.primary_text))
             .on_click(cx.listener(|this, _, _, cx| {
+                this.tab_context_menu = None;
                 this.windows_menu_open = !this.windows_menu_open;
                 cx.notify();
             }))
@@ -1870,7 +1917,37 @@ impl Render for MainWindow {
             root = root.child(dropdown);
         }
 
-        root.on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
+        root.on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|this, event: &MouseDownEvent, window, cx| {
+                let size = window.viewport_size();
+                let changed = this.dismiss_menus_if_outside(
+                    event.position.x.as_f32(),
+                    event.position.y.as_f32(),
+                    size.width.as_f32(),
+                    size.height.as_f32(),
+                );
+                if changed {
+                    cx.notify();
+                }
+            }),
+        )
+        .on_mouse_down(
+            MouseButton::Right,
+            cx.listener(|this, event: &MouseDownEvent, window, cx| {
+                let size = window.viewport_size();
+                let changed = this.dismiss_menus_if_outside(
+                    event.position.x.as_f32(),
+                    event.position.y.as_f32(),
+                    size.width.as_f32(),
+                    size.height.as_f32(),
+                );
+                if changed {
+                    cx.notify();
+                }
+            }),
+        )
+        .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
                 if let Some(column_id) = this.resizing_outer_column {
                     let pointer_x = event.position.x.as_f32();
                     let window_width = window.viewport_size().width.as_f32().max(1.0);
