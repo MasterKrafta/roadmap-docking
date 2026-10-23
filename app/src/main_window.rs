@@ -1104,6 +1104,40 @@ impl MainWindow {
             .child(title)
     }
 
+    fn render_tab_group(
+        &self,
+        width: f32,
+        group_height: f32,
+        show_tab_strip: bool,
+        show_content: bool,
+        content_height: f32,
+        tab_strip: Div,
+        content: impl IntoElement,
+    ) -> Div {
+        let colors = self.theme.colors;
+        let mut group = div()
+            .flex()
+            .flex_col()
+            .w(px(width))
+            .h(px(group_height));
+
+        if show_tab_strip {
+            group = group.child(tab_strip);
+        }
+        if show_content {
+            group = group.child(
+                div()
+                    .w(px(width))
+                    .h(px(content_height))
+                    .bg(rgb(colors.group_background))
+                    .border_1()
+                    .border_color(rgb(colors.border))
+                    .child(content),
+            );
+        }
+        group
+    }
+
     fn render_tab_strip(
         &self,
         cx: &mut Context<Self>,
@@ -1535,45 +1569,25 @@ impl MainWindow {
             "right-dock-bottom-group-menu",
         );
 
-        let top_content_area = div()
-            .w(px(column_content_width))
-            .h(px(top_content_height))
-            .bg(rgb(colors.group_background))
-            .border_1()
-            .border_color(rgb(colors.border))
-            .child(top_content);
+        let top_group = self.render_tab_group(
+            column_content_width,
+            top_group_height,
+            !tabs_collapsed,
+            !top_group_collapsed,
+            top_content_height,
+            top_tab_strip,
+            top_content,
+        );
 
-        let bottom_content_area = div()
-            .w(px(column_content_width))
-            .h(px(bottom_content_height))
-            .bg(rgb(colors.group_background))
-            .border_1()
-            .border_color(rgb(colors.border))
-            .child(bottom_content);
-
-        let mut top_group = div()
-            .flex()
-            .flex_col()
-            .w(px(column_content_width))
-            .h(px(top_group_height));
-        if !tabs_collapsed {
-            top_group = top_group.child(top_tab_strip);
-        }
-        if !top_group_collapsed {
-            top_group = top_group.child(top_content_area);
-        }
-
-        let mut bottom_group = div()
-            .flex()
-            .flex_col()
-            .w(px(column_content_width))
-            .h(px(bottom_group_height));
-        if !tabs_collapsed {
-            bottom_group = bottom_group.child(bottom_tab_strip);
-        }
-        if !bottom_group_collapsed {
-            bottom_group = bottom_group.child(bottom_content_area);
-        }
+        let bottom_group = self.render_tab_group(
+            column_content_width,
+            bottom_group_height,
+            !tabs_collapsed,
+            !bottom_group_collapsed,
+            bottom_content_height,
+            bottom_tab_strip,
+            bottom_content,
+        );
 
         let resize_hit_height = metrics.splitter_hit_zone.max(metrics.splitter_thickness);
         let visible_split_height = metrics.splitter_thickness.min(resize_hit_height);
