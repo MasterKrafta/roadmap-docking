@@ -283,11 +283,34 @@ impl MainWindow {
             3 => (1, 2), // Right Properties
             _ => return,
         };
+
+        self.panel_visibility[menu_index] = !self.panel_visibility[menu_index];
+        if self.panel_visibility[menu_index] && !self.column_open[column_index] {
+            // Recreate the column through Core when its last visible panel was
+            // disabled earlier. Rebuild the same three-panel template on the right.
+            if let Err(error) = self.open_column_from_menu(column_index, menu_index) {
+                eprintln!("Could not reopen dock column: {error}");
+                self.panel_visibility[menu_index] = false;
+            }
+            return;
+        }
         if !self.column_open[column_index] {
             return;
         }
 
-        self.panel_visibility[menu_index] = !self.panel_visibility[menu_index];
+        let column_has_visible_panels = match column_index {
+            0 => self.panel_visibility[0],
+            1 => self.panel_visibility[1] || self.panel_visibility[2] || self.panel_visibility[3],
+            _ => false,
+        };
+        if !column_has_visible_panels {
+            // Closing the last visible panel closes every group in this column.
+            // Core normalization then removes the empty Column and collapses the
+            // surrounding Split, so the other column shifts into its place.
+            self.close_column(column_index);
+            return;
+        }
+
         let group = if panel_slot < 2 {
             self.top_tab_groups[column_index]
         } else {
@@ -312,17 +335,144 @@ impl MainWindow {
         }
     }
 
+    fn open_column_from_menu(
+        &mut self,
+        column_index: usize,
+        selected_menu_index: usize,
+    ) -> Result<(), String> {
+        let layers_key = PanelKey::new("layers").expect("built-in panel key is valid");
+        let color_key = PanelKey::new("color").expect("built-in panel key is valid");
+        let properties_key = PanelKey::new("properties").expect("built-in panel key is valid");
+        let layers_constraints = self
+            .panels
+            .constraints_for_key(&layers_key)
+            .ok_or_else(|| "Layers panel is missing from the registry".to_owned())?;
+        let color_constraints = self
+            .panels
+            .constraints_for_key(&color_key)
+            .ok_or_else(|| "Color panel is missing from the registry".to_owned())?;
+        let properties_constraints = self
+            .panels
+            .constraints_for_key(&properties_key)
+            .ok_or_else(|| "Properties panel is missing from the registry".to_owned())?;
+
+        let target = if self.column_open[1 - column_index] {
+            Some(DropTarget::MainColumn {
+                side: DockSide::Right,
+                index: column_index,
+            })
+        } else {
+            None
+        };
+        self.layout
+            .apply(
+                DockCommand::OpenPanel {
+                    key: layers_key.clone(),
+                    constraints: layers_constraints,
+                    target,
+                },
+                &self.dock_metrics,
+            )
+            .map_err(|error| format!("Could not recreate Layers: {error}"))?;
+
+        let area = self
+            .layout
+            .main_area(DockSide::Right)
+            .ok_or_else(|| "Dock Core did not create a main dock area".to_owned())?;
+        let (column_ids, column_open, target_column) = match self.layout.node(area.root) {
+            Some(Node::Split(split)) if split.axis == Axis::X && split.children.len() == 2 => {
+                let ids = [split.children[0], split.children[1]];
+                (ids, [true, true], ids[column_index])
+            }
+            Some(Node::Column(_)) => {
+                let mut ids = self.column_ids;
+                ids[column_index] = area.root;
+                let mut opened = [false; 2];
+                opened[column_index] = true;
+                (ids, opened, area.root)
+            }
+            _ => return Err("Dock Core created an unexpected main dock shape".to_owned()),
+        };
+        self.column_ids = column_ids;
+        self.column_open = column_open;
+
+        let top_group = first_group_in_column(&self.layout, target_column)
+            .ok_or_else(|| "Dock Core did not create the upper tab group".to_owned())?;
+        let layers_panel = panel_id_in_group(&self.layout, top_group, &layers_key)
+            .ok_or_else(|| "Dock Core did not retain Layers in the new column".to_owned())?;
+
+        if column_index == 0 {
+            self.top_tab_groups[0] = top_group;
+            self.bottom_tab_groups[0] = top_group;
+            self.panels_by_column[0] = [layers_panel; 4];
+            self.column_has_bottom_group[0] = false;
+        } else {
+            self.layout
+                .apply(
+                    DockCommand::OpenPanel {
+                        key: color_key.clone(),
+                        constraints: color_constraints,
+                        target: Some(DropTarget::Tabs {
+                            group: top_group,
+                            index: 1,
+                        }),
+                    },
+                    &self.dock_metrics,
+                )
+                .map_err(|error| format!("Could not recreate Color: {error}"))?;
+            self.layout
+                .apply(
+                    DockCommand::OpenPanel {
+                        key: properties_key.clone(),
+                        constraints: properties_constraints,
+                        target: Some(DropTarget::GroupEdge {
+                            group: top_group,
+                            zone: DropZone::Bottom,
+                        }),
+                    },
+                    &self.dock_metrics,
+                )
+                .map_err(|error| format!("Could not recreate Properties: {error}"))?;
+
+            let bottom_group = second_group_in_column(&self.layout, target_column)
+                .ok_or_else(|| "Dock Core did not create the lower tab group".to_owned())?;
+            let color_panel = panel_id_in_group(&self.layout, top_group, &color_key)
+                .ok_or_else(|| "Dock Core did not retain Color in the new column".to_owned())?;
+            let properties_panel =
+                panel_id_in_group(&self.layout, bottom_group, &properties_key)
+                    .ok_or_else(|| "Dock Core did not retain Properties in the new column".to_owned())?;
+
+            self.top_tab_groups[1] = top_group;
+            self.bottom_tab_groups[1] = bottom_group;
+            self.panels_by_column[1] = [
+                layers_panel,
+                color_panel,
+                properties_panel,
+                properties_panel,
+            ];
+            self.column_has_bottom_group[1] = true;
+
+            let selected = match selected_menu_index {
+                1 => layers_panel,
+                2 => color_panel,
+                3 => properties_panel,
+                _ => layers_panel,
+            };
+            let selected_group = if selected_menu_index == 3 {
+                bottom_group
+            } else {
+                top_group
+            };
+            self.activate_tab(selected_group, selected);
+        }
+        self.column_open[column_index] = true;
+        Ok(())
+    }
+
     fn close_column(&mut self, column_index: usize) {
         if column_index >= self.column_open.len() || !self.column_open[column_index] {
             return;
         }
-        let other_index = 1 - column_index;
-        // Keep one dock column alive so the user can still interact with the
-        // workspace and use the remaining column's controls.
-        if !self.column_open[other_index] {
-            return;
-        }
-
         for group in [
             self.top_tab_groups[column_index],
             self.bottom_tab_groups[column_index],
@@ -762,6 +912,7 @@ impl Render for MainWindow {
 
         let left_is_open = self.column_open[0];
         let right_is_open = self.column_open[1];
+        let any_column_open = left_is_open || right_is_open;
         let both_columns_open = left_is_open && right_is_open;
         let left_width = if left_is_open {
             self.column_width(0).min(window_width)
@@ -774,7 +925,7 @@ impl Render for MainWindow {
             0.0
         };
         let splitter_width = metrics.splitter_thickness;
-        let outer_splitter_width = splitter_width;
+        let outer_splitter_width = if any_column_open { splitter_width } else { 0.0 };
         let center_splitter_width = if both_columns_open { splitter_width } else { 0.0 };
         let dock_width =
             left_width + outer_splitter_width + center_splitter_width + right_width;
@@ -794,40 +945,44 @@ impl Render for MainWindow {
         let outer_splitter_center_x = workspace_width + outer_splitter_width / 2.0;
         let outer_column_index = if left_is_open { 0 } else { 1 };
         let outer_column_id = self.column_ids[outer_column_index];
-        let outer_column_splitter = div()
-            .relative()
-            .w(px(outer_splitter_width))
-            .h(px(dock_height))
-            .bg(rgb(colors.splitter))
-            .child(
-                div()
-                    .absolute()
-                    .left(px((outer_splitter_width - split_hit_width) / 2.0))
-                    .top(px(0.0))
-                    .w(px(split_hit_width))
-                    .h(px(dock_height))
-                    .cursor(CursorStyle::ResizeLeftRight)
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
-                            this.is_resizing_column = false;
-                            this.resizing_outer_column = Some(outer_column_id);
-                            this.resize_column_pointer_offset_x =
-                                event.position.x.as_f32() - outer_splitter_center_x;
-                            this.resizing_groups_column = None;
-                            cx.notify();
-                        }),
-                    )
-                    .child(
-                        div()
-                            .absolute()
-                            .left(px((split_hit_width - outer_splitter_width) / 2.0))
-                            .top(px(0.0))
-                            .w(px(outer_splitter_width))
-                            .h(px(dock_height))
-                            .bg(rgb(colors.splitter)),
-                    ),
-            );
+        let outer_column_splitter = if any_column_open {
+            div()
+                .relative()
+                .w(px(outer_splitter_width))
+                .h(px(dock_height))
+                .bg(rgb(colors.splitter))
+                .child(
+                    div()
+                        .absolute()
+                        .left(px((outer_splitter_width - split_hit_width) / 2.0))
+                        .top(px(0.0))
+                        .w(px(split_hit_width))
+                        .h(px(dock_height))
+                        .cursor(CursorStyle::ResizeLeftRight)
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
+                                this.is_resizing_column = false;
+                                this.resizing_outer_column = Some(outer_column_id);
+                                this.resize_column_pointer_offset_x =
+                                    event.position.x.as_f32() - outer_splitter_center_x;
+                                this.resizing_groups_column = None;
+                                cx.notify();
+                            }),
+                        )
+                        .child(
+                            div()
+                                .absolute()
+                                .left(px((split_hit_width - outer_splitter_width) / 2.0))
+                                .top(px(0.0))
+                                .w(px(outer_splitter_width))
+                                .h(px(dock_height))
+                                .bg(rgb(colors.splitter)),
+                        ),
+                )
+        } else {
+            div().w(px(0.0)).h(px(dock_height))
+        };
         let column_splitter_center_x =
             workspace_width + outer_splitter_width + left_width + splitter_width / 2.0;
         let column_splitter = if both_columns_open {
