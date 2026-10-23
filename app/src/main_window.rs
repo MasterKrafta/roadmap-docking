@@ -1104,6 +1104,42 @@ impl MainWindow {
             .child(title)
     }
 
+    fn render_tab_group_menu_button(
+        &self,
+        cx: &mut Context<Self>,
+        element_id: &'static str,
+        column_index: usize,
+        group_id: NodeId,
+        active_panel: Option<PanelId>,
+        button_size: f32,
+    ) -> Div {
+        let colors = self.theme.colors;
+
+        div()
+            .id(element_id)
+            .flex()
+            .items_center()
+            .justify_center()
+            .w(px(button_size))
+            .h(px(button_size))
+            .text_color(rgb(colors.primary_text))
+            .bg(rgb(colors.hover))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                    this.toggle_tab_context_menu(
+                        column_index,
+                        group_id,
+                        active_panel,
+                        event.position.x.as_f32(),
+                        event.position.y.as_f32(),
+                    );
+                    cx.notify();
+                }),
+            )
+            .child("☰")
+    }
+
     fn render_tab_group_hit_area(
         &self,
         cx: &mut Context<Self>,
@@ -1408,33 +1444,18 @@ impl MainWindow {
         }
         top_tab_strip = top_tab_strip
             .child(
-                div()
-                    .id(if column_index == 0 {
+                self.render_tab_group_menu_button(
+                    cx,
+                    if column_index == 0 {
                         "left-dock-top-group-menu"
                     } else {
                         "right-dock-top-group-menu"
-                    })
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .w(px(button_size))
-                    .h(px(button_size))
-                    .text_color(rgb(colors.primary_text))
-                    .bg(rgb(colors.hover))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                            this.toggle_tab_context_menu(
-                                column_index,
-                                top_tab_group,
-                                active_top_panel,
-                                event.position.x.as_f32(),
-                                event.position.y.as_f32(),
-                            );
-                            cx.notify();
-                        }),
-                    )
-                    .child("☰"),
+                    },
+                    column_index,
+                    top_tab_group,
+                    active_top_panel,
+                    button_size,
+                ),
             )
             .child(
                 self.render_tab_group_hit_area(
@@ -1509,29 +1530,14 @@ impl MainWindow {
         }
         bottom_tab_strip = bottom_tab_strip
             .child(
-                div()
-                    .id("right-dock-bottom-group-menu")
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .w(px(button_size))
-                    .h(px(button_size))
-                    .text_color(rgb(colors.primary_text))
-                    .bg(rgb(colors.hover))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                            this.toggle_tab_context_menu(
-                                column_index,
-                                bottom_tab_group,
-                                active_bottom_panel,
-                                event.position.x.as_f32(),
-                                event.position.y.as_f32(),
-                            );
-                            cx.notify();
-                        }),
-                    )
-                    .child("☰"),
+                self.render_tab_group_menu_button(
+                    cx,
+                    "right-dock-bottom-group-menu",
+                    column_index,
+                    bottom_tab_group,
+                    active_bottom_panel,
+                    button_size,
+                ),
             )
             .child(
                 self.render_tab_group_hit_area(
