@@ -407,7 +407,7 @@ impl MainWindow {
         let Some(panel_id) = menu.active_panel else {
             return;
         };
-        if self.panel_is_visible(menu.column_index, panel_id) {
+        if self.panel_is_visible(panel_id) {
             self.toggle_panel_visibility(panel_id);
         }
     }
@@ -421,7 +421,7 @@ impl MainWindow {
             .map(|group| group.panels)
             .unwrap_or_default();
         for panel_id in panel_ids {
-            if self.panel_is_visible(menu.column_index, panel_id) {
+            if self.panel_is_visible(panel_id) {
                 self.toggle_panel_visibility(panel_id);
             }
         }
@@ -491,7 +491,7 @@ impl MainWindow {
         had_open_menu
     }
 
-    fn panel_is_visible(&self, _column_index: usize, panel_id: PanelId) -> bool {
+    fn panel_is_visible(&self, panel_id: PanelId) -> bool {
         self.panel_visibility
             .iter()
             .find(|entry| entry.panel_id == panel_id)
@@ -570,7 +570,7 @@ impl MainWindow {
         };
         if self
             .active_panel_id(group)
-            .is_some_and(|active| self.panel_is_visible(column_index, active))
+            .is_some_and(|active| self.panel_is_visible(active))
         {
             return;
         }
@@ -578,7 +578,7 @@ impl MainWindow {
             .tab_group_view_data(group)
             .into_iter()
             .flat_map(|data| data.panels)
-            .find(|candidate| self.panel_is_visible(column_index, *candidate))
+            .find(|candidate| self.panel_is_visible(*candidate))
         {
             self.activate_tab(group, next_panel);
         }
@@ -891,7 +891,6 @@ impl MainWindow {
 
     fn visible_tab_groups_in_column(
         &self,
-        column_index: usize,
         column_id: NodeId,
     ) -> Vec<(usize, TabGroupViewData)> {
         self.group_ids_in_column(column_id)
@@ -901,7 +900,7 @@ impl MainWindow {
                 let mut group = self.tab_group_view_data(group_id)?;
                 group
                     .panels
-                    .retain(|panel_id| self.panel_is_visible(column_index, *panel_id));
+                    .retain(|panel_id| self.panel_is_visible(*panel_id));
                 if group
                     .active_panel
                     .is_some_and(|active| !group.panels.contains(&active))
@@ -1501,7 +1500,7 @@ impl MainWindow {
 
         let header_height = metrics.column_header_height.min(window_height);
         let available_below_header = (window_height - header_height).max(0.0);
-        let visible_groups = self.visible_tab_groups_in_column(column_index, column_id);
+        let visible_groups = self.visible_tab_groups_in_column(column_id);
         // ResizeGroups operates on adjacent Core groups. Avoid exposing splitters
         // while any Core group is hidden from the view by a panel-visibility toggle.
         let all_groups_visible = visible_groups.len() == core_group_ids.len();
@@ -2485,7 +2484,7 @@ impl Render for MainWindow {
                     };
 
                     let core_group_ids = this.group_ids_in_column(column_id);
-                    let visible_groups = this.visible_tab_groups_in_column(column_index, column_id);
+                    let visible_groups = this.visible_tab_groups_in_column(column_id);
                     if visible_groups.len() != core_group_ids.len()
                         || resize.boundary_index >= core_group_ids.len().saturating_sub(1)
                     {
