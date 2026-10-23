@@ -69,14 +69,14 @@ pub(crate) struct MainWindow {
     layout: Layout,
     dock_metrics: DockMetrics,
     /// Main-dock column IDs in visual order: left, right.
-    column_ids: [NodeId; 2],
+    column_ids: Vec<NodeId>,
     /// Core removes empty columns and collapses their parent Split. These flags keep
     /// the view aligned with that topology; the last remaining column stays open.
-    column_open: [bool; 2],
+    column_open: Vec<bool>,
     /// Per-panel visibility entries used by rendering, context actions, and the Windows menu.
     panel_visibility: Vec<PanelVisibilityEntry>,
     /// Core topology remembered while a column is closed, so it can be recreated generically.
-    closed_column_snapshots: [Option<ClosedColumnSnapshot>; 2],
+    closed_column_snapshots: Vec<Option<ClosedColumnSnapshot>>,
     windows_menu_open: bool,
     tab_context_menu: Option<DockTabContextMenu>,
     is_resizing_column: bool,
@@ -210,11 +210,11 @@ impl MainWindow {
         else {
             return Err("Dock Core did not create a split for the two dock columns".to_owned());
         };
-        if split.axis != Axis::X || split.children.len() != 2 {
-            return Err("Dock Core right dock must be a horizontal split of two columns".to_owned());
+        if split.axis != Axis::X {
+            return Err("Dock Core right dock must be a horizontal split of columns".to_owned());
         }
-        let column_ids = [split.children[0], split.children[1]];
-        if column_ids[1] != initial_right_column {
+        let column_ids = split.children.clone();
+        if column_ids.last() != Some(&initial_right_column) {
             return Err("Dock Core changed the original column's order unexpectedly".to_owned());
         }
         // Initialize each Core group by activating its first actual panel. This
@@ -250,15 +250,16 @@ impl MainWindow {
             }
         }
 
+        let initial_column_count = column_ids.len();
         let mut main_window = Self {
             theme,
             panels,
             layout,
             dock_metrics,
             column_ids,
-            column_open: [true; 2],
+            column_open: vec![true; initial_column_count],
             panel_visibility: Vec::new(),
-            closed_column_snapshots: [None, None],
+            closed_column_snapshots: (0..initial_column_count).map(|_| None).collect(),
             windows_menu_open: false,
             tab_context_menu: None,
             is_resizing_column: false,
