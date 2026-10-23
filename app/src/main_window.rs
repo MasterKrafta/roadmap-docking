@@ -627,27 +627,66 @@ impl MainWindow {
         }
     }
 
+    fn open_panel_for_restore(
+        &mut self,
+        panel_key: &str,
+        target: Option<DropTarget>,
+    ) -> Result<(), String> {
+        let key = PanelKey::new(panel_key)
+            .map_err(|_| format!("Invalid panel key while restoring column: {panel_key}"))?;
+        let constraints = self
+            .panels
+            .constraints_for_key(&key)
+            .ok_or_else(|| format!("Panel registry has no descriptor for '{panel_key}'"))?;
+        self.layout
+            .apply(
+                DockCommand::OpenPanel {
+                    key,
+                    constraints,
+                    target,
+                },
+                &self.dock_metrics,
+            )
+            .map_err(|error| format!("Could not recreate panel '{panel_key}': {error}"))?;
+        Ok(())
+    }
+
     fn open_column_from_menu(
         &mut self,
         column_index: usize,
         selected_panel_key: &str,
     ) -> Result<(), String> {
-        let layers_key = PanelKey::new("layers").expect("built-in panel key is valid");
-        let color_key = PanelKey::new("color").expect("built-in panel key is valid");
-        let properties_key = PanelKey::new("properties").expect("built-in panel key is valid");
-        let layers_constraints = self
-            .panels
-            .constraints_for_key(&layers_key)
-            .ok_or_else(|| "Layers panel is missing from the registry".to_owned())?;
-        let color_constraints = self
-            .panels
-            .constraints_for_key(&color_key)
-            .ok_or_else(|| "Color panel is missing from the registry".to_owned())?;
-        let properties_constraints = self
-            .panels
-            .constraints_for_key(&properties_key)
-            .ok_or_else(|| "Properties panel is missing from the registry".to_owned())?;
+        let mut snapshot = self
+            .closed_column_snapshots
+            .get(column_index)
+            .and_then(Option::as_ref)
+            .cloned()
+            .unwrap_or_else(|| ClosedColumnSnapshot {
+                groups: Vec::new(),
+                group_ratios: Vec::new(),
+                width: self.theme.metrics.default_column_width,
+            });
+        snapshot.groups.retain(|group| !group.panel_keys.is_empty());
+        if snapshot.groups.is_empty() {
+            snapshot.groups.push(ClosedTabGroupSnapshot {
+                panel_keys: vec![selected_panel_key.to_owned()],
+                active_panel_key: Some(selected_panel_key.to_owned()),
+                collapsed: false,
+            });
+            snapshot.group_ratios = vec![1.0];
+        } else if !snapshot
+            .groups
+            .iter()
+            .any(|group| group.panel_keys.iter().any(|key| key == selected_panel_key))
+        {
+            // A menu entry may have been discovered after this column was closed.
+            // Put an unknown-to-the-snapshot panel into the first restored group.
+            snapshot.groups[0]
+                .panel_keys
+                .push(selected_panel_key.to_owned());
+        }
 
+        let first_panel_key = snapshot.groups[0].panel_keys[0].clone();
         let target = if self.column_open[1 - column_index] {
             Some(DropTarget::MainColumn {
                 side: DockSide::Right,
@@ -656,16 +695,7 @@ impl MainWindow {
         } else {
             None
         };
-        self.layout
-            .apply(
-                DockCommand::OpenPanel {
-                    key: layers_key.clone(),
-                    constraints: layers_constraints,
-                    target,
-                },
-                &self.dock_metrics,
-            )
-            .map_err(|error| format!("Could not recreate Layers: {error}"))?;
+        self.open_panel_for_restore(&first_panel_key, target)?;
 
         let area = self
             .layout
@@ -688,77 +718,157 @@ impl MainWindow {
         self.column_ids = column_ids;
         self.column_open = column_open;
 
-        let top_group = first_group_in_column(&self.layout, target_column)
-            .ok_or_else(|| "Dock Core did not create the upper tab group".to_owned())?;
-        let layers_panel = panel_id_in_group(&self.layout, top_group, &layers_key)
-            .ok_or_else(|| "Dock Core did not retain Layers in the new column".to_owned())?;
+        let first_group = first_group_in_column(&self.layout, target_column)
+            .ok_or_else(|| "Dock Core did not create the first restored tab group".to_owned())?;
+        let mut restored_groups = Vec::with_capacity(snapshot.groups.len());
+        restored_groups.push(first_group);
 
-        if column_index == 0 {
-            self.top_tab_groups[0] = top_group;
-            self.bottom_tab_groups[0] = top_group;
-            self.panels_by_column[0] = [layers_panel; 4];
-            self.column_has_bottom_group[0] = false;
-        } else {
-            self.layout
-                .apply(
-                    DockCommand::OpenPanel {
-                        key: color_key.clone(),
-                        constraints: color_constraints,
-                        target: Some(DropTarget::Tabs {
-                            group: top_group,
-                            index: 1,
-                        }),
-                    },
-                    &self.dock_metrics,
-                )
-                .map_err(|error| format!("Could not recreate Color: {error}"))?;
-            self.layout
-                .apply(
-                    DockCommand::OpenPanel {
-                        key: properties_key.clone(),
-                        constraints: properties_constraints,
-                        target: Some(DropTarget::GroupEdge {
-                            group: top_group,
-                            zone: DropZone::Bottom,
-                        }),
-                    },
-                    &self.dock_metrics,
-                )
-                .map_err(|error| format!("Could not recreate Properties: {error}"))?;
-
-            let bottom_group = second_group_in_column(&self.layout, target_column)
-                .ok_or_else(|| "Dock Core did not create the lower tab group".to_owned())?;
-            let color_panel = panel_id_in_group(&self.layout, top_group, &color_key)
-                .ok_or_else(|| "Dock Core did not retain Color in the new column".to_owned())?;
-            let properties_panel =
-                panel_id_in_group(&self.layout, bottom_group, &properties_key)
-                    .ok_or_else(|| "Dock Core did not retain Properties in the new column".to_owned())?;
-
-            self.top_tab_groups[1] = top_group;
-            self.bottom_tab_groups[1] = bottom_group;
-            self.panels_by_column[1] = [
-                layers_panel,
-                color_panel,
-                properties_panel,
-                properties_panel,
-            ];
-            self.column_has_bottom_group[1] = true;
-
-            let selected = if selected_panel_key == color_key.as_str() {
-                color_panel
-            } else if selected_panel_key == properties_key.as_str() {
-                properties_panel
+        for (group_index, group_snapshot) in snapshot.groups.iter().enumerate() {
+            let group_id = if group_index == 0 {
+                first_group
             } else {
-                layers_panel
+                let first_key = group_snapshot
+                    .panel_keys
+                    .first()
+                    .ok_or_else(|| "A restored tab group has no panels".to_owned())?;
+                let previous_group = *restored_groups
+                    .last()
+                    .ok_or_else(|| "No preceding group exists during restore".to_owned())?;
+                let groups_before = self.group_ids_in_column(target_column);
+                self.open_panel_for_restore(
+                    first_key,
+                    Some(DropTarget::GroupEdge {
+                        group: previous_group,
+                        zone: DropZone::Bottom,
+                    }),
+                )?;
+                let groups_after = self.group_ids_in_column(target_column);
+                let new_group = groups_after
+                    .iter()
+                    .copied()
+                    .find(|group| !groups_before.contains(group))
+                    .ok_or_else(|| "Dock Core did not create a new restored tab group".to_owned())?;
+                restored_groups.push(new_group);
+                new_group
             };
-            let selected_group = if selected_panel_key == properties_key.as_str() {
-                bottom_group
-            } else {
-                top_group
-            };
-            self.activate_tab(selected_group, selected);
+
+            let start_panel_index = if group_index == 0 { 1 } else { 1 };
+            for panel_key in group_snapshot.panel_keys.iter().skip(start_panel_index) {
+                let target_index = self
+                    .tab_group_view_data(group_id)
+                    .map_or(0, |group| group.panels.len());
+                self.open_panel_for_restore(
+                    panel_key,
+                    Some(DropTarget::Tabs {
+                        group: group_id,
+                        index: target_index,
+                    }),
+                )?;
+            }
         }
-        self.column_open[column_index] = true;
+
+        // Restore compatibility fields until their remaining consumers are moved to Core.
+        let current_groups = self.group_ids_in_column(target_column);
+        let top_group = *current_groups
+            .first()
+            .ok_or_else(|| "Restored column has no tab groups".to_owned())?;
+        let bottom_group = current_groups.get(1).copied().unwrap_or(top_group);
+        let top_panels = self
+            .tab_group_view_data(top_group)
+            .map(|group| group.panels)
+            .unwrap_or_default();
+        let bottom_panels = self
+            .tab_group_view_data(bottom_group)
+            .map(|group| group.panels)
+            .unwrap_or_default();
+        let first_top_panel = top_panels
+            .first()
+            .copied()
+            .ok_or_else(|| "Restored first group has no panels".to_owned())?;
+        let second_top_panel = top_panels.get(1).copied().unwrap_or(first_top_panel);
+        let first_bottom_panel = bottom_panels.first().copied().unwrap_or(first_top_panel);
+        let second_bottom_panel = bottom_panels
+            .get(1)
+            .copied()
+            .unwrap_or(first_bottom_panel);
+
+        self.top_tab_groups[column_index] = top_group;
+        self.bottom_tab_groups[column_index] = bottom_group;
+        self.column_has_bottom_group[column_index] = current_groups.len() > 1;
+        self.panels_by_column[column_index] = [
+            first_top_panel,
+            second_top_panel,
+            first_bottom_panel,
+            second_bottom_panel,
+        ];
+
+        for (group_snapshot, group_id) in snapshot.groups.iter().zip(restored_groups.iter().copied()) {
+            let selected_key_for_group = group_snapshot
+                .panel_keys
+                .iter()
+                .any(|key| key == selected_panel_key)
+                .then_some(selected_panel_key);
+            let active_key = selected_key_for_group.or(group_snapshot.active_panel_key.as_deref());
+            if let Some(active_key) = active_key {
+                let active_panel = self
+                    .tab_group_view_data(group_id)
+                    .into_iter()
+                    .flat_map(|group| group.panels)
+                    .find(|panel_id| {
+                        self.layout
+                            .panel_instance(*panel_id)
+                            .is_some_and(|panel| panel.key.as_str() == active_key)
+                    });
+                if let Some(active_panel) = active_panel {
+                    self.layout
+                        .apply(
+                            DockCommand::ActivateTab {
+                                group: group_id,
+                                panel: active_panel,
+                            },
+                            &self.dock_metrics,
+                        )
+                        .map_err(|error| format!("Could not restore active panel: {error}"))?;
+                }
+            }
+            if self.group_is_collapsed(group_id) != group_snapshot.collapsed {
+                self.layout
+                    .apply(
+                        DockCommand::CollapseGroup {
+                            group: group_id,
+                            collapsed: group_snapshot.collapsed,
+                        },
+                        &self.dock_metrics,
+                    )
+                    .map_err(|error| format!("Could not restore group collapse state: {error}"))?;
+            }
+        }
+
+        if snapshot.group_ratios.len() == current_groups.len() {
+            self.layout
+                .apply(
+                    DockCommand::RestoreGroupRatios {
+                        column: target_column,
+                        ratios: snapshot.group_ratios,
+                    },
+                    &self.dock_metrics,
+                )
+                .map_err(|error| format!("Could not restore group sizes: {error}"))?;
+        }
+        if snapshot.width.is_finite() && snapshot.width > 0.0 {
+            self.layout
+                .apply(
+                    DockCommand::ResizeColumn {
+                        column: target_column,
+                        width: snapshot.width,
+                    },
+                    &self.dock_metrics,
+                )
+                .map_err(|error| format!("Could not restore column width: {error}"))?;
+        }
+
+        self.closed_column_snapshots[column_index] = None;
+        self.sync_floating_composition_bounds();
         self.sync_panel_visibility_entries();
         Ok(())
     }
