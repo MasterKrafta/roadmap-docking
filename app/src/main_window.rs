@@ -1834,10 +1834,10 @@ impl MainWindow {
                     .border_color(rgb(colors.border))
                     .child(
                         div()
-                            .id(if column_index == 0 {
-                                "left-dock-header-spacer"
-                            } else {
-                                "right-dock-header-spacer"
+                            .id(match column_index {
+                                0 => "left-dock-header-spacer".to_owned(),
+                                1 => "right-dock-header-spacer".to_owned(),
+                                index => format!("dock-column-{index}-header-spacer"),
                             })
                             .w(px(header_spacer_width))
                             .h(px(header_height))
@@ -1879,10 +1879,10 @@ impl MainWindow {
                     )
                     .child(
                         div()
-                            .id(if column_index == 0 {
-                                "left-dock-collapse-tabs"
-                            } else {
-                                "right-dock-collapse-tabs"
+                            .id(match column_index {
+                                0 => "left-dock-collapse-tabs".to_owned(),
+                                1 => "right-dock-collapse-tabs".to_owned(),
+                                index => format!("dock-column-{index}-collapse-tabs"),
                             })
                             .flex()
                             .items_center()
@@ -1914,10 +1914,10 @@ impl MainWindow {
                     .child(div().w(px(button_gap)).h(px(1.0)))
                     .child(
                         div()
-                            .id(if column_index == 0 {
-                                "left-dock-close-column"
-                            } else {
-                                "right-dock-close-column"
+                            .id(match column_index {
+                                0 => "left-dock-close-column".to_owned(),
+                                1 => "right-dock-close-column".to_owned(),
+                                index => format!("dock-column-{index}-close-column"),
                             })
                             .flex()
                             .items_center()
