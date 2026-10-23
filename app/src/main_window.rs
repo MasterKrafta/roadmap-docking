@@ -1042,6 +1042,68 @@ impl MainWindow {
         }
     }
 
+    fn render_tab(
+        &self,
+        cx: &mut Context<Self>,
+        element_id: &'static str,
+        column_index: usize,
+        group_id: NodeId,
+        panel_id: PanelId,
+        width: f32,
+        height: f32,
+        active: bool,
+        title: String,
+    ) -> Div {
+        let colors = self.theme.colors;
+
+        div()
+            .id(element_id)
+            .flex()
+            .items_center()
+            .justify_center()
+            .w(px(width))
+            .h(px(height))
+            .bg(rgb(if active {
+                colors.active_tab
+            } else {
+                colors.dock_background
+            }))
+            .border_1()
+            .border_color(rgb(colors.border))
+            .text_color(rgb(if active {
+                colors.primary_text
+            } else {
+                colors.muted_text
+            }))
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                    this.open_tab_context_menu(
+                        column_index,
+                        group_id,
+                        Some(panel_id),
+                        event.position.x.as_f32(),
+                        event.position.y.as_f32(),
+                    );
+                    cx.notify();
+                }),
+            )
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                    if event.click_count == 2 {
+                        this.toggle_group_collapse(group_id);
+                        cx.notify();
+                    }
+                }),
+            )
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.activate_tab(group_id, panel_id);
+                cx.notify();
+            }))
+            .child(title)
+    }
+
     fn render_column(
         &self,
         cx: &mut Context<Self>,
@@ -1230,83 +1292,36 @@ impl MainWindow {
             }
         }
 
-        let layers_tab = div()
-            .id(if column_index == 0 { "left-dock-tab-layers" } else { "right-dock-tab-layers" })
-            .flex()
-            .items_center()
-            .justify_center()
-            .w(px(tab_width))
-            .h(px(top_tab_strip_height))
-            .bg(rgb(if layers_active { colors.active_tab } else { colors.dock_background }))
-            .border_1()
-            .border_color(rgb(colors.border))
-            .text_color(rgb(if layers_active { colors.primary_text } else { colors.muted_text }))
-            .on_mouse_down(
-                MouseButton::Right,
-                cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                    this.open_tab_context_menu(
-                        column_index,
-                        top_tab_group,
-                        Some(panel_ids[0]),
-                        event.position.x.as_f32(),
-                        event.position.y.as_f32(),
-                    );
-                    cx.notify();
-                }),
-            )
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                    if event.click_count == 2 {
-                        this.toggle_group_collapse(top_tab_group);
-                        cx.notify();
-                    }
-                }),
-            )
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.activate_tab(top_tab_group, panel_ids[0]);
-                cx.notify();
-            }))
-            .child(layers_title);
-
-        let color_tab = div()
-            .id(if column_index == 0 { "left-dock-tab-color" } else { "right-dock-tab-color" })
-            .flex()
-            .items_center()
-            .justify_center()
-            .w(px(tab_width))
-            .h(px(top_tab_strip_height))
-            .bg(rgb(if color_active { colors.active_tab } else { colors.dock_background }))
-            .border_1()
-            .border_color(rgb(colors.border))
-            .text_color(rgb(if color_active { colors.primary_text } else { colors.muted_text }))
-            .on_mouse_down(
-                MouseButton::Right,
-                cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                    this.open_tab_context_menu(
-                        column_index,
-                        top_tab_group,
-                        Some(panel_ids[1]),
-                        event.position.x.as_f32(),
-                        event.position.y.as_f32(),
-                    );
-                    cx.notify();
-                }),
-            )
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                    if event.click_count == 2 {
-                        this.toggle_group_collapse(top_tab_group);
-                        cx.notify();
-                    }
-                }),
-            )
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.activate_tab(top_tab_group, panel_ids[1]);
-                cx.notify();
-            }))
-            .child(color_title);
+        let layers_tab = self.render_tab(
+            cx,
+            if column_index == 0 {
+                "left-dock-tab-layers"
+            } else {
+                "right-dock-tab-layers"
+            },
+            column_index,
+            top_tab_group,
+            panel_ids[0],
+            tab_width,
+            top_tab_strip_height,
+            layers_active,
+            layers_title,
+        );
+        let color_tab = self.render_tab(
+            cx,
+            if column_index == 0 {
+                "left-dock-tab-color"
+            } else {
+                "right-dock-tab-color"
+            },
+            column_index,
+            top_tab_group,
+            panel_ids[1],
+            tab_width,
+            top_tab_strip_height,
+            color_active,
+            color_title,
+        );
 
         let mut top_tab_strip = div()
             .flex()
@@ -1447,44 +1462,21 @@ impl MainWindow {
                     ),
             );
 
-        let properties_tab = div()
-            .id(if column_index == 0 { "left-dock-tab-properties" } else { "right-dock-tab-properties" })
-            .flex()
-            .items_center()
-            .justify_center()
-            .w(px(bottom_tab_width))
-            .h(px(bottom_tab_strip_height))
-            .bg(rgb(if properties_active { colors.active_tab } else { colors.dock_background }))
-            .border_1()
-            .border_color(rgb(colors.border))
-            .text_color(rgb(if properties_active { colors.primary_text } else { colors.muted_text }))
-            .on_mouse_down(
-                MouseButton::Right,
-                cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                    this.open_tab_context_menu(
-                        column_index,
-                        bottom_tab_group,
-                        Some(panel_ids[2]),
-                        event.position.x.as_f32(),
-                        event.position.y.as_f32(),
-                    );
-                    cx.notify();
-                }),
-            )
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                    if event.click_count == 2 {
-                        this.toggle_group_collapse(bottom_tab_group);
-                        cx.notify();
-                    }
-                }),
-            )
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.activate_tab(bottom_tab_group, panel_ids[2]);
-                cx.notify();
-            }))
-            .child(properties_title);
+        let properties_tab = self.render_tab(
+            cx,
+            if column_index == 0 {
+                "left-dock-tab-properties"
+            } else {
+                "right-dock-tab-properties"
+            },
+            column_index,
+            bottom_tab_group,
+            panel_ids[2],
+            bottom_tab_width,
+            bottom_tab_strip_height,
+            properties_active,
+            properties_title,
+        );
 
         let mut bottom_tab_strip = div()
             .flex()
