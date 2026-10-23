@@ -761,7 +761,7 @@ fn render_panel(instance: &PanelInstance, theme: Theme) -> AnyElement {
         .into_any_element()
 }
 
-fn menu_item(label: impl Into<String>, handler: CommandClickHandler, theme: Theme) -> Div {
+fn menu_item(label: impl Into<String>, handler: CommandClickHandler, theme: Theme) -> impl IntoElement {
     let label = label.into();
     div()
         .id(format!("dock-menu-item-{label}"))
