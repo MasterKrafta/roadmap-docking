@@ -291,9 +291,42 @@ impl MainWindow {
         self.layout
             .apply(command, &self.dock_metrics)
             .map_err(|error| error.to_string())?;
+        self.sync_column_slots_from_core();
         self.sync_floating_composition_bounds();
         self.sync_panel_visibility_entries();
         Ok(())
+    }
+
+    /// Reconcile stable UI slots with the columns that currently exist in Core.
+    ///
+    /// Core node IDs are authoritative for active membership, while stale slot IDs
+    /// and snapshots are retained so closed columns can still be restored.
+    fn sync_column_slots_from_core(&mut self) {
+        let mut active_column_ids = Vec::new();
+        if let Some(root) = self.layout.main_area(DockSide::Right).map(|area| area.root) {
+            active_column_ids.extend(self.core_column_ids_in_order(root));
+        }
+        if let Some(root) = self.floating_composition.and_then(|group_id| {
+            self.layout
+                .floating_group(group_id)
+                .and_then(|floating| self.layout.dock_area(floating.area))
+                .map(|area| area.root)
+        }) {
+            active_column_ids.extend(self.core_column_ids_in_order(root));
+        }
+
+        for column_id in active_column_ids.iter().copied() {
+            if self.column_ids.contains(&column_id) {
+                continue;
+            }
+            self.column_ids.push(column_id);
+            self.column_open.push(true);
+            self.closed_column_snapshots.push(None);
+        }
+
+        for (index, column_id) in self.column_ids.iter().copied().enumerate() {
+            self.column_open[index] = active_column_ids.contains(&column_id);
+        }
     }
 
     fn activate_tab(&mut self, group: NodeId, panel: PanelId) {
@@ -1158,25 +1191,28 @@ impl MainWindow {
             )
     }
 
-    fn column_indices_in_core_order(&self, root: NodeId) -> Vec<usize> {
+    fn core_column_ids_in_order(&self, root: NodeId) -> Vec<NodeId> {
         match self.layout.node(root) {
-            Some(Node::Column(_)) => self
-                .column_ids
-                .iter()
-                .position(|column_id| *column_id == root)
-                .into_iter()
-                .collect(),
+            Some(Node::Column(_)) => vec![root],
             Some(Node::Split(split)) if split.axis == Axis::X => split
                 .children
                 .iter()
-                .filter_map(|child| {
-                    self.column_ids
-                        .iter()
-                        .position(|column_id| column_id == child)
-                })
+                .copied()
+                .filter(|child| matches!(self.layout.node(*child), Some(Node::Column(_))))
                 .collect(),
             _ => Vec::new(),
         }
+    }
+
+    fn column_indices_in_core_order(&self, root: NodeId) -> Vec<usize> {
+        self.core_column_ids_in_order(root)
+            .iter()
+            .filter_map(|column_id| {
+                self.column_ids
+                    .iter()
+                    .position(|slot_id| slot_id == column_id)
+            })
+            .collect()
     }
 
     fn main_column_indices_in_core_order(&self) -> Vec<usize> {
@@ -2082,6 +2118,7 @@ impl Render for MainWindow {
             self.composition_drag_source = None;
             self.composition_drag_group = None;
         }
+        self.sync_column_slots_from_core();
         // The Core Split is the source of both column order and column membership.
         // Stable indices only connect current Core node IDs to per-column UI state.
         let column_indices = self.main_column_indices_in_core_order();
