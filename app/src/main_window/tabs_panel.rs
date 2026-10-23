@@ -1,19 +1,25 @@
-use gpui::{Div, ParentElement, Styled, div, px, rgb};
+use gpui::{Context, Div, InteractiveElement, ParentElement, Styled, div, px, rgb};
 use ui::Theme;
+
+use super::MainWindow;
 
 const MIN_TAB_SPACER_WIDTH: f32 = 24.0;
 
 /// Draws one tab group: tab strip, menu button, and the panel content surface.
 pub(crate) struct TabsPanel {
     theme: Theme,
+    active_tab: usize,
 }
 
 impl TabsPanel {
     pub(crate) fn new(theme: Theme) -> Self {
-        Self { theme }
+        Self {
+            theme,
+            active_tab: 0,
+        }
     }
 
-    pub(crate) fn render(&self, height: f32) -> Div {
+    pub(crate) fn render(&self, cx: &mut Context<MainWindow>, height: f32) -> Div {
         let metrics = self.theme.metrics;
         let colors = self.theme.colors;
 
@@ -28,8 +34,28 @@ impl TabsPanel {
             .max(0.0)
             .min(tabs_available_width / 2.0);
         let actual_spacer_width = (width - button_width - tab_width * 2.0).max(spacer_width);
-        let content_available_height = (height - strip_height).max(0.0);
-        let content_height = content_available_height * 0.75;
+        let content_height = (height - strip_height).max(0.0);
+
+        let first_tab_background = if self.active_tab == 0 {
+            colors.active_tab
+        } else {
+            colors.toolbar_background
+        };
+        let first_tab_text = if self.active_tab == 0 {
+            colors.primary_text
+        } else {
+            colors.muted_text
+        };
+        let second_tab_background = if self.active_tab == 1 {
+            colors.active_tab
+        } else {
+            colors.toolbar_background
+        };
+        let second_tab_text = if self.active_tab == 1 {
+            colors.primary_text
+        } else {
+            colors.muted_text
+        };
 
         let strip = div()
             .flex()
@@ -47,10 +73,14 @@ impl TabsPanel {
                     .justify_center()
                     .w(px(tab_width))
                     .h(px(strip_height))
-                    .bg(rgb(colors.active_tab))
-                    .text_color(rgb(colors.primary_text))
+                    .bg(rgb(first_tab_background))
+                    .text_color(rgb(first_tab_text))
                     .border_1()
                     .border_color(rgb(colors.border))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.tabs_panel.active_tab = 0;
+                        cx.notify();
+                    }))
                     .child("Layers"),
             )
             .child(
@@ -60,14 +90,17 @@ impl TabsPanel {
                     .justify_center()
                     .w(px(tab_width))
                     .h(px(strip_height))
-                    .bg(rgb(colors.toolbar_background))
-                    .text_color(rgb(colors.muted_text))
+                    .bg(rgb(second_tab_background))
+                    .text_color(rgb(second_tab_text))
                     .border_1()
                     .border_color(rgb(colors.border))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.tabs_panel.active_tab = 1;
+                        cx.notify();
+                    }))
                     .child("Color"),
             )
             // Intentionally empty space between the tabs and the menu button.
-            // Its width is never smaller than the configured minimum where space allows.
             .child(div().w(px(actual_spacer_width)).h(px(strip_height)))
             .child(
                 div()
@@ -83,6 +116,7 @@ impl TabsPanel {
                     .child("☰"),
             );
 
+        // The content surface fills all remaining height so no empty strip is left below it.
         let content = div()
             .w(px(width))
             .h(px(content_height))
@@ -95,7 +129,7 @@ impl TabsPanel {
             .flex_col()
             .w(px(width))
             .h(px(height))
-            .bg(rgb(colors.dock_background))
+            .bg(rgb(colors.group_background))
             .border_1()
             .border_color(rgb(colors.border))
             .child(strip)
@@ -121,5 +155,15 @@ mod tests {
         assert!(actual_spacer >= MIN_TAB_SPACER_WIDTH);
         assert!(tab_width > 0.0);
         assert!(button_width > 0.0);
+    }
+
+    #[test]
+    fn content_occupies_all_height_below_the_tab_strip() {
+        let theme = Theme::default();
+        let height = 700.0;
+        let strip_height = theme.metrics.tab_strip_height.min(height).max(1.0);
+        let content_height = (height - strip_height).max(0.0);
+
+        assert!((strip_height + content_height - height).abs() < 0.001);
     }
 }
