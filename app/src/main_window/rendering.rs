@@ -257,6 +257,7 @@ impl MainWindow {
                 active_panel,
                 content_padding,
                 height,
+                false,
             ));
 
         for tab in tabs {
@@ -281,6 +282,7 @@ impl MainWindow {
                 active_panel,
                 spacer_width,
                 height,
+                true,
             ));
         }
 
@@ -300,6 +302,7 @@ impl MainWindow {
                 active_panel,
                 content_padding,
                 height,
+                false,
             ))
     }
 
@@ -347,6 +350,7 @@ impl MainWindow {
         active_panel: Option<PanelId>,
         width: f32,
         height: f32,
+        starts_group_drag: bool,
     ) -> Div {
         div()
             .w(px(width))
@@ -370,9 +374,104 @@ impl MainWindow {
                     if event.click_count == 2 {
                         this.toggle_group_collapse(group_id);
                         cx.notify();
+                    } else if starts_group_drag {
+                        this.begin_tab_group_drag(
+                            column_index,
+                            group_id,
+                            event.position.x.as_f32(),
+                            event.position.y.as_f32(),
+                        );
+                        cx.notify();
                     }
                 }),
             )
+    }
+
+    fn render_floating_tab_group(
+        &self,
+        cx: &mut Context<Self>,
+        group_id: NodeId,
+        width: f32,
+        height: f32,
+    ) -> Div {
+        let Some(mut group) = self.tab_group_view_data(group_id) else {
+            return div().w(px(0.0)).h(px(0.0));
+        };
+        group.panels.retain(|panel_id| self.panel_is_visible(*panel_id));
+        if group
+            .active_panel
+            .is_some_and(|active| !group.panels.contains(&active))
+        {
+            group.active_panel = None;
+        }
+
+        let column_index = self
+            .column_ids
+            .iter()
+            .position(|column_id| self.group_ids_in_column(*column_id).contains(&group_id))
+            .unwrap_or(0);
+        let metrics = self.theme.metrics;
+        let width = width.max(1.0);
+        let height = height.max(1.0);
+        let tab_strip_height = metrics.tab_strip_height.min(height);
+        let button_size = metrics.button_size.min(width);
+        let content_padding = metrics.content_padding.min(width / 2.0);
+        let available_tab_width =
+            (width - content_padding * 2.0 - button_size).max(0.0);
+        let visible_tab_count = group.panels.len();
+        let tab_width = metrics
+            .column_tab_width
+            .min((available_tab_width / visible_tab_count.max(1) as f32).max(0.0));
+        let spacer_width =
+            (available_tab_width - tab_width * visible_tab_count as f32).max(0.0);
+
+        let mut tabs = Vec::with_capacity(visible_tab_count);
+        for (tab_index, panel_id) in group.panels.iter().copied().enumerate() {
+            let Some(panel) = self.layout.panel_instance(panel_id) else {
+                continue;
+            };
+            tabs.push(self.render_tab(
+                cx,
+                format!("floating-group-{group_id:?}-tab-{tab_index}"),
+                column_index,
+                group_id,
+                panel_id,
+                tab_width,
+                tab_strip_height,
+                group.active_panel == Some(panel_id),
+                self.panels.title(panel).to_owned(),
+            ));
+        }
+
+        let tab_strip = self.render_tab_strip(
+            cx,
+            column_index,
+            group_id,
+            group.active_panel,
+            width,
+            tab_strip_height,
+            content_padding,
+            button_size,
+            spacer_width,
+            visible_tab_count,
+            tabs,
+            format!("floating-group-{group_id:?}-menu"),
+        );
+        let content = group
+            .active_panel
+            .and_then(|panel_id| self.layout.panel_instance(panel_id))
+            .map(|panel| self.panels.render(panel, &self.theme))
+            .unwrap_or_else(|| div().into_any_element());
+        let content_height = (height - tab_strip_height).max(0.0);
+        self.render_tab_group(
+            width,
+            height,
+            true,
+            !group.collapsed,
+            content_height,
+            tab_strip,
+            content,
+        )
     }
 
     fn render_column(
@@ -990,6 +1089,27 @@ impl Render for MainWindow {
                         bounds.origin.y,
                     ));
                 }
+                root = root.child(floating_view);
+            } else if matches!(self.layout.node(composition_root), Some(Node::Tabs(_))) {
+                let floating_view = div()
+                    .id("floating-dock-composition")
+                    .absolute()
+                    .left(px(bounds.origin.x))
+                    .top(px(bounds.origin.y))
+                    .flex()
+                    .flex_col()
+                    .w(px(bounds.size.width))
+                    .h(px(bounds.size.height))
+                    .bg(rgb(colors.dock_background))
+                    .border_1()
+                    .border_color(rgb(colors.border))
+                    .overflow_hidden()
+                    .child(self.render_floating_tab_group(
+                        cx,
+                        composition_root,
+                        bounds.size.width,
+                        bounds.size.height,
+                    ));
                 root = root.child(floating_view);
             }
         }

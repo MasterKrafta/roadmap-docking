@@ -1,4 +1,4 @@
-use dock_core::{DockCommand, DockSide, FloatingGroupId, NodeId, Point, Rect, Size};
+use dock_core::{DockCommand, DockSide, FloatingGroupId, Node, NodeId, Point, Rect, Size};
 
 use super::MainWindow;
 
@@ -134,6 +134,36 @@ impl MainWindow {
         self.composition_drag_pending = true;
     }
 
+    pub(super) fn begin_tab_group_drag(
+        &mut self,
+        column_index: usize,
+        group_id: NodeId,
+        pointer_x: f32,
+        pointer_y: f32,
+    ) {
+        if self.floating_composition.is_some()
+            || !self.main_column_indices_in_core_order().contains(&column_index)
+        {
+            return;
+        }
+        let Some(column_id) = self.column_ids.get(column_index).copied() else {
+            return;
+        };
+        if !self.group_ids_in_column(column_id).contains(&group_id) {
+            return;
+        }
+
+        self.composition_drag_pending = false;
+        self.composition_dragging = false;
+        self.composition_drag_source = Some(group_id);
+        self.composition_drag_group = None;
+        self.composition_drag_start_x = pointer_x;
+        self.composition_drag_start_y = pointer_y;
+        self.composition_drag_offset_x = self.column_width(column_index) / 2.0;
+        self.composition_drag_offset_y = self.theme.metrics.tab_strip_height / 2.0;
+        self.composition_drag_pending = true;
+    }
+
     fn floating_origin_for_pointer(
         &self,
         pointer_x: f32,
@@ -163,7 +193,31 @@ impl MainWindow {
         window_height: f32,
     ) -> Option<FloatingGroupId> {
         let node = self.composition_drag_source?;
-        let size = self.composition_size(node, window_height)?;
+        let size = match self.layout.node(node) {
+            Some(Node::Tabs(_)) => {
+                let width = self
+                    .column_ids
+                    .iter()
+                    .enumerate()
+                    .find_map(|(column_index, column_id)| {
+                        self.group_ids_in_column(*column_id)
+                            .contains(&node)
+                            .then(|| self.column_width(column_index))
+                    })
+                    .unwrap_or(self.theme.metrics.default_column_width);
+                let menu_height = self
+                    .theme
+                    .metrics
+                    .column_header_height
+                    .min(window_height.max(1.0));
+                let available_height = (window_height - menu_height).max(1.0);
+                Some(Size::new(
+                    width.max(1.0),
+                    available_height.min((window_height * 0.75).max(1.0)).max(1.0),
+                ))
+            }
+            _ => self.composition_size(node, window_height),
+        }?;
         let origin = self.floating_origin_for_pointer(
             pointer_x,
             pointer_y,
