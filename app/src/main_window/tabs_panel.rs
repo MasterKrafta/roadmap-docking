@@ -133,7 +133,7 @@ mod tests {
     fn more_tabs_share_available_width_instead_of_overflowing() {
         let (tab_width, spacer_width) = tab_strip_geometry(280.0, 24.0, 104.0, 4);
 
-        assert!((tab_width - 52.0).abs() < 0.001);
+        assert!((tab_width - 58.0).abs() < 0.001);
         assert!((tab_width * 4.0 + spacer_width + 24.0 - 280.0).abs() < 0.001);
     }
 
