@@ -1818,12 +1818,8 @@ impl MainWindow {
                     ));
                 }
 
-                let menu_element_id = match (column_index, *group_index) {
-                    (0, 0) => "left-dock-top-group-menu".to_owned(),
-                    (1, 0) => "right-dock-top-group-menu".to_owned(),
-                    (1, 1) => "right-dock-bottom-group-menu".to_owned(),
-                    _ => format!("dock-column-{column_index}-group-{group_index}-menu"),
-                };
+                let menu_element_id =
+                    format!("dock-column-{column_index}-group-{group_index}-menu");
                 let tab_strip = self.render_tab_strip(
                     cx,
                     column_index,
