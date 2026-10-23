@@ -760,6 +760,24 @@ impl MainWindow {
         self.collapse_column_to_icons(menu.column_index);
     }
 
+    fn expand_context_tabs(&mut self) {
+        let Some(menu) = self.tab_context_menu.take() else {
+            return;
+        };
+        if menu.column_index >= self.column_ids.len() {
+            return;
+        }
+        if let Err(error) = self.layout.apply(
+            DockCommand::SetColumnMode {
+                column: self.column_ids[menu.column_index],
+                mode: ColumnMode::Expanded,
+            },
+            &self.dock_metrics,
+        ) {
+            eprintln!("Could not expand dock tabs: {error}");
+        }
+    }
+
     fn minimize_context_group(&mut self) {
         let Some(menu) = self.tab_context_menu.take() else {
             return;
@@ -1578,7 +1596,19 @@ impl MainWindow {
                         .id(format!("collapsed-dock-group-header-{column_index}-{group_index}"))
                         .w(px(rail_item_width))
                         .h(px(12.0))
-                        .bg(rgb(colors.dock_background));
+                        .bg(rgb(colors.dock_background))
+                        .on_mouse_down(
+                            MouseButton::Right,
+                            cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                                this.open_header_context_menu(
+                                    column_index,
+                                    group_id,
+                                    event.position.x.as_f32(),
+                                    event.position.y.as_f32(),
+                                );
+                                cx.notify();
+                            }),
+                        );
                     collapsed_tab_rail = collapsed_tab_rail.child(mini_header);
                     last_group_index = Some(group_index);
                 }
@@ -1872,6 +1902,20 @@ impl Render for MainWindow {
                     cx.notify();
                 }))
                 .child("Collapse to Icons");
+            let expand_tabs = div()
+                .id("dock-context-expand-tabs")
+                .flex()
+                .items_center()
+                .w(px(context_item_width))
+                .h(px(30.0))
+                .p(px(8.0))
+                .bg(rgb(colors.toolbar_background))
+                .text_color(rgb(colors.primary_text))
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.expand_context_tabs();
+                    cx.notify();
+                }))
+                .child("Expand Tabs");
             let close_tab_group = div()
                 .id("dock-context-close-tab-group")
                 .flex()
@@ -1899,7 +1943,15 @@ impl Render for MainWindow {
                 .border_color(rgb(colors.border))
                 .p(px(4.0));
             if menu_state.header_only {
-                dropdown = dropdown.child(collapse_to_icons);
+                let column_is_collapsed = matches!(
+                    self.layout.node(self.column_ids[menu_state.column_index]),
+                    Some(Node::Column(column)) if column.mode == ColumnMode::IconsOnly
+                );
+                dropdown = if column_is_collapsed {
+                    dropdown.child(expand_tabs)
+                } else {
+                    dropdown.child(collapse_to_icons)
+                };
             } else {
                 dropdown = dropdown
                     .child(close_tab)
