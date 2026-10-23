@@ -778,18 +778,19 @@ impl MainWindow {
         }
     }
 
-    fn minimize_context_group(&mut self) {
+    fn toggle_context_group_collapse(&mut self) {
         let Some(menu) = self.tab_context_menu.take() else {
             return;
         };
+        let collapsed = !self.group_is_collapsed(menu.group);
         if let Err(error) = self.layout.apply(
             DockCommand::CollapseGroup {
                 group: menu.group,
-                collapsed: true,
+                collapsed,
             },
             &self.dock_metrics,
         ) {
-            eprintln!("Could not minimize dock group: {error}");
+            eprintln!("Could not change dock group collapse state: {error}");
         }
     }
 
@@ -1874,6 +1875,12 @@ impl Render for MainWindow {
                     cx.notify();
                 }))
                 .child("Close Tab");
+            let group_is_collapsed = self.group_is_collapsed(menu_state.group);
+            let group_action_title = if group_is_collapsed {
+                "Expand Tab Group"
+            } else {
+                "Minimize"
+            };
             let minimize = div()
                 .id("dock-context-minimize")
                 .flex()
@@ -1884,10 +1891,10 @@ impl Render for MainWindow {
                 .bg(rgb(colors.toolbar_background))
                 .text_color(rgb(colors.primary_text))
                 .on_click(cx.listener(|this, _, _, cx| {
-                    this.minimize_context_group();
+                    this.toggle_context_group_collapse();
                     cx.notify();
                 }))
-                .child("Minimize");
+                .child(group_action_title);
             let collapse_to_icons = div()
                 .id("dock-context-collapse-to-icons")
                 .flex()
