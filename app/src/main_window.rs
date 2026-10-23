@@ -1,5 +1,5 @@
 use dock_core::{
-    Axis, DockCommand, DockMetrics, DockSide, DropTarget, DropZone, Layout, Node, NodeId, PanelId,
+    Axis, ColumnMode, DockCommand, DockMetrics, DockSide, DropTarget, DropZone, Layout, Node, NodeId, PanelId,
     PanelKey, Profile,
 };
 use dock_gpui::dock_metrics_from_theme;
@@ -23,8 +23,6 @@ pub(crate) struct MainWindow {
     /// Core removes empty columns and collapses their parent Split. These flags keep
     /// the view aligned with that topology; the last remaining column stays open.
     column_open: [bool; 2],
-    /// Whether each column renders tabs as a compact vertical icon rail.
-    column_tabs_collapsed: [bool; 2],
     /// The left column has one tab group; the right column has upper and lower groups.
     column_has_bottom_group: [bool; 2],
     top_tab_groups: [NodeId; 2],
@@ -218,7 +216,6 @@ impl MainWindow {
             dock_metrics,
             column_ids,
             column_open: [true; 2],
-            column_tabs_collapsed: [false; 2],
             column_has_bottom_group,
             top_tab_groups,
             bottom_tab_groups,
@@ -547,7 +544,10 @@ impl MainWindow {
         let column_width = self.column_width(column_index);
         let colors = self.theme.colors;
         let metrics = self.theme.metrics;
-        let tabs_collapsed = self.column_tabs_collapsed[column_index];
+        let tabs_collapsed = matches!(
+            self.layout.node(column_id),
+            Some(Node::Column(column)) if column.mode == ColumnMode::IconsOnly
+        );
 
         let header_height = metrics.column_header_height.min(window_height);
         let available_below_header = (window_height - header_height).max(0.0);
@@ -596,12 +596,30 @@ impl MainWindow {
         let bottom_content_height = (bottom_group_height - bottom_tab_strip_height).max(0.0);
 
         let button_size = metrics.button_size.min(column_width);
-        let button_gap = metrics.button_gap;
-        let content_padding = metrics.content_padding.min(column_width / 2.0);
-        let header_spacer_width =
-            (column_width - content_padding - button_size * 2.0 - button_gap).max(0.0);
-        let tab_rail_width = if tabs_collapsed { button_size } else { 0.0 };
+        let button_gap = if tabs_collapsed { 0.0 } else { metrics.button_gap };
+        let content_padding = if tabs_collapsed {
+            0.0
+        } else {
+            metrics.content_padding.min(column_width / 2.0)
+        };
+        let collapse_button_width = if tabs_collapsed {
+            (column_width * 0.58).max(1.0)
+        } else {
+            button_size
+        };
+        let close_button_width = if tabs_collapsed {
+            (column_width - collapse_button_width).max(1.0)
+        } else {
+            button_size
+        };
+        let header_spacer_width = if tabs_collapsed {
+            0.0
+        } else {
+            (column_width - content_padding - button_size * 2.0 - button_gap).max(0.0)
+        };
+        let tab_rail_width = if tabs_collapsed { column_width } else { 0.0 };
         let column_content_width = (column_width - tab_rail_width).max(0.0);
+        let rail_item_width = if tabs_collapsed { column_width } else { button_size };
         let available_tab_width =
             (column_content_width - content_padding * 2.0 - button_size).max(0.0);
         let tab_width = metrics
@@ -898,13 +916,29 @@ impl MainWindow {
                             .flex()
                             .items_center()
                             .justify_center()
-                            .w(px(button_size))
+                            .w(px(collapse_button_width))
                             .h(px(button_size))
                             .bg(rgb(colors.hover))
                             .text_color(rgb(colors.primary_text))
                             .on_click(cx.listener(move |this, _, _, cx| {
-                                this.column_tabs_collapsed[column_index] =
-                                    !this.column_tabs_collapsed[column_index];
+                                let mode = if matches!(
+                                    this.layout.node(this.column_ids[column_index]),
+                                    Some(Node::Column(column))
+                                        if column.mode == ColumnMode::IconsOnly
+                                ) {
+                                    ColumnMode::Expanded
+                                } else {
+                                    ColumnMode::IconsOnly
+                                };
+                                if let Err(error) = this.layout.apply(
+                                    DockCommand::SetColumnMode {
+                                        column: this.column_ids[column_index],
+                                        mode,
+                                    },
+                                    &this.dock_metrics,
+                                ) {
+                                    eprintln!("Could not change dock column mode: {error}");
+                                }
                                 cx.notify();
                             }))
                             .child(if tabs_collapsed { "<<" } else { ">>" }),
@@ -920,7 +954,7 @@ impl MainWindow {
                             .flex()
                             .items_center()
                             .justify_center()
-                            .w(px(button_size))
+                            .w(px(close_button_width))
                             .h(px(button_size))
                             .bg(rgb(colors.hover))
                             .text_color(rgb(colors.primary_text))
@@ -932,13 +966,13 @@ impl MainWindow {
                     )
                     .child(div().w(px(content_padding)).h(px(1.0))),
             );
-        if show_top_group {
+        if show_top_group && !tabs_collapsed {
             column_view = column_view.child(top_group);
         }
-        if show_group_splitter {
+        if show_group_splitter && !tabs_collapsed {
             column_view = column_view.child(group_splitter);
         }
-        if show_bottom_group {
+        if show_bottom_group && !tabs_collapsed {
             column_view = column_view.child(bottom_group);
         }
         if tabs_collapsed {
@@ -971,7 +1005,7 @@ impl MainWindow {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .w(px(button_size))
+                    .w(px(rail_item_width))
                     .h(px(button_size))
                     .bg(rgb(if active_panel {
                         colors.active_tab
