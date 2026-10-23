@@ -223,3 +223,59 @@ fn column_ids_in_core_order(layout: &Layout, root: NodeId) -> Result<Vec<NodeId>
         _ => Err("Core main dock root must be a Column or a horizontal split of Columns".to_owned()),
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dock_core::{DockMetrics, Node};
+    use crate::panels::PanelRegistry;
+
+    #[test]
+    fn created_layout_matches_the_column_and_group_specification() {
+        let metrics = DockMetrics::default();
+        let (layout, columns) =
+            create_initial_layout(&PanelRegistry::default(), &metrics, 0.6)
+                .expect("the built-in panel registry should satisfy the initial layout spec");
+
+        assert_eq!(columns.len(), INITIAL_COLUMNS_LEFT_TO_RIGHT.len());
+        assert_eq!(layout.validate(&metrics), Ok(()));
+
+        for (column_id, expected_groups) in
+            columns.iter().zip(INITIAL_COLUMNS_LEFT_TO_RIGHT.iter())
+        {
+            let actual_groups = group_ids_for_column(&layout, *column_id);
+            assert_eq!(actual_groups.len(), expected_groups.len());
+
+            for (group_id, expected_panels) in
+                actual_groups.iter().zip(expected_groups.iter())
+            {
+                let Some(Node::Tabs(tabs)) = layout.node(*group_id) else {
+                    panic!("every initial group must be represented by a Tabs node");
+                };
+                assert_eq!(tabs.children.len(), expected_panels.len());
+
+                for (panel_node_id, expected_key) in
+                    tabs.children.iter().zip(expected_panels.iter())
+                {
+                    let Some(Node::Panel(panel)) = layout.node(*panel_node_id) else {
+                        panic!("initial Tabs groups must contain Panel leaves");
+                    };
+                    let instance = layout
+                        .panel_instance(panel.panel_id)
+                        .expect("every initial Panel node must have an instance");
+                    assert_eq!(instance.key.as_str(), *expected_key);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn initial_group_ratios_support_any_positive_group_count() {
+        assert_eq!(initial_group_ratios(1, 0.6).unwrap(), vec![1.0]);
+        assert_eq!(initial_group_ratios(2, 0.6).unwrap(), vec![0.6, 0.39999998]);
+        assert_eq!(initial_group_ratios(3, 0.6).unwrap(), vec![0.6, 0.19999999, 0.19999999]);
+        assert!(initial_group_ratios(0, 0.6).is_err());
+        assert!(initial_group_ratios(2, f32::NAN).is_err());
+    }
+}
