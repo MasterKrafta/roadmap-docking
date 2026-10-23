@@ -372,17 +372,17 @@ impl MainWindow {
             .column_header_height
             .min(window_height.max(1.0));
         let inside_context_menu = self.tab_context_menu.is_some_and(|menu| {
-            let menu_height = if menu.header_only { 42.0 } else { 132.0 };
+            let popup_height = if menu.header_only { 42.0 } else { 132.0 };
             pointer_x >= menu.left
-                && pointer_x <= menu.left + 192.0
+                && pointer_x <= (menu.left + 192.0).min(window_width)
                 && pointer_y >= menu.top
-                && pointer_y <= menu.top + menu_height
+                && pointer_y <= (menu.top + popup_height).min(window_height)
         });
         let inside_windows_menu = self.windows_menu_open
             && pointer_x >= 0.0
-            && pointer_x <= 224.0
+            && pointer_x <= 224.0_f32.min(window_width)
             && pointer_y >= menu_height
-            && pointer_y <= menu_height + 136.0;
+            && pointer_y <= (menu_height + 136.0).min(window_height);
         // The Windows button itself is a trigger, not an outside click. It can
         // open or close that dropdown while still dismissing the other menu.
         let on_windows_button = pointer_x >= 0.0
