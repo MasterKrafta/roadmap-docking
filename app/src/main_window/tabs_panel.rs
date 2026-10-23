@@ -1,63 +1,56 @@
-use gpui::{Context, Div, InteractiveElement, ParentElement, StatefulInteractiveElement, Styled, div, px, rgb};
-use ui::Theme;
+mod hamburger_button;
+mod panel_content;
+mod tab;
 
-use super::MainWindow;
+use gpui::{Context, Div, ParentElement, Styled, div, px, rgb};
+use hamburger_button::HamburgerButton;
+use panel_content::PanelContent;
+use tab::Tab;
+use ui::Theme;
 
 const MIN_TAB_SPACER_WIDTH: f32 = 24.0;
 
-/// Draws one tab group: tab strip, menu button, and the panel content surface.
+/// Composes a dynamic collection of tab headers, a menu button, and a content surface.
 pub(crate) struct TabsPanel {
     theme: Theme,
-    active_tab: usize,
+    tabs: Vec<Tab>,
+    active_tab_id: String,
+    hamburger_button: HamburgerButton,
+    content: PanelContent,
 }
 
 impl TabsPanel {
     pub(crate) fn new(theme: Theme) -> Self {
+        let tabs = vec![
+            Tab::new("tab-layers", "Layers"),
+            Tab::new("tab-color", "Color"),
+        ];
+
         Self {
             theme,
-            active_tab: 0,
+            active_tab_id: "tab-layers".to_owned(),
+            tabs,
+            hamburger_button: HamburgerButton::new(theme),
+            content: PanelContent::new(theme),
         }
     }
 
     pub(crate) fn render(&self, cx: &mut Context<MainWindow>, height: f32) -> Div {
         let metrics = self.theme.metrics;
         let colors = self.theme.colors;
-
         let width = metrics.default_column_width.max(1.0);
         let height = height.max(1.0);
         let strip_height = metrics.tab_strip_height.min(height).max(1.0);
         let button_width = metrics.button_size.min(width).max(1.0);
-        let spacer_width = MIN_TAB_SPACER_WIDTH.min((width - button_width).max(0.0));
-        let tabs_available_width = (width - button_width - spacer_width).max(0.0);
-        let tab_width = metrics
-            .column_tab_width
-            .max(0.0)
-            .min(tabs_available_width / 2.0);
-        let actual_spacer_width = (width - button_width - tab_width * 2.0).max(spacer_width);
+        let (tab_width, spacer_width) = tab_strip_geometry(
+            width,
+            button_width,
+            metrics.column_tab_width,
+            self.tabs.len(),
+        );
         let content_height = (height - strip_height).max(0.0);
 
-        let first_tab_background = if self.active_tab == 0 {
-            colors.active_tab
-        } else {
-            colors.toolbar_background
-        };
-        let first_tab_text = if self.active_tab == 0 {
-            colors.primary_text
-        } else {
-            colors.muted_text
-        };
-        let second_tab_background = if self.active_tab == 1 {
-            colors.active_tab
-        } else {
-            colors.toolbar_background
-        };
-        let second_tab_text = if self.active_tab == 1 {
-            colors.primary_text
-        } else {
-            colors.muted_text
-        };
-
-        let strip = div()
+        let mut strip = div()
             .flex()
             .flex_row()
             .items_center()
@@ -65,66 +58,27 @@ impl TabsPanel {
             .h(px(strip_height))
             .bg(rgb(colors.toolbar_background))
             .border_1()
-            .border_color(rgb(colors.border))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .w(px(tab_width))
-                    .h(px(strip_height))
-                    .bg(rgb(first_tab_background))
-                    .text_color(rgb(first_tab_text))
-                    .border_1()
-                    .border_color(rgb(colors.border))
-                    .id("tabs-panel-tab-layers")
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.tabs_panel.active_tab = 0;
-                        cx.notify();
-                    }))
-                    .child("Layers"),
-            )
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .w(px(tab_width))
-                    .h(px(strip_height))
-                    .bg(rgb(second_tab_background))
-                    .text_color(rgb(second_tab_text))
-                    .border_1()
-                    .border_color(rgb(colors.border))
-                    .id("tabs-panel-tab-color")
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.tabs_panel.active_tab = 1;
-                        cx.notify();
-                    }))
-                    .child("Color"),
-            )
-            // Intentionally empty space between the tabs and the menu button.
-            .child(div().w(px(actual_spacer_width)).h(px(strip_height)))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .w(px(button_width))
-                    .h(px(strip_height))
-                    .bg(rgb(colors.toolbar_background))
-                    .text_color(rgb(colors.primary_text))
-                    .border_1()
-                    .border_color(rgb(colors.border))
-                    .child("☰"),
-            );
-
-        // The content surface fills all remaining height so no empty strip is left below it.
-        let content = div()
-            .w(px(width))
-            .h(px(content_height))
-            .bg(rgb(colors.group_background))
-            .border_1()
             .border_color(rgb(colors.border));
+
+        for tab in &self.tabs {
+            let tab_id = tab.id().to_owned();
+            let active = self.active_tab_id == tab.id();
+            strip = strip.child(tab.render(
+                self.theme,
+                tab_width,
+                strip_height,
+                active,
+                cx.listener(move |this, _, _, cx| {
+                    this.tabs_panel.active_tab_id = tab_id.clone();
+                    cx.notify();
+                }),
+            ));
+        }
+
+        strip = strip
+            // The empty region separates the last tab from the menu button.
+            .child(div().w(px(spacer_width)).h(px(strip_height)))
+            .child(self.hamburger_button.render(button_width, strip_height));
 
         div()
             .flex()
@@ -135,37 +89,59 @@ impl TabsPanel {
             .border_1()
             .border_color(rgb(colors.border))
             .child(strip)
-            .child(content)
+            .child(self.content.render(width, content_height))
     }
+}
+
+/// Computes equal tab widths while preserving a small empty drag/menu gap.
+fn tab_strip_geometry(
+    width: f32,
+    button_width: f32,
+    desired_tab_width: f32,
+    tab_count: usize,
+) -> (f32, f32) {
+    let width = width.max(0.0);
+    let button_width = button_width.max(0.0).min(width);
+    let minimum_spacer = MIN_TAB_SPACER_WIDTH.min((width - button_width).max(0.0));
+    let available_for_tabs = (width - button_width - minimum_spacer).max(0.0);
+    let tab_width = if tab_count == 0 {
+        0.0
+    } else {
+        desired_tab_width
+            .max(0.0)
+            .min(available_for_tabs / tab_count as f32)
+    };
+    let spacer_width =
+        (width - button_width - tab_width * tab_count as f32).max(minimum_spacer);
+
+    (tab_width, spacer_width)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::MIN_TAB_SPACER_WIDTH;
-    use ui::Theme;
+    use super::tab_strip_geometry;
 
     #[test]
-    fn default_width_leaves_space_between_two_tabs_and_menu() {
-        let theme = Theme::default();
-        let width = theme.metrics.default_column_width;
-        let button_width = theme.metrics.button_size.min(width).max(1.0);
-        let spacer_width = MIN_TAB_SPACER_WIDTH.min((width - button_width).max(0.0));
-        let tabs_available = (width - button_width - spacer_width).max(0.0);
-        let tab_width = theme.metrics.column_tab_width.max(0.0).min(tabs_available / 2.0);
-        let actual_spacer = (width - button_width - tab_width * 2.0).max(spacer_width);
+    fn default_width_allocates_two_dynamic_tabs_and_a_gap() {
+        let (tab_width, spacer_width) = tab_strip_geometry(280.0, 24.0, 104.0, 2);
 
-        assert!(actual_spacer >= MIN_TAB_SPACER_WIDTH);
-        assert!(tab_width > 0.0);
-        assert!(button_width > 0.0);
+        assert!((tab_width - 104.0).abs() < 0.001);
+        assert!((spacer_width - 48.0).abs() < 0.001);
     }
 
     #[test]
-    fn content_occupies_all_height_below_the_tab_strip() {
-        let theme = Theme::default();
-        let height = 700.0;
-        let strip_height = theme.metrics.tab_strip_height.min(height).max(1.0);
-        let content_height = (height - strip_height).max(0.0);
+    fn more_tabs_share_available_width_instead_of_overflowing() {
+        let (tab_width, spacer_width) = tab_strip_geometry(280.0, 24.0, 104.0, 4);
 
-        assert!((strip_height + content_height - height).abs() < 0.001);
+        assert!((tab_width - 52.0).abs() < 0.001);
+        assert!((tab_width * 4.0 + spacer_width + 24.0 - 280.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn empty_tab_list_keeps_the_menu_gap() {
+        let (tab_width, spacer_width) = tab_strip_geometry(280.0, 24.0, 104.0, 0);
+
+        assert_eq!(tab_width, 0.0);
+        assert!((spacer_width - 256.0).abs() < 0.001);
     }
 }
