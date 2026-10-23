@@ -353,7 +353,7 @@ impl DockController {
         self.refresh_drag_target(position);
         let Some(mut session) = self.drag_session.take() else {
             self.drag_overlay = None;
-                return;
+            return;
         };
         let target = session.preview().and_then(|preview| preview.target);
         let request = match session.pointer_up(position, target) {
@@ -365,14 +365,12 @@ impl DockController {
             Err(error) => {
                 eprintln!("Dock drag cancelled: {error}");
                 self.drag_overlay = None;
-                self.drag_handle = None;
                 return;
             }
         };
 
         self.apply_drag_request(request);
         self.drag_overlay = None;
-        self.drag_handle = None;
     }
 
     fn apply_drag_request(&mut self, mut request: DragDropRequest) {
@@ -459,7 +457,6 @@ impl DockController {
         }
         if let Some(mut session) = self.drag_session.take() {
             let _ = session.escape();
-            self.drag_handle = None;
             self.drag_overlay = None;
             return true;
         }
