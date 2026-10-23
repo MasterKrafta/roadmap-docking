@@ -702,8 +702,10 @@ fn layout_floating_root(
 ) -> Result<(), ComputeRectsError> {
     let title_height = metrics.header_height.min(rect.size.height);
     match layout.node(id) {
-        Some(Node::Column(_))
-            if floating_branch_starts_collapsed(layout, id) && rect.size.height > title_height =>
+        Some(Node::Column(column))
+            if column.groups.len() > 1
+                && floating_branch_starts_collapsed(layout, id)
+                && rect.size.height > title_height =>
         {
             let content_rect = Rect::new(
                 Point::new(rect.origin.x, rect.origin.y + title_height),
@@ -1448,6 +1450,32 @@ mod tests {
             layout.floating_group(floating).unwrap().bounds,
             model_bounds
         );
+    }
+
+    #[test]
+    fn single_group_floating_column_keeps_standalone_group_geometry() {
+        let metrics = DockMetrics::default();
+        let mut builder = LayoutBuilder::new(Profile::Photoshop);
+        let (_, panel_node) = builder.panel(key("floating-single-column"), constraints());
+        let group = builder.tabs(vec![panel_node], 0, true);
+        let column = builder.column(
+            300.0,
+            ColumnMode::Expanded,
+            vec![group],
+            vec![1.0],
+        );
+        let bounds = Rect::new(Point::new(40.0, 50.0), Size::new(300.0, 260.0));
+        builder.floating_group(column, bounds, 1);
+        let layout = builder.build();
+
+        let rects = layout
+            .compute_rects(viewport(1000.0, 700.0), &metrics)
+            .unwrap();
+        let group_rect = rects.groups.iter().find(|entry| entry.group == group).unwrap().rect;
+
+        assert_eq!(rects.floating_groups[0].rect, bounds);
+        assert_eq!(group_rect.origin.y, bounds.origin.y);
+        assert_eq!(group_rect.size.height, metrics.effective_collapsed_group_height());
     }
 
     #[test]
