@@ -1,5 +1,8 @@
+#[path = "tabs_panel/hamburger_button.rs"]
 mod hamburger_button;
+#[path = "tabs_panel/panel_content.rs"]
 mod panel_content;
+#[path = "tabs_panel/tab.rs"]
 mod tab;
 
 use gpui::{Context, Div, ParentElement, Styled, div, px, rgb};
