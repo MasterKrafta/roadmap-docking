@@ -3137,12 +3137,9 @@ impl Layout {
                 reason: "FloatPanelAsGroup requires a panel inside a Tabs group",
             },
         )?;
-        let source_tabs = match self.nodes.get(source_group) {
-            Some(Node::Tabs(tabs)
-                if tabs.children.len() > 1 && tabs.children.contains(&panel_node)) =>
-            {
-                tabs
-            }
+        match self.nodes.get(source_group) {
+            Some(Node::Tabs(tabs))
+                if tabs.children.len() > 1 && tabs.children.contains(&panel_node) => {}
             Some(Node::Tabs(_)) => {
                 return Err(CommandError::InvalidTarget {
                     reason: "cannot detach the only tab from a group; float the containing group instead",
@@ -3153,8 +3150,7 @@ impl Layout {
                     reason: "FloatPanelAsGroup requires a panel inside a Tabs group",
                 });
             }
-        };
-        let _source_tab_count = source_tabs.children.len();
+        }
         let requested_width = self
             .find_owner_column(source_group)
             .and_then(|column_id| match self.nodes.get(column_id) {
