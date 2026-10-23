@@ -749,8 +749,7 @@ impl MainWindow {
     }
 
     fn group_is_collapsed(&self, group: NodeId) -> bool {
-        self.tab_group_view_data(group)
-            .is_some_and(|group| group.collapsed)
+        matches!(self.layout.node(group), Some(Node::Tabs(tabs)) if tabs.collapsed)
     }
 
     fn toggle_group_collapse(&mut self, group: NodeId) {
@@ -1334,6 +1333,8 @@ impl MainWindow {
         let column_id = self.column_ids[column_index];
         let top_tab_group = self.top_tab_groups[column_index];
         let bottom_tab_group = self.bottom_tab_groups[column_index];
+        let top_group_data = self.tab_group_view_data(top_tab_group);
+        let bottom_group_data = self.tab_group_view_data(bottom_tab_group);
         let panel_ids = self.panels_by_column[column_index];
         let column_width = self.column_width(column_index);
         let colors = self.theme.colors;
@@ -1357,9 +1358,10 @@ impl MainWindow {
         };
         let show_top_group = visible_top_count > 0;
         let show_bottom_group = has_bottom_group && visible_bottom_count > 0;
-        let top_group_collapsed = show_top_group && self.group_is_collapsed(top_tab_group);
+        let top_group_collapsed =
+            show_top_group && top_group_data.as_ref().is_some_and(|group| group.collapsed);
         let bottom_group_collapsed =
-            show_bottom_group && self.group_is_collapsed(bottom_tab_group);
+            show_bottom_group && bottom_group_data.as_ref().is_some_and(|group| group.collapsed);
         let show_group_splitter = show_top_group && show_bottom_group;
         let group_split_hit_height = if show_group_splitter {
             metrics.splitter_hit_zone.max(metrics.splitter_thickness)
@@ -1459,11 +1461,14 @@ impl MainWindow {
         let bottom_tab_spacer_width =
             (available_tab_width - bottom_tab_width * visible_bottom_count as f32).max(0.0);
 
-        let active_top_panel = self
-            .active_panel_id(top_tab_group)
+        let active_top_panel = top_group_data
+            .as_ref()
+            .and_then(|group| group.active_panel)
             .filter(|panel_id| self.panel_is_visible(column_index, *panel_id));
         let active_bottom_panel = if has_bottom_group {
-            self.active_panel_id(bottom_tab_group)
+            bottom_group_data
+                .as_ref()
+                .and_then(|group| group.active_panel)
                 .filter(|panel_id| self.panel_is_visible(column_index, *panel_id))
         } else {
             None
