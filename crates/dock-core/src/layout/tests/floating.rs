@@ -125,6 +125,16 @@ fn c46_float_entire_horizontal_column_composition_preserves_columns_and_groups()
     assert!(matches!(layout.node(left_column), Some(Node::Column(column)) if column.groups == vec![left_group]));
     assert!(matches!(layout.node(right_column), Some(Node::Column(column)) if column.groups == vec![right_group]));
     assert_eq!(layout.validate(&metrics), Ok(()));
+
+    // Closing one of the floating columns must normalize the composition to
+    // the surviving column, rather than retaining the old horizontal split.
+    layout
+        .apply(DockCommand::CloseGroup { group: left_group }, &metrics)
+        .unwrap();
+    let floating = layout.floating_group(floating_id).unwrap();
+    assert_eq!(layout.dock_area(floating.area).unwrap().root, right_column);
+    assert!(layout.node(left_column).is_none());
+    assert_eq!(layout.validate(&metrics), Ok(()));
 }
 
 #[test]
