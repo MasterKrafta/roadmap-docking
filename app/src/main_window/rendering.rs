@@ -1,4 +1,4 @@
-use dock_core::{ColumnMode, DockCommand, DockSide, Node, NodeId, PanelId};
+use dock_core::{ColumnMode, DockCommand, DockSide, Node, NodeId, PanelId, Point};
 use gpui::{
     Context, CursorStyle, Div, InteractiveElement, IntoElement, MouseButton,
     MouseDownEvent, MouseMoveEvent, ParentElement, Render, StatefulInteractiveElement, Styled,
@@ -157,6 +157,12 @@ impl MainWindow {
         height: f32,
         active: bool,
         title: String,
+        tab_origin_x: f32,
+        tab_origin_y: f32,
+        column_origin_x: f32,
+        group_origin_y: f32,
+        composition_origin: Point,
+        content_padding: f32,
     ) -> impl IntoElement + use<> {
         let colors = self.theme.colors;
 
@@ -196,9 +202,27 @@ impl MainWindow {
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, _, cx| {
                     if event.click_count == 2 {
+                        this.composition_drag_pending = false;
+                        this.composition_dragging = false;
+                        this.composition_drag_source = None;
+                        this.composition_drag_group = None;
                         this.toggle_group_collapse(group_id);
-                        cx.notify();
+                    } else {
+                        this.begin_panel_drag(
+                            column_index,
+                            group_id,
+                            panel_id,
+                            event.position.x.as_f32(),
+                            event.position.y.as_f32(),
+                            tab_origin_x,
+                            tab_origin_y,
+                            column_origin_x,
+                            group_origin_y,
+                            composition_origin,
+                            content_padding,
+                        );
                     }
+                    cx.notify();
                 }),
             )
             .on_click(cx.listener(move |this, _, _, cx| {
@@ -248,6 +272,9 @@ impl MainWindow {
         column_index: usize,
         group_id: NodeId,
         active_panel: Option<PanelId>,
+        column_origin_x: f32,
+        group_origin_y: f32,
+        composition_origin: Point,
         width: f32,
         height: f32,
         content_padding: f32,
@@ -273,6 +300,9 @@ impl MainWindow {
                 column_index,
                 group_id,
                 active_panel,
+                column_origin_x,
+                group_origin_y,
+                composition_origin,
                 content_padding,
                 height,
                 false,
@@ -298,6 +328,9 @@ impl MainWindow {
                 column_index,
                 group_id,
                 active_panel,
+                column_origin_x,
+                group_origin_y,
+                composition_origin,
                 spacer_width,
                 height,
                 true,
@@ -366,6 +399,9 @@ impl MainWindow {
         column_index: usize,
         group_id: NodeId,
         active_panel: Option<PanelId>,
+        column_origin_x: f32,
+        group_origin_y: f32,
+        composition_origin: Point,
         width: f32,
         height: f32,
         starts_group_drag: bool,
@@ -390,6 +426,10 @@ impl MainWindow {
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, _, cx| {
                     if event.click_count == 2 {
+                        this.composition_drag_pending = false;
+                        this.composition_dragging = false;
+                        this.composition_drag_source = None;
+                        this.composition_drag_group = None;
                         this.toggle_group_collapse(group_id);
                         cx.notify();
                     } else if starts_group_drag {
@@ -398,6 +438,9 @@ impl MainWindow {
                             group_id,
                             event.position.x.as_f32(),
                             event.position.y.as_f32(),
+                            column_origin_x,
+                            group_origin_y,
+                            composition_origin,
                         );
                         cx.notify();
                     }
@@ -411,6 +454,7 @@ impl MainWindow {
         group_id: NodeId,
         width: f32,
         height: f32,
+        origin: Point,
     ) -> Div {
         let Some(mut group) = self.tab_group_view_data(group_id) else {
             return div().w(px(0.0)).h(px(0.0));
@@ -455,6 +499,12 @@ impl MainWindow {
                 tab_strip_height,
                 group.active_panel == Some(panel_id),
                 self.panels.title(panel).to_owned(),
+                origin.x + content_padding + tab_index as f32 * tab_width,
+                origin.y,
+                origin.x,
+                origin.y,
+                origin,
+                content_padding,
             ));
         }
 
@@ -463,6 +513,9 @@ impl MainWindow {
             column_index,
             group_id,
             group.active_panel,
+            origin.x,
+            origin.y,
+            origin,
             width,
             tab_strip_height,
             content_padding,
@@ -495,6 +548,8 @@ impl MainWindow {
         column_index: usize,
         window_height: f32,
         window_y_offset: f32,
+        column_origin_x: f32,
+        composition_origin: Point,
     ) -> Div {
         let column_id = self.column_ids[column_index];
         let core_group_ids = self.group_ids_in_column(column_id);
@@ -565,10 +620,16 @@ impl MainWindow {
 
         let column_label = self.column_label(column_index);
         let mut rendered_groups: Vec<(usize, Div, f32)> = Vec::new();
+        let mut strip_cursor_y = window_y_offset + header_height;
+        let mut rendered_group_count = 0usize;
         if !tabs_collapsed {
             for ((group_index, group), group_height) in
                 visible_groups.iter().zip(group_heights.iter().copied())
             {
+                if all_groups_visible && rendered_group_count > 0 {
+                    strip_cursor_y += group_split_hit_height;
+                }
+                let group_origin_y = strip_cursor_y;
                 let visible_tab_count = group.panels.len();
                 let (tab_width, spacer_width) =
                     tab_strip_widths(available_tab_width, metrics.column_tab_width, visible_tab_count);
@@ -600,7 +661,13 @@ impl MainWindow {
                         tab_width,
                         tab_strip_height,
                         group.active_panel == Some(panel_id),
-                        title,
+                        self.panels.title(panel).to_owned(),
+                        column_origin_x + content_padding + tab_index as f32 * tab_width,
+                        group_origin_y,
+                        column_origin_x,
+                        group_origin_y,
+                        composition_origin,
+                        content_padding,
                     ));
                 }
 
@@ -611,6 +678,9 @@ impl MainWindow {
                     column_index,
                     group.id,
                     group.active_panel,
+                    column_origin_x,
+                    group_origin_y,
+                    composition_origin,
                     column_content_width,
                     tab_strip_height,
                     content_padding,
@@ -635,6 +705,8 @@ impl MainWindow {
                     content,
                 );
                 rendered_groups.push((*group_index, group_view, group_height));
+                strip_cursor_y += group_height;
+                rendered_group_count += 1;
             }
         }
 
@@ -857,6 +929,9 @@ impl MainWindow {
                                     group_id,
                                     event.position.x.as_f32(),
                                     event.position.y.as_f32(),
+                                    column_origin_x,
+                                    mini_header_origin_y,
+                                    composition_origin,
                                 );
                                 cx.notify();
                             }),
@@ -1009,6 +1084,8 @@ impl Render for MainWindow {
 
         if any_column_open {
             dock_area = dock_area.child(outer_column_splitter);
+            let composition_origin = Point::new(workspace_width + outer_splitter_width, menu_height);
+            let mut column_origin_x = composition_origin.x;
             for (position, column_index) in column_indices.iter().copied().enumerate() {
                 if position > 0 {
                     let boundary_index = position - 1;
@@ -1056,6 +1133,7 @@ impl Render for MainWindow {
                                 ),
                         );
                     dock_area = dock_area.child(column_splitter);
+                    column_origin_x += splitter_width;
                 }
 
                 dock_area = dock_area.child(self.render_column(
@@ -1063,7 +1141,10 @@ impl Render for MainWindow {
                     column_index,
                     dock_height,
                     menu_height,
+                    column_origin_x,
+                    composition_origin,
                 ));
+                column_origin_x += column_widths[position];
             }
         }
 
@@ -1105,6 +1186,7 @@ impl Render for MainWindow {
                     .border_1()
                     .border_color(rgb(colors.border))
                     .overflow_hidden();
+                let mut floating_column_origin_x = bounds.origin.x;
                 for (position, column_index) in composition_columns.iter().copied().enumerate() {
                     if position > 0 {
                         floating_view = floating_view.child(
@@ -1113,13 +1195,17 @@ impl Render for MainWindow {
                                 .h(px(bounds.size.height))
                                 .bg(rgb(colors.splitter)),
                         );
+                        floating_column_origin_x += metrics.splitter_thickness;
                     }
                     floating_view = floating_view.child(self.render_column(
                         cx,
                         column_index,
                         bounds.size.height,
                         bounds.origin.y,
+                        floating_column_origin_x,
+                        bounds.origin,
                     ));
+                    floating_column_origin_x += self.column_width(column_index);
                 }
                 root = root.child(floating_view);
             } else if matches!(self.layout.node(composition_root), Some(Node::Tabs(_))) {
@@ -1141,6 +1227,7 @@ impl Render for MainWindow {
                         composition_root,
                         bounds.size.width,
                         bounds.size.height,
+                        bounds.origin,
                     ));
                 root = root.child(floating_view);
             }
