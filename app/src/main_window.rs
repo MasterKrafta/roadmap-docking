@@ -2155,16 +2155,6 @@ impl Render for MainWindow {
         let menu_height = metrics.column_header_height.min(window_height);
         let dock_height = (window_height - menu_height).max(1.0);
 
-        if self
-            .floating_composition
-            .is_some_and(|group_id| self.layout.floating_group(group_id).is_none())
-        {
-            self.floating_composition = None;
-            self.composition_drag_pending = false;
-            self.composition_dragging = false;
-            self.composition_drag_source = None;
-            self.composition_drag_group = None;
-        }
         self.sync_column_slots_from_core();
         // The Core Split is the source of both column order and column membership.
         // Stable indices only connect current Core node IDs to per-column UI state.
