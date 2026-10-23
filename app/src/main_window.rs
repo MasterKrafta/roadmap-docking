@@ -33,6 +33,6 @@ impl Render for MainWindow {
             .w(px(width))
             .h(px(height))
             .bg(rgb(self.theme.colors.canvas_background))
-            .child(self.tabs_panel.render(width, height))
+            .child(self.tabs_panel.render(height))
     }
 }
