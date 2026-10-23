@@ -1,0 +1,31 @@
+[workspace]
+resolver = "2"
+members = [
+    "app",
+    "crates/dock-core",
+    "crates/dock-gpui",
+    "crates/ui",
+    "crates/platform-api",
+    "crates/platform-windows",
+]
+default-members = ["app", "crates/dock-core", "crates/dock-gpui", "crates/ui", "crates/platform-api", "crates/platform-windows"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99.1"
+authors = ["Docking System contributors"]
+
+[workspace.dependencies]
+gpui = { git = "https://github.com/zed-industries/zed", rev = "9cd14daad768fbfaeeac8789f515f9a5f67669a6", default-features = false }
+gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "9cd14daad768fbfaeeac8789f515f9a5f67669a6" }
+slotmap = "1.0.7"
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "2.0.21"
+tracing = "0.1"
+
+[workspace.lints.rust]
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+all = "warn"
