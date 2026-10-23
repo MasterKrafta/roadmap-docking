@@ -1,4 +1,4 @@
-use gpui::{Context, Div, ParentElement, StatefulInteractiveElement, Styled, div, px, rgb};
+use gpui::{Context, Div, InteractiveElement, ParentElement, StatefulInteractiveElement, Styled, div, px, rgb};
 use ui::Theme;
 
 use super::MainWindow;
