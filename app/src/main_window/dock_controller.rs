@@ -444,7 +444,8 @@ impl DockController {
 
     fn apply_drag_request(&mut self, mut request: DragDropRequest) {
         if request.target == Some(DropTarget::FreeArea) {
-            request.floating_bounds = Some(self.floating_bounds_at(request.point));
+            request.floating_bounds =
+                Some(self.floating_bounds_at(request.point, request.payload));
         }
 
         match self.layout.resolve_drag_drop(&request, &self.metrics) {
@@ -454,16 +455,98 @@ impl DockController {
         }
     }
 
-    fn floating_bounds_at(&self, point: Point) -> Rect {
+    fn floating_bounds_at(&self, point: Point, payload: DragPayload) -> Rect {
         let viewport = self
             .current_rects
             .as_ref()
             .and_then(|rects| rects.viewport)
             .unwrap_or(Rect::new(Point::ZERO, Size::new(1200.0, 800.0)));
-        let size = Size::new(420.0_f32.min(viewport.size.width), 320.0_f32.min(viewport.size.height));
+
+        // A floating root needs its own title bar and tab strip. Preserve the
+        // source content area, then add those two rows instead of imposing one
+        // fixed 420x320 window on every panel and group.
+        let source_content_size = self.current_rects.as_ref().and_then(|rects| {
+            match payload {
+                DragPayload::Panel { panel } => {
+                    if let Some(panel_rect) =
+                        rects.panels.iter().find(|entry| entry.panel == panel)
+                    {
+                        return Some(panel_rect.rect.size);
+                    }
+
+                    // An inactive tab has no content rectangle. Derive the
+                    // available content area from its owning group's geometry.
+                    let group = rects
+                        .tab_headers
+                        .iter()
+                        .find(|header| header.panel == panel)
+                        .map(|header| header.group)?;
+                    let group_rect = rects.groups.iter().find(|entry| entry.group == group)?;
+                    let strip = rects.tab_strips.iter().find(|entry| entry.group == group)?;
+                    let content_height = (group_rect.rect.size.height
+                        - (strip.rect.origin.y - group_rect.rect.origin.y)
+                        - strip.rect.size.height)
+                        .max(0.0);
+                    Some(Size::new(group_rect.rect.size.width, content_height))
+                }
+                DragPayload::Group { group } => {
+                    let group_rect = rects.groups.iter().find(|entry| entry.group == group)?;
+                    let strip = rects.tab_strips.iter().find(|entry| entry.group == group)?;
+                    let content_height = (group_rect.rect.size.height
+                        - (strip.rect.origin.y - group_rect.rect.origin.y)
+                        - strip.rect.size.height)
+                        .max(0.0);
+                    Some(Size::new(group_rect.rect.size.width, content_height))
+                }
+                DragPayload::FloatingGroup { group } => rects
+                    .floating_groups
+                    .iter()
+                    .find(|entry| entry.group == group)
+                    .map(|entry| entry.rect.size),
+            }
+        });
+
+        let content_size = source_content_size.or_else(|| match payload {
+            DragPayload::Panel { panel } => self
+                .layout
+                .panel_instance(panel)
+                .map(|instance| instance.constraints.preferred_size),
+            DragPayload::Group { group } => match self.layout.node(group) {
+                Some(Node::Tabs(tabs)) => tabs
+                    .active_child()
+                    .and_then(|child| match self.layout.node(child) {
+                        Some(Node::Panel(panel)) => self.layout.panel_instance(panel.panel_id),
+                        _ => None,
+                    })
+                    .map(|instance| instance.constraints.preferred_size),
+                _ => None,
+            },
+            DragPayload::FloatingGroup { .. } => None,
+        });
+
+        let size = match payload {
+            DragPayload::FloatingGroup { .. } => content_size.unwrap_or(Size::new(420.0, 320.0)),
+            DragPayload::Panel { .. } | DragPayload::Group { .. } => {
+                let content = content_size.unwrap_or(Size::new(280.0, 220.0));
+                Size::new(
+                    content.width,
+                    content.height + self.metrics.header_height + self.metrics.tab_strip_height,
+                )
+            }
+        };
+        let size = Size::new(
+            size.width.min(viewport.size.width).max(1.0),
+            size.height.min(viewport.size.height).max(1.0),
+        );
         let origin = Point::new(
-            (point.x - size.width / 2.0).clamp(viewport.origin.x, viewport.origin.x + (viewport.size.width - size.width).max(0.0)),
-            (point.y - size.height / 2.0).clamp(viewport.origin.y, viewport.origin.y + (viewport.size.height - size.height).max(0.0)),
+            (point.x - size.width / 2.0).clamp(
+                viewport.origin.x,
+                viewport.origin.x + (viewport.size.width - size.width).max(0.0),
+            ),
+            (point.y - size.height / 2.0).clamp(
+                viewport.origin.y,
+                viewport.origin.y + (viewport.size.height - size.height).max(0.0),
+            ),
         );
         Rect::new(origin, size)
     }
