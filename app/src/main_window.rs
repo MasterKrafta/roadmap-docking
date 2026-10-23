@@ -919,6 +919,19 @@ impl MainWindow {
             .border_color(rgb(colors.border))
             .text_color(rgb(if layers_active { colors.primary_text } else { colors.muted_text }))
             .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                    this.open_tab_context_menu(
+                        column_index,
+                        top_tab_group,
+                        Some(panel_ids[0]),
+                        event.position.x.as_f32(),
+                        event.position.y.as_f32(),
+                    );
+                    cx.notify();
+                }),
+            )
+            .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, _, cx| {
                     if event.click_count == 2 {
@@ -944,6 +957,19 @@ impl MainWindow {
             .border_1()
             .border_color(rgb(colors.border))
             .text_color(rgb(if color_active { colors.primary_text } else { colors.muted_text }))
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                    this.open_tab_context_menu(
+                        column_index,
+                        top_tab_group,
+                        Some(panel_ids[1]),
+                        event.position.x.as_f32(),
+                        event.position.y.as_f32(),
+                    );
+                    cx.notify();
+                }),
+            )
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, _, cx| {
@@ -972,6 +998,19 @@ impl MainWindow {
                 div()
                     .w(px(content_padding))
                     .h(px(top_tab_strip_height))
+                    .on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                            this.open_tab_context_menu(
+                                column_index,
+                                top_tab_group,
+                                active_top_panel,
+                                event.position.x.as_f32(),
+                                event.position.y.as_f32(),
+                            );
+                            cx.notify();
+                        }),
+                    )
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, event: &MouseDownEvent, _, cx| {
@@ -1003,6 +1042,19 @@ impl MainWindow {
                 div()
                     .w(px(top_tab_spacer_width))
                     .h(px(top_tab_strip_height))
+                    .on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                            this.open_tab_context_menu(
+                                column_index,
+                                top_tab_group,
+                                active_top_panel,
+                                event.position.x.as_f32(),
+                                event.position.y.as_f32(),
+                            );
+                            cx.notify();
+                        }),
+                    )
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, event: &MouseDownEvent, _, cx| {
@@ -1049,6 +1101,19 @@ impl MainWindow {
                     .w(px(content_padding))
                     .h(px(top_tab_strip_height))
                     .on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                            this.open_tab_context_menu(
+                                column_index,
+                                top_tab_group,
+                                active_top_panel,
+                                event.position.x.as_f32(),
+                                event.position.y.as_f32(),
+                            );
+                            cx.notify();
+                        }),
+                    )
+                    .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, event: &MouseDownEvent, _, cx| {
                             if event.click_count == 2 {
@@ -1070,6 +1135,19 @@ impl MainWindow {
             .border_1()
             .border_color(rgb(colors.border))
             .text_color(rgb(if properties_active { colors.primary_text } else { colors.muted_text }))
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                    this.open_tab_context_menu(
+                        column_index,
+                        bottom_tab_group,
+                        Some(panel_ids[2]),
+                        event.position.x.as_f32(),
+                        event.position.y.as_f32(),
+                    );
+                    cx.notify();
+                }),
+            )
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, _, cx| {
@@ -1099,6 +1177,19 @@ impl MainWindow {
                     .w(px(content_padding))
                     .h(px(bottom_tab_strip_height))
                     .on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                            this.open_tab_context_menu(
+                                column_index,
+                                bottom_tab_group,
+                                active_bottom_panel,
+                                event.position.x.as_f32(),
+                                event.position.y.as_f32(),
+                            );
+                            cx.notify();
+                        }),
+                    )
+                    .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, event: &MouseDownEvent, _, cx| {
                             if event.click_count == 2 {
@@ -1126,6 +1217,19 @@ impl MainWindow {
                 div()
                     .w(px(bottom_tab_spacer_width))
                     .h(px(bottom_tab_strip_height))
+                    .on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                            this.open_tab_context_menu(
+                                column_index,
+                                bottom_tab_group,
+                                active_bottom_panel,
+                                event.position.x.as_f32(),
+                                event.position.y.as_f32(),
+                            );
+                            cx.notify();
+                        }),
+                    )
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, event: &MouseDownEvent, _, cx| {
@@ -1167,6 +1271,19 @@ impl MainWindow {
                 div()
                     .w(px(content_padding))
                     .h(px(bottom_tab_strip_height))
+                    .on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                            this.open_tab_context_menu(
+                                column_index,
+                                bottom_tab_group,
+                                active_bottom_panel,
+                                event.position.x.as_f32(),
+                                event.position.y.as_f32(),
+                            );
+                            cx.notify();
+                        }),
+                    )
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, event: &MouseDownEvent, _, cx| {
@@ -1275,6 +1392,18 @@ impl MainWindow {
                             .w(px(header_spacer_width))
                             .h(px(header_height))
                             .on_mouse_down(
+                                MouseButton::Right,
+                                cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                                    this.open_header_context_menu(
+                                        column_index,
+                                        top_tab_group,
+                                        event.position.x.as_f32(),
+                                        event.position.y.as_f32(),
+                                    );
+                                    cx.notify();
+                                }),
+                            )
+                            .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(move |this, event: &MouseDownEvent, _, cx| {
                                     if event.click_count == 2 {
@@ -1298,6 +1427,18 @@ impl MainWindow {
                             .h(px(button_size))
                             .bg(rgb(colors.hover))
                             .text_color(rgb(colors.primary_text))
+                            .on_mouse_down(
+                                MouseButton::Right,
+                                cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                                    this.open_header_context_menu(
+                                        column_index,
+                                        top_tab_group,
+                                        event.position.x.as_f32(),
+                                        event.position.y.as_f32(),
+                                    );
+                                    cx.notify();
+                                }),
+                            )
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.toggle_column_mode(column_index);
                                 cx.notify();
