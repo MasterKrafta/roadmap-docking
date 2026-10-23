@@ -1362,15 +1362,22 @@ impl Layout {
                     })?;
                 let moving_panels = self.panel_ids_in_subtree(*node);
                 self.validate_panel_ids_allowed_for_area(&moving_panels, AllowedArea::FLOATING)?;
-                if self.profile == Profile::Photoshop
-                    && !matches!(
-                        self.nodes.get(*node),
-                        Some(Node::Panel(_)) | Some(Node::Tabs(_))
-                    )
-                {
+                let supports_photoshop_floating_root = match self.nodes.get(*node) {
+                    Some(Node::Panel(_) | Node::Tabs(_)) => true,
+                    Some(Node::Column(column)) => column
+                        .groups
+                        .iter()
+                        .all(|child| matches!(self.nodes.get(*child), Some(Node::Tabs(_)))),
+                    Some(Node::Split(split)) if split.axis == Axis::X => split
+                        .children
+                        .iter()
+                        .all(|child| matches!(self.nodes.get(*child), Some(Node::Column(_)))),
+                    _ => false,
+                };
+                if self.profile == Profile::Photoshop && !supports_photoshop_floating_root {
                     return Err(CommandError::UnsupportedForProfile {
                         profile: self.profile,
-                        reason: "only a panel or tab group can become a floating root",
+                        reason: "only a panel, tab group, column, or horizontal composition of columns can become a floating root",
                     });
                 }
                 let next_z = self.next_floating_z_order()?;
