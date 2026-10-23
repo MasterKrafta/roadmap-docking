@@ -1503,7 +1503,7 @@ mod tests {
             "the expanded sibling must begin after the collapsed row and splitter"
         );
         assert_eq!(
-            splitter.rect.origin.y + (metrics.splitter_hit_zone - metrics.splitter_thickness) / 2.0,
+            splitter.origin.y + (metrics.splitter_hit_zone - metrics.splitter_thickness) / 2.0,
             first.origin.y + first.size.height
         );
         assert!(
