@@ -1,20 +1,20 @@
-mod column;
+mod group_column;
 
-use column::Column;
+use group_column::GroupColumn;
 use gpui::{Context, IntoElement, ParentElement, Render, Styled, Window, div, px, rgb};
 use ui::Theme;
 
 /// Root window for the rebuilt docking layout.
 pub(crate) struct MainWindow {
     theme: Theme,
-    column: Column,
+    group_column: GroupColumn,
 }
 
 impl MainWindow {
     pub(crate) fn new(theme: Theme) -> Result<Self, String> {
         Ok(Self {
             theme,
-            column: Column::new(theme),
+            group_column: GroupColumn::new(theme),
         })
     }
 }
@@ -30,6 +30,6 @@ impl Render for MainWindow {
             .w(px(width))
             .h(px(height))
             .bg(rgb(self.theme.colors.canvas_background))
-            .child(self.column.render(cx, height))
+            .child(self.group_column.render(cx, width, height))
     }
 }
