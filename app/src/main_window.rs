@@ -1529,10 +1529,11 @@ impl MainWindow {
             (column_content_width - content_padding * 2.0 - button_size).max(0.0);
 
         let column_label = if column_index == 0 { "Left" } else { "Right" };
+        let column_element_prefix = if column_index == 0 { "left" } else { "right" };
         let mut rendered_groups: Vec<(usize, Div, f32)> = Vec::new();
         if !tabs_collapsed {
-            for (visible_index, ((group_index, group), group_height)) in
-                visible_groups.iter().zip(group_heights.iter().copied()).enumerate()
+            for ((group_index, group), group_height) in
+                visible_groups.iter().zip(group_heights.iter().copied())
             {
                 let visible_tab_count = group.panels.len();
                 let tab_width = metrics
@@ -1554,9 +1555,9 @@ impl MainWindow {
                     };
                     let slot = panel_ids.iter().position(|candidate| *candidate == panel_id);
                     let element_id = match slot {
-                        Some(0) => format!("{column_label.to_lowercase()}-dock-tab-layers"),
-                        Some(1) => format!("{column_label.to_lowercase()}-dock-tab-color"),
-                        Some(2) => format!("{column_label.to_lowercase()}-dock-tab-properties"),
+                        Some(0) => format!("{column_element_prefix}-dock-tab-layers"),
+                        Some(1) => format!("{column_element_prefix}-dock-tab-color"),
+                        Some(2) => format!("{column_element_prefix}-dock-tab-properties"),
                         _ => format!(
                             "dock-column-{column_index}-group-{group_index}-tab-{tab_index}"
                         ),
@@ -1610,7 +1611,6 @@ impl MainWindow {
                     content,
                 );
                 rendered_groups.push((*group_index, group_view, group_height));
-                let _ = visible_index;
             }
         }
 
