@@ -62,16 +62,16 @@ struct GroupResizeState {
     group_area_top: f32,
 }
 
-/// A single-panel left column beside a right column with two upper tabs and one lower tab.
+/// Main window rendering the dock Core layout and its interactive panel controls.
 pub(crate) struct MainWindow {
     theme: Theme,
     panels: PanelRegistry,
     layout: Layout,
     dock_metrics: DockMetrics,
-    /// Main-dock column IDs in visual order: left, right.
+    /// Stable column slots; current visual order is derived from the Core Split.
     column_ids: Vec<NodeId>,
-    /// Core removes empty columns and collapses their parent Split. These flags keep
-    /// the view aligned with that topology; the last remaining column stays open.
+    /// Core removes empty columns from the Split; these flags retain UI slots while
+    /// the current visual order follows Core. The last remaining column stays open.
     column_open: Vec<bool>,
     /// Per-panel visibility entries used by rendering, context actions, and the Windows menu.
     panel_visibility: Vec<PanelVisibilityEntry>,
@@ -877,8 +877,8 @@ impl MainWindow {
         }
         // Save the actual Core group structure before close commands normalize it away.
         let snapshot = self.snapshot_column(column_index);
-        // Close every group in the actual Core column, not only the two legacy
-        // group slots. Take a snapshot because each close command may normalize Core.
+        // Close every group in the Core column, without assuming a top/bottom pair.
+        // Take a snapshot because each close command may normalize Core.
         let column_id = self.column_ids[column_index];
         let groups = self.group_ids_in_column(column_id);
         for group in groups {
@@ -894,9 +894,8 @@ impl MainWindow {
 
         self.closed_column_snapshots[column_index] = Some(snapshot);
 
-        // Core normalization removes the now-empty Column and reduces the
-        // two-child Split to the remaining column. The UI stops rendering the
-        // removed IDs and lets the surviving column move next to the workspace.
+        // Core normalization removes the empty Column and updates its parent Split.
+        // Rendering follows that normalized topology on the next frame.
         self.column_open[column_index] = false;
         for entry in &mut self.panel_visibility {
             if entry.column_index == column_index {
@@ -1714,8 +1713,11 @@ impl MainWindow {
         let available_tab_width =
             (column_content_width - content_padding * 2.0 - button_size).max(0.0);
 
-        let column_label = if column_index == 0 { "Left" } else { "Right" };
-        let column_element_prefix = if column_index == 0 { "left" } else { "right" };
+        let column_label = match column_index {
+            0 => "Left".to_owned(),
+            1 => "Right".to_owned(),
+            index => format!("Column {}", index + 1),
+        };
         let mut rendered_groups: Vec<(usize, Div, f32)> = Vec::new();
         if !tabs_collapsed {
             for ((group_index, group), group_height) in
