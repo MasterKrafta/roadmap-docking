@@ -6,7 +6,7 @@ mod visibility;
 
 use dock_core::{
     Axis, ColumnMode, DockCommand, DockMetrics, DockSide, FloatingGroupId, Layout, Node, NodeId,
-    PanelId, PanelKey,
+    PanelId,
 };
 use dock_gpui::dock_metrics_from_theme;
 use ui::Theme;
@@ -344,15 +344,3 @@ fn group_ids_for_column(layout: &Layout, column_id: NodeId) -> Vec<NodeId> {
     }
 }
 
-fn panel_id_in_group(layout: &Layout, group_id: NodeId, key: &PanelKey) -> Option<PanelId> {
-    let Node::Tabs(tabs) = layout.node(group_id)? else {
-        return None;
-    };
-    tabs.children.iter().find_map(|node_id| {
-        let Node::Panel(panel) = layout.node(*node_id)? else {
-            return None;
-        };
-        let instance = layout.panel_instance(panel.panel_id)?;
-        (instance.key == *key).then_some(panel.panel_id)
-    })
-}
