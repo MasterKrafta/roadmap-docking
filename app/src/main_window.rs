@@ -1,6 +1,6 @@
 use dock_core::{
-    Axis, ColumnMode, DockCommand, DockMetrics, DockSide, DropTarget, DropZone, Layout, Node, NodeId, PanelId,
-    PanelKey, Profile,
+    Axis, ColumnMode, DockCommand, DockMetrics, DockSide, DropTarget, DropZone, FloatingGroupId,
+    Layout, Node, NodeId, PanelId, PanelKey, Point, Profile, Rect, Size,
 };
 use dock_gpui::dock_metrics_from_theme;
 use gpui::{
@@ -54,6 +54,17 @@ pub(crate) struct MainWindow {
     resize_column_pointer_offset_x: f32,
     resizing_groups_column: Option<NodeId>,
     resize_group_pointer_offset_y: f32,
+    /// The complete horizontal main-dock composition while it is floating.
+    floating_composition: Option<FloatingGroupId>,
+    /// Pointer state used to detach or move the composition from a column header spacer.
+    composition_drag_pending: bool,
+    composition_dragging: bool,
+    composition_drag_start_x: f32,
+    composition_drag_start_y: f32,
+    composition_drag_offset_x: f32,
+    composition_drag_offset_y: f32,
+    composition_drag_source: Option<NodeId>,
+    composition_drag_group: Option<FloatingGroupId>,
 }
 
 impl MainWindow {
@@ -239,6 +250,15 @@ impl MainWindow {
             resize_column_pointer_offset_x: 0.0,
             resizing_groups_column: None,
             resize_group_pointer_offset_y: 0.0,
+            floating_composition: None,
+            composition_drag_pending: false,
+            composition_dragging: false,
+            composition_drag_start_x: 0.0,
+            composition_drag_start_y: 0.0,
+            composition_drag_offset_x: 0.0,
+            composition_drag_offset_y: 0.0,
+            composition_drag_source: None,
+            composition_drag_group: None,
         })
     }
 
