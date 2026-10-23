@@ -1318,6 +1318,7 @@ impl MainWindow {
 
     fn begin_composition_drag(
         &mut self,
+        column_index: usize,
         pointer_x: f32,
         pointer_y: f32,
         window_width: f32,
@@ -1331,18 +1332,35 @@ impl MainWindow {
         self.composition_drag_start_y = pointer_y;
 
         if let Some(group_id) = self.floating_composition {
-            if let Some(origin) = self
+            let floating_root = self
                 .layout
                 .floating_group(group_id)
-                .map(|group| group.bounds.origin)
-            {
-                self.composition_drag_group = Some(group_id);
-                self.composition_drag_offset_x = pointer_x - origin.x;
-                self.composition_drag_offset_y = pointer_y - origin.y;
-                self.composition_drag_pending = true;
+                .and_then(|group| self.layout.dock_area(group.area))
+                .map(|area| area.root);
+            let clicked_column_is_floating = floating_root.is_some_and(|root| {
+                self.composition_column_indices(root).contains(&column_index)
+            });
+
+            if clicked_column_is_floating {
+                if let Some(origin) = self
+                    .layout
+                    .floating_group(group_id)
+                    .map(|group| group.bounds.origin)
+                {
+                    self.composition_drag_group = Some(group_id);
+                    self.composition_drag_offset_x = pointer_x - origin.x;
+                    self.composition_drag_offset_y = pointer_y - origin.y;
+                    self.composition_drag_pending = true;
+                    return;
+                }
+                self.floating_composition = None;
+            } else if floating_root.is_some() {
+                // This UI currently tracks one movable floating composition.
+                // Do not let a main-dock header accidentally drag that floating window.
                 return;
+            } else {
+                self.floating_composition = None;
             }
-            self.floating_composition = None;
         }
 
         let Some(root) = self.layout.main_area(DockSide::Right).map(|area| area.root) else {
@@ -1920,6 +1938,7 @@ impl MainWindow {
                                     } else {
                                         let viewport = window.viewport_size();
                                         this.begin_composition_drag(
+                                            column_index,
                                             event.position.x.as_f32(),
                                             event.position.y.as_f32(),
                                             viewport.width.as_f32(),
