@@ -269,10 +269,17 @@ impl MainWindow {
     }
 
     fn panel_is_visible(&self, column_index: usize, panel_id: PanelId) -> bool {
-        self.panels_by_column
+        let Some(panel_slot) = self
+            .panels_by_column
             .get(column_index)
             .and_then(|panel_ids| panel_ids.iter().position(|candidate| *candidate == panel_id))
-            .is_some_and(|panel_slot| self.panel_slot_visible(column_index, panel_slot))
+        else {
+            // Panels without a dedicated Windows-menu toggle remain visible by default.
+            return true;
+        };
+        Self::visibility_index_for_slot(column_index, panel_slot)
+            .map(|visibility_index| self.panel_visibility[visibility_index])
+            .unwrap_or(true)
     }
 
     fn toggle_panel_visibility(&mut self, menu_index: usize) {
@@ -642,76 +649,24 @@ impl MainWindow {
         let color_active = active_top_panel == Some(panel_ids[1]);
         let properties_active = active_bottom_panel == Some(panel_ids[2]);
 
-        let icon_for_panel = |panel_id: PanelId| {
-            self.layout
-                .panel_instance(panel_id)
-                .map(|panel| self.panels.icon(panel).to_owned())
-                .unwrap_or_else(|| "◇".to_owned())
-        };
-        let layers_icon = icon_for_panel(panel_ids[0]);
-        let color_icon = icon_for_panel(panel_ids[1]);
-        let properties_icon = icon_for_panel(panel_ids[2]);
-
-        let layers_rail_tab = div()
-            .id(if column_index == 0 {
-                "left-collapsed-tab-layers"
-            } else {
-                "right-collapsed-tab-layers"
-            })
-            .flex()
-            .items_center()
-            .justify_center()
-            .w(px(button_size))
-            .h(px(button_size))
-            .bg(rgb(if layers_active { colors.active_tab } else { colors.dock_background }))
-            .border_1()
-            .border_color(rgb(colors.border))
-            .text_color(rgb(if layers_active { colors.primary_text } else { colors.muted_text }))
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.activate_tab(top_tab_group, panel_ids[0]);
-                cx.notify();
-            }))
-            .child(layers_icon);
-        let color_rail_tab = div()
-            .id(if column_index == 0 {
-                "left-collapsed-tab-color"
-            } else {
-                "right-collapsed-tab-color"
-            })
-            .flex()
-            .items_center()
-            .justify_center()
-            .w(px(button_size))
-            .h(px(button_size))
-            .bg(rgb(if color_active { colors.active_tab } else { colors.dock_background }))
-            .border_1()
-            .border_color(rgb(colors.border))
-            .text_color(rgb(if color_active { colors.primary_text } else { colors.muted_text }))
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.activate_tab(top_tab_group, panel_ids[1]);
-                cx.notify();
-            }))
-            .child(color_icon);
-        let properties_rail_tab = div()
-            .id(if column_index == 0 {
-                "left-collapsed-tab-properties"
-            } else {
-                "right-collapsed-tab-properties"
-            })
-            .flex()
-            .items_center()
-            .justify_center()
-            .w(px(button_size))
-            .h(px(button_size))
-            .bg(rgb(if properties_active { colors.active_tab } else { colors.dock_background }))
-            .border_1()
-            .border_color(rgb(colors.border))
-            .text_color(rgb(if properties_active { colors.primary_text } else { colors.muted_text }))
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.activate_tab(bottom_tab_group, panel_ids[2]);
-                cx.notify();
-            }))
-            .child(properties_icon);
+        // Build the collapsed rail from Core's actual tab groups, so every tab in
+        // every group belonging to this column gets an icon.
+        let mut collapsed_tabs: Vec<(usize, NodeId, PanelId)> = Vec::new();
+        for (group_index, group_id) in [top_tab_group, bottom_tab_group].into_iter().enumerate() {
+            if group_index == 1 && !has_bottom_group {
+                continue;
+            }
+            if let Some(Node::Tabs(tabs)) = self.layout.node(group_id) {
+                for child_id in &tabs.children {
+                    let Some(Node::Panel(panel)) = self.layout.node(*child_id) else {
+                        continue;
+                    };
+                    if self.panel_is_visible(column_index, panel.panel_id) {
+                        collapsed_tabs.push((group_index, group_id, panel.panel_id));
+                    }
+                }
+            }
+        }
 
         let layers_tab = div()
             .id(if column_index == 0 { "left-dock-tab-layers" } else { "right-dock-tab-layers" })
@@ -999,14 +954,43 @@ impl MainWindow {
                 .bg(rgb(colors.dock_background))
                 .border_1()
                 .border_color(rgb(colors.border));
-            if self.panel_slot_visible(column_index, 0) {
-                collapsed_tab_rail = collapsed_tab_rail.child(layers_rail_tab);
-            }
-            if self.panel_slot_visible(column_index, 1) {
-                collapsed_tab_rail = collapsed_tab_rail.child(color_rail_tab);
-            }
-            if self.panel_slot_visible(column_index, 2) {
-                collapsed_tab_rail = collapsed_tab_rail.child(properties_rail_tab);
+            for (tab_index, (group_index, group_id, panel_id)) in
+                collapsed_tabs.iter().copied().enumerate()
+            {
+                let Some(panel) = self.layout.panel_instance(panel_id) else {
+                    continue;
+                };
+                let tab_icon = self.panels.icon(panel).to_owned();
+                let active_panel = if group_index == 0 {
+                    active_top_panel == Some(panel_id)
+                } else {
+                    active_bottom_panel == Some(panel_id)
+                };
+                let tab = div()
+                    .id(format!("collapsed-dock-tab-{column_index}-{tab_index}"))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .w(px(button_size))
+                    .h(px(button_size))
+                    .bg(rgb(if active_panel {
+                        colors.active_tab
+                    } else {
+                        colors.dock_background
+                    }))
+                    .border_1()
+                    .border_color(rgb(colors.border))
+                    .text_color(rgb(if active_panel {
+                        colors.primary_text
+                    } else {
+                        colors.muted_text
+                    }))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.activate_tab(group_id, panel_id);
+                        cx.notify();
+                    }))
+                    .child(tab_icon);
+                collapsed_tab_rail = collapsed_tab_rail.child(tab);
             }
             column_view = column_view.child(collapsed_tab_rail);
         }
