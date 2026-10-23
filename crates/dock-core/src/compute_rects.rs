@@ -1471,7 +1471,12 @@ mod tests {
         let rects = layout
             .compute_rects(viewport(1000.0, 700.0), &metrics)
             .unwrap();
-        let group_rect = rects.groups.iter().find(|entry| entry.group == group).unwrap().rect;
+        let group_rect = rects
+            .groups
+            .iter()
+            .find(|entry| entry.group == group)
+            .unwrap()
+            .rect;
 
         assert_eq!(rects.floating_groups[0].rect, bounds);
         assert_eq!(group_rect.origin.y, bounds.origin.y);
