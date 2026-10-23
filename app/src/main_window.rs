@@ -48,6 +48,8 @@ struct ClosedTabGroupSnapshot {
 
 #[derive(Clone)]
 struct ClosedColumnSnapshot {
+    /// Visual insertion slot captured from Core before the column was closed.
+    position: usize,
     groups: Vec<ClosedTabGroupSnapshot>,
     group_ratios: Vec<f32>,
     width: f32,
@@ -676,6 +678,7 @@ impl MainWindow {
             .and_then(Option::as_ref)
             .cloned()
             .unwrap_or_else(|| ClosedColumnSnapshot {
+                position: column_index,
                 groups: Vec::new(),
                 group_ratios: Vec::new(),
                 width: self.theme.metrics.default_column_width,
@@ -701,21 +704,15 @@ impl MainWindow {
         }
 
         let first_panel_key = snapshot.groups[0].panel_keys[0].clone();
-        // Restore relative to the current main tree, not to columns that may
-        // currently live only in a separate floating composition.
-        let main_column_indices = self
+        // Restore at the visual position captured before closing. Stable UI slot
+        // numbers are not authoritative after Core reorders the columns.
+        let main_column_count = self
             .layout
             .main_area(DockSide::Right)
-            .map(|area| self.column_indices_in_core_order(area.root))
+            .map(|area| self.core_column_ids_in_order(area.root).len())
             .unwrap_or_default();
-        let insert_index = main_column_indices
-            .iter()
-            .filter(|open_index| **open_index < column_index)
-            .count();
-        let has_other_main_column = main_column_indices
-            .iter()
-            .any(|open_index| *open_index != column_index);
-        let target = has_other_main_column.then_some(DropTarget::MainColumn {
+        let insert_index = snapshot.position.min(main_column_count);
+        let target = (main_column_count > 0).then_some(DropTarget::MainColumn {
             side: DockSide::Right,
             index: insert_index,
         });
@@ -896,6 +893,7 @@ impl MainWindow {
             .collect();
 
         ClosedColumnSnapshot {
+            position: self.column_visual_position(column_index),
             groups,
             group_ratios: self.group_ratios_in_column(column_id),
             width: self.column_width(column_index),
