@@ -227,9 +227,12 @@ fn column_ids_in_core_order(layout: &Layout, root: NodeId) -> Result<Vec<NodeId>
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use dock_core::{DockMetrics, Node};
+    use super::{
+        INITIAL_COLUMNS_LEFT_TO_RIGHT, create_initial_layout, group_ids_for_column,
+        initial_group_ratios,
+    };
     use crate::panels::PanelRegistry;
+    use dock_core::{DockMetrics, Node};
 
     #[test]
     fn created_layout_matches_the_column_and_group_specification() {
