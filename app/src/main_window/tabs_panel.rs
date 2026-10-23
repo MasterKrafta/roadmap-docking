@@ -36,7 +36,18 @@ impl TabsPanel {
         }
     }
 
-    pub(crate) fn render(&self, cx: &mut Context<MainWindow>, height: f32) -> Div {
+    pub(crate) fn set_active_tab_id(&mut self, tab_id: String) {
+        if self.tabs.iter().any(|tab| tab.id() == tab_id) {
+            self.active_tab_id = tab_id;
+        }
+    }
+
+    pub(crate) fn render(
+        &self,
+        cx: &mut Context<MainWindow>,
+        height: f32,
+        group_index: usize,
+    ) -> Div {
         let metrics = self.theme.metrics;
         let colors = self.theme.colors;
         let width = metrics.default_column_width.max(1.0);
@@ -70,7 +81,7 @@ impl TabsPanel {
                 strip_height,
                 active,
                 cx.listener(move |this, _, _, cx| {
-                    this.tabs_panel.active_tab_id = tab_id.clone();
+                    this.column.set_active_tab_id(group_index, tab_id.clone());
                     cx.notify();
                 }),
             ));
