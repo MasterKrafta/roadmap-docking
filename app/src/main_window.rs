@@ -493,6 +493,11 @@ impl MainWindow {
         // two-child Split to the remaining column. The UI stops rendering the
         // removed IDs and lets the surviving column move next to the workspace.
         self.column_open[column_index] = false;
+        if column_index == 0 {
+            self.panel_visibility[0] = false;
+        } else {
+            self.panel_visibility[1..=3].fill(false);
+        }
         self.is_resizing_column = false;
         self.resizing_outer_column = None;
         self.resizing_groups_column = None;
@@ -536,19 +541,36 @@ impl MainWindow {
         let header_height = metrics.column_header_height.min(window_height);
         let available_below_header = (window_height - header_height).max(0.0);
         let has_bottom_group = self.column_has_bottom_group[column_index];
-        let group_split_hit_height = if has_bottom_group {
+        let visible_top_count =
+            (if self.panel_slot_visible(column_index, 0) { 1usize } else { 0 })
+                + (if self.panel_slot_visible(column_index, 1) { 1usize } else { 0 });
+        let visible_bottom_count = if has_bottom_group {
+            (if self.panel_slot_visible(column_index, 2) { 1usize } else { 0 })
+                + (if self.panel_slot_visible(column_index, 3) { 1usize } else { 0 })
+        } else {
+            0
+        };
+        let show_top_group = visible_top_count > 0;
+        let show_bottom_group = has_bottom_group && visible_bottom_count > 0;
+        let show_group_splitter = show_top_group && show_bottom_group;
+        let group_split_hit_height = if show_group_splitter {
             metrics.splitter_hit_zone.max(metrics.splitter_thickness)
                 .min(available_below_header)
         } else {
             0.0
         };
         let groups_height = (available_below_header - group_split_hit_height).max(0.0);
-        let top_group_height = if has_bottom_group {
-            groups_height * self.group_split_ratio(column_index).clamp(0.0, 1.0)
-        } else {
-            groups_height
+        let split_ratio = self.group_split_ratio(column_index).clamp(0.0, 1.0);
+        let top_group_height = match (show_top_group, show_bottom_group) {
+            (true, true) => groups_height * split_ratio,
+            (true, false) => groups_height,
+            _ => 0.0,
         };
-        let bottom_group_height = (groups_height - top_group_height).max(0.0);
+        let bottom_group_height = match (show_top_group, show_bottom_group) {
+            (true, true) => (groups_height - top_group_height).max(0.0),
+            (false, true) => groups_height,
+            _ => 0.0,
+        };
         let top_tab_strip_height = metrics.tab_strip_height.min(top_group_height);
         let top_content_height = (top_group_height - top_tab_strip_height).max(0.0);
         let bottom_tab_strip_height = metrics.tab_strip_height.min(bottom_group_height);
@@ -559,16 +581,7 @@ impl MainWindow {
         let content_padding = metrics.content_padding.min(column_width / 2.0);
         let header_spacer_width =
             (column_width - content_padding - button_size * 2.0 - button_gap).max(0.0);
-        let visible_top_count =
-            (if self.panel_slot_visible(column_index, 0) { 1usize } else { 0 })
-                + (if self.panel_slot_visible(column_index, 1) { 1usize } else { 0 });
-        let visible_bottom_count = if has_bottom_group {
-            (if self.panel_slot_visible(column_index, 2) { 1usize } else { 0 })
-                + (if self.panel_slot_visible(column_index, 3) { 1usize } else { 0 })
-        } else {
-            0
-        };
-        let available_tab_width =
+remove duplicate visible counts        let available_tab_width =
             (column_width - content_padding * 2.0 - button_size).max(0.0);
         let tab_width = metrics
             .column_tab_width
@@ -864,10 +877,15 @@ impl MainWindow {
                             .child("×"),
                     )
                     .child(div().w(px(content_padding)).h(px(1.0))),
-            )
-            .child(top_group);
-        if has_bottom_group {
-            column_view = column_view.child(group_splitter).child(bottom_group);
+            );
+        if show_top_group {
+            column_view = column_view.child(top_group);
+        }
+        if show_group_splitter {
+            column_view = column_view.child(group_splitter);
+        }
+        if show_bottom_group {
+            column_view = column_view.child(bottom_group);
         }
         column_view
     }
