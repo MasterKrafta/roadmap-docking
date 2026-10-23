@@ -495,7 +495,7 @@ impl MainWindow {
         self.panel_visibility
             .iter()
             .find(|entry| entry.panel_id == panel_id)
-            .is_none_or(|entry| entry.visible)
+            .map_or(true, |entry| entry.visible)
     }
 
     fn update_panel_visibility_id(
@@ -507,7 +507,9 @@ impl MainWindow {
         if let Some(entry) = self
             .panel_visibility
             .iter_mut()
-            .find(|entry| entry.column_index == column_index && entry.panel_key == panel_key)
+            .find(|entry| {
+                entry.column_index == column_index && entry.panel_key.as_str() == panel_key
+            })
         {
             entry.panel_id = panel_id;
         }
