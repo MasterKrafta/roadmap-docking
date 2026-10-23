@@ -139,7 +139,7 @@ impl MainWindow {
         height: f32,
         active: bool,
         title: String,
-    ) -> Div {
+    ) -> impl IntoElement {
         let colors = self.theme.colors;
 
         div()
@@ -311,7 +311,7 @@ impl MainWindow {
         group_id: NodeId,
         active_panel: Option<PanelId>,
         button_size: f32,
-    ) -> Div {
+    ) -> impl IntoElement {
         let colors = self.theme.colors;
 
         div()
@@ -1345,7 +1345,7 @@ impl Render for MainWindow {
                 if let Some(resize) = this.resizing_groups_column {
                     let pointer_y = event.position.y.as_f32();
                     let column_id = resize.column;
-                    let Some(column_index) = this
+                    let Some(_column_index) = this
                         .column_ids
                         .iter()
                         .position(|candidate| *candidate == column_id)

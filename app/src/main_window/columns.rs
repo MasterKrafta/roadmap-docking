@@ -1,6 +1,6 @@
-use dock_core::{DockCommand, DockSide, DropTarget, DropZone, Node, PanelKey};
+use dock_core::{Axis, DockCommand, DockSide, DropTarget, DropZone, Node, PanelKey};
 
-use super::{ClosedColumnSnapshot, ClosedTabGroupSnapshot, MainWindow};
+use super::{group_ids_for_column, ClosedColumnSnapshot, ClosedTabGroupSnapshot, MainWindow};
 
 impl MainWindow {
     fn open_panel_for_restore(

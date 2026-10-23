@@ -1,4 +1,4 @@
-use dock_core::{ColumnMode, DockCommand, NodeId, PanelId};
+use dock_core::{ColumnMode, DockCommand, Node, NodeId, PanelId};
 
 use super::MainWindow;
 
