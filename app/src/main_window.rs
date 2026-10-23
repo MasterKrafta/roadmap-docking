@@ -23,7 +23,7 @@ impl MainWindow {
 }
 
 impl Render for MainWindow {
-    fn render(&mut self, window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let viewport = window.viewport_size();
 
         let width = viewport.width.as_f32().max(1.0);
@@ -33,6 +33,6 @@ impl Render for MainWindow {
             .w(px(width))
             .h(px(height))
             .bg(rgb(self.theme.colors.canvas_background))
-            .child(self.tabs_panel.render(height))
+            .child(self.tabs_panel.render(cx, height))
     }
 }
