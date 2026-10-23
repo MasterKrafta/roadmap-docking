@@ -11,9 +11,9 @@ use dock_gpui::{
     ResizeStartHandler, dock_metrics_from_theme, normalize_docked_group_geometry, render,
 };
 use gpui::{
-    AnyElement, App, Context, Div, InteractiveElement, IntoElement, KeyDownEvent, MouseButton,
+    AnyElement, Context, Div, InteractiveElement, IntoElement, KeyDownEvent, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point as GpuiPoint,
-    FocusHandle, ScrollHandle, Styled, div, px, rgb,
+    FocusHandle, ScrollHandle, StatefulInteractiveElement, Styled, div, px, rgb,
 };
 use ui::Theme;
 
@@ -129,7 +129,8 @@ impl DockController {
             move |command: DockCommand| -> CommandClickHandler {
                 let entity = entity.clone();
                 Box::new(move |_, _, app| {
-                    entity.update(app, |window, cx| {
+                    let command = command.clone();
+                    entity.update(app, move |window, cx| {
                         window.dock.apply_command(command);
                         cx.notify();
                     });
@@ -535,6 +536,7 @@ impl DockController {
                     .child(heading)
                     .child(
                         div()
+                            .id("dock-menu-close")
                             .p(px(4.0))
                             .child("×")
                             .on_click({
@@ -760,11 +762,13 @@ fn render_panel(instance: &PanelInstance, theme: Theme) -> AnyElement {
 }
 
 fn menu_item(label: impl Into<String>, handler: CommandClickHandler, theme: Theme) -> Div {
+    let label = label.into();
     div()
+        .id(format!("dock-menu-item-{label}"))
         .w_full()
         .p(px(6.0))
         .text_color(rgb(theme.colors.primary_text))
         .bg(rgb(theme.colors.toolbar_background))
-        .child(label.into())
+        .child(label)
         .on_click(handler)
 }
