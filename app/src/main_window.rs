@@ -369,7 +369,7 @@ impl MainWindow {
         let viewport_width = window_width.max(1.0);
         let viewport_height = window_height.max(1.0);
         let popup_width = 184.0_f32.min(viewport_width);
-        let popup_height = if menu.header_only { 42.0 } else { 132.0 }.min(viewport_height);
+        let popup_height = (if menu.header_only { 42.0 } else { 132.0 }).min(viewport_height);
         let left = menu.left.max(0.0).min((viewport_width - popup_width).max(0.0));
         let top = menu.top.max(0.0).min((viewport_height - popup_height).max(0.0));
         (left, top)
@@ -392,7 +392,7 @@ impl MainWindow {
             .map(|menu| Self::context_menu_position(menu, window_width, window_height))
             .unwrap_or((0.0, 0.0));
         let inside_context_menu = self.tab_context_menu.is_some_and(|menu| {
-            let popup_height = if menu.header_only { 42.0 } else { 132.0 }.min(window_height.max(1.0));
+            let popup_height = (if menu.header_only { 42.0 } else { 132.0 }).min(window_height.max(1.0));
             pointer_x >= context_menu_left
                 && pointer_x <= (context_menu_left + 184.0).min(window_width)
                 && pointer_y >= context_menu_top
