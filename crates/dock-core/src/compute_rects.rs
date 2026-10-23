@@ -193,7 +193,7 @@ impl Layout {
                     .floating_groups
                     .push(FloatingGroupRect::new(id, bounds, floating.z_order));
                 push_resize_edges(id, bounds, metrics, &mut output)?;
-                layout_node(self, area.root, bounds, metrics, &mut output)?;
+                layout_floating_root(self, area.root, bounds, metrics, &mut output)?;
             }
         }
 
@@ -684,6 +684,66 @@ fn layout_split(
     metrics: &DockMetrics,
     output: &mut LayoutRects,
 ) -> Result<(), ComputeRectsError> {
+    layout_split_inner(layout, id, split, rect, metrics, output, false)
+}
+
+/// Lays out a floating composition while respecting the independent window title.
+///
+/// An expanded top group already uses Core's header row for the floating title.
+/// A collapsed top group has no such row, so its branch must reserve the same
+/// height before allocating group rectangles. Apply this only to composite
+/// floating roots; a standalone Tabs root keeps its own established geometry.
+fn layout_floating_root(
+    layout: &Layout,
+    id: NodeId,
+    rect: Rect,
+    metrics: &DockMetrics,
+    output: &mut LayoutRects,
+) -> Result<(), ComputeRectsError> {
+    let title_height = metrics.header_height.min(rect.size.height);
+    match layout.node(id) {
+        Some(Node::Column(_))
+            if floating_branch_starts_collapsed(layout, id) && rect.size.height > title_height =>
+        {
+            let content_rect = Rect::new(
+                Point::new(rect.origin.x, rect.origin.y + title_height),
+                Size::new(rect.size.width, rect.size.height - title_height),
+            );
+            layout_node(layout, id, content_rect, metrics, output)
+        }
+        Some(Node::Split(split)) if split.axis == Axis::X => {
+            layout_split_inner(layout, id, split, rect, metrics, output, true)
+        }
+        _ => layout_node(layout, id, rect, metrics, output),
+    }
+}
+
+/// Whether the first visible vertical branch of a floating composition starts
+/// with a collapsed group and therefore lacks the normal header-height reserve.
+fn floating_branch_starts_collapsed(layout: &Layout, id: NodeId) -> bool {
+    match layout.node(id) {
+        Some(Node::Tabs(tabs)) => tabs.collapsed,
+        Some(Node::Column(column)) => column
+            .groups
+            .first()
+            .is_some_and(|group| matches!(layout.node(*group), Some(Node::Tabs(tabs)) if tabs.collapsed)),
+        Some(Node::Split(split)) if split.axis == Axis::Y => split
+            .children
+            .first()
+            .is_some_and(|child| floating_branch_starts_collapsed(layout, *child)),
+        _ => false,
+    }
+}
+
+fn layout_split_inner(
+    layout: &Layout,
+    id: NodeId,
+    split: &crate::Split,
+    rect: Rect,
+    metrics: &DockMetrics,
+    output: &mut LayoutRects,
+    reserve_title_for_collapsed_branches: bool,
+) -> Result<(), ComputeRectsError> {
     if split.children.is_empty() {
         return Ok(());
     }
@@ -734,10 +794,19 @@ fn layout_split(
 
             let mut x = rect.origin.x;
             for (index, child) in split.children.iter().enumerate() {
-                let child_rect = Rect::new(
+                let mut child_rect = Rect::new(
                     Point::new(x, rect.origin.y),
                     Size::new(widths[index], rect.size.height),
                 );
+                if reserve_title_for_collapsed_branches
+                    && floating_branch_starts_collapsed(layout, *child)
+                {
+                    let title_height = metrics.header_height.min(child_rect.size.height);
+                    if child_rect.size.height > title_height {
+                        child_rect.origin.y += title_height;
+                        child_rect.size.height -= title_height;
+                    }
+                }
                 layout_node(layout, *child, child_rect, metrics, output)?;
                 x += widths[index];
                 if index + 1 < split.children.len() {
@@ -1376,6 +1445,96 @@ mod tests {
         assert_eq!(
             layout.floating_group(floating).unwrap().bounds,
             model_bounds
+        );
+    }
+
+    #[test]
+    fn floating_column_reserves_window_title_before_allocating_a_collapsed_first_group() {
+        let metrics = DockMetrics {
+            header_height: 32.0,
+            tab_strip_height: 24.0,
+            ..DockMetrics::default()
+        };
+        let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+        let (_, collapsed_panel_node) = builder.panel(key("floating-column-collapsed"), constraints());
+        let collapsed_group = builder.tabs(vec![collapsed_panel_node], 0, true);
+        let (_, expanded_panel_node) = builder.panel(key("floating-column-expanded"), constraints());
+        let expanded_group = builder.tabs(vec![expanded_panel_node], 0, false);
+        let column = builder.column(
+            300.0,
+            ColumnMode::Expanded,
+            vec![collapsed_group, expanded_group],
+            vec![0.5, 0.5],
+        );
+        let bounds = Rect::new(Point::new(40.0, 50.0), Size::new(300.0, 400.0));
+        builder.floating_group(column, bounds, 1);
+        let layout = builder.build();
+
+        let rects = layout.compute_rects(viewport(1000.0, 700.0), &metrics).unwrap();
+        let first = rects.groups.iter().find(|entry| entry.group == collapsed_group).unwrap().rect;
+        let second = rects.groups.iter().find(|entry| entry.group == expanded_group).unwrap().rect;
+        let splitter = rects.splitters.iter().find(|entry| entry.owner == column).unwrap().rect;
+
+        assert_eq!(rects.floating_groups[0].rect, bounds);
+        assert_eq!(first.origin.y, bounds.origin.y + metrics.header_height);
+        assert_eq!(first.size.height, metrics.effective_collapsed_group_height());
+        assert!(
+            second.origin.y >= first.origin.y + first.size.height + metrics.splitter_thickness,
+            "the expanded sibling must begin after the collapsed row and splitter"
+        );
+        assert_eq!(splitter.origin.y, first.origin.y + first.size.height);
+        assert!(
+            ((second.origin.y + second.size.height) - (bounds.origin.y + bounds.size.height)).abs()
+                < PIXEL_TOLERANCE
+        );
+    }
+
+    #[test]
+    fn floating_horizontal_split_reserves_title_for_each_collapsed_column_branch() {
+        let metrics = DockMetrics {
+            header_height: 32.0,
+            tab_strip_height: 24.0,
+            ..DockMetrics::default()
+        };
+        let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+        let (_, collapsed_panel_node) = builder.panel(key("split-floating-collapsed"), constraints());
+        let collapsed_group = builder.tabs(vec![collapsed_panel_node], 0, true);
+        let left_column = builder.column(
+            300.0,
+            ColumnMode::Expanded,
+            vec![collapsed_group],
+            vec![1.0],
+        );
+
+        let (_, expanded_panel_node) = builder.panel(key("split-floating-expanded"), constraints());
+        let expanded_group = builder.tabs(vec![expanded_panel_node], 0, false);
+        let right_column = builder.column(
+            300.0,
+            ColumnMode::Expanded,
+            vec![expanded_group],
+            vec![1.0],
+        );
+        let root = builder.split(Axis::X, vec![left_column, right_column], vec![0.5, 0.5]);
+        let bounds = Rect::new(Point::new(40.0, 50.0), Size::new(604.0, 400.0));
+        builder.floating_group(root, bounds, 1);
+        let layout = builder.build();
+
+        let rects = layout.compute_rects(viewport(1000.0, 700.0), &metrics).unwrap();
+        let collapsed = rects.groups.iter().find(|entry| entry.group == collapsed_group).unwrap().rect;
+        let expanded = rects.groups.iter().find(|entry| entry.group == expanded_group).unwrap().rect;
+        let collapsed_strip = rects.tab_strips.iter().find(|entry| entry.group == collapsed_group).unwrap().rect;
+        let expanded_strip = rects.tab_strips.iter().find(|entry| entry.group == expanded_group).unwrap().rect;
+
+        assert_eq!(rects.floating_groups[0].rect, bounds);
+        assert_eq!(collapsed.origin.y, bounds.origin.y + metrics.header_height);
+        assert_eq!(collapsed_strip.origin.y, bounds.origin.y + metrics.header_height);
+        assert_eq!(expanded.origin.y, bounds.origin.y);
+        assert_eq!(expanded_strip.origin.y, bounds.origin.y + metrics.header_height);
+        assert!(
+            (collapsed_strip.origin.y - expanded_strip.origin.y).abs() < PIXEL_TOLERANCE,
+            "both horizontal branches must align their tab strips below the shared title"
         );
     }
 
