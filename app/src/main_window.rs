@@ -678,14 +678,22 @@ impl MainWindow {
             .main_area(DockSide::Right)
             .ok_or_else(|| "Dock Core did not create a main dock area".to_owned())?;
         let (column_ids, column_open, target_column) = match self.layout.node(area.root) {
-            Some(Node::Split(split)) if split.axis == Axis::X && split.children.len() == 2 => {
-                let ids = [split.children[0], split.children[1]];
-                (ids, [true, true], ids[column_index])
+            Some(Node::Split(split)) if split.axis == Axis::X && !split.children.is_empty() => {
+                let ids = split.children.clone();
+                let target = ids
+                    .get(column_index)
+                    .copied()
+                    .ok_or_else(|| "Restored column is missing from the Core split".to_owned())?;
+                let opened = vec![true; ids.len()];
+                (ids, opened, target)
             }
             Some(Node::Column(_)) => {
-                let mut ids = self.column_ids;
+                let mut ids = self.column_ids.clone();
+                if column_index >= ids.len() {
+                    ids.resize(column_index + 1, area.root);
+                }
                 ids[column_index] = area.root;
-                let mut opened = [false; 2];
+                let mut opened = vec![false; ids.len()];
                 opened[column_index] = true;
                 (ids, opened, area.root)
             }
