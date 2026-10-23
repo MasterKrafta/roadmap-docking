@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use dock_core::{
-    create_initial_layout, Axis, ChromeMode, ColumnMode, DockCommand, DockMetrics, DockSide,
+    create_initial_layout, Axis, DockCommand, DockMetrics, DockSide,
     DragDropAction, DragDropRequest, DragHandle, DragPayload, DragSession, DragState, DropSource,
     DropTarget, Layout, LayoutRects, Node, PanelConstraints, PanelInstance, PanelKey, Point,
     Profile, Rect, ResizeEdge, Size, UndoRedoHistory,
@@ -13,7 +13,7 @@ use dock_gpui::{
 use gpui::{
     AnyElement, App, Context, Div, InteractiveElement, IntoElement, KeyDownEvent, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point as GpuiPoint,
-    ScrollHandle, Styled, Window, div, px, rgb,
+    ScrollHandle, Styled, div, px, rgb,
 };
 use ui::Theme;
 
@@ -31,7 +31,6 @@ pub(crate) struct DockController {
     scroll_handles: HashMap<dock_core::NodeId, ScrollHandle>,
     current_rects: Option<LayoutRects>,
     drag_session: Option<DragSession>,
-    drag_handle: Option<DragHandle>,
     drag_overlay: Option<DragOverlay>,
     resize_gesture: Option<ResizeGesture>,
     menu_request: Option<DockMenuRequest>,
@@ -81,7 +80,6 @@ impl DockController {
             scroll_handles: HashMap::new(),
             current_rects: None,
             drag_session: None,
-            drag_handle: None,
             drag_overlay: None,
             resize_gesture: None,
             menu_request: None,
@@ -266,7 +264,6 @@ impl DockController {
             return;
         }
         self.drag_session = Some(session);
-        self.drag_handle = Some(handle);
     }
 
     fn begin_resize(&mut self, handle: ResizeHandle, position: Point) {
@@ -274,7 +271,6 @@ impl DockController {
             return;
         };
         self.drag_session = None;
-        self.drag_handle = None;
         self.drag_overlay = None;
         self.menu_request = None;
         self.resize_gesture = Some(ResizeGesture {
@@ -357,15 +353,13 @@ impl DockController {
         self.refresh_drag_target(position);
         let Some(mut session) = self.drag_session.take() else {
             self.drag_overlay = None;
-            self.drag_handle = None;
-            return;
+                return;
         };
         let target = session.preview().and_then(|preview| preview.target);
         let request = match session.pointer_up(position, target) {
             Ok(Some(request)) => request,
             Ok(None) => {
                 self.drag_overlay = None;
-                self.drag_handle = None;
                 return;
             }
             Err(error) => {
@@ -724,9 +718,7 @@ fn panel_title(key: &str) -> &'static str {
         "color" => "Color",
         "properties" => "Properties",
         "history" => "History",
-        other => match other {
-            _ => "Panel",
-        },
+        _ => "Panel",
     }
 }
 
