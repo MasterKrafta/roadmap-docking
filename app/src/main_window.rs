@@ -508,7 +508,7 @@ impl MainWindow {
     fn sync_panel_visibility_entries(&mut self) {
         let mut discovered: Vec<(usize, PanelId, String, String)> = Vec::new();
 
-        for (column_id, column_index) in self.column_ids.iter().copied().enumerate() {
+        for (column_index, column_id) in self.column_ids.iter().copied().enumerate() {
             for group_id in self.group_ids_in_column(column_id) {
                 let Some(group) = self.tab_group_view_data(group_id) else {
                     continue;
