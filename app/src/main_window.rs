@@ -23,6 +23,8 @@ pub(crate) struct MainWindow {
     /// Core removes empty columns and collapses their parent Split. These flags keep
     /// the view aligned with that topology; the last remaining column stays open.
     column_open: [bool; 2],
+    /// Whether each column renders tabs as a compact vertical icon rail.
+    column_tabs_collapsed: [bool; 2],
     /// The left column has one tab group; the right column has upper and lower groups.
     column_has_bottom_group: [bool; 2],
     top_tab_groups: [NodeId; 2],
@@ -216,6 +218,7 @@ impl MainWindow {
             dock_metrics,
             column_ids,
             column_open: [true; 2],
+            column_tabs_collapsed: [false; 2],
             column_has_bottom_group,
             top_tab_groups,
             bottom_tab_groups,
@@ -537,6 +540,7 @@ impl MainWindow {
         let column_width = self.column_width(column_index);
         let colors = self.theme.colors;
         let metrics = self.theme.metrics;
+        let tabs_collapsed = self.column_tabs_collapsed[column_index];
 
         let header_height = metrics.column_header_height.min(window_height);
         let available_below_header = (window_height - header_height).max(0.0);
@@ -571,9 +575,17 @@ impl MainWindow {
             (false, true) => groups_height,
             _ => 0.0,
         };
-        let top_tab_strip_height = metrics.tab_strip_height.min(top_group_height);
+        let top_tab_strip_height = if tabs_collapsed {
+            0.0
+        } else {
+            metrics.tab_strip_height.min(top_group_height)
+        };
         let top_content_height = (top_group_height - top_tab_strip_height).max(0.0);
-        let bottom_tab_strip_height = metrics.tab_strip_height.min(bottom_group_height);
+        let bottom_tab_strip_height = if tabs_collapsed {
+            0.0
+        } else {
+            metrics.tab_strip_height.min(bottom_group_height)
+        };
         let bottom_content_height = (bottom_group_height - bottom_tab_strip_height).max(0.0);
 
         let button_size = metrics.button_size.min(column_width);
@@ -581,8 +593,10 @@ impl MainWindow {
         let content_padding = metrics.content_padding.min(column_width / 2.0);
         let header_spacer_width =
             (column_width - content_padding - button_size * 2.0 - button_gap).max(0.0);
+        let tab_rail_width = if tabs_collapsed { button_size } else { 0.0 };
+        let column_content_width = (column_width - tab_rail_width).max(0.0);
         let available_tab_width =
-            (column_width - content_padding * 2.0 - button_size).max(0.0);
+            (column_content_width - content_padding * 2.0 - button_size).max(0.0);
         let tab_width = metrics
             .column_tab_width
             .min((available_tab_width / visible_top_count.max(1) as f32).max(0.0));
@@ -628,6 +642,77 @@ impl MainWindow {
         let color_active = active_top_panel == Some(panel_ids[1]);
         let properties_active = active_bottom_panel == Some(panel_ids[2]);
 
+        let icon_for_panel = |panel_id: PanelId| {
+            self.layout
+                .panel_instance(panel_id)
+                .map(|panel| self.panels.icon(panel).to_owned())
+                .unwrap_or_else(|| "◇".to_owned())
+        };
+        let layers_icon = icon_for_panel(panel_ids[0]);
+        let color_icon = icon_for_panel(panel_ids[1]);
+        let properties_icon = icon_for_panel(panel_ids[2]);
+
+        let layers_rail_tab = div()
+            .id(if column_index == 0 {
+                "left-collapsed-tab-layers"
+            } else {
+                "right-collapsed-tab-layers"
+            })
+            .flex()
+            .items_center()
+            .justify_center()
+            .w(px(button_size))
+            .h(px(button_size))
+            .bg(rgb(if layers_active { colors.active_tab } else { colors.dock_background }))
+            .border_1()
+            .border_color(rgb(colors.border))
+            .text_color(rgb(if layers_active { colors.primary_text } else { colors.muted_text }))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.activate_tab(top_tab_group, panel_ids[0]);
+                cx.notify();
+            }))
+            .child(layers_icon);
+        let color_rail_tab = div()
+            .id(if column_index == 0 {
+                "left-collapsed-tab-color"
+            } else {
+                "right-collapsed-tab-color"
+            })
+            .flex()
+            .items_center()
+            .justify_center()
+            .w(px(button_size))
+            .h(px(button_size))
+            .bg(rgb(if color_active { colors.active_tab } else { colors.dock_background }))
+            .border_1()
+            .border_color(rgb(colors.border))
+            .text_color(rgb(if color_active { colors.primary_text } else { colors.muted_text }))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.activate_tab(top_tab_group, panel_ids[1]);
+                cx.notify();
+            }))
+            .child(color_icon);
+        let properties_rail_tab = div()
+            .id(if column_index == 0 {
+                "left-collapsed-tab-properties"
+            } else {
+                "right-collapsed-tab-properties"
+            })
+            .flex()
+            .items_center()
+            .justify_center()
+            .w(px(button_size))
+            .h(px(button_size))
+            .bg(rgb(if properties_active { colors.active_tab } else { colors.dock_background }))
+            .border_1()
+            .border_color(rgb(colors.border))
+            .text_color(rgb(if properties_active { colors.primary_text } else { colors.muted_text }))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.activate_tab(bottom_tab_group, panel_ids[2]);
+                cx.notify();
+            }))
+            .child(properties_icon);
+
         let layers_tab = div()
             .id(if column_index == 0 { "left-dock-tab-layers" } else { "right-dock-tab-layers" })
             .flex()
@@ -666,7 +751,7 @@ impl MainWindow {
             .flex()
             .flex_row()
             .items_center()
-            .w(px(column_width))
+            .w(px(column_content_width))
             .h(px(top_tab_strip_height))
             .bg(rgb(colors.dock_background))
             .border_1()
@@ -727,7 +812,7 @@ impl MainWindow {
             .flex()
             .flex_row()
             .items_center()
-            .w(px(column_width))
+            .w(px(column_content_width))
             .h(px(bottom_tab_strip_height))
             .bg(rgb(colors.dock_background))
             .border_1()
@@ -765,7 +850,7 @@ impl MainWindow {
             .child(div().w(px(content_padding)).h(px(1.0)));
 
         let top_content_area = div()
-            .w(px(column_width))
+            .w(px(column_content_width))
             .h(px(top_content_height))
             .bg(rgb(colors.group_background))
             .border_1()
@@ -773,28 +858,32 @@ impl MainWindow {
             .child(top_content);
 
         let bottom_content_area = div()
-            .w(px(column_width))
+            .w(px(column_content_width))
             .h(px(bottom_content_height))
             .bg(rgb(colors.group_background))
             .border_1()
             .border_color(rgb(colors.border))
             .child(bottom_content);
 
-        let top_group = div()
+        let mut top_group = div()
             .flex()
             .flex_col()
-            .w(px(column_width))
-            .h(px(top_group_height))
-            .child(top_tab_strip)
-            .child(top_content_area);
+            .w(px(column_content_width))
+            .h(px(top_group_height));
+        if !tabs_collapsed {
+            top_group = top_group.child(top_tab_strip);
+        }
+        top_group = top_group.child(top_content_area);
 
-        let bottom_group = div()
+        let mut bottom_group = div()
             .flex()
             .flex_col()
-            .w(px(column_width))
-            .h(px(bottom_group_height))
-            .child(bottom_tab_strip)
-            .child(bottom_content_area);
+            .w(px(column_content_width))
+            .h(px(bottom_group_height));
+        if !tabs_collapsed {
+            bottom_group = bottom_group.child(bottom_tab_strip);
+        }
+        bottom_group = bottom_group.child(bottom_content_area);
 
         let resize_hit_height = metrics.splitter_hit_zone.max(metrics.splitter_thickness);
         let visible_split_height = metrics.splitter_thickness.min(resize_hit_height);
@@ -802,7 +891,7 @@ impl MainWindow {
             window_y_offset + header_height + top_group_height + group_split_hit_height / 2.0;
         let group_splitter = div()
             .relative()
-            .w(px(column_width))
+            .w(px(column_content_width))
             .h(px(group_split_hit_height))
             .cursor(CursorStyle::ResizeUpDown)
             .on_mouse_down(
@@ -846,6 +935,11 @@ impl MainWindow {
                     .child(div().w(px(header_spacer_width)).h(px(1.0)))
                     .child(
                         div()
+                            .id(if column_index == 0 {
+                                "left-dock-collapse-tabs"
+                            } else {
+                                "right-dock-collapse-tabs"
+                            })
                             .flex()
                             .items_center()
                             .justify_center()
@@ -853,7 +947,12 @@ impl MainWindow {
                             .h(px(button_size))
                             .bg(rgb(colors.hover))
                             .text_color(rgb(colors.primary_text))
-                            .child(">>"),
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.column_tabs_collapsed[column_index] =
+                                    !this.column_tabs_collapsed[column_index];
+                                cx.notify();
+                            }))
+                            .child(if tabs_collapsed { "<<" } else { ">>" }),
                     )
                     .child(div().w(px(button_gap)).h(px(1.0)))
                     .child(
@@ -886,6 +985,30 @@ impl MainWindow {
         }
         if show_bottom_group {
             column_view = column_view.child(bottom_group);
+        }
+        if tabs_collapsed {
+            let mut collapsed_tab_rail = div()
+                .absolute()
+                .right(px(0.0))
+                .top(px(header_height))
+                .flex()
+                .flex_col()
+                .items_center()
+                .w(px(tab_rail_width))
+                .h(px(available_below_header))
+                .bg(rgb(colors.dock_background))
+                .border_l_1()
+                .border_color(rgb(colors.border));
+            if self.panel_slot_visible(column_index, 0) {
+                collapsed_tab_rail = collapsed_tab_rail.child(layers_rail_tab);
+            }
+            if self.panel_slot_visible(column_index, 1) {
+                collapsed_tab_rail = collapsed_tab_rail.child(color_rail_tab);
+            }
+            if self.panel_slot_visible(column_index, 2) {
+                collapsed_tab_rail = collapsed_tab_rail.child(properties_rail_tab);
+            }
+            column_view = column_view.child(collapsed_tab_rail);
         }
         column_view
     }
