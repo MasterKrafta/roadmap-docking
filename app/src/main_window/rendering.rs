@@ -451,7 +451,11 @@ impl MainWindow {
             )
     }
 
-    fn render_floating_tab_group(
+    /// Compatibility renderer for legacy floating roots whose Core root is a bare Tabs node.
+    ///
+    /// All new MainWindow detach operations wrap groups in a Column, so current floating groups
+    /// use render_column and inherit its exact header, collapse-to-icons, and close behavior.
+    fn render_legacy_floating_tabs(
         &self,
         cx: &mut Context<Self>,
         group_id: NodeId,
@@ -1228,7 +1232,7 @@ impl Render for MainWindow {
                     .border_1()
                     .border_color(rgb(colors.border))
                     .overflow_hidden()
-                    .child(self.render_floating_tab_group(
+                    .child(self.render_legacy_floating_tabs(
                         cx,
                         composition_root,
                         bounds.size.width,
