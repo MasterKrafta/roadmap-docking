@@ -1592,7 +1592,25 @@ impl MainWindow {
                         cx.notify();
                     }))
                     .child(tab_icon);
-                collapsed_tab_rail = collapsed_tab_rail.child(tab);
+                // Reserve a separate mini-header strip above each collapsed tab.
+                // It is intentionally inert for now; it can become the drag and
+                // double-click target without interfering with icon activation.
+                let mini_header = div()
+                    .id(format!("collapsed-dock-tab-header-{column_index}-{tab_index}"))
+                    .w(px(rail_item_width))
+                    .h(px(12.0))
+                    .bg(rgb(colors.toolbar_background))
+                    .border_1()
+                    .border_color(rgb(colors.border));
+                let tab_item = div()
+                    .id(format!("collapsed-dock-tab-item-{column_index}-{tab_index}"))
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .w(px(rail_item_width))
+                    .child(mini_header)
+                    .child(tab);
+                collapsed_tab_rail = collapsed_tab_rail.child(tab_item);
             }
             column_view = column_view.child(collapsed_tab_rail);
         }
