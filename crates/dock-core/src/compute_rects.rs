@@ -1636,6 +1636,8 @@ mod tests {
             .unwrap();
 
         assert_eq!(rects.floating_groups[0].rect, bounds);
+        assert_eq!(rects.groups[0].rect.origin.y, bounds.origin.y);
+        assert_eq!(rects.tab_strips[0].rect.origin.y, bounds.origin.y);
         assert_eq!(
             rects.groups[0].rect.size.height,
             metrics.collapsed_group_height
