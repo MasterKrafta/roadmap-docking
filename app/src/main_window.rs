@@ -910,7 +910,7 @@ impl MainWindow {
                     .absolute()
                     .left(px(0.0))
                     .top(px(((group_split_hit_height - visible_split_height) / 2.0).max(0.0)))
-                    .w(px(column_width))
+                    .w(px(column_content_width))
                     .h(px(visible_split_height))
                     .bg(rgb(colors.splitter)),
             );
@@ -997,7 +997,7 @@ impl MainWindow {
                 .w(px(tab_rail_width))
                 .h(px(available_below_header))
                 .bg(rgb(colors.dock_background))
-                .border_l_1()
+                .border_1()
                 .border_color(rgb(colors.border));
             if self.panel_slot_visible(column_index, 0) {
                 collapsed_tab_rail = collapsed_tab_rail.child(layers_rail_tab);
