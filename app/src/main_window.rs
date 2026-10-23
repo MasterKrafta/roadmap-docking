@@ -141,7 +141,9 @@ impl MainWindow {
             .main_area(DockSide::Right)
             .ok_or_else(|| "Dock Core did not create the initial right dock area".to_owned())?
             .root;
-        let initial_top_group = first_group_in_column(&layout, initial_right_column)
+        let initial_top_group = group_ids_for_column(&layout, initial_right_column)
+            .first()
+            .copied()
             .ok_or_else(|| "Dock Core did not create the upper tab group".to_owned())?;
 
         layout
@@ -172,8 +174,6 @@ impl MainWindow {
             )
             .map_err(|error| format!("Could not create the lower tab group: {error}"))?;
 
-        let initial_bottom_group = second_group_in_column(&layout, initial_right_column)
-            .ok_or_else(|| "Dock Core did not create the lower tab group".to_owned())?;
         layout
             .apply(
                 DockCommand::RestoreGroupRatios {
@@ -693,7 +693,9 @@ impl MainWindow {
         self.column_ids = column_ids;
         self.column_open = column_open;
 
-        let first_group = first_group_in_column(&self.layout, target_column)
+        let first_group = group_ids_for_column(&self.layout, target_column)
+            .first()
+            .copied()
             .ok_or_else(|| "Dock Core did not create the first restored tab group".to_owned())?;
         let mut restored_groups = Vec::with_capacity(snapshot.groups.len());
         restored_groups.push(first_group);
@@ -740,13 +742,6 @@ impl MainWindow {
                 )?;
             }
         }
-
-        // Restore compatibility fields until their remaining consumers are moved to Core.
-        let current_groups = self.group_ids_in_column(target_column);
-        let top_group = *current_groups
-            .first()
-            .ok_or_else(|| "Restored column has no tab groups".to_owned())?;
-        let bottom_group = current_groups.get(1).copied().unwrap_or(top_group);
 
         for (group_snapshot, group_id) in snapshot.groups.iter().zip(restored_groups.iter().copied()) {
             let selected_key_for_group = group_snapshot
@@ -1016,10 +1011,7 @@ impl MainWindow {
     }
 
     fn group_ids_in_column(&self, column_id: NodeId) -> Vec<NodeId> {
-        match self.layout.node(column_id) {
-            Some(Node::Column(column)) => column.groups.clone(),
-            _ => Vec::new(),
-        }
+        group_ids_for_column(&self.layout, column_id)
     }
 
     fn group_ratios_in_column(&self, column_id: NodeId) -> Vec<f32> {
@@ -2016,17 +2008,10 @@ impl MainWindow {
     }
 }
 
-fn first_group_in_column(layout: &Layout, column_id: NodeId) -> Option<NodeId> {
-    match layout.node(column_id)? {
-        Node::Column(column) => column.groups.first().copied(),
-        _ => None,
-    }
-}
-
-fn second_group_in_column(layout: &Layout, column_id: NodeId) -> Option<NodeId> {
-    match layout.node(column_id)? {
-        Node::Column(column) => column.groups.get(1).copied(),
-        _ => None,
+fn group_ids_for_column(layout: &Layout, column_id: NodeId) -> Vec<NodeId> {
+    match layout.node(column_id) {
+        Some(Node::Column(column)) => column.groups.clone(),
+        _ => Vec::new(),
     }
 }
 
