@@ -12,6 +12,15 @@ use ui::Theme;
 
 use crate::panels::PanelRegistry;
 
+#[derive(Clone, Copy)]
+struct DockTabContextMenu {
+    column_index: usize,
+    group: NodeId,
+    active_panel: Option<PanelId>,
+    left: f32,
+    top: f32,
+}
+
 /// A single-panel left column beside a right column with two upper tabs and one lower tab.
 pub(crate) struct MainWindow {
     theme: Theme,
@@ -35,6 +44,7 @@ pub(crate) struct MainWindow {
     /// destroying their dock location.
     panel_visibility: [bool; 4],
     windows_menu_open: bool,
+    tab_context_menu: Option<DockTabContextMenu>,
     is_resizing_column: bool,
     /// The outermost dock column whose canvas-facing edge is being resized.
     resizing_outer_column: Option<NodeId>,
@@ -222,6 +232,7 @@ impl MainWindow {
             panels_by_column,
             panel_visibility: [true; 4],
             windows_menu_open: false,
+            tab_context_menu: None,
             is_resizing_column: false,
             resizing_outer_column: None,
             resize_column_pointer_offset_x: 0.0,
@@ -247,6 +258,72 @@ impl MainWindow {
         match self.layout.node(active_node)? {
             Node::Panel(panel) => Some(panel.panel_id),
             _ => None,
+        }
+    }
+
+    fn toggle_tab_context_menu(
+        &mut self,
+        column_index: usize,
+        group: NodeId,
+        active_panel: Option<PanelId>,
+        pointer_x: f32,
+        pointer_y: f32,
+    ) {
+        if self
+            .tab_context_menu
+            .is_some_and(|menu| menu.group == group)
+        {
+            self.tab_context_menu = None;
+            return;
+        }
+        self.tab_context_menu = Some(DockTabContextMenu {
+            column_index,
+            group,
+            active_panel,
+            left: (pointer_x - 168.0).max(0.0),
+            top: pointer_y,
+        });
+    }
+
+    fn close_context_tab(&mut self) {
+        let Some(menu) = self.tab_context_menu.take() else {
+            return;
+        };
+        let Some(panel_id) = menu.active_panel else {
+            return;
+        };
+        let Some(panel_slot) = self
+            .panels_by_column
+            .get(menu.column_index)
+            .and_then(|panel_ids| panel_ids.iter().position(|candidate| *candidate == panel_id))
+        else {
+            return;
+        };
+        let Some(menu_index) = Self::visibility_index_for_slot(menu.column_index, panel_slot) else {
+            return;
+        };
+        if self.panel_visibility[menu_index] {
+            self.toggle_panel_visibility(menu_index);
+        }
+    }
+
+    fn close_context_tab_group(&mut self) {
+        let Some(menu) = self.tab_context_menu.take() else {
+            return;
+        };
+        let menu_indices: &[usize] = if menu.column_index == 0 {
+            &[0]
+        } else if menu.group == self.top_tab_groups[1] {
+            &[1, 2]
+        } else if menu.group == self.bottom_tab_groups[1] {
+            &[3]
+        } else {
+            &[]
+        };
+        for menu_index in menu_indices.iter().copied() {
+            if self.panel_visibility[menu_index] {
+                self.toggle_panel_visibility(menu_index);
+            }
         }
     }
 
@@ -868,6 +945,11 @@ impl MainWindow {
         top_tab_strip = top_tab_strip
             .child(
                 div()
+                    .id(if column_index == 0 {
+                        "left-dock-top-group-menu"
+                    } else {
+                        "right-dock-top-group-menu"
+                    })
                     .flex()
                     .items_center()
                     .justify_center()
@@ -875,6 +957,19 @@ impl MainWindow {
                     .h(px(button_size))
                     .text_color(rgb(colors.primary_text))
                     .bg(rgb(colors.hover))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                            this.toggle_tab_context_menu(
+                                column_index,
+                                top_tab_group,
+                                active_top_panel,
+                                event.position.x.as_f32(),
+                                event.position.y.as_f32(),
+                            );
+                            cx.notify();
+                        }),
+                    )
                     .child("☰"),
             )
             .child(
@@ -973,6 +1068,7 @@ impl MainWindow {
         bottom_tab_strip = bottom_tab_strip
             .child(
                 div()
+                    .id("right-dock-bottom-group-menu")
                     .flex()
                     .items_center()
                     .justify_center()
@@ -980,6 +1076,19 @@ impl MainWindow {
                     .h(px(button_size))
                     .text_color(rgb(colors.primary_text))
                     .bg(rgb(colors.hover))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                            this.toggle_tab_context_menu(
+                                column_index,
+                                bottom_tab_group,
+                                active_bottom_panel,
+                                event.position.x.as_f32(),
+                                event.position.y.as_f32(),
+                            );
+                            cx.notify();
+                        }),
+                    )
                     .child("☰"),
             )
             .child(
@@ -1418,6 +1527,52 @@ impl Render for MainWindow {
             .bg(rgb(colors.canvas_background))
             .child(menu_bar)
             .child(dock_area);
+
+        if let Some(menu_state) = self.tab_context_menu {
+            let close_tab = div()
+                .id("dock-context-close-tab")
+                .flex()
+                .items_center()
+                .w(px(176.0))
+                .h(px(30.0))
+                .p(px(8.0))
+                .bg(rgb(colors.toolbar_background))
+                .text_color(rgb(colors.primary_text))
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.close_context_tab();
+                    cx.notify();
+                }))
+                .child("Close Tab");
+            let close_tab_group = div()
+                .id("dock-context-close-tab-group")
+                .flex()
+                .items_center()
+                .w(px(176.0))
+                .h(px(30.0))
+                .p(px(8.0))
+                .bg(rgb(colors.toolbar_background))
+                .text_color(rgb(colors.primary_text))
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.close_context_tab_group();
+                    cx.notify();
+                }))
+                .child("Close Tab Group");
+            let dropdown = div()
+                .id("dock-tab-context-menu")
+                .absolute()
+                .left(px(menu_state.left))
+                .top(px(menu_state.top))
+                .flex()
+                .flex_col()
+                .w(px(184.0))
+                .bg(rgb(colors.toolbar_background))
+                .border_1()
+                .border_color(rgb(colors.border))
+                .p(px(4.0))
+                .child(close_tab)
+                .child(close_tab_group);
+            root = root.child(dropdown);
+        }
 
         if self.windows_menu_open {
             let mut dropdown = div()
