@@ -705,20 +705,21 @@ impl MainWindow {
         }
 
         let first_panel_key = snapshot.groups[0].panel_keys[0].clone();
-        // Stable column slots can have gaps while columns are closed. Insert the
-        // restored column after the number of currently open slots before its slot.
-        let insert_index = self
-            .column_open
+        // Restore relative to the current main tree, not to columns that may
+        // currently live only in a separate floating composition.
+        let main_column_indices = self
+            .layout
+            .main_area(DockSide::Right)
+            .map(|area| self.column_indices_in_core_order(area.root))
+            .unwrap_or_default();
+        let insert_index = main_column_indices
             .iter()
-            .take(column_index)
-            .filter(|is_open| **is_open)
+            .filter(|open_index| **open_index < column_index)
             .count();
-        let has_other_open_column = self
-            .column_open
+        let has_other_main_column = main_column_indices
             .iter()
-            .enumerate()
-            .any(|(index, is_open)| index != column_index && *is_open);
-        let target = has_other_open_column.then_some(DropTarget::MainColumn {
+            .any(|open_index| *open_index != column_index);
+        let target = has_other_main_column.then_some(DropTarget::MainColumn {
             side: DockSide::Right,
             index: insert_index,
         });
