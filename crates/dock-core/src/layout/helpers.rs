@@ -324,6 +324,30 @@ pub(super) fn validate_photoshop_floating_root(
 ) {
     match nodes.get(root) {
         Some(Node::Tabs(_)) => {}
+        Some(Node::Column(column)) => {
+            let invalid_child = column.groups.iter().any(|child| {
+                nodes.contains_key(*child) && !matches!(nodes.get(*child), Some(Node::Tabs(_)))
+            });
+            if invalid_child {
+                errors.push(ValidationError::InvalidFloatingRoot {
+                    group,
+                    root,
+                    reason: "floating Column children must all be Tabs nodes",
+                });
+            }
+        }
+        Some(Node::Split(split)) if split.axis == Axis::X => {
+            let invalid_child = split.children.iter().any(|child| {
+                nodes.contains_key(*child) && !matches!(nodes.get(*child), Some(Node::Column(_)))
+            });
+            if invalid_child {
+                errors.push(ValidationError::InvalidFloatingRoot {
+                    group,
+                    root,
+                    reason: "Split(X) floating composition children must all be Column nodes",
+                });
+            }
+        }
         Some(Node::Split(split)) if split.axis == Axis::Y => {
             let invalid_child = split.children.iter().any(|child| {
                 nodes.contains_key(*child) && !matches!(nodes.get(*child), Some(Node::Tabs(_)))
@@ -339,12 +363,12 @@ pub(super) fn validate_photoshop_floating_root(
         Some(Node::Split(_)) => errors.push(ValidationError::InvalidFloatingRoot {
             group,
             root,
-            reason: "floating stack Split must use axis Y",
+            reason: "floating composition Split must use axis X or floating stack Split must use axis Y",
         }),
         Some(_) => errors.push(ValidationError::InvalidFloatingRoot {
             group,
             root,
-            reason: "floating root must be Tabs or Split(Y) of Tabs",
+            reason: "floating root must be Tabs, Column, Split(X) of Columns, or Split(Y) of Tabs",
         }),
         None => {}
     }
