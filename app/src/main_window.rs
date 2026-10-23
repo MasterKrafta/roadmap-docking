@@ -6,7 +6,7 @@ mod visibility;
 
 use dock_core::{
     Axis, ColumnMode, DockCommand, DockMetrics, DockSide, FloatingGroupId, Layout, Node, NodeId,
-    PanelId, PanelKey, Size,
+    PanelId, PanelKey,
 };
 use dock_gpui::dock_metrics_from_theme;
 use ui::Theme;
