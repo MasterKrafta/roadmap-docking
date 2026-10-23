@@ -5,7 +5,7 @@ mod tab;
 use gpui::{Context, Div, ParentElement, Styled, div, px, rgb};
 use hamburger_button::HamburgerButton;
 use panel_content::PanelContent;
-use super::MainWindow;
+use super::super::MainWindow;
 use tab::Tab;
 use ui::Theme;
 
