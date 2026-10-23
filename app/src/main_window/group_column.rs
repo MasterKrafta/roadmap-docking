@@ -14,9 +14,18 @@ pub(crate) struct GroupColumn {
 
 impl GroupColumn {
     pub(crate) fn new(theme: Theme) -> Self {
-        Self {
+        let mut group = Self {
             theme,
-            columns: vec![Column::new(theme)],
+            columns: Vec::new(),
+        };
+        group.add_column();
+        group
+    }
+
+    /// Adds another column until the layout reaches its configured limit.
+    pub(crate) fn add_column(&mut self) {
+        if self.columns.len() < self.theme.metrics.max_columns.max(1) {
+            self.columns.push(Column::new(self.theme));
         }
     }
 
