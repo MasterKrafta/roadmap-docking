@@ -888,6 +888,7 @@ impl MainWindow {
                 .border_1()
                 .border_color(rgb(colors.border));
             let mut last_group_index: Option<usize> = None;
+            let mut collapsed_rail_cursor_y = window_y_offset + header_height;
             for (tab_index, (group_index, group_id, panel_id, active_panel)) in
                 collapsed_tabs.iter().copied().enumerate()
             {
@@ -904,7 +905,9 @@ impl MainWindow {
                             .h(px(2.0))
                             .bg(rgb(colors.border));
                         collapsed_tab_rail = collapsed_tab_rail.child(group_separator);
+                        collapsed_rail_cursor_y += 2.0;
                     }
+                    let mini_header_origin_y = collapsed_rail_cursor_y;
                     let mini_header = div()
                         .id(format!("collapsed-dock-group-header-{column_index}-{group_index}"))
                         .w(px(rail_item_width))
@@ -938,6 +941,7 @@ impl MainWindow {
                             }),
                         );
                     collapsed_tab_rail = collapsed_tab_rail.child(mini_header);
+                    collapsed_rail_cursor_y += 12.0;
                     last_group_index = Some(group_index);
                 }
 
@@ -963,6 +967,7 @@ impl MainWindow {
                     }))
                     .child(tab_icon);
                 collapsed_tab_rail = collapsed_tab_rail.child(tab);
+                collapsed_rail_cursor_y += button_size;
             }
             column_view = column_view.child(collapsed_tab_rail);
         }
