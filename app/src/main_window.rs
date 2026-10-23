@@ -255,7 +255,7 @@ impl MainWindow {
             }
         }
 
-        Ok(Self {
+        let mut main_window = Self {
             theme,
             panels,
             layout,
@@ -266,36 +266,7 @@ impl MainWindow {
             top_tab_groups,
             bottom_tab_groups,
             panels_by_column,
-            panel_visibility: vec![
-                PanelVisibilityEntry {
-                    panel_id: left_layers,
-                    column_index: 0,
-                    panel_key: "layers".to_owned(),
-                    title: "Left Layers".to_owned(),
-                    visible: true,
-                },
-                PanelVisibilityEntry {
-                    panel_id: right_layers,
-                    column_index: 1,
-                    panel_key: "layers".to_owned(),
-                    title: "Right Layers".to_owned(),
-                    visible: true,
-                },
-                PanelVisibilityEntry {
-                    panel_id: right_color,
-                    column_index: 1,
-                    panel_key: "color".to_owned(),
-                    title: "Right Color".to_owned(),
-                    visible: true,
-                },
-                PanelVisibilityEntry {
-                    panel_id: right_properties,
-                    column_index: 1,
-                    panel_key: "properties".to_owned(),
-                    title: "Right Properties".to_owned(),
-                    visible: true,
-                },
-            ],
+            panel_visibility: Vec::new(),
             windows_menu_open: false,
             tab_context_menu: None,
             is_resizing_column: false,
@@ -312,7 +283,9 @@ impl MainWindow {
             composition_drag_offset_y: 0.0,
             composition_drag_source: None,
             composition_drag_group: None,
-        })
+        };
+        main_window.sync_panel_visibility_entries();
+        Ok(main_window)
     }
 
     /// Apply a Core layout mutation and then reconcile floating composition geometry.
@@ -324,6 +297,7 @@ impl MainWindow {
             .apply(command, &self.dock_metrics)
             .map_err(|error| error.to_string())?;
         self.sync_floating_composition_bounds();
+        self.sync_panel_visibility_entries();
         Ok(())
     }
 
@@ -498,20 +472,72 @@ impl MainWindow {
             .map_or(true, |entry| entry.visible)
     }
 
-    fn update_panel_visibility_id(
-        &mut self,
-        column_index: usize,
-        panel_key: &str,
-        panel_id: PanelId,
-    ) {
-        if let Some(entry) = self
-            .panel_visibility
-            .iter_mut()
-            .find(|entry| {
-                entry.column_index == column_index && entry.panel_key.as_str() == panel_key
-            })
-        {
-            entry.panel_id = panel_id;
+    /// Discover current Core panel instances and ensure each has independent visibility state.
+    ///
+    /// Existing entries survive when their column temporarily disappears, so closing a
+    /// column and restoring it can retain visibility preferences. A newly discovered
+    /// panel instance reuses a stale entry only when the stable panel key and column match.
+    fn sync_panel_visibility_entries(&mut self) {
+        let mut discovered: Vec<(usize, PanelId, String, String)> = Vec::new();
+
+        for (column_index, column_id) in self.column_ids.iter().copied().enumerate() {
+            for group_id in self.group_ids_in_column(column_id) {
+                let Some(group) = self.tab_group_view_data(group_id) else {
+                    continue;
+                };
+                for panel_id in group.panels {
+                    let Some(instance) = self.layout.panel_instance(panel_id) else {
+                        continue;
+                    };
+                    let column_label = match column_index {
+                        0 => "Left".to_owned(),
+                        1 => "Right".to_owned(),
+                        index => format!("Column {}", index + 1),
+                    };
+                    discovered.push((
+                        column_index,
+                        panel_id,
+                        instance.key.as_str().to_owned(),
+                        format!("{column_label} {}", self.panels.title(instance)),
+                    ));
+                }
+            }
+        }
+
+        let current_panel_ids: Vec<PanelId> =
+            discovered.iter().map(|(_, panel_id, _, _)| *panel_id).collect();
+
+        for (column_index, panel_id, panel_key, title) in discovered {
+            if let Some(entry) = self
+                .panel_visibility
+                .iter_mut()
+                .find(|entry| entry.panel_id == panel_id)
+            {
+                entry.column_index = column_index;
+                entry.panel_key = panel_key;
+                entry.title = title;
+                continue;
+            }
+
+            let stale_entry_index = self.panel_visibility.iter().position(|entry| {
+                entry.column_index == column_index
+                    && entry.panel_key == panel_key
+                    && !current_panel_ids.contains(&entry.panel_id)
+            });
+
+            if let Some(index) = stale_entry_index {
+                let entry = &mut self.panel_visibility[index];
+                entry.panel_id = panel_id;
+                entry.title = title;
+            } else {
+                self.panel_visibility.push(PanelVisibilityEntry {
+                    panel_id,
+                    column_index,
+                    panel_key,
+                    title,
+                    visible: true,
+                });
+            }
         }
     }
 
@@ -655,7 +681,6 @@ impl MainWindow {
             self.bottom_tab_groups[0] = top_group;
             self.panels_by_column[0] = [layers_panel; 4];
             self.column_has_bottom_group[0] = false;
-            self.update_panel_visibility_id(0, layers_key.as_str(), layers_panel);
         } else {
             self.layout
                 .apply(
@@ -701,9 +726,6 @@ impl MainWindow {
                 properties_panel,
             ];
             self.column_has_bottom_group[1] = true;
-            self.update_panel_visibility_id(1, layers_key.as_str(), layers_panel);
-            self.update_panel_visibility_id(1, color_key.as_str(), color_panel);
-            self.update_panel_visibility_id(1, properties_key.as_str(), properties_panel);
 
             let selected = if selected_panel_key == color_key.as_str() {
                 color_panel
@@ -720,6 +742,7 @@ impl MainWindow {
             self.activate_tab(selected_group, selected);
         }
         self.column_open[column_index] = true;
+        self.sync_panel_visibility_entries();
         Ok(())
     }
 
