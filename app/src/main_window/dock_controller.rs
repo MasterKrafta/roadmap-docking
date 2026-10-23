@@ -126,9 +126,12 @@ impl DockController {
 
         let make_command_handler = {
             let entity = entity.clone();
+            let focus_handle = focus_handle.clone();
             move |command: DockCommand| -> CommandClickHandler {
                 let entity = entity.clone();
-                Box::new(move |_, _, app| {
+                let focus_handle = focus_handle.clone();
+                Box::new(move |_: &ClickEvent, gpui_window: &mut Window, app: &mut App| {
+                    focus_handle.focus(gpui_window, app);
                     let command = command.clone();
                     entity.update(app, move |window, cx| {
                         window.dock.apply_command(command);
@@ -140,9 +143,12 @@ impl DockController {
 
         let make_menu_handler = {
             let entity = entity.clone();
+            let focus_handle = focus_handle.clone();
             move |request: DockMenuRequest| -> CommandClickHandler {
                 let entity = entity.clone();
-                Box::new(move |_, _, app| {
+                let focus_handle = focus_handle.clone();
+                Box::new(move |_: &ClickEvent, gpui_window: &mut Window, app: &mut App| {
+                    focus_handle.focus(gpui_window, app);
                     entity.update(app, |window, cx| {
                         window.dock.menu_request = Some(request);
                         cx.notify();
@@ -153,9 +159,12 @@ impl DockController {
 
         let make_drag_start_handler = {
             let entity = entity.clone();
+            let focus_handle = focus_handle.clone();
             move |payload: DragPayload, handle: DragHandle| -> DragStartHandler {
                 let entity = entity.clone();
-                Box::new(move |event: &MouseDownEvent, _, app| {
+                let focus_handle = focus_handle.clone();
+                Box::new(move |event: &MouseDownEvent, gpui_window: &mut Window, app: &mut App| {
+                    focus_handle.focus(gpui_window, app);
                     let position = core_point(event.position);
                     entity.update(app, |window, cx| {
                         window.dock.begin_drag(payload, handle, position);
@@ -167,9 +176,12 @@ impl DockController {
 
         let make_resize_start_handler = {
             let entity = entity.clone();
+            let focus_handle = focus_handle.clone();
             move |handle: ResizeHandle| -> ResizeStartHandler {
                 let entity = entity.clone();
-                Box::new(move |event: &MouseDownEvent, _, app| {
+                let focus_handle = focus_handle.clone();
+                Box::new(move |event: &MouseDownEvent, gpui_window: &mut Window, app: &mut App| {
+                    focus_handle.focus(gpui_window, app);
                     let position = core_point(event.position);
                     entity.update(app, |window, cx| {
                         window.dock.begin_resize(handle, position);
@@ -586,7 +598,9 @@ impl DockController {
                             .child("×")
                             .on_click({
                                 let entity = entity.clone();
-                                Box::new(move |_: &ClickEvent, _: &mut Window, app: &mut App| {
+                                let focus_handle = focus_handle.clone();
+                                Box::new(move |_: &ClickEvent, gpui_window: &mut Window, app: &mut App| {
+                                    focus_handle.focus(gpui_window, app);
                                     entity.update(app, |window, cx| {
                                         window.dock.menu_request = None;
                                         cx.notify();
