@@ -230,9 +230,32 @@ impl DockController {
                 }),
             )
             .on_key_down(cx.listener(|window, event: &KeyDownEvent, _, cx| {
-                if event.keystroke.key.as_str() == "escape"
-                    && window.dock.escape_or_dismiss()
+                let key = event.keystroke.key.as_str();
+                let modifiers = event.keystroke.modifiers;
+                let primary_modifier = modifiers.platform || modifiers.control;
+
+                let history_changed = if primary_modifier
+                    && !modifiers.alt
+                    && key.eq_ignore_ascii_case("z")
                 {
+                    if modifiers.shift {
+                        window.dock.redo()
+                    } else {
+                        window.dock.undo()
+                    }
+                } else if primary_modifier
+                    && !modifiers.alt
+                    && !modifiers.shift
+                    && key.eq_ignore_ascii_case("y")
+                {
+                    window.dock.redo()
+                } else {
+                    false
+                };
+
+                if history_changed {
+                    cx.notify();
+                } else if key == "escape" && window.dock.escape_or_dismiss() {
                     cx.notify();
                 }
             }));
@@ -262,6 +285,28 @@ impl DockController {
             .apply(&mut self.layout, command, &self.metrics)
         {
             eprintln!("Dock command rejected: {error}");
+        }
+    }
+
+    fn undo(&mut self) -> bool {
+        self.menu_request = None;
+        match self.history.undo(&mut self.layout, &self.metrics) {
+            Ok(changed) => changed,
+            Err(error) => {
+                eprintln!("Dock undo failed: {error}");
+                false
+            }
+        }
+    }
+
+    fn redo(&mut self) -> bool {
+        self.menu_request = None;
+        match self.history.redo(&mut self.layout, &self.metrics) {
+            Ok(changed) => changed,
+            Err(error) => {
+                eprintln!("Dock redo failed: {error}");
+                false
+            }
         }
     }
 
