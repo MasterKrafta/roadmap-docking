@@ -752,8 +752,7 @@ impl MainWindow {
                 new_group
             };
 
-            let start_panel_index = if group_index == 0 { 1 } else { 1 };
-            for panel_key in group_snapshot.panel_keys.iter().skip(start_panel_index) {
+            for panel_key in group_snapshot.panel_keys.iter().skip(1) {
                 let target_index = self
                     .tab_group_view_data(group_id)
                     .map_or(0, |group| group.panels.len());
