@@ -73,7 +73,6 @@ pub(crate) struct MainWindow {
     /// Core removes empty columns and collapses their parent Split. These flags keep
     /// the view aligned with that topology; the last remaining column stays open.
     column_open: [bool; 2],
-    top_tab_groups: [NodeId; 2],
     /// Per-panel visibility entries used by rendering, context actions, and the Windows menu.
     panel_visibility: Vec<PanelVisibilityEntry>,
     /// Core topology remembered while a column is closed, so it can be recreated generically.
@@ -218,10 +217,6 @@ impl MainWindow {
         if column_ids[1] != initial_right_column {
             return Err("Dock Core changed the original column's order unexpectedly".to_owned());
         }
-        let left_top_group = first_group_in_column(&layout, column_ids[0])
-            .ok_or_else(|| "Dock Core did not create the left upper group".to_owned())?;
-
-        let top_tab_groups = [left_top_group, initial_top_group];
         // Initialize each Core group by activating its first actual panel. This
         // does not require a fixed Layers/Color/Properties slot map.
         for column_id in column_ids {
@@ -262,7 +257,6 @@ impl MainWindow {
             dock_metrics,
             column_ids,
             column_open: [true; 2],
-            top_tab_groups,
             panel_visibility: Vec::new(),
             closed_column_snapshots: [None, None],
             windows_menu_open: false,
@@ -753,7 +747,6 @@ impl MainWindow {
             .first()
             .ok_or_else(|| "Restored column has no tab groups".to_owned())?;
         let bottom_group = current_groups.get(1).copied().unwrap_or(top_group);
-        self.top_tab_groups[column_index] = top_group;
 
         for (group_snapshot, group_id) in snapshot.groups.iter().zip(restored_groups.iter().copied()) {
             let selected_key_for_group = group_snapshot
@@ -1632,11 +1625,8 @@ impl MainWindow {
     ) -> Div {
         let column_id = self.column_ids[column_index];
         let core_group_ids = self.group_ids_in_column(column_id);
-        // Keep the first current group as the column header's context-menu target.
-        let top_tab_group = core_group_ids
-            .first()
-            .copied()
-            .unwrap_or(self.top_tab_groups[column_index]);
+        // A context menu needs a real Core group; avoid stale placeholder IDs.
+        let header_context_group = core_group_ids.first().copied();
         let column_width = self.column_width(column_index);
         let colors = self.theme.colors;
         let metrics = self.theme.metrics;
@@ -1828,12 +1818,14 @@ impl MainWindow {
                             .on_mouse_down(
                                 MouseButton::Right,
                                 cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                                    this.open_header_context_menu(
-                                        column_index,
-                                        top_tab_group,
-                                        event.position.x.as_f32(),
-                                        event.position.y.as_f32(),
-                                    );
+                                    if let Some(group) = header_context_group {
+                                        this.open_header_context_menu(
+                                            column_index,
+                                            group,
+                                            event.position.x.as_f32(),
+                                            event.position.y.as_f32(),
+                                        );
+                                    }
                                     cx.notify();
                                 }),
                             )
@@ -1876,12 +1868,14 @@ impl MainWindow {
                             .on_mouse_down(
                                 MouseButton::Right,
                                 cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                                    this.open_header_context_menu(
-                                        column_index,
-                                        top_tab_group,
-                                        event.position.x.as_f32(),
-                                        event.position.y.as_f32(),
-                                    );
+                                    if let Some(group) = header_context_group {
+                                        this.open_header_context_menu(
+                                            column_index,
+                                            group,
+                                            event.position.x.as_f32(),
+                                            event.position.y.as_f32(),
+                                        );
+                                    }
                                     cx.notify();
                                 }),
                             )
