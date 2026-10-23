@@ -701,6 +701,7 @@ impl MainWindow {
         self.is_resizing_column = false;
         self.resizing_outer_column = None;
         self.resizing_groups_column = None;
+        self.sync_floating_composition_bounds();
     }
 
     fn column_width(&self, column_index: usize) -> f32 {
@@ -845,7 +846,7 @@ impl MainWindow {
         }
     }
 
-    fn composition_size(&self, root: NodeId, window_height: f32) -> Option<Size> {
+    fn composition_width(&self, root: NodeId) -> Option<f32> {
         let columns = self.composition_column_indices(root);
         if columns.is_empty() {
             return None;
@@ -856,15 +857,55 @@ impl MainWindow {
             .map(|column_index| self.column_width(*column_index))
             .sum::<f32>()
             + self.theme.metrics.splitter_thickness * splitter_gaps;
+        Some(width.max(1.0))
+    }
+
+    fn composition_size(&self, root: NodeId, window_height: f32) -> Option<Size> {
+        let width = self.composition_width(root)?;
         let menu_height = self
             .theme
             .metrics
             .column_header_height
             .min(window_height.max(1.0));
-        Some(Size::new(
-            width.max(1.0),
-            (window_height - menu_height).max(1.0),
-        ))
+        let available_height = (window_height - menu_height).max(1.0);
+        // Floating docks should be compact enough to move vertically instead
+        // of initially filling almost the entire application viewport.
+        let floating_height = available_height.min((window_height * 0.75).max(1.0));
+        Some(Size::new(width, floating_height.max(1.0)))
+    }
+
+    fn sync_floating_composition_bounds(&mut self) {
+        let Some(group_id) = self.floating_composition else {
+            return;
+        };
+        let Some((root, current_bounds)) = self
+            .layout
+            .floating_group(group_id)
+            .and_then(|floating| {
+                self.layout
+                    .dock_area(floating.area)
+                    .map(|area| (area.root, floating.bounds))
+            })
+        else {
+            self.floating_composition = None;
+            return;
+        };
+        let Some(width) = self.composition_width(root) else {
+            return;
+        };
+        if (current_bounds.size.width - width).abs() <= f32::EPSILON {
+            return;
+        }
+        let bounds = Rect::new(
+            current_bounds.origin,
+            Size::new(width, current_bounds.size.height),
+        );
+        if let Err(error) = self.layout.apply(
+            DockCommand::ResizeFloatingBounds { group: group_id, bounds },
+            &self.dock_metrics,
+        ) {
+            eprintln!("Could not resize floating dock composition after closing a column: {error}");
+        }
     }
 
     fn begin_composition_drag(
@@ -922,18 +963,13 @@ impl MainWindow {
         window_width: f32,
         window_height: f32,
     ) -> Point {
-        // Keep a usable part of the floating composition's header reachable.
+        // Keep the floating composition horizontally reachable and its
+        // bottom edge inside the application viewport.
         let visible_width = 80.0_f32.min(size.width.max(1.0));
-        let visible_height = self
-            .theme
-            .metrics
-            .column_header_height
-            .min(size.height)
-            .max(1.0);
         let min_x = -(size.width - visible_width).max(0.0);
         let max_x = (window_width - visible_width).max(0.0);
-        let min_y = -(size.height - visible_height).max(0.0);
-        let max_y = (window_height - visible_height).max(0.0);
+        let min_y = 0.0_f32;
+        let max_y = (window_height - size.height).max(0.0);
         Point::new(
             (pointer_x - self.composition_drag_offset_x).clamp(min_x, max_x),
             (pointer_y - self.composition_drag_offset_y).clamp(min_y, max_y),
