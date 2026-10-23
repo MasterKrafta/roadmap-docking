@@ -1566,13 +1566,19 @@ impl MainWindow {
                 // Each tab group gets one mini-header above all of its icons.
                 // This separate strip can later host group dragging and double-click.
                 if last_group_index != Some(group_index) {
+                    if last_group_index.is_some() {
+                        let group_separator = div()
+                            .id(format!("collapsed-dock-group-separator-{column_index}-{group_index}"))
+                            .w(px(rail_item_width))
+                            .h(px(2.0))
+                            .bg(rgb(colors.border));
+                        collapsed_tab_rail = collapsed_tab_rail.child(group_separator);
+                    }
                     let mini_header = div()
                         .id(format!("collapsed-dock-group-header-{column_index}-{group_index}"))
                         .w(px(rail_item_width))
                         .h(px(12.0))
-                        .bg(rgb(colors.toolbar_background))
-                        .border_1()
-                        .border_color(rgb(colors.border));
+                        .bg(rgb(colors.dock_background));
                     collapsed_tab_rail = collapsed_tab_rail.child(mini_header);
                     last_group_index = Some(group_index);
                 }
@@ -1590,11 +1596,7 @@ impl MainWindow {
                     .justify_center()
                     .w(px(rail_item_width))
                     .h(px(button_size))
-                    .bg(rgb(if active_panel {
-                        colors.active_tab
-                    } else {
-                        colors.dock_background
-                    }))
+                    .bg(rgb(colors.dock_background))
                     .border_1()
                     .border_color(rgb(colors.border))
                     .text_color(rgb(if active_panel {
