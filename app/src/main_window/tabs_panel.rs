@@ -1,4 +1,4 @@
-use gpui::{Context, Div, InteractiveElement, ParentElement, Styled, div, px, rgb};
+use gpui::{Context, Div, InteractiveElement, ParentElement, StatefulInteractiveElement, Styled, div, px, rgb};
 use ui::Theme;
 
 use super::MainWindow;
@@ -77,6 +77,7 @@ impl TabsPanel {
                     .text_color(rgb(first_tab_text))
                     .border_1()
                     .border_color(rgb(colors.border))
+                    .id("tabs-panel-tab-layers")
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.tabs_panel.active_tab = 0;
                         cx.notify();
@@ -94,6 +95,7 @@ impl TabsPanel {
                     .text_color(rgb(second_tab_text))
                     .border_1()
                     .border_color(rgb(colors.border))
+                    .id("tabs-panel-tab-color")
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.tabs_panel.active_tab = 1;
                         cx.notify();
