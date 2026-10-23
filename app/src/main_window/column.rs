@@ -1,5 +1,8 @@
 use gpui::{Context, Div, ParentElement, Styled, div, px, rgb};
-use super::tabs_panel::TabsPanel;
+#[path = "tabs_panel.rs"]
+mod tabs_panel;
+
+use self::tabs_panel::TabsPanel;
 use super::MainWindow;
 use ui::Theme;
 
