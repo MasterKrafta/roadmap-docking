@@ -74,7 +74,6 @@ pub(crate) struct MainWindow {
     /// the view aligned with that topology; the last remaining column stays open.
     column_open: [bool; 2],
     top_tab_groups: [NodeId; 2],
-    bottom_tab_groups: [NodeId; 2],
     /// Per-panel visibility entries used by rendering, context actions, and the Windows menu.
     panel_visibility: Vec<PanelVisibilityEntry>,
     /// Core topology remembered while a column is closed, so it can be recreated generically.
@@ -223,9 +222,6 @@ impl MainWindow {
             .ok_or_else(|| "Dock Core did not create the left upper group".to_owned())?;
 
         let top_tab_groups = [left_top_group, initial_top_group];
-        // This ID is a harmless placeholder for the left column, which has no
-        // lower group and therefore never renders or targets a bottom splitter.
-        let bottom_tab_groups = [left_top_group, initial_bottom_group];
         // Initialize each Core group by activating its first actual panel. This
         // does not require a fixed Layers/Color/Properties slot map.
         for column_id in column_ids {
@@ -267,7 +263,6 @@ impl MainWindow {
             column_ids,
             column_open: [true; 2],
             top_tab_groups,
-            bottom_tab_groups,
             panel_visibility: Vec::new(),
             closed_column_snapshots: [None, None],
             windows_menu_open: false,
@@ -759,7 +754,6 @@ impl MainWindow {
             .ok_or_else(|| "Restored column has no tab groups".to_owned())?;
         let bottom_group = current_groups.get(1).copied().unwrap_or(top_group);
         self.top_tab_groups[column_index] = top_group;
-        self.bottom_tab_groups[column_index] = bottom_group;
 
         for (group_snapshot, group_id) in snapshot.groups.iter().zip(restored_groups.iter().copied()) {
             let selected_key_for_group = group_snapshot
