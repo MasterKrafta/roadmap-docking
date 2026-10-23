@@ -1929,3 +1929,149 @@ fn c47_failed_commands_preserve_full_state_and_version() {
 
     assert!(layout.panel_instance(panel_id).is_some());
 }
+
+
+#[test]
+fn float_group_as_column_preserves_group_and_wraps_it_in_one_column() {
+    let metrics = DockMetrics::default();
+    let mut layout = sequence_layout();
+    let (source_column, source_groups, _, _, _) =
+        main_columns(&layout, DockSide::Right)[0].clone();
+    let moved_group = source_groups[0];
+    let bounds = Rect::new(Point::new(25.0, 35.0), Size::new(280.0, 360.0));
+
+    layout
+        .apply(
+            DockCommand::FloatGroupAsColumn {
+                group: moved_group,
+                bounds,
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    assert_eq!(layout.validate(&metrics), Ok(()));
+    let (_, floating) = layout.floating_groups().next().expect("floating group");
+    let root = layout.dock_area(floating.area).expect("floating area").root;
+    let Some(Node::Column(floating_column)) = layout.node(root) else {
+        panic!("detached tab group must have a Column root");
+    };
+    assert_eq!(floating_column.groups, vec![moved_group]);
+    assert_eq!(floating_column.group_ratios, vec![1.0]);
+    assert!(matches!(
+        layout.node(source_column),
+        Some(Node::Column(column)) if !column.groups.contains(&moved_group)
+    ));
+}
+
+#[test]
+fn float_panel_as_group_creates_a_one_tab_group_inside_a_column() {
+    let metrics = DockMetrics::default();
+    let mut layout = sequence_layout();
+    let (_, source_groups, _, _, _) =
+        main_columns(&layout, DockSide::Right)[0].clone();
+    let source_group = source_groups[0];
+    let source_panel_node = match layout.node(source_group) {
+        Some(Node::Tabs(tabs)) if tabs.children.len() > 1 => tabs.children[0],
+        _ => panic!("test source group must contain multiple tabs"),
+    };
+    let panel_id = match layout.node(source_panel_node) {
+        Some(Node::Panel(panel)) => panel.panel_id,
+        _ => panic!("test source tab must be a Panel"),
+    };
+    let bounds = Rect::new(Point::new(45.0, 55.0), Size::new(280.0, 360.0));
+
+    layout
+        .apply(
+            DockCommand::FloatPanelAsGroup {
+                panel: panel_id,
+                bounds,
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    assert_eq!(layout.validate(&metrics), Ok(()));
+    let (_, floating) = layout.floating_groups().next().expect("floating group");
+    let root = layout.dock_area(floating.area).expect("floating area").root;
+    let Some(Node::Column(floating_column)) = layout.node(root) else {
+        panic!("detached tab must have a Column root");
+    };
+    assert_eq!(floating_column.groups.len(), 1);
+    let one_tab_group = floating_column.groups[0];
+    let Some(Node::Tabs(tabs)) = layout.node(one_tab_group) else {
+        panic!("detached tab must be inside a Tabs node");
+    };
+    assert_eq!(tabs.children, vec![source_panel_node]);
+    assert_eq!(tabs.active_index, 0);
+    assert!(!tabs.collapsed);
+    assert!(matches!(
+        layout.node(source_group),
+        Some(Node::Tabs(tabs)) if tabs.children.len() == 1 && !tabs.children.contains(&source_panel_node)
+    ));
+}
+
+#[test]
+fn float_group_as_column_rejects_detaching_the_last_group_atomically() {
+    let metrics = DockMetrics::default();
+    let mut layout = sequence_layout();
+    let (column, groups, _, _, _) =
+        main_columns(&layout, DockSide::Right)[0].clone();
+    let retained_group = groups[1];
+    layout
+        .apply(
+            DockCommand::CloseGroup { group: groups[0] },
+            &metrics,
+        )
+        .unwrap();
+    assert!(matches!(
+        layout.node(column),
+        Some(Node::Column(column)) if column.groups == vec![retained_group]
+    ));
+
+    assert_rejected_atomically(
+        &mut layout,
+        DockCommand::FloatGroupAsColumn {
+            group: retained_group,
+            bounds: Rect::new(Point::ZERO, Size::new(280.0, 360.0)),
+        },
+        &metrics,
+    );
+}
+
+#[test]
+fn float_panel_as_group_rejects_detaching_the_only_tab_atomically() {
+    let metrics = DockMetrics::default();
+    let mut layout = sequence_layout();
+    let (_, groups, _, _, _) =
+        main_columns(&layout, DockSide::Right)[0].clone();
+    let group = groups[0];
+    let panel_nodes = match layout.node(group) {
+        Some(Node::Tabs(tabs)) => tabs.children.clone(),
+        _ => panic!("test group must be Tabs"),
+    };
+    let panel_id = match layout.node(panel_nodes[1]) {
+        Some(Node::Panel(panel)) => panel.panel_id,
+        _ => panic!("test tab must be a Panel"),
+    };
+    layout
+        .apply(
+            DockCommand::ClosePanel {
+                panel: match layout.node(panel_nodes[0]) {
+                    Some(Node::Panel(panel)) => panel.panel_id,
+                    _ => panic!("test tab must be a Panel"),
+                },
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    assert_rejected_atomically(
+        &mut layout,
+        DockCommand::FloatPanelAsGroup {
+            panel: panel_id,
+            bounds: Rect::new(Point::ZERO, Size::new(280.0, 360.0)),
+        },
+        &metrics,
+    );
+}
