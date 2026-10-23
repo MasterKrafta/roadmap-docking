@@ -9,22 +9,6 @@ use super::{GroupResizeState, MainWindow, TabGroupViewData};
 
 const MIN_TAB_GROUP_DRAG_SPACER_WIDTH: f32 = 24.0;
 
-#[derive(Clone, Copy)]
-enum DockHeaderTarget {
-    Column {
-        column_index: usize,
-        context_group: Option<NodeId>,
-        collapsed: bool,
-    },
-    FloatingGroup {
-        column_index: usize,
-        group_id: NodeId,
-        active_panel: Option<PanelId>,
-        collapsed: bool,
-    },
-}
-
-
 /// Allocate strip width while always preserving a reachable drag handle.
 fn tab_strip_widths(
     available_width: f32,
@@ -42,280 +26,6 @@ fn tab_strip_widths(
 }
 
 impl MainWindow {
-    /// Shared toolbar/header used by columns and detached standalone tab groups.
-    fn render_dock_header(
-        &self,
-        cx: &mut Context<Self>,
-        target: DockHeaderTarget,
-        width: f32,
-        height: f32,
-        title: Option<String>,
-    ) -> Div {
-        let colors = self.theme.colors;
-        let metrics = self.theme.metrics;
-        let column_index = match target {
-            DockHeaderTarget::Column { column_index, .. }
-            | DockHeaderTarget::FloatingGroup { column_index, .. } => column_index,
-        };
-        let button_size = metrics.button_size.min(width);
-        let (button_gap, content_padding, collapse_button_width, close_button_width, spacer_width) =
-            match target {
-                DockHeaderTarget::Column { collapsed, .. } => {
-                    let button_gap = if collapsed { 0.0 } else { metrics.button_gap };
-                    let content_padding = if collapsed {
-                        0.0
-                    } else {
-                        metrics.content_padding.min(width / 2.0)
-                    };
-                    let collapse_width = if collapsed {
-                        (width * 0.58).max(1.0)
-                    } else {
-                        button_size
-                    };
-                    let close_width = if collapsed {
-                        (width - collapse_width).max(1.0)
-                    } else {
-                        button_size
-                    };
-                    let spacer_width = if collapsed {
-                        0.0
-                    } else {
-                        (width - content_padding - button_size * 2.0 - button_gap).max(0.0)
-                    };
-                    (
-                        button_gap,
-                        content_padding,
-                        collapse_width,
-                        close_width,
-                        spacer_width,
-                    )
-                }
-                DockHeaderTarget::FloatingGroup { .. } => {
-                    let button_gap = metrics.button_gap;
-                    let content_padding = metrics.content_padding.min(width / 2.0);
-                    let spacer_width =
-                        (width - content_padding - button_size * 2.0 - button_gap).max(0.0);
-                    (
-                        button_gap,
-                        content_padding,
-                        button_size,
-                        button_size,
-                        spacer_width,
-                    )
-                }
-            };
-        let spacer_id = match target {
-            DockHeaderTarget::Column { column_index, .. } => match column_index {
-                0 => "left-dock-header-spacer".to_owned(),
-                1 => "right-dock-header-spacer".to_owned(),
-                index => format!("dock-column-{index}-header-spacer"),
-            },
-            DockHeaderTarget::FloatingGroup { group_id, .. } => {
-                format!("floating-tab-group-{group_id:?}-header-spacer")
-            }
-        };
-        let collapse_id = match target {
-            DockHeaderTarget::Column { column_index, .. } => match column_index {
-                0 => "left-dock-collapse-tabs".to_owned(),
-                1 => "right-dock-collapse-tabs".to_owned(),
-                index => format!("dock-column-{index}-collapse-tabs"),
-            },
-            DockHeaderTarget::FloatingGroup { group_id, .. } => {
-                format!("floating-tab-group-{group_id:?}-collapse")
-            }
-        };
-        let close_id = match target {
-            DockHeaderTarget::Column { column_index, .. } => match column_index {
-                0 => "left-dock-close-column".to_owned(),
-                1 => "right-dock-close-column".to_owned(),
-                index => format!("dock-column-{index}-close-column"),
-            },
-            DockHeaderTarget::FloatingGroup { group_id, .. } => {
-                format!("floating-tab-group-{group_id:?}-close")
-            }
-        };
-
-        let spacer = div()
-            .id(spacer_id)
-            .flex()
-            .items_center()
-            .w(px(spacer_width))
-            .h(px(height))
-            .text_color(rgb(colors.primary_text))
-            .on_mouse_down(
-                MouseButton::Right,
-                cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                    match target {
-                        DockHeaderTarget::Column {
-                            context_group: Some(group),
-                            ..
-                        } => {
-                            this.open_header_context_menu(
-                                column_index,
-                                group,
-                                event.position.x.as_f32(),
-                                event.position.y.as_f32(),
-                            );
-                        }
-                        DockHeaderTarget::Column { .. } => {}
-                        DockHeaderTarget::FloatingGroup {
-                            group_id,
-                            active_panel,
-                            ..
-                        } => {
-                            this.open_tab_context_menu(
-                                column_index,
-                                group_id,
-                                active_panel,
-                                event.position.x.as_f32(),
-                                event.position.y.as_f32(),
-                            );
-                        }
-                    }
-                    cx.notify();
-                }),
-            )
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                    match target {
-                        DockHeaderTarget::Column { .. } => {
-                            if event.click_count == 2 {
-                                this.composition_drag_pending = false;
-                                this.composition_dragging = false;
-                                this.composition_drag_source = None;
-                                this.composition_drag_group = None;
-                                this.toggle_column_mode(column_index);
-                            } else {
-                                let viewport = window.viewport_size();
-                                this.begin_composition_drag(
-                                    column_index,
-                                    event.position.x.as_f32(),
-                                    event.position.y.as_f32(),
-                                    viewport.width.as_f32(),
-                                    viewport.height.as_f32(),
-                                );
-                            }
-                        }
-                        DockHeaderTarget::FloatingGroup { group_id, .. } => {
-                            if event.click_count == 2 {
-                                this.toggle_group_collapse(group_id);
-                            } else {
-                                this.begin_tab_group_drag(
-                                    column_index,
-                                    group_id,
-                                    event.position.x.as_f32(),
-                                    event.position.y.as_f32(),
-                                    0.0,
-                                    0.0,
-                                    false,
-                                );
-                            }
-                        }
-                    }
-                    cx.notify();
-                }),
-            )
-            .child(title.unwrap_or_default());
-
-        let collapse_label = match target {
-            DockHeaderTarget::Column { collapsed, .. } => {
-                if collapsed { "<<" } else { ">>" }
-            }
-            DockHeaderTarget::FloatingGroup { collapsed, .. } => {
-                if collapsed { "+" } else { "−" }
-            }
-        };
-        let collapse_button = div()
-            .id(collapse_id)
-            .flex()
-            .items_center()
-            .justify_center()
-            .w(px(collapse_button_width))
-            .h(px(button_size.min(height)))
-            .bg(rgb(colors.hover))
-            .text_color(rgb(colors.primary_text))
-            .on_mouse_down(
-                MouseButton::Right,
-                cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                    match target {
-                        DockHeaderTarget::Column {
-                            context_group: Some(group),
-                            ..
-                        } => this.open_header_context_menu(
-                            column_index,
-                            group,
-                            event.position.x.as_f32(),
-                            event.position.y.as_f32(),
-                        ),
-                        DockHeaderTarget::Column { .. } => {}
-                        DockHeaderTarget::FloatingGroup {
-                            group_id,
-                            active_panel,
-                            ..
-                        } => this.open_tab_context_menu(
-                            column_index,
-                            group_id,
-                            active_panel,
-                            event.position.x.as_f32(),
-                            event.position.y.as_f32(),
-                        ),
-                    }
-                    cx.notify();
-                }),
-            )
-            .on_click(cx.listener(move |this, _, _, cx| {
-                match target {
-                    DockHeaderTarget::Column { .. } => this.toggle_column_mode(column_index),
-                    DockHeaderTarget::FloatingGroup { group_id, .. } => {
-                        this.toggle_group_collapse(group_id)
-                    }
-                }
-                cx.notify();
-            }))
-            .child(collapse_label);
-
-        let close_button = div()
-            .id(close_id)
-            .flex()
-            .items_center()
-            .justify_center()
-            .w(px(close_button_width))
-            .h(px(button_size.min(height)))
-            .bg(rgb(colors.hover))
-            .text_color(rgb(colors.primary_text))
-            .on_click(cx.listener(move |this, _, _, cx| {
-                match target {
-                    DockHeaderTarget::Column { .. } => this.close_column(column_index),
-                    DockHeaderTarget::FloatingGroup { group_id, .. } => {
-                        if let Err(error) = this.apply_dock_command(DockCommand::CloseGroup {
-                            group: group_id,
-                        }) {
-                            eprintln!("Could not close floating tab group: {error}");
-                        }
-                    }
-                }
-                cx.notify();
-            }))
-            .child("×");
-
-        // Exactly the same toolbar shell surrounds both header targets.
-        div()
-            .flex()
-            .flex_row()
-            .items_center()
-            .w(px(width))
-            .h(px(height))
-            .bg(rgb(colors.toolbar_background))
-            .border_1()
-            .border_color(rgb(colors.border))
-            .child(spacer)
-            .child(collapse_button)
-            .child(div().w(px(button_gap)).h(px(1.0)))
-            .child(close_button)
-            .child(div().w(px(content_padding)).h(px(1.0)))
-    }
-
     fn visible_tab_groups_in_column(
         &self,
         column_id: NodeId,
@@ -538,8 +248,6 @@ impl MainWindow {
         column_index: usize,
         group_id: NodeId,
         active_panel: Option<PanelId>,
-        group_origin_x: f32,
-        group_origin_y: f32,
         width: f32,
         height: f32,
         content_padding: f32,
@@ -565,8 +273,6 @@ impl MainWindow {
                 column_index,
                 group_id,
                 active_panel,
-                group_origin_x,
-                group_origin_y,
                 content_padding,
                 height,
                 false,
@@ -592,8 +298,6 @@ impl MainWindow {
                 column_index,
                 group_id,
                 active_panel,
-                group_origin_x,
-                group_origin_y,
                 spacer_width,
                 height,
                 true,
@@ -614,8 +318,6 @@ impl MainWindow {
                 column_index,
                 group_id,
                 active_panel,
-                group_origin_x,
-                group_origin_y,
                 content_padding,
                 height,
                 false,
@@ -664,8 +366,6 @@ impl MainWindow {
         column_index: usize,
         group_id: NodeId,
         active_panel: Option<PanelId>,
-        group_origin_x: f32,
-        group_origin_y: f32,
         width: f32,
         height: f32,
         starts_group_drag: bool,
@@ -698,9 +398,6 @@ impl MainWindow {
                             group_id,
                             event.position.x.as_f32(),
                             event.position.y.as_f32(),
-                            group_origin_x,
-                            group_origin_y,
-                            starts_group_drag,
                         );
                         cx.notify();
                     }
@@ -714,8 +411,6 @@ impl MainWindow {
         group_id: NodeId,
         width: f32,
         height: f32,
-        origin_x: f32,
-        origin_y: f32,
     ) -> Div {
         let Some(mut group) = self.tab_group_view_data(group_id) else {
             return div().w(px(0.0)).h(px(0.0));
@@ -736,25 +431,7 @@ impl MainWindow {
         let metrics = self.theme.metrics;
         let width = width.max(1.0);
         let height = height.max(1.0);
-        let header_height = metrics.column_header_height.min(height);
-        let group_body_height = (height - header_height).max(0.0);
-        let tab_strip_height = metrics.tab_strip_height.min(group_body_height);
-        let title = group
-            .active_panel
-            .and_then(|panel_id| self.layout.panel_instance(panel_id))
-            .map(|panel| self.panels.title(panel).to_owned());
-        let header = self.render_dock_header(
-            cx,
-            DockHeaderTarget::FloatingGroup {
-                column_index,
-                group_id,
-                active_panel: group.active_panel,
-                collapsed: group.collapsed,
-            },
-            width,
-            header_height,
-            title,
-        );
+        let tab_strip_height = metrics.tab_strip_height.min(height);
         let button_size = metrics.button_size.min(width);
         let content_padding = metrics.content_padding.min(width / 2.0);
         let available_tab_width =
@@ -786,8 +463,6 @@ impl MainWindow {
             column_index,
             group_id,
             group.active_panel,
-            origin_x,
-            origin_y + header_height,
             width,
             tab_strip_height,
             content_padding,
@@ -802,23 +477,16 @@ impl MainWindow {
             .and_then(|panel_id| self.layout.panel_instance(panel_id))
             .map(|panel| self.panels.render(panel, &self.theme))
             .unwrap_or_else(|| div().into_any_element());
-        let content_height = (group_body_height - tab_strip_height).max(0.0);
-        let group_view = self.render_tab_group(
+        let content_height = (height - tab_strip_height).max(0.0);
+        self.render_tab_group(
             width,
-            group_body_height,
+            height,
             true,
             !group.collapsed,
             content_height,
             tab_strip,
             content,
-        );
-        div()
-            .flex()
-            .flex_col()
-            .w(px(width))
-            .h(px(height))
-            .child(header)
-            .child(group_view)
+        )
     }
 
     fn render_column(
@@ -827,7 +495,6 @@ impl MainWindow {
         column_index: usize,
         window_height: f32,
         window_y_offset: f32,
-        window_x_offset: f32,
     ) -> Div {
         let column_id = self.column_ids[column_index];
         let core_group_ids = self.group_ids_in_column(column_id);
@@ -869,10 +536,26 @@ impl MainWindow {
             self.group_heights_for_available_height(&visible_groups, &group_ratios, groups_height);
 
         let button_size = metrics.button_size.min(column_width);
+        let button_gap = if tabs_collapsed { 0.0 } else { metrics.button_gap };
         let content_padding = if tabs_collapsed {
             0.0
         } else {
             metrics.content_padding.min(column_width / 2.0)
+        };
+        let collapse_button_width = if tabs_collapsed {
+            (column_width * 0.58).max(1.0)
+        } else {
+            button_size
+        };
+        let close_button_width = if tabs_collapsed {
+            (column_width - collapse_button_width).max(1.0)
+        } else {
+            button_size
+        };
+        let header_spacer_width = if tabs_collapsed {
+            0.0
+        } else {
+            (column_width - content_padding - button_size * 2.0 - button_gap).max(0.0)
         };
         let tab_rail_width = if tabs_collapsed { column_width } else { 0.0 };
         let column_content_width = (column_width - tab_rail_width).max(0.0);
@@ -882,16 +565,10 @@ impl MainWindow {
 
         let column_label = self.column_label(column_index);
         let mut rendered_groups: Vec<(usize, Div, f32)> = Vec::new();
-        let mut strip_cursor_y = window_y_offset + header_height;
-        let mut rendered_group_count = 0usize;
         if !tabs_collapsed {
             for ((group_index, group), group_height) in
                 visible_groups.iter().zip(group_heights.iter().copied())
             {
-                if all_groups_visible && rendered_group_count > 0 {
-                    strip_cursor_y += group_split_hit_height;
-                }
-                let group_origin_y = strip_cursor_y;
                 let visible_tab_count = group.panels.len();
                 let (tab_width, spacer_width) =
                     tab_strip_widths(available_tab_width, metrics.column_tab_width, visible_tab_count);
@@ -934,8 +611,6 @@ impl MainWindow {
                     column_index,
                     group.id,
                     group.active_panel,
-                    window_x_offset,
-                    group_origin_y,
                     column_content_width,
                     tab_strip_height,
                     content_padding,
@@ -960,8 +635,6 @@ impl MainWindow {
                     content,
                 );
                 rendered_groups.push((*group_index, group_view, group_height));
-                strip_cursor_y += group_height;
-                rendered_group_count += 1;
             }
         }
 
@@ -981,17 +654,6 @@ impl MainWindow {
             })
             .collect();
 
-        let header = self.render_dock_header(
-            cx,
-            DockHeaderTarget::Column {
-                column_index,
-                context_group: header_context_group,
-                collapsed: tabs_collapsed,
-            },
-            column_width,
-            header_height,
-            None,
-        );
         let mut column_view = div()
             .relative()
             .flex()
@@ -999,7 +661,119 @@ impl MainWindow {
             .w(px(column_width))
             .h(px(window_height))
             .bg(rgb(colors.dock_background))
-            .child(header);
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .w(px(column_width))
+                    .h(px(header_height))
+                    .bg(rgb(colors.toolbar_background))
+                    .border_1()
+                    .border_color(rgb(colors.border))
+                    .child(
+                        div()
+                            .id(match column_index {
+                                0 => "left-dock-header-spacer".to_owned(),
+                                1 => "right-dock-header-spacer".to_owned(),
+                                index => format!("dock-column-{index}-header-spacer"),
+                            })
+                            .w(px(header_spacer_width))
+                            .h(px(header_height))
+                            .on_mouse_down(
+                                MouseButton::Right,
+                                cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                                    if let Some(group) = header_context_group {
+                                        this.open_header_context_menu(
+                                            column_index,
+                                            group,
+                                            event.position.x.as_f32(),
+                                            event.position.y.as_f32(),
+                                        );
+                                    }
+                                    cx.notify();
+                                }),
+                            )
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                                    if event.click_count == 2 {
+                                        this.composition_drag_pending = false;
+                                        this.composition_dragging = false;
+                                        this.composition_drag_source = None;
+                                        this.composition_drag_group = None;
+                                        this.toggle_column_mode(column_index);
+                                    } else {
+                                        let viewport = window.viewport_size();
+                                        this.begin_composition_drag(
+                                            column_index,
+                                            event.position.x.as_f32(),
+                                            event.position.y.as_f32(),
+                                            viewport.width.as_f32(),
+                                            viewport.height.as_f32(),
+                                        );
+                                    }
+                                    cx.notify();
+                                }),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .id(match column_index {
+                                0 => "left-dock-collapse-tabs".to_owned(),
+                                1 => "right-dock-collapse-tabs".to_owned(),
+                                index => format!("dock-column-{index}-collapse-tabs"),
+                            })
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .w(px(collapse_button_width))
+                            .h(px(button_size))
+                            .bg(rgb(colors.hover))
+                            .text_color(rgb(colors.primary_text))
+                            .on_mouse_down(
+                                MouseButton::Right,
+                                cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                                    if let Some(group) = header_context_group {
+                                        this.open_header_context_menu(
+                                            column_index,
+                                            group,
+                                            event.position.x.as_f32(),
+                                            event.position.y.as_f32(),
+                                        );
+                                    }
+                                    cx.notify();
+                                }),
+                            )
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.toggle_column_mode(column_index);
+                                cx.notify();
+                            }))
+                            .child(if tabs_collapsed { "<<" } else { ">>" }),
+                    )
+                    .child(div().w(px(button_gap)).h(px(1.0)))
+                    .child(
+                        div()
+                            .id(match column_index {
+                                0 => "left-dock-close-column".to_owned(),
+                                1 => "right-dock-close-column".to_owned(),
+                                index => format!("dock-column-{index}-close-column"),
+                            })
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .w(px(close_button_width))
+                            .h(px(button_size))
+                            .bg(rgb(colors.hover))
+                            .text_color(rgb(colors.primary_text))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.close_column(column_index);
+                                cx.notify();
+                            }))
+                            .child("×"),
+                    )
+                    .child(div().w(px(content_padding)).h(px(1.0))),
+            );
         if !tabs_collapsed {
             let group_area_top = window_y_offset + header_height;
             let mut group_cursor_y = group_area_top;
@@ -1041,7 +815,6 @@ impl MainWindow {
                 .border_1()
                 .border_color(rgb(colors.border));
             let mut last_group_index: Option<usize> = None;
-            let mut collapsed_rail_cursor_y = window_y_offset + header_height;
             for (tab_index, (group_index, group_id, panel_id, active_panel)) in
                 collapsed_tabs.iter().copied().enumerate()
             {
@@ -1058,9 +831,7 @@ impl MainWindow {
                             .h(px(2.0))
                             .bg(rgb(colors.border));
                         collapsed_tab_rail = collapsed_tab_rail.child(group_separator);
-                        collapsed_rail_cursor_y += 2.0;
                     }
-                    let mini_header_origin_y = collapsed_rail_cursor_y;
                     let mini_header = div()
                         .id(format!("collapsed-dock-group-header-{column_index}-{group_index}"))
                         .w(px(rail_item_width))
@@ -1086,15 +857,11 @@ impl MainWindow {
                                     group_id,
                                     event.position.x.as_f32(),
                                     event.position.y.as_f32(),
-                                    window_x_offset,
-                                    mini_header_origin_y,
-                                    false,
                                 );
                                 cx.notify();
                             }),
                         );
                     collapsed_tab_rail = collapsed_tab_rail.child(mini_header);
-                    collapsed_rail_cursor_y += 12.0;
                     last_group_index = Some(group_index);
                 }
 
@@ -1120,7 +887,6 @@ impl MainWindow {
                     }))
                     .child(tab_icon);
                 collapsed_tab_rail = collapsed_tab_rail.child(tab);
-                collapsed_rail_cursor_y += button_size;
             }
             column_view = column_view.child(collapsed_tab_rail);
         }
@@ -1243,7 +1009,6 @@ impl Render for MainWindow {
 
         if any_column_open {
             dock_area = dock_area.child(outer_column_splitter);
-            let mut column_left_x = workspace_width + outer_splitter_width;
             for (position, column_index) in column_indices.iter().copied().enumerate() {
                 if position > 0 {
                     let boundary_index = position - 1;
@@ -1291,7 +1056,6 @@ impl Render for MainWindow {
                                 ),
                         );
                     dock_area = dock_area.child(column_splitter);
-                    column_left_x += splitter_width;
                 }
 
                 dock_area = dock_area.child(self.render_column(
@@ -1299,9 +1063,7 @@ impl Render for MainWindow {
                     column_index,
                     dock_height,
                     menu_height,
-                    column_left_x,
                 ));
-                column_left_x += column_widths[position];
             }
         }
 
@@ -1343,7 +1105,6 @@ impl Render for MainWindow {
                     .border_1()
                     .border_color(rgb(colors.border))
                     .overflow_hidden();
-                let mut floating_column_left_x = bounds.origin.x;
                 for (position, column_index) in composition_columns.iter().copied().enumerate() {
                     if position > 0 {
                         floating_view = floating_view.child(
@@ -1352,16 +1113,13 @@ impl Render for MainWindow {
                                 .h(px(bounds.size.height))
                                 .bg(rgb(colors.splitter)),
                         );
-                        floating_column_left_x += metrics.splitter_thickness;
                     }
                     floating_view = floating_view.child(self.render_column(
                         cx,
                         column_index,
                         bounds.size.height,
                         bounds.origin.y,
-                        floating_column_left_x,
                     ));
-                    floating_column_left_x += self.column_width(column_index);
                 }
                 root = root.child(floating_view);
             } else if matches!(self.layout.node(composition_root), Some(Node::Tabs(_))) {
@@ -1383,8 +1141,6 @@ impl Render for MainWindow {
                         composition_root,
                         bounds.size.width,
                         bounds.size.height,
-                        bounds.origin.x,
-                        bounds.origin.y,
                     ));
                 root = root.child(floating_view);
             }
