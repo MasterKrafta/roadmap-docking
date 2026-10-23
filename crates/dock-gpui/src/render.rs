@@ -65,9 +65,11 @@ pub fn normalize_docked_group_geometry(
         }
     }
 
-    // A floating window owns one title bar. Its topmost Tabs group shares that
-    // row; lower groups in a floating stack still use the normal tabs-only form.
-    let mut floating_title_groups = HashMap::<NodeId, f32>::new();
+    // A floating title is shared by every branch along the top edge of a
+    // horizontal composition, not just the single group returned by min_by(y).
+    // Core reserves title space for collapsed branches in composite roots;
+    // standalone Tabs roots retain the adapter's simple local offset.
+    let mut floating_title_groups = HashMap::<NodeId, (f32, f32)>::new();
     for (floating_id, floating) in layout.floating_groups_in_paint_order() {
         let Some(area) = layout.dock_area(floating.area) else {
             continue;
@@ -80,22 +82,14 @@ pub fn normalize_docked_group_geometry(
         else {
             continue;
         };
-        let nodes = subtree_nodes(layout, area.root);
-        if let Some(top_group) = rects
-            .groups
-            .iter()
-            .filter(|entry| nodes.contains(&entry.group))
-            .min_by(|left, right| {
-                left.rect
-                    .origin
-                    .y
-                    .partial_cmp(&right.rect.origin.y)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
-            .map(|entry| entry.group)
-            && bounds.size.height > 0.0
-        {
-            floating_title_groups.insert(top_group, metrics.header_height.min(bounds.size.height));
+        if bounds.size.height <= 0.0 {
+            continue;
+        }
+        let title_height = metrics.header_height.min(bounds.size.height);
+        for top_group in floating_title_groups_in_tree(layout, area.root) {
+            if rects.groups.iter().any(|entry| entry.group == top_group) {
+                floating_title_groups.insert(top_group, (title_height, bounds.origin.y));
+            }
         }
     }
 
@@ -110,12 +104,17 @@ pub fn normalize_docked_group_geometry(
         let Some(Node::Tabs(tabs)) = layout.node(group_id) else {
             continue;
         };
-        if let Some(title_height) = floating_title_groups.get(&group_id) {
+        if let Some(&(title_height, window_top)) = floating_title_groups.get(&group_id) {
             // Expanded groups already place the strip below the floating title
-            // through Core's header geometry. Collapsed groups put their strip
-            // at the group's origin, so move the row below the title bar.
+            // through Core's header geometry. A collapsed group in a composite
+            // root may already be below that title because Core reserved the
+            // space during stack allocation. Only offset geometry that still
+            // starts inside the title row (the standalone Tabs-root case).
             if tabs.collapsed {
-                floating_collapsed_shifts.insert(group_id, *title_height);
+                let shift = (window_top + title_height - group_rect.rect.origin.y).max(0.0);
+                if shift > 0.001 {
+                    floating_collapsed_shifts.insert(group_id, shift);
+                }
             }
             continue;
         }
@@ -229,6 +228,27 @@ pub fn normalize_docked_group_geometry(
             overflow.button_rect.origin.x = group_rect.rect.origin.x + tabs_width;
             overflow.button_rect.size.width = overflow_width;
         }
+    }
+}
+
+/// Finds one top Tabs group per vertical branch along the floating root's
+/// upper edge. A Column contributes its first group; a horizontal Split
+/// contributes the first group from each child branch.
+fn floating_title_groups_in_tree(layout: &Layout, root: NodeId) -> Vec<NodeId> {
+    match layout.node(root) {
+        Some(Node::Tabs(_)) => vec![root],
+        Some(Node::Column(column)) => column.groups.first().copied().into_iter().collect(),
+        Some(Node::Split(split)) if split.axis == Axis::X => split
+            .children
+            .iter()
+            .flat_map(|child| floating_title_groups_in_tree(layout, *child))
+            .collect(),
+        Some(Node::Split(split)) => split
+            .children
+            .first()
+            .map(|child| floating_title_groups_in_tree(layout, *child))
+            .unwrap_or_default(),
+        Some(Node::Panel(_)) | None => Vec::new(),
     }
 }
 
