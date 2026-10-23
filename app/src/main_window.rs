@@ -73,8 +73,6 @@ pub(crate) struct MainWindow {
     /// Core removes empty columns and collapses their parent Split. These flags keep
     /// the view aligned with that topology; the last remaining column stays open.
     column_open: [bool; 2],
-    /// The left column has one tab group; the right column has upper and lower groups.
-    column_has_bottom_group: [bool; 2],
     top_tab_groups: [NodeId; 2],
     bottom_tab_groups: [NodeId; 2],
     /// Panel IDs per column, ordered: Layers, Color, Properties. Unused slots alias
@@ -241,7 +239,6 @@ impl MainWindow {
         let right_color = panel_id_for_group(initial_top_group, &color_key, "right Color")?;
         let right_properties =
             panel_id_for_group(initial_bottom_group, &properties_key, "right Properties")?;
-        let column_has_bottom_group = [false, true];
         let panels_by_column = [
             [left_layers, left_layers, left_layers, left_layers],
             [right_layers, right_color, right_properties, right_properties],
@@ -258,7 +255,11 @@ impl MainWindow {
                     &dock_metrics,
                 )
                 .map_err(|error| format!("Could not activate the first tab in column {column_index}: {error}"))?;
-            if column_has_bottom_group[column_index] {
+            let has_multiple_groups = matches!(
+                layout.node(column_ids[column_index]),
+                Some(Node::Column(column)) if column.groups.len() > 1
+            );
+            if has_multiple_groups {
                 layout
                     .apply(
                         DockCommand::ActivateTab {
@@ -278,7 +279,6 @@ impl MainWindow {
             dock_metrics,
             column_ids,
             column_open: [true; 2],
-            column_has_bottom_group,
             top_tab_groups,
             bottom_tab_groups,
             panels_by_column,
@@ -793,7 +793,6 @@ impl MainWindow {
 
         self.top_tab_groups[column_index] = top_group;
         self.bottom_tab_groups[column_index] = bottom_group;
-        self.column_has_bottom_group[column_index] = current_groups.len() > 1;
         self.panels_by_column[column_index] = [
             first_top_panel,
             second_top_panel,
