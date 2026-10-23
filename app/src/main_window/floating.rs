@@ -1,6 +1,6 @@
 use dock_core::{ColumnMode, DockCommand, DockSide, FloatingGroupId, Node, NodeId, PanelId, Point, Rect, Size};
 
-use super::MainWindow;
+use super::{CompositionDragSource, MainWindow};
 
 impl MainWindow {
     pub(super) fn composition_column_indices(&self, root: NodeId) -> Vec<usize> {
