@@ -1464,7 +1464,6 @@ impl MainWindow {
             .first()
             .copied()
             .unwrap_or(self.top_tab_groups[column_index]);
-        let panel_ids = self.panels_by_column[column_index];
         let column_width = self.column_width(column_index);
         let colors = self.theme.colors;
         let metrics = self.theme.metrics;
@@ -1553,15 +1552,12 @@ impl MainWindow {
                     let Some(panel) = self.layout.panel_instance(panel_id) else {
                         continue;
                     };
-                    let slot = panel_ids.iter().position(|candidate| *candidate == panel_id);
-                    let element_id = match slot {
-                        Some(0) => format!("{column_element_prefix}-dock-tab-layers"),
-                        Some(1) => format!("{column_element_prefix}-dock-tab-color"),
-                        Some(2) => format!("{column_element_prefix}-dock-tab-properties"),
-                        _ => format!(
-                            "dock-column-{column_index}-group-{group_index}-tab-{tab_index}"
-                        ),
-                    };
+                    // Tab identity comes from its position in the Core group, not
+                    // from a fixed application-owned panel slot. This also remains
+                    // unique when a group contains multiple instances of one panel type.
+                    let element_id = format!(
+                        "dock-column-{column_index}-group-{group_index}-tab-{tab_index}"
+                    );
                     let title = format!("{column_label} {}", self.panels.title(panel));
                     tabs.push(self.render_tab(
                         cx,
