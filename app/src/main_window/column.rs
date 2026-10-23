@@ -33,7 +33,7 @@ impl Column {
         let group_count = self.groups.len();
 
         let button_size = metrics.button_size.min(width / 2.0).max(1.0);
-        let mut header = div()
+        let header = div()
             .flex()
             .flex_row()
             .items_center()
@@ -46,9 +46,6 @@ impl Column {
             .child(div().flex_1().h(px(header_height)))
             .child(header_button("»", button_size, self.theme))
             .child(header_button("×", button_size, self.theme));
-
-        // Keep the header assembled separately from the groups below it.
-        let _ = &mut header;
 
         let available_height = (height - header_height).max(0.0);
         let splitter_height = if group_count > 1 {
