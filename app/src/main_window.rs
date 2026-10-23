@@ -30,6 +30,15 @@ struct TabGroupViewData {
     collapsed: bool,
 }
 
+#[derive(Clone, Copy)]
+struct GroupResizeState {
+    column: NodeId,
+    boundary_index: usize,
+    available_height: f32,
+    splitter_hit_height: f32,
+    group_area_top: f32,
+}
+
 /// A single-panel left column beside a right column with two upper tabs and one lower tab.
 pub(crate) struct MainWindow {
     theme: Theme,
@@ -60,7 +69,7 @@ pub(crate) struct MainWindow {
     /// Cursor-to-divider offset captured on mouse-down; keeps the pointer anchored
     /// to the actual boundary even after Core clamps the requested resize.
     resize_column_pointer_offset_x: f32,
-    resizing_groups_column: Option<NodeId>,
+    resizing_groups_column: Option<GroupResizeState>,
     resize_group_pointer_offset_y: f32,
     /// The complete horizontal main-dock composition while it is floating.
     floating_composition: Option<FloatingGroupId>,
@@ -846,14 +855,132 @@ impl MainWindow {
         }
     }
 
-    fn group_split_ratio(&self, column_index: usize) -> f32 {
-        self.layout
-            .node(self.column_ids[column_index])
-            .and_then(|node| match node {
-                Node::Column(column) => column.group_ratios.first().copied(),
-                _ => None,
+    fn group_ratios_in_column(&self, column_id: NodeId) -> Vec<f32> {
+        match self.layout.node(column_id) {
+            Some(Node::Column(column)) => column.group_ratios.clone(),
+            _ => Vec::new(),
+        }
+    }
+
+    fn visible_tab_groups_in_column(
+        &self,
+        column_index: usize,
+        column_id: NodeId,
+    ) -> Vec<(usize, TabGroupViewData)> {
+        self.group_ids_in_column(column_id)
+            .into_iter()
+            .enumerate()
+            .filter_map(|(group_index, group_id)| {
+                let mut group = self.tab_group_view_data(group_id)?;
+                group
+                    .panels
+                    .retain(|panel_id| self.panel_is_visible(column_index, *panel_id));
+                if group
+                    .active_panel
+                    .is_some_and(|active| !group.panels.contains(&active))
+                {
+                    group.active_panel = None;
+                }
+                (!group.panels.is_empty()).then_some((group_index, group))
             })
-            .unwrap_or(self.theme.metrics.default_column_split_ratio)
+            .collect()
+    }
+
+    fn group_heights_for_available_height(
+        &self,
+        groups: &[(usize, TabGroupViewData)],
+        ratios: &[f32],
+        available_height: f32,
+    ) -> Vec<f32> {
+        if groups.is_empty() {
+            return Vec::new();
+        }
+
+        let available_height = available_height.max(0.0);
+        let collapsed_height = self
+            .dock_metrics
+            .collapsed_group_height
+            .max(self.theme.metrics.tab_strip_height)
+            .min(available_height);
+        let collapsed_count = groups.iter().filter(|(_, group)| group.collapsed).count();
+        let fixed_collapsed_height = collapsed_height * collapsed_count as f32;
+        let expandable_height = (available_height - fixed_collapsed_height).max(0.0);
+
+        let weights: Vec<f32> = groups
+            .iter()
+            .map(|(core_index, group)| {
+                if group.collapsed {
+                    0.0
+                } else {
+                    ratios
+                        .get(*core_index)
+                        .copied()
+                        .filter(|ratio| ratio.is_finite() && *ratio > 0.0)
+                        .unwrap_or(1.0)
+                }
+            })
+            .collect();
+        let total_weight = weights.iter().sum::<f32>();
+
+        groups
+            .iter()
+            .zip(weights)
+            .map(|((_, group), weight)| {
+                if group.collapsed {
+                    collapsed_height
+                } else if total_weight > 0.0 {
+                    expandable_height * weight / total_weight
+                } else {
+                    0.0
+                }
+            })
+            .collect()
+    }
+
+    fn render_group_splitter(
+        &self,
+        cx: &mut Context<Self>,
+        column_id: NodeId,
+        boundary_index: usize,
+        width: f32,
+        hit_height: f32,
+        visible_height: f32,
+        center_y: f32,
+        available_height: f32,
+        group_area_top: f32,
+    ) -> Div {
+        let colors = self.theme.colors;
+        div()
+            .relative()
+            .w(px(width))
+            .h(px(hit_height))
+            .cursor(CursorStyle::ResizeUpDown)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
+                    this.is_resizing_column = false;
+                    this.resizing_outer_column = None;
+                    this.resizing_groups_column = Some(GroupResizeState {
+                        column: column_id,
+                        boundary_index,
+                        available_height,
+                        splitter_hit_height: hit_height,
+                        group_area_top,
+                    });
+                    this.resize_group_pointer_offset_y =
+                        event.position.y.as_f32() - center_y;
+                    cx.notify();
+                }),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .left(px(0.0))
+                    .top(px(((hit_height - visible_height) / 2.0).max(0.0)))
+                    .w(px(width))
+                    .h(px(visible_height))
+                    .bg(rgb(colors.splitter)),
+            )
     }
 
     fn composition_column_indices(&self, root: NodeId) -> Vec<usize> {
@@ -1079,7 +1206,7 @@ impl MainWindow {
     fn render_tab(
         &self,
         cx: &mut Context<Self>,
-        element_id: &'static str,
+        element_id: String,
         column_index: usize,
         group_id: NodeId,
         panel_id: PanelId,
@@ -1185,7 +1312,7 @@ impl MainWindow {
         spacer_width: f32,
         visible_tab_count: usize,
         tabs: Vec<Div>,
-        menu_element_id: &'static str,
+        menu_element_id: String,
     ) -> Div {
         let colors = self.theme.colors;
 
@@ -1254,7 +1381,7 @@ impl MainWindow {
     fn render_tab_group_menu_button(
         &self,
         cx: &mut Context<Self>,
-        element_id: &'static str,
+        element_id: String,
         column_index: usize,
         group_id: NodeId,
         active_panel: Option<PanelId>,
@@ -1331,10 +1458,12 @@ impl MainWindow {
         window_y_offset: f32,
     ) -> Div {
         let column_id = self.column_ids[column_index];
-        let top_tab_group = self.top_tab_groups[column_index];
-        let bottom_tab_group = self.bottom_tab_groups[column_index];
-        let top_group_data = self.tab_group_view_data(top_tab_group);
-        let bottom_group_data = self.tab_group_view_data(bottom_tab_group);
+        let core_group_ids = self.group_ids_in_column(column_id);
+        // Keep the first current group as the column header's context-menu target.
+        let top_tab_group = core_group_ids
+            .first()
+            .copied()
+            .unwrap_or(self.top_tab_groups[column_index]);
         let panel_ids = self.panels_by_column[column_index];
         let column_width = self.column_width(column_index);
         let colors = self.theme.colors;
@@ -1346,82 +1475,30 @@ impl MainWindow {
 
         let header_height = metrics.column_header_height.min(window_height);
         let available_below_header = (window_height - header_height).max(0.0);
-        let has_bottom_group = self.column_has_bottom_group[column_index];
-        let visible_top_count =
-            (if self.panel_slot_visible(column_index, 0) { 1usize } else { 0 })
-                + (if self.panel_slot_visible(column_index, 1) { 1usize } else { 0 });
-        let visible_bottom_count = if has_bottom_group {
-            (if self.panel_slot_visible(column_index, 2) { 1usize } else { 0 })
-                + (if self.panel_slot_visible(column_index, 3) { 1usize } else { 0 })
+        let visible_groups = self.visible_tab_groups_in_column(column_index, column_id);
+        // ResizeGroups operates on adjacent Core groups. Avoid exposing splitters
+        // while any Core group is hidden from the view by a panel-visibility toggle.
+        let all_groups_visible = visible_groups.len() == core_group_ids.len();
+        let divider_count = if all_groups_visible {
+            visible_groups.len().saturating_sub(1)
         } else {
             0
         };
-        let show_top_group = visible_top_count > 0;
-        let show_bottom_group = has_bottom_group && visible_bottom_count > 0;
-        let top_group_collapsed =
-            show_top_group && top_group_data.as_ref().is_some_and(|group| group.collapsed);
-        let bottom_group_collapsed =
-            show_bottom_group && bottom_group_data.as_ref().is_some_and(|group| group.collapsed);
-        let show_group_splitter = show_top_group && show_bottom_group;
-        let group_split_hit_height = if show_group_splitter {
-            metrics.splitter_hit_zone.max(metrics.splitter_thickness)
-                .min(available_below_header)
+        let requested_splitter_hit_height =
+            metrics.splitter_hit_zone.max(metrics.splitter_thickness);
+        let group_split_hit_height = if divider_count > 0 {
+            requested_splitter_hit_height.min(
+                (available_below_header / divider_count as f32).max(0.0),
+            )
         } else {
             0.0
         };
-        let groups_height = (available_below_header - group_split_hit_height).max(0.0);
-        let collapsed_group_height = self
-            .dock_metrics
-            .collapsed_group_height
-            .max(metrics.tab_strip_height)
-            .min(groups_height);
-        let split_ratio = self.group_split_ratio(column_index).clamp(0.0, 1.0);
-        let (top_group_height, bottom_group_height) = match (show_top_group, show_bottom_group) {
-            (true, true) => match (top_group_collapsed, bottom_group_collapsed) {
-                (false, false) => {
-                    let top = groups_height * split_ratio;
-                    (top, (groups_height - top).max(0.0))
-                }
-                (true, false) => {
-                    let top = collapsed_group_height;
-                    (top, (groups_height - top).max(0.0))
-                }
-                (false, true) => {
-                    let bottom = collapsed_group_height;
-                    ((groups_height - bottom).max(0.0), bottom)
-                }
-                (true, true) => (collapsed_group_height, collapsed_group_height),
-            },
-            (true, false) => (
-                if top_group_collapsed { collapsed_group_height } else { groups_height },
-                0.0,
-            ),
-            (false, true) => (
-                0.0,
-                if bottom_group_collapsed { collapsed_group_height } else { groups_height },
-            ),
-            (false, false) => (0.0, 0.0),
-        };
-        let top_tab_strip_height = if tabs_collapsed {
-            0.0
-        } else {
-            metrics.tab_strip_height.min(top_group_height)
-        };
-        let top_content_height = if top_group_collapsed {
-            0.0
-        } else {
-            (top_group_height - top_tab_strip_height).max(0.0)
-        };
-        let bottom_tab_strip_height = if tabs_collapsed {
-            0.0
-        } else {
-            metrics.tab_strip_height.min(bottom_group_height)
-        };
-        let bottom_content_height = if bottom_group_collapsed {
-            0.0
-        } else {
-            (bottom_group_height - bottom_tab_strip_height).max(0.0)
-        };
+        let visible_split_height = metrics.splitter_thickness.min(group_split_hit_height);
+        let groups_height =
+            (available_below_header - group_split_hit_height * divider_count as f32).max(0.0);
+        let group_ratios = self.group_ratios_in_column(column_id);
+        let group_heights =
+            self.group_heights_for_available_height(&visible_groups, &group_ratios, groups_height);
 
         let button_size = metrics.button_size.min(column_width);
         let button_gap = if tabs_collapsed { 0.0 } else { metrics.button_gap };
@@ -1450,214 +1527,108 @@ impl MainWindow {
         let rail_item_width = if tabs_collapsed { column_width } else { button_size };
         let available_tab_width =
             (column_content_width - content_padding * 2.0 - button_size).max(0.0);
-        let tab_width = metrics
-            .column_tab_width
-            .min((available_tab_width / visible_top_count.max(1) as f32).max(0.0));
-        let top_tab_spacer_width =
-            (available_tab_width - tab_width * visible_top_count as f32).max(0.0);
-        let bottom_tab_width = metrics
-            .column_tab_width
-            .min((available_tab_width / visible_bottom_count.max(1) as f32).max(0.0));
-        let bottom_tab_spacer_width =
-            (available_tab_width - bottom_tab_width * visible_bottom_count as f32).max(0.0);
 
-        let active_top_panel = top_group_data
-            .as_ref()
-            .and_then(|group| group.active_panel)
-            .filter(|panel_id| self.panel_is_visible(column_index, *panel_id));
-        let active_bottom_panel = if has_bottom_group {
-            bottom_group_data
-                .as_ref()
-                .and_then(|group| group.active_panel)
-                .filter(|panel_id| self.panel_is_visible(column_index, *panel_id))
-        } else {
-            None
-        };
-        let get_title = |panel_id: PanelId, fallback: &str| {
-            self.layout
-                .panel_instance(panel_id)
-                .map(|panel| self.panels.title(panel))
-                .unwrap_or_else(|| fallback.to_owned())
-        };
         let column_label = if column_index == 0 { "Left" } else { "Right" };
-        let layers_title = format!("{column_label} {}", get_title(panel_ids[0], "Layers"));
-        let color_title = format!("{column_label} {}", get_title(panel_ids[1], "Color"));
-        let properties_title =
-            format!("{column_label} {}", get_title(panel_ids[2], "Properties"));
+        let mut rendered_groups: Vec<(usize, Div, f32)> = Vec::new();
+        if !tabs_collapsed {
+            for (visible_index, ((group_index, group), group_height)) in
+                visible_groups.iter().zip(group_heights.iter().copied()).enumerate()
+            {
+                let visible_tab_count = group.panels.len();
+                let tab_width = metrics
+                    .column_tab_width
+                    .min((available_tab_width / visible_tab_count.max(1) as f32).max(0.0));
+                let spacer_width =
+                    (available_tab_width - tab_width * visible_tab_count as f32).max(0.0);
+                let tab_strip_height = metrics.tab_strip_height.min(group_height);
+                let content_height = if group.collapsed {
+                    0.0
+                } else {
+                    (group_height - tab_strip_height).max(0.0)
+                };
 
-        let top_content = active_top_panel
-            .and_then(|panel_id| self.layout.panel_instance(panel_id))
-            .map(|panel| self.panels.render(panel, &self.theme))
-            .unwrap_or_else(|| div().into_any_element());
-        let bottom_content = active_bottom_panel
-            .and_then(|panel_id| self.layout.panel_instance(panel_id))
-            .map(|panel| self.panels.render(panel, &self.theme))
-            .unwrap_or_else(|| div().into_any_element());
-
-        let layers_active = active_top_panel == Some(panel_ids[0]);
-        let color_active = active_top_panel == Some(panel_ids[1]);
-        let properties_active = active_bottom_panel == Some(panel_ids[2]);
-
-        // Build the collapsed rail from Core's actual tab groups, so every tab in
-        // every group belonging to this column gets an icon.
-        let mut collapsed_tabs: Vec<(usize, NodeId, PanelId, bool)> = Vec::new();
-        for (group_index, group_id) in self.group_ids_in_column(column_id).into_iter().enumerate() {
-            let Some(group) = self.tab_group_view_data(group_id) else {
-                continue;
-            };
-            for panel_id in group.panels.iter().copied() {
-                if self.panel_is_visible(column_index, panel_id) {
-                    collapsed_tabs.push((
-                        group_index,
+                let mut tabs = Vec::with_capacity(visible_tab_count);
+                for (tab_index, panel_id) in group.panels.iter().copied().enumerate() {
+                    let Some(panel) = self.layout.panel_instance(panel_id) else {
+                        continue;
+                    };
+                    let slot = panel_ids.iter().position(|candidate| *candidate == panel_id);
+                    let element_id = match slot {
+                        Some(0) => format!("{column_label.to_lowercase()}-dock-tab-layers"),
+                        Some(1) => format!("{column_label.to_lowercase()}-dock-tab-color"),
+                        Some(2) => format!("{column_label.to_lowercase()}-dock-tab-properties"),
+                        _ => format!(
+                            "dock-column-{column_index}-group-{group_index}-tab-{tab_index}"
+                        ),
+                    };
+                    let title = format!("{column_label} {}", self.panels.title(panel));
+                    tabs.push(self.render_tab(
+                        cx,
+                        element_id,
+                        column_index,
                         group.id,
                         panel_id,
+                        tab_width,
+                        tab_strip_height,
                         group.active_panel == Some(panel_id),
+                        title,
                     ));
                 }
+
+                let menu_element_id = match (column_index, *group_index) {
+                    (0, 0) => "left-dock-top-group-menu".to_owned(),
+                    (1, 0) => "right-dock-top-group-menu".to_owned(),
+                    (1, 1) => "right-dock-bottom-group-menu".to_owned(),
+                    _ => format!("dock-column-{column_index}-group-{group_index}-menu"),
+                };
+                let tab_strip = self.render_tab_strip(
+                    cx,
+                    column_index,
+                    group.id,
+                    group.active_panel,
+                    column_content_width,
+                    tab_strip_height,
+                    content_padding,
+                    button_size,
+                    spacer_width,
+                    visible_tab_count,
+                    tabs,
+                    menu_element_id,
+                );
+                let content = group
+                    .active_panel
+                    .and_then(|panel_id| self.layout.panel_instance(panel_id))
+                    .map(|panel| self.panels.render(panel, &self.theme))
+                    .unwrap_or_else(|| div().into_any_element());
+                let group_view = self.render_tab_group(
+                    column_content_width,
+                    group_height,
+                    true,
+                    !group.collapsed,
+                    content_height,
+                    tab_strip,
+                    content,
+                );
+                rendered_groups.push((*group_index, group_view, group_height));
+                let _ = visible_index;
             }
         }
 
-        let layers_tab = self.render_tab(
-            cx,
-            if column_index == 0 {
-                "left-dock-tab-layers"
-            } else {
-                "right-dock-tab-layers"
-            },
-            column_index,
-            top_tab_group,
-            panel_ids[0],
-            tab_width,
-            top_tab_strip_height,
-            layers_active,
-            layers_title,
-        );
-        let color_tab = self.render_tab(
-            cx,
-            if column_index == 0 {
-                "left-dock-tab-color"
-            } else {
-                "right-dock-tab-color"
-            },
-            column_index,
-            top_tab_group,
-            panel_ids[1],
-            tab_width,
-            top_tab_strip_height,
-            color_active,
-            color_title,
-        );
-
-        let mut top_tabs = Vec::new();
-        if self.panel_slot_visible(column_index, 0) {
-            top_tabs.push(layers_tab);
-        }
-        if self.panel_slot_visible(column_index, 1) {
-            top_tabs.push(color_tab);
-        }
-        let top_tab_strip = self.render_tab_strip(
-            cx,
-            column_index,
-            top_tab_group,
-            active_top_panel,
-            column_content_width,
-            top_tab_strip_height,
-            content_padding,
-            button_size,
-            top_tab_spacer_width,
-            visible_top_count,
-            top_tabs,
-            if column_index == 0 {
-                "left-dock-top-group-menu"
-            } else {
-                "right-dock-top-group-menu"
-            },
-        );
-
-        let properties_tab = self.render_tab(
-            cx,
-            if column_index == 0 {
-                "left-dock-tab-properties"
-            } else {
-                "right-dock-tab-properties"
-            },
-            column_index,
-            bottom_tab_group,
-            panel_ids[2],
-            bottom_tab_width,
-            bottom_tab_strip_height,
-            properties_active,
-            properties_title,
-        );
-
-        let mut bottom_tabs = Vec::new();
-        if has_bottom_group && self.panel_slot_visible(column_index, 2) {
-            bottom_tabs.push(properties_tab);
-        }
-        let bottom_tab_strip = self.render_tab_strip(
-            cx,
-            column_index,
-            bottom_tab_group,
-            active_bottom_panel,
-            column_content_width,
-            bottom_tab_strip_height,
-            content_padding,
-            button_size,
-            bottom_tab_spacer_width,
-            visible_bottom_count,
-            bottom_tabs,
-            "right-dock-bottom-group-menu",
-        );
-
-        let top_group = self.render_tab_group(
-            column_content_width,
-            top_group_height,
-            !tabs_collapsed,
-            !top_group_collapsed,
-            top_content_height,
-            top_tab_strip,
-            top_content,
-        );
-
-        let bottom_group = self.render_tab_group(
-            column_content_width,
-            bottom_group_height,
-            !tabs_collapsed,
-            !bottom_group_collapsed,
-            bottom_content_height,
-            bottom_tab_strip,
-            bottom_content,
-        );
-
-        let resize_hit_height = metrics.splitter_hit_zone.max(metrics.splitter_thickness);
-        let visible_split_height = metrics.splitter_thickness.min(resize_hit_height);
-        let group_splitter_center_y =
-            window_y_offset + header_height + top_group_height + group_split_hit_height / 2.0;
-        let group_splitter = div()
-            .relative()
-            .w(px(column_content_width))
-            .h(px(group_split_hit_height))
-            .cursor(CursorStyle::ResizeUpDown)
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
-                    this.is_resizing_column = false;
-                    this.resizing_outer_column = None;
-                    this.resizing_groups_column = Some(column_id);
-                    this.resize_group_pointer_offset_y =
-                        event.position.y.as_f32() - group_splitter_center_y;
-                    cx.notify();
-                }),
-            )
-            .child(
-                div()
-                    .absolute()
-                    .left(px(0.0))
-                    .top(px(((group_split_hit_height - visible_split_height) / 2.0).max(0.0)))
-                    .w(px(column_content_width))
-                    .h(px(visible_split_height))
-                    .bg(rgb(colors.splitter)),
-            );
+        // The same visible group model feeds the icon rail. No separate top/bottom
+        // list is needed, so newly added Core groups automatically appear here.
+        let collapsed_tabs: Vec<(usize, NodeId, PanelId, bool)> = visible_groups
+            .iter()
+            .flat_map(|(group_index, group)| {
+                group.panels.iter().copied().map(move |panel_id| {
+                    (
+                        *group_index,
+                        group.id,
+                        panel_id,
+                        group.active_panel == Some(panel_id),
+                    )
+                })
+            })
+            .collect();
 
         let mut column_view = div()
             .relative()
@@ -1774,14 +1745,32 @@ impl MainWindow {
                     )
                     .child(div().w(px(content_padding)).h(px(1.0))),
             );
-        if show_top_group && !tabs_collapsed {
-            column_view = column_view.child(top_group);
-        }
-        if show_group_splitter && !tabs_collapsed {
-            column_view = column_view.child(group_splitter);
-        }
-        if show_bottom_group && !tabs_collapsed {
-            column_view = column_view.child(bottom_group);
+        if !tabs_collapsed {
+            let group_area_top = window_y_offset + header_height;
+            let mut group_cursor_y = group_area_top;
+            let mut previous_group_index: Option<usize> = None;
+            for (group_index, group_view, group_height) in rendered_groups {
+                if all_groups_visible {
+                    if let Some(previous_index) = previous_group_index {
+                        let center_y = group_cursor_y + group_split_hit_height / 2.0;
+                        column_view = column_view.child(self.render_group_splitter(
+                            cx,
+                            column_id,
+                            previous_index,
+                            column_content_width,
+                            group_split_hit_height,
+                            visible_split_height,
+                            center_y,
+                            groups_height,
+                            group_area_top,
+                        ));
+                        group_cursor_y += group_split_hit_height;
+                    }
+                }
+                column_view = column_view.child(group_view);
+                group_cursor_y += group_height;
+                previous_group_index = Some(group_index);
+            }
         }
         if tabs_collapsed {
             let mut collapsed_tab_rail = div()
@@ -2465,36 +2454,43 @@ impl Render for MainWindow {
                     return;
                 }
 
-                if let Some(column_id) = this.resizing_groups_column {
+                if let Some(resize) = this.resizing_groups_column {
                     let pointer_y = event.position.y.as_f32();
-                    let window_height = window.viewport_size().height.as_f32().max(1.0);
-                    let menu_height =
-                        this.theme.metrics.column_header_height.min(window_height);
-                    let dock_height = (window_height - menu_height).max(1.0);
-                    let header_height =
-                        this.theme.metrics.column_header_height.min(dock_height);
-                    let available_below_header = (dock_height - header_height).max(0.0);
-                    let splitter_hit_height = this
-                        .theme
-                        .metrics
-                        .splitter_hit_zone
-                        .max(this.theme.metrics.splitter_thickness)
-                        .min(available_below_header);
-                    let available_height =
-                        (available_below_header - splitter_hit_height).max(1.0);
-                    let column_index = this
+                    let column_id = resize.column;
+                    let Some(column_index) = this
                         .column_ids
                         .iter()
-                        .position(|candidate| *candidate == column_id);
-                    let Some(column_index) = column_index else {
+                        .position(|candidate| *candidate == column_id)
+                    else {
                         this.resizing_groups_column = None;
                         cx.notify();
                         return;
                     };
-                    let current_splitter_center_y = menu_height
-                        + header_height
-                        + available_height * this.group_split_ratio(column_index).clamp(0.0, 1.0)
-                        + splitter_hit_height / 2.0;
+
+                    let core_group_ids = this.group_ids_in_column(column_id);
+                    let visible_groups = this.visible_tab_groups_in_column(column_index, column_id);
+                    if visible_groups.len() != core_group_ids.len()
+                        || resize.boundary_index >= core_group_ids.len().saturating_sub(1)
+                    {
+                        this.resizing_groups_column = None;
+                        cx.notify();
+                        return;
+                    }
+
+                    let group_ratios = this.group_ratios_in_column(column_id);
+                    let group_heights = this.group_heights_for_available_height(
+                        &visible_groups,
+                        &group_ratios,
+                        resize.available_height,
+                    );
+                    let groups_before_boundary = group_heights
+                        .iter()
+                        .take(resize.boundary_index + 1)
+                        .sum::<f32>();
+                    let current_splitter_center_y = resize.group_area_top
+                        + groups_before_boundary
+                        + resize.splitter_hit_height * resize.boundary_index as f32
+                        + resize.splitter_hit_height / 2.0;
                     let target_splitter_center_y =
                         pointer_y - this.resize_group_pointer_offset_y;
                     let delta_y = target_splitter_center_y - current_splitter_center_y;
@@ -2502,9 +2498,9 @@ impl Render for MainWindow {
                         if let Err(error) = this.apply_dock_command(
                             DockCommand::ResizeGroups {
                                 column: column_id,
-                                boundary_index: 0,
+                                boundary_index: resize.boundary_index,
                                 delta: delta_y,
-                                available_height,
+                                available_height: resize.available_height,
                             }) {
                             eprintln!("Could not resize dock groups: {error}");
                             this.resizing_groups_column = None;
