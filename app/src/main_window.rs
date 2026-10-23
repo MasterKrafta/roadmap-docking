@@ -1556,12 +1556,27 @@ impl MainWindow {
                 .bg(rgb(colors.dock_background))
                 .border_1()
                 .border_color(rgb(colors.border));
+            let mut last_group_index: Option<usize> = None;
             for (tab_index, (group_index, group_id, panel_id)) in
                 collapsed_tabs.iter().copied().enumerate()
             {
                 let Some(panel) = self.layout.panel_instance(panel_id) else {
                     continue;
                 };
+                // Each tab group gets one mini-header above all of its icons.
+                // This separate strip can later host group dragging and double-click.
+                if last_group_index != Some(group_index) {
+                    let mini_header = div()
+                        .id(format!("collapsed-dock-group-header-{column_index}-{group_index}"))
+                        .w(px(rail_item_width))
+                        .h(px(12.0))
+                        .bg(rgb(colors.toolbar_background))
+                        .border_1()
+                        .border_color(rgb(colors.border));
+                    collapsed_tab_rail = collapsed_tab_rail.child(mini_header);
+                    last_group_index = Some(group_index);
+                }
+
                 let tab_icon = self.panels.icon(panel).to_owned();
                 let active_panel = if group_index == 0 {
                     active_top_panel == Some(panel_id)
@@ -1592,25 +1607,7 @@ impl MainWindow {
                         cx.notify();
                     }))
                     .child(tab_icon);
-                // Reserve a separate mini-header strip above each collapsed tab.
-                // It is intentionally inert for now; it can become the drag and
-                // double-click target without interfering with icon activation.
-                let mini_header = div()
-                    .id(format!("collapsed-dock-tab-header-{column_index}-{tab_index}"))
-                    .w(px(rail_item_width))
-                    .h(px(12.0))
-                    .bg(rgb(colors.toolbar_background))
-                    .border_1()
-                    .border_color(rgb(colors.border));
-                let tab_item = div()
-                    .id(format!("collapsed-dock-tab-item-{column_index}-{tab_index}"))
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .w(px(rail_item_width))
-                    .child(mini_header)
-                    .child(tab);
-                collapsed_tab_rail = collapsed_tab_rail.child(tab_item);
+                collapsed_tab_rail = collapsed_tab_rail.child(tab);
             }
             column_view = column_view.child(collapsed_tab_rail);
         }
