@@ -2529,39 +2529,38 @@ impl Render for MainWindow {
                 if let Some(column_id) = this.resizing_outer_column {
                     let pointer_x = event.position.x.as_f32();
                     let window_width = window.viewport_size().width.as_f32().max(1.0);
+                    let column_indices = this.main_column_indices_in_core_order();
+                    let Some(outer_column_index) = column_indices.first().copied() else {
+                        this.resizing_outer_column = None;
+                        cx.notify();
+                        return;
+                    };
+                    if this.column_ids.get(outer_column_index).copied() != Some(column_id) {
+                        this.resizing_outer_column = None;
+                        cx.notify();
+                        return;
+                    }
+
                     let splitter_width = this.theme.metrics.splitter_thickness;
-                    let left_is_open = this.column_open[0];
-                    let right_is_open = this.column_open[1];
-                    let left_width = if left_is_open {
-                        this.column_width(0).min(window_width)
-                    } else {
-                        0.0
-                    };
-                    let right_width = if right_is_open {
-                        this.column_width(1).min(window_width)
-                    } else {
-                        0.0
-                    };
-                    let outer_splitter_width = splitter_width;
-                    let center_splitter_width =
-                        if left_is_open && right_is_open { splitter_width } else { 0.0 };
+                    let column_widths: Vec<f32> = column_indices
+                        .iter()
+                        .map(|index| this.column_width(*index).min(window_width))
+                        .collect();
+                    let all_splitter_width = splitter_width * column_indices.len() as f32;
                     let workspace_width = (window_width
-                        - left_width
-                        - right_width
-                        - center_splitter_width
-                        - outer_splitter_width)
+                        - column_widths.iter().sum::<f32>()
+                        - all_splitter_width)
                         .max(0.0);
-                    let current_splitter_center_x =
-                        workspace_width + outer_splitter_width / 2.0;
+                    let current_splitter_center_x = workspace_width + splitter_width / 2.0;
                     let target_splitter_center_x =
                         pointer_x - this.resize_column_pointer_offset_x;
-                    let current_outer_width = this.column_width(if left_is_open { 0 } else { 1 });
+                    let current_outer_width = column_widths.first().copied().unwrap_or(0.0);
                     let width_delta = current_splitter_center_x - target_splitter_center_x;
                     let requested_width = (current_outer_width + width_delta).max(1.0);
+                    let other_columns_width = column_widths.iter().skip(1).sum::<f32>();
                     let max_width = (window_width
-                        - (if left_is_open { right_width } else { 0.0 })
-                        - center_splitter_width
-                        - outer_splitter_width
+                        - other_columns_width
+                        - all_splitter_width
                         - this.theme.metrics.min_document_width)
                         .max(0.0);
                     // Keep a usable workspace even when Core has no measured canvas
@@ -2591,29 +2590,42 @@ impl Render for MainWindow {
                 if this.is_resizing_column {
                     let pointer_x = event.position.x.as_f32();
                     let window_width = window.viewport_size().width.as_f32().max(1.0);
+                    let column_indices = this.main_column_indices_in_core_order();
+                    let boundary_index = this.resizing_column_boundary_index;
+                    if boundary_index >= column_indices.len().saturating_sub(1) {
+                        this.is_resizing_column = false;
+                        cx.notify();
+                        return;
+                    }
+
                     let splitter_width = this.theme.metrics.splitter_thickness;
-                    let left_width = this.column_width(0).min(window_width);
-                    let right_width = this.column_width(1).min(window_width);
-                    let outer_splitter_width = splitter_width;
+                    let column_widths: Vec<f32> = column_indices
+                        .iter()
+                        .map(|index| this.column_width(*index).min(window_width))
+                        .collect();
+                    let all_splitter_width = splitter_width * column_indices.len() as f32;
                     let workspace_width = (window_width
-                        - left_width
-                        - splitter_width
-                        - outer_splitter_width
-                        - right_width)
+                        - column_widths.iter().sum::<f32>()
+                        - all_splitter_width)
                         .max(0.0);
-                    let current_splitter_center_x =
-                        workspace_width + outer_splitter_width + left_width + splitter_width / 2.0;
+                    let columns_before_boundary =
+                        column_widths.iter().take(boundary_index + 1).sum::<f32>();
+                    let current_splitter_center_x = workspace_width
+                        + splitter_width
+                        + columns_before_boundary
+                        + splitter_width * boundary_index as f32
+                        + splitter_width / 2.0;
                     let target_splitter_center_x =
                         pointer_x - this.resize_column_pointer_offset_x;
                     let delta_x = target_splitter_center_x - current_splitter_center_x;
-                    if this.column_open.iter().all(|is_open| *is_open) && delta_x != 0.0 {
+                    if delta_x != 0.0 {
                         if let Err(error) = this.apply_dock_command(
                             DockCommand::ResizeColumnBoundary {
                                 side: DockSide::Right,
-                                boundary_index: 0,
+                                boundary_index,
                                 delta: delta_x,
                             }) {
-                            eprintln!("Could not resize adjacent dock columns: {error}");
+                            eprintln!("Could not resize dock column boundary: {error}");
                             this.is_resizing_column = false;
                         }
                     }
