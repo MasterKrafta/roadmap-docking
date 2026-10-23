@@ -60,6 +60,74 @@ fn c46_float_panel_keeps_panel_instance_and_id() {
 }
 
 #[test]
+fn c46_float_entire_horizontal_column_composition_preserves_columns_and_groups() {
+    let metrics = DockMetrics::default();
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, left_panel) = builder.panel(
+        PanelKey::new("c46-float-composition-left").unwrap(),
+        descriptors()[0].1,
+    );
+    let left_group = builder.tabs(vec![left_panel], 0, false);
+    let left_column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![left_group],
+        vec![1.0],
+    );
+
+    let (_, right_panel) = builder.panel(
+        PanelKey::new("c46-float-composition-right").unwrap(),
+        descriptors()[0].1,
+    );
+    let right_group = builder.tabs(vec![right_panel], 0, false);
+    let right_column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![right_group],
+        vec![1.0],
+    );
+
+    let composition = builder.split(
+        Axis::X,
+        vec![left_column, right_column],
+        vec![0.4, 0.6],
+    );
+    builder.main_area(DockSide::Right, composition);
+    let mut layout = builder.build();
+    assert_eq!(layout.validate(&metrics), Ok(()));
+
+    layout
+        .apply(
+            DockCommand::Float {
+                node: composition,
+                bounds: Rect::new(Point::new(120.0, 80.0), Size::new(620.0, 640.0)),
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    assert!(layout.main_area(DockSide::Right).is_none());
+    let (floating_id, floating) = layout.floating_groups().next().unwrap();
+    let floating_root = layout.dock_area(floating.area).unwrap().root;
+    assert_eq!(floating_root, composition);
+    assert!(matches!(
+        layout.node(floating_root),
+        Some(Node::Split(split))
+            if split.axis == Axis::X
+                && split.children == vec![left_column, right_column]
+                && split.ratios == vec![0.4, 0.6]
+    ));
+    assert_eq!(
+        layout.floating_group(floating_id).unwrap().bounds,
+        Rect::new(Point::new(120.0, 80.0), Size::new(620.0, 640.0))
+    );
+    assert!(matches!(layout.node(left_column), Some(Node::Column(column)) if column.groups == vec![left_group]));
+    assert!(matches!(layout.node(right_column), Some(Node::Column(column)) if column.groups == vec![right_group]));
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
 fn c46_move_resize_raise_and_center_dock_floating_preserve_source_active_tab() {
     let metrics = DockMetrics::default();
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
