@@ -75,9 +75,6 @@ pub(crate) struct MainWindow {
     column_open: [bool; 2],
     top_tab_groups: [NodeId; 2],
     bottom_tab_groups: [NodeId; 2],
-    /// Panel IDs per column, ordered: Layers, Color, Properties. Unused slots alias
-    /// an existing ID but are never exposed as tabs or menu entries.
-    panels_by_column: [[PanelId; 4]; 2],
     /// Per-panel visibility entries used by rendering, context actions, and the Windows menu.
     panel_visibility: Vec<PanelVisibilityEntry>,
     /// Core topology remembered while a column is closed, so it can be recreated generically.
@@ -229,46 +226,36 @@ impl MainWindow {
         // This ID is a harmless placeholder for the left column, which has no
         // lower group and therefore never renders or targets a bottom splitter.
         let bottom_tab_groups = [left_top_group, initial_bottom_group];
-        let panel_id_for_group = |group: NodeId, key: &PanelKey, title: &str| {
-            panel_id_in_group(&layout, group, key)
-                .ok_or_else(|| format!("Dock Core did not retain {title} in its tab group"))
-        };
-
-        let left_layers = panel_id_for_group(left_top_group, &layers_key, "left Layers")?;
-        let right_layers = panel_id_for_group(initial_top_group, &layers_key, "right Layers")?;
-        let right_color = panel_id_for_group(initial_top_group, &color_key, "right Color")?;
-        let right_properties =
-            panel_id_for_group(initial_bottom_group, &properties_key, "right Properties")?;
-        let panels_by_column = [
-            [left_layers, left_layers, left_layers, left_layers],
-            [right_layers, right_color, right_properties, right_properties],
-        ];
-
-        // The left column has one active tab; the right column has two tab groups.
-        for column_index in 0..2 {
-            layout
-                .apply(
-                    DockCommand::ActivateTab {
-                        group: top_tab_groups[column_index],
-                        panel: panels_by_column[column_index][0],
-                    },
-                    &dock_metrics,
-                )
-                .map_err(|error| format!("Could not activate the first tab in column {column_index}: {error}"))?;
-            let has_multiple_groups = matches!(
-                layout.node(column_ids[column_index]),
-                Some(Node::Column(column)) if column.groups.len() > 1
-            );
-            if has_multiple_groups {
-                layout
-                    .apply(
-                        DockCommand::ActivateTab {
-                            group: bottom_tab_groups[column_index],
-                            panel: panels_by_column[column_index][2],
-                        },
-                        &dock_metrics,
-                    )
-                    .map_err(|error| format!("Could not activate Properties in column {column_index}: {error}"))?;
+        // Initialize each Core group by activating its first actual panel. This
+        // does not require a fixed Layers/Color/Properties slot map.
+        for column_id in column_ids {
+            let group_ids = match layout.node(column_id) {
+                Some(Node::Column(column)) => column.groups.clone(),
+                _ => Vec::new(),
+            };
+            for group_id in group_ids {
+                let first_panel = match layout.node(group_id) {
+                    Some(Node::Tabs(tabs)) => tabs.children.iter().find_map(|child_id| {
+                        match layout.node(*child_id) {
+                            Some(Node::Panel(panel)) => Some(panel.panel_id),
+                            _ => None,
+                        }
+                    }),
+                    _ => None,
+                };
+                if let Some(panel) = first_panel {
+                    layout
+                        .apply(
+                            DockCommand::ActivateTab {
+                                group: group_id,
+                                panel,
+                            },
+                            &dock_metrics,
+                        )
+                        .map_err(|error| {
+                            format!("Could not activate the first panel in group {group_id:?}: {error}")
+                        })?;
+                }
             }
         }
 
@@ -281,7 +268,6 @@ impl MainWindow {
             column_open: [true; 2],
             top_tab_groups,
             bottom_tab_groups,
-            panels_by_column,
             panel_visibility: Vec::new(),
             closed_column_snapshots: [None, None],
             windows_menu_open: false,
@@ -772,33 +758,8 @@ impl MainWindow {
             .first()
             .ok_or_else(|| "Restored column has no tab groups".to_owned())?;
         let bottom_group = current_groups.get(1).copied().unwrap_or(top_group);
-        let top_panels = self
-            .tab_group_view_data(top_group)
-            .map(|group| group.panels)
-            .unwrap_or_default();
-        let bottom_panels = self
-            .tab_group_view_data(bottom_group)
-            .map(|group| group.panels)
-            .unwrap_or_default();
-        let first_top_panel = top_panels
-            .first()
-            .copied()
-            .ok_or_else(|| "Restored first group has no panels".to_owned())?;
-        let second_top_panel = top_panels.get(1).copied().unwrap_or(first_top_panel);
-        let first_bottom_panel = bottom_panels.first().copied().unwrap_or(first_top_panel);
-        let second_bottom_panel = bottom_panels
-            .get(1)
-            .copied()
-            .unwrap_or(first_bottom_panel);
-
         self.top_tab_groups[column_index] = top_group;
         self.bottom_tab_groups[column_index] = bottom_group;
-        self.panels_by_column[column_index] = [
-            first_top_panel,
-            second_top_panel,
-            first_bottom_panel,
-            second_bottom_panel,
-        ];
 
         for (group_snapshot, group_id) in snapshot.groups.iter().zip(restored_groups.iter().copied()) {
             let selected_key_for_group = group_snapshot
