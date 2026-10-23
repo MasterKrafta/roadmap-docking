@@ -508,7 +508,7 @@ impl MainWindow {
     fn sync_panel_visibility_entries(&mut self) {
         let mut discovered: Vec<(usize, PanelId, String, String)> = Vec::new();
 
-        for (column_index, column_id) in self.column_ids.iter().copied().enumerate() {
+        for (column_id, column_index) in self.column_ids.iter().copied().enumerate() {
             for group_id in self.group_ids_in_column(column_id) {
                 let Some(group) = self.tab_group_view_data(group_id) else {
                     continue;
@@ -517,11 +517,7 @@ impl MainWindow {
                     let Some(instance) = self.layout.panel_instance(panel_id) else {
                         continue;
                     };
-                    let column_label = match column_index {
-                        0 => "Left".to_owned(),
-                        1 => "Right".to_owned(),
-                        index => format!("Column {}", index + 1),
-                    };
+                    let column_label = self.column_label(column_index);
                     discovered.push((
                         column_index,
                         panel_id,
@@ -1224,6 +1220,38 @@ impl MainWindow {
             .unwrap_or_default()
     }
 
+    /// Return a column's visual position, without confusing it with its stable UI slot.
+    fn column_visual_position(&self, column_index: usize) -> usize {
+        if let Some(area) = self.layout.main_area(DockSide::Right) {
+            let columns = self.column_indices_in_core_order(area.root);
+            if let Some(position) = columns.iter().position(|index| *index == column_index) {
+                return position;
+            }
+        }
+
+        if let Some(root) = self.floating_composition.and_then(|group_id| {
+            self.layout
+                .floating_group(group_id)
+                .and_then(|floating| self.layout.dock_area(floating.area))
+                .map(|area| area.root)
+        }) {
+            let columns = self.composition_column_indices(root);
+            if let Some(position) = columns.iter().position(|index| *index == column_index) {
+                return position;
+            }
+        }
+
+        column_index
+    }
+
+    fn column_label(&self, column_index: usize) -> String {
+        match self.column_visual_position(column_index) {
+            0 => "Left".to_owned(),
+            1 => "Right".to_owned(),
+            position => format!("Column {}", position + 1),
+        }
+    }
+
     fn composition_column_indices(&self, root: NodeId) -> Vec<usize> {
         self.column_indices_in_core_order(root)
     }
@@ -1748,11 +1776,7 @@ impl MainWindow {
         let available_tab_width =
             (column_content_width - content_padding * 2.0 - button_size).max(0.0);
 
-        let column_label = match column_index {
-            0 => "Left".to_owned(),
-            1 => "Right".to_owned(),
-            index => format!("Column {}", index + 1),
-        };
+        let column_label = self.column_label(column_index);
         let mut rendered_groups: Vec<(usize, Div, f32)> = Vec::new();
         if !tabs_collapsed {
             for ((group_index, group), group_height) in
