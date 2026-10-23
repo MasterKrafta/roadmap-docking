@@ -70,8 +70,8 @@ pub(crate) struct MainWindow {
     dock_metrics: DockMetrics,
     /// Stable column slots; current visual order is derived from the Core Split.
     column_ids: Vec<NodeId>,
-    /// Core removes empty columns from the Split; these flags retain UI slots while
-    /// the current visual order follows Core. The last remaining column stays open.
+    /// True only while a slot's Core column is active in the main or floating tree.
+    /// Closed slots remain allocated so their saved snapshots can be restored.
     column_open: Vec<bool>,
     /// Per-panel visibility entries used by rendering, context actions, and the Windows menu.
     panel_visibility: Vec<PanelVisibilityEntry>,
