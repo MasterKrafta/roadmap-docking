@@ -520,6 +520,46 @@ impl MainWindow {
             .unwrap_or(self.theme.metrics.default_column_width)
     }
 
+    fn group_is_collapsed(&self, group: NodeId) -> bool {
+        matches!(self.layout.node(group), Some(Node::Tabs(tabs)) if tabs.collapsed)
+    }
+
+    fn toggle_group_collapse(&mut self, group: NodeId) {
+        let Some(Node::Tabs(tabs)) = self.layout.node(group) else {
+            return;
+        };
+        let collapsed = !tabs.collapsed;
+        if let Err(error) = self.layout.apply(
+            DockCommand::CollapseGroup { group, collapsed },
+            &self.dock_metrics,
+        ) {
+            eprintln!("Could not change dock group collapse state: {error}");
+        }
+    }
+
+    fn toggle_column_mode(&mut self, column_index: usize) {
+        if column_index >= self.column_ids.len() {
+            return;
+        }
+        let mode = if matches!(
+            self.layout.node(self.column_ids[column_index]),
+            Some(Node::Column(column)) if column.mode == ColumnMode::IconsOnly
+        ) {
+            ColumnMode::Expanded
+        } else {
+            ColumnMode::IconsOnly
+        };
+        if let Err(error) = self.layout.apply(
+            DockCommand::SetColumnMode {
+                column: self.column_ids[column_index],
+                mode,
+            },
+            &self.dock_metrics,
+        ) {
+            eprintln!("Could not change dock column mode: {error}");
+        }
+    }
+
     fn group_split_ratio(&self, column_index: usize) -> f32 {
         self.layout
             .node(self.column_ids[column_index])
@@ -563,6 +603,9 @@ impl MainWindow {
         };
         let show_top_group = visible_top_count > 0;
         let show_bottom_group = has_bottom_group && visible_bottom_count > 0;
+        let top_group_collapsed = show_top_group && self.group_is_collapsed(top_tab_group);
+        let bottom_group_collapsed =
+            show_bottom_group && self.group_is_collapsed(bottom_tab_group);
         let show_group_splitter = show_top_group && show_bottom_group;
         let group_split_hit_height = if show_group_splitter {
             metrics.splitter_hit_zone.max(metrics.splitter_thickness)
@@ -571,29 +614,58 @@ impl MainWindow {
             0.0
         };
         let groups_height = (available_below_header - group_split_hit_height).max(0.0);
+        let collapsed_group_height = self
+            .dock_metrics
+            .collapsed_group_height
+            .max(metrics.tab_strip_height)
+            .min(groups_height);
         let split_ratio = self.group_split_ratio(column_index).clamp(0.0, 1.0);
-        let top_group_height = match (show_top_group, show_bottom_group) {
-            (true, true) => groups_height * split_ratio,
-            (true, false) => groups_height,
-            _ => 0.0,
-        };
-        let bottom_group_height = match (show_top_group, show_bottom_group) {
-            (true, true) => (groups_height - top_group_height).max(0.0),
-            (false, true) => groups_height,
-            _ => 0.0,
+        let (top_group_height, bottom_group_height) = match (show_top_group, show_bottom_group) {
+            (true, true) => match (top_group_collapsed, bottom_group_collapsed) {
+                (false, false) => {
+                    let top = groups_height * split_ratio;
+                    (top, (groups_height - top).max(0.0))
+                }
+                (true, false) => {
+                    let top = collapsed_group_height;
+                    (top, (groups_height - top).max(0.0))
+                }
+                (false, true) => {
+                    let bottom = collapsed_group_height;
+                    ((groups_height - bottom).max(0.0), bottom)
+                }
+                (true, true) => (collapsed_group_height, collapsed_group_height),
+            },
+            (true, false) => (
+                if top_group_collapsed { collapsed_group_height } else { groups_height },
+                0.0,
+            ),
+            (false, true) => (
+                0.0,
+                if bottom_group_collapsed { collapsed_group_height } else { groups_height },
+            ),
+            (false, false) => (0.0, 0.0),
         };
         let top_tab_strip_height = if tabs_collapsed {
             0.0
         } else {
             metrics.tab_strip_height.min(top_group_height)
         };
-        let top_content_height = (top_group_height - top_tab_strip_height).max(0.0);
+        let top_content_height = if top_group_collapsed {
+            0.0
+        } else {
+            (top_group_height - top_tab_strip_height).max(0.0)
+        };
         let bottom_tab_strip_height = if tabs_collapsed {
             0.0
         } else {
             metrics.tab_strip_height.min(bottom_group_height)
         };
-        let bottom_content_height = (bottom_group_height - bottom_tab_strip_height).max(0.0);
+        let bottom_content_height = if bottom_group_collapsed {
+            0.0
+        } else {
+            (bottom_group_height - bottom_tab_strip_height).max(0.0)
+        };
 
         let button_size = metrics.button_size.min(column_width);
         let button_gap = if tabs_collapsed { 0.0 } else { metrics.button_gap };
@@ -697,6 +769,15 @@ impl MainWindow {
             .border_1()
             .border_color(rgb(colors.border))
             .text_color(rgb(if layers_active { colors.primary_text } else { colors.muted_text }))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                    if event.click_count == 2 {
+                        this.toggle_group_collapse(top_tab_group);
+                        cx.notify();
+                    }
+                }),
+            )
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.activate_tab(top_tab_group, panel_ids[0]);
                 cx.notify();
@@ -714,6 +795,15 @@ impl MainWindow {
             .border_1()
             .border_color(rgb(colors.border))
             .text_color(rgb(if color_active { colors.primary_text } else { colors.muted_text }))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                    if event.click_count == 2 {
+                        this.toggle_group_collapse(top_tab_group);
+                        cx.notify();
+                    }
+                }),
+            )
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.activate_tab(top_tab_group, panel_ids[1]);
                 cx.notify();
@@ -729,7 +819,20 @@ impl MainWindow {
             .bg(rgb(colors.dock_background))
             .border_1()
             .border_color(rgb(colors.border))
-            .child(div().w(px(content_padding)).h(px(1.0)));
+            .child(
+                div()
+                    .w(px(content_padding))
+                    .h(px(top_tab_strip_height))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                            if event.click_count == 2 {
+                                this.toggle_group_collapse(top_tab_group);
+                                cx.notify();
+                            }
+                        }),
+                    ),
+            );
         if self.panel_slot_visible(column_index, 0) {
             top_tab_strip = top_tab_strip.child(layers_tab);
         }
@@ -747,8 +850,20 @@ impl MainWindow {
                     .child("No panels"),
             );
         } else {
-            top_tab_strip =
-                top_tab_strip.child(div().w(px(top_tab_spacer_width)).h(px(1.0)));
+            top_tab_strip = top_tab_strip.child(
+                div()
+                    .w(px(top_tab_spacer_width))
+                    .h(px(top_tab_strip_height))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                            if event.click_count == 2 {
+                                this.toggle_group_collapse(top_tab_group);
+                                cx.notify();
+                            }
+                        }),
+                    ),
+            );
         }
         top_tab_strip = top_tab_strip
             .child(
@@ -762,7 +877,20 @@ impl MainWindow {
                     .bg(rgb(colors.hover))
                     .child("☰"),
             )
-            .child(div().w(px(content_padding)).h(px(1.0)));
+            .child(
+                div()
+                    .w(px(content_padding))
+                    .h(px(top_tab_strip_height))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                            if event.click_count == 2 {
+                                this.toggle_group_collapse(top_tab_group);
+                                cx.notify();
+                            }
+                        }),
+                    ),
+            );
 
         let properties_tab = div()
             .id(if column_index == 0 { "left-dock-tab-properties" } else { "right-dock-tab-properties" })
@@ -775,6 +903,15 @@ impl MainWindow {
             .border_1()
             .border_color(rgb(colors.border))
             .text_color(rgb(if properties_active { colors.primary_text } else { colors.muted_text }))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                    if event.click_count == 2 {
+                        this.toggle_group_collapse(bottom_tab_group);
+                        cx.notify();
+                    }
+                }),
+            )
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.activate_tab(bottom_tab_group, panel_ids[2]);
                 cx.notify();
@@ -790,7 +927,20 @@ impl MainWindow {
             .bg(rgb(colors.dock_background))
             .border_1()
             .border_color(rgb(colors.border))
-            .child(div().w(px(content_padding)).h(px(1.0)));
+            .child(
+                div()
+                    .w(px(content_padding))
+                    .h(px(bottom_tab_strip_height))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                            if event.click_count == 2 {
+                                this.toggle_group_collapse(bottom_tab_group);
+                                cx.notify();
+                            }
+                        }),
+                    ),
+            );
         if has_bottom_group && self.panel_slot_visible(column_index, 2) {
             bottom_tab_strip = bottom_tab_strip.child(properties_tab);
         }
@@ -805,8 +955,20 @@ impl MainWindow {
                     .child("No panels"),
             );
         } else {
-            bottom_tab_strip =
-                bottom_tab_strip.child(div().w(px(bottom_tab_spacer_width)).h(px(1.0)));
+            bottom_tab_strip = bottom_tab_strip.child(
+                div()
+                    .w(px(bottom_tab_spacer_width))
+                    .h(px(bottom_tab_strip_height))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                            if event.click_count == 2 {
+                                this.toggle_group_collapse(bottom_tab_group);
+                                cx.notify();
+                            }
+                        }),
+                    ),
+            );
         }
         bottom_tab_strip = bottom_tab_strip
             .child(
@@ -820,7 +982,20 @@ impl MainWindow {
                     .bg(rgb(colors.hover))
                     .child("☰"),
             )
-            .child(div().w(px(content_padding)).h(px(1.0)));
+            .child(
+                div()
+                    .w(px(content_padding))
+                    .h(px(bottom_tab_strip_height))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                            if event.click_count == 2 {
+                                this.toggle_group_collapse(bottom_tab_group);
+                                cx.notify();
+                            }
+                        }),
+                    ),
+            );
 
         let top_content_area = div()
             .w(px(column_content_width))
@@ -846,7 +1021,9 @@ impl MainWindow {
         if !tabs_collapsed {
             top_group = top_group.child(top_tab_strip);
         }
-        top_group = top_group.child(top_content_area);
+        if !top_group_collapsed {
+            top_group = top_group.child(top_content_area);
+        }
 
         let mut bottom_group = div()
             .flex()
@@ -856,7 +1033,9 @@ impl MainWindow {
         if !tabs_collapsed {
             bottom_group = bottom_group.child(bottom_tab_strip);
         }
-        bottom_group = bottom_group.child(bottom_content_area);
+        if !bottom_group_collapsed {
+            bottom_group = bottom_group.child(bottom_content_area);
+        }
 
         let resize_hit_height = metrics.splitter_hit_zone.max(metrics.splitter_thickness);
         let visible_split_height = metrics.splitter_thickness.min(resize_hit_height);
@@ -905,7 +1084,25 @@ impl MainWindow {
                     .bg(rgb(colors.toolbar_background))
                     .border_1()
                     .border_color(rgb(colors.border))
-                    .child(div().w(px(header_spacer_width)).h(px(1.0)))
+                    .child(
+                        div()
+                            .id(if column_index == 0 {
+                                "left-dock-header-spacer"
+                            } else {
+                                "right-dock-header-spacer"
+                            })
+                            .w(px(header_spacer_width))
+                            .h(px(header_height))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                                    if event.click_count == 2 {
+                                        this.toggle_column_mode(column_index);
+                                        cx.notify();
+                                    }
+                                }),
+                            ),
+                    )
                     .child(
                         div()
                             .id(if column_index == 0 {
@@ -921,24 +1118,7 @@ impl MainWindow {
                             .bg(rgb(colors.hover))
                             .text_color(rgb(colors.primary_text))
                             .on_click(cx.listener(move |this, _, _, cx| {
-                                let mode = if matches!(
-                                    this.layout.node(this.column_ids[column_index]),
-                                    Some(Node::Column(column))
-                                        if column.mode == ColumnMode::IconsOnly
-                                ) {
-                                    ColumnMode::Expanded
-                                } else {
-                                    ColumnMode::IconsOnly
-                                };
-                                if let Err(error) = this.layout.apply(
-                                    DockCommand::SetColumnMode {
-                                        column: this.column_ids[column_index],
-                                        mode,
-                                    },
-                                    &this.dock_metrics,
-                                ) {
-                                    eprintln!("Could not change dock column mode: {error}");
-                                }
+                                this.toggle_column_mode(column_index);
                                 cx.notify();
                             }))
                             .child(if tabs_collapsed { "<<" } else { ">>" }),
