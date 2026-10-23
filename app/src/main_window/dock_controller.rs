@@ -13,7 +13,7 @@ use dock_gpui::{
 use gpui::{
     AnyElement, App, Context, Div, InteractiveElement, IntoElement, KeyDownEvent, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point as GpuiPoint,
-    ScrollHandle, Styled, div, px, rgb,
+    FocusHandle, ScrollHandle, Styled, div, px, rgb,
 };
 use ui::Theme;
 
@@ -34,6 +34,7 @@ pub(crate) struct DockController {
     drag_overlay: Option<DragOverlay>,
     resize_gesture: Option<ResizeGesture>,
     menu_request: Option<DockMenuRequest>,
+    focus_handle: Option<FocusHandle>,
 }
 
 struct ResizeGesture {
@@ -83,6 +84,7 @@ impl DockController {
             drag_overlay: None,
             resize_gesture: None,
             menu_request: None,
+            focus_handle: None,
         })
     }
 
@@ -94,6 +96,14 @@ impl DockController {
     ) -> Div {
         let width = width.max(1.0);
         let height = height.max(1.0);
+        if self.focus_handle.is_none() {
+            self.focus_handle = Some(cx.focus_handle());
+        }
+        let focus_handle = self
+            .focus_handle
+            .as_ref()
+            .expect("focus handle was initialized above")
+            .clone();
         let viewport = Rect::new(Point::ZERO, Size::new(width, height));
 
         let mut rects = match self.layout.compute_rects(viewport, &self.metrics) {
@@ -194,6 +204,7 @@ impl DockController {
         // GPUI delivers pointer events to this full-window root while the adapter owns
         // the individual hit surfaces. This joins those events to Core's drag session.
         root = root
+            .track_focus(&focus_handle)
             .on_mouse_move(cx.listener(
                 |window, event: &MouseMoveEvent, _, cx| {
                     if window.dock.pointer_move(core_point(event.position)) {
@@ -410,7 +421,6 @@ impl DockController {
                 gesture.handle,
                 gesture.origin,
                 position,
-                &self.metrics,
             )
         };
 
@@ -436,7 +446,6 @@ impl DockController {
             gesture.handle,
             gesture.origin,
             position,
-            &self.metrics,
         );
         self.layout = gesture.original_layout;
         if let Some(command) = command {
@@ -608,7 +617,6 @@ fn resize_command(
     handle: ResizeHandle,
     origin: Point,
     position: Point,
-    metrics: &DockMetrics,
 ) -> Option<DockCommand> {
     let delta_x = position.x - origin.x;
     let delta_y = position.y - origin.y;
