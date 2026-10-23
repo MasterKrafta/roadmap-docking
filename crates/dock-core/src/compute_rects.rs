@@ -1457,9 +1457,11 @@ mod tests {
         };
         let mut builder = LayoutBuilder::new(Profile::Photoshop);
 
-        let (_, collapsed_panel_node) = builder.panel(key("floating-column-collapsed"), constraints());
+        let (_, collapsed_panel_node) =
+            builder.panel(key("floating-column-collapsed"), constraints());
         let collapsed_group = builder.tabs(vec![collapsed_panel_node], 0, true);
-        let (_, expanded_panel_node) = builder.panel(key("floating-column-expanded"), constraints());
+        let (_, expanded_panel_node) =
+            builder.panel(key("floating-column-expanded"), constraints());
         let expanded_group = builder.tabs(vec![expanded_panel_node], 0, false);
         let column = builder.column(
             300.0,
@@ -1471,10 +1473,27 @@ mod tests {
         builder.floating_group(column, bounds, 1);
         let layout = builder.build();
 
-        let rects = layout.compute_rects(viewport(1000.0, 700.0), &metrics).unwrap();
-        let first = rects.groups.iter().find(|entry| entry.group == collapsed_group).unwrap().rect;
-        let second = rects.groups.iter().find(|entry| entry.group == expanded_group).unwrap().rect;
-        let splitter = rects.splitters.iter().find(|entry| entry.owner == column).unwrap().rect;
+        let rects = layout
+            .compute_rects(viewport(1000.0, 700.0), &metrics)
+            .unwrap();
+        let first = rects
+            .groups
+            .iter()
+            .find(|entry| entry.group == collapsed_group)
+            .unwrap()
+            .rect;
+        let second = rects
+            .groups
+            .iter()
+            .find(|entry| entry.group == expanded_group)
+            .unwrap()
+            .rect;
+        let splitter = rects
+            .splitters
+            .iter()
+            .find(|entry| entry.owner == column)
+            .unwrap()
+            .rect;
 
         assert_eq!(rects.floating_groups[0].rect, bounds);
         assert_eq!(first.origin.y, bounds.origin.y + metrics.header_height);
@@ -1483,9 +1502,14 @@ mod tests {
             second.origin.y >= first.origin.y + first.size.height + metrics.splitter_thickness,
             "the expanded sibling must begin after the collapsed row and splitter"
         );
-        assert_eq!(splitter.origin.y, first.origin.y + first.size.height);
+        assert_eq!(
+            splitter.rect.origin.y + (metrics.splitter_hit_zone - metrics.splitter_thickness) / 2.0,
+            first.origin.y + first.size.height
+        );
         assert!(
-            ((second.origin.y + second.size.height) - (bounds.origin.y + bounds.size.height)).abs()
+            ((second.origin.y + second.size.height)
+                - (bounds.origin.y + bounds.size.height))
+            .abs()
                 < PIXEL_TOLERANCE
         );
     }
@@ -1499,7 +1523,8 @@ mod tests {
         };
         let mut builder = LayoutBuilder::new(Profile::Photoshop);
 
-        let (_, collapsed_panel_node) = builder.panel(key("split-floating-collapsed"), constraints());
+        let (_, collapsed_panel_node) =
+            builder.panel(key("split-floating-collapsed"), constraints());
         let collapsed_group = builder.tabs(vec![collapsed_panel_node], 0, true);
         let left_column = builder.column(
             300.0,
@@ -1508,7 +1533,8 @@ mod tests {
             vec![1.0],
         );
 
-        let (_, expanded_panel_node) = builder.panel(key("split-floating-expanded"), constraints());
+        let (_, expanded_panel_node) =
+            builder.panel(key("split-floating-expanded"), constraints());
         let expanded_group = builder.tabs(vec![expanded_panel_node], 0, false);
         let right_column = builder.column(
             300.0,
@@ -1521,11 +1547,33 @@ mod tests {
         builder.floating_group(root, bounds, 1);
         let layout = builder.build();
 
-        let rects = layout.compute_rects(viewport(1000.0, 700.0), &metrics).unwrap();
-        let collapsed = rects.groups.iter().find(|entry| entry.group == collapsed_group).unwrap().rect;
-        let expanded = rects.groups.iter().find(|entry| entry.group == expanded_group).unwrap().rect;
-        let collapsed_strip = rects.tab_strips.iter().find(|entry| entry.group == collapsed_group).unwrap().rect;
-        let expanded_strip = rects.tab_strips.iter().find(|entry| entry.group == expanded_group).unwrap().rect;
+        let rects = layout
+            .compute_rects(viewport(1000.0, 700.0), &metrics)
+            .unwrap();
+        let collapsed = rects
+            .groups
+            .iter()
+            .find(|entry| entry.group == collapsed_group)
+            .unwrap()
+            .rect;
+        let expanded = rects
+            .groups
+            .iter()
+            .find(|entry| entry.group == expanded_group)
+            .unwrap()
+            .rect;
+        let collapsed_strip = rects
+            .tab_strips
+            .iter()
+            .find(|entry| entry.group == collapsed_group)
+            .unwrap()
+            .rect;
+        let expanded_strip = rects
+            .tab_strips
+            .iter()
+            .find(|entry| entry.group == expanded_group)
+            .unwrap()
+            .rect;
 
         assert_eq!(rects.floating_groups[0].rect, bounds);
         assert_eq!(collapsed.origin.y, bounds.origin.y + metrics.header_height);
