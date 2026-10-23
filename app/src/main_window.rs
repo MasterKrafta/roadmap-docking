@@ -2320,6 +2320,61 @@ impl Render for MainWindow {
             }),
         )
         .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
+                let pointer_x = event.position.x.as_f32();
+                let pointer_y = event.position.y.as_f32();
+                let viewport = window.viewport_size();
+                let window_width = viewport.width.as_f32().max(1.0);
+                let window_height = viewport.height.as_f32().max(1.0);
+
+                if this.composition_drag_pending {
+                    let delta_x = pointer_x - this.composition_drag_start_x;
+                    let delta_y = pointer_y - this.composition_drag_start_y;
+                    if delta_x * delta_x + delta_y * delta_y >= 16.0 {
+                        let floating_group = if let Some(group_id) = this.composition_drag_group {
+                            Some(group_id)
+                        } else {
+                            this.float_main_composition_at_pointer(
+                                pointer_x,
+                                pointer_y,
+                                window_width,
+                                window_height,
+                            )
+                        };
+                        if let Some(group_id) = floating_group {
+                            this.composition_drag_group = Some(group_id);
+                            this.composition_dragging = true;
+                            this.composition_drag_pending = false;
+                            this.move_floating_composition(
+                                group_id,
+                                pointer_x,
+                                pointer_y,
+                                window_width,
+                                window_height,
+                            );
+                        } else {
+                            this.composition_drag_pending = false;
+                            this.composition_drag_source = None;
+                            this.composition_drag_group = None;
+                        }
+                        cx.notify();
+                    }
+                    return;
+                }
+
+                if this.composition_dragging {
+                    if let Some(group_id) = this.composition_drag_group {
+                        this.move_floating_composition(
+                            group_id,
+                            pointer_x,
+                            pointer_y,
+                            window_width,
+                            window_height,
+                        );
+                        cx.notify();
+                    }
+                    return;
+                }
+
                 if let Some(column_id) = this.resizing_outer_column {
                     let pointer_x = event.position.x.as_f32();
                     let window_width = window.viewport_size().width.as_f32().max(1.0);
@@ -2472,7 +2527,14 @@ impl Render for MainWindow {
             .on_mouse_up(
                 MouseButton::Left,
                 cx.listener(|this, _event, _window, cx| {
-                    if this.is_resizing_column
+                    let had_composition_drag =
+                        this.composition_drag_pending || this.composition_dragging;
+                    this.composition_drag_pending = false;
+                    this.composition_dragging = false;
+                    this.composition_drag_source = None;
+                    this.composition_drag_group = None;
+                    if had_composition_drag
+                        || this.is_resizing_column
                         || this.resizing_outer_column.is_some()
                         || this.resizing_groups_column.is_some()
                     {
