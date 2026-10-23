@@ -235,6 +235,16 @@ impl MainWindow {
                 self.composition_drag_pending = true;
                 return;
             }
+
+            // A group inside an already-floating multi-group Column follows the
+            // same detach rule as a group in the main dock. Only the selected
+            // group becomes a new floating Column; its siblings stay behind.
+            self.composition_drag_source = Some(CompositionDragSource::Group(group_id));
+            self.composition_drag_offset_x = pointer_x - column_origin_x;
+            self.composition_drag_offset_y = pointer_y - group_origin_y
+                + self.theme.metrics.column_header_height;
+            self.composition_drag_pending = true;
+            return;
         }
 
         let Some(column_id) = self.column_ids.get(column_index).copied() else {
