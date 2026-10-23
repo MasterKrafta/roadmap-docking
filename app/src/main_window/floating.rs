@@ -1,4 +1,4 @@
-use dock_core::{DockCommand, DockSide, FloatingGroupId, Node, NodeId, Point, Rect, Size};
+use dock_core::{ColumnMode, DockCommand, DockSide, FloatingGroupId, Node, NodeId, PanelId, Point, Rect, Size};
 
 use super::MainWindow;
 
@@ -70,6 +70,91 @@ impl MainWindow {
         }
     }
 
+    fn node_tree_contains(&self, root: NodeId, target: NodeId) -> bool {
+        if root == target {
+            return true;
+        }
+        match self.layout.node(root) {
+            Some(Node::Split(split)) => split
+                .children
+                .iter()
+                .any(|child| self.node_tree_contains(*child, target)),
+            Some(Node::Column(column)) => column
+                .groups
+                .iter()
+                .any(|group| self.node_tree_contains(*group, target)),
+            Some(Node::Tabs(tabs)) => tabs
+                .children
+                .iter()
+                .any(|child| self.node_tree_contains(*child, target)),
+            Some(Node::Panel(_)) | None => false,
+        }
+    }
+
+    fn floating_group_containing_node(
+        &self,
+        target: NodeId,
+    ) -> Option<(FloatingGroupId, NodeId, Rect)> {
+        self.layout.floating_groups().find_map(|(group_id, floating)| {
+            let root = self.layout.dock_area(floating.area)?.root;
+            self.node_tree_contains(root, target)
+                .then_some((group_id, root, floating.bounds))
+        })
+    }
+
+    fn column_index_for_group(&self, group_id: NodeId) -> Option<usize> {
+        self.column_ids.iter().position(|column_id| {
+            self.group_ids_in_column(*column_id).contains(&group_id)
+        })
+    }
+
+    fn column_index_for_panel(&self, panel_id: PanelId) -> Option<usize> {
+        self.column_ids.iter().enumerate().find_map(|(column_index, column_id)| {
+            self.group_ids_in_column(*column_id).into_iter().any(|group_id| {
+                self.tab_group_view_data(group_id)
+                    .is_some_and(|group| group.panels.contains(&panel_id))
+            }).then_some(column_index)
+        })
+    }
+
+    fn panel_node_id(&self, panel_id: PanelId) -> Option<NodeId> {
+        self.layout.nodes().find_map(|(node_id, node)| match node {
+            Node::Panel(panel) if panel.panel_id == panel_id => Some(node_id),
+            _ => None,
+        })
+    }
+
+    fn detached_column_width(&self, column_index: Option<usize>) -> f32 {
+        let default_width = self.theme.metrics.default_column_width;
+        let Some(column_id) = column_index.and_then(|index| self.column_ids.get(index).copied()) else {
+            return default_width;
+        };
+        let Some(Node::Column(column)) = self.layout.node(column_id) else {
+            return default_width;
+        };
+        let requested_width = if column.mode == ColumnMode::Expanded {
+            column.width
+        } else {
+            column.last_expanded_width.unwrap_or(default_width)
+        };
+        if requested_width.is_finite() && requested_width > 0.0 {
+            requested_width.max(self.dock_metrics.min_column_width)
+        } else {
+            default_width
+        }
+    }
+
+    fn single_column_size(&self, width: f32, window_height: f32) -> Size {
+        let header_height = self
+            .theme
+            .metrics
+            .column_header_height
+            .min(window_height.max(1.0));
+        let available_height = (window_height - header_height).max(1.0);
+        let floating_height = available_height.min((window_height * 0.75).max(1.0));
+        Size::new(width.max(1.0), floating_height.max(1.0))
+    }
+
     pub(super) fn begin_composition_drag(
         &mut self,
         column_index: usize,
@@ -85,27 +170,23 @@ impl MainWindow {
         self.composition_drag_start_x = pointer_x;
         self.composition_drag_start_y = pointer_y;
 
-        let floating_columns: Vec<_> = self
-            .layout
-            .floating_groups()
-            .filter_map(|(group_id, floating)| {
-                let root = self.layout.dock_area(floating.area)?.root;
-                Some((group_id, root, floating.bounds.origin))
-            })
-            .collect();
-        for (group_id, root, origin) in floating_columns {
-            if self.composition_column_indices(root).contains(&column_index) {
-                self.composition_drag_group = Some(group_id);
-                self.composition_drag_offset_x = pointer_x - origin.x;
-                self.composition_drag_offset_y = pointer_y - origin.y;
-                self.composition_drag_pending = true;
-                return;
-            }
+        let Some(column_id) = self.column_ids.get(column_index).copied() else {
+            return;
+        };
+        if let Some((group_id, _root, bounds)) = self.floating_group_containing_node(column_id) {
+            self.composition_drag_group = Some(group_id);
+            self.composition_drag_offset_x = pointer_x - bounds.origin.x;
+            self.composition_drag_offset_y = pointer_y - bounds.origin.y;
+            self.composition_drag_pending = true;
+            return;
         }
 
         let Some(root) = self.layout.main_area(DockSide::Right).map(|area| area.root) else {
             return;
         };
+        if !self.node_tree_contains(root, column_id) {
+            return;
+        }
         let Some(size) = self.composition_size(root, window_height) else {
             return;
         };
@@ -117,7 +198,7 @@ impl MainWindow {
             .min(window_height.max(1.0));
         self.composition_drag_offset_x = pointer_x - origin_x;
         self.composition_drag_offset_y = pointer_y - origin_y;
-        self.composition_drag_source = Some(root);
+        self.composition_drag_source = Some(CompositionDragSource::Composition(root));
         self.composition_drag_pending = true;
     }
 
@@ -127,49 +208,113 @@ impl MainWindow {
         group_id: NodeId,
         pointer_x: f32,
         pointer_y: f32,
+        column_origin_x: f32,
+        group_origin_y: f32,
+        composition_origin: Point,
     ) {
-        if let Some((floating_id, origin)) = self
-            .layout
-            .floating_groups()
-            .find_map(|(floating_id, floating)| {
-                let root = self.layout.dock_area(floating.area)?.root;
-                (root == group_id).then_some((floating_id, floating.bounds.origin))
-            })
+        self.composition_drag_pending = false;
+        self.composition_dragging = false;
+        self.composition_drag_source = None;
+        self.composition_drag_group = None;
+        self.composition_drag_start_x = pointer_x;
+        self.composition_drag_start_y = pointer_y;
+
+        if let Some((floating_id, floating_root, bounds)) =
+            self.floating_group_containing_node(group_id)
         {
-            self.composition_drag_pending = false;
-            self.composition_dragging = false;
-            self.composition_drag_source = None;
-            self.composition_drag_group = Some(floating_id);
-            self.composition_drag_start_x = pointer_x;
-            self.composition_drag_start_y = pointer_y;
-            self.composition_drag_offset_x = pointer_x - origin.x;
-            self.composition_drag_offset_y = pointer_y - origin.y;
-            self.composition_drag_pending = true;
-            return;
+            // Legacy floating Tabs roots and single-group floating Columns already
+            // represent a complete composition: move the window instead of trying
+            // to detach its only group.
+            let source_column_index = self.column_index_for_group(group_id);
+            let source_group_count = source_column_index
+                .map(|index| self.group_ids_in_column(self.column_ids[index]).len());
+            if floating_root == group_id || source_group_count.is_none_or(|count| count <= 1) {
+                self.composition_drag_group = Some(floating_id);
+                self.composition_drag_offset_x = pointer_x - bounds.origin.x;
+                self.composition_drag_offset_y = pointer_y - bounds.origin.y;
+                self.composition_drag_pending = true;
+                return;
+            }
         }
 
         let Some(column_id) = self.column_ids.get(column_index).copied() else {
             return;
         };
-        let group_is_in_column = self.group_ids_in_column(column_id).contains(&group_id);
-        let column_is_in_main = self.main_column_indices_in_core_order().contains(&column_index);
-        let column_is_in_floating = self.layout.floating_groups().any(|(_, floating)| {
-            self.layout
-                .dock_area(floating.area)
-                .is_some_and(|area| self.composition_column_indices(area.root).contains(&column_index))
-        });
-        if !group_is_in_column || !(column_is_in_main || column_is_in_floating) {
+        if !self.group_ids_in_column(column_id).contains(&group_id) {
+            return;
+        }
+
+        let group_count = self.group_ids_in_column(column_id).len();
+        if let Some(main_root) = self.layout.main_area(DockSide::Right).map(|area| area.root) {
+            if self.node_tree_contains(main_root, group_id) {
+                if group_count <= 1 {
+                    // The last group cannot leave behind an empty Column. Detach
+                    // the containing composition as a whole.
+                    self.composition_drag_source =
+                        Some(CompositionDragSource::Composition(main_root));
+                    self.composition_drag_offset_x = pointer_x - composition_origin.x;
+                    self.composition_drag_offset_y = pointer_y - composition_origin.y;
+                } else {
+                    self.composition_drag_source = Some(CompositionDragSource::Group(group_id));
+                    self.composition_drag_offset_x = pointer_x - column_origin_x;
+                    self.composition_drag_offset_y = pointer_y - group_origin_y
+                        + self.theme.metrics.column_header_height;
+                }
+                self.composition_drag_pending = true;
+            }
+        } else if group_count > 1 {
+            self.composition_drag_source = Some(CompositionDragSource::Group(group_id));
+            self.composition_drag_offset_x = pointer_x - column_origin_x;
+            self.composition_drag_offset_y = pointer_y - group_origin_y
+                + self.theme.metrics.column_header_height;
+            self.composition_drag_pending = true;
+        }
+    }
+
+    pub(super) fn begin_panel_drag(
+        &mut self,
+        column_index: usize,
+        group_id: NodeId,
+        panel_id: PanelId,
+        pointer_x: f32,
+        pointer_y: f32,
+        tab_origin_x: f32,
+        tab_origin_y: f32,
+        column_origin_x: f32,
+        group_origin_y: f32,
+        composition_origin: Point,
+        content_padding: f32,
+    ) {
+        let Some(group) = self.tab_group_view_data(group_id) else {
+            return;
+        };
+        if !group.panels.contains(&panel_id) {
+            return;
+        }
+        if group.panels.len() <= 1 {
+            self.begin_tab_group_drag(
+                column_index,
+                group_id,
+                pointer_x,
+                pointer_y,
+                column_origin_x,
+                group_origin_y,
+                composition_origin,
+            );
             return;
         }
 
         self.composition_drag_pending = false;
         self.composition_dragging = false;
-        self.composition_drag_source = Some(group_id);
         self.composition_drag_group = None;
+        self.composition_drag_source = Some(CompositionDragSource::Panel(panel_id));
         self.composition_drag_start_x = pointer_x;
         self.composition_drag_start_y = pointer_y;
-        self.composition_drag_offset_x = self.column_width(column_index) / 2.0;
-        self.composition_drag_offset_y = self.theme.metrics.tab_strip_height / 2.0;
+        // The detached tab becomes the first tab in a new group. Preserve the
+        // grab point inside that tab while accounting for its new Column header.
+        self.composition_drag_offset_x = pointer_x - tab_origin_x + content_padding;
+        self.composition_drag_offset_y =
+            pointer_y - tab_origin_y + self.theme.metrics.column_header_height;
         self.composition_drag_pending = true;
     }
 
@@ -201,32 +346,22 @@ impl MainWindow {
         window_width: f32,
         window_height: f32,
     ) -> Option<FloatingGroupId> {
-        let node = self.composition_drag_source?;
-        let size = match self.layout.node(node) {
-            Some(Node::Tabs(_)) => {
-                let width = self
-                    .column_ids
-                    .iter()
-                    .enumerate()
-                    .find_map(|(column_index, column_id)| {
-                        self.group_ids_in_column(*column_id)
-                            .contains(&node)
-                            .then(|| self.column_width(column_index))
-                    })
-                    .unwrap_or(self.theme.metrics.default_column_width);
-                let menu_height = self
-                    .theme
-                    .metrics
-                    .column_header_height
-                    .min(window_height.max(1.0));
-                let available_height = (window_height - menu_height).max(1.0);
-                Some(Size::new(
-                    width.max(1.0),
-                    available_height.min((window_height * 0.75).max(1.0)).max(1.0),
-                ))
+        let source = self.composition_drag_source?;
+        let target_node = match source {
+            CompositionDragSource::Composition(node) | CompositionDragSource::Group(node) => node,
+            CompositionDragSource::Panel(panel_id) => self.panel_node_id(panel_id)?,
+        };
+        let size = match source {
+            CompositionDragSource::Composition(node) => self.composition_size(node, window_height)?,
+            CompositionDragSource::Group(group_id) => {
+                let width = self.detached_column_width(self.column_index_for_group(group_id));
+                self.single_column_size(width, window_height)
             }
-            _ => self.composition_size(node, window_height),
-        }?;
+            CompositionDragSource::Panel(panel_id) => {
+                let width = self.detached_column_width(self.column_index_for_panel(panel_id));
+                self.single_column_size(width, window_height)
+            }
+        };
         let origin = self.floating_origin_for_pointer(
             pointer_x,
             pointer_y,
@@ -235,17 +370,19 @@ impl MainWindow {
             window_height,
         );
         let bounds = Rect::new(origin, size);
-        if let Err(error) = self.apply_dock_command(
-            DockCommand::Float { node, bounds }) {
+        let command = match source {
+            CompositionDragSource::Composition(node) => DockCommand::Float { node, bounds },
+            CompositionDragSource::Group(group) => DockCommand::FloatGroupAsColumn { group, bounds },
+            CompositionDragSource::Panel(panel) => DockCommand::FloatPanelAsGroup { panel, bounds },
+        };
+        if let Err(error) = self.apply_dock_command(command) {
             eprintln!("Could not float dock composition: {error}");
             return None;
         }
 
-        let floating_id = self.layout.floating_groups().find_map(|(group_id, group)| {
-            self.layout
-                .dock_area(group.area)
-                .is_some_and(|area| area.root == node)
-                .then_some(group_id)
+        let floating_id = self.layout.floating_groups().find_map(|(group_id, floating)| {
+            let root = self.layout.dock_area(floating.area)?.root;
+            self.node_tree_contains(root, target_node).then_some(group_id)
         })?;
         self.composition_drag_group = Some(floating_id);
         self.composition_drag_source = None;
