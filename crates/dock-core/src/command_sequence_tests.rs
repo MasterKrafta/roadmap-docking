@@ -372,10 +372,6 @@ fn existing_but_wrong_node_types_and_forbidden_targets_are_rejected_atomically()
             mode: ColumnMode::IconsOnly,
         },
         DockCommand::OpenFlyout { column, panel },
-        DockCommand::Float {
-            node: column,
-            bounds: Rect::new(Point::new(20.0, 30.0), Size::new(320.0, 220.0)),
-        },
         DockCommand::MovePanel {
             panel,
             target: DropTarget::RailSlot { column, index: 0 },
@@ -390,6 +386,20 @@ fn existing_but_wrong_node_types_and_forbidden_targets_are_rejected_atomically()
     for command in wrong_type_commands {
         assert_rejected_atomically(&mut layout, command, &metrics);
     }
+
+    // A complete Photoshop dock column can be floated as a composition.
+    // Keep this valid operation out of the wrong-node-type rejection list.
+    let mut floating_column_layout = layout.clone();
+    floating_column_layout
+        .apply(
+            DockCommand::Float {
+                node: column,
+                bounds: Rect::new(Point::new(20.0, 30.0), Size::new(320.0, 220.0)),
+            },
+            &metrics,
+        )
+        .expect("a Photoshop dock column can become a floating composition");
+    assert_eq!(floating_column_layout.validate(&metrics), Ok(()));
 
     // A flyout requires a rail column and a panel represented by one of its icons.
     layout
