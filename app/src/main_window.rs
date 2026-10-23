@@ -22,6 +22,14 @@ struct DockTabContextMenu {
     top: f32,
 }
 
+/// Runtime view data derived from one Core Tabs node.
+struct TabGroupViewData {
+    id: NodeId,
+    panels: Vec<PanelId>,
+    active_panel: Option<PanelId>,
+    collapsed: bool,
+}
+
 /// A single-panel left column beside a right column with two upper tabs and one lower tab.
 pub(crate) struct MainWindow {
     theme: Theme,
@@ -721,8 +729,28 @@ impl MainWindow {
             .unwrap_or(self.theme.metrics.default_column_width)
     }
 
+    fn tab_group_view_data(&self, group_id: NodeId) -> Option<TabGroupViewData> {
+        let Node::Tabs(tabs) = self.layout.node(group_id)? else {
+            return None;
+        };
+        let panels = tabs.children.iter().filter_map(|child_id| {
+            match self.layout.node(*child_id)? {
+                Node::Panel(panel) => Some(panel.panel_id),
+                _ => None,
+            }
+        }).collect();
+
+        Some(TabGroupViewData {
+            id: group_id,
+            panels,
+            active_panel: self.active_panel_id(group_id),
+            collapsed: tabs.collapsed,
+        })
+    }
+
     fn group_is_collapsed(&self, group: NodeId) -> bool {
-        matches!(self.layout.node(group), Some(Node::Tabs(tabs)) if tabs.collapsed)
+        self.tab_group_view_data(group)
+            .is_some_and(|group| group.collapsed)
     }
 
     fn toggle_group_collapse(&mut self, group: NodeId) {
@@ -1467,16 +1495,19 @@ impl MainWindow {
 
         // Build the collapsed rail from Core's actual tab groups, so every tab in
         // every group belonging to this column gets an icon.
-        let mut collapsed_tabs: Vec<(usize, NodeId, PanelId)> = Vec::new();
+        let mut collapsed_tabs: Vec<(usize, NodeId, PanelId, bool)> = Vec::new();
         for (group_index, group_id) in self.group_ids_in_column(column_id).into_iter().enumerate() {
-            if let Some(Node::Tabs(tabs)) = self.layout.node(group_id) {
-                for child_id in &tabs.children {
-                    let Some(Node::Panel(panel)) = self.layout.node(*child_id) else {
-                        continue;
-                    };
-                    if self.panel_is_visible(column_index, panel.panel_id) {
-                        collapsed_tabs.push((group_index, group_id, panel.panel_id));
-                    }
+            let Some(group) = self.tab_group_view_data(group_id) else {
+                continue;
+            };
+            for panel_id in group.panels.iter().copied() {
+                if self.panel_is_visible(column_index, panel_id) {
+                    collapsed_tabs.push((
+                        group_index,
+                        group.id,
+                        panel_id,
+                        group.active_panel == Some(panel_id),
+                    ));
                 }
             }
         }
@@ -1761,7 +1792,7 @@ impl MainWindow {
                 .border_1()
                 .border_color(rgb(colors.border));
             let mut last_group_index: Option<usize> = None;
-            for (tab_index, (group_index, group_id, panel_id)) in
+            for (tab_index, (group_index, group_id, panel_id, active_panel)) in
                 collapsed_tabs.iter().copied().enumerate()
             {
                 let Some(panel) = self.layout.panel_instance(panel_id) else {
@@ -1800,7 +1831,6 @@ impl MainWindow {
                 }
 
                 let tab_icon = self.panels.icon(panel).to_owned();
-                let active_panel = self.active_panel_id(group_id) == Some(panel_id);
                 let tab = div()
                     .id(format!("collapsed-dock-tab-{column_index}-{tab_index}"))
                     .flex()
