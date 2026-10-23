@@ -84,8 +84,7 @@ pub(crate) struct MainWindow {
     resize_column_pointer_offset_x: f32,
     resizing_groups_column: Option<GroupResizeState>,
     resize_group_pointer_offset_y: f32,
-    /// The complete horizontal main-dock composition while it is floating.
-    /// Pointer state used to detach or move the composition from a column header spacer.
+    /// Pointer-gesture state for floating a composition, a group, or an individual tab.
     composition_drag_pending: bool,
     composition_dragging: bool,
     composition_drag_start_x: f32,
