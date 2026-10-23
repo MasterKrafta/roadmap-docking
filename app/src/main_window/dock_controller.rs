@@ -1,10 +1,12 @@
 use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::path::PathBuf;
 
 use dock_core::{
     create_initial_layout, Axis, DockCommand, DockMetrics, DockSide,
     DragDropAction, DragDropRequest, DragHandle, DragPayload, DragSession, DragState, DropSource,
     DropTarget, Layout, LayoutRects, Node, PanelConstraints, PanelInstance, PanelKey, Point,
-    Profile, Rect, ResizeEdge, Size, UndoRedoHistory,
+    Profile, Rect, ResizeEdge, Size, UndoRedoHistory, WorkspaceFile, WorkspaceLoadOptions,
 };
 use dock_gpui::{
     CommandClickHandler, DockMenuRequest, DragOverlay, DragStartHandler, ResizeHandle,
@@ -35,6 +37,7 @@ pub(crate) struct DockController {
     resize_gesture: Option<ResizeGesture>,
     menu_request: Option<DockMenuRequest>,
     focus_handle: Option<FocusHandle>,
+    workspace_path: PathBuf,
 }
 
 struct ResizeGesture {
@@ -67,8 +70,40 @@ impl DockController {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        let layout = create_initial_layout(Profile::Photoshop, &descriptors, metrics)
+        let initial_layout = create_initial_layout(Profile::Photoshop, &descriptors, metrics)
             .map_err(str::to_owned)?;
+        let workspace_path = workspace_file_path();
+        let layout = match fs::read_to_string(&workspace_path) {
+            Ok(contents) => match WorkspaceFile::load_json(
+                &contents,
+                &descriptors,
+                &metrics,
+                WorkspaceLoadOptions::default(),
+            ) {
+                Ok(loaded) => {
+                    for diagnostic in &loaded.diagnostics {
+                        eprintln!("Workspace load diagnostic: {diagnostic:?}");
+                    }
+                    eprintln!("Loaded docking workspace from {}", workspace_path.display());
+                    loaded.layout
+                }
+                Err(error) => {
+                    eprintln!(
+                        "Could not load workspace {}: {error}; using the default layout",
+                        workspace_path.display()
+                    );
+                    initial_layout
+                }
+            },
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => initial_layout,
+            Err(error) => {
+                eprintln!(
+                    "Could not read workspace {}: {error}; using the default layout",
+                    workspace_path.display()
+                );
+                initial_layout
+            }
+        };
         layout
             .validate(&metrics)
             .map_err(|errors| format!("Initial dock layout is invalid: {errors:?}"))?;
@@ -85,6 +120,7 @@ impl DockController {
             resize_gesture: None,
             menu_request: None,
             focus_handle: None,
+            workspace_path,
         })
     }
 
@@ -292,18 +328,26 @@ impl DockController {
 
     fn apply_command(&mut self, command: DockCommand) {
         self.menu_request = None;
-        if let Err(error) = self
+        let previous_version = self.layout.version();
+        match self
             .history
             .apply(&mut self.layout, command, &self.metrics)
         {
-            eprintln!("Dock command rejected: {error}");
+            Ok(outcome) if outcome.new_version != previous_version => self.save_workspace(),
+            Ok(_) => {}
+            Err(error) => eprintln!("Dock command rejected: {error}"),
         }
     }
 
     fn undo(&mut self) -> bool {
         self.menu_request = None;
         match self.history.undo(&mut self.layout, &self.metrics) {
-            Ok(changed) => changed,
+            Ok(changed) => {
+                if changed {
+                    self.save_workspace();
+                }
+                changed
+            }
             Err(error) => {
                 eprintln!("Dock undo failed: {error}");
                 false
@@ -314,11 +358,96 @@ impl DockController {
     fn redo(&mut self) -> bool {
         self.menu_request = None;
         match self.history.redo(&mut self.layout, &self.metrics) {
-            Ok(changed) => changed,
+            Ok(changed) => {
+                if changed {
+                    self.save_workspace();
+                }
+                changed
+            }
             Err(error) => {
                 eprintln!("Dock redo failed: {error}");
                 false
             }
+        }
+    }
+
+    fn save_workspace(&self) {
+        let json = match self
+            .layout
+            .to_workspace_file()
+            .and_then(|workspace| workspace.to_json_pretty())
+        {
+            Ok(json) => json,
+            Err(error) => {
+                eprintln!("Could not serialize docking workspace: {error}");
+                return;
+            }
+        };
+
+        let Some(parent) = self.workspace_path.parent() else {
+            eprintln!(
+                "Could not save docking workspace: {} has no parent directory",
+                self.workspace_path.display()
+            );
+            return;
+        };
+        if let Err(error) = fs::create_dir_all(parent) {
+            eprintln!(
+                "Could not create workspace directory {}: {error}",
+                parent.display()
+            );
+            return;
+        }
+
+        let temporary_path = self.workspace_path.with_extension("json.tmp");
+        if let Err(error) = fs::write(&temporary_path, json) {
+            eprintln!(
+                "Could not write temporary workspace {}: {error}",
+                temporary_path.display()
+            );
+            return;
+        }
+
+        // Keep one last-known-good copy. Windows rename does not replace an existing
+        // destination consistently, so move the old file aside before promoting the temp.
+        let backup_path = self.workspace_path.with_extension("json.bak");
+        let had_previous = self.workspace_path.exists();
+        if had_previous {
+            if backup_path.exists()
+                && let Err(error) = fs::remove_file(&backup_path)
+            {
+                let _ = fs::remove_file(&temporary_path);
+                eprintln!(
+                    "Could not rotate workspace backup {}: {error}",
+                    backup_path.display()
+                );
+                return;
+            }
+            if let Err(error) = fs::rename(&self.workspace_path, &backup_path) {
+                let _ = fs::remove_file(&temporary_path);
+                eprintln!(
+                    "Could not preserve previous workspace {}: {error}",
+                    self.workspace_path.display()
+                );
+                return;
+            }
+        }
+
+        if let Err(error) = fs::rename(&temporary_path, &self.workspace_path) {
+            eprintln!(
+                "Could not promote temporary workspace {}: {error}",
+                temporary_path.display()
+            );
+            if had_previous
+                && let Err(restore_error) = fs::rename(&backup_path, &self.workspace_path)
+            {
+                eprintln!(
+                    "Could not restore previous workspace {}: {restore_error}",
+                    self.workspace_path.display()
+                );
+            }
+            let _ = fs::remove_file(&temporary_path);
+            return;
         }
     }
 
@@ -832,4 +961,18 @@ fn menu_item(label: impl Into<String>, handler: CommandClickHandler, theme: Them
         .bg(rgb(theme.colors.toolbar_background))
         .child(label)
         .on_click(handler)
+}
+
+fn workspace_file_path() -> PathBuf {
+    let app_data = std::env::var_os("APPDATA")
+        .or_else(|| std::env::var_os("LOCALAPPDATA"))
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::current_exe()
+                .ok()
+                .and_then(|path| path.parent().map(PathBuf::from))
+        })
+        .unwrap_or_else(|| PathBuf::from("."));
+
+    app_data.join("RoadmapDocking").join("workspace.json")
 }
