@@ -812,6 +812,13 @@ impl MainWindow {
         }
     }
 
+    fn group_ids_in_column(&self, column_id: NodeId) -> Vec<NodeId> {
+        match self.layout.node(column_id) {
+            Some(Node::Column(column)) => column.groups.clone(),
+            _ => Vec::new(),
+        }
+    }
+
     fn group_split_ratio(&self, column_index: usize) -> f32 {
         self.layout
             .node(self.column_ids[column_index])
@@ -1461,10 +1468,7 @@ impl MainWindow {
         // Build the collapsed rail from Core's actual tab groups, so every tab in
         // every group belonging to this column gets an icon.
         let mut collapsed_tabs: Vec<(usize, NodeId, PanelId)> = Vec::new();
-        for (group_index, group_id) in [top_tab_group, bottom_tab_group].into_iter().enumerate() {
-            if group_index == 1 && !has_bottom_group {
-                continue;
-            }
+        for (group_index, group_id) in self.group_ids_in_column(column_id).into_iter().enumerate() {
             if let Some(Node::Tabs(tabs)) = self.layout.node(group_id) {
                 for child_id in &tabs.children {
                     let Some(Node::Panel(panel)) = self.layout.node(*child_id) else {
@@ -1796,11 +1800,7 @@ impl MainWindow {
                 }
 
                 let tab_icon = self.panels.icon(panel).to_owned();
-                let active_panel = if group_index == 0 {
-                    active_top_panel == Some(panel_id)
-                } else {
-                    active_bottom_panel == Some(panel_id)
-                };
+                let active_panel = self.active_panel_id(group_id) == Some(panel_id);
                 let tab = div()
                     .id(format!("collapsed-dock-tab-{column_index}-{tab_index}"))
                     .flex()
