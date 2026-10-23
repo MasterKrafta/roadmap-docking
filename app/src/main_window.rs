@@ -837,6 +837,7 @@ impl MainWindow {
             }
         }
 
+        let current_groups = self.group_ids_in_column(target_column);
         if snapshot.group_ratios.len() == current_groups.len() {
             self.layout
                 .apply(
