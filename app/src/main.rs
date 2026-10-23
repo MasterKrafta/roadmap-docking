@@ -12,7 +12,7 @@ fn main() {
         let main_window = match MainWindow::new(theme) {
             Ok(window) => window,
             Err(error) => {
-                eprintln!("Could not initialize the docking layout: {error}");
+                eprintln!("Could not initialize the main window: {error}");
                 return;
             }
         };
