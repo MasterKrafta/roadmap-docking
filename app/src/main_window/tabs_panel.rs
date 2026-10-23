@@ -8,7 +8,7 @@ mod tab;
 use gpui::{Context, Div, ParentElement, Styled, div, px, rgb};
 use hamburger_button::HamburgerButton;
 use panel_content::PanelContent;
-use super::super::MainWindow;
+use super::super::super::MainWindow;
 use tab::Tab;
 use ui::Theme;
 
@@ -49,6 +49,7 @@ impl TabsPanel {
         &self,
         cx: &mut Context<MainWindow>,
         height: f32,
+        column_index: usize,
         group_index: usize,
     ) -> Div {
         let metrics = self.theme.metrics;
@@ -84,7 +85,7 @@ impl TabsPanel {
                 strip_height,
                 active,
                 cx.listener(move |this, _, _, cx| {
-                    this.column.set_active_tab_id(group_index, tab_id.clone());
+                    this.group_column.set_active_tab_id(column_index, group_index, tab_id.clone());
                     cx.notify();
                 }),
             ));
