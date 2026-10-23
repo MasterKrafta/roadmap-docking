@@ -1906,8 +1906,19 @@ impl Render for MainWindow {
         let menu_height = metrics.column_header_height.min(window_height);
         let dock_height = (window_height - menu_height).max(1.0);
 
-        let left_is_open = self.column_open[0];
-        let right_is_open = self.column_open[1];
+        if self
+            .floating_composition
+            .is_some_and(|group_id| self.layout.floating_group(group_id).is_none())
+        {
+            self.floating_composition = None;
+            self.composition_drag_pending = false;
+            self.composition_dragging = false;
+            self.composition_drag_source = None;
+            self.composition_drag_group = None;
+        }
+        let composition_is_floating = self.floating_composition.is_some();
+        let left_is_open = self.column_open[0] && !composition_is_floating;
+        let right_is_open = self.column_open[1] && !composition_is_floating;
         let any_column_open = left_is_open || right_is_open;
         let both_columns_open = left_is_open && right_is_open;
         let left_width = if left_is_open {
@@ -2076,6 +2087,46 @@ impl Render for MainWindow {
             .bg(rgb(colors.canvas_background))
             .child(menu_bar)
             .child(dock_area);
+
+        if let Some((composition_root, bounds)) = self.floating_composition.and_then(|group_id| {
+            let floating = self.layout.floating_group(group_id)?;
+            let area = self.layout.dock_area(floating.area)?;
+            Some((area.root, floating.bounds))
+        }) {
+            let composition_columns = self.composition_column_indices(composition_root);
+            if !composition_columns.is_empty() {
+                let mut floating_view = div()
+                    .id("floating-dock-composition")
+                    .absolute()
+                    .left(px(bounds.origin.x))
+                    .top(px(bounds.origin.y))
+                    .flex()
+                    .flex_row()
+                    .w(px(bounds.size.width))
+                    .h(px(bounds.size.height))
+                    .bg(rgb(colors.dock_background))
+                    .border_1()
+                    .border_color(rgb(colors.border))
+                    .overflow_hidden();
+                for (position, column_index) in composition_columns.iter().copied().enumerate() {
+                    if position > 0 {
+                        floating_view = floating_view.child(
+                            div()
+                                .w(px(metrics.splitter_thickness))
+                                .h(px(bounds.size.height))
+                                .bg(rgb(colors.splitter)),
+                        );
+                    }
+                    floating_view = floating_view.child(self.render_column(
+                        cx,
+                        column_index,
+                        bounds.size.height,
+                        bounds.origin.y,
+                    ));
+                }
+                root = root.child(floating_view);
+            }
+        }
 
         if let Some(menu_state) = self.tab_context_menu {
             let (context_menu_left, context_menu_top) =
