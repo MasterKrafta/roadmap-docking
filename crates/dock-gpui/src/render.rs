@@ -6,9 +6,9 @@ use dock_core::{
     PanelInstance, Point, Rect, ResizeEdge, Size, Tabs,
 };
 use gpui::{
-    AnyElement, App, AppContext, ClickEvent, Context, Div, InteractiveElement, IntoElement, MouseButton,
-    MouseDownEvent, ParentElement, Render, ScrollHandle, StatefulInteractiveElement, Styled, Window,
-    div, px, rgb,
+    AnyElement, App, AppContext, ClickEvent, Div, InteractiveElement, IntoElement, MouseButton,
+    MouseDownEvent, ParentElement, ScrollHandle, StatefulInteractiveElement, Styled, Window, div,
+    px, rgb,
 };
 use ui::Theme;
 
@@ -35,21 +35,6 @@ pub struct DragOverlay {
     pub preview: DragPreview,
     pub zones: Vec<DropZoneRect>,
 }
-
-struct DragGhost {
-    title: String,
-}
-
-impl Render for DragGhost {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .p(px(8.0))
-            .bg(rgb(0x0C8CE9))
-            .text_color(rgb(0xFFFFFF))
-            .child(self.title.clone())
-    }
-}
-
 
 const GROUP_MENU_BUTTON_WIDTH: f32 = 28.0;
 const GROUP_DRAG_GRIP_HEIGHT: f32 = 4.0;
@@ -82,7 +67,7 @@ pub fn normalize_docked_group_geometry(
 
     // A floating window owns one title bar. Its topmost Tabs group shares that
     // row; lower groups in a floating stack still use the normal tabs-only form.
-    let mut floating_title_groups = HashSet::<NodeId>::new();
+    let mut floating_title_groups = HashMap::<NodeId, f32>::new();
     for (floating_id, floating) in layout.floating_groups_in_paint_order() {
         let Some(area) = layout.dock_area(floating.area) else {
             continue;
@@ -110,20 +95,30 @@ pub fn normalize_docked_group_geometry(
             .map(|entry| entry.group)
             && bounds.size.height > 0.0
         {
-            floating_title_groups.insert(top_group);
+            floating_title_groups.insert(top_group, metrics.header_height.min(bounds.size.height));
         }
     }
 
     let mut groups = HashMap::<NodeId, GroupChromeGeometry>::new();
     let mut active_panel_shifts = HashMap::<PanelId, f32>::new();
+    let mut floating_collapsed_shifts = HashMap::<NodeId, f32>::new();
     for group_rect in &rects.groups {
         let group_id = group_rect.group;
-        if rail_groups.contains(&group_id) || floating_title_groups.contains(&group_id) {
+        if rail_groups.contains(&group_id) {
             continue;
         }
         let Some(Node::Tabs(tabs)) = layout.node(group_id) else {
             continue;
         };
+        if let Some(title_height) = floating_title_groups.get(&group_id) {
+            // Expanded groups already place the strip below the floating title
+            // through Core's header geometry. Collapsed groups put their strip
+            // at the group's origin, so move the row below the title bar.
+            if tabs.collapsed {
+                floating_collapsed_shifts.insert(group_id, *title_height);
+            }
+            continue;
+        }
         let grip_height = if tabs.collapsed {
             0.0
         } else {
@@ -142,21 +137,37 @@ pub fn normalize_docked_group_geometry(
         }
     }
 
-    // Shift each normalized strip and its interaction targets into the old
-    // header row. Grow active content by the same amount to keep the bottom edge.
+    // Keep collapsed floating tabs below the independent window title row.
+    // Shift the group rectangle and hit targets together so the visual surface
+    // and the Core drop geometry continue to describe the same area.
+    for group in &mut rects.groups {
+        if let Some(shift) = floating_collapsed_shifts.get(&group.group) {
+            group.rect.origin.y += *shift;
+        }
+    }
+
+    // Shift normalized docked strips into their former header row. Grow active
+    // content by the same amount to preserve its bottom edge. Floating collapsed
+    // strips instead move down to avoid being covered by the title bar.
     for strip in &mut rects.tab_strips {
         if let Some(group) = groups.get(&strip.group) {
             strip.rect.origin.y -= group.vertical_shift;
+        } else if let Some(shift) = floating_collapsed_shifts.get(&strip.group) {
+            strip.rect.origin.y += *shift;
         }
     }
     for header in &mut rects.tab_headers {
         if let Some(group) = groups.get(&header.group) {
             header.rect.origin.y -= group.vertical_shift;
+        } else if let Some(shift) = floating_collapsed_shifts.get(&header.group) {
+            header.rect.origin.y += *shift;
         }
     }
     for overflow in &mut rects.tab_overflows {
         if let Some(group) = groups.get(&overflow.group) {
             overflow.button_rect.origin.y -= group.vertical_shift;
+        } else if let Some(shift) = floating_collapsed_shifts.get(&overflow.group) {
+            overflow.button_rect.origin.y += *shift;
         }
     }
     for panel in &mut rects.panels {
@@ -442,7 +453,6 @@ where
         let title_height = theme.metrics.column_header_height.min(rect.size.height);
         let title_rect = Rect::new(Point::ZERO, Size::new(rect.size.width, title_height));
         let payload = DragPayload::FloatingGroup { group: floating_id };
-        let ghost_title = format!("Move floating: {title}");
         container = container.child(
             rect_element(title_rect, theme.colors.toolbar_background)
                 .text_color(rgb(theme.colors.primary_text))
@@ -452,10 +462,6 @@ where
                     MouseButton::Left,
                     make_drag_start_handler(payload, DragHandle::FloatingTitle),
                 )
-                .on_drag(payload, move |_payload, _offset, _window, app| {
-                    let title = ghost_title.clone();
-                    app.new(|_| DragGhost { title })
-                })
                 .into_any_element(),
         );
         root = root.child(container.into_any_element());
@@ -527,18 +533,13 @@ where
             ),
         );
         let payload = DragPayload::Panel { panel: flyout.panel };
-        let ghost_title = panel_title(instance);
         let content = rect_element(content_rect, theme.colors.group_background)
             .child(render_panel(instance))
             .id(format!("dock-flyout-panel-{:?}", flyout.panel))
             .on_mouse_down(
                 MouseButton::Left,
                 make_drag_start_handler(payload, DragHandle::FlyoutPanel),
-            )
-            .on_drag(payload, move |_payload, _offset, _window, app| {
-                let title = ghost_title.clone();
-                app.new(|_| DragGhost { title })
-            });
+            );
 
         let overlay = rect_element(flyout.rect, theme.colors.dock_background)
             .border_1()
@@ -690,12 +691,7 @@ where
                 .min(group.rect.size.height);
             let strip_offset = strip.rect.origin.y - group.rect.origin.y;
             if grip_height > 0.0 && (strip_offset - grip_height).abs() < 0.01 {
-                let title = active_panel(layout, tabs)
-                    .and_then(|panel_id| layout.panel_instance(panel_id))
-                    .map(panel_title)
-                    .unwrap_or_else(|| "Panel group".to_owned());
                 let payload = DragPayload::Group { group: group.group };
-                let ghost_title = format!("Move group: {title}");
                 let grip_rect = Rect::new(
                     group.rect.origin,
                     Size::new(group.rect.size.width, grip_height),
@@ -707,10 +703,6 @@ where
                             MouseButton::Left,
                             make_drag_start_handler(payload, DragHandle::GroupGrip),
                         )
-                        .on_drag(payload, move |_payload, _offset, _window, app| {
-                            let title = ghost_title.clone();
-                            app.new(|_| DragGhost { title })
-                        })
                         .into_any_element(),
                 );
             }
@@ -749,7 +741,6 @@ where
             theme.colors.toolbar_background
         };
         let payload = DragPayload::Panel { panel: header.panel };
-        let ghost_title = format!("Move panel: {label}");
         let activate_handler = make_command_handler(DockCommand::ActivateTab {
             group: header.group,
             panel: header.panel,
@@ -768,10 +759,6 @@ where
                 MouseButton::Left,
                 make_drag_start_handler(payload, DragHandle::PanelTab),
             )
-            .on_drag(payload, move |_payload, _offset, _window, app| {
-                let title = ghost_title.clone();
-                app.new(|_| DragGhost { title })
-            })
             .on_click(move |event, window, app| {
                 if event.click_count() >= 2 {
                     collapse_handler(event, window, app);
@@ -1189,6 +1176,66 @@ mod tests {
             ),
         );
     }
+    #[test]
+    fn collapsed_floating_root_tabs_are_positioned_below_the_window_title() {
+        use dock_core::DockCommand;
+
+        let constraints = PanelConstraints::new(
+            Size::new(80.0, 80.0),
+            Size::new(180.0, 140.0),
+            Some(Size::new(800.0, 600.0)),
+            false,
+        );
+        let descriptors = ["layers", "color", "properties", "history"]
+            .into_iter()
+            .map(|key| (PanelKey::new(key).unwrap(), constraints))
+            .collect::<Vec<_>>();
+        let metrics = DockMetrics {
+            header_height: 32.0,
+            tab_strip_height: 24.0,
+            ..DockMetrics::default()
+        };
+        let mut layout =
+            create_initial_layout(Profile::Photoshop, &descriptors, metrics).unwrap();
+        let root = layout.main_area(DockSide::Right).unwrap().root;
+        let Node::Column(column) = layout.node(root).unwrap() else {
+            panic!("Photoshop main area should use a column");
+        };
+        let group = column.groups[0];
+        layout
+            .apply(
+                DockCommand::Float {
+                    node: group,
+                    bounds: Rect::new(Point::new(40.0, 50.0), Size::new(320.0, 240.0)),
+                },
+                &metrics,
+            )
+            .unwrap();
+        layout
+            .apply(
+                DockCommand::CollapseGroup {
+                    group,
+                    collapsed: true,
+                },
+                &metrics,
+            )
+            .unwrap();
+
+        let viewport = Rect::new(Point::ZERO, Size::new(1000.0, 700.0));
+        let mut rects = layout.compute_rects(viewport, &metrics).unwrap();
+        normalize_docked_group_geometry(&layout, &metrics, &mut rects);
+
+        let floating = rects.floating_groups.first().unwrap().rect;
+        let group_rect = rects.groups.iter().find(|entry| entry.group == group).unwrap().rect;
+        let strip = rects.tab_strips.iter().find(|entry| entry.group == group).unwrap().rect;
+        let expected_y = floating.origin.y + metrics.header_height;
+        assert!((group_rect.origin.y - expected_y).abs() < 0.001);
+        assert!((strip.origin.y - expected_y).abs() < 0.001);
+        for header in rects.tab_headers.iter().filter(|entry| entry.group == group) {
+            assert!((header.rect.origin.y - expected_y).abs() < 0.001);
+        }
+    }
+
     #[test]
     fn docked_tabs_replace_header_row_and_reserve_distinct_menu_and_drag_space() {
         let constraints = PanelConstraints::new(
