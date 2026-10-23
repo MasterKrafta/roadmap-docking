@@ -351,6 +351,9 @@ impl MainWindow {
                 column_index,
                 group_id,
                 active_panel,
+                column_origin_x,
+                group_origin_y,
+                composition_origin,
                 content_padding,
                 height,
                 false,
@@ -618,7 +621,6 @@ impl MainWindow {
         let available_tab_width =
             (column_content_width - content_padding * 2.0 - button_size).max(0.0);
 
-        let column_label = self.column_label(column_index);
         let mut rendered_groups: Vec<(usize, Div, f32)> = Vec::new();
         let mut strip_cursor_y = window_y_offset + header_height;
         let mut rendered_group_count = 0usize;
@@ -651,7 +653,6 @@ impl MainWindow {
                     let element_id = format!(
                         "dock-column-{column_index}-group-{group_index}-tab-{tab_index}"
                     );
-                    let title = format!("{column_label} {}", self.panels.title(panel));
                     tabs.push(self.render_tab(
                         cx,
                         element_id,
