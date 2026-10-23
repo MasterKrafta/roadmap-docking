@@ -359,6 +359,22 @@ impl MainWindow {
         }
     }
 
+    fn context_menu_position(
+        menu: DockTabContextMenu,
+        window_width: f32,
+        window_height: f32,
+    ) -> (f32, f32) {
+        // Keep the popup under the pointer when possible, but flip its position
+        // toward the available space when it approaches a viewport edge.
+        let viewport_width = window_width.max(1.0);
+        let viewport_height = window_height.max(1.0);
+        let popup_width = 184.0_f32.min(viewport_width);
+        let popup_height = if menu.header_only { 42.0 } else { 132.0 }.min(viewport_height);
+        let left = menu.left.max(0.0).min((viewport_width - popup_width).max(0.0));
+        let top = menu.top.max(0.0).min((viewport_height - popup_height).max(0.0));
+        (left, top)
+    }
+
     fn dismiss_menus_if_outside(
         &mut self,
         pointer_x: f32,
@@ -371,12 +387,16 @@ impl MainWindow {
             .metrics
             .column_header_height
             .min(window_height.max(1.0));
+        let (context_menu_left, context_menu_top) = self
+            .tab_context_menu
+            .map(|menu| Self::context_menu_position(menu, window_width, window_height))
+            .unwrap_or((0.0, 0.0));
         let inside_context_menu = self.tab_context_menu.is_some_and(|menu| {
-            let popup_height = if menu.header_only { 42.0 } else { 132.0 };
-            pointer_x >= menu.left
-                && pointer_x <= (menu.left + 192.0).min(window_width)
-                && pointer_y >= menu.top
-                && pointer_y <= (menu.top + popup_height).min(window_height)
+            let popup_height = if menu.header_only { 42.0 } else { 132.0 }.min(window_height.max(1.0));
+            pointer_x >= context_menu_left
+                && pointer_x <= (context_menu_left + 184.0).min(window_width)
+                && pointer_y >= context_menu_top
+                && pointer_y <= (context_menu_top + popup_height).min(window_height)
         });
         let inside_windows_menu = self.windows_menu_open
             && pointer_x >= 0.0
@@ -1789,11 +1809,15 @@ impl Render for MainWindow {
             .child(dock_area);
 
         if let Some(menu_state) = self.tab_context_menu {
+            let (context_menu_left, context_menu_top) =
+                Self::context_menu_position(menu_state, window_width, window_height);
+            let context_menu_width = 184.0_f32.min(window_width);
+            let context_item_width = (context_menu_width - 8.0).max(1.0).min(176.0);
             let close_tab = div()
                 .id("dock-context-close-tab")
                 .flex()
                 .items_center()
-                .w(px(176.0))
+                .w(px(context_item_width))
                 .h(px(30.0))
                 .p(px(8.0))
                 .bg(rgb(colors.toolbar_background))
@@ -1807,7 +1831,7 @@ impl Render for MainWindow {
                 .id("dock-context-minimize")
                 .flex()
                 .items_center()
-                .w(px(176.0))
+                .w(px(context_item_width))
                 .h(px(30.0))
                 .p(px(8.0))
                 .bg(rgb(colors.toolbar_background))
@@ -1821,7 +1845,7 @@ impl Render for MainWindow {
                 .id("dock-context-collapse-to-icons")
                 .flex()
                 .items_center()
-                .w(px(176.0))
+                .w(px(context_item_width))
                 .h(px(30.0))
                 .p(px(8.0))
                 .bg(rgb(colors.toolbar_background))
@@ -1835,7 +1859,7 @@ impl Render for MainWindow {
                 .id("dock-context-close-tab-group")
                 .flex()
                 .items_center()
-                .w(px(176.0))
+                .w(px(context_item_width))
                 .h(px(30.0))
                 .p(px(8.0))
                 .bg(rgb(colors.toolbar_background))
@@ -1848,11 +1872,11 @@ impl Render for MainWindow {
             let mut dropdown = div()
                 .id("dock-tab-context-menu")
                 .absolute()
-                .left(px(menu_state.left))
-                .top(px(menu_state.top))
+                .left(px(context_menu_left))
+                .top(px(context_menu_top))
                 .flex()
                 .flex_col()
-                .w(px(184.0))
+                .w(px(context_menu_width))
                 .bg(rgb(colors.toolbar_background))
                 .border_1()
                 .border_color(rgb(colors.border))
