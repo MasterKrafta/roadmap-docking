@@ -80,6 +80,7 @@ pub(crate) struct MainWindow {
     windows_menu_open: bool,
     tab_context_menu: Option<DockTabContextMenu>,
     is_resizing_column: bool,
+    resizing_column_boundary_index: usize,
     /// The outermost dock column whose canvas-facing edge is being resized.
     resizing_outer_column: Option<NodeId>,
     /// Cursor-to-divider offset captured on mouse-down; keeps the pointer anchored
@@ -263,6 +264,7 @@ impl MainWindow {
             windows_menu_open: false,
             tab_context_menu: None,
             is_resizing_column: false,
+            resizing_column_boundary_index: 0,
             resizing_outer_column: None,
             resize_column_pointer_offset_x: 0.0,
             resizing_groups_column: None,
@@ -1150,7 +1152,7 @@ impl MainWindow {
             )
     }
 
-    fn composition_column_indices(&self, root: NodeId) -> Vec<usize> {
+    fn column_indices_in_core_order(&self, root: NodeId) -> Vec<usize> {
         match self.layout.node(root) {
             Some(Node::Column(_)) => self
                 .column_ids
@@ -1169,6 +1171,20 @@ impl MainWindow {
                 .collect(),
             _ => Vec::new(),
         }
+    }
+
+    fn main_column_indices_in_core_order(&self) -> Vec<usize> {
+        if self.floating_composition.is_some() {
+            return Vec::new();
+        }
+        self.layout
+            .main_area(DockSide::Right)
+            .map(|area| self.column_indices_in_core_order(area.root))
+            .unwrap_or_default()
+    }
+
+    fn composition_column_indices(&self, root: NodeId) -> Vec<usize> {
+        self.column_indices_in_core_order(root)
     }
 
     fn composition_width(&self, root: NodeId) -> Option<f32> {
