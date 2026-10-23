@@ -36,7 +36,15 @@ fn initial_layout(profile: Profile) -> Layout {
 }
 
 fn sequence_layout() -> Layout {
-    let mut builder = LayoutBuilder::new(Profile::Generic);
+    sequence_layout_for(Profile::Generic)
+}
+
+fn photoshop_sequence_layout() -> Layout {
+    sequence_layout_for(Profile::Photoshop)
+}
+
+fn sequence_layout_for(profile: Profile) -> Layout {
+    let mut builder = LayoutBuilder::new(profile);
     let mut columns = Vec::new();
 
     for column_index in 0..2 {
@@ -1934,7 +1942,7 @@ fn c47_failed_commands_preserve_full_state_and_version() {
 #[test]
 fn float_group_as_column_preserves_group_and_wraps_it_in_one_column() {
     let metrics = DockMetrics::default();
-    let mut layout = sequence_layout();
+    let mut layout = photoshop_sequence_layout();
     let (source_column, source_groups, _, _, _) =
         main_columns(&layout, DockSide::Right)[0].clone();
     let moved_group = source_groups[0];
@@ -1967,7 +1975,7 @@ fn float_group_as_column_preserves_group_and_wraps_it_in_one_column() {
 #[test]
 fn float_panel_as_group_creates_a_one_tab_group_inside_a_column() {
     let metrics = DockMetrics::default();
-    let mut layout = sequence_layout();
+    let mut layout = photoshop_sequence_layout();
     let (_, source_groups, _, _, _) =
         main_columns(&layout, DockSide::Right)[0].clone();
     let source_group = source_groups[0];
@@ -2014,7 +2022,7 @@ fn float_panel_as_group_creates_a_one_tab_group_inside_a_column() {
 #[test]
 fn float_group_as_column_rejects_detaching_the_last_group_atomically() {
     let metrics = DockMetrics::default();
-    let mut layout = sequence_layout();
+    let mut layout = photoshop_sequence_layout();
     let (column, groups, _, _, _) =
         main_columns(&layout, DockSide::Right)[0].clone();
     let retained_group = groups[1];
@@ -2042,7 +2050,7 @@ fn float_group_as_column_rejects_detaching_the_last_group_atomically() {
 #[test]
 fn float_panel_as_group_rejects_detaching_the_only_tab_atomically() {
     let metrics = DockMetrics::default();
-    let mut layout = sequence_layout();
+    let mut layout = photoshop_sequence_layout();
     let (_, groups, _, _, _) =
         main_columns(&layout, DockSide::Right)[0].clone();
     let group = groups[0];
