@@ -3,7 +3,7 @@ use gpui::{Context, Div, ParentElement, Styled, div, px, rgb};
 mod tabs_panel;
 
 use self::tabs_panel::TabsPanel;
-use super::MainWindow;
+use super::super::MainWindow;
 use ui::Theme;
 
 /// A column consists of a header and a vertical stack of tab groups.
@@ -27,7 +27,12 @@ impl Column {
         }
     }
 
-    pub(crate) fn render(&self, cx: &mut Context<MainWindow>, height: f32) -> Div {
+    pub(crate) fn render(
+        &self,
+        cx: &mut Context<MainWindow>,
+        height: f32,
+        column_index: usize,
+    ) -> Div {
         let metrics = self.theme.metrics;
         let colors = self.theme.colors;
         let width = metrics.default_column_width.max(1.0);
@@ -85,7 +90,7 @@ impl Column {
                 );
             }
 
-            column = column.child(group.render(cx, group_height, index));
+            column = column.child(group.render(cx, group_height, column_index, index));
         }
 
         column
