@@ -634,6 +634,13 @@ impl MainWindow {
         column_index: usize,
         selected_panel_key: &str,
     ) -> Result<(), String> {
+        if column_index >= self.column_ids.len()
+            || column_index >= self.column_open.len()
+            || column_index >= self.closed_column_snapshots.len()
+        {
+            return Err("Cannot restore a dock column at an unknown column slot".to_owned());
+        }
+
         let mut snapshot = self
             .closed_column_snapshots
             .get(column_index)
@@ -665,44 +672,44 @@ impl MainWindow {
         }
 
         let first_panel_key = snapshot.groups[0].panel_keys[0].clone();
-        let target = if self.column_open[1 - column_index] {
-            Some(DropTarget::MainColumn {
-                side: DockSide::Right,
-                index: column_index,
-            })
-        } else {
-            None
-        };
+        // Stable column slots can have gaps while columns are closed. Insert the
+        // restored column after the number of currently open slots before its slot.
+        let insert_index = self
+            .column_open
+            .iter()
+            .take(column_index)
+            .filter(|is_open| **is_open)
+            .count();
+        let has_other_open_column = self
+            .column_open
+            .iter()
+            .enumerate()
+            .any(|(index, is_open)| index != column_index && *is_open);
+        let target = has_other_open_column.then_some(DropTarget::MainColumn {
+            side: DockSide::Right,
+            index: insert_index,
+        });
         self.open_panel_for_restore(&first_panel_key, target)?;
 
         let area = self
             .layout
             .main_area(DockSide::Right)
             .ok_or_else(|| "Dock Core did not create a main dock area".to_owned())?;
-        let (column_ids, column_open, target_column) = match self.layout.node(area.root) {
+        let target_column = match self.layout.node(area.root) {
             Some(Node::Split(split)) if split.axis == Axis::X && !split.children.is_empty() => {
-                let ids = split.children.clone();
-                let target = ids
-                    .get(column_index)
+                split
+                    .children
+                    .get(insert_index)
                     .copied()
-                    .ok_or_else(|| "Restored column is missing from the Core split".to_owned())?;
-                let opened = vec![true; ids.len()];
-                (ids, opened, target)
+                    .ok_or_else(|| "Restored column is missing from the Core split".to_owned())?
             }
-            Some(Node::Column(_)) => {
-                let mut ids = self.column_ids.clone();
-                if column_index >= ids.len() {
-                    ids.resize(column_index + 1, area.root);
-                }
-                ids[column_index] = area.root;
-                let mut opened = vec![false; ids.len()];
-                opened[column_index] = true;
-                (ids, opened, area.root)
-            }
+            Some(Node::Column(_)) => area.root,
             _ => return Err("Dock Core created an unexpected main dock shape".to_owned()),
         };
-        self.column_ids = column_ids;
-        self.column_open = column_open;
+        // Preserve closed slots and their snapshots; only the restored slot gets
+        // a new Core node ID and changes back to open.
+        self.column_ids[column_index] = target_column;
+        self.column_open[column_index] = true;
 
         let first_group = group_ids_for_column(&self.layout, target_column)
             .first()
