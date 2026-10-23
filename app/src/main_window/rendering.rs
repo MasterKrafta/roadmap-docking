@@ -139,7 +139,7 @@ impl MainWindow {
         height: f32,
         active: bool,
         title: String,
-    ) -> impl IntoElement {
+    ) -> impl IntoElement + use<> {
         let colors = self.theme.colors;
 
         div()
@@ -311,7 +311,7 @@ impl MainWindow {
         group_id: NodeId,
         active_panel: Option<PanelId>,
         button_size: f32,
-    ) -> impl IntoElement {
+    ) -> impl IntoElement + use<> {
         let colors = self.theme.colors;
 
         div()
