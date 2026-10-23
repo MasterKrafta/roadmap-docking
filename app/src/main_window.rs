@@ -39,6 +39,20 @@ struct PanelVisibilityEntry {
     visible: bool,
 }
 
+#[derive(Clone)]
+struct ClosedTabGroupSnapshot {
+    panel_keys: Vec<String>,
+    active_panel_key: Option<String>,
+    collapsed: bool,
+}
+
+#[derive(Clone)]
+struct ClosedColumnSnapshot {
+    groups: Vec<ClosedTabGroupSnapshot>,
+    group_ratios: Vec<f32>,
+    width: f32,
+}
+
 #[derive(Clone, Copy)]
 struct GroupResizeState {
     column: NodeId,
@@ -68,6 +82,8 @@ pub(crate) struct MainWindow {
     panels_by_column: [[PanelId; 4]; 2],
     /// Per-panel visibility entries used by rendering, context actions, and the Windows menu.
     panel_visibility: Vec<PanelVisibilityEntry>,
+    /// Core topology remembered while a column is closed, so it can be recreated generically.
+    closed_column_snapshots: [Option<ClosedColumnSnapshot>; 2],
     windows_menu_open: bool,
     tab_context_menu: Option<DockTabContextMenu>,
     is_resizing_column: bool,
@@ -267,6 +283,7 @@ impl MainWindow {
             bottom_tab_groups,
             panels_by_column,
             panel_visibility: Vec::new(),
+            closed_column_snapshots: [None, None],
             windows_menu_open: false,
             tab_context_menu: None,
             is_resizing_column: false,
@@ -746,10 +763,51 @@ impl MainWindow {
         Ok(())
     }
 
+    fn snapshot_column(&self, column_index: usize) -> ClosedColumnSnapshot {
+        let column_id = self.column_ids[column_index];
+        let groups = self
+            .group_ids_in_column(column_id)
+            .into_iter()
+            .filter_map(|group_id| {
+                let group = self.tab_group_view_data(group_id)?;
+                let panel_keys: Vec<String> = group
+                    .panels
+                    .iter()
+                    .filter_map(|panel_id| {
+                        self.layout
+                            .panel_instance(*panel_id)
+                            .map(|panel| panel.key.as_str().to_owned())
+                    })
+                    .collect();
+                if panel_keys.is_empty() {
+                    return None;
+                }
+                let active_panel_key = group.active_panel.and_then(|panel_id| {
+                    self.layout
+                        .panel_instance(panel_id)
+                        .map(|panel| panel.key.as_str().to_owned())
+                });
+                Some(ClosedTabGroupSnapshot {
+                    panel_keys,
+                    active_panel_key,
+                    collapsed: group.collapsed,
+                })
+            })
+            .collect();
+
+        ClosedColumnSnapshot {
+            groups,
+            group_ratios: self.group_ratios_in_column(column_id),
+            width: self.column_width(column_index),
+        }
+    }
+
     fn close_column(&mut self, column_index: usize) {
         if column_index >= self.column_open.len() || !self.column_open[column_index] {
             return;
         }
+        // Save the actual Core group structure before close commands normalize it away.
+        let snapshot = self.snapshot_column(column_index);
         // Close every group in the actual Core column, not only the two legacy
         // group slots. Take a snapshot because each close command may normalize Core.
         let column_id = self.column_ids[column_index];
@@ -764,6 +822,8 @@ impl MainWindow {
                 return;
             }
         }
+
+        self.closed_column_snapshots[column_index] = Some(snapshot);
 
         // Core normalization removes the now-empty Column and reduces the
         // two-child Split to the remaining column. The UI stops rendering the
