@@ -141,9 +141,33 @@ impl MainWindow {
         pointer_x: f32,
         pointer_y: f32,
     ) {
-        if self.floating_composition.is_some()
-            || !self.main_column_indices_in_core_order().contains(&column_index)
-        {
+        if let Some(floating_id) = self.floating_composition {
+            let floating_root = self
+                .layout
+                .floating_group(floating_id)
+                .and_then(|floating| self.layout.dock_area(floating.area))
+                .map(|area| area.root);
+            if floating_root == Some(group_id) {
+                let Some(origin) = self
+                    .layout
+                    .floating_group(floating_id)
+                    .map(|floating| floating.bounds.origin)
+                else {
+                    return;
+                };
+                self.composition_drag_pending = false;
+                self.composition_dragging = false;
+                self.composition_drag_source = None;
+                self.composition_drag_group = Some(floating_id);
+                self.composition_drag_start_x = pointer_x;
+                self.composition_drag_start_y = pointer_y;
+                self.composition_drag_offset_x = pointer_x - origin.x;
+                self.composition_drag_offset_y = pointer_y - origin.y;
+                self.composition_drag_pending = true;
+            }
+            return;
+        }
+        if !self.main_column_indices_in_core_order().contains(&column_index) {
             return;
         }
         let Some(column_id) = self.column_ids.get(column_index).copied() else {
