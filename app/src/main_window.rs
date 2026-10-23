@@ -220,7 +220,7 @@ impl MainWindow {
         }
         // Initialize each Core group by activating its first actual panel. This
         // does not require a fixed Layers/Color/Properties slot map.
-        for column_id in column_ids {
+        for column_id in column_ids.iter().copied() {
             let group_ids = match layout.node(column_id) {
                 Some(Node::Column(column)) => column.groups.clone(),
                 _ => Vec::new(),
