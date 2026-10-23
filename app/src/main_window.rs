@@ -1104,6 +1104,42 @@ impl MainWindow {
             .child(title)
     }
 
+    fn render_tab_group_hit_area(
+        &self,
+        cx: &mut Context<Self>,
+        column_index: usize,
+        group_id: NodeId,
+        active_panel: Option<PanelId>,
+        width: f32,
+        height: f32,
+    ) -> Div {
+        div()
+            .w(px(width))
+            .h(px(height))
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                    this.open_tab_context_menu(
+                        column_index,
+                        group_id,
+                        active_panel,
+                        event.position.x.as_f32(),
+                        event.position.y.as_f32(),
+                    );
+                    cx.notify();
+                }),
+            )
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                    if event.click_count == 2 {
+                        this.toggle_group_collapse(group_id);
+                        cx.notify();
+                    }
+                }),
+            )
+    }
+
     fn render_column(
         &self,
         cx: &mut Context<Self>,
@@ -1333,31 +1369,14 @@ impl MainWindow {
             .border_1()
             .border_color(rgb(colors.border))
             .child(
-                div()
-                    .w(px(content_padding))
-                    .h(px(top_tab_strip_height))
-                    .on_mouse_down(
-                        MouseButton::Right,
-                        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                            this.open_tab_context_menu(
-                                column_index,
-                                top_tab_group,
-                                active_top_panel,
-                                event.position.x.as_f32(),
-                                event.position.y.as_f32(),
-                            );
-                            cx.notify();
-                        }),
-                    )
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                            if event.click_count == 2 {
-                                this.toggle_group_collapse(top_tab_group);
-                                cx.notify();
-                            }
-                        }),
-                    ),
+                self.render_tab_group_hit_area(
+                    cx,
+                    column_index,
+                    top_tab_group,
+                    active_top_panel,
+                    content_padding,
+                    top_tab_strip_height,
+                ),
             );
         if self.panel_slot_visible(column_index, 0) {
             top_tab_strip = top_tab_strip.child(layers_tab);
@@ -1377,31 +1396,14 @@ impl MainWindow {
             );
         } else {
             top_tab_strip = top_tab_strip.child(
-                div()
-                    .w(px(top_tab_spacer_width))
-                    .h(px(top_tab_strip_height))
-                    .on_mouse_down(
-                        MouseButton::Right,
-                        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                            this.open_tab_context_menu(
-                                column_index,
-                                top_tab_group,
-                                active_top_panel,
-                                event.position.x.as_f32(),
-                                event.position.y.as_f32(),
-                            );
-                            cx.notify();
-                        }),
-                    )
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                            if event.click_count == 2 {
-                                this.toggle_group_collapse(top_tab_group);
-                                cx.notify();
-                            }
-                        }),
-                    ),
+                self.render_tab_group_hit_area(
+                    cx,
+                    column_index,
+                    top_tab_group,
+                    active_top_panel,
+                    top_tab_spacer_width,
+                    top_tab_strip_height,
+                ),
             );
         }
         top_tab_strip = top_tab_strip
@@ -1435,31 +1437,14 @@ impl MainWindow {
                     .child("☰"),
             )
             .child(
-                div()
-                    .w(px(content_padding))
-                    .h(px(top_tab_strip_height))
-                    .on_mouse_down(
-                        MouseButton::Right,
-                        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                            this.open_tab_context_menu(
-                                column_index,
-                                top_tab_group,
-                                active_top_panel,
-                                event.position.x.as_f32(),
-                                event.position.y.as_f32(),
-                            );
-                            cx.notify();
-                        }),
-                    )
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                            if event.click_count == 2 {
-                                this.toggle_group_collapse(top_tab_group);
-                                cx.notify();
-                            }
-                        }),
-                    ),
+                self.render_tab_group_hit_area(
+                    cx,
+                    column_index,
+                    top_tab_group,
+                    active_top_panel,
+                    content_padding,
+                    top_tab_strip_height,
+                ),
             );
 
         let properties_tab = self.render_tab(
@@ -1488,31 +1473,14 @@ impl MainWindow {
             .border_1()
             .border_color(rgb(colors.border))
             .child(
-                div()
-                    .w(px(content_padding))
-                    .h(px(bottom_tab_strip_height))
-                    .on_mouse_down(
-                        MouseButton::Right,
-                        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                            this.open_tab_context_menu(
-                                column_index,
-                                bottom_tab_group,
-                                active_bottom_panel,
-                                event.position.x.as_f32(),
-                                event.position.y.as_f32(),
-                            );
-                            cx.notify();
-                        }),
-                    )
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                            if event.click_count == 2 {
-                                this.toggle_group_collapse(bottom_tab_group);
-                                cx.notify();
-                            }
-                        }),
-                    ),
+                self.render_tab_group_hit_area(
+                    cx,
+                    column_index,
+                    bottom_tab_group,
+                    active_bottom_panel,
+                    content_padding,
+                    bottom_tab_strip_height,
+                ),
             );
         if has_bottom_group && self.panel_slot_visible(column_index, 2) {
             bottom_tab_strip = bottom_tab_strip.child(properties_tab);
@@ -1529,31 +1497,14 @@ impl MainWindow {
             );
         } else {
             bottom_tab_strip = bottom_tab_strip.child(
-                div()
-                    .w(px(bottom_tab_spacer_width))
-                    .h(px(bottom_tab_strip_height))
-                    .on_mouse_down(
-                        MouseButton::Right,
-                        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                            this.open_tab_context_menu(
-                                column_index,
-                                bottom_tab_group,
-                                active_bottom_panel,
-                                event.position.x.as_f32(),
-                                event.position.y.as_f32(),
-                            );
-                            cx.notify();
-                        }),
-                    )
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                            if event.click_count == 2 {
-                                this.toggle_group_collapse(bottom_tab_group);
-                                cx.notify();
-                            }
-                        }),
-                    ),
+                self.render_tab_group_hit_area(
+                    cx,
+                    column_index,
+                    bottom_tab_group,
+                    active_bottom_panel,
+                    bottom_tab_spacer_width,
+                    bottom_tab_strip_height,
+                ),
             );
         }
         bottom_tab_strip = bottom_tab_strip
@@ -1583,31 +1534,14 @@ impl MainWindow {
                     .child("☰"),
             )
             .child(
-                div()
-                    .w(px(content_padding))
-                    .h(px(bottom_tab_strip_height))
-                    .on_mouse_down(
-                        MouseButton::Right,
-                        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                            this.open_tab_context_menu(
-                                column_index,
-                                bottom_tab_group,
-                                active_bottom_panel,
-                                event.position.x.as_f32(),
-                                event.position.y.as_f32(),
-                            );
-                            cx.notify();
-                        }),
-                    )
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                            if event.click_count == 2 {
-                                this.toggle_group_collapse(bottom_tab_group);
-                                cx.notify();
-                            }
-                        }),
-                    ),
+                self.render_tab_group_hit_area(
+                    cx,
+                    column_index,
+                    bottom_tab_group,
+                    active_bottom_panel,
+                    content_padding,
+                    bottom_tab_strip_height,
+                ),
             );
 
         let top_content_area = div()
