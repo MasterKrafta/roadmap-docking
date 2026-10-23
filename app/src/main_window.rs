@@ -1104,6 +1104,85 @@ impl MainWindow {
             .child(title)
     }
 
+    fn render_tab_strip(
+        &self,
+        cx: &mut Context<Self>,
+        column_index: usize,
+        group_id: NodeId,
+        active_panel: Option<PanelId>,
+        width: f32,
+        height: f32,
+        content_padding: f32,
+        button_size: f32,
+        spacer_width: f32,
+        visible_tab_count: usize,
+        tabs: Vec<Div>,
+        menu_element_id: &'static str,
+    ) -> Div {
+        let colors = self.theme.colors;
+
+        let mut strip = div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .w(px(width))
+            .h(px(height))
+            .bg(rgb(colors.dock_background))
+            .border_1()
+            .border_color(rgb(colors.border))
+            .child(self.render_tab_group_hit_area(
+                cx,
+                column_index,
+                group_id,
+                active_panel,
+                content_padding,
+                height,
+            ));
+
+        for tab in tabs {
+            strip = strip.child(tab);
+        }
+
+        if visible_tab_count == 0 {
+            strip = strip.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .w(px(spacer_width))
+                    .h(px(height))
+                    .text_color(rgb(colors.muted_text))
+                    .child("No panels"),
+            );
+        } else {
+            strip = strip.child(self.render_tab_group_hit_area(
+                cx,
+                column_index,
+                group_id,
+                active_panel,
+                spacer_width,
+                height,
+            ));
+        }
+
+        strip
+            .child(self.render_tab_group_menu_button(
+                cx,
+                menu_element_id,
+                column_index,
+                group_id,
+                active_panel,
+                button_size,
+            ))
+            .child(self.render_tab_group_hit_area(
+                cx,
+                column_index,
+                group_id,
+                active_panel,
+                content_padding,
+                height,
+            ))
+    }
+
     fn render_tab_group_menu_button(
         &self,
         cx: &mut Context<Self>,
@@ -1395,78 +1474,31 @@ impl MainWindow {
             color_title,
         );
 
-        let mut top_tab_strip = div()
-            .flex()
-            .flex_row()
-            .items_center()
-            .w(px(column_content_width))
-            .h(px(top_tab_strip_height))
-            .bg(rgb(colors.dock_background))
-            .border_1()
-            .border_color(rgb(colors.border))
-            .child(
-                self.render_tab_group_hit_area(
-                    cx,
-                    column_index,
-                    top_tab_group,
-                    active_top_panel,
-                    content_padding,
-                    top_tab_strip_height,
-                ),
-            );
+        let mut top_tabs = Vec::new();
         if self.panel_slot_visible(column_index, 0) {
-            top_tab_strip = top_tab_strip.child(layers_tab);
+            top_tabs.push(layers_tab);
         }
         if self.panel_slot_visible(column_index, 1) {
-            top_tab_strip = top_tab_strip.child(color_tab);
+            top_tabs.push(color_tab);
         }
-        if visible_top_count == 0 {
-            top_tab_strip = top_tab_strip.child(
-                div()
-                    .flex()
-                    .items_center()
-                    .w(px(top_tab_spacer_width))
-                    .h(px(top_tab_strip_height))
-                    .text_color(rgb(colors.muted_text))
-                    .child("No panels"),
-            );
-        } else {
-            top_tab_strip = top_tab_strip.child(
-                self.render_tab_group_hit_area(
-                    cx,
-                    column_index,
-                    top_tab_group,
-                    active_top_panel,
-                    top_tab_spacer_width,
-                    top_tab_strip_height,
-                ),
-            );
-        }
-        top_tab_strip = top_tab_strip
-            .child(
-                self.render_tab_group_menu_button(
-                    cx,
-                    if column_index == 0 {
-                        "left-dock-top-group-menu"
-                    } else {
-                        "right-dock-top-group-menu"
-                    },
-                    column_index,
-                    top_tab_group,
-                    active_top_panel,
-                    button_size,
-                ),
-            )
-            .child(
-                self.render_tab_group_hit_area(
-                    cx,
-                    column_index,
-                    top_tab_group,
-                    active_top_panel,
-                    content_padding,
-                    top_tab_strip_height,
-                ),
-            );
+        let top_tab_strip = self.render_tab_strip(
+            cx,
+            column_index,
+            top_tab_group,
+            active_top_panel,
+            column_content_width,
+            top_tab_strip_height,
+            content_padding,
+            button_size,
+            top_tab_spacer_width,
+            visible_top_count,
+            top_tabs,
+            if column_index == 0 {
+                "left-dock-top-group-menu"
+            } else {
+                "right-dock-top-group-menu"
+            },
+        );
 
         let properties_tab = self.render_tab(
             cx,
@@ -1484,71 +1516,24 @@ impl MainWindow {
             properties_title,
         );
 
-        let mut bottom_tab_strip = div()
-            .flex()
-            .flex_row()
-            .items_center()
-            .w(px(column_content_width))
-            .h(px(bottom_tab_strip_height))
-            .bg(rgb(colors.dock_background))
-            .border_1()
-            .border_color(rgb(colors.border))
-            .child(
-                self.render_tab_group_hit_area(
-                    cx,
-                    column_index,
-                    bottom_tab_group,
-                    active_bottom_panel,
-                    content_padding,
-                    bottom_tab_strip_height,
-                ),
-            );
+        let mut bottom_tabs = Vec::new();
         if has_bottom_group && self.panel_slot_visible(column_index, 2) {
-            bottom_tab_strip = bottom_tab_strip.child(properties_tab);
+            bottom_tabs.push(properties_tab);
         }
-        if visible_bottom_count == 0 {
-            bottom_tab_strip = bottom_tab_strip.child(
-                div()
-                    .flex()
-                    .items_center()
-                    .w(px(bottom_tab_spacer_width))
-                    .h(px(bottom_tab_strip_height))
-                    .text_color(rgb(colors.muted_text))
-                    .child("No panels"),
-            );
-        } else {
-            bottom_tab_strip = bottom_tab_strip.child(
-                self.render_tab_group_hit_area(
-                    cx,
-                    column_index,
-                    bottom_tab_group,
-                    active_bottom_panel,
-                    bottom_tab_spacer_width,
-                    bottom_tab_strip_height,
-                ),
-            );
-        }
-        bottom_tab_strip = bottom_tab_strip
-            .child(
-                self.render_tab_group_menu_button(
-                    cx,
-                    "right-dock-bottom-group-menu",
-                    column_index,
-                    bottom_tab_group,
-                    active_bottom_panel,
-                    button_size,
-                ),
-            )
-            .child(
-                self.render_tab_group_hit_area(
-                    cx,
-                    column_index,
-                    bottom_tab_group,
-                    active_bottom_panel,
-                    content_padding,
-                    bottom_tab_strip_height,
-                ),
-            );
+        let bottom_tab_strip = self.render_tab_strip(
+            cx,
+            column_index,
+            bottom_tab_group,
+            active_bottom_panel,
+            column_content_width,
+            bottom_tab_strip_height,
+            content_padding,
+            button_size,
+            bottom_tab_spacer_width,
+            visible_bottom_count,
+            bottom_tabs,
+            "right-dock-bottom-group-menu",
+        );
 
         let top_content_area = div()
             .w(px(column_content_width))
