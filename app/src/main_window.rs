@@ -17,6 +17,7 @@ struct DockTabContextMenu {
     column_index: usize,
     group: NodeId,
     active_panel: Option<PanelId>,
+    header_only: bool,
     left: f32,
     top: f32,
 }
@@ -271,17 +272,46 @@ impl MainWindow {
     ) {
         if self
             .tab_context_menu
-            .is_some_and(|menu| menu.group == group)
+            .is_some_and(|menu| menu.group == group && !menu.header_only)
         {
             self.tab_context_menu = None;
             return;
         }
+        self.open_tab_context_menu(column_index, group, active_panel, pointer_x, pointer_y);
+    }
+
+    fn open_tab_context_menu(
+        &mut self,
+        column_index: usize,
+        group: NodeId,
+        active_panel: Option<PanelId>,
+        pointer_x: f32,
+        pointer_y: f32,
+    ) {
         self.tab_context_menu = Some(DockTabContextMenu {
             column_index,
             group,
             active_panel,
-            left: (pointer_x - 168.0).max(0.0),
-            top: pointer_y,
+            header_only: false,
+            left: pointer_x.max(0.0),
+            top: pointer_y.max(0.0),
+        });
+    }
+
+    fn open_header_context_menu(
+        &mut self,
+        column_index: usize,
+        group: NodeId,
+        pointer_x: f32,
+        pointer_y: f32,
+    ) {
+        self.tab_context_menu = Some(DockTabContextMenu {
+            column_index,
+            group,
+            active_panel: None,
+            header_only: true,
+            left: pointer_x.max(0.0),
+            top: pointer_y.max(0.0),
         });
     }
 
@@ -634,6 +664,48 @@ impl MainWindow {
             &self.dock_metrics,
         ) {
             eprintln!("Could not change dock column mode: {error}");
+        }
+    }
+
+    fn collapse_column_to_icons(&mut self, column_index: usize) {
+        if column_index >= self.column_ids.len()
+            || matches!(
+                self.layout.node(self.column_ids[column_index]),
+                Some(Node::Column(column)) if column.mode == ColumnMode::IconsOnly
+            )
+        {
+            return;
+        }
+        if let Err(error) = self.layout.apply(
+            DockCommand::SetColumnMode {
+                column: self.column_ids[column_index],
+                mode: ColumnMode::IconsOnly,
+            },
+            &self.dock_metrics,
+        ) {
+            eprintln!("Could not collapse dock column to icons: {error}");
+        }
+    }
+
+    fn collapse_context_to_icons(&mut self) {
+        let Some(menu) = self.tab_context_menu.take() else {
+            return;
+        };
+        self.collapse_column_to_icons(menu.column_index);
+    }
+
+    fn minimize_context_group(&mut self) {
+        let Some(menu) = self.tab_context_menu.take() else {
+            return;
+        };
+        if let Err(error) = self.layout.apply(
+            DockCommand::CollapseGroup {
+                group: menu.group,
+                collapsed: true,
+            },
+            &self.dock_metrics,
+        ) {
+            eprintln!("Could not minimize dock group: {error}");
         }
     }
 
@@ -1543,6 +1615,34 @@ impl Render for MainWindow {
                     cx.notify();
                 }))
                 .child("Close Tab");
+            let minimize = div()
+                .id("dock-context-minimize")
+                .flex()
+                .items_center()
+                .w(px(176.0))
+                .h(px(30.0))
+                .p(px(8.0))
+                .bg(rgb(colors.toolbar_background))
+                .text_color(rgb(colors.primary_text))
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.minimize_context_group();
+                    cx.notify();
+                }))
+                .child("Minimize");
+            let collapse_to_icons = div()
+                .id("dock-context-collapse-to-icons")
+                .flex()
+                .items_center()
+                .w(px(176.0))
+                .h(px(30.0))
+                .p(px(8.0))
+                .bg(rgb(colors.toolbar_background))
+                .text_color(rgb(colors.primary_text))
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.collapse_context_to_icons();
+                    cx.notify();
+                }))
+                .child("Collapse to Icons");
             let close_tab_group = div()
                 .id("dock-context-close-tab-group")
                 .flex()
@@ -1557,7 +1657,7 @@ impl Render for MainWindow {
                     cx.notify();
                 }))
                 .child("Close Tab Group");
-            let dropdown = div()
+            let mut dropdown = div()
                 .id("dock-tab-context-menu")
                 .absolute()
                 .left(px(menu_state.left))
@@ -1568,9 +1668,16 @@ impl Render for MainWindow {
                 .bg(rgb(colors.toolbar_background))
                 .border_1()
                 .border_color(rgb(colors.border))
-                .p(px(4.0))
-                .child(close_tab)
-                .child(close_tab_group);
+                .p(px(4.0));
+            if menu_state.header_only {
+                dropdown = dropdown.child(collapse_to_icons);
+            } else {
+                dropdown = dropdown
+                    .child(close_tab)
+                    .child(close_tab_group)
+                    .child(minimize)
+                    .child(collapse_to_icons);
+            }
             root = root.child(dropdown);
         }
 
