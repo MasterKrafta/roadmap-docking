@@ -1699,11 +1699,23 @@ impl MainWindow {
                             )
                             .on_mouse_down(
                                 MouseButton::Left,
-                                cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
                                     if event.click_count == 2 {
+                                        this.composition_drag_pending = false;
+                                        this.composition_dragging = false;
+                                        this.composition_drag_source = None;
+                                        this.composition_drag_group = None;
                                         this.toggle_column_mode(column_index);
-                                        cx.notify();
+                                    } else {
+                                        let viewport = window.viewport_size();
+                                        this.begin_composition_drag(
+                                            event.position.x.as_f32(),
+                                            event.position.y.as_f32(),
+                                            viewport.width.as_f32(),
+                                            viewport.height.as_f32(),
+                                        );
                                     }
+                                    cx.notify();
                                 }),
                             ),
                     )
