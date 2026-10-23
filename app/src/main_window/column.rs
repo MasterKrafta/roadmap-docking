@@ -44,7 +44,7 @@ impl Column {
             .border_color(rgb(colors.border))
             // The empty header area is reserved for future drag handling.
             .child(div().flex_1().h(px(header_height)))
-            .child(header_button("»", button_size, self.theme))
+            .child(header_button(">>", button_size, self.theme))
             .child(header_button("×", button_size, self.theme));
 
         let available_height = (height - header_height).max(0.0);
