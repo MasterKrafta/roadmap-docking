@@ -30,6 +30,15 @@ struct TabGroupViewData {
     collapsed: bool,
 }
 
+/// UI visibility state is keyed by the Core panel instance, not by a menu index.
+struct PanelVisibilityEntry {
+    panel_id: PanelId,
+    column_index: usize,
+    panel_key: String,
+    title: String,
+    visible: bool,
+}
+
 #[derive(Clone, Copy)]
 struct GroupResizeState {
     column: NodeId,
@@ -57,10 +66,8 @@ pub(crate) struct MainWindow {
     /// Panel IDs per column, ordered: Layers, Color, Properties. Unused slots alias
     /// an existing ID but are never exposed as tabs or menu entries.
     panels_by_column: [[PanelId; 4]; 2],
-    /// Visibility choices exposed by the Windows menu. Hidden panels retain
-    /// their Core nodes and active-tab state so they can be restored without
-    /// destroying their dock location.
-    panel_visibility: [bool; 4],
+    /// Per-panel visibility entries used by rendering, context actions, and the Windows menu.
+    panel_visibility: Vec<PanelVisibilityEntry>,
     windows_menu_open: bool,
     tab_context_menu: Option<DockTabContextMenu>,
     is_resizing_column: bool,
@@ -259,7 +266,36 @@ impl MainWindow {
             top_tab_groups,
             bottom_tab_groups,
             panels_by_column,
-            panel_visibility: [true; 4],
+            panel_visibility: vec![
+                PanelVisibilityEntry {
+                    panel_id: left_layers,
+                    column_index: 0,
+                    panel_key: "layers".to_owned(),
+                    title: "Left Layers".to_owned(),
+                    visible: true,
+                },
+                PanelVisibilityEntry {
+                    panel_id: right_layers,
+                    column_index: 1,
+                    panel_key: "layers".to_owned(),
+                    title: "Right Layers".to_owned(),
+                    visible: true,
+                },
+                PanelVisibilityEntry {
+                    panel_id: right_color,
+                    column_index: 1,
+                    panel_key: "color".to_owned(),
+                    title: "Right Color".to_owned(),
+                    visible: true,
+                },
+                PanelVisibilityEntry {
+                    panel_id: right_properties,
+                    column_index: 1,
+                    panel_key: "properties".to_owned(),
+                    title: "Right Properties".to_owned(),
+                    visible: true,
+                },
+            ],
             windows_menu_open: false,
             tab_context_menu: None,
             is_resizing_column: false,
@@ -371,18 +407,8 @@ impl MainWindow {
         let Some(panel_id) = menu.active_panel else {
             return;
         };
-        let Some(panel_slot) = self
-            .panels_by_column
-            .get(menu.column_index)
-            .and_then(|panel_ids| panel_ids.iter().position(|candidate| *candidate == panel_id))
-        else {
-            return;
-        };
-        let Some(menu_index) = Self::visibility_index_for_slot(menu.column_index, panel_slot) else {
-            return;
-        };
-        if self.panel_visibility[menu_index] {
-            self.toggle_panel_visibility(menu_index);
+        if self.panel_is_visible(menu.column_index, panel_id) {
+            self.toggle_panel_visibility(panel_id);
         }
     }
 
@@ -390,18 +416,13 @@ impl MainWindow {
         let Some(menu) = self.tab_context_menu.take() else {
             return;
         };
-        let menu_indices: &[usize] = if menu.column_index == 0 {
-            &[0]
-        } else if menu.group == self.top_tab_groups[1] {
-            &[1, 2]
-        } else if menu.group == self.bottom_tab_groups[1] {
-            &[3]
-        } else {
-            &[]
-        };
-        for menu_index in menu_indices.iter().copied() {
-            if self.panel_visibility[menu_index] {
-                self.toggle_panel_visibility(menu_index);
+        let panel_ids = self
+            .tab_group_view_data(menu.group)
+            .map(|group| group.panels)
+            .unwrap_or_default();
+        for panel_id in panel_ids {
+            if self.panel_is_visible(menu.column_index, panel_id) {
+                self.toggle_panel_visibility(panel_id);
             }
         }
     }
@@ -470,54 +491,49 @@ impl MainWindow {
         had_open_menu
     }
 
-    fn visibility_index_for_slot(column_index: usize, panel_slot: usize) -> Option<usize> {
-        match (column_index, panel_slot) {
-            (0, 0) => Some(0), // Left Layers
-            (1, 0) => Some(1), // Right Layers
-            (1, 1) => Some(2), // Right Color
-            (1, 2) => Some(3), // Right Properties
-            _ => None,
+    fn panel_is_visible(&self, _column_index: usize, panel_id: PanelId) -> bool {
+        self.panel_visibility
+            .iter()
+            .find(|entry| entry.panel_id == panel_id)
+            .is_none_or(|entry| entry.visible)
+    }
+
+    fn update_panel_visibility_id(
+        &mut self,
+        column_index: usize,
+        panel_key: &str,
+        panel_id: PanelId,
+    ) {
+        if let Some(entry) = self
+            .panel_visibility
+            .iter_mut()
+            .find(|entry| entry.column_index == column_index && entry.panel_key == panel_key)
+        {
+            entry.panel_id = panel_id;
         }
     }
 
-    fn panel_slot_visible(&self, column_index: usize, panel_slot: usize) -> bool {
-        Self::visibility_index_for_slot(column_index, panel_slot)
-            .is_some_and(|visibility_index| self.panel_visibility[visibility_index])
-    }
-
-    fn panel_is_visible(&self, column_index: usize, panel_id: PanelId) -> bool {
-        let Some(panel_slot) = self
-            .panels_by_column
-            .get(column_index)
-            .and_then(|panel_ids| panel_ids.iter().position(|candidate| *candidate == panel_id))
+    fn toggle_panel_visibility(&mut self, panel_id: PanelId) {
+        let Some(entry_index) = self
+            .panel_visibility
+            .iter()
+            .position(|entry| entry.panel_id == panel_id)
         else {
-            // Panels without a dedicated Windows-menu toggle remain visible by default.
-            return true;
-        };
-        Self::visibility_index_for_slot(column_index, panel_slot)
-            .map(|visibility_index| self.panel_visibility[visibility_index])
-            .unwrap_or(true)
-    }
-
-    fn toggle_panel_visibility(&mut self, menu_index: usize) {
-        if menu_index >= self.panel_visibility.len() {
             return;
-        }
-        let (column_index, panel_slot) = match menu_index {
-            0 => (0, 0), // Left Layers
-            1 => (1, 0), // Right Layers
-            2 => (1, 1), // Right Color
-            3 => (1, 2), // Right Properties
-            _ => return,
         };
+        let column_index = self.panel_visibility[entry_index].column_index;
+        let panel_key = self.panel_visibility[entry_index].panel_key.clone();
+        let next_visible = !self.panel_visibility[entry_index].visible;
+        self.panel_visibility[entry_index].visible = next_visible;
 
-        self.panel_visibility[menu_index] = !self.panel_visibility[menu_index];
-        if self.panel_visibility[menu_index] && !self.column_open[column_index] {
-            // Recreate the column through Core when its last visible panel was
-            // disabled earlier. Rebuild the same three-panel template on the right.
-            if let Err(error) = self.open_column_from_menu(column_index, menu_index) {
+        if next_visible && !self.column_open[column_index] {
+            // Restore the standard dock template, then bind its freshly-created Core
+            // panel IDs back to the existing visibility entries by their stable keys.
+            if let Err(error) = self.open_column_from_menu(column_index, &panel_key) {
                 eprintln!("Could not reopen dock column: {error}");
-                self.panel_visibility[menu_index] = false;
+                if let Some(entry) = self.panel_visibility.get_mut(entry_index) {
+                    entry.visible = false;
+                }
             }
             return;
         }
@@ -525,47 +541,51 @@ impl MainWindow {
             return;
         }
 
-        let column_has_visible_panels = match column_index {
-            0 => self.panel_visibility[0],
-            1 => self.panel_visibility[1] || self.panel_visibility[2] || self.panel_visibility[3],
-            _ => false,
-        };
+        let column_has_visible_panels = self
+            .panel_visibility
+            .iter()
+            .any(|entry| entry.column_index == column_index && entry.visible);
         if !column_has_visible_panels {
             // Closing the last visible panel closes every group in this column.
-            // Core normalization then removes the empty Column and collapses the
-            // surrounding Split, so the other column shifts into its place.
+            // Core normalization then removes the empty Column and collapses its Split.
             self.close_column(column_index);
             return;
         }
 
-        let group = if panel_slot < 2 {
-            self.top_tab_groups[column_index]
-        } else {
-            self.bottom_tab_groups[column_index]
-        };
-        let candidates = if panel_slot < 2 {
-            [0usize, 1usize]
-        } else {
-            [2usize, 3usize]
-        };
-        let active_visible = self
-            .active_panel_id(group)
-            .is_some_and(|active| self.panel_is_visible(column_index, active));
-        if active_visible {
+        if next_visible {
             return;
         }
-        if let Some(next_slot) = candidates
+
+        let group = self
+            .group_ids_in_column(self.column_ids[column_index])
             .into_iter()
-            .find(|candidate| self.panel_slot_visible(column_index, *candidate))
+            .find(|group_id| {
+                self.tab_group_view_data(*group_id)
+                    .is_some_and(|data| data.panels.contains(&panel_id))
+            });
+        let Some(group) = group else {
+            return;
+        };
+        if self
+            .active_panel_id(group)
+            .is_some_and(|active| self.panel_is_visible(column_index, active))
         {
-            self.activate_tab(group, self.panels_by_column[column_index][next_slot]);
+            return;
+        }
+        if let Some(next_panel) = self
+            .tab_group_view_data(group)
+            .into_iter()
+            .flat_map(|data| data.panels)
+            .find(|candidate| self.panel_is_visible(column_index, *candidate))
+        {
+            self.activate_tab(group, next_panel);
         }
     }
 
     fn open_column_from_menu(
         &mut self,
         column_index: usize,
-        selected_menu_index: usize,
+        selected_panel_key: &str,
     ) -> Result<(), String> {
         let layers_key = PanelKey::new("layers").expect("built-in panel key is valid");
         let color_key = PanelKey::new("color").expect("built-in panel key is valid");
@@ -633,6 +653,7 @@ impl MainWindow {
             self.bottom_tab_groups[0] = top_group;
             self.panels_by_column[0] = [layers_panel; 4];
             self.column_has_bottom_group[0] = false;
+            self.update_panel_visibility_id(0, layers_key.as_str(), layers_panel);
         } else {
             self.layout
                 .apply(
@@ -678,14 +699,18 @@ impl MainWindow {
                 properties_panel,
             ];
             self.column_has_bottom_group[1] = true;
+            self.update_panel_visibility_id(1, layers_key.as_str(), layers_panel);
+            self.update_panel_visibility_id(1, color_key.as_str(), color_panel);
+            self.update_panel_visibility_id(1, properties_key.as_str(), properties_panel);
 
-            let selected = match selected_menu_index {
-                1 => layers_panel,
-                2 => color_panel,
-                3 => properties_panel,
-                _ => layers_panel,
+            let selected = if selected_panel_key == color_key.as_str() {
+                color_panel
+            } else if selected_panel_key == properties_key.as_str() {
+                properties_panel
+            } else {
+                layers_panel
             };
-            let selected_group = if selected_menu_index == 3 {
+            let selected_group = if selected_panel_key == properties_key.as_str() {
                 bottom_group
             } else {
                 top_group
@@ -718,10 +743,10 @@ impl MainWindow {
         // two-child Split to the remaining column. The UI stops rendering the
         // removed IDs and lets the surviving column move next to the workspace.
         self.column_open[column_index] = false;
-        if column_index == 0 {
-            self.panel_visibility[0] = false;
-        } else {
-            self.panel_visibility[1..=3].fill(false);
+        for entry in &mut self.panel_visibility {
+            if entry.column_index == column_index {
+                entry.visible = false;
+            }
         }
         self.is_resizing_column = false;
         self.resizing_outer_column = None;
@@ -2232,21 +2257,15 @@ impl Render for MainWindow {
                 .border_1()
                 .border_color(rgb(colors.border))
                 .p(px(4.0));
-            let panel_titles = [
-                "Left Layers",
-                "Right Layers",
-                "Right Color",
-                "Right Properties",
-            ];
-            for (index, title) in panel_titles.into_iter().enumerate() {
-                let visible = self.panel_visibility[index];
-                let panel_index = index;
-                let item_id = match index {
-                    0 => "windows-panel-left-layers",
-                    1 => "windows-panel-right-layers",
-                    2 => "windows-panel-right-color",
-                    _ => "windows-panel-right-properties",
-                };
+            for entry in &self.panel_visibility {
+                let panel_id = entry.panel_id;
+                let visible = entry.visible;
+                let title = entry.title.clone();
+                let item_id = format!(
+                    "windows-panel-{}-{}",
+                    entry.column_index,
+                    entry.panel_key
+                );
                 let item = div()
                     .id(item_id)
                     .flex()
@@ -2259,7 +2278,7 @@ impl Render for MainWindow {
                     .bg(rgb(colors.toolbar_background))
                     .text_color(rgb(if visible { colors.primary_text } else { colors.muted_text }))
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.toggle_panel_visibility(panel_index);
+                        this.toggle_panel_visibility(panel_id);
                         cx.notify();
                     }))
                     .child(if visible { "☑" } else { "☐" })
