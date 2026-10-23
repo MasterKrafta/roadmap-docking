@@ -237,7 +237,9 @@ pub fn normalize_docked_group_geometry(
 fn floating_title_groups_in_tree(layout: &Layout, root: NodeId) -> Vec<NodeId> {
     match layout.node(root) {
         Some(Node::Tabs(_)) => vec![root],
-        Some(Node::Column(column)) => column.groups.first().copied().into_iter().collect(),
+        Some(Node::Column(column)) => {
+            column.groups.first().copied().into_iter().collect()
+        }
         Some(Node::Split(split)) if split.axis == Axis::X => split
             .children
             .iter()
