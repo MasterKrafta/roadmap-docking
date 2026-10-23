@@ -1594,7 +1594,7 @@ impl MainWindow {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .w(px(rail_item_width))
+                    .w(px(button_size))
                     .h(px(button_size))
                     .bg(rgb(colors.dock_background))
                     .border_1()
