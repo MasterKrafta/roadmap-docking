@@ -750,10 +750,11 @@ impl MainWindow {
         if column_index >= self.column_open.len() || !self.column_open[column_index] {
             return;
         }
-        for group in [
-            self.top_tab_groups[column_index],
-            self.bottom_tab_groups[column_index],
-        ] {
+        // Close every group in the actual Core column, not only the two legacy
+        // group slots. Take a snapshot because each close command may normalize Core.
+        let column_id = self.column_ids[column_index];
+        let groups = self.group_ids_in_column(column_id);
+        for group in groups {
             if self.layout.node(group).is_none() {
                 continue;
             }
