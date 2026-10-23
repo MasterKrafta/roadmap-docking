@@ -7,128 +7,135 @@ use crate::panels::PanelRegistry;
 
 use super::group_ids_for_column;
 
+/// Initial layout is data, not renderer logic. Add or reorder groups here without
+/// changing the MainWindow algorithms. Columns are declared in visual left-to-right order;
+/// construction proceeds right-to-left because Core inserts new main columns at index zero.
+const INITIAL_COLUMNS_LEFT_TO_RIGHT: &[&[&[&str]]] = &[
+    &[&["layers"]],
+    &[&["layers", "color"], &["properties"]],
+];
+
 /// Build the startup docking tree using Core commands and return its stable column IDs.
 pub(super) fn create_initial_layout(
     panels: &PanelRegistry,
     dock_metrics: &DockMetrics,
     split_ratio: f32,
 ) -> Result<(Layout, Vec<NodeId>), String> {
-    let layers_key = PanelKey::new("layers").expect("built-in panel key must be valid");
-    let color_key = PanelKey::new("color").expect("built-in panel key must be valid");
-    let properties_key =
-        PanelKey::new("properties").expect("built-in panel key must be valid");
-
-    let constraints_for = |key: &PanelKey, title: &str| {
-        panels
-            .constraints_for_key(key)
-            .ok_or_else(|| format!("{title} panel is missing from the panel registry"))
-    };
-    let layers_constraints = constraints_for(&layers_key, "Layers")?;
-    let color_constraints = constraints_for(&color_key, "Color")?;
-    let properties_constraints = constraints_for(&properties_key, "Properties")?;
-
     let mut layout = Layout::new(Profile::Photoshop);
 
-    // Build the original right column and its two tab groups using Core commands.
-    layout
-        .apply(
-            DockCommand::OpenPanel {
-                key: layers_key.clone(),
-                constraints: layers_constraints,
-                target: None,
-            },
-            dock_metrics,
-        )
-        .map_err(|error| format!("Could not open the Layers panel: {error}"))?;
+    for (constructed_column_index, groups) in INITIAL_COLUMNS_LEFT_TO_RIGHT.iter().rev().enumerate() {
+        let first_group = groups
+            .first()
+            .ok_or_else(|| "Initial layout columns must contain at least one tab group".to_owned())?;
+        let first_panel_key = first_group
+            .first()
+            .ok_or_else(|| "Initial layout tab groups must contain at least one panel".to_owned())?;
 
-    let initial_right_column = layout
-        .main_area(DockSide::Right)
-        .ok_or_else(|| "Dock Core did not create the initial right dock area".to_owned())?
-        .root;
-    let initial_top_group = group_ids_for_column(&layout, initial_right_column)
-        .first()
-        .copied()
-        .ok_or_else(|| "Dock Core did not create the upper tab group".to_owned())?;
-
-    layout
-        .apply(
-            DockCommand::OpenPanel {
-                key: color_key.clone(),
-                constraints: color_constraints,
-                target: Some(DropTarget::Tabs {
-                    group: initial_top_group,
-                    index: 1,
-                }),
-            },
-            dock_metrics,
-        )
-        .map_err(|error| format!("Could not add the Color tab: {error}"))?;
-
-    layout
-        .apply(
-            DockCommand::OpenPanel {
-                key: properties_key.clone(),
-                constraints: properties_constraints,
-                target: Some(DropTarget::GroupEdge {
-                    group: initial_top_group,
-                    zone: DropZone::Bottom,
-                }),
-            },
-            dock_metrics,
-        )
-        .map_err(|error| format!("Could not create the lower tab group: {error}"))?;
-
-    layout
-        .apply(
-            DockCommand::RestoreGroupRatios {
-                column: initial_right_column,
-                ratios: vec![split_ratio, 1.0 - split_ratio],
-            },
-            dock_metrics,
-        )
-        .map_err(|error| format!("Could not apply the right column split ratio: {error}"))?;
-
-    // Insert a second copy to the left of the existing column. Duplicate panel
-    // keys are allowed by the registry constraints; each column gets independent
-    // panel instances and independent active-tab state.
-    layout
-        .apply(
-            DockCommand::OpenPanel {
-                key: layers_key.clone(),
-                constraints: layers_constraints,
-                target: Some(DropTarget::MainColumn {
-                    side: DockSide::Right,
-                    index: 0,
-                }),
-            },
-            dock_metrics,
-        )
-        .map_err(|error| format!("Could not create the left dock column: {error}"))?;
-
-    let right_area = layout
-        .main_area(DockSide::Right)
-        .ok_or_else(|| "Dock Core lost the right dock area".to_owned())?;
-    let Node::Split(split) = layout
-        .node(right_area.root)
-        .ok_or_else(|| "Dock Core did not return the two-column split".to_owned())?
-    else {
-        return Err("Dock Core did not create a split for the two dock columns".to_owned());
-    };
-    if split.axis != Axis::X {
-        return Err("Dock Core right dock must be a horizontal split of columns".to_owned());
-    }
-    let column_ids = split.children.clone();
-    if column_ids.last() != Some(&initial_right_column) {
-        return Err("Dock Core changed the original column's order unexpectedly".to_owned());
-    }
-    // Initialize each Core group by activating its first actual panel. This
-    // does not require a fixed Layers/Color/Properties slot map.
-    for column_id in column_ids.iter().copied() {
-        let group_ids = match layout.node(column_id) {
-            Some(Node::Column(column)) => column.groups.clone(),
-            _ => Vec::new(),
+        let first_column_target = if constructed_column_index == 0 {
+            None
+        } else {
+            Some(DropTarget::MainColumn {
+                side: DockSide::Right,
+                index: 0,
+            })
         };
-        for group_id in group_ids {
+        open_initial_panel(
+            &mut layout,
+            panels,
+            dock_metrics,
+            first_panel_key,
+            first_column_target,
+        )?;
+
+        let area = layout
+            .main_area(DockSide::Right)
+            .ok_or_else(|| "Dock Core did not create the initial right dock area".to_owned())?;
+        let column_id = match layout.node(area.root) {
+            Some(Node::Column(_)) => area.root,
+            Some(Node::Split(split)) if split.axis == Axis::X => split
+                .children
+                .first()
+                .copied()
+                .ok_or_else(|| "Dock Core created an empty main column split".to_owned())?,
+            _ => return Err("Dock Core created an unexpected main dock shape".to_owned()),
+        };
+        if !matches!(layout.node(column_id), Some(Node::Column(_))) {
+            return Err("Dock Core did not create the requested initial column".to_owned());
+        }
+
+        let first_group_id = group_ids_for_column(&layout, column_id)
+            .first()
+            .copied()
+            .ok_or_else(|| "Dock Core did not create the first tab group".to_owned())?;
+        let mut group_ids = Vec::with_capacity(groups.len());
+
+        for (group_index, panel_keys) in groups.iter().enumerate() {
+            let first_panel_key = panel_keys
+                .first()
+                .ok_or_else(|| "Initial layout tab groups must contain at least one panel".to_owned())?;
+
+            let group_id = if group_index == 0 {
+                first_group_id
+            } else {
+                let previous_group = *group_ids
+                    .last()
+                    .ok_or_else(|| "No preceding group exists while building initial layout".to_owned())?;
+                let groups_before = group_ids_for_column(&layout, column_id);
+                open_initial_panel(
+                    &mut layout,
+                    panels,
+                    dock_metrics,
+                    first_panel_key,
+                    Some(DropTarget::GroupEdge {
+                        group: previous_group,
+                        zone: DropZone::Bottom,
+                    }),
+                )?;
+                group_ids_for_column(&layout, column_id)
+                    .into_iter()
+                    .find(|candidate| !groups_before.contains(candidate))
+                    .ok_or_else(|| "Dock Core did not create the requested tab group".to_owned())?
+            };
+
+            group_ids.push(group_id);
+            for panel_key in panel_keys.iter().skip(1) {
+                let next_index = match layout.node(group_id) {
+                    Some(Node::Tabs(tabs)) => tabs.children.len(),
+                    _ => return Err("Dock Core returned a non-Tabs node for an initial group".to_owned()),
+                };
+                open_initial_panel(
+                    &mut layout,
+                    panels,
+                    dock_metrics,
+                    panel_key,
+                    Some(DropTarget::Tabs {
+                        group: group_id,
+                        index: next_index,
+                    }),
+                )?;
+            }
+        }
+
+        let group_ratios = initial_group_ratios(groups.len(), split_ratio)?;
+        layout
+            .apply(
+                DockCommand::RestoreGroupRatios {
+                    column: column_id,
+                    ratios: group_ratios,
+                },
+                dock_metrics,
+            )
+            .map_err(|error| format!("Could not apply initial group sizes: {error}"))?;
+    }
+
+    // Activate the first actual panel of every group. The same traversal works
+    // for any number of columns, groups, and tabs in the initial layout data.
+    let area = layout
+        .main_area(DockSide::Right)
+        .ok_or_else(|| "Dock Core lost the initial main dock area".to_owned())?;
+    let column_ids = column_ids_in_core_order(&layout, area.root)?;
+    for column_id in column_ids.iter().copied() {
+        for group_id in group_ids_for_column(&layout, column_id) {
             let first_panel = match layout.node(group_id) {
                 Some(Node::Tabs(tabs)) => tabs.children.iter().find_map(|child_id| {
                     match layout.node(*child_id) {
@@ -155,4 +162,64 @@ pub(super) fn create_initial_layout(
     }
 
     Ok((layout, column_ids))
+}
+
+fn open_initial_panel(
+    layout: &mut Layout,
+    panels: &PanelRegistry,
+    dock_metrics: &DockMetrics,
+    panel_key: &str,
+    target: Option<DropTarget>,
+) -> Result<(), String> {
+    let key = PanelKey::new(panel_key)
+        .map_err(|_| format!("Initial layout contains an invalid panel key: '{panel_key}'"))?;
+    let constraints = panels
+        .constraints_for_key(&key)
+        .ok_or_else(|| format!("Initial layout references unknown panel '{panel_key}'"))?;
+
+    layout
+        .apply(
+            DockCommand::OpenPanel {
+                key,
+                constraints,
+                target,
+            },
+            dock_metrics,
+        )
+        .map_err(|error| format!("Could not add panel '{panel_key}' to the initial layout: {error}"))?;
+    Ok(())
+}
+
+fn initial_group_ratios(group_count: usize, split_ratio: f32) -> Result<Vec<f32>, String> {
+    if group_count == 0 {
+        return Err("Initial columns must contain at least one tab group".to_owned());
+    }
+    if !split_ratio.is_finite() || split_ratio <= 0.0 || split_ratio >= 1.0 {
+        return Err("Initial group split ratio must be between zero and one".to_owned());
+    }
+    if group_count == 1 {
+        return Ok(vec![1.0]);
+    }
+
+    let remaining_ratio = (1.0 - split_ratio) / (group_count - 1) as f32;
+    let mut ratios = vec![remaining_ratio; group_count];
+    ratios[0] = split_ratio;
+    Ok(ratios)
+}
+
+fn column_ids_in_core_order(layout: &Layout, root: NodeId) -> Result<Vec<NodeId>, String> {
+    match layout.node(root) {
+        Some(Node::Column(_)) => Ok(vec![root]),
+        Some(Node::Split(split)) if split.axis == Axis::X => {
+            if split
+                .children
+                .iter()
+                .any(|child| !matches!(layout.node(*child), Some(Node::Column(_))))
+            {
+                return Err("Core main horizontal split must contain only Columns".to_owned());
+            }
+            Ok(split.children.clone())
+        }
+        _ => Err("Core main dock root must be a Column or a horizontal split of Columns".to_owned()),
+    }
 }
