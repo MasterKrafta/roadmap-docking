@@ -47,6 +47,17 @@ struct GroupResizeState {
     group_area_top: f32,
 }
 
+/// Semantic target of a drag that may create a floating composition.
+///
+/// A composition drag preserves its complete Core subtree; group and panel drags
+/// explicitly request the one-column wrappers used by the shared dock UI.
+#[derive(Clone, Copy)]
+enum CompositionDragSource {
+    Composition(NodeId),
+    Group(NodeId),
+    Panel(PanelId),
+}
+
 /// Main window rendering the dock Core layout and its interactive panel controls.
 pub(crate) struct MainWindow {
     theme: Theme,
@@ -81,7 +92,7 @@ pub(crate) struct MainWindow {
     composition_drag_start_y: f32,
     composition_drag_offset_x: f32,
     composition_drag_offset_y: f32,
-    composition_drag_source: Option<NodeId>,
+    composition_drag_source: Option<CompositionDragSource>,
     composition_drag_group: Option<FloatingGroupId>,
 }
 
