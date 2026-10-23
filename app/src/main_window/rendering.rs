@@ -893,6 +893,7 @@ impl MainWindow {
                 .border_color(rgb(colors.border));
             let mut last_group_index: Option<usize> = None;
             let mut collapsed_rail_cursor_y = window_y_offset + header_height;
+            let mut current_group_origin_y = collapsed_rail_cursor_y;
             for (tab_index, (group_index, group_id, panel_id, active_panel)) in
                 collapsed_tabs.iter().copied().enumerate()
             {
@@ -912,6 +913,7 @@ impl MainWindow {
                         collapsed_rail_cursor_y += 2.0;
                     }
                     let mini_header_origin_y = collapsed_rail_cursor_y;
+                    current_group_origin_y = mini_header_origin_y;
                     let mini_header = div()
                         .id(format!("collapsed-dock-group-header-{column_index}-{group_index}"))
                         .w(px(rail_item_width))
@@ -950,6 +952,13 @@ impl MainWindow {
                 }
 
                 let tab_icon = self.panels.icon(panel).to_owned();
+                let tab_icon_origin_x =
+                    column_origin_x + ((column_width - button_size) / 2.0).max(0.0);
+                let tab_icon_origin_y = collapsed_rail_cursor_y;
+                let group_drag_origin_y = current_group_origin_y;
+                let floating_content_padding = metrics
+                    .content_padding
+                    .min(self.detached_column_width(Some(column_index)) / 2.0);
                 let tab = div()
                     .id(format!("collapsed-dock-tab-{column_index}-{tab_index}"))
                     .flex()
@@ -965,6 +974,25 @@ impl MainWindow {
                     } else {
                         colors.muted_text
                     }))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                            this.begin_panel_drag(
+                                column_index,
+                                group_id,
+                                panel_id,
+                                event.position.x.as_f32(),
+                                event.position.y.as_f32(),
+                                tab_icon_origin_x,
+                                tab_icon_origin_y,
+                                column_origin_x,
+                                group_drag_origin_y,
+                                composition_origin,
+                                floating_content_padding,
+                            );
+                            cx.notify();
+                        }),
+                    )
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.activate_tab(group_id, panel_id);
                         cx.notify();
