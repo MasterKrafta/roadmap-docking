@@ -74,7 +74,6 @@ pub(crate) struct MainWindow {
     resizing_groups_column: Option<GroupResizeState>,
     resize_group_pointer_offset_y: f32,
     /// The complete horizontal main-dock composition while it is floating.
-    floating_composition: Option<FloatingGroupId>,
     /// Pointer state used to detach or move the composition from a column header spacer.
     composition_drag_pending: bool,
     composition_dragging: bool,
@@ -115,7 +114,6 @@ impl MainWindow {
             resize_column_pointer_offset_x: 0.0,
             resizing_groups_column: None,
             resize_group_pointer_offset_y: 0.0,
-            floating_composition: None,
             composition_drag_pending: false,
             composition_dragging: false,
             composition_drag_start_x: 0.0,
@@ -149,13 +147,11 @@ impl MainWindow {
     /// and snapshots are retained so closed columns can still be restored.
     fn sync_column_slots_from_core(&mut self) {
         if self
-            .floating_composition
+            .composition_drag_group
             .is_some_and(|group_id| self.layout.floating_group(group_id).is_none())
         {
-            self.floating_composition = None;
             self.composition_drag_pending = false;
             self.composition_dragging = false;
-            self.composition_drag_source = None;
             self.composition_drag_group = None;
         }
 
@@ -163,13 +159,10 @@ impl MainWindow {
         if let Some(root) = self.layout.main_area(DockSide::Right).map(|area| area.root) {
             active_column_ids.extend(self.core_column_ids_in_order(root));
         }
-        if let Some(root) = self.floating_composition.and_then(|group_id| {
-            self.layout
-                .floating_group(group_id)
-                .and_then(|floating| self.layout.dock_area(floating.area))
-                .map(|area| area.root)
-        }) {
-            active_column_ids.extend(self.core_column_ids_in_order(root));
+        for (_, floating) in self.layout.floating_groups() {
+            if let Some(root) = self.layout.dock_area(floating.area).map(|area| area.root) {
+                active_column_ids.extend(self.core_column_ids_in_order(root));
+            }
         }
 
         for column_id in active_column_ids.iter().copied() {
@@ -310,12 +303,10 @@ impl MainWindow {
             }
         }
 
-        if let Some(root) = self.floating_composition.and_then(|group_id| {
-            self.layout
-                .floating_group(group_id)
-                .and_then(|floating| self.layout.dock_area(floating.area))
-                .map(|area| area.root)
-        }) {
+        for (_, floating) in self.layout.floating_groups() {
+            let Some(root) = self.layout.dock_area(floating.area).map(|area| area.root) else {
+                continue;
+            };
             let columns = self.composition_column_indices(root);
             if let Some(position) = columns.iter().position(|index| *index == column_index) {
                 return position;

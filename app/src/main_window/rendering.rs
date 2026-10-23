@@ -7,6 +7,24 @@ use gpui::{
 
 use super::{GroupResizeState, MainWindow, TabGroupViewData};
 
+const MIN_TAB_GROUP_DRAG_SPACER_WIDTH: f32 = 24.0;
+
+/// Allocate strip width while always preserving a reachable drag handle.
+fn tab_strip_widths(
+    available_width: f32,
+    max_tab_width: f32,
+    tab_count: usize,
+) -> (f32, f32) {
+    let available_width = available_width.max(0.0);
+    let drag_spacer_width = available_width.min(MIN_TAB_GROUP_DRAG_SPACER_WIDTH);
+    let tab_space = (available_width - drag_spacer_width).max(0.0);
+    let tab_width = max_tab_width
+        .max(0.0)
+        .min(tab_space / tab_count.max(1) as f32);
+    let spacer_width = (available_width - tab_width * tab_count as f32).max(drag_spacer_width);
+    (tab_width, spacer_width)
+}
+
 impl MainWindow {
     fn visible_tab_groups_in_column(
         &self,
@@ -419,11 +437,8 @@ impl MainWindow {
         let available_tab_width =
             (width - content_padding * 2.0 - button_size).max(0.0);
         let visible_tab_count = group.panels.len();
-        let tab_width = metrics
-            .column_tab_width
-            .min((available_tab_width / visible_tab_count.max(1) as f32).max(0.0));
-        let spacer_width =
-            (available_tab_width - tab_width * visible_tab_count as f32).max(0.0);
+        let (tab_width, spacer_width) =
+            tab_strip_widths(available_tab_width, metrics.column_tab_width, visible_tab_count);
 
         let mut tabs = Vec::with_capacity(visible_tab_count);
         for (tab_index, panel_id) in group.panels.iter().copied().enumerate() {
@@ -555,11 +570,8 @@ impl MainWindow {
                 visible_groups.iter().zip(group_heights.iter().copied())
             {
                 let visible_tab_count = group.panels.len();
-                let tab_width = metrics
-                    .column_tab_width
-                    .min((available_tab_width / visible_tab_count.max(1) as f32).max(0.0));
-                let spacer_width =
-                    (available_tab_width - tab_width * visible_tab_count as f32).max(0.0);
+                let (tab_width, spacer_width) =
+                    tab_strip_widths(available_tab_width, metrics.column_tab_width, visible_tab_count);
                 let tab_strip_height = metrics.tab_strip_height.min(group_height);
                 let content_height = if group.collapsed {
                     0.0
@@ -836,6 +848,18 @@ impl MainWindow {
                                 );
                                 cx.notify();
                             }),
+                        )
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                                this.begin_tab_group_drag(
+                                    column_index,
+                                    group_id,
+                                    event.position.x.as_f32(),
+                                    event.position.y.as_f32(),
+                                );
+                                cx.notify();
+                            }),
                         );
                     collapsed_tab_rail = collapsed_tab_rail.child(mini_header);
                     last_group_index = Some(group_index);
@@ -1053,15 +1077,23 @@ impl Render for MainWindow {
             .child(menu_bar)
             .child(dock_area);
 
-        if let Some((composition_root, bounds)) = self.floating_composition.and_then(|group_id| {
-            let floating = self.layout.floating_group(group_id)?;
-            let area = self.layout.dock_area(floating.area)?;
-            Some((area.root, floating.bounds))
-        }) {
+        let mut floating_group_ids: Vec<_> = self
+            .layout
+            .floating_groups()
+            .map(|(group_id, floating)| (floating.z_order, group_id))
+            .collect();
+        floating_group_ids.sort_by_key(|(z_order, _)| *z_order);
+        for (_, floating_group_id) in floating_group_ids {
+            let Some((composition_root, bounds)) = self.layout.floating_group(floating_group_id).and_then(|floating| {
+                let area = self.layout.dock_area(floating.area)?;
+                Some((area.root, floating.bounds))
+            }) else {
+                continue;
+            };
             let composition_columns = self.composition_column_indices(composition_root);
             if !composition_columns.is_empty() {
                 let mut floating_view = div()
-                    .id("floating-dock-composition")
+                    .id(format!("floating-dock-composition-{floating_group_id:?}"))
                     .absolute()
                     .left(px(bounds.origin.x))
                     .top(px(bounds.origin.y))
@@ -1092,7 +1124,7 @@ impl Render for MainWindow {
                 root = root.child(floating_view);
             } else if matches!(self.layout.node(composition_root), Some(Node::Tabs(_))) {
                 let floating_view = div()
-                    .id("floating-dock-composition")
+                    .id(format!("floating-dock-composition-{floating_group_id:?}"))
                     .absolute()
                     .left(px(bounds.origin.x))
                     .top(px(bounds.origin.y))
@@ -1538,5 +1570,34 @@ impl Render for MainWindow {
                     }
                 }),
             )
+    }
+}
+
+
+#[cfg(test)]
+mod tab_strip_widths_tests {
+    use super::tab_strip_widths;
+
+    #[test]
+    fn one_tab_keeps_a_drag_spacer() {
+        let (tab_width, spacer_width) = tab_strip_widths(100.0, 160.0, 1);
+        assert!(tab_width > 0.0);
+        assert!(spacer_width >= 24.0);
+        assert!((tab_width + spacer_width - 100.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn multiple_tabs_keep_a_drag_spacer() {
+        let (tab_width, spacer_width) = tab_strip_widths(100.0, 160.0, 3);
+        assert!(tab_width > 0.0);
+        assert!(spacer_width >= 24.0);
+        assert!((tab_width * 3.0 + spacer_width - 100.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn drag_spacer_never_exceeds_available_width() {
+        let (tab_width, spacer_width) = tab_strip_widths(8.0, 160.0, 1);
+        assert_eq!(tab_width, 0.0);
+        assert_eq!(spacer_width, 8.0);
     }
 }

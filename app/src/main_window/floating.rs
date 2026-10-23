@@ -36,36 +36,37 @@ impl MainWindow {
     }
 
     pub(super) fn sync_floating_composition_bounds(&mut self) {
-        let Some(group_id) = self.floating_composition else {
-            return;
-        };
-        let Some((root, current_bounds)) = self
-            .layout
-            .floating_group(group_id)
-            .and_then(|floating| {
-                self.layout
-                    .dock_area(floating.area)
-                    .map(|area| (area.root, floating.bounds))
-            })
-        else {
-            self.floating_composition = None;
-            return;
-        };
-        let Some(width) = self.composition_width(root) else {
-            return;
-        };
-        if (current_bounds.size.width - width).abs() <= f32::EPSILON {
-            return;
-        }
-        let bounds = Rect::new(
-            current_bounds.origin,
-            Size::new(width, current_bounds.size.height),
-        );
-        if let Err(error) = self.layout.apply(
-            DockCommand::ResizeFloatingBounds { group: group_id, bounds },
-            &self.dock_metrics,
-        ) {
-            eprintln!("Could not synchronize floating dock composition bounds: {error}");
+        let floating_group_ids: Vec<_> =
+            self.layout.floating_groups().map(|(group_id, _)| group_id).collect();
+        for group_id in floating_group_ids {
+            let Some((root, current_bounds)) = self
+                .layout
+                .floating_group(group_id)
+                .and_then(|floating| {
+                    self.layout
+                        .dock_area(floating.area)
+                        .map(|area| (area.root, floating.bounds))
+                })
+            else {
+                continue;
+            };
+            let Some(width) = self.composition_width(root) else {
+                // A standalone Tabs root keeps its explicitly assigned width.
+                continue;
+            };
+            if (current_bounds.size.width - width).abs() <= f32::EPSILON {
+                continue;
+            }
+            let bounds = Rect::new(
+                current_bounds.origin,
+                Size::new(width, current_bounds.size.height),
+            );
+            if let Err(error) = self.layout.apply(
+                DockCommand::ResizeFloatingBounds { group: group_id, bounds },
+                &self.dock_metrics,
+            ) {
+                eprintln!("Could not synchronize floating dock composition bounds: {error}");
+            }
         }
     }
 
@@ -84,35 +85,21 @@ impl MainWindow {
         self.composition_drag_start_x = pointer_x;
         self.composition_drag_start_y = pointer_y;
 
-        if let Some(group_id) = self.floating_composition {
-            let floating_root = self
-                .layout
-                .floating_group(group_id)
-                .and_then(|group| self.layout.dock_area(group.area))
-                .map(|area| area.root);
-            let clicked_column_is_floating = floating_root.is_some_and(|root| {
-                self.composition_column_indices(root).contains(&column_index)
-            });
-
-            if clicked_column_is_floating {
-                if let Some(origin) = self
-                    .layout
-                    .floating_group(group_id)
-                    .map(|group| group.bounds.origin)
-                {
-                    self.composition_drag_group = Some(group_id);
-                    self.composition_drag_offset_x = pointer_x - origin.x;
-                    self.composition_drag_offset_y = pointer_y - origin.y;
-                    self.composition_drag_pending = true;
-                    return;
-                }
-                self.floating_composition = None;
-            } else if floating_root.is_some() {
-                // This UI currently tracks one movable floating composition.
-                // Do not let a main-dock header accidentally drag that floating window.
+        let floating_columns: Vec<_> = self
+            .layout
+            .floating_groups()
+            .filter_map(|(group_id, floating)| {
+                let root = self.layout.dock_area(floating.area)?.root;
+                Some((group_id, root, floating.bounds.origin))
+            })
+            .collect();
+        for (group_id, root, origin) in floating_columns {
+            if self.composition_column_indices(root).contains(&column_index) {
+                self.composition_drag_group = Some(group_id);
+                self.composition_drag_offset_x = pointer_x - origin.x;
+                self.composition_drag_offset_y = pointer_y - origin.y;
+                self.composition_drag_pending = true;
                 return;
-            } else {
-                self.floating_composition = None;
             }
         }
 
@@ -141,39 +128,37 @@ impl MainWindow {
         pointer_x: f32,
         pointer_y: f32,
     ) {
-        if let Some(floating_id) = self.floating_composition {
-            let floating_root = self
-                .layout
-                .floating_group(floating_id)
-                .and_then(|floating| self.layout.dock_area(floating.area))
-                .map(|area| area.root);
-            if floating_root == Some(group_id) {
-                let Some(origin) = self
-                    .layout
-                    .floating_group(floating_id)
-                    .map(|floating| floating.bounds.origin)
-                else {
-                    return;
-                };
-                self.composition_drag_pending = false;
-                self.composition_dragging = false;
-                self.composition_drag_source = None;
-                self.composition_drag_group = Some(floating_id);
-                self.composition_drag_start_x = pointer_x;
-                self.composition_drag_start_y = pointer_y;
-                self.composition_drag_offset_x = pointer_x - origin.x;
-                self.composition_drag_offset_y = pointer_y - origin.y;
-                self.composition_drag_pending = true;
-            }
+        if let Some((floating_id, origin)) = self
+            .layout
+            .floating_groups()
+            .find_map(|(floating_id, floating)| {
+                let root = self.layout.dock_area(floating.area)?.root;
+                (root == group_id).then_some((floating_id, floating.bounds.origin))
+            })
+        {
+            self.composition_drag_pending = false;
+            self.composition_dragging = false;
+            self.composition_drag_source = None;
+            self.composition_drag_group = Some(floating_id);
+            self.composition_drag_start_x = pointer_x;
+            self.composition_drag_start_y = pointer_y;
+            self.composition_drag_offset_x = pointer_x - origin.x;
+            self.composition_drag_offset_y = pointer_y - origin.y;
+            self.composition_drag_pending = true;
             return;
         }
-        if !self.main_column_indices_in_core_order().contains(&column_index) {
-            return;
-        }
+
         let Some(column_id) = self.column_ids.get(column_index).copied() else {
             return;
         };
-        if !self.group_ids_in_column(column_id).contains(&group_id) {
+        let group_is_in_column = self.group_ids_in_column(column_id).contains(&group_id);
+        let column_is_in_main = self.main_column_indices_in_core_order().contains(&column_index);
+        let column_is_in_floating = self.layout.floating_groups().any(|(_, floating)| {
+            self.layout
+                .dock_area(floating.area)
+                .is_some_and(|area| self.composition_column_indices(area.root).contains(&column_index))
+        });
+        if !group_is_in_column || !(column_is_in_main || column_is_in_floating) {
             return;
         }
 
@@ -262,9 +247,9 @@ impl MainWindow {
                 .is_some_and(|area| area.root == node)
                 .then_some(group_id)
         })?;
-        self.floating_composition = Some(floating_id);
         self.composition_drag_group = Some(floating_id);
         self.composition_drag_source = None;
+        self.sync_column_slots_from_core();
         Some(floating_id)
     }
 
@@ -281,7 +266,6 @@ impl MainWindow {
             .floating_group(group_id)
             .map(|group| group.bounds.size)
         else {
-            self.floating_composition = None;
             self.composition_drag_group = None;
             self.composition_dragging = false;
             return;
