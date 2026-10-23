@@ -1,23 +1,21 @@
+mod column;
 mod tabs_panel;
 
+use column::Column;
 use gpui::{Context, IntoElement, ParentElement, Render, Styled, Window, div, px, rgb};
-use tabs_panel::TabsPanel;
 use ui::Theme;
 
-/// Minimal application window.
-///
-/// Dock panels, columns, floating windows, and pointer gestures will be rebuilt
-/// from this small root instead of carrying the previous UI implementation forward.
+/// Root window for the rebuilt docking layout.
 pub(crate) struct MainWindow {
     theme: Theme,
-    tabs_panel: TabsPanel,
+    column: Column,
 }
 
 impl MainWindow {
     pub(crate) fn new(theme: Theme) -> Result<Self, String> {
         Ok(Self {
             theme,
-            tabs_panel: TabsPanel::new(theme),
+            column: Column::new(theme),
         })
     }
 }
@@ -33,6 +31,6 @@ impl Render for MainWindow {
             .w(px(width))
             .h(px(height))
             .bg(rgb(self.theme.colors.canvas_background))
-            .child(self.tabs_panel.render(cx, height))
+            .child(self.column.render(cx, height))
     }
 }
