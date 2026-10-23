@@ -127,6 +127,9 @@ impl MainWindow {
         group_id: NodeId,
         pointer_x: f32,
         pointer_y: f32,
+        group_origin_x: f32,
+        group_origin_y: f32,
+        add_floating_header_offset: bool,
     ) {
         if let Some((floating_id, origin)) = self
             .layout
@@ -168,8 +171,13 @@ impl MainWindow {
         self.composition_drag_group = None;
         self.composition_drag_start_x = pointer_x;
         self.composition_drag_start_y = pointer_y;
-        self.composition_drag_offset_x = self.column_width(column_index) / 2.0;
-        self.composition_drag_offset_y = self.theme.metrics.tab_strip_height / 2.0;
+        self.composition_drag_offset_x = pointer_x - group_origin_x;
+        self.composition_drag_offset_y = pointer_y - group_origin_y
+            + if add_floating_header_offset {
+                self.theme.metrics.column_header_height
+            } else {
+                0.0
+            };
         self.composition_drag_pending = true;
     }
 
