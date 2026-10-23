@@ -236,7 +236,7 @@ impl MainWindow {
         button_size: f32,
         spacer_width: f32,
         visible_tab_count: usize,
-        tabs: Vec<Div>,
+        tabs: Vec<impl IntoElement>,
         menu_element_id: String,
     ) -> Div {
         let colors = self.theme.colors;
