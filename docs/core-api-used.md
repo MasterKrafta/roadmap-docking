@@ -21,13 +21,14 @@
 | `column_display_order` | `fn column_display_order(&self, column_id: NodeId) -> Result<Vec<ColumnDisplayItem>, CommandError>` | Канонический порядок панелей в рейке: группы сверху вниз, вкладки слева направо |
 | `flyout` | `const fn flyout(&self) -> Option<FlyoutState>` | Текущая временно открытая панель flyout |
 
-Также доступны и используются для проверки/логики уровня окна:
+Дополнительные методы `Layout`, доступные хозяину состояния и input-слою, но не являющиеся прямыми вызовами текущего `render.rs`:
 
 - `floating_group(id) -> Option<&FloatingGroup>`;
 - `panel_instances() -> impl Iterator<Item = (PanelId, &PanelInstance)>`;
 - `floating_groups() -> impl Iterator<Item = (FloatingGroupId, &FloatingGroup)>`;
 - `floating_groups_in_hit_test_order() -> Vec<(FloatingGroupId, &FloatingGroup)>`;
 - `chrome() -> ChromeMode`, `canvas() -> &CanvasState`, `flyout_auto_collapse_enabled() -> bool`.
+
 
 Точные объявления этих методов находятся в `crates/dock-core/src/layout.rs`; порядок рейки реализован в `crates/dock-core/src/layout/column_display_order.rs`.
 
