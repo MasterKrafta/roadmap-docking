@@ -4,6 +4,7 @@ mod metrics;
 mod render;
 pub mod panels;
 
+pub use geometry::union_rects;
 pub use metrics::dock_metrics_from_theme;
 pub use render::{
     CommandClickHandler, DockMenuRequest, DragOverlay, DragStartHandler, ResizeHandle,

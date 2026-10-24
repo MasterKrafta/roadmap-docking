@@ -1,5 +1,6 @@
 mod tabs_group;
 
+use dock_gpui::union_rects;
 use dock_core::{
     create_initial_layout, DockCommand, DockMetrics, DockSide, DropTarget, DropZone,
     FloatingGroupId, Layout, Node, NodeId, PanelConstraints, PanelId, PanelKey, Point,
@@ -1847,16 +1848,7 @@ fn dock_area_bounds(
     })
 }
 
-fn union_rects(current: Option<Rect>, next: Rect) -> Rect {
-    let Some(current) = current else {
-        return next;
-    };
-    let left = current.origin.x.min(next.origin.x);
-    let top = current.origin.y.min(next.origin.y);
-    let right = (current.origin.x + current.size.width).max(next.origin.x + next.size.width);
-    let bottom = (current.origin.y + current.size.height).max(next.origin.y + next.size.height);
-    Rect::new(Point::new(left, top), Size::new(right - left, bottom - top))
-}
+
 
 fn floating_root_node(layout: &Layout, floating_group: FloatingGroupId) -> Option<NodeId> {
     let floating = layout.floating_group(floating_group)?;

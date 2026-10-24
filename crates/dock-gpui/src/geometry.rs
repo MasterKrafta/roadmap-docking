@@ -61,9 +61,22 @@ pub(crate) fn scroll_rect_in_viewport(
     ))
 }
 
+/// Returns the smallest rectangle that contains both rectangles.
+/// When there is no accumulated rectangle yet, the next rectangle becomes the result.
+pub fn union_rects(current: Option<Rect>, next: Rect) -> Rect {
+    let Some(current) = current else {
+        return next;
+    };
+    let left = current.origin.x.min(next.origin.x);
+    let top = current.origin.y.min(next.origin.y);
+    let right = (current.origin.x + current.size.width).max(next.origin.x + next.size.width);
+    let bottom = (current.origin.y + current.size.height).max(next.origin.y + next.size.height);
+    Rect::new(Point::new(left, top), Size::new(right - left, bottom - top))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{scroll_rect_in_viewport, translate_rect_to_local};
+    use super::{scroll_rect_in_viewport, translate_rect_to_local, union_rects};
     use dock_core::{Point, Rect, Size};
 
     #[test]
@@ -100,4 +113,25 @@ mod tests {
             ),
         );
     }
+    #[test]
+    fn union_rects_combines_bounds_and_handles_an_empty_accumulator() {
+        let first = Rect::new(
+            Point::new(10.0, 20.0),
+            Size::new(30.0, 40.0),
+        );
+        let second = Rect::new(
+            Point::new(0.0, 35.0),
+            Size::new(20.0, 10.0),
+        );
+
+        assert_eq!(union_rects(None, first), first);
+        assert_eq!(
+            union_rects(Some(first), second),
+            Rect::new(
+                Point::new(0.0, 20.0),
+                Size::new(40.0, 40.0),
+            )
+        );
+    }
+
 }
