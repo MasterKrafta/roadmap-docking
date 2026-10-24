@@ -802,6 +802,112 @@ fn c45_resize_column_boundary_preserves_pair_sum_and_clamps_min_max() {
 }
 
 #[test]
+fn resize_split_column_boundary_works_for_a_floating_tree() {
+    let metrics = DockMetrics::default();
+    let left_constraints = PanelConstraints::new(
+        Size::new(120.0, 80.0),
+        Size::new(200.0, 160.0),
+        Some(Size::new(300.0, 400.0)),
+        false,
+    );
+    let right_constraints = PanelConstraints::new(
+        Size::new(120.0, 80.0),
+        Size::new(200.0, 160.0),
+        Some(Size::new(500.0, 400.0)),
+        false,
+    );
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+    let (_, left_panel) = builder.panel(
+        PanelKey::new("floating-split-boundary-left").unwrap(),
+        left_constraints,
+    );
+    let (_, right_panel) = builder.panel(
+        PanelKey::new("floating-split-boundary-right").unwrap(),
+        right_constraints,
+    );
+    let left_group = builder.tabs(vec![left_panel], 0, false);
+    let right_group = builder.tabs(vec![right_panel], 0, false);
+    let left_column = builder.column(
+        280.0,
+        crate::ColumnMode::Expanded,
+        vec![left_group],
+        vec![1.0],
+    );
+    let right_column = builder.column(
+        280.0,
+        crate::ColumnMode::Expanded,
+        vec![right_group],
+        vec![1.0],
+    );
+    let root = builder.split(Axis::X, vec![left_column, right_column], vec![0.5, 0.5]);
+    builder.main_area(DockSide::Right, root);
+    let mut layout = builder.build();
+    let bounds = Rect::new(Point::ZERO, Size::new(600.0, 500.0));
+
+    layout
+        .apply(DockCommand::Float { node: root, bounds }, &metrics)
+        .unwrap();
+    assert!(layout.main_area(DockSide::Right).is_none());
+
+    let max_clamp = layout
+        .apply(
+            DockCommand::ResizeSplitColumnBoundary {
+                split: root,
+                boundary_index: 0,
+                delta: 10_000.0,
+            },
+            &metrics,
+        )
+        .unwrap();
+    assert_eq!(
+        max_clamp.actual_value,
+        Some(CommandValue::ColumnBoundaryDelta(20.0))
+    );
+    let left_width = match layout.node(left_column).unwrap() {
+        Node::Column(value) => value.width,
+        _ => unreachable!(),
+    };
+    let right_width = match layout.node(right_column).unwrap() {
+        Node::Column(value) => value.width,
+        _ => unreachable!(),
+    };
+    assert_eq!(left_width, 300.0);
+    assert_eq!(right_width, 260.0);
+    assert!((left_width + right_width - 560.0).abs() < 1.0e-4);
+
+    layout.apply(max_clamp.inverse.unwrap(), &metrics).unwrap();
+    assert!(matches!(layout.node(left_column), Some(Node::Column(value)) if value.width == 280.0));
+    assert!(matches!(layout.node(right_column), Some(Node::Column(value)) if value.width == 280.0));
+
+    let min_clamp = layout
+        .apply(
+            DockCommand::ResizeSplitColumnBoundary {
+                split: root,
+                boundary_index: 0,
+                delta: -10_000.0,
+            },
+            &metrics,
+        )
+        .unwrap();
+    assert_eq!(
+        min_clamp.actual_value,
+        Some(CommandValue::ColumnBoundaryDelta(-80.0))
+    );
+    let left_width = match layout.node(left_column).unwrap() {
+        Node::Column(value) => value.width,
+        _ => unreachable!(),
+    };
+    let right_width = match layout.node(right_column).unwrap() {
+        Node::Column(value) => value.width,
+        _ => unreachable!(),
+    };
+    assert_eq!(left_width, 200.0);
+    assert_eq!(right_width, 360.0);
+    assert!((left_width + right_width - 560.0).abs() < 1.0e-4);
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
 fn c45_resize_rejects_non_finite_or_non_positive_inputs_atomically() {
     let metrics = DockMetrics::default();
     let mut layout = initial_layout(Profile::Photoshop);
