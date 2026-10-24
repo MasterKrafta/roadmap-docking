@@ -1,6 +1,4 @@
-mod collapse_button;
-mod close_button;
-
+use super::{close_button, collapse_button};
 use gpui::{Div, ParentElement, Styled, div, px, rgb};
 
 /// Empty header area with the collapse and close controls aligned to the right.
