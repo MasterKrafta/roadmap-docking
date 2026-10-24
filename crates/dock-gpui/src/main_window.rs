@@ -1,7 +1,7 @@
 use dock_core::{DockCommand, Point, Rect, Size};
 use gpui::{
-    Context, IntoElement, MouseButton, MouseMoveEvent, MouseUpEvent, ParentElement, Render,
-    Styled, Subscription, Window, div, px, rgb,
+    Context, DispatchPhase, IntoElement, MouseButton, MouseMoveEvent, MouseUpEvent,
+    ParentElement, Render, Styled, Subscription, Window, div, px, rgb,
 };
 use ui::Theme;
 
@@ -102,6 +102,21 @@ impl MainWindow {
     }
 }
 
+fn dock_pointer(position: gpui::Point<gpui::Pixels>) -> Point {
+    Point::new(position.x.as_f32(), position.y.as_f32())
+}
+
+fn surface_contains_window_point(
+    position: gpui::Point<gpui::Pixels>,
+    width: f32,
+    top: f32,
+    height: f32,
+) -> bool {
+    let x = position.x.as_f32();
+    let y = position.y.as_f32();
+    x >= 0.0 && x < width && y >= top && y < top + height
+}
+
 impl Render for MainWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if self.activation_subscription.is_none() {
@@ -120,6 +135,47 @@ impl Render for MainWindow {
         let height = window_size.height.as_f32().max(1.0);
         let menu_height = self.theme.metrics.column_header_height.max(1.0);
         let content_height = (height - menu_height).max(1.0);
+
+        // Element mouse-move handlers stop receiving events once the pointer leaves
+        // the surface hitbox. Keep tracking the same resize gesture at window scope
+        // only while the pointer is outside the surface.
+        let outside_move = cx.listener::<MouseMoveEvent>(|this, event, _window, cx| {
+            this.handle_surface_mouse_move(event, cx);
+        });
+        window.on_mouse_event(
+            move |event: &MouseMoveEvent, phase, window, cx| {
+                if phase == DispatchPhase::Capture
+                    && !surface_contains_window_point(
+                        event.position,
+                        width,
+                        menu_height,
+                        content_height,
+                    )
+                {
+                    outside_move(event, window, cx);
+                }
+            },
+        );
+
+        let outside_up = cx.listener::<MouseUpEvent>(|this, event, _window, cx| {
+            this.handle_surface_mouse_up(event, cx);
+        });
+        window.on_mouse_event(
+            move |event: &MouseUpEvent, phase, window, cx| {
+                if phase == DispatchPhase::Capture
+                    && event.button == MouseButton::Left
+                    && !surface_contains_window_point(
+                        event.position,
+                        width,
+                        menu_height,
+                        content_height,
+                    )
+                {
+                    outside_up(event, window, cx);
+                }
+            },
+        );
+
         let viewport = Rect::new(Point::ZERO, Size::new(width, content_height));
 
         let frame = match self.dock.frame(viewport) {
