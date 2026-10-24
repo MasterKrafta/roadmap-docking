@@ -1,7 +1,7 @@
 use gpui::{Div, ParentElement, Styled, div, px, rgb};
 
 /// Renders placeholder content for the panel selected by the Core layout.
-pub(super) fn render_selected(
+pub(super) fn render(
     theme: ui::Theme,
     selected_tab: &'static str,
     width: f32,
