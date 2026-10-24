@@ -1183,8 +1183,10 @@ fn group_tabs_view(layout: &Layout, group_id: NodeId) -> Option<GroupTabsView> {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_core_layout, floating_group_for_panel, floating_root_tabs_group,
-        column_containing_group, group_containing_panel, group_is_floating, panel_id_for_key,
+        build_core_layout, column_containing_group, floating_group_bounds,
+        floating_group_for_panel, floating_root_tabs_group, group_containing_panel,
+        group_has_header, group_is_floating, panel_constraints, panel_id_for_key,
+        panel_is_open, toggle_core_panel, FLOATING_HEIGHT_RATIO,
     };
     use dock_core::{Axis, DockCommand, DockSide, Node, Point, Rect, Size};
 
