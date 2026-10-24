@@ -3,7 +3,7 @@ use gpui::{
     StatefulInteractiveElement, Styled, Window, div, px, rgb,
 };
 
-use super::super::{TabDragPayload, TabDragPreview};
+use super::super::{DockDragPreview, TabDragPayload};
 
 /// A selectable tab. The parent owns the active-tab state and click callback.
 pub(super) fn render<F>(
@@ -43,7 +43,7 @@ where
             // inactive tab. Refresh the pointer origin when GPUI actually starts
             // the drag so both active and inactive tabs follow the cursor equally.
             payload.drag_start_position.set(window.mouse_position());
-            cx.new(|_| TabDragPreview)
+            cx.new(|_| DockDragPreview)
         }),
         None => tab,
     }
