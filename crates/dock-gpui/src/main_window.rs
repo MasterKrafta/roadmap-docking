@@ -7,7 +7,7 @@ use gpui::{
 };
 use ui::Theme;
 
-use crate::{DockSurface, FrameGeometry, NoopHost, dock_metrics_from_theme};
+use crate::{DockSurface, NoopHost, dock_metrics_from_theme};
 use crate::dock::DockController;
 
 /// Temporary picture-only host window used while the new surface architecture is validated.
@@ -37,7 +37,7 @@ impl Render for MainWindow {
         let content_height = (height - menu_height).max(1.0);
         let viewport = Rect::new(Point::ZERO, Size::new(width, content_height));
 
-        let frame = match FrameGeometry::compute(self.dock.layout(), viewport, self.dock.metrics()) {
+        let frame = match self.dock.frame(viewport) {
             Ok(frame) => frame,
             Err(error) => {
                 return div()

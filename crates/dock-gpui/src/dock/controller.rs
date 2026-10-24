@@ -1,7 +1,12 @@
 use std::collections::HashMap;
 
-use dock_core::{CommandError, CommandOutcome, DockCommand, DockMetrics, Layout, NodeId, UndoRedoHistory};
+use dock_core::{
+    CommandError, CommandOutcome, ComputeRectsError, DockCommand, DockMetrics, Layout, NodeId,
+    Rect, UndoRedoHistory,
+};
 use gpui::ScrollHandle;
+
+use crate::FrameGeometry;
 
 /// Owns the live layout and the view-local state needed to render it.
 ///
@@ -41,6 +46,11 @@ impl DockController {
     /// Reapplies the next recorded layout revision, if one exists.
     pub(crate) fn redo(&mut self) -> Result<bool, CommandError> {
         self.history.redo(&mut self.layout, &self.metrics)
+    }
+
+    /// Computes the normalized frame geometry for the current layout and viewport.
+    pub(crate) fn frame(&self, viewport: Rect) -> Result<FrameGeometry, ComputeRectsError> {
+        FrameGeometry::compute(&self.layout, viewport, &self.metrics)
     }
 
     pub(crate) fn layout(&self) -> &Layout {
