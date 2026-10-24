@@ -98,6 +98,7 @@ pub(crate) struct MainWindow {
     core_layout: Layout,
     core_metrics: DockMetrics,
     tab_drag_preview: Option<TabDragPreviewState>,
+    active_tab_drag_payload: Option<TabDragPayload>,
 }
 
 impl MainWindow {
@@ -110,6 +111,7 @@ impl MainWindow {
             core_layout,
             core_metrics,
             tab_drag_preview: None,
+            active_tab_drag_payload: None,
         })
     }
 
@@ -231,6 +233,10 @@ impl MainWindow {
         cx: &mut Context<Self>,
     ) {
         let drag = event.drag(cx);
+        if self.active_tab_drag_payload.is_none() {
+            self.active_tab_drag_payload = Some(drag.clone());
+        }
+
         let current_pointer = Point::new(
             event.event.position.x.as_f32(),
             event.event.position.y.as_f32(),
@@ -309,6 +315,7 @@ impl MainWindow {
 
         if !dx.is_finite() || !dy.is_finite() {
             self.tab_drag_preview = None;
+            self.active_tab_drag_payload = None;
             cx.notify();
             return;
         }
@@ -348,6 +355,7 @@ impl MainWindow {
         }
 
         self.tab_drag_preview = None;
+        self.active_tab_drag_payload = None;
         cx.notify();
     }
 
@@ -831,6 +839,16 @@ impl Render for MainWindow {
                     this.finish_tab_drag(drag, window.mouse_position(), cx);
                 },
             ))
+            .on_mouse_up_out(
+                MouseButton::Left,
+                cx.listener(|this, _event, window, cx| {
+                    if let Some(drag) = this.active_tab_drag_payload.clone() {
+                        this.finish_tab_drag(&drag, window.mouse_position(), cx);
+                    } else if this.tab_drag_preview.take().is_some() {
+                        cx.notify();
+                    }
+                }),
+            )
     }
 }
 
