@@ -1,7 +1,7 @@
 use dock_core::Rect;
 use gpui::{
-    App, ClickEvent, InteractiveElement, IntoElement, ParentElement, RenderOnce, Styled, Window,
-    div, px, rgb,
+    App, ClickEvent, InteractiveElement, IntoElement, ParentElement, RenderOnce,
+    StatefulInteractiveElement, Styled, Window, div, px, rgb,
 };
 use ui::Theme;
 

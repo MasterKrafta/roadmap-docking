@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::components::{
-    DropZone, FloatingTitle, FlyoutHeader, GroupFrame, GroupGrip, GroupMenuButton, IconButton,
+    DropZone, FloatingTitle, FlyoutHeader, GroupFrame, GroupGrip, GroupMenuButton,
     PanelSurface, PanelTab, RailEntry, RectBox, ResizeEdgeHandle, ResizeEdgeKind, SplitterHandle,
     TabOverflowButton, TabStrip,
 };
@@ -21,7 +21,7 @@ use dock_core::{
 };
 use gpui::{
     AnyElement, App, ClickEvent, Div, InteractiveElement, IntoElement, MouseButton,
-    MouseDownEvent, ParentElement, ScrollHandle, Styled, Window, div,
+    MouseDownEvent, ParentElement, ScrollHandle, StatefulInteractiveElement, Styled, Window, div,
     px, rgb,
 };
 use ui::Theme;
