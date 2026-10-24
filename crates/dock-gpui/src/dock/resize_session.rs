@@ -227,6 +227,7 @@ fn capture_start_geometry(
             entry.owner == owner
                 && entry.boundary_index == boundary_index
                 && entry.axis == axis
+                && entry.rect.validate_non_empty().is_ok()
         });
         if !has_splitter_geometry {
             return Err(ResizeStartError::InvalidHandle);
@@ -599,6 +600,45 @@ mod tests {
                     || entry.boundary_index != splitter.boundary_index
                     || entry.axis != axis
             });
+
+            assert_eq!(
+                capture_start_geometry(&layout, &rects, controller.metrics(), handle),
+                Err(ResizeStartError::InvalidHandle)
+            );
+        }
+    }
+
+    #[test]
+    fn splitter_resize_rejects_empty_frame_geometry() {
+        let controller = DockController::new_initial(&Theme::default()).unwrap();
+        let layout = controller.layout().clone();
+        let frame = controller
+            .frame(Rect::new(Point::ZERO, Size::new(1200.0, 800.0)))
+            .unwrap();
+
+        for axis in [Axis::X, Axis::Y] {
+            let splitter = *frame
+                .rects()
+                .splitters
+                .iter()
+                .find(|splitter| splitter.axis == axis)
+                .expect("initial layout should contain a splitter on each axis");
+            let handle = ResizeHandle::Splitter {
+                owner: splitter.owner,
+                boundary_index: splitter.boundary_index,
+                axis,
+            };
+            let mut rects = frame.rects().clone();
+            let geometry = rects
+                .splitters
+                .iter_mut()
+                .find(|entry| {
+                    entry.owner == splitter.owner
+                        && entry.boundary_index == splitter.boundary_index
+                        && entry.axis == axis
+                })
+                .expect("matching splitter geometry should exist");
+            geometry.rect.size.height = 0.0;
 
             assert_eq!(
                 capture_start_geometry(&layout, &rects, controller.metrics(), handle),
