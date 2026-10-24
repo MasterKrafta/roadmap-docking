@@ -1,3 +1,4 @@
+mod geometry;
 mod metrics;
 mod render;
 pub mod panels;

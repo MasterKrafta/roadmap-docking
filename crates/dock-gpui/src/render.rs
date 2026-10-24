@@ -1,5 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::geometry::{localize_tree_rects, scroll_rect_in_viewport, translate_rect_to_local};
+
 use dock_core::{
     Axis, ColumnMode, DockCommand, DockMetrics, DockSide, DragHandle, DragPayload, DragPreview,
     DropTarget, DropZoneRect, FloatingGroupId, Layout, LayoutRects, Node, NodeId, PanelId,
@@ -674,23 +676,6 @@ fn drop_target_node(target: DropTarget) -> Option<NodeId> {
     }
 }
 
-/// Translates a Core drop zone by the GPUI scroll offset and clips it to the viewport.
-fn scroll_rect_in_viewport(rect: Rect, viewport: Rect, scroll_offset_y: f32) -> Option<Rect> {
-    if !scroll_offset_y.is_finite() {
-        return None;
-    }
-    let top = (rect.origin.y + scroll_offset_y).max(viewport.origin.y);
-    let bottom = (rect.origin.y + scroll_offset_y + rect.size.height)
-        .min(viewport.origin.y + viewport.size.height);
-    if !top.is_finite() || !bottom.is_finite() || bottom <= top {
-        return None;
-    }
-    Some(Rect::new(
-        Point::new(rect.origin.x, top),
-        Size::new(rect.size.width, bottom - top),
-    ))
-}
-
 fn tree_elements<F, T, I, H, M, D, R>(
     layout: &Layout,
     rects: &LayoutRects,
@@ -1067,45 +1052,6 @@ fn first_panel_in_subtree(layout: &Layout, node_id: NodeId) -> Option<PanelId> {
     }
 }
 
-fn translate_rect_to_local(rect: Rect, origin: Point) -> Rect {
-    Rect::new(
-        Point::new(rect.origin.x - origin.x, rect.origin.y - origin.y),
-        rect.size,
-    )
-}
-
-/// Produces tree geometry relative to a floating-container origin. Floating bounds, Canvas,
-/// and drop-zone geometry stay in window coordinates and are intentionally left untouched.
-fn localize_tree_rects(rects: &LayoutRects, origin: Point) -> LayoutRects {
-    let mut local = rects.clone();
-    for entry in &mut local.columns {
-        entry.rect = translate_rect_to_local(entry.rect, origin);
-    }
-    for entry in &mut local.groups {
-        entry.rect = translate_rect_to_local(entry.rect, origin);
-    }
-    for entry in &mut local.tab_strips {
-        entry.rect = translate_rect_to_local(entry.rect, origin);
-    }
-    for entry in &mut local.tab_headers {
-        entry.rect = translate_rect_to_local(entry.rect, origin);
-    }
-    for entry in &mut local.tab_overflows {
-        entry.button_rect = translate_rect_to_local(entry.button_rect, origin);
-    }
-    for entry in &mut local.panels {
-        entry.rect = translate_rect_to_local(entry.rect, origin);
-    }
-    for entry in &mut local.splitters {
-        entry.rect = translate_rect_to_local(entry.rect, origin);
-    }
-    for entry in &mut local.vertical_overflow {
-        entry.viewport = translate_rect_to_local(entry.viewport, origin);
-        entry.content_extent = translate_rect_to_local(entry.content_extent, origin);
-    }
-    local
-}
-
 fn rect_element(rect: Rect, color: u32) -> Div {
     div()
         .absolute()
@@ -1178,8 +1124,8 @@ fn tab_header_label(title: &str, collapsed: bool, tab_index: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        normalize_docked_group_geometry, rail_entry_label, scroll_rect_in_viewport,
-        tab_header_label, GROUP_DRAG_GRIP_HEIGHT, GROUP_MENU_BUTTON_WIDTH,
+        normalize_docked_group_geometry, rail_entry_label, tab_header_label,
+        GROUP_DRAG_GRIP_HEIGHT, GROUP_MENU_BUTTON_WIDTH,
     };
     use dock_core::{
         create_initial_layout, ColumnMode, DockMetrics, DockSide, Node, PanelConstraints, PanelKey,
@@ -1202,40 +1148,6 @@ mod tests {
         assert_eq!(tab_header_label("Layers", false, 0), "Layers");
     }
 
-    #[test]
-    fn scrolled_drop_zones_are_translated_and_clipped_to_the_column_viewport() {
-        let viewport = super::Rect::new(
-            super::Point::new(20.0, 10.0),
-            super::Size::new(180.0, 100.0),
-        );
-        let zone = super::Rect::new(
-            super::Point::new(20.0, 120.0),
-            super::Size::new(180.0, 40.0),
-        );
-        assert_eq!(
-            scroll_rect_in_viewport(zone, viewport, -30.0),
-            Some(super::Rect::new(
-                super::Point::new(20.0, 90.0),
-                super::Size::new(180.0, 20.0),
-            ))
-        );
-        assert_eq!(scroll_rect_in_viewport(zone, viewport, f32::NAN), None);
-    }
-
-    #[test]
-    fn floating_descendant_rects_are_relative_to_the_container_origin() {
-        let rect = super::Rect::new(
-            super::Point::new(145.0, 92.0),
-            super::Size::new(180.0, 48.0),
-        );
-        assert_eq!(
-            super::translate_rect_to_local(rect, super::Point::new(100.0, 60.0)),
-            super::Rect::new(
-                super::Point::new(45.0, 32.0),
-                super::Size::new(180.0, 48.0),
-            ),
-        );
-    }
     #[test]
     fn collapsed_floating_root_tabs_are_positioned_below_the_window_title() {
         use dock_core::DockCommand;
