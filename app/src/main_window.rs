@@ -1421,14 +1421,20 @@ fn group_tabs_view_excluding(
     let Some(Node::Tabs(tabs)) = layout.node(group_id) else {
         return None;
     };
-    let mut children = tabs.children.iter().filter_map(|child_id| {
-        let Some(Node::Panel(panel)) = layout.node(*child_id) else {
-            return None;
-        };
-        (Some(panel.panel_id) != excluded_panel)
-            .then(|| panel_label(layout, panel.panel_id).map(|label| (panel.panel_id, label)))
-            .flatten()
-    }).take(2);
+    let mut children = tabs
+        .children
+        .iter()
+        .filter_map(|child_id| {
+            let Some(Node::Panel(panel)) = layout.node(*child_id) else {
+                return None;
+            };
+            if Some(panel.panel_id) == excluded_panel {
+                return None;
+            }
+            let label = panel_label(layout, panel.panel_id)?;
+            Some((panel.panel_id, label))
+        })
+        .take(2);
 
     let (first_panel, first_label) = children.next()?;
     let second = children.next();
