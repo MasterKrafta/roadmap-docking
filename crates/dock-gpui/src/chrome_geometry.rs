@@ -34,6 +34,15 @@ pub fn normalize_docked_group_geometry(
 
     // A floating title is shared by every branch along the top edge of a
     // horizontal composition, not just the single group returned by min_by(y).
+    // Index the computed groups once so composite floating roots can resolve
+    // their title-bearing branches without rescanning all group rectangles.
+    let group_rect_indices = rects
+        .groups
+        .iter()
+        .enumerate()
+        .map(|(index, entry)| (entry.group, index))
+        .collect::<HashMap<NodeId, usize>>();
+
     // Core reserves title space for collapsed branches in composite roots;
     // standalone Tabs roots retain the adapter's simple local offset.
     let mut floating_title_groups = HashMap::<NodeId, (f32, f32)>::new();
@@ -54,8 +63,9 @@ pub fn normalize_docked_group_geometry(
         }
         let title_height = metrics.header_height.min(bounds.size.height);
         for top_group in floating_title_groups_in_tree(layout, area.root) {
-            if rects.groups.iter().any(|entry| entry.group == top_group) {
-                floating_title_groups.insert(top_group, (title_height, bounds.origin.y));
+            if let Some(&group_index) = group_rect_indices.get(&top_group) {
+                let group_id = rects.groups[group_index].group;
+                floating_title_groups.insert(group_id, (title_height, bounds.origin.y));
             }
         }
     }
