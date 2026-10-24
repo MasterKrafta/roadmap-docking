@@ -52,3 +52,18 @@ fn blend_rgb(foreground: u32, background: u32, foreground_weight: f32) -> u32 {
 
     (channel(16) << 16) | (channel(8) << 8) | channel(0)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::blend_rgb;
+
+    #[test]
+    fn active_and_idle_drop_zones_use_distinct_blends() {
+        let active = blend_rgb(0x0C8CE9, 0x121212, 0.38);
+        let idle = blend_rgb(0x0C8CE9, 0x121212, 0.13);
+
+        assert_ne!(active, idle);
+        assert_ne!(active, 0x121212);
+        assert_ne!(idle, 0x121212);
+    }
+}

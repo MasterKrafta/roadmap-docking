@@ -6,12 +6,14 @@
 //! All callbacks are intentionally no-ops: this window previews component styling,
 //! keyboard focus, labels and hit targets without creating a DockController or Layout.
 
+#[cfg(windows)]
+mod windows_gallery {
 use dock_core::{
     Axis, ColumnMode, FloatingGroupId, NodeId, PanelId, Point, Rect, ResizeEdge, Size,
 };
 use gpui::{
-    App, AppContext, ClickEvent, Context, IntoElement, InteractiveElement, MouseDownEvent,
-    ParentElement, Render, SharedString, Styled, Window, div, px, rgb,
+    App, ClickEvent, Context, IntoElement, InteractiveElement, MouseDownEvent, ParentElement,
+    Render, Styled, Window, div, px, rgb,
 };
 use slotmap::SlotMap;
 use ui::Theme;
@@ -456,9 +458,8 @@ fn noop_mouse_down() -> MouseDownHandler {
     Box::new(|_, _, _| {})
 }
 
-#[cfg(windows)]
-fn main() {
-    use gpui::{Bounds, WindowBounds, WindowOptions, px, size};
+pub(super) fn run() {
+    use gpui::{AppContext, Bounds, WindowBounds, WindowOptions, px, size};
     use gpui_platform::application;
 
     application().run(|cx: &mut App| {
@@ -471,7 +472,7 @@ fn main() {
         };
 
         if let Err(error) = cx.open_window(options, move |_window, cx| {
-            cx.new(|_| gallery)
+            cx.new(move |_| gallery)
         }) {
             eprintln!("Could not open the components gallery: {error}");
             return;
@@ -479,6 +480,12 @@ fn main() {
 
         cx.activate(true);
     });
+}
+}
+
+#[cfg(windows)]
+fn main() {
+    windows_gallery::run();
 }
 
 #[cfg(not(windows))]
