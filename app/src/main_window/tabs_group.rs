@@ -47,6 +47,7 @@ pub(super) fn render<F1, F2>(
     on_second_tab: F2,
     mode: GroupRenderMode,
     group_drag_payload: Option<GroupDragPayload>,
+    header_drag_payload: Option<GroupDragPayload>,
 ) -> Div
 where
     F1: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
@@ -102,7 +103,7 @@ where
         group
     };
     let group = if show_header {
-        group.child(header::render(theme, width, header_height))
+        group.child(header::render(theme, width, header_height, header_drag_payload))
     } else {
         group
     };
