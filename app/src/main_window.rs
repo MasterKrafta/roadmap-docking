@@ -1357,7 +1357,7 @@ mod tests {
         use std::collections::HashMap;
 
         let theme = ui::Theme::default();
-        let (mut layout, metrics, headered_group, _, headerless_group) =
+        let (mut layout, metrics, _, headered_group, headerless_group) =
             build_core_layout(&theme).expect("initial Core layout should be valid");
         let mut header_modes =
             HashMap::from([(headered_group, true), (headerless_group, false)]);
