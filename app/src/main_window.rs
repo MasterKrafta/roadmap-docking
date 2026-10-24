@@ -76,6 +76,17 @@ pub(super) struct TabDragPayload {
     label: &'static str,
 }
 
+/// The full source snapshot and geometry captured when a group drag begins.
+#[derive(Clone)]
+pub(super) struct GroupDragPayload {
+    layout_before: Layout,
+    group: NodeId,
+    drag_start_position: Rc<Cell<gpui::Point<gpui::Pixels>>>,
+    drag_viewport_size: Size,
+    bounds_before: Rect,
+    floating_group: Option<FloatingGroupId>,
+}
+
 /// Temporary presentation state only. Core's Layout is not changed until drop.
 #[derive(Clone)]
 struct TabDragPreviewState {
@@ -85,11 +96,18 @@ struct TabDragPreviewState {
     bounds: Rect,
 }
 
-/// GPUI requires a view entity to start a drag. The floating component is rendered
-/// from Core geometry while the pointer moves.
-pub(super) struct TabDragPreview;
+/// Presentation-only snapshot for moving a complete group.
+#[derive(Clone)]
+struct GroupDragPreviewState {
+    layout: Layout,
+    group: NodeId,
+    bounds: Rect,
+}
 
-impl Render for TabDragPreview {
+/// GPUI uses the same empty drag entity for tab and group gestures.
+pub(super) struct DockDragPreview;
+
+impl Render for DockDragPreview {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         div()
     }
@@ -103,6 +121,8 @@ pub(crate) struct MainWindow {
     core_metrics: DockMetrics,
     tab_drag_preview: Option<TabDragPreviewState>,
     active_tab_drag_payload: Option<TabDragPayload>,
+    group_drag_preview: Option<GroupDragPreviewState>,
+    active_group_drag_payload: Option<GroupDragPayload>,
 }
 
 impl MainWindow {
@@ -116,6 +136,8 @@ impl MainWindow {
             core_metrics,
             tab_drag_preview: None,
             active_tab_drag_payload: None,
+            group_drag_preview: None,
+            active_group_drag_payload: None,
         })
     }
 
@@ -231,6 +253,30 @@ impl MainWindow {
         }
     }
 
+    fn group_drag_payload(
+        &self,
+        panel: PanelId,
+        group: NodeId,
+        group_rect: Rect,
+        mouse_position_before: gpui::Point<gpui::Pixels>,
+        drag_viewport_size: Size,
+    ) -> GroupDragPayload {
+        let floating = floating_group_for_panel(&self.core_layout, panel);
+        let (floating_group, bounds_before) = match floating {
+            Some((floating_group, bounds)) => (Some(floating_group), bounds),
+            None => (None, group_rect),
+        };
+
+        GroupDragPayload {
+            layout_before: self.core_layout.clone(),
+            group,
+            drag_start_position: Rc::new(Cell::new(mouse_position_before)),
+            drag_viewport_size,
+            bounds_before,
+            floating_group,
+        }
+    }
+
     fn update_tab_from_drag(
         &mut self,
         event: &DragMoveEvent<TabDragPayload>,
@@ -299,6 +345,125 @@ impl MainWindow {
         cx.notify();
     }
 
+    fn update_group_from_drag(
+        &mut self,
+        event: &DragMoveEvent<GroupDragPayload>,
+        cx: &mut Context<Self>,
+    ) {
+        let drag = event.drag(cx);
+        if self.active_group_drag_payload.is_none() {
+            self.active_group_drag_payload = Some(drag.clone());
+        }
+
+        let current_pointer = Point::new(
+            event.event.position.x.as_f32(),
+            event.event.position.y.as_f32(),
+        );
+        let drag_start_position = drag.drag_start_position.get();
+        let pointer_before = Point::new(
+            drag_start_position.x.as_f32(),
+            drag_start_position.y.as_f32(),
+        );
+        let movement =
+            clamped_pointer_delta(current_pointer, pointer_before, drag.drag_viewport_size);
+        if !movement.x.is_finite() || !movement.y.is_finite() {
+            return;
+        }
+
+        let origin = Point::new(
+            drag.bounds_before.origin.x + movement.x,
+            drag.bounds_before.origin.y + movement.y,
+        );
+
+        if let Some(floating_group) = drag.floating_group {
+            // Already-floating groups keep moving live using Core's move command.
+            self.group_drag_preview = None;
+            self.core_layout = drag.layout_before.clone();
+            if let Err(error) = self.core_layout.apply(
+                DockCommand::MoveFloating {
+                    group: floating_group,
+                    origin,
+                },
+                &self.core_metrics,
+            ) {
+                eprintln!("Could not move floating group: {error:?}");
+                self.core_layout = drag.layout_before.clone();
+            }
+        } else {
+            let source_has_header = group_has_header(&drag.layout_before, drag.group);
+            let bounds = group_drag_bounds(
+                drag.bounds_before,
+                movement,
+                source_has_header,
+                &self.core_metrics,
+            );
+            self.group_drag_preview = Some(GroupDragPreviewState {
+                layout: drag.layout_before.clone(),
+                group: drag.group,
+                bounds,
+            });
+        }
+
+        cx.notify();
+    }
+
+    /// Commits moving a whole group when the pointer is released.
+    fn finish_group_drag(
+        &mut self,
+        drag: &GroupDragPayload,
+        mouse_position: gpui::Point<gpui::Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        let current_pointer = Point::new(mouse_position.x.as_f32(), mouse_position.y.as_f32());
+        let drag_start_position = drag.drag_start_position.get();
+        let pointer_before = Point::new(
+            drag_start_position.x.as_f32(),
+            drag_start_position.y.as_f32(),
+        );
+        let movement =
+            clamped_pointer_delta(current_pointer, pointer_before, drag.drag_viewport_size);
+
+        if !movement.x.is_finite() || !movement.y.is_finite() {
+            self.group_drag_preview = None;
+            self.active_group_drag_payload = None;
+            cx.notify();
+            return;
+        }
+
+        let origin = Point::new(
+            drag.bounds_before.origin.x + movement.x,
+            drag.bounds_before.origin.y + movement.y,
+        );
+        self.core_layout = drag.layout_before.clone();
+
+        let command = if let Some(floating_group) = drag.floating_group {
+            DockCommand::MoveFloating {
+                group: floating_group,
+                origin,
+            }
+        } else {
+            let source_has_header = group_has_header(&drag.layout_before, drag.group);
+            let bounds = group_drag_bounds(
+                drag.bounds_before,
+                movement,
+                source_has_header,
+                &self.core_metrics,
+            );
+            docked_group_float_command(&drag.layout_before, drag.group, bounds)
+        };
+
+        if let Err(error) = self.core_layout.apply(command, &self.core_metrics) {
+            eprintln!("Could not finish dragged group: {error:?}");
+            self.core_layout = drag.layout_before.clone();
+        }
+
+        self.group_drag_preview = None;
+        self.active_group_drag_payload = None;
+        self.tab_drag_preview = None;
+        self.active_tab_drag_payload = None;
+        cx.notify();
+    }
+
     /// Commits a docked tab detach when the pointer is released. At this stage
     /// the window root is the fallback drop target; explicit dock zones come later.
     fn finish_tab_drag(
@@ -364,6 +529,8 @@ impl MainWindow {
 
         self.tab_drag_preview = None;
         self.active_tab_drag_payload = None;
+        self.group_drag_preview = None;
+        self.active_group_drag_payload = None;
         cx.notify();
     }
 
@@ -406,9 +573,42 @@ impl MainWindow {
                 continue;
             }
 
-            // A docked source stays in Core while dragging, but its visual source
-            // updates: hide the dragged tab, or show an empty placeholder when
-            // the dragged tab was the group's only tab.
+            // Whole-group dragging keeps the Core layout intact and leaves a
+            // placeholder at the group's original geometry until release.
+            let dragged_group = self
+                .active_group_drag_payload
+                .as_ref()
+                .filter(|drag| drag.floating_group.is_none() && drag.group == group_id);
+            if dragged_group.is_some() {
+                let placeholder = tabs_group::render(
+                    &self.core_layout,
+                    group_id,
+                    self.theme,
+                    0,
+                    group_rect.rect.size.width,
+                    group_rect.rect.size.height,
+                    "",
+                    None,
+                    None,
+                    None,
+                    |_, _, _| {},
+                    |_, _, _| {},
+                    tabs_group::GroupRenderMode::SourcePlaceholder,
+                    None,
+                );
+                root = root.child(
+                    div()
+                        .absolute()
+                        .left(px(group_rect.rect.origin.x))
+                        .top(px(group_rect.rect.origin.y))
+                        .w(px(group_rect.rect.size.width))
+                        .h(px(group_rect.rect.size.height))
+                        .child(placeholder),
+                );
+                continue;
+            }
+
+            // A docked tab drag only hides its own source tab.
             let dragged_panel = self
                 .active_tab_drag_payload
                 .as_ref()
@@ -477,6 +677,13 @@ impl MainWindow {
                     drag_viewport_size,
                 )
             });
+            let group_drag_payload = Some(self.group_drag_payload(
+                tabs_view.first_panel,
+                group_id,
+                group_rect.rect,
+                drag_mouse_position,
+                drag_viewport_size,
+            ));
 
             let group_element = tabs_group::render(
                 &self.core_layout,
@@ -492,6 +699,7 @@ impl MainWindow {
                 on_first_tab,
                 on_second_tab,
                 tabs_group::GroupRenderMode::Layout,
+                group_drag_payload,
             );
 
             root = root.child(
@@ -716,6 +924,13 @@ impl MainWindow {
                     drag_viewport_size,
                 )
             });
+            let group_drag_payload = Some(self.group_drag_payload(
+                tabs_view.first_panel,
+                group_id,
+                group_rect.rect,
+                drag_mouse_position,
+                drag_viewport_size,
+            ));
 
             let floating_bounds =
                 floating_group_bounds(&self.core_layout, floating_rect.group)
@@ -738,6 +953,7 @@ impl MainWindow {
                 on_first_tab,
                 on_second_tab,
                 tabs_group::GroupRenderMode::Layout,
+                group_drag_payload,
             );
 
             root = root.child(
@@ -766,6 +982,7 @@ impl MainWindow {
                 |_, _, _| {},
                 |_, _, _| {},
                 tabs_group::GroupRenderMode::DragPreview,
+                None,
             );
             root = root.child(
                 div()
@@ -778,11 +995,47 @@ impl MainWindow {
             );
         }
 
-        root.on_drag_move::<TabDragPayload>(cx.listener(
-            |this, event: &DragMoveEvent<TabDragPayload>, _window, cx| {
-                this.update_tab_from_drag(event, cx);
-            },
-        ))
+        if let Some(preview) = &self.group_drag_preview {
+            if let Some(tabs_view) = group_tabs_view(&preview.layout, preview.group) {
+                let preview_element = tabs_group::render(
+                    &preview.layout,
+                    preview.group,
+                    self.theme,
+                    tabs_view.active_tab,
+                    preview.bounds.size.width,
+                    preview.bounds.size.height,
+                    tabs_view.first_label,
+                    tabs_view.second_label,
+                    None,
+                    None,
+                    |_, _, _| {},
+                    |_, _, _| {},
+                    tabs_group::GroupRenderMode::GroupDragPreview,
+                    None,
+                );
+                root = root.child(
+                    div()
+                        .absolute()
+                        .left(px(preview.bounds.origin.x))
+                        .top(px(preview.bounds.origin.y))
+                        .w(px(preview.bounds.size.width))
+                        .h(px(preview.bounds.size.height))
+                        .child(preview_element),
+                );
+            }
+        }
+
+        root
+            .on_drag_move::<TabDragPayload>(cx.listener(
+                |this, event: &DragMoveEvent<TabDragPayload>, _window, cx| {
+                    this.update_tab_from_drag(event, cx);
+                },
+            ))
+            .on_drag_move::<GroupDragPayload>(cx.listener(
+                |this, event: &DragMoveEvent<GroupDragPayload>, _window, cx| {
+                    this.update_group_from_drag(event, cx);
+                },
+            ))
     }
 }
 
@@ -895,12 +1148,21 @@ impl Render for MainWindow {
                     this.finish_tab_drag(drag, window.mouse_position(), cx);
                 },
             ))
+            .on_drop(cx.listener(
+                |this, drag: &GroupDragPayload, window, cx| {
+                    this.finish_group_drag(drag, window.mouse_position(), cx);
+                },
+            ))
             .on_mouse_up_out(
                 MouseButton::Left,
                 cx.listener(|this, _event, window, cx| {
-                    if let Some(drag) = this.active_tab_drag_payload.clone() {
+                    if let Some(drag) = this.active_group_drag_payload.clone() {
+                        this.finish_group_drag(&drag, window.mouse_position(), cx);
+                    } else if let Some(drag) = this.active_tab_drag_payload.clone() {
                         this.finish_tab_drag(&drag, window.mouse_position(), cx);
-                    } else if this.tab_drag_preview.take().is_some() {
+                    } else if this.group_drag_preview.take().is_some()
+                        || this.tab_drag_preview.take().is_some()
+                    {
                         cx.notify();
                     }
                 }),
@@ -1241,6 +1503,31 @@ fn floating_drag_bounds(
     (preview_bounds, floating_bounds)
 }
 
+fn group_drag_bounds(
+    source_bounds: Rect,
+    movement: Point,
+    source_has_header: bool,
+    metrics: &DockMetrics,
+) -> Rect {
+    let header_height = metrics.header_height.max(1.0);
+    let (header_offset, height_offset) = if source_has_header {
+        (0.0, 0.0)
+    } else {
+        (-header_height, header_height)
+    };
+
+    Rect::new(
+        Point::new(
+            source_bounds.origin.x + movement.x,
+            source_bounds.origin.y + movement.y + header_offset,
+        ),
+        Size::new(
+            source_bounds.size.width,
+            (source_bounds.size.height + height_offset).max(1.0),
+        ),
+    )
+}
+
 fn floating_size_for_detach(
     source_bounds: Rect,
     has_header: bool,
@@ -1413,6 +1700,19 @@ fn docked_tab_float_command(
     }
 }
 
+fn docked_group_float_command(layout: &Layout, group: NodeId, bounds: Rect) -> DockCommand {
+    if let Some((column, group_count)) = column_containing_group(layout, group) {
+        if group_count > 1 {
+            DockCommand::FloatGroupAsColumn { group, bounds }
+        } else {
+            // Float the containing column to avoid leaving an empty column behind.
+            DockCommand::Float { node: column, bounds }
+        }
+    } else {
+        DockCommand::Float { node: group, bounds }
+    }
+}
+
 fn group_tabs_view(layout: &Layout, group_id: NodeId) -> Option<GroupTabsView> {
     group_tabs_view_excluding(layout, group_id, None)
 }
@@ -1464,7 +1764,7 @@ mod tests {
         group_has_header, group_is_floating, panel_constraints, panel_id_for_key,
         group_tabs_view_excluding,
         clamped_pointer_delta, panel_is_open, toggle_core_panel, floating_size_for_detach,
-        floating_drag_bounds, FLOATING_HEIGHT_RATIO,
+        floating_drag_bounds, group_drag_bounds, FLOATING_HEIGHT_RATIO,
     };
     use dock_core::{Axis, DockCommand, DockSide, Node, Point, Rect, Size};
 
@@ -1660,6 +1960,32 @@ mod tests {
             + (source_content_without_header * FLOATING_HEIGHT_RATIO).max(minimum_content_height))
             .max(minimum_floating_height);
         assert!((without_header.height - expected_without_header).abs() < 0.001);
+    }
+
+    #[test]
+    fn group_drag_keeps_all_group_height_and_adds_header_above_headerless_source() {
+        let theme = ui::Theme::default();
+        let (_, metrics, _, _, _) =
+            build_core_layout(&theme).expect("initial Core layout should be valid");
+        let source = Rect::new(Point::new(100.0, 150.0), Size::new(320.0, 420.0));
+        let movement = Point::new(25.0, 35.0);
+        let header_height = metrics.header_height.max(1.0);
+
+        let headerless = group_drag_bounds(source, movement, false, &metrics);
+        assert_eq!(headerless.origin.x, source.origin.x + movement.x);
+        assert_eq!(
+            headerless.origin.y + header_height,
+            source.origin.y + movement.y
+        );
+        assert_eq!(headerless.size.width, source.size.width);
+        assert_eq!(headerless.size.height, source.size.height + header_height);
+
+        let headered = group_drag_bounds(source, movement, true, &metrics);
+        assert_eq!(
+            headered.origin,
+            Point::new(source.origin.x + movement.x, source.origin.y + movement.y)
+        );
+        assert_eq!(headered.size, source.size);
     }
 
     #[test]
