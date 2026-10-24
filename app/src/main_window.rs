@@ -3,8 +3,6 @@ mod floating_column_tabs_group;
 mod floating_tabs_group;
 mod tabs_group;
 
-use std::collections::{HashMap, HashSet};
-
 use dock_core::{
     create_initial_layout, DockCommand, DockMetrics, DockSide, DropTarget, DropZone,
     FloatingGroupId, Layout, Node, NodeId, PanelConstraints, PanelId, PanelKey, Point,
@@ -94,40 +92,18 @@ pub(crate) struct MainWindow {
     dockers_menu_open: bool,
     core_layout: Layout,
     core_metrics: DockMetrics,
-    // Header presence is UI presentation state, not a field in Core's Tabs node.
-    // Preserve it by group identity when a tab becomes a new floating group.
-    group_header_modes: HashMap<NodeId, bool>,
 }
 
 impl MainWindow {
     pub(crate) fn new(theme: ui::Theme) -> Result<Self, String> {
-        let (
-            core_layout,
-            core_metrics,
-            one_tab_headered_group,
-            two_tab_headered_group,
-            one_tab_headerless_group,
-        ) = build_core_layout(&theme)?;
-        let group_header_modes = HashMap::from([
-            (one_tab_headered_group, true),
-            (two_tab_headered_group, true),
-            (one_tab_headerless_group, false),
-        ]);
+        let (core_layout, core_metrics, _, _, _) = build_core_layout(&theme)?;
 
         Ok(Self {
             theme,
             dockers_menu_open: false,
             core_layout,
             core_metrics,
-            group_header_modes,
         })
-    }
-
-    fn has_group_header(&self, group_id: NodeId) -> bool {
-        self.group_header_modes
-            .get(&group_id)
-            .copied()
-            .unwrap_or_else(|| group_has_header(&self.core_layout, group_id))
     }
 
     fn activate_tab(&mut self, group: NodeId, panel: PanelId, cx: &mut Context<Self>) {
@@ -213,7 +189,6 @@ impl MainWindow {
         ) {
             eprintln!("Could not toggle dock panel '{key}': {error}");
         }
-        synchronize_group_header_modes(&self.core_layout, &mut self.group_header_modes);
         cx.notify();
     }
 
@@ -248,11 +223,7 @@ impl MainWindow {
         cx: &mut Context<Self>,
     ) {
         let drag = event.drag(cx);
-        let source_has_header = self
-            .group_header_modes
-            .get(&drag.group)
-            .copied()
-            .unwrap_or_else(|| group_has_header(&drag.layout_before, drag.group));
+        let source_has_header = group_has_header(&drag.layout_before, drag.group);
         let source_tab_count = match drag.layout_before.node(drag.group) {
             Some(Node::Tabs(tabs)) => tabs.children.len(),
             _ => 0,
@@ -284,8 +255,8 @@ impl MainWindow {
             // Once floating, keep the actual size stable while moving it.
             drag.bounds_before.size
         } else {
-            // Keep the title/tab chrome at full height and shrink only the content
-            // area. The headerless History group uses the matching no-header sizing.
+            // Shrink the source group's content only. The floating result always
+            // reserves a header and tab strip, even if the docked source had no header.
             floating_size_for_detach(
                 drag.bounds_before,
                 source_has_header,
@@ -333,25 +304,9 @@ impl MainWindow {
             }
         };
 
-        let applied = match self.core_layout.apply(command, &self.core_metrics) {
-            Ok(_) => true,
-            Err(error) => {
-                eprintln!("Could not float dragged tab: {error:?}");
-                self.core_layout = drag.layout_before.clone();
-                false
-            }
-        };
-
-        synchronize_group_header_modes(&self.core_layout, &mut self.group_header_modes);
-        if applied && drag.floating_group.is_none() && source_tab_count > 1 {
-            // FloatPanelAsGroup creates a new Tabs node. Its presentation mode comes
-            // from the source group, not from the detached panel's key/name.
-            inherit_group_header_mode_for_panel(
-                &self.core_layout,
-                &mut self.group_header_modes,
-                drag.panel,
-                source_has_header,
-            );
+        if let Err(error) = self.core_layout.apply(command, &self.core_metrics) {
+            eprintln!("Could not float dragged tab: {error:?}");
+            self.core_layout = drag.layout_before.clone();
         }
         cx.notify();
     }
@@ -394,7 +349,7 @@ impl MainWindow {
             if group_is_floating(&self.core_layout, group_id) {
                 continue;
             }
-            let has_header = self.has_group_header(group_id);
+            let has_header = group_has_header(&self.core_layout, group_id);
             let Some(tabs_view) = group_tabs_view(&self.core_layout, group_id) else {
                 continue;
             };
@@ -689,7 +644,7 @@ impl MainWindow {
             // clamps the visible rect for layout calculations; using that clamped
             // origin for painting made the panel stop before the pointer reached
             // the app-window edge.
-            let floating_element = if self.has_group_header(group_id) {
+            let floating_element = if group_has_header(&self.core_layout, group_id) {
                 floating_column_tabs_group::render(
                     self.theme,
                     tabs_view.active_tab,
@@ -1104,39 +1059,27 @@ fn group_containing_key(layout: &Layout, key: &str) -> Option<NodeId> {
     group_containing_panel(layout, panel)
 }
 
-fn synchronize_group_header_modes(layout: &Layout, modes: &mut HashMap<NodeId, bool>) {
-    let live_tabs: HashSet<NodeId> = layout
-        .nodes()
-        .filter_map(|(node_id, node)| matches!(node, Node::Tabs(_)).then_some(node_id))
-        .collect();
-    modes.retain(|group_id, _| live_tabs.contains(group_id));
-}
-
-fn inherit_group_header_mode_for_panel(
-    layout: &Layout,
-    modes: &mut HashMap<NodeId, bool>,
-    panel_id: PanelId,
-    has_header: bool,
-) {
-    synchronize_group_header_modes(layout, modes);
-    if let Some(group_id) = group_containing_panel(layout, panel_id) {
-        modes.insert(group_id, has_header);
-    }
-}
-
-// Fallback policy for groups without recorded presentation metadata.
-// Initial groups and groups created by detaching a tab use explicit modes above.
+// Floating composition always gets its own header. In the dock, the top group of
+// a column owns the column header; groups below it start beneath a horizontal splitter.
+// Derive both decisions from the current tree instead of maintaining parallel UI state.
 fn group_has_header(layout: &Layout, group_id: NodeId) -> bool {
-    let Some(Node::Tabs(tabs)) = layout.node(group_id) else {
-        return false;
-    };
-    tabs.children.iter().any(|child_id| match layout.node(*child_id) {
-        Some(Node::Panel(panel)) => layout
-            .panel_instance(panel.panel_id)
-            .map(|instance| instance.key.as_str() != "history")
-            .unwrap_or(true),
-        _ => true,
-    })
+    if group_is_floating(layout, group_id) {
+        return true;
+    }
+
+    layout
+        .nodes()
+        .find_map(|(_, node)| {
+            let Node::Column(column) = node else {
+                return None;
+            };
+            column
+                .groups
+                .iter()
+                .position(|candidate| *candidate == group_id)
+                .map(|index| index == 0)
+        })
+        .unwrap_or(true)
 }
 
 fn clamped_pointer_delta(current: Point, start: Point, viewport_size: Size) -> Point {
@@ -1155,24 +1098,25 @@ fn floating_size_for_detach(
     has_header: bool,
     metrics: &DockMetrics,
 ) -> Size {
-    let header_height = if has_header {
+    let source_header_height = if has_header {
         metrics.header_height.max(1.0)
     } else {
         0.0
     };
+    let floating_header_height = metrics.header_height.max(1.0);
     let tab_strip_height = metrics.tab_strip_height.max(1.0);
     let minimum_content_height = metrics.min_group_height.max(1.0);
-    let source_content_height = (source_bounds.size.height - header_height - tab_strip_height)
-        .max(minimum_content_height);
+    let source_content_height =
+        (source_bounds.size.height - source_header_height - tab_strip_height)
+            .max(minimum_content_height);
     let floating_content_height =
         (source_content_height * FLOATING_HEIGHT_RATIO).max(minimum_content_height);
 
-    // Core's minimum floating size includes its full header metric, even for the
-    // app's headerless History group; preserve that lower bound for valid geometry.
-    let minimum_floating_height = metrics.header_height.max(1.0)
-        + metrics.tab_strip_height.max(1.0)
-        + minimum_content_height;
-    let height = (header_height + tab_strip_height + floating_content_height)
+    // Floating groups always render with a header, even when their docked source
+    // was below a splitter and therefore had no separate header.
+    let minimum_floating_height =
+        floating_header_height + tab_strip_height + minimum_content_height;
+    let height = (floating_header_height + tab_strip_height + floating_content_height)
         .max(minimum_floating_height);
 
     Size::new(source_bounds.size.width, height)
@@ -1323,7 +1267,7 @@ mod tests {
         floating_group_for_panel, floating_root_tabs_group, group_containing_panel,
         group_has_header, group_is_floating, panel_constraints, panel_id_for_key,
         clamped_pointer_delta, panel_is_open, toggle_core_panel, floating_size_for_detach,
-        synchronize_group_header_modes, FLOATING_HEIGHT_RATIO,
+        FLOATING_HEIGHT_RATIO,
     };
     use dock_core::{Axis, DockCommand, DockSide, Node, Point, Rect, Size};
 
@@ -1353,18 +1297,13 @@ mod tests {
     }
 
     #[test]
-    fn history_keeps_headerless_component_when_floated_from_lower_split_group() {
-        use std::collections::HashMap;
-
+    fn lower_docked_group_has_no_header_but_floating_group_does() {
         let theme = ui::Theme::default();
         let (mut layout, metrics, _, headered_group, headerless_group) =
             build_core_layout(&theme).expect("initial Core layout should be valid");
-        let mut header_modes =
-            HashMap::from([(headered_group, true), (headerless_group, false)]);
         let history = panel_id_for_key(&layout, "history").unwrap();
 
-        // History is deliberately the lower group below the horizontal splitter.
-        // Its intended component is tabs_group, without a separate header row.
+        assert!(group_has_header(&layout, headered_group));
         assert!(!group_has_header(&layout, headerless_group));
         assert_eq!(group_containing_panel(&layout, history), Some(headerless_group));
 
@@ -1376,39 +1315,31 @@ mod tests {
             .find(|entry| entry.group == headerless_group)
             .expect("lower History group should have geometry")
             .rect;
-        let size = floating_size_for_detach(source_bounds, false, &metrics);
+        let source_has_header = group_has_header(&layout, headerless_group);
+        let size = floating_size_for_detach(source_bounds, source_has_header, &metrics);
         let bounds = Rect::new(
             Point::new(source_bounds.origin.x + 20.0, source_bounds.origin.y + 16.0),
             size,
         );
 
-        // Match the same detach choice made by the app for a one-tab group.
-        let (column, group_count) = column_containing_group(&layout, headerless_group)
-            .expect("lower group should belong to a column");
-        let command = if group_count > 1 {
-            DockCommand::FloatGroupAsColumn {
-                group: headerless_group,
-                bounds,
-            }
-        } else {
-            DockCommand::Float {
-                node: column,
-                bounds,
-            }
-        };
         layout
-            .apply(command, &metrics)
+            .apply(
+                DockCommand::FloatGroupAsColumn {
+                    group: headerless_group,
+                    bounds,
+                },
+                &metrics,
+            )
             .expect("the lower History group should detach as floating");
         assert_eq!(layout.validate(&metrics), Ok(()));
 
-        synchronize_group_header_modes(&layout, &mut header_modes);
         let (floating_id, _) = floating_group_for_panel(&layout, history)
             .expect("History should now belong to a floating composition");
         let floating_tabs = floating_root_tabs_group(&layout, floating_id)
             .expect("floating composition should contain the History Tabs node");
 
-        assert_eq!(header_modes.get(&floating_tabs), Some(&false));
-        assert!(!group_has_header(&layout, floating_tabs));
+        assert!(group_is_floating(&layout, floating_tabs));
+        assert!(group_has_header(&layout, floating_tabs));
     }
 
     #[test]
@@ -1451,7 +1382,8 @@ mod tests {
         let without_header = floating_size_for_detach(source_bounds, false, &metrics);
         let source_content_without_header =
             (source_bounds.size.height - tab_strip_height).max(minimum_content_height);
-        let expected_without_header = (tab_strip_height
+        let expected_without_header = (header_height
+            + tab_strip_height
             + (source_content_without_header * FLOATING_HEIGHT_RATIO).max(minimum_content_height))
             .max(minimum_floating_height);
         assert!((without_header.height - expected_without_header).abs() < 0.001);
