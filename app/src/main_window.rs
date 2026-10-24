@@ -71,6 +71,14 @@ pub(super) struct TabDragPayload {
     drag_viewport_size: Size,
     bounds_before: Rect,
     floating_group: Option<FloatingGroupId>,
+    label: &'static str,
+}
+
+/// Temporary presentation state only. Core's Layout is not changed until drop.
+#[derive(Clone, Copy)]
+struct TabDragPreviewState {
+    label: &'static str,
+    bounds: Rect,
 }
 
 /// GPUI requires a view entity to start a drag. The floating component is rendered
@@ -89,6 +97,7 @@ pub(crate) struct MainWindow {
     dockers_menu_open: bool,
     core_layout: Layout,
     core_metrics: DockMetrics,
+    tab_drag_preview: Option<TabDragPreviewState>,
 }
 
 impl MainWindow {
@@ -100,6 +109,7 @@ impl MainWindow {
             dockers_menu_open: false,
             core_layout,
             core_metrics,
+            tab_drag_preview: None,
         })
     }
 
@@ -211,6 +221,7 @@ impl MainWindow {
             drag_viewport_size,
             bounds_before,
             floating_group,
+            label: panel_label(&self.core_layout, panel).unwrap_or("Панель"),
         }
     }
 
@@ -220,11 +231,6 @@ impl MainWindow {
         cx: &mut Context<Self>,
     ) {
         let drag = event.drag(cx);
-        let source_has_header = group_has_header(&drag.layout_before, drag.group);
-        let source_tab_count = match drag.layout_before.node(drag.group) {
-            Some(Node::Tabs(tabs)) => tabs.children.len(),
-            _ => 0,
-        };
         let current_pointer = Point::new(
             event.event.position.x.as_f32(),
             event.event.position.y.as_f32(),
@@ -241,29 +247,78 @@ impl MainWindow {
             return;
         }
 
-        // Move the frame by the pointer delta, not by clamping its outer edge.
-        // This keeps the grabbed tab point under the cursor while the root clips
-        // any part of the floating frame that passes the app-window boundary.
+        // Move by the pointer delta without mutating a docked source. The preview
+        // remains outside Core's tree until an actual release commits the command.
         let origin = Point::new(
             drag.bounds_before.origin.x + dx,
             drag.bounds_before.origin.y + dy,
         );
-        let floating_size = if drag.floating_group.is_some() {
-            // Once floating, keep the actual size stable while moving it.
-            drag.bounds_before.size
+
+        if let Some(floating_group) = drag.floating_group {
+            // A group that was already floating keeps moving live. Deferred creation
+            // applies only to a drag that started in the dock.
+            self.tab_drag_preview = None;
+            self.core_layout = drag.layout_before.clone();
+            if let Err(error) = self.core_layout.apply(
+                DockCommand::MoveFloating {
+                    group: floating_group,
+                    origin,
+                },
+                &self.core_metrics,
+            ) {
+                eprintln!("Could not move floating tab group: {error:?}");
+                self.core_layout = drag.layout_before.clone();
+            }
         } else {
-            // Shrink the source group's content only. The floating result always
-            // reserves a header and tab strip, even if the docked source had no header.
-            floating_size_for_detach(
+            let source_has_header = group_has_header(&drag.layout_before, drag.group);
+            let floating_size = floating_size_for_detach(
                 drag.bounds_before,
                 source_has_header,
                 &self.core_metrics,
-            )
-        };
-        let bounds = Rect::new(origin, floating_size);
+            );
+            self.tab_drag_preview = Some(TabDragPreviewState {
+                label: drag.label,
+                bounds: Rect::new(origin, floating_size),
+            });
+        }
 
-        // Rebuild from the drag-start snapshot so cumulative mouse movement is
-        // applied once and never added repeatedly to the previously moved frame.
+        cx.notify();
+    }
+
+    /// Commits a docked tab detach when the pointer is released. At this stage
+    /// the window root is the fallback drop target; explicit dock zones come later.
+    fn finish_tab_drag(
+        &mut self,
+        drag: &TabDragPayload,
+        mouse_position: gpui::Point<gpui::Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        let current_pointer = Point::new(
+            mouse_position.x.as_f32(),
+            mouse_position.y.as_f32(),
+        );
+        let pointer_before = Point::new(
+            drag.mouse_position_before.x.as_f32(),
+            drag.mouse_position_before.y.as_f32(),
+        );
+        let movement =
+            clamped_pointer_delta(current_pointer, pointer_before, drag.drag_viewport_size);
+        let dx = movement.x;
+        let dy = movement.y;
+
+        if !dx.is_finite() || !dy.is_finite() {
+            self.tab_drag_preview = None;
+            cx.notify();
+            return;
+        }
+
+        let origin = Point::new(
+            drag.bounds_before.origin.x + dx,
+            drag.bounds_before.origin.y + dy,
+        );
+
+        // Rebuild from the drag-start snapshot and apply one semantic command only
+        // after release, so intermediate pointer movement never changes the tree.
         self.core_layout = drag.layout_before.clone();
         let command = if let Some(floating_group) = drag.floating_group {
             DockCommand::MoveFloating {
@@ -271,40 +326,27 @@ impl MainWindow {
                 origin,
             }
         } else {
-            if source_tab_count > 1 {
-                DockCommand::FloatPanelAsGroup {
-                    panel: drag.panel,
-                    bounds,
-                }
-            } else if let Some((column, group_count)) =
-                column_containing_group(&self.core_layout, drag.group)
-            {
-                if group_count > 1 {
-                    DockCommand::FloatGroupAsColumn {
-                        group: drag.group,
-                        bounds,
-                    }
-                } else {
-                    // The dragged tab is the whole column. Float that containing
-                    // composition instead of leaving an invalid empty Column behind.
-                    DockCommand::Float {
-                        node: column,
-                        bounds,
-                    }
-                }
-            } else {
-                // Generic fallback for a tab group that is not owned by a Column.
-                DockCommand::Float {
-                    node: drag.group,
-                    bounds,
-                }
-            }
+            let source_has_header = group_has_header(&drag.layout_before, drag.group);
+            let floating_size = floating_size_for_detach(
+                drag.bounds_before,
+                source_has_header,
+                &self.core_metrics,
+            );
+            let bounds = Rect::new(origin, floating_size);
+            docked_tab_float_command(
+                &drag.layout_before,
+                drag.panel,
+                drag.group,
+                bounds,
+            )
         };
 
         if let Err(error) = self.core_layout.apply(command, &self.core_metrics) {
-            eprintln!("Could not float dragged tab: {error:?}");
+            eprintln!("Could not finish dragged tab: {error:?}");
             self.core_layout = drag.layout_before.clone();
         }
+
+        self.tab_drag_preview = None;
         cx.notify();
     }
 
@@ -653,6 +695,24 @@ impl MainWindow {
             );
         }
 
+        if let Some(preview) = self.tab_drag_preview {
+            let preview_element = tabs_group::render_drag_preview(
+                self.theme,
+                preview.bounds.size.width,
+                preview.bounds.size.height,
+                preview.label,
+            );
+            root = root.child(
+                div()
+                    .absolute()
+                    .left(px(preview.bounds.origin.x))
+                    .top(px(preview.bounds.origin.y))
+                    .w(px(preview.bounds.size.width))
+                    .h(px(preview.bounds.size.height))
+                    .child(preview_element),
+            );
+        }
+
         root.on_drag_move::<TabDragPayload>(cx.listener(
             |this, event: &DragMoveEvent<TabDragPayload>, _window, cx| {
                 this.update_tab_from_drag(event, cx);
@@ -765,6 +825,11 @@ impl Render for MainWindow {
             )
             .child(dropdown)
             .child(self.render_core_groups(width, content_height, window, cx))
+            .on_drop(cx.listener(
+                |this, drag: &TabDragPayload, window, cx| {
+                    this.finish_tab_drag(drag, window.mouse_position(), cx);
+                },
+            ))
     }
 }
 
@@ -1199,6 +1264,42 @@ fn group_containing_panel(layout: &Layout, panel_id: PanelId) -> Option<NodeId> 
     })
 }
 
+fn panel_label(layout: &Layout, panel_id: PanelId) -> Option<&'static str> {
+    let instance = layout.panel_instance(panel_id)?;
+    Some(match instance.key.as_str() {
+        "layers" => "Вкладка 1",
+        "color" => "Вкладка 2",
+        "properties" => "Вкладка 3",
+        "history" => "Вкладка 4",
+        _ => "Панель",
+    })
+}
+
+fn docked_tab_float_command(
+    layout: &Layout,
+    panel: PanelId,
+    group: NodeId,
+    bounds: Rect,
+) -> DockCommand {
+    let source_tab_count = match layout.node(group) {
+        Some(Node::Tabs(tabs)) => tabs.children.len(),
+        _ => 0,
+    };
+
+    if source_tab_count > 1 {
+        DockCommand::FloatPanelAsGroup { panel, bounds }
+    } else if let Some((column, group_count)) = column_containing_group(layout, group) {
+        if group_count > 1 {
+            DockCommand::FloatGroupAsColumn { group, bounds }
+        } else {
+            // Float the containing column rather than leaving an invalid empty one.
+            DockCommand::Float { node: column, bounds }
+        }
+    } else {
+        DockCommand::Float { node: group, bounds }
+    }
+}
+
 fn group_tabs_view(layout: &Layout, group_id: NodeId) -> Option<GroupTabsView> {
     let Some(Node::Tabs(tabs)) = layout.node(group_id) else {
         return None;
@@ -1208,13 +1309,7 @@ fn group_tabs_view(layout: &Layout, group_id: NodeId) -> Option<GroupTabsView> {
             return None;
         };
         let instance = layout.panel_instance(panel.panel_id)?;
-        let label = match instance.key.as_str() {
-            "layers" => "Вкладка 1",
-            "color" => "Вкладка 2",
-            "properties" => "Вкладка 3",
-            "history" => "Вкладка 4",
-            _ => "Панель",
-        };
+        let label = panel_label(layout, panel.panel_id)?;
         Some((panel.panel_id, label))
     });
 
