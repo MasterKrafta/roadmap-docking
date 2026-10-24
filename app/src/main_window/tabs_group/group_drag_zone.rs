@@ -1,5 +1,8 @@
 use dock_core::NodeId;
-use gpui::{IntoElement, ParentElement, StatefulInteractiveElement, Styled, div, px, rgb};
+use gpui::{
+    InteractiveElement, IntoElement, ParentElement, StatefulInteractiveElement, Styled, div, px,
+    rgb,
+};
 
 use super::super::{DockDragPreview, GroupDragPayload};
 
