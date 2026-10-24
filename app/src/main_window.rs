@@ -742,8 +742,8 @@ impl MainWindow {
                 on_first_tab,
                 on_second_tab,
                 tabs_group::GroupRenderMode::Layout,
+                group_drag_payload.clone(),
                 group_drag_payload,
-                None,
             );
 
             composition = composition.child(
