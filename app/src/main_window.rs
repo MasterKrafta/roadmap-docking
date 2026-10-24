@@ -325,7 +325,7 @@ impl MainWindow {
             .relative()
             .w(px(width))
             .h(px(height))
-            .clip()
+            .overflow_hidden()
             .bg(rgb(self.theme.colors.canvas_background));
 
         for group_rect in &rects.groups {
