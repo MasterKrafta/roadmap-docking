@@ -7,8 +7,8 @@ use ui::Theme;
 
 use crate::components::IconButton;
 
-type ClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
-type DragStartHandler = Box<dyn Fn(&MouseDownEvent, &mut Window, &mut App) + 'static>;
+pub type ClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
+pub type DragStartHandler = Box<dyn Fn(&MouseDownEvent, &mut Window, &mut App) + 'static>;
 
 /// Header of a floating dock window; optional controls are rendered when their handlers are supplied.
 #[derive(IntoElement)]
@@ -33,7 +33,7 @@ impl RenderOnce for FloatingTitle {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
         let button_width = self.rect.size.height.min(28.0).max(0.0);
         let button_count =
-            usize::from(self.on_close.is_some()) + usize::from(self.on_collapse.is_some());
+            self.on_close.is_some() as usize + self.on_collapse.is_some() as usize;
         let buttons_width = button_width * button_count as f32;
         let drag_width = (self.rect.size.width - buttons_width).max(0.0);
 

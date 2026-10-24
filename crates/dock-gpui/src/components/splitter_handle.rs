@@ -5,7 +5,7 @@ use gpui::{
 };
 use ui::Theme;
 
-type ResizeStartHandler = Box<dyn Fn(&MouseDownEvent, &mut Window, &mut App) + 'static>;
+pub type ResizeStartHandler = Box<dyn Fn(&MouseDownEvent, &mut Window, &mut App) + 'static>;
 
 /// The splitter's painted band and its optional resize hit target.
 #[derive(IntoElement)]

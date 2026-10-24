@@ -13,7 +13,7 @@ use crate::tree_query::{
     active_panel, drop_target_node, first_panel_in_subtree, main_column_ids, subtree_nodes,
 };
 use crate::geometry::{localize_tree_rects, scroll_rect_in_viewport, translate_rect_to_local};
-use crate::labels::{rail_entry_label, tab_header_label};
+use crate::labels::tab_header_label;
 
 use dock_core::{
     Axis, DockCommand, DockSide, DragHandle, DragPayload, DragPreview,

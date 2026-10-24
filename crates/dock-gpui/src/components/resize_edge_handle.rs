@@ -5,7 +5,7 @@ use gpui::{
 };
 use ui::Theme;
 
-type ResizeStartHandler = Box<dyn Fn(&MouseDownEvent, &mut Window, &mut App) + 'static>;
+pub type ResizeStartHandler = Box<dyn Fn(&MouseDownEvent, &mut Window, &mut App) + 'static>;
 
 /// Identifies whether a resize hit zone belongs to a floating edge or an outer dock column.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
