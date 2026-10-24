@@ -227,3 +227,24 @@ impl Render for MainWindow {
             )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::surface_contains_window_point;
+    use gpui::{point, px};
+
+    #[test]
+    fn surface_contains_top_left_but_excludes_right_and_bottom_edges() {
+        let contains = |x, y| {
+            surface_contains_window_point(point(px(x), px(y)), 200.0, 24.0, 76.0)
+        };
+
+        assert!(contains(0.0, 24.0));
+        assert!(contains(199.0, 99.0));
+        assert!(!contains(200.0, 30.0));
+        assert!(!contains(-1.0, 30.0));
+        assert!(!contains(20.0, 23.0));
+        assert!(!contains(20.0, 100.0));
+    }
+}
+
