@@ -1,15 +1,16 @@
 use std::collections::HashMap;
 
-use dock_core::{DockMetrics, Layout, NodeId};
+use dock_core::{CommandError, CommandOutcome, DockCommand, DockMetrics, Layout, NodeId, UndoRedoHistory};
 use gpui::ScrollHandle;
 
 /// Owns the live layout and the view-local state needed to render it.
 ///
-/// Command history and interaction sessions are added in their corresponding
-/// Stage 7 checklist items; the layout ownership boundary is established here.
+/// All post-initialization layout commands are applied through the history
+/// facade, keeping command execution and undo checkpoints on one path.
 pub(crate) struct DockController {
     layout: Layout,
     metrics: DockMetrics,
+    history: UndoRedoHistory,
     scroll_handles: HashMap<NodeId, ScrollHandle>,
 }
 
@@ -18,8 +19,18 @@ impl DockController {
         Self {
             layout,
             metrics,
+            history: UndoRedoHistory::new(),
             scroll_handles: HashMap::new(),
         }
+    }
+
+    /// Applies a layout command and records persistent changes for undo/redo.
+    pub(crate) fn apply(
+        &mut self,
+        command: DockCommand,
+    ) -> Result<CommandOutcome, CommandError> {
+        self.history
+            .apply(&mut self.layout, command, &self.metrics)
     }
 
     pub(crate) fn layout(&self) -> &Layout {
