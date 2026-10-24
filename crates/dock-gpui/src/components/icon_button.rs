@@ -1,0 +1,67 @@
+use dock_core::Rect;
+use gpui::{
+    App, ClickEvent, InteractiveElement, IntoElement, ParentElement, RenderOnce, Styled, Window,
+    div, px, rgb,
+};
+use ui::Theme;
+
+use crate::components::with_focus_ring;
+
+/// A small absolutely positioned button that displays a single glyph.
+#[derive(IntoElement)]
+pub struct IconButton {
+    id: String,
+    rect: Rect,
+    glyph: String,
+    theme: Theme,
+    border: bool,
+    on_click: Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>,
+}
+
+impl IconButton {
+    /// Creates an icon button using the shared dock theme and click handler.
+    pub fn new(
+        id: impl Into<String>,
+        rect: Rect,
+        glyph: impl Into<String>,
+        theme: &Theme,
+        on_click: Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            rect,
+            glyph: glyph.into(),
+            theme: *theme,
+            border: false,
+            on_click,
+        }
+    }
+
+    /// Adds the standard one-pixel border used by the group menu control.
+    pub fn with_border(mut self) -> Self {
+        self.border = true;
+        self
+    }
+}
+
+impl RenderOnce for IconButton {
+    fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+        let mut button = div()
+            .absolute()
+            .left(px(self.rect.origin.x))
+            .top(px(self.rect.origin.y))
+            .w(px(self.rect.size.width))
+            .h(px(self.rect.size.height))
+            .bg(rgb(self.theme.colors.toolbar_background))
+            .text_color(rgb(self.theme.colors.primary_text))
+            .child(self.glyph);
+
+        if self.border {
+            button = button
+                .border_1()
+                .border_color(rgb(self.theme.colors.border));
+        }
+
+        with_focus_ring(button.id(self.id), &self.theme).on_click(self.on_click)
+    }
+}

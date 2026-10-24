@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::components::{with_focus_ring, RectBox};
+use crate::components::{with_focus_ring, IconButton, RectBox};
 
 use crate::chrome_geometry::{GROUP_DRAG_GRIP_HEIGHT, GROUP_MENU_BUTTON_WIDTH};
 use crate::frame::FrameGeometry;
@@ -440,30 +440,28 @@ where
             Point::new(flyout.rect.size.width - button_width * 2.0, 0.0),
             Size::new(button_width, header_height),
         );
-        let menu_button = with_focus_ring(
-            rect_element(menu_rect, theme.colors.toolbar_background)
-                .text_color(rgb(theme.colors.primary_text))
-                .child("⋯")
-                .id(format!("dock-flyout-menu-{:?}-{:?}", flyout.group, flyout.panel)),
+        let menu_button = IconButton::new(
+            format!("dock-flyout-menu-{:?}-{:?}", flyout.group, flyout.panel),
+            menu_rect,
+            "⋯",
             theme,
-        )
-        .on_click(make_menu_handler(DockMenuRequest::PanelGroup {
-            group: flyout.group,
-            panel: Some(flyout.panel),
-        }));
+            make_menu_handler(DockMenuRequest::PanelGroup {
+                group: flyout.group,
+                panel: Some(flyout.panel),
+            }),
+        );
 
         let close_rect = Rect::new(
             Point::new(flyout.rect.size.width - button_width, 0.0),
             Size::new(button_width, header_height),
         );
-        let close_button = with_focus_ring(
-            rect_element(close_rect, theme.colors.toolbar_background)
-                .text_color(rgb(theme.colors.primary_text))
-                .child("×")
-                .id(format!("dock-flyout-close-{:?}-{:?}", flyout.group, flyout.panel)),
+        let close_button = IconButton::new(
+            format!("dock-flyout-close-{:?}-{:?}", flyout.group, flyout.panel),
+            close_rect,
+            "×",
             theme,
-        )
-        .on_click(make_command_handler(DockCommand::CloseFlyout));
+            make_command_handler(DockCommand::CloseFlyout),
+        );
 
         let content_rect = Rect::new(
             Point::new(0.0, header_height),
@@ -705,16 +703,15 @@ where
         .filter(|entry| nodes.contains(&entry.group))
     {
         elements.push(
-            with_focus_ring(
-                rect_element(overflow.button_rect, theme.colors.toolbar_background)
-                    .text_color(rgb(theme.colors.primary_text))
-                    .child("⋯")
-                    .id(format!("dock-tab-overflow-{:?}", overflow.group)),
+            IconButton::new(
+                format!("dock-tab-overflow-{:?}", overflow.group),
+                overflow.button_rect,
+                "⋯",
                 theme,
+                make_menu_handler(DockMenuRequest::TabOverflow {
+                    group: overflow.group,
+                }),
             )
-            .on_click(make_menu_handler(DockMenuRequest::TabOverflow {
-                group: overflow.group,
-            }))
             .into_any_element(),
         );
     }
@@ -736,19 +733,17 @@ where
             Size::new(button_width, strip.rect.size.height),
         );
         elements.push(
-            with_focus_ring(
-                rect_element(menu_rect, theme.colors.toolbar_background)
-                    .border_1()
-                    .border_color(rgb(theme.colors.border))
-                    .text_color(rgb(theme.colors.primary_text))
-                    .child("☰")
-                    .id(format!("dock-group-menu-{:?}", strip.group)),
+            IconButton::new(
+                format!("dock-group-menu-{:?}", strip.group),
+                menu_rect,
+                "☰",
                 theme,
+                make_menu_handler(DockMenuRequest::PanelGroup {
+                    group: strip.group,
+                    panel: active_panel(layout, tabs),
+                }),
             )
-            .on_click(make_menu_handler(DockMenuRequest::PanelGroup {
-                group: strip.group,
-                panel: active_panel(layout, tabs),
-            }))
+            .with_border()
             .into_any_element(),
         );
     }
