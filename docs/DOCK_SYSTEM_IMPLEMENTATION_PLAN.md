@@ -590,3 +590,109 @@ gpui      = { workspace = true }
 ### Для чего такой порядок этапов
 
 Первые шесть этапов — это только картинка, и их можно делать **сейчас**, без ответов на вопросы выше. Этапы 7–9 требуют ответов № 1, 2, 6, 8, 9. Этапы 10–12 — № 3, 4, 5, 7. Вот почему я бы присылал файлы ядра к тому моменту, когда вы закончите этап 6.
+
+## 12. Тема: цвета и метрики
+
+Правило: компоненты берут цвета только из `ThemeColors`, размеры — только из `ThemeMetrics` (без чисел `28.0`, `4.0`, `30.0` и без `rgb(0x…)` внутри компонентов). Выполняется на этапе 4.
+
+### Цвета
+
+Уже используются: `window_background`, `canvas_background`, `dock_background`, `group_background`, `border`, `splitter`, `primary_text`, `muted_text`, `active_tab`, `focus`, `drop_target`, `toolbar_background`. `hover` пока не используется — подключить в вкладках, кнопках, пунктах меню/рейки и сплиттере.
+
+| Новое поле | Зачем | Этап |
+| --- | --- | --- |
+| `scrollbar_thumb` (+ опц. `scrollbar_track`) | полоса прокрутки колонок с `vertical_overflow` | 6 |
+| `shadow` | тень меню, flyout и «призрака» при перетаскивании | 10, 13 |
+| `danger` | наведение на ×, опасные пункты меню | 8, 13 |
+| `disabled_text` | пункты меню с `enabled = false` | 13 |
+
+Опционально: `inactive_title` (заголовок неактивного плавающего окна), `pressed`. `focus` и `drop_target` должны заметно отличаться: активная зона стыковки рисуется границей `focus` поверх заливки `drop_target`.
+
+### Метрики
+
+Разбор текущего `ThemeMetrics` по полям:
+
+| Поле | Статус | Действие |
+| --- | --- | --- |
+| `column_header_height` | дублирует `DockMetrics::header_height` | `render.rs` читает оба (заголовок окна и flyout — из темы, геометрия — из `DockMetrics`). Выбрать один источник: компоненты получают высоту из `FrameGeometry` |
+| `tab_strip_height` | ок | та же проверка на совпадение с `DockMetrics::tab_strip_height` |
+| `group_control_button_width` | ок, но не используется | в `render.rs` вместо константы `GROUP_MENU_BUTTON_WIDTH = 28.0` |
+| `tab_drag_zone_width` | **устарело** (старый `group_drag_zone`) | удалить после этапа 6 |
+| `column_tab_width` | **устарело** («простая колонка», в `render.rs` вкладки делят ширину поровну) | но если ядро решает переполнение вкладок по ширине вкладки, переименовать в `tab_min_width` (проверить в `DockMetrics`) |
+| `button_size`, `button_gap`, `content_padding` | не видно, где используются | использовать в `IconButton` и `PanelSurface`, иначе удалить |
+| `splitter_thickness`, `splitter_hit_zone` | ок | `SplitterHandle`: полоса = thickness, зона клика = hit\_zone (в `render.rs` сейчас заливается вся hit-зона — полоса больше задуманного) |
+| `edge_drop_zone_width` и `drop_edge_zone` | **два поля на одно** | оставить `drop_edge_zone`, остальное удалить |
+| `drop_indicator_thickness`, `drop_outline_thickness` | ок, но не используются | этап 10: линия вставки и разделения — толщиной `drop_indicator_thickness`, контур целевой группы/окна — `drop_outline_thickness`; заменяют маркер 10×10 |
+| `drag_start_threshold` | ок, но не используется | **это и есть порог `DRAG_SLOP_PX` из этапа 10** — не заводить новую константу |
+| `default_column_width`, `min_column_width`, `rail_width`, `min_group_height`, `collapsed_group_height`, `max_columns`, `default_column_split_ratio` | работают на уровне `DockMetrics` | не читать из UI напрямую — только через `dock_metrics_from_theme` |
+| `min_document_width` | в ядре называется `min_canvas_width` | проверить, что `dock_metrics_from_theme` его мапит |
+
+**Что добавить в `ThemeMetrics`:**
+
+| Новое поле | Зачем | Этап |
+| --- | --- | --- |
+| `group_grip_height` (4.0) | сейчас константа `GROUP_DRAG_GRIP_HEIGHT` в `render.rs` и в нормализаторе | 3 |
+| `menu_item_height` (30.0), `menu_min_width`, `menu_padding` | в старом коде `30.0` было магическим числом | 13 |
+| `scrollbar_width` | полоса прокрутки колонки | 6 |
+| `border_width` (1.0), `focus_ring_width` (2.0) | в `render.rs` зашиты `border_1()` и `border_2()` | 4 |
+| `corner_radius` | единый радиус меню, flyout, призрака (можно 0) | 4 |
+| `icon_size`, `tab_font_size`, `title_font_size` | в теме сейчас нет **типографики**: размеры текста остаются по умолчанию GPUI | 4 |
+| `ghost_offset` | смещение «призрака» от курсора | 10 |
+| `rail_collapse_width`, `rail_expand_width` | пороги автопереключения режима колонки с гистерезисом (два разных порога) | 14 |
+
+### Как метрики доходят до ядра (`dock_metrics_from_theme`)
+
+Уточнение по фактической функции маппинга; оно исправляет две строки таблицы выше.
+
+- `column_header_height` → `header_height` мапится напрямую, расхождения нет. Высоту в UI всё равно читать одним способом (из `FrameGeometry`/`DockMetrics`).
+- `drop_edge_zone` → `edge_drop_width`, а `edge_drop_zone_width` не мапится никуда: **удаляем**.
+- `drag_start_threshold` → `drag_threshold` в ядре. Если `DragSession` сам применяет этот порог, не дублируйте его в `drag_session.rs`; иначе используйте то же значение.
+- Не доходят до ядра: `default_column_split_ratio`, `group_control_button_width`, `drop_indicator_thickness`, `drop_outline_thickness`, `tab_drag_zone_width`, `column_tab_width`, `button_*`, `content_padding`. Для `default_column_split_ratio` проверить, есть ли аналог в `DockMetrics`: если есть, поле теряется молча.
+- `..DockMetrics::default()` скрывает поля, которых тема не задаёт: `tab_overflow_button_width` (его читает `normalize_docked_group_geometry`), размеры flyout, минимум плавающего окна, толщина ручек resize. Выписать их все и решить по каждому: выставить из темы или осознанно оставить по умолчанию.
+- **Резерв под кнопки в полосе вкладок.** UI резервирует ширину под ☰ и ⋯ уже после расчёта ядра (`normalize_docked_group_geometry`), а ядро решает, сколько вкладок помещается, считая всю ширину доступной. Из-за этого переполнение срабатывает позже, чем нужно, и вкладки сжимаются. Если в `DockMetrics` есть поле под резерв в конце полосы, передать туда `group_control_button_width`; если нет, попросить добавить.
+- **Защита от дрейфа:** добавить тест, который деструктурирует `ThemeMetrics` без `..`. При добавлении нового поля тест перестанет компилироваться, и поле придётся явно отнести к «мапится в ядро» или «только UI».
+
+**Уточнение после просмотра `DockMetrics` (15 полей):**
+
+- Тема не задаёт только два поля ядра: `min_tab_width` и `tab_overflow_button_width`. Вывести их в `ThemeMetrics`. Устаревшее `column_tab_width` переименовать в `tab_min_width` и передать в `min_tab_width`.
+- Размеры flyout и минимум плавающего окна в `DockMetrics` нет: они берутся из `PanelConstraints` панелей (реестр из этапа 1). Не добавлять их в тему.
+- `default_column_split_ratio` в ядре нет — поле темы мёртвое. Удалить или применить в приложении при сборке начальной раскладки.
+- Резерв под ☰ в конце полосы вкладок в `DockMetrics` **нет**. Ядро решает переполнение по `min_tab_width`, не зная об этих 28 px, а UI вычитает их потом. Просим у ядра поле `tab_strip_trailing_reserved`; пока — увеличить `min_tab_width` на запас и покрыть тестом «после `normalize_docked_group_geometry` ширина каждой видимой вкладки ≥ `min_tab_width`» на 2, 4, 8 вкладках и разных ширинах колонки.
+- `DockMetrics` имеет `serde(default)`. Если workspace-файл сохраняет метрики, при загрузке игнорировать их и брать из темы, иначе смена темы не влияет на старые раскладки (проверить состав `WorkspaceLayout`).
+- Инварианты для `ThemeMetrics::validated()` и теста: `min_column_width ≤ default_column_width`; `rail_width < min_column_width`; `splitter_hit_zone ≥ splitter_thickness`; `header_height` и `tab_strip_height` > 0; `min_tab_width > 0`; `min_canvas_width > 0`; `max_columns ≥ 1`.
+
+**Проверка входных значений:** в старом коде повсюду `.max(1.0)`. Вынести в `ThemeMetrics::validated(self) -> Self` (клампит отрицательные/NaN) и вызывать один раз при загрузке темы.
+
+## 13. Тесты и критерии приёмки
+
+### Уровни тестов
+
+1. **Чистые юнит-тесты без GPUI** (быстрые, идут на Linux-CI): `geometry`, `tree_query`, `labels`, `chrome_geometry`, `frame`, `drop_commit`, маппинг `ResizeHandle` → `DockCommand`, `rail_policy` (гистерезис), `floating_policy` (`initial_float_bounds`).
+2. **Тесты инвариантов ядра:** после любой команды из таблицы раздела 9 — `layout.validate(&metrics) == Ok(())` и `compute_rects` не падает. Предлагаю один параметризованный тест на все варианты.
+3. **Два теста на Undo:** «команда → undo → дерево равно исходному» и «жест ресайза = один шаг истории».
+4. **Визуальные:** `examples/components_gallery.rs` для компонентов; скриншоты трёх эталонных раскладок до и после этапа 6.
+
+### Критерии «готово» для любого этапа
+
+- [ ] `cargo build`, `cargo test`, `cargo clippy --all-targets -- -D warnings` без ошибок
+- [ ] новый код не вызывает `layout.apply` вне `DockController`
+- [ ] компоненты не импортируют `Layout`/`Node`
+- [ ] нет магических чисел и `rgb(0x…)` в компонентах
+- [ ] нет новых `Layout::clone()` в пути рендера (`grep`)
+- [ ] файл ≤ \~300 строк, функция ≤ \~60, ≤ 5 аргументов
+
+### Ручной сценарий приёмки всего проекта (после этапа 15)
+
+1. Открыть приложение: три группы в двух колонках как раньше.
+2. Ресайз всех типов ручек → Ctrl+Z → Ctrl+Shift+Z.
+3. Перетащить вкладку в другую группу, на край группы, в новую колонку, в свободную область.
+4. Перетащить группу (за grip) во все типы целей.
+5. Открыть два плавающих окна, перекрыть, поднять нижнее кликом, изменить размер каждого за края и углы, закрыть.
+6. Сузить колонку → рейка → flyout → клик снаружи → перетащить из flyout в плавающее окно.
+7. Закрыть и открыть все панели через Dockers — панели возвращаются на прежние места.
+8. Esc в середине каждого жеста — всё как было; увод курсора за окно и отпускание вне окна не оставляют «залипшей» сессии.
+9. Перезапуск: раскладка восстанавливается; повреждённый workspace-файл даёт раскладку по умолчанию, а не краш.
+
+### Бюджет производительности
+
+Время кадра (`compute_rects` + нормализация + сборка элементов) на раскладке из трёх групп — в пределах однозначных миллисекунд; целевое число уточнить замером до рефакторинга (этап 0) и не допускать роста более чем на 10 %.

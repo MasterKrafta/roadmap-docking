@@ -133,9 +133,7 @@ dependencies = [
  "dock-gpui",
  "gpui",
  "gpui_platform",
- "platform-api",
  "platform-windows",
- "slotmap",
  "ui",
 ]
 
@@ -1080,6 +1078,7 @@ version = "0.1.0"
 dependencies = [
  "dock-core",
  "gpui",
+ "gpui_platform",
  "slotmap",
  "ui",
 ]
