@@ -39,25 +39,25 @@ impl Render for MainWindow {
                     self.theme,
                     dropdown_width,
                     menu_item_height,
-                    "Column Tabs Group",
+                    "Вкладка 1",
                 ))
                 .child(render_menu_item(
                     self.theme,
                     dropdown_width,
                     menu_item_height,
-                    "Tabs Group",
+                    "Вкладка 2",
                 ))
                 .child(render_menu_item(
                     self.theme,
                     dropdown_width,
                     menu_item_height,
-                    "Floating Column Tabs Group",
+                    "Вкладка 3",
                 ))
                 .child(render_menu_item(
                     self.theme,
                     dropdown_width,
                     menu_item_height,
-                    "Floating Tabs Group",
+                    "Вкладка 4",
                 ))
         } else {
             div().w(px(0.0)).h(px(0.0))
