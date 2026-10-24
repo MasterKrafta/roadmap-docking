@@ -93,6 +93,15 @@ pub enum DockCommand {
         boundary_index: usize,
         delta: f32,
     },
+    /// Move a boundary between adjacent Column children of a horizontal Split(X).
+    ///
+    /// Unlike ResizeColumnBoundary, this targets a split node directly and can
+    /// therefore resize columns inside a floating dock-tree composition.
+    ResizeSplitColumnBoundary {
+        split: NodeId,
+        boundary_index: usize,
+        delta: f32,
+    },
     /// Reset group-height ratios in one column, sharing free height among
     /// expanded groups only. Collapsed groups keep their fixed collapsed height.
     ResetColumnRatios {
@@ -256,6 +265,11 @@ mod tests {
             },
             DockCommand::ResizeColumnBoundary {
                 side: DockSide::Right,
+                boundary_index: 0,
+                delta: 12.0,
+            },
+            DockCommand::ResizeSplitColumnBoundary {
+                split: NodeId::null(),
                 boundary_index: 0,
                 delta: 12.0,
             },
