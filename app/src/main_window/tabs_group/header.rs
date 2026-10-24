@@ -1,8 +1,30 @@
 use super::{close_button, collapse_button};
-use gpui::{Div, ParentElement, Styled, div, px, rgb};
+use super::super::{DockDragPreview, GroupDragPayload};
+use gpui::{
+    AppContext, Div, InteractiveElement, ParentElement, StatefulInteractiveElement, Styled, div, px,
+    rgb,
+};
 
-/// Empty header area with the collapse and close controls aligned to the right.
-pub(super) fn render(theme: ui::Theme, width: f32, height: f32) -> Div {
+/// Header controls stay outside the draggable area; only the free area carries the dock-tree drag.
+pub(super) fn render(
+    theme: ui::Theme,
+    width: f32,
+    height: f32,
+    dock_tree_drag: Option<GroupDragPayload>,
+) -> Div {
+    let drag_area = div()
+        .flex_1()
+        .h(px(height))
+        .id("dock-tree-header-drag-zone");
+
+    let drag_area = match dock_tree_drag {
+        Some(payload) => drag_area.on_drag(payload, |payload, _cursor_offset, window, cx| {
+            payload.drag_start_position.set(window.mouse_position());
+            cx.new(|_| DockDragPreview)
+        }),
+        None => drag_area,
+    };
+
     div()
         .flex()
         .items_center()
@@ -11,7 +33,7 @@ pub(super) fn render(theme: ui::Theme, width: f32, height: f32) -> Div {
         .bg(rgb(theme.colors.toolbar_background))
         .border_1()
         .border_color(rgb(theme.colors.border))
-        .child(div().flex_1().h(px(height)))
+        .child(drag_area)
         .child(collapse_button::render(theme, height))
         .child(close_button::render(theme, height))
 }
