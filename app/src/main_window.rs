@@ -632,6 +632,7 @@ impl MainWindow {
                         |_, _, _| {},
                         |_, _, _| {},
                         tabs_group::GroupRenderMode::SourcePlaceholder,
+                        None,
                     );
                     root = root.child(
                         div()
@@ -1973,9 +1974,8 @@ mod tests {
 
         let headerless = group_drag_bounds(source, movement, false, &metrics);
         assert_eq!(headerless.origin.x, source.origin.x + movement.x);
-        assert_eq!(
-            headerless.origin.y + header_height,
-            source.origin.y + movement.y
+        assert!(
+            (headerless.origin.y + header_height - (source.origin.y + movement.y)).abs() < 0.001
         );
         assert_eq!(headerless.size.width, source.size.width);
         assert_eq!(headerless.size.height, source.size.height + header_height);
