@@ -605,6 +605,161 @@ impl MainWindow {
         cx.notify();
     }
 
+    /// Renders all group and splitter descendants of a floating Column/Split root.
+    /// Standalone Tabs windows keep their established single-group renderer.
+    fn render_floating_tree(
+        &self,
+        layout: &Layout,
+        rects: &dock_core::LayoutRects,
+        tree_root: NodeId,
+        floating_rect: &dock_core::FloatingGroupRect,
+        bounds: Rect,
+        drag_viewport_size: Size,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> gpui::Div {
+        let mut composition = div()
+            .relative()
+            .w(px(bounds.size.width))
+            .h(px(bounds.size.height))
+            .overflow_hidden()
+            .bg(rgb(self.theme.colors.group_background))
+            .border_1()
+            .border_color(rgb(self.theme.colors.primary_text));
+
+        // Splitter bars belong to the tree root, and are positioned relative to
+        // Core's clamped floating rectangle while the frame uses its raw origin.
+        for splitter in &rects.splitters {
+            if !subtree_contains_node(layout, tree_root, splitter.owner) {
+                continue;
+            }
+            let (bar_left, bar_top, bar_width, bar_height) = match splitter.axis {
+                dock_core::Axis::X => (
+                    (splitter.rect.size.width - self.core_metrics.splitter_thickness).max(0.0)
+                        / 2.0,
+                    0.0,
+                    self.core_metrics
+                        .splitter_thickness
+                        .min(splitter.rect.size.width),
+                    splitter.rect.size.height,
+                ),
+                dock_core::Axis::Y => (
+                    0.0,
+                    (splitter.rect.size.height - self.core_metrics.splitter_thickness).max(0.0)
+                        / 2.0,
+                    splitter.rect.size.width,
+                    self.core_metrics
+                        .splitter_thickness
+                        .min(splitter.rect.size.height),
+                ),
+            };
+            composition = composition.child(
+                div()
+                    .absolute()
+                    .left(px(
+                        splitter.rect.origin.x - floating_rect.rect.origin.x + bar_left,
+                    ))
+                    .top(px(
+                        splitter.rect.origin.y - floating_rect.rect.origin.y + bar_top,
+                    ))
+                    .w(px(bar_width))
+                    .h(px(bar_height))
+                    .bg(rgb(self.theme.colors.splitter)),
+            );
+        }
+
+        for group_rect in &rects.groups {
+            let group_id = group_rect.group;
+            if !subtree_contains_node(layout, tree_root, group_id) {
+                continue;
+            }
+
+            // If a tab is currently being detached, retain the other source tab.
+            let dragged_panel = self
+                .active_tab_drag_payload
+                .as_ref()
+                .filter(|drag| {
+                    drag.floating_group == Some(floating_rect.group)
+                        && drag.group == group_id
+                        && group_has_multiple_tabs(&drag.layout_before, drag.group)
+                })
+                .map(|drag| drag.panel);
+            let Some(tabs_view) =
+                group_tabs_view_excluding(layout, group_id, dragged_panel)
+            else {
+                continue;
+            };
+
+            let first_group = group_id;
+            let first_panel = tabs_view.first_panel;
+            let on_first_tab = cx.listener(move |this, _, _, cx| {
+                this.activate_tab(first_group, first_panel, cx);
+            });
+            let second_group = group_id;
+            let second_panel = tabs_view.second_panel;
+            let on_second_tab = cx.listener(move |this, _, _, cx| {
+                if let Some(panel) = second_panel {
+                    this.activate_tab(second_group, panel, cx);
+                }
+            });
+
+            let drag_mouse_position = window.mouse_position();
+            let first_drag = Some(self.tab_drag_payload(
+                tabs_view.first_panel,
+                group_id,
+                group_rect.rect,
+                drag_mouse_position,
+                drag_viewport_size,
+            ));
+            let second_drag = tabs_view.second_panel.map(|panel| {
+                self.tab_drag_payload(
+                    panel,
+                    group_id,
+                    group_rect.rect,
+                    drag_mouse_position,
+                    drag_viewport_size,
+                )
+            });
+            let group_drag_payload = Some(self.group_drag_payload(
+                tabs_view.first_panel,
+                group_id,
+                group_rect.rect,
+                drag_mouse_position,
+                drag_viewport_size,
+            ));
+
+            let group_element = tabs_group::render(
+                layout,
+                group_id,
+                self.theme,
+                tabs_view.active_tab,
+                group_rect.rect.size.width,
+                group_rect.rect.size.height,
+                tabs_view.first_label,
+                tabs_view.second_label,
+                first_drag,
+                second_drag,
+                on_first_tab,
+                on_second_tab,
+                tabs_group::GroupRenderMode::Layout,
+                group_drag_payload,
+                None,
+            );
+
+            composition = composition.child(
+                div()
+                    .absolute()
+                    .left(px(group_rect.rect.origin.x - floating_rect.rect.origin.x))
+                    .top(px(group_rect.rect.origin.y - floating_rect.rect.origin.y))
+                    .w(px(group_rect.rect.size.width))
+                    .h(px(group_rect.rect.size.height))
+                    .child(group_element),
+            );
+        }
+
+        composition
+    }
+
     fn render_core_groups(
         &self,
         width: f32,
