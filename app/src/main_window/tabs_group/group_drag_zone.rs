@@ -1,5 +1,5 @@
 use gpui::{
-    Div, InteractiveElement, ParentElement, StatefulInteractiveElement, Styled, Window, div, px,
+    Div, InteractiveElement, ParentElement, StatefulInteractiveElement, Styled, div, px,
     rgb,
 };
 
