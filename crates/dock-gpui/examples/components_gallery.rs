@@ -13,7 +13,7 @@ use dock_core::{
 };
 use gpui::{
     App, ClickEvent, Context, IntoElement, InteractiveElement, MouseDownEvent, ParentElement,
-    Render, Styled, Window, div, px, rgb,
+    Render, StatefulInteractiveElement, Styled, Window, div, px, rgb,
 };
 use slotmap::SlotMap;
 use ui::Theme;
