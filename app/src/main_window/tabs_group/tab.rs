@@ -38,7 +38,13 @@ where
         .on_click(on_click);
 
     match drag_payload {
-        Some(payload) => tab.on_drag(payload, |_, _, _, cx| cx.new(|_| TabDragPreview)),
+        Some(payload) => tab.on_drag(payload, |payload, _cursor_offset, window, cx| {
+            // The payload is built during render, which may be stale for an
+            // inactive tab. Refresh the pointer origin when GPUI actually starts
+            // the drag so both active and inactive tabs follow the cursor equally.
+            payload.drag_start_position.set(window.mouse_position());
+            cx.new(|_| TabDragPreview)
+        }),
         None => tab,
     }
 }
