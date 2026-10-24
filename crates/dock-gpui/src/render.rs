@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::color::blend_rgb;
 use crate::geometry::{localize_tree_rects, scroll_rect_in_viewport, translate_rect_to_local};
 
 use dock_core::{
@@ -1062,17 +1063,7 @@ fn rect_element(rect: Rect, color: u32) -> Div {
         .bg(rgb(color))
 }
 
-fn blend_rgb(foreground: u32, background: u32, foreground_weight: f32) -> u32 {
-    let weight = foreground_weight.clamp(0.0, 1.0);
-    let channel = |shift: u32| {
-        let foreground = ((foreground >> shift) & 0xFF) as f32;
-        let background = ((background >> shift) & 0xFF) as f32;
-        (foreground * weight + background * (1.0 - weight))
-            .round()
-            .clamp(0.0, 255.0) as u32
-    };
-    (channel(16) << 16) | (channel(8) << 8) | channel(0)
-}
+
 
 fn subtree_nodes(layout: &Layout, root: NodeId) -> HashSet<NodeId> {
     let mut result = HashSet::new();

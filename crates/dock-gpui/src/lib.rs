@@ -1,3 +1,4 @@
+mod color;
 mod geometry;
 mod metrics;
 mod render;
