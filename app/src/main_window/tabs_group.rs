@@ -18,6 +18,13 @@ use gpui::{App, ClickEvent, Div, ParentElement, Styled, Window, div, px, rgb};
 
 use super::TabDragPayload;
 
+/// Selects the presentation of a group while keeping one shared renderer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum GroupRenderMode {
+    Layout,
+    DragPreview,
+}
+
 /// Renders any Tabs group from Core's tree.
 ///
 /// Header visibility and floating styling are derived from the current layout:
@@ -36,13 +43,20 @@ pub(super) fn render<F1, F2>(
     second_drag: Option<TabDragPayload>,
     on_first_tab: F1,
     on_second_tab: F2,
+    mode: GroupRenderMode,
 ) -> Div
 where
     F1: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     F2: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 {
-    let show_header = super::group_has_header(layout, group_id);
-    let is_floating = super::group_is_floating(layout, group_id);
+    let show_header = match mode {
+        GroupRenderMode::Layout => super::group_has_header(layout, group_id),
+        GroupRenderMode::DragPreview => false,
+    };
+    let is_floating = match mode {
+        GroupRenderMode::Layout => super::group_is_floating(layout, group_id),
+        GroupRenderMode::DragPreview => true,
+    };
     let header_height = if show_header {
         theme.metrics.column_header_height.max(1.0)
     } else {
@@ -94,49 +108,6 @@ where
             width,
             content_height,
         ))
-}
-
-/// Renders the temporary tab-drag preview. It deliberately has no group header;
-/// the actual floating group is created only when the drag is released.
-pub(super) fn render_drag_preview(
-    theme: ui::Theme,
-    width: f32,
-    height: f32,
-    label: &'static str,
-) -> Div {
-    let tab_strip_height = theme.metrics.tab_strip_height.max(1.0);
-    let content_height = (height - tab_strip_height).max(1.0);
-
-    div()
-        .flex()
-        .flex_col()
-        .w(px(width))
-        .h(px(height))
-        .bg(rgb(theme.colors.group_background))
-        .border_1()
-        .border_color(rgb(theme.colors.primary_text))
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .w(px(width))
-                .h(px(tab_strip_height))
-                .bg(rgb(theme.colors.toolbar_background))
-                .border_1()
-                .border_color(rgb(theme.colors.border))
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .w(px(theme.metrics.column_tab_width.max(1.0)))
-                        .h(px(tab_strip_height))
-                        .bg(rgb(theme.colors.active_tab))
-                        .text_color(rgb(theme.colors.primary_text))
-                        .child(label),
-                ),
-        )
-        .child(content::render(theme, label, width, content_height))
 }
 
 /// Arranges one or two tabs, the open drag/drop area, and the hamburger button.
