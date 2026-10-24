@@ -437,4 +437,34 @@ mod tests {
             Err(ResizeUpdateError::InvalidBounds)
         ));
     }
+
+    #[test]
+    fn command_for_pointer_rejects_non_finite_coordinates() {
+        let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
+        let owner = layout
+            .nodes()
+            .find_map(|(id, node)| matches!(node, Node::Column(_)).then_some(id))
+            .unwrap();
+        let session = session(
+            &layout,
+            ResizeHandle::Splitter {
+                owner,
+                boundary_index: 0,
+                axis: Axis::Y,
+            },
+            StartGeometry::VerticalGroups {
+                available_height: 640.0,
+            },
+        );
+
+        assert!(matches!(
+            session.command_for_pointer(Point::new(f32::NAN, 120.0)),
+            Err(ResizeUpdateError::InvalidPointer)
+        ));
+        assert!(matches!(
+            session.command_for_pointer(Point::new(120.0, f32::INFINITY)),
+            Err(ResizeUpdateError::InvalidPointer)
+        ));
+    }
+
 }
