@@ -204,9 +204,139 @@ mod tests {
         normalize_docked_group_geometry, GROUP_DRAG_GRIP_HEIGHT, GROUP_MENU_BUTTON_WIDTH,
     };
     use dock_core::{
-        create_initial_layout, DockMetrics, DockSide, Node, PanelConstraints, PanelKey,
-        Point, Profile, Rect, Size,
+        create_initial_layout, DockCommand, DockMetrics, DockSide, DropTarget, Layout, Node,
+        NodeId, PanelConstraints, PanelKey, Point, Profile, Rect, Size,
     };
+
+    fn layout_with_tab_count(tab_count: usize, metrics: DockMetrics) -> (Layout, NodeId) {
+        let constraints = PanelConstraints::new(
+            Size::new(80.0, 80.0),
+            Size::new(180.0, 140.0),
+            Some(Size::new(800.0, 600.0)),
+            false,
+        );
+        let descriptors = ["layers", "color", "properties", "history"]
+            .into_iter()
+            .map(|key| (PanelKey::new(key).unwrap(), constraints))
+            .collect::<Vec<_>>();
+        let mut layout =
+            create_initial_layout(Profile::Photoshop, &descriptors, metrics).unwrap();
+
+        let column_id = layout.main_area(DockSide::Right).unwrap().root;
+        let Node::Column(column) = layout.node(column_id).unwrap() else {
+            panic!("Photoshop main area should use a column");
+        };
+        let group_id = column.groups[0];
+
+        match tab_count {
+            1 => {
+                let panel = layout
+                    .panel_instances()
+                    .find_map(|(id, instance)| (instance.key.as_str() == "color").then_some(id))
+                    .unwrap();
+                layout
+                    .apply(DockCommand::ClosePanel { panel }, &metrics)
+                    .unwrap();
+            }
+            2 => {}
+            5 => {
+                for (offset, key) in ["extra-three", "extra-four", "extra-five"]
+                    .into_iter()
+                    .enumerate()
+                {
+                    layout
+                        .apply(
+                            DockCommand::OpenPanel {
+                                key: PanelKey::new(key).unwrap(),
+                                constraints,
+                                target: Some(DropTarget::Tabs {
+                                    group: group_id,
+                                    index: 2 + offset,
+                                }),
+                            },
+                            &metrics,
+                        )
+                        .unwrap();
+                }
+            }
+            _ => panic!("the fixture supports 1, 2, or 5 tabs"),
+        }
+
+        // Give all five tabs enough room to remain visible instead of testing overflow.
+        layout
+            .apply(
+                DockCommand::ResizeColumn {
+                    column: column_id,
+                    width: 700.0,
+                },
+                &metrics,
+            )
+            .unwrap();
+
+        (layout, group_id)
+    }
+
+    #[test]
+    fn visible_tab_widths_are_equal_for_one_two_and_five_tabs() {
+        let metrics = DockMetrics {
+            header_height: 32.0,
+            tab_strip_height: 24.0,
+            ..DockMetrics::default()
+        };
+        let viewport = Rect::new(Point::ZERO, Size::new(1600.0, 900.0));
+
+        for tab_count in [1, 2, 5] {
+            let (layout, group_id) = layout_with_tab_count(tab_count, metrics);
+            let mut rects = layout.compute_rects(viewport, &metrics).unwrap();
+            let group_rect = rects
+                .groups
+                .iter()
+                .find(|entry| entry.group == group_id)
+                .unwrap()
+                .rect;
+
+            assert!(
+                !rects.tab_overflows.iter().any(|entry| entry.group == group_id),
+                "the {tab_count}-tab fixture should not overflow"
+            );
+
+            normalize_docked_group_geometry(&layout, &metrics, &mut rects);
+
+            let mut headers = rects
+                .tab_headers
+                .iter()
+                .filter(|header| header.group == group_id)
+                .collect::<Vec<_>>();
+            headers.sort_by_key(|header| header.index);
+            assert_eq!(headers.len(), tab_count);
+
+            let tabs_width = (group_rect.size.width - GROUP_MENU_BUTTON_WIDTH).max(0.0);
+            let expected_tab_width = tabs_width / tab_count as f32;
+            let mut expected_left = group_rect.origin.x;
+            for header in headers {
+                assert!(
+                    (header.rect.origin.x - expected_left).abs() < 0.001,
+                    "tab {}/{} should start at the next equal-width slot",
+                    header.index + 1,
+                    tab_count
+                );
+                assert!(
+                    (header.rect.size.width - expected_tab_width).abs() < 0.001,
+                    "tab {}/{} should be {expected_tab_width}px wide, got {}",
+                    header.index + 1,
+                    tab_count,
+                    header.rect.size.width
+                );
+                expected_left += expected_tab_width;
+            }
+
+            let expected_tabs_right = group_rect.origin.x + tabs_width;
+            assert!(
+                (expected_left - expected_tabs_right).abs() < 0.001,
+                "tabs must end before the reserved group-menu area"
+            );
+        }
+    }
 
     #[test]
     fn collapsed_floating_root_tabs_are_positioned_below_the_window_title() {
