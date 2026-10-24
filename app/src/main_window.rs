@@ -386,20 +386,33 @@ impl MainWindow {
                 )
             });
 
-            let group_element = render_tabs_group(
-                self.theme,
-                false,
-                has_header,
-                tabs_view.active_tab,
-                group_rect.rect.size.width,
-                group_rect.rect.size.height,
-                tabs_view.first_label,
-                tabs_view.second_label,
-                first_drag,
-                second_drag,
-                on_first_tab,
-                on_second_tab,
-            );
+            let group_element = if has_header {
+                column_tabs_group::render_with_tabs(
+                    self.theme,
+                    tabs_view.active_tab,
+                    group_rect.rect.size.width,
+                    group_rect.rect.size.height,
+                    tabs_view.first_label,
+                    tabs_view.second_label,
+                    first_drag,
+                    second_drag,
+                    on_first_tab,
+                    on_second_tab,
+                )
+            } else {
+                tabs_group::render_with_tabs(
+                    self.theme,
+                    tabs_view.active_tab,
+                    group_rect.rect.size.width,
+                    group_rect.rect.size.height,
+                    tabs_view.first_label,
+                    tabs_view.second_label,
+                    first_drag,
+                    second_drag,
+                    on_first_tab,
+                    on_second_tab,
+                )
+            };
 
             root = root.child(
                 div()
@@ -631,20 +644,33 @@ impl MainWindow {
             // clamps the visible rect for layout calculations; using that clamped
             // origin for painting made the panel stop before the pointer reached
             // the app-window edge.
-            let floating_element = render_tabs_group(
-                self.theme,
-                true,
-                group_has_header(&self.core_layout, group_id),
-                tabs_view.active_tab,
-                floating_bounds.size.width,
-                floating_bounds.size.height,
-                tabs_view.first_label,
-                tabs_view.second_label,
-                first_drag,
-                second_drag,
-                on_first_tab,
-                on_second_tab,
-            );
+            let floating_element = if group_has_header(&self.core_layout, group_id) {
+                floating_column_tabs_group::render_with_tabs(
+                    self.theme,
+                    tabs_view.active_tab,
+                    floating_bounds.size.width,
+                    floating_bounds.size.height,
+                    tabs_view.first_label,
+                    tabs_view.second_label,
+                    first_drag,
+                    second_drag,
+                    on_first_tab,
+                    on_second_tab,
+                )
+            } else {
+                floating_tabs_group::render_with_tabs(
+                    self.theme,
+                    tabs_view.active_tab,
+                    floating_bounds.size.width,
+                    floating_bounds.size.height,
+                    tabs_view.first_label,
+                    tabs_view.second_label,
+                    first_drag,
+                    second_drag,
+                    on_first_tab,
+                    on_second_tab,
+                )
+            };
 
             root = root.child(
                 div()
@@ -769,83 +795,6 @@ impl Render for MainWindow {
             )
             .child(dropdown)
             .child(self.render_core_groups(width, content_height, window, cx))
-    }
-}
-
-/// Routes each group to exactly one of the four visual components.
-///
-/// The floating state and the optional header are independent:
-/// - dock + header -> column_tabs_group
-/// - dock without header -> tabs_group
-/// - floating + header -> floating_column_tabs_group
-/// - floating without header -> floating_tabs_group
-fn render_tabs_group<F1, F2>(
-    theme: ui::Theme,
-    floating: bool,
-    has_header: bool,
-    active_tab: usize,
-    width: f32,
-    height: f32,
-    first_tab: &'static str,
-    second_tab: Option<&'static str>,
-    first_drag: Option<TabDragPayload>,
-    second_drag: Option<TabDragPayload>,
-    on_first_tab: F1,
-    on_second_tab: F2,
-) -> gpui::Div
-where
-    F1: Fn(&gpui::ClickEvent, &mut Window, &mut gpui::App) + 'static,
-    F2: Fn(&gpui::ClickEvent, &mut Window, &mut gpui::App) + 'static,
-{
-    match (floating, has_header) {
-        (true, true) => floating_column_tabs_group::render_with_tabs(
-            theme,
-            active_tab,
-            width,
-            height,
-            first_tab,
-            second_tab,
-            first_drag,
-            second_drag,
-            on_first_tab,
-            on_second_tab,
-        ),
-        (true, false) => floating_tabs_group::render_with_tabs(
-            theme,
-            active_tab,
-            width,
-            height,
-            first_tab,
-            second_tab,
-            first_drag,
-            second_drag,
-            on_first_tab,
-            on_second_tab,
-        ),
-        (false, true) => column_tabs_group::render_with_tabs(
-            theme,
-            active_tab,
-            width,
-            height,
-            first_tab,
-            second_tab,
-            first_drag,
-            second_drag,
-            on_first_tab,
-            on_second_tab,
-        ),
-        (false, false) => tabs_group::render_with_tabs(
-            theme,
-            active_tab,
-            width,
-            height,
-            first_tab,
-            second_tab,
-            first_drag,
-            second_drag,
-            on_first_tab,
-            on_second_tab,
-        ),
     }
 }
 
