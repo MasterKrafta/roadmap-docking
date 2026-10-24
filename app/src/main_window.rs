@@ -439,6 +439,16 @@ impl MainWindow {
                 eprintln!("Could not move floating group: {error:?}");
                 self.core_layout = drag.layout_before.clone();
             }
+        } else if drag.whole_area {
+            // A dock-area root already contains all its column headers. Preview the
+            // entire existing tree at the pointer delta without reshaping its bounds.
+            self.group_drag_preview = Some(GroupDragPreviewState {
+                layout: drag.layout_before.clone(),
+                group: drag.group,
+                bounds: Rect::new(origin, drag.bounds_before.size),
+                source_bounds: drag.bounds_before,
+                whole_area: true,
+            });
         } else {
             let source_has_header = group_has_header(&drag.layout_before, drag.group);
             let (preview_bounds, _) = group_drag_bounds(
@@ -451,13 +461,15 @@ impl MainWindow {
                 layout: drag.layout_before.clone(),
                 group: drag.group,
                 bounds: preview_bounds,
+                source_bounds: drag.bounds_before,
+                whole_area: false,
             });
         }
 
         cx.notify();
     }
 
-    /// Commits moving a whole group when the pointer is released.
+    /// Commits moving a whole group or a complete dock-area tree when released.
     fn finish_group_drag(
         &mut self,
         drag: &GroupDragPayload,
@@ -490,6 +502,12 @@ impl MainWindow {
             DockCommand::MoveFloating {
                 group: floating_group,
                 origin,
+            }
+        } else if drag.whole_area {
+            // Core can detach a Column or a Split(X) of columns as one floating root.
+            DockCommand::Float {
+                node: drag.group,
+                bounds: Rect::new(origin, drag.bounds_before.size),
             }
         } else {
             let source_has_header = group_has_header(&drag.layout_before, drag.group);
