@@ -467,6 +467,32 @@ mod tests {
 
 
     #[test]
+    fn command_for_pointer_rejects_overflowing_delta() {
+        let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
+        let owner = layout
+            .nodes()
+            .find_map(|(id, node)| matches!(node, Node::Column(_)).then_some(id))
+            .unwrap();
+        let mut session = session(
+            &layout,
+            ResizeHandle::Splitter {
+                owner,
+                boundary_index: 0,
+                axis: Axis::Y,
+            },
+            StartGeometry::VerticalGroups {
+                available_height: 640.0,
+            },
+        );
+        session.pointer_start = Point::new(f32::MAX, 100.0);
+
+        assert!(matches!(
+            session.command_for_pointer(Point::new(-f32::MAX, 100.0)),
+            Err(ResizeUpdateError::InvalidDelta)
+        ));
+    }
+
+    #[test]
     fn vertical_resize_rejects_zero_available_height_at_start() {
         let controller = DockController::new_initial(&Theme::default()).unwrap();
         let layout = controller.layout().clone();
