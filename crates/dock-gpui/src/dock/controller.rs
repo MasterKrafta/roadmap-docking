@@ -54,6 +54,9 @@ impl DockController {
         &mut self,
         command: DockCommand,
     ) -> Result<CommandOutcome, CommandError> {
+        // A persistent command must not race an uncommitted preview based on an
+        // older layout snapshot. Roll the gesture back before mutating history.
+        self.cancel_resize();
         let result = self
             .history
             .apply(&mut self.layout, command, &self.metrics);
@@ -62,12 +65,14 @@ impl DockController {
 
     /// Restores the preceding recorded layout revision, if one exists.
     pub(crate) fn undo(&mut self) -> Result<bool, CommandError> {
+        self.cancel_resize();
         let result = self.history.undo(&mut self.layout, &self.metrics);
         self.track_command_result(result, "undo")
     }
 
     /// Reapplies the next recorded layout revision, if one exists.
     pub(crate) fn redo(&mut self) -> Result<bool, CommandError> {
+        self.cancel_resize();
         let result = self.history.redo(&mut self.layout, &self.metrics);
         self.track_command_result(result, "redo")
     }
