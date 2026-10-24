@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::components::RectBox;
+use crate::components::{with_focus_ring, RectBox};
 
 use crate::chrome_geometry::{GROUP_DRAG_GRIP_HEIGHT, GROUP_MENU_BUTTON_WIDTH};
 use crate::frame::FrameGeometry;
@@ -440,28 +440,30 @@ where
             Point::new(flyout.rect.size.width - button_width * 2.0, 0.0),
             Size::new(button_width, header_height),
         );
-        let menu_button = rect_element(menu_rect, theme.colors.toolbar_background)
-            .text_color(rgb(theme.colors.primary_text))
-            .child("⋯")
-            .id(format!("dock-flyout-menu-{:?}-{:?}", flyout.group, flyout.panel))
-            .focusable()
-            .focus_visible(|style| style.border_2().border_color(rgb(theme.colors.focus)))
-            .on_click(make_menu_handler(DockMenuRequest::PanelGroup {
-                group: flyout.group,
-                panel: Some(flyout.panel),
-            }));
+        let menu_button = with_focus_ring(
+            rect_element(menu_rect, theme.colors.toolbar_background)
+                .text_color(rgb(theme.colors.primary_text))
+                .child("⋯")
+                .id(format!("dock-flyout-menu-{:?}-{:?}", flyout.group, flyout.panel)),
+            theme,
+        )
+        .on_click(make_menu_handler(DockMenuRequest::PanelGroup {
+            group: flyout.group,
+            panel: Some(flyout.panel),
+        }));
 
         let close_rect = Rect::new(
             Point::new(flyout.rect.size.width - button_width, 0.0),
             Size::new(button_width, header_height),
         );
-        let close_button = rect_element(close_rect, theme.colors.toolbar_background)
-            .text_color(rgb(theme.colors.primary_text))
-            .child("×")
-            .id(format!("dock-flyout-close-{:?}-{:?}", flyout.group, flyout.panel))
-            .focusable()
-            .focus_visible(|style| style.border_2().border_color(rgb(theme.colors.focus)))
-            .on_click(make_command_handler(DockCommand::CloseFlyout));
+        let close_button = with_focus_ring(
+            rect_element(close_rect, theme.colors.toolbar_background)
+                .text_color(rgb(theme.colors.primary_text))
+                .child("×")
+                .id(format!("dock-flyout-close-{:?}-{:?}", flyout.group, flyout.panel)),
+            theme,
+        )
+        .on_click(make_command_handler(DockCommand::CloseFlyout));
 
         let content_rect = Rect::new(
             Point::new(0.0, header_height),
@@ -676,23 +678,24 @@ where
             group: header.group,
             collapsed: !collapsed,
         });
-        let element = rect_element(header.rect, background)
-            .text_color(rgb(theme.colors.primary_text))
-            .child(display_label)
-            .id(format!("dock-tab-{:?}-{:?}", header.group, header.panel))
-            .focusable()
-            .focus_visible(|style| style.border_2().border_color(rgb(theme.colors.focus)))
-            .on_mouse_down(
-                MouseButton::Left,
-                make_drag_start_handler(payload, DragHandle::PanelTab),
-            )
-            .on_click(move |event, window, app| {
-                if event.click_count() >= 2 {
-                    collapse_handler(event, window, app);
-                } else {
-                    activate_handler(event, window, app);
-                }
-            });
+        let element = with_focus_ring(
+            rect_element(header.rect, background)
+                .text_color(rgb(theme.colors.primary_text))
+                .child(display_label)
+                .id(format!("dock-tab-{:?}-{:?}", header.group, header.panel)),
+            theme,
+        )
+        .on_mouse_down(
+            MouseButton::Left,
+            make_drag_start_handler(payload, DragHandle::PanelTab),
+        )
+        .on_click(move |event, window, app| {
+            if event.click_count() >= 2 {
+                collapse_handler(event, window, app);
+            } else {
+                activate_handler(event, window, app);
+            }
+        });
         elements.push(element.into_any_element());
     }
 
@@ -702,16 +705,17 @@ where
         .filter(|entry| nodes.contains(&entry.group))
     {
         elements.push(
-            rect_element(overflow.button_rect, theme.colors.toolbar_background)
-                .text_color(rgb(theme.colors.primary_text))
-                .child("⋯")
-                .id(format!("dock-tab-overflow-{:?}", overflow.group))
-                .focusable()
-                .focus_visible(|style| style.border_2().border_color(rgb(theme.colors.focus)))
-                .on_click(make_menu_handler(DockMenuRequest::TabOverflow {
-                    group: overflow.group,
-                }))
-                .into_any_element(),
+            with_focus_ring(
+                rect_element(overflow.button_rect, theme.colors.toolbar_background)
+                    .text_color(rgb(theme.colors.primary_text))
+                    .child("⋯")
+                    .id(format!("dock-tab-overflow-{:?}", overflow.group)),
+                theme,
+            )
+            .on_click(make_menu_handler(DockMenuRequest::TabOverflow {
+                group: overflow.group,
+            }))
+            .into_any_element(),
         );
     }
 
@@ -732,19 +736,20 @@ where
             Size::new(button_width, strip.rect.size.height),
         );
         elements.push(
-            rect_element(menu_rect, theme.colors.toolbar_background)
-                .border_1()
-                .border_color(rgb(theme.colors.border))
-                .text_color(rgb(theme.colors.primary_text))
-                .child("☰")
-                .id(format!("dock-group-menu-{:?}", strip.group))
-                .focusable()
-                .focus_visible(|style| style.border_2().border_color(rgb(theme.colors.focus)))
-                .on_click(make_menu_handler(DockMenuRequest::PanelGroup {
-                    group: strip.group,
-                    panel: active_panel(layout, tabs),
-                }))
-                .into_any_element(),
+            with_focus_ring(
+                rect_element(menu_rect, theme.colors.toolbar_background)
+                    .border_1()
+                    .border_color(rgb(theme.colors.border))
+                    .text_color(rgb(theme.colors.primary_text))
+                    .child("☰")
+                    .id(format!("dock-group-menu-{:?}", strip.group)),
+                theme,
+            )
+            .on_click(make_menu_handler(DockMenuRequest::PanelGroup {
+                group: strip.group,
+                panel: active_panel(layout, tabs),
+            }))
+            .into_any_element(),
         );
     }
 
@@ -869,15 +874,15 @@ where
                 entry.flex().items_center().child(display_label)
             };
             elements.push(
-                entry
-                    .id(format!("dock-rail-{:?}-{:?}", column_rect.column, item.panel))
-                    .focusable()
-                    .focus_visible(|style| style.border_2().border_color(rgb(theme.colors.focus)))
-                    .on_click(make_command_handler(DockCommand::OpenFlyout {
-                        column: column_rect.column,
-                        panel: item.panel,
-                    }))
-                    .into_any_element(),
+                with_focus_ring(
+                    entry.id(format!("dock-rail-{:?}-{:?}", column_rect.column, item.panel)),
+                    theme,
+                )
+                .on_click(make_command_handler(DockCommand::OpenFlyout {
+                    column: column_rect.column,
+                    panel: item.panel,
+                }))
+                .into_any_element(),
             );
         }
     }
