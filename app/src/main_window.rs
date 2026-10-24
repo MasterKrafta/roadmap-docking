@@ -465,8 +465,8 @@ impl MainWindow {
         cx.notify();
     }
 
-    /// Commits a docked tab detach when the pointer is released. At this stage
-    /// the window root is the fallback drop target; explicit dock zones come later.
+    /// Commits a tab detach when the pointer is released. At this stage the
+    /// window root is the fallback drop target; explicit dock zones come later.
     fn finish_tab_drag(
         &mut self,
         drag: &TabDragPayload,
@@ -503,7 +503,9 @@ impl MainWindow {
         // after release, so intermediate pointer movement never changes the tree.
         self.core_layout = drag.layout_before.clone();
         let source_has_other_tabs = group_has_multiple_tabs(&drag.layout_before, drag.group);
-        let command = if let Some(floating_group) = drag.floating_group.filter(|_| !source_has_other_tabs) {
+        let command = if let Some(floating_group) =
+            drag.floating_group.filter(|_| !source_has_other_tabs)
+        {
             DockCommand::MoveFloating {
                 group: floating_group,
                 origin,
@@ -2164,7 +2166,10 @@ mod tests {
         );
 
         let detached_bounds = Rect::new(
-            Point::new(first_floating_bounds.origin.x + 80.0, first_floating_bounds.origin.y + 40.0),
+            Point::new(
+                first_floating_bounds.origin.x + 80.0,
+                first_floating_bounds.origin.y + 40.0,
+            ),
             floating_size_for_detach(first_floating_bounds, true, &metrics),
         );
         layout
