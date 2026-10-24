@@ -4,8 +4,8 @@ mod close_button;
 mod collapse_button;
 #[path = "tabs_group/content.rs"]
 mod content;
-#[path = "tabs_group/drag_zone.rs"]
-mod drag_zone;
+#[path = "tabs_group/group_drag_zone.rs"]
+mod group_drag_zone;
 #[path = "tabs_group/hamburger_button.rs"]
 mod hamburger_button;
 #[path = "tabs_group/header.rs"]
@@ -16,13 +16,14 @@ mod tab;
 use dock_core::{Layout, NodeId};
 use gpui::{App, ClickEvent, Div, ParentElement, Styled, Window, div, px, rgb};
 
-use super::TabDragPayload;
+use super::{GroupDragPayload, TabDragPayload};
 
 /// Selects the presentation of a group while keeping one shared renderer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum GroupRenderMode {
     Layout,
     DragPreview,
+    GroupDragPreview,
     SourcePlaceholder,
 }
 
@@ -45,6 +46,7 @@ pub(super) fn render<F1, F2>(
     on_first_tab: F1,
     on_second_tab: F2,
     mode: GroupRenderMode,
+    group_drag_payload: Option<GroupDragPayload>,
 ) -> Div
 where
     F1: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
@@ -64,11 +66,12 @@ where
     let show_header = match mode {
         GroupRenderMode::Layout => super::group_has_header(layout, group_id),
         GroupRenderMode::DragPreview => false,
+        GroupRenderMode::GroupDragPreview => true,
         GroupRenderMode::SourcePlaceholder => unreachable!("handled above"),
     };
     let is_floating = match mode {
         GroupRenderMode::Layout => super::group_is_floating(layout, group_id),
-        GroupRenderMode::DragPreview => true,
+        GroupRenderMode::DragPreview | GroupRenderMode::GroupDragPreview => true,
         GroupRenderMode::SourcePlaceholder => unreachable!("handled above"),
     };
     let header_height = if show_header {
@@ -115,6 +118,7 @@ where
             second_drag,
             on_first_tab,
             on_second_tab,
+            group_drag_payload,
         ))
         .child(content::render(
             theme,
@@ -136,6 +140,7 @@ fn render_tab_strip<F1, F2>(
     second_drag: Option<TabDragPayload>,
     on_first_tab: F1,
     on_second_tab: F2,
+    group_drag_payload: Option<GroupDragPayload>,
 ) -> Div
 where
     F1: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
@@ -172,6 +177,6 @@ where
     };
 
     strip
-        .child(drag_zone::render(theme, height))
+        .child(group_drag_zone::render(theme, height, group_drag_payload))
         .child(hamburger_button::render(theme, height))
 }
