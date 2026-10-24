@@ -1627,15 +1627,7 @@ fn build_core_layout(
     theme: &ui::Theme,
 ) -> Result<(Layout, DockMetrics, NodeId, NodeId, NodeId), String> {
     let metrics = dock_gpui::dock_metrics_from_theme(theme);
-    let constraints = panel_constraints(theme);
-    let descriptors = ["layers", "color", "properties", "history"]
-        .into_iter()
-        .map(|key| {
-            PanelKey::new(key)
-                .map(|key| (key, constraints))
-                .map_err(str::to_owned)
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    let descriptors = dock_gpui::panels::descriptors(theme);
 
     let mut layout = create_initial_layout(Profile::Photoshop, &descriptors, metrics)
         .map_err(str::to_owned)?;
