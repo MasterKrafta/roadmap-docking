@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::components::{with_focus_ring, IconButton, RectBox};
+use crate::components::{with_focus_ring, IconButton, PanelTab, RectBox};
 
 use crate::chrome_geometry::{GROUP_DRAG_GRIP_HEIGHT, GROUP_MENU_BUTTON_WIDTH};
 use crate::frame::FrameGeometry;
@@ -676,25 +676,19 @@ where
             group: header.group,
             collapsed: !collapsed,
         });
-        let element = with_focus_ring(
-            rect_element(header.rect, background)
-                .text_color(rgb(theme.colors.primary_text))
-                .child(display_label)
-                .id(format!("dock-tab-{:?}-{:?}", header.group, header.panel)),
-            theme,
-        )
-        .on_mouse_down(
-            MouseButton::Left,
-            make_drag_start_handler(payload, DragHandle::PanelTab),
-        )
-        .on_click(move |event, window, app| {
-            if event.click_count() >= 2 {
-                collapse_handler(event, window, app);
-            } else {
-                activate_handler(event, window, app);
+        elements.push(
+            PanelTab {
+                id: format!("dock-tab-{:?}-{:?}", header.group, header.panel),
+                rect: header.rect,
+                label: display_label,
+                active,
+                theme: *theme,
+                on_activate: activate_handler,
+                on_collapse_toggle: collapse_handler,
+                on_drag_start: make_drag_start_handler(payload, DragHandle::PanelTab),
             }
-        });
-        elements.push(element.into_any_element());
+            .into_any_element(),
+        );
     }
 
     for overflow in rects

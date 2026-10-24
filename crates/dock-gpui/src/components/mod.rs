@@ -2,8 +2,10 @@
 
 pub mod focus_ring;
 pub mod icon_button;
+pub mod panel_tab;
 pub mod rect_box;
 
 pub use focus_ring::with_focus_ring;
 pub use icon_button::IconButton;
+pub use panel_tab::PanelTab;
 pub use rect_box::RectBox;
