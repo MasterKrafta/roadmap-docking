@@ -61,8 +61,7 @@ impl Render for SplitterDragPreview {
     }
 }
 
-/// Floating windows start at half of the source group's height until content
-/// measurement becomes authoritative.
+/// Floating content initially uses half of the source group's content height.
 const FLOATING_HEIGHT_RATIO: f32 = 0.5;
 
 /// The source snapshot and geometry captured when a tab drag begins.
@@ -228,6 +227,9 @@ impl MainWindow {
             return;
         }
 
+        // Move the frame by the pointer delta, not by clamping its outer edge.
+        // This keeps the grabbed tab point under the cursor while the root clips
+        // any part of the floating frame that passes the app-window boundary.
         let origin = Point::new(
             drag.bounds_before.origin.x + dx,
             drag.bounds_before.origin.y + dy,
@@ -236,15 +238,12 @@ impl MainWindow {
             // Once floating, keep the actual size stable while moving it.
             drag.bounds_before.size
         } else {
-            // Until content measurement is available, use a compact half-height
-            // floating frame. Keep enough room for the chrome and minimum content.
-            let minimum_height = self.core_metrics.header_height
-                + self.core_metrics.tab_strip_height
-                + self.core_metrics.min_group_height;
-            Size::new(
-                drag.bounds_before.size.width,
-                (drag.bounds_before.size.height * FLOATING_HEIGHT_RATIO)
-                    .max(minimum_height),
+            // Keep the title/tab chrome at full height and shrink only the content
+            // area. The headerless History group uses the matching no-header sizing.
+            floating_size_for_detach(
+                drag.bounds_before,
+                group_has_header(&drag.layout_before, drag.group),
+                &self.core_metrics,
             )
         };
         let bounds = Rect::new(origin, floating_size);
@@ -363,33 +362,20 @@ impl MainWindow {
                 self.tab_drag_payload(panel, group_id, group_rect.rect, drag_mouse_position)
             });
 
-            let group_element = if has_header {
-                column_tabs_group::render_with_tabs(
-                    self.theme,
-                    tabs_view.active_tab,
-                    group_rect.rect.size.width,
-                    group_rect.rect.size.height,
-                    tabs_view.first_label,
-                    tabs_view.second_label,
-                    first_drag,
-                    second_drag,
-                    on_first_tab,
-                    on_second_tab,
-                )
-            } else {
-                tabs_group::render_with_tabs(
-                    self.theme,
-                    tabs_view.active_tab,
-                    group_rect.rect.size.width,
-                    group_rect.rect.size.height,
-                    tabs_view.first_label,
-                    tabs_view.second_label,
-                    first_drag,
-                    second_drag,
-                    on_first_tab,
-                    on_second_tab,
-                )
-            };
+            let group_element = render_tabs_group(
+                self.theme,
+                false,
+                has_header,
+                tabs_view.active_tab,
+                group_rect.rect.size.width,
+                group_rect.rect.size.height,
+                tabs_view.first_label,
+                tabs_view.second_label,
+                first_drag,
+                second_drag,
+                on_first_tab,
+                on_second_tab,
+            );
 
             root = root.child(
                 div()
@@ -614,33 +600,20 @@ impl MainWindow {
             // clamps the visible rect for layout calculations; using that clamped
             // origin for painting made the panel stop before the pointer reached
             // the app-window edge.
-            let floating_element = if group_has_header(&self.core_layout, group_id) {
-                floating_column_tabs_group::render_with_tabs(
-                    self.theme,
-                    tabs_view.active_tab,
-                    floating_bounds.size.width,
-                    floating_bounds.size.height,
-                    tabs_view.first_label,
-                    tabs_view.second_label,
-                    first_drag,
-                    second_drag,
-                    on_first_tab,
-                    on_second_tab,
-                )
-            } else {
-                floating_tabs_group::render_with_tabs(
-                    self.theme,
-                    tabs_view.active_tab,
-                    floating_bounds.size.width,
-                    floating_bounds.size.height,
-                    tabs_view.first_label,
-                    tabs_view.second_label,
-                    first_drag,
-                    second_drag,
-                    on_first_tab,
-                    on_second_tab,
-                )
-            };
+            let floating_element = render_tabs_group(
+                self.theme,
+                true,
+                group_has_header(&self.core_layout, group_id),
+                tabs_view.active_tab,
+                floating_bounds.size.width,
+                floating_bounds.size.height,
+                tabs_view.first_label,
+                tabs_view.second_label,
+                first_drag,
+                second_drag,
+                on_first_tab,
+                on_second_tab,
+            );
 
             root = root.child(
                 div()
@@ -769,6 +742,52 @@ impl Render for MainWindow {
 }
 
 /// A menu row with a right-side checkmark that can be toggled independently.
+
+/// Routes each group to exactly one of the four visual components.
+///
+/// The floating state and the optional header are independent:
+/// - dock + header -> column_tabs_group
+/// - dock without header -> tabs_group
+/// - floating + header -> floating_column_tabs_group
+/// - floating without header -> floating_tabs_group
+fn render_tabs_group<F1, F2>(
+    theme: ui::Theme,
+    floating: bool,
+    has_header: bool,
+    active_tab: usize,
+    width: f32,
+    height: f32,
+    first_tab: &'static str,
+    second_tab: Option<&'static str>,
+    first_drag: Option<TabDragPayload>,
+    second_drag: Option<TabDragPayload>,
+    on_first_tab: F1,
+    on_second_tab: F2,
+) -> gpui::Div
+where
+    F1: Fn(&gpui::ClickEvent, &mut Window, &mut gpui::App) + 'static,
+    F2: Fn(&gpui::ClickEvent, &mut Window, &mut gpui::App) + 'static,
+{
+    match (floating, has_header) {
+        (true, true) => floating_column_tabs_group::render_with_tabs(
+            theme, active_tab, width, height, first_tab, second_tab, first_drag, second_drag,
+            on_first_tab, on_second_tab,
+        ),
+        (true, false) => floating_tabs_group::render_with_tabs(
+            theme, active_tab, width, height, first_tab, second_tab, first_drag, second_drag,
+            on_first_tab, on_second_tab,
+        ),
+        (false, true) => column_tabs_group::render_with_tabs(
+            theme, active_tab, width, height, first_tab, second_tab, first_drag, second_drag,
+            on_first_tab, on_second_tab,
+        ),
+        (false, false) => tabs_group::render_with_tabs(
+            theme, active_tab, width, height, first_tab, second_tab, first_drag, second_drag,
+            on_first_tab, on_second_tab,
+        ),
+    }
+}
+
 fn render_menu_item<F>(
     theme: ui::Theme,
     width: f32,
@@ -1042,6 +1061,30 @@ fn group_has_header(layout: &Layout, group_id: NodeId) -> bool {
     })
 }
 
+fn floating_size_for_detach(source_bounds: Rect, has_header: bool, metrics: &DockMetrics) -> Size {
+    let header_height = if has_header {
+        metrics.header_height.max(1.0)
+    } else {
+        0.0
+    };
+    let tab_strip_height = metrics.tab_strip_height.max(1.0);
+    let minimum_content_height = metrics.min_group_height.max(1.0);
+    let source_content_height =
+        (source_bounds.size.height - header_height - tab_strip_height).max(minimum_content_height);
+    let floating_content_height =
+        (source_content_height * FLOATING_HEIGHT_RATIO).max(minimum_content_height);
+
+    // Core's minimum floating size includes its full header metric, even for the
+    // app's headerless History group; preserve that lower bound for valid geometry.
+    let minimum_floating_height = metrics.header_height.max(1.0)
+        + metrics.tab_strip_height.max(1.0)
+        + minimum_content_height;
+    let height = (header_height + tab_strip_height + floating_content_height)
+        .max(minimum_floating_height);
+
+    Size::new(source_bounds.size.width, height)
+}
+
 fn floating_group_bounds(layout: &Layout, floating_id: FloatingGroupId) -> Option<Rect> {
     layout
         .floating_groups()
@@ -1186,7 +1229,7 @@ mod tests {
         build_core_layout, column_containing_group, floating_group_bounds,
         floating_group_for_panel, floating_root_tabs_group, group_containing_panel,
         group_has_header, group_is_floating, panel_constraints, panel_id_for_key,
-        panel_is_open, toggle_core_panel, FLOATING_HEIGHT_RATIO,
+        panel_is_open, toggle_core_panel, floating_size_for_detach, FLOATING_HEIGHT_RATIO,
     };
     use dock_core::{Axis, DockCommand, DockSide, Node, Point, Rect, Size};
 
@@ -1202,17 +1245,49 @@ mod tests {
         let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 768.0));
         let rects = layout.compute_rects(viewport, &metrics).unwrap();
         let rect = rects.groups.iter().find(|item| item.group == upper_group).unwrap().rect;
+        let floating_size =
+            floating_size_for_detach(rect, group_has_header(&layout, upper_group), &metrics);
         let bounds = Rect::new(
             Point::new(rect.origin.x + 20.0, rect.origin.y + 16.0),
-            Size::new(rect.size.width, (rect.size.height * FLOATING_HEIGHT_RATIO).max(
-                metrics.header_height + metrics.tab_strip_height + metrics.min_group_height,
-            )),
+            floating_size,
         );
         layout
             .apply(DockCommand::FloatPanelAsGroup { panel: color, bounds }, &metrics)
             .expect("a tab should detach into a floating group");
         let floating = layout.floating_groups().next().unwrap();
         assert!(floating_group_bounds(&layout, floating.0).is_some());
+    }
+
+    #[test]
+    fn floating_detach_halves_content_without_shrinking_header_or_tab_strip() {
+        let theme = ui::Theme::default();
+        let (_, metrics, _, _, _) =
+            build_core_layout(&theme).expect("initial Core layout should be valid");
+        let source_bounds = Rect::new(Point::ZERO, Size::new(320.0, 1000.0));
+        let header_height = metrics.header_height.max(1.0);
+        let tab_strip_height = metrics.tab_strip_height.max(1.0);
+        let minimum_content_height = metrics.min_group_height.max(1.0);
+        let minimum_floating_height =
+            header_height + tab_strip_height + minimum_content_height;
+
+        let with_header = floating_size_for_detach(source_bounds, true, &metrics);
+        let source_content_with_header = (source_bounds.size.height
+            - header_height
+            - tab_strip_height)
+            .max(minimum_content_height);
+        let expected_with_header = (header_height
+            + tab_strip_height
+            + (source_content_with_header * FLOATING_HEIGHT_RATIO).max(minimum_content_height))
+            .max(minimum_floating_height);
+        assert!((with_header.height - expected_with_header).abs() < 0.001);
+
+        let without_header = floating_size_for_detach(source_bounds, false, &metrics);
+        let source_content_without_header =
+            (source_bounds.size.height - tab_strip_height).max(minimum_content_height);
+        let expected_without_header = (tab_strip_height
+            + (source_content_without_header * FLOATING_HEIGHT_RATIO).max(minimum_content_height))
+            .max(minimum_floating_height);
+        assert!((without_header.height - expected_without_header).abs() < 0.001);
     }
 
     #[test]
