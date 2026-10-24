@@ -1323,7 +1323,7 @@ mod tests {
         floating_group_for_panel, floating_root_tabs_group, group_containing_panel,
         group_has_header, group_is_floating, panel_constraints, panel_id_for_key,
         clamped_pointer_delta, panel_is_open, toggle_core_panel, floating_size_for_detach,
-        synchronize_group_header_modes, inherit_group_header_mode_for_panel, FLOATING_HEIGHT_RATIO,
+        synchronize_group_header_modes, FLOATING_HEIGHT_RATIO,
     };
     use dock_core::{Axis, DockCommand, DockSide, Node, Point, Rect, Size};
 
@@ -1353,7 +1353,7 @@ mod tests {
     }
 
     #[test]
-    fn detached_panel_inherits_header_mode_from_its_source_group() {
+    fn history_keeps_headerless_component_when_floated_from_lower_split_group() {
         use std::collections::HashMap;
 
         let theme = ui::Theme::default();
@@ -1363,52 +1363,52 @@ mod tests {
             HashMap::from([(headered_group, true), (headerless_group, false)]);
         let history = panel_id_for_key(&layout, "history").unwrap();
 
-        // Move History into a group that explicitly has a header. Its panel key must
-        // not override the source group's component type when it is later detached.
-        layout
-            .apply(
-                DockCommand::MovePanel {
-                    panel: history,
-                    target: dock_core::DropTarget::Tabs {
-                        group: headered_group,
-                        index: 1,
-                    },
-                },
-                &metrics,
-            )
-            .expect("History should join the headered group");
+        // History is deliberately the lower group below the horizontal splitter.
+        // Its intended component is tabs_group, without a separate header row.
+        assert!(!group_has_header(&layout, headerless_group));
+        assert_eq!(group_containing_panel(&layout, history), Some(headerless_group));
 
         let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 768.0));
         let rects = layout.compute_rects(viewport, &metrics).unwrap();
         let source_bounds = rects
             .groups
             .iter()
-            .find(|entry| entry.group == headered_group)
-            .expect("headered source group should have geometry")
+            .find(|entry| entry.group == headerless_group)
+            .expect("lower History group should have geometry")
             .rect;
-        let size = floating_size_for_detach(source_bounds, true, &metrics);
+        let size = floating_size_for_detach(source_bounds, false, &metrics);
         let bounds = Rect::new(
             Point::new(source_bounds.origin.x + 20.0, source_bounds.origin.y + 16.0),
             size,
         );
 
+        // Match the same detach choice made by the app for a one-tab group.
+        let (column, group_count) = column_containing_group(&layout, headerless_group)
+            .expect("lower group should belong to a column");
+        let command = if group_count > 1 {
+            DockCommand::FloatGroupAsColumn {
+                group: headerless_group,
+                bounds,
+            }
+        } else {
+            DockCommand::Float {
+                node: column,
+                bounds,
+            }
+        };
         layout
-            .apply(
-                DockCommand::FloatPanelAsGroup { panel: history, bounds },
-                &metrics,
-            )
-            .expect("History should detach as its own floating group");
+            .apply(command, &metrics)
+            .expect("the lower History group should detach as floating");
         assert_eq!(layout.validate(&metrics), Ok(()));
 
-        let floating_tabs = group_containing_panel(&layout, history)
-            .expect("detached History should belong to a new Tabs node");
-        assert!(
-            !group_has_header(&layout, floating_tabs),
-            "the key-based fallback ignores the source group's header mode"
-        );
+        synchronize_group_header_modes(&layout, &mut header_modes);
+        let (floating_id, _) = floating_group_for_panel(&layout, history)
+            .expect("History should now belong to a floating composition");
+        let floating_tabs = floating_root_tabs_group(&layout, floating_id)
+            .expect("floating composition should contain the History Tabs node");
 
-        inherit_group_header_mode_for_panel(&layout, &mut header_modes, history, true);
-        assert_eq!(header_modes.get(&floating_tabs), Some(&true));
+        assert_eq!(header_modes.get(&floating_tabs), Some(&false));
+        assert!(!group_has_header(&layout, floating_tabs));
     }
 
     #[test]
