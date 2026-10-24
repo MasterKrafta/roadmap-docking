@@ -1,5 +1,6 @@
 mod column_tabs_group;
 mod floating_column_tabs_group;
+mod floating_tabs_group;
 mod tabs_group;
 
 use dock_core::{
@@ -59,6 +60,10 @@ impl Render for SplitterDragPreview {
         div()
     }
 }
+
+/// Floating windows start at half of the source group's height until content
+/// measurement becomes authoritative.
+const FLOATING_HEIGHT_RATIO: f32 = 0.5;
 
 /// The source snapshot and geometry captured when a tab drag begins.
 #[derive(Clone)]
@@ -227,7 +232,22 @@ impl MainWindow {
             drag.bounds_before.origin.x + dx,
             drag.bounds_before.origin.y + dy,
         );
-        let bounds = Rect::new(origin, drag.bounds_before.size);
+        let floating_size = if drag.floating_group.is_some() {
+            // Once floating, keep the actual size stable while moving it.
+            drag.bounds_before.size
+        } else {
+            // Until content measurement is available, use a compact half-height
+            // floating frame. Keep enough room for the chrome and minimum content.
+            let minimum_height = self.core_metrics.header_height
+                + self.core_metrics.tab_strip_height
+                + self.core_metrics.min_group_height;
+            Size::new(
+                drag.bounds_before.size.width,
+                (drag.bounds_before.size.height * FLOATING_HEIGHT_RATIO)
+                    .max(minimum_height),
+            )
+        };
+        let bounds = Rect::new(origin, floating_size);
 
         // Rebuild from the drag-start snapshot so cumulative mouse movement is
         // applied once and never added repeatedly to the previously moved frame.
@@ -305,6 +325,7 @@ impl MainWindow {
             .relative()
             .w(px(width))
             .h(px(height))
+            .clip()
             .bg(rgb(self.theme.colors.canvas_background));
 
         for group_rect in &rects.groups {
@@ -586,26 +607,48 @@ impl MainWindow {
                 self.tab_drag_payload(panel, group_id, group_rect.rect, drag_mouse_position)
             });
 
-            let floating_element = floating_column_tabs_group::render_with_tabs(
-                self.theme,
-                tabs_view.active_tab,
-                floating_rect.rect.size.width,
-                floating_rect.rect.size.height,
-                tabs_view.first_label,
-                tabs_view.second_label,
-                first_drag,
-                second_drag,
-                on_first_tab,
-                on_second_tab,
-            );
+            let floating_bounds =
+                floating_group_bounds(&self.core_layout, floating_rect.group)
+                    .unwrap_or(floating_rect.rect);
+            // Keep the model's raw origin while dragging. Core's geometry snapshot
+            // clamps the visible rect for layout calculations; using that clamped
+            // origin for painting made the panel stop before the pointer reached
+            // the app-window edge.
+            let floating_element = if group_has_header(&self.core_layout, group_id) {
+                floating_column_tabs_group::render_with_tabs(
+                    self.theme,
+                    tabs_view.active_tab,
+                    floating_bounds.size.width,
+                    floating_bounds.size.height,
+                    tabs_view.first_label,
+                    tabs_view.second_label,
+                    first_drag,
+                    second_drag,
+                    on_first_tab,
+                    on_second_tab,
+                )
+            } else {
+                floating_tabs_group::render_with_tabs(
+                    self.theme,
+                    tabs_view.active_tab,
+                    floating_bounds.size.width,
+                    floating_bounds.size.height,
+                    tabs_view.first_label,
+                    tabs_view.second_label,
+                    first_drag,
+                    second_drag,
+                    on_first_tab,
+                    on_second_tab,
+                )
+            };
 
             root = root.child(
                 div()
                     .absolute()
-                    .left(px(floating_rect.rect.origin.x))
-                    .top(px(floating_rect.rect.origin.y))
-                    .w(px(floating_rect.rect.size.width))
-                    .h(px(floating_rect.rect.size.height))
+                    .left(px(floating_bounds.origin.x))
+                    .top(px(floating_bounds.origin.y))
+                    .w(px(floating_bounds.size.width))
+                    .h(px(floating_bounds.size.height))
                     .child(floating_element),
             );
         }
@@ -999,6 +1042,12 @@ fn group_has_header(layout: &Layout, group_id: NodeId) -> bool {
     })
 }
 
+fn floating_group_bounds(layout: &Layout, floating_id: FloatingGroupId) -> Option<Rect> {
+    layout
+        .floating_groups()
+        .find_map(|(id, floating)| (id == floating_id).then_some(floating.bounds))
+}
+
 fn floating_group_for_panel(
     layout: &Layout,
     panel_id: PanelId,
@@ -1138,6 +1187,31 @@ mod tests {
         column_containing_group, group_containing_panel, group_is_floating, panel_id_for_key,
     };
     use dock_core::{Axis, DockCommand, DockSide, Node, Point, Rect, Size};
+
+    #[test]
+    fn floating_rendering_uses_the_correct_header_mode() {
+        let theme = ui::Theme::default();
+        let (mut layout, metrics, _, upper_group, lower_group) =
+            build_core_layout(&theme).expect("initial Core layout should be valid");
+        assert!(group_has_header(&layout, upper_group));
+        assert!(!group_has_header(&layout, lower_group));
+
+        let color = panel_id_for_key(&layout, "color").unwrap();
+        let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 768.0));
+        let rects = layout.compute_rects(viewport, &metrics).unwrap();
+        let rect = rects.groups.iter().find(|item| item.group == upper_group).unwrap().rect;
+        let bounds = Rect::new(
+            Point::new(rect.origin.x + 20.0, rect.origin.y + 16.0),
+            Size::new(rect.size.width, (rect.size.height * FLOATING_HEIGHT_RATIO).max(
+                metrics.header_height + metrics.tab_strip_height + metrics.min_group_height,
+            )),
+        );
+        layout
+            .apply(DockCommand::FloatPanelAsGroup { panel: color, bounds }, &metrics)
+            .expect("a tab should detach into a floating group");
+        let floating = layout.floating_groups().next().unwrap();
+        assert!(floating_group_bounds(&layout, floating.0).is_some());
+    }
 
     #[test]
     fn floating_tree_helpers_find_panels_after_detach() {
