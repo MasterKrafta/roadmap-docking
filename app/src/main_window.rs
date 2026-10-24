@@ -27,6 +27,10 @@ enum SplitterResizeTarget {
         side: DockSide,
         boundary_index: usize,
     },
+    SplitColumnBoundary {
+        split: NodeId,
+        boundary_index: usize,
+    },
     ColumnOuterEdge {
         side: DockSide,
         column: NodeId,
@@ -179,6 +183,14 @@ impl MainWindow {
                 boundary_index,
             } => DockCommand::ResizeColumnBoundary {
                 side,
+                boundary_index,
+                delta,
+            },
+            SplitterResizeTarget::SplitColumnBoundary {
+                split,
+                boundary_index,
+            } => DockCommand::ResizeSplitColumnBoundary {
+                split,
                 boundary_index,
                 delta,
             },
@@ -627,12 +639,64 @@ impl MainWindow {
             .border_1()
             .border_color(rgb(self.theme.colors.primary_text));
 
-        // Splitter bars belong to the tree root, and are positioned relative to
-        // Core's clamped floating rectangle while the frame uses its raw origin.
-        for splitter in &rects.splitters {
+        // Keep each splitter's hit zone in the same floating container as its
+        // painted bar. Global hitboxes drift when Core clamps the visible window rect.
+        for (splitter_index, splitter) in rects.splitters.iter().copied().enumerate() {
             if !subtree_contains_node(layout, tree_root, splitter.owner) {
                 continue;
             }
+
+            let target = match splitter.axis {
+                dock_core::Axis::X => {
+                    let Some(Node::Split(split)) = layout.node(splitter.owner) else {
+                        continue;
+                    };
+                    if split.axis != dock_core::Axis::X
+                        || split.children.len() < 2
+                        || split.children.iter().any(|child| {
+                            !matches!(layout.node(*child), Some(Node::Column(_)))
+                        })
+                    {
+                        continue;
+                    }
+                    SplitterResizeTarget::SplitColumnBoundary {
+                        split: splitter.owner,
+                        boundary_index: splitter.boundary_index,
+                    }
+                }
+                dock_core::Axis::Y => {
+                    let Some(Node::Column(column)) = layout.node(splitter.owner) else {
+                        continue;
+                    };
+                    let Some(column_rect) = rects
+                        .columns
+                        .iter()
+                        .find(|entry| entry.column == splitter.owner)
+                    else {
+                        continue;
+                    };
+                    let available_height = (column_rect.rect.size.height
+                        - self.core_metrics.splitter_thickness
+                            * column.groups.len().saturating_sub(1) as f32)
+                        .max(1.0);
+                    SplitterResizeTarget::Groups {
+                        column: splitter.owner,
+                        boundary_index: splitter.boundary_index,
+                        available_height,
+                    }
+                }
+            };
+
+            let drag_state = SplitterDragState {
+                layout_before: self.core_layout.clone(),
+                mouse_position_before: window.mouse_position(),
+                axis: splitter.axis,
+                target,
+            };
+            let cursor = match splitter.axis {
+                dock_core::Axis::X => CursorStyle::ResizeColumn,
+                dock_core::Axis::Y => CursorStyle::ResizeRow,
+            };
             let (bar_left, bar_top, bar_width, bar_height) = match splitter.axis {
                 dock_core::Axis::X => (
                     (splitter.rect.size.width - self.core_metrics.splitter_thickness).max(0.0)
@@ -653,19 +717,37 @@ impl MainWindow {
                         .min(splitter.rect.size.height),
                 ),
             };
-            composition = composition.child(
-                div()
-                    .absolute()
-                    .left(px(
-                        splitter.rect.origin.x - floating_rect.rect.origin.x + bar_left,
-                    ))
-                    .top(px(
-                        splitter.rect.origin.y - floating_rect.rect.origin.y + bar_top,
-                    ))
-                    .w(px(bar_width))
-                    .h(px(bar_height))
-                    .bg(rgb(self.theme.colors.splitter)),
-            );
+            let handle = div()
+                .id(format!(
+                    "floating-dock-splitter-{floating_rect_group:?}-{splitter_index}",
+                    floating_rect_group = floating_rect.group
+                ))
+                .absolute()
+                .left(px(splitter.rect.origin.x - floating_rect.rect.origin.x))
+                .top(px(splitter.rect.origin.y - floating_rect.rect.origin.y))
+                .w(px(splitter.rect.size.width))
+                .h(px(splitter.rect.size.height))
+                .cursor(cursor)
+                .on_mouse_down(MouseButton::Left, |_, window, cx| {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                })
+                .on_drag(drag_state, |_, _, _, cx| cx.new(|_| SplitterDragPreview))
+                .on_drag_move::<SplitterDragState>(cx.listener(
+                    move |this, event: &DragMoveEvent<SplitterDragState>, _window, cx| {
+                        this.update_splitter_from_drag(event, cx);
+                    },
+                ))
+                .child(
+                    div()
+                        .absolute()
+                        .left(px(bar_left))
+                        .top(px(bar_top))
+                        .w(px(bar_width))
+                        .h(px(bar_height))
+                        .bg(rgb(self.theme.colors.splitter)),
+                );
+            composition = composition.child(handle);
         }
 
         for group_rect in &rects.groups {
@@ -959,12 +1041,9 @@ impl MainWindow {
         // Core provides the splitter hit zones. GPUI starts the drag while Core
         // owns all sizing rules and applies each pointer delta transactionally.
         for (splitter_index, splitter) in rects.splitters.iter().copied().enumerate() {
-            // Core currently has no floating-root command for resizing a horizontal
-            // split between floating columns. Do not let that bar accidentally resize
-            // the main dock's right columns. The visual bar stays with the floating tree.
-            if splitter.axis == dock_core::Axis::X
-                && node_belongs_to_floating_tree(&self.core_layout, splitter.owner)
-            {
+            // Floating trees install their own local hitboxes in render_floating_tree;
+            // do not create a second global hitbox whose coordinates can drift.
+            if node_belongs_to_floating_tree(&self.core_layout, splitter.owner) {
                 continue;
             }
             if self.active_group_drag_payload.as_ref().is_some_and(|drag| {
