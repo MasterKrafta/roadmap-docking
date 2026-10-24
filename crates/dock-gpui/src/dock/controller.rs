@@ -11,7 +11,7 @@ use ui::Theme;
 use crate::{dock_metrics_from_theme, FrameGeometry};
 use crate::requests::ResizeHandle;
 
-use super::resize_session::{ResizeSession, ResizeStartError};
+use super::resize_session::{ResizeSession, ResizeStartError, ResizeUpdateError};
 
 #[derive(Debug)]
 enum Session {
@@ -102,6 +102,36 @@ impl DockController {
         match &self.session {
             Session::Resize(session) => Some(session),
             Session::Idle => None,
+        }
+    }
+
+    /// Applies one preview command against the immutable pointer-down snapshot.
+    ///
+    /// Preview mutations bypass history. A rejected candidate is discarded, so
+    /// the previous valid preview remains visible and a later move may recover.
+    pub(crate) fn update_resize(
+        &mut self,
+        pointer: Point,
+    ) -> Result<CommandOutcome, ResizeUpdateError> {
+        let (mut candidate, command) = match &self.session {
+            Session::Idle => return Err(ResizeUpdateError::NoActiveSession),
+            Session::Resize(session) => (
+                session.baseline().clone(),
+                session.command_for_pointer(pointer)?,
+            ),
+        };
+
+        match candidate.apply(command, &self.metrics) {
+            Ok(outcome) => {
+                self.layout = candidate;
+                self.last_error = None;
+                Ok(outcome)
+            }
+            Err(error) => {
+                tracing::warn!(error = %error, "dock resize preview was rejected");
+                self.last_error = Some(error.clone());
+                Err(ResizeUpdateError::Command(error))
+            }
         }
     }
 
@@ -291,6 +321,55 @@ mod tests {
         assert_eq!(
             controller.begin_resize(handle, pointer, &frame),
             Err(super::super::resize_session::ResizeStartError::SessionAlreadyActive)
+        );
+    }
+
+
+    #[test]
+    fn resize_preview_is_recomputed_from_baseline_and_zero_delta_restores_it() {
+        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+        let frame = controller
+            .frame(Rect::new(Point::ZERO, Size::new(1200.0, 800.0)))
+            .unwrap();
+        let splitter = *frame
+            .rects()
+            .splitters
+            .iter()
+            .find(|splitter| splitter.axis == Axis::Y)
+            .expect("initial layout should contain a vertical group splitter");
+        let owner = splitter.owner;
+        let original = match controller.layout().node(owner) {
+            Some(Node::Column(column)) => column.group_ratios.clone(),
+            other => panic!("vertical splitter should belong to a column, got {other:?}"),
+        };
+        let initial_version = controller.layout().version();
+        let start = Point::new(180.0, 240.0);
+        controller
+            .begin_resize(
+                ResizeHandle::Splitter {
+                    owner,
+                    boundary_index: splitter.boundary_index,
+                    axis: Axis::Y,
+                },
+                start,
+                &frame,
+            )
+            .unwrap();
+
+        let preview = controller
+            .update_resize(Point::new(start.x, start.y + 12.0))
+            .unwrap();
+        assert_eq!(controller.layout().version(), preview.new_version);
+        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+
+        controller.update_resize(start).unwrap();
+        assert_eq!(controller.layout().version(), initial_version);
+        assert_eq!(
+            match controller.layout().node(owner) {
+                Some(Node::Column(column)) => column.group_ratios.clone(),
+                _ => panic!("resize owner should remain a column"),
+            },
+            original
         );
     }
 }

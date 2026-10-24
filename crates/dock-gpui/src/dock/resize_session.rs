@@ -1,4 +1,6 @@
-use dock_core::{Axis, DockMetrics, Layout, LayoutRects, Node, Point, Rect};
+use dock_core::{
+    Axis, DockCommand, DockMetrics, DockSide, Layout, LayoutRects, Node, Point, Rect, ResizeEdge,
+};
 use crate::requests::ResizeHandle;
 
 /// Geometry measured once at pointer-down and reused for the entire resize.
@@ -19,6 +21,17 @@ pub(crate) enum ResizeStartError {
     MissingFloatingGeometry,
     MissingFloatingEdge,
     SessionAlreadyActive,
+}
+
+/// Failure while translating a resize pointer position into a preview command.
+#[derive(Clone, Debug)]
+pub(crate) enum ResizeUpdateError {
+    NoActiveSession,
+    InvalidPointer,
+    InvalidDelta,
+    InvalidStartGeometry,
+    InvalidBounds,
+    Command(dock_core::CommandError),
 }
 
 /// Immutable starting point for a pointer-driven resize gesture.
@@ -71,6 +84,126 @@ impl ResizeSession {
     pub(super) fn start_geometry(&self) -> StartGeometry {
         self.start_geometry
     }
+
+    /// Builds a command from total displacement since pointer-down.
+    ///
+    /// The baseline and captured geometry never change, so pointer updates are
+    /// independent of the order or number of preceding move events.
+    pub(super) fn command_for_pointer(
+        &self,
+        pointer: Point,
+    ) -> Result<DockCommand, ResizeUpdateError> {
+        if !pointer.is_finite() {
+            return Err(ResizeUpdateError::InvalidPointer);
+        }
+
+        let delta_x = pointer.x - self.pointer_start.x;
+        let delta_y = pointer.y - self.pointer_start.y;
+        if !delta_x.is_finite() || !delta_y.is_finite() {
+            return Err(ResizeUpdateError::InvalidDelta);
+        }
+
+        match (self.handle, self.start_geometry) {
+            (
+                ResizeHandle::Splitter {
+                    owner,
+                    boundary_index,
+                    axis: Axis::Y,
+                },
+                StartGeometry::VerticalGroups { available_height },
+            ) if available_height.is_finite() && available_height > 0.0 => {
+                Ok(DockCommand::ResizeGroups {
+                    column: owner,
+                    boundary_index,
+                    delta: delta_y,
+                    available_height,
+                })
+            }
+            (
+                ResizeHandle::Splitter {
+                    owner,
+                    boundary_index,
+                    axis: Axis::X,
+                },
+                StartGeometry::HorizontalSplit,
+            ) => {
+                if self
+                    .baseline
+                    .main_area(DockSide::Left)
+                    .is_some_and(|area| area.root == owner)
+                {
+                    Ok(DockCommand::ResizeColumnBoundary {
+                        side: DockSide::Left,
+                        boundary_index,
+                        delta: delta_x,
+                    })
+                } else if self
+                    .baseline
+                    .main_area(DockSide::Right)
+                    .is_some_and(|area| area.root == owner)
+                {
+                    Ok(DockCommand::ResizeColumnBoundary {
+                        side: DockSide::Right,
+                        boundary_index,
+                        delta: delta_x,
+                    })
+                } else {
+                    Ok(DockCommand::ResizeSplitColumnBoundary {
+                        split: owner,
+                        boundary_index,
+                        delta: delta_x,
+                    })
+                }
+            }
+            (
+                ResizeHandle::OuterColumn { column, side },
+                StartGeometry::OuterColumn { start_width },
+            ) => {
+                let width = match side {
+                    DockSide::Left => start_width + delta_x,
+                    DockSide::Right => start_width - delta_x,
+                };
+                if !width.is_finite() || width <= 0.0 {
+                    return Err(ResizeUpdateError::InvalidBounds);
+                }
+                Ok(DockCommand::ResizeColumn { column, width })
+            }
+            (
+                ResizeHandle::FloatingEdge { group, edge },
+                StartGeometry::FloatingEdge { bounds },
+            ) => {
+                let bounds = resized_floating_bounds(bounds, edge, delta_x, delta_y);
+                if bounds.validate_non_empty().is_err() {
+                    return Err(ResizeUpdateError::InvalidBounds);
+                }
+                Ok(DockCommand::ResizeFloatingBounds { group, bounds })
+            }
+            _ => Err(ResizeUpdateError::InvalidStartGeometry),
+        }
+    }
+}
+
+fn resized_floating_bounds(
+    mut bounds: Rect,
+    edge: ResizeEdge,
+    delta_x: f32,
+    delta_y: f32,
+) -> Rect {
+    if matches!(edge, ResizeEdge::Left | ResizeEdge::TopLeft | ResizeEdge::BottomLeft) {
+        bounds.origin.x += delta_x;
+        bounds.size.width -= delta_x;
+    }
+    if matches!(edge, ResizeEdge::Right | ResizeEdge::TopRight | ResizeEdge::BottomRight) {
+        bounds.size.width += delta_x;
+    }
+    if matches!(edge, ResizeEdge::Top | ResizeEdge::TopLeft | ResizeEdge::TopRight) {
+        bounds.origin.y += delta_y;
+        bounds.size.height -= delta_y;
+    }
+    if matches!(edge, ResizeEdge::Bottom | ResizeEdge::BottomLeft | ResizeEdge::BottomRight) {
+        bounds.size.height += delta_y;
+    }
+    bounds
 }
 
 fn capture_start_geometry(
@@ -160,5 +293,143 @@ fn capture_start_geometry(
                 bounds: floating.rect,
             })
         }
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::{ResizeSession, ResizeUpdateError, StartGeometry};
+    use crate::dock::DockController;
+    use crate::requests::ResizeHandle;
+    use dock_core::{Axis, DockCommand, DockSide, Node, Point, Rect, ResizeEdge, Size};
+    use slotmap::Key;
+    use ui::Theme;
+
+    fn session(
+        layout: &dock_core::Layout,
+        handle: ResizeHandle,
+        start_geometry: StartGeometry,
+    ) -> ResizeSession {
+        ResizeSession {
+            handle,
+            baseline: layout.clone(),
+            pointer_start: Point::new(100.0, 100.0),
+            start_geometry,
+        }
+    }
+
+    #[test]
+    fn vertical_splitter_uses_absolute_y_delta_and_keeps_zero_delta() {
+        let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
+        let owner = layout
+            .nodes()
+            .find_map(|(id, node)| matches!(node, Node::Column(_)).then_some(id))
+            .unwrap();
+        let handle = ResizeHandle::Splitter {
+            owner,
+            boundary_index: 0,
+            axis: Axis::Y,
+        };
+        let session = session(
+            &layout,
+            handle,
+            StartGeometry::VerticalGroups {
+                available_height: 640.0,
+            },
+        );
+
+        assert_eq!(
+            session.command_for_pointer(Point::new(123.0, 117.5)).unwrap(),
+            DockCommand::ResizeGroups {
+                column: owner,
+                boundary_index: 0,
+                delta: 17.5,
+                available_height: 640.0,
+            }
+        );
+        assert_eq!(
+            session.command_for_pointer(Point::new(100.0, 100.0)).unwrap(),
+            DockCommand::ResizeGroups {
+                column: owner,
+                boundary_index: 0,
+                delta: 0.0,
+                available_height: 640.0,
+            }
+        );
+    }
+
+    #[test]
+    fn horizontal_splitter_maps_main_root_to_its_actual_side() {
+        let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
+        let (side, owner) = [DockSide::Left, DockSide::Right]
+            .into_iter()
+            .find_map(|side| {
+                let owner = layout.main_area(side)?.root;
+                matches!(layout.node(owner), Some(Node::Split(split)) if split.axis == Axis::X)
+                    .then_some((side, owner))
+            })
+            .expect("initial layout should have a horizontal main-area root");
+        let session = session(
+            &layout,
+            ResizeHandle::Splitter {
+                owner,
+                boundary_index: 0,
+                axis: Axis::X,
+            },
+            StartGeometry::HorizontalSplit,
+        );
+
+        assert_eq!(
+            session.command_for_pointer(Point::new(112.0, 130.0)).unwrap(),
+            DockCommand::ResizeColumnBoundary {
+                side,
+                boundary_index: 0,
+                delta: 12.0,
+            }
+        );
+    }
+
+    #[test]
+    fn outer_columns_use_opposite_width_delta_and_floating_edges_keep_the_opposite_corner() {
+        let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
+        let column = layout
+            .nodes()
+            .find_map(|(id, node)| matches!(node, Node::Column(_)).then_some(id))
+            .unwrap();
+
+        for (side, width) in [(DockSide::Left, 300.0), (DockSide::Right, 260.0)] {
+            let session = session(
+                &layout,
+                ResizeHandle::OuterColumn { column, side },
+                StartGeometry::OuterColumn { start_width: 280.0 },
+            );
+            assert_eq!(
+                session.command_for_pointer(Point::new(120.0, 100.0)).unwrap(),
+                DockCommand::ResizeColumn { column, width }
+            );
+        }
+
+        let floating = session(
+            &layout,
+            ResizeHandle::FloatingEdge {
+                group: dock_core::FloatingGroupId::null(),
+                edge: ResizeEdge::TopLeft,
+            },
+            StartGeometry::FloatingEdge {
+                bounds: Rect::new(Point::new(10.0, 20.0), Size::new(300.0, 200.0)),
+            },
+        );
+        assert_eq!(
+            floating.command_for_pointer(Point::new(120.0, 130.0)).unwrap(),
+            DockCommand::ResizeFloatingBounds {
+                group: dock_core::FloatingGroupId::null(),
+                bounds: Rect::new(Point::new(30.0, 50.0), Size::new(280.0, 170.0)),
+            }
+        );
+        assert!(matches!(
+            floating.command_for_pointer(Point::new(500.0, 500.0)),
+            Err(ResizeUpdateError::InvalidBounds)
+        ));
     }
 }
