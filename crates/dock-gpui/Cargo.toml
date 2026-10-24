@@ -9,11 +9,11 @@ dock-core = { path = "../dock-core" }
 gpui.workspace = true
 ui = { path = "../ui" }
 
+[target.'cfg(windows)'.dependencies]
+gpui_platform.workspace = true
+
 [dev-dependencies]
 slotmap.workspace = true
 
 [lints]
 workspace = true
-
-[target.'cfg(windows)'.dev-dependencies]
-gpui_platform.workspace = true
