@@ -959,6 +959,14 @@ impl MainWindow {
         // Core provides the splitter hit zones. GPUI starts the drag while Core
         // owns all sizing rules and applies each pointer delta transactionally.
         for (splitter_index, splitter) in rects.splitters.iter().copied().enumerate() {
+            // Core currently has no floating-root command for resizing a horizontal
+            // split between floating columns. Do not let that bar accidentally resize
+            // the main dock's right columns. The visual bar stays with the floating tree.
+            if splitter.axis == dock_core::Axis::X
+                && node_belongs_to_floating_tree(&self.core_layout, splitter.owner)
+            {
+                continue;
+            }
             if self.active_group_drag_payload.as_ref().is_some_and(|drag| {
                 drag.whole_area
                     && drag.floating_group.is_none()
@@ -1785,6 +1793,14 @@ fn union_rects(current: Option<Rect>, next: Rect) -> Rect {
 fn floating_root_node(layout: &Layout, floating_group: FloatingGroupId) -> Option<NodeId> {
     let floating = layout.floating_group(floating_group)?;
     layout.dock_area(floating.area).map(|area| area.root)
+}
+
+fn node_belongs_to_floating_tree(layout: &Layout, node_id: NodeId) -> bool {
+    layout.floating_groups().any(|(_, floating)| {
+        layout
+            .dock_area(floating.area)
+            .is_some_and(|area| subtree_contains_node(layout, area.root, node_id))
+    })
 }
 
 /// Paints a translated copy of a dock-area tree while Core's source layout stays unchanged.
