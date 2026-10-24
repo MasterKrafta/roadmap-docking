@@ -80,11 +80,13 @@ pub(super) struct TabDragPayload {
 #[derive(Clone)]
 pub(super) struct GroupDragPayload {
     layout_before: Layout,
+    /// The dragged Tabs group, or a complete main-area root when whole_area is true.
     group: NodeId,
     drag_start_position: Rc<Cell<gpui::Point<gpui::Pixels>>>,
     drag_viewport_size: Size,
     bounds_before: Rect,
     floating_group: Option<FloatingGroupId>,
+    whole_area: bool,
 }
 
 /// Temporary presentation state only. Core's Layout is not changed until drop.
@@ -102,6 +104,8 @@ struct GroupDragPreviewState {
     layout: Layout,
     group: NodeId,
     bounds: Rect,
+    source_bounds: Rect,
+    whole_area: bool,
 }
 
 /// GPUI uses the same empty drag entity for tab and group gestures.
@@ -284,7 +288,42 @@ impl MainWindow {
             drag_viewport_size,
             bounds_before,
             floating_group,
+            whole_area: false,
         }
+    }
+
+    /// Creates a drag payload from the first header of a main dock area.
+    /// The payload references the area's root so every column and descendant moves together.
+    fn dock_tree_drag_payload(
+        &self,
+        header_group: NodeId,
+        rects: &dock_core::LayoutRects,
+        mouse_position_before: gpui::Point<gpui::Pixels>,
+        drag_viewport_size: Size,
+    ) -> Option<GroupDragPayload> {
+        for side in [DockSide::Left, DockSide::Right] {
+            let Some(area) = self.core_layout.main_area(side) else {
+                continue;
+            };
+            if dock_tree_header_group(&self.core_layout, side) != Some(header_group) {
+                continue;
+            }
+            let root = area.root;
+            let Some(bounds_before) = dock_area_bounds(&self.core_layout, root, rects) else {
+                continue;
+            };
+
+            return Some(GroupDragPayload {
+                layout_before: self.core_layout.clone(),
+                group: root,
+                drag_start_position: Rc::new(Cell::new(mouse_position_before)),
+                drag_viewport_size,
+                bounds_before,
+                floating_group: None,
+                whole_area: true,
+            });
+        }
+        None
     }
 
     fn update_tab_from_drag(
