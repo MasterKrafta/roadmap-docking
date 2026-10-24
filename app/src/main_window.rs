@@ -24,6 +24,7 @@ impl Render for MainWindow {
         let height = viewport.height.as_f32().max(1.0);
 
         div()
+            .flex()
             .w(px(width))
             .h(px(height))
             .bg(rgb(self.theme.colors.window_background))
