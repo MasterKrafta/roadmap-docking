@@ -9,6 +9,7 @@ use gpui::{
     AppContext, Context, CursorStyle, DragMoveEvent, InteractiveElement, IntoElement, MouseButton,
     ParentElement, Render, StatefulInteractiveElement, Styled, Window, div, px, rgb,
 };
+use std::{cell::Cell, rc::Rc};
 
 #[derive(Clone, Copy)]
 struct GroupTabsView {
@@ -67,7 +68,8 @@ pub(super) struct TabDragPayload {
     layout_before: Layout,
     panel: PanelId,
     group: NodeId,
-    mouse_position_before: gpui::Point<gpui::Pixels>,
+    /// Updated by tab.rs at the actual drag initiation, not when the view last rendered.
+    drag_start_position: Rc<Cell<gpui::Point<gpui::Pixels>>>,
     drag_viewport_size: Size,
     bounds_before: Rect,
     floating_group: Option<FloatingGroupId>,
@@ -221,7 +223,7 @@ impl MainWindow {
             layout_before: self.core_layout.clone(),
             panel,
             group,
-            mouse_position_before,
+            drag_start_position: Rc::new(Cell::new(mouse_position_before)),
             drag_viewport_size,
             bounds_before,
             floating_group,
@@ -243,9 +245,10 @@ impl MainWindow {
             event.event.position.x.as_f32(),
             event.event.position.y.as_f32(),
         );
+        let drag_start_position = drag.drag_start_position.get();
         let pointer_before = Point::new(
-            drag.mouse_position_before.x.as_f32(),
-            drag.mouse_position_before.y.as_f32(),
+            drag_start_position.x.as_f32(),
+            drag_start_position.y.as_f32(),
         );
         let movement =
             clamped_pointer_delta(current_pointer, pointer_before, drag.drag_viewport_size);
@@ -308,9 +311,10 @@ impl MainWindow {
             mouse_position.x.as_f32(),
             mouse_position.y.as_f32(),
         );
+        let drag_start_position = drag.drag_start_position.get();
         let pointer_before = Point::new(
-            drag.mouse_position_before.x.as_f32(),
-            drag.mouse_position_before.y.as_f32(),
+            drag_start_position.x.as_f32(),
+            drag_start_position.y.as_f32(),
         );
         let movement =
             clamped_pointer_delta(current_pointer, pointer_before, drag.drag_viewport_size);
