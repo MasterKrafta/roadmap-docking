@@ -77,6 +77,8 @@ pub(super) struct TabDragPayload {
 /// Temporary presentation state only. Core's Layout is not changed until drop.
 #[derive(Clone, Copy)]
 struct TabDragPreviewState {
+    layout: Layout,
+    group: NodeId,
     label: &'static str,
     bounds: Rect,
 }
@@ -284,6 +286,8 @@ impl MainWindow {
                 &self.core_metrics,
             );
             self.tab_drag_preview = Some(TabDragPreviewState {
+                layout: drag.layout_before.clone(),
+                group: drag.group,
                 label: drag.label,
                 bounds: preview_bounds,
             });
@@ -446,6 +450,7 @@ impl MainWindow {
                 second_drag,
                 on_first_tab,
                 on_second_tab,
+                tabs_group::GroupRenderMode::Layout,
             );
 
             root = root.child(
@@ -691,6 +696,7 @@ impl MainWindow {
                 second_drag,
                 on_first_tab,
                 on_second_tab,
+                tabs_group::GroupRenderMode::Layout,
             );
 
             root = root.child(
@@ -705,11 +711,20 @@ impl MainWindow {
         }
 
         if let Some(preview) = self.tab_drag_preview {
-            let preview_element = tabs_group::render_drag_preview(
+            let preview_element = tabs_group::render(
+                &preview.layout,
+                preview.group,
                 self.theme,
+                0,
                 preview.bounds.size.width,
                 preview.bounds.size.height,
                 preview.label,
+                None,
+                None,
+                None,
+                |_, _, _| {},
+                |_, _, _| {},
+                tabs_group::GroupRenderMode::DragPreview,
             );
             root = root.child(
                 div()
