@@ -1765,7 +1765,8 @@ mod tests {
         group_has_header, group_is_floating, panel_constraints, panel_id_for_key,
         group_tabs_view_excluding,
         clamped_pointer_delta, panel_is_open, toggle_core_panel, floating_size_for_detach,
-        floating_drag_bounds, group_drag_bounds, FLOATING_HEIGHT_RATIO,
+        floating_drag_bounds, group_drag_bounds, docked_group_float_command,
+        FLOATING_HEIGHT_RATIO,
     };
     use dock_core::{Axis, DockCommand, DockSide, Node, Point, Rect, Size};
 
@@ -1961,6 +1962,50 @@ mod tests {
             + (source_content_without_header * FLOATING_HEIGHT_RATIO).max(minimum_content_height))
             .max(minimum_floating_height);
         assert!((without_header.height - expected_without_header).abs() < 0.001);
+    }
+
+    #[test]
+    fn dragging_group_preserves_all_tabs_and_keeps_core_layout_valid() {
+        let theme = ui::Theme::default();
+        let (mut layout, metrics, _, group, _) =
+            build_core_layout(&theme).expect("initial Core layout should be valid");
+        let initial_tab_count = match layout.node(group).unwrap() {
+            Node::Tabs(tabs) => tabs.children.len(),
+            _ => panic!("the source should be a tab group"),
+        };
+        assert_eq!(initial_tab_count, 2);
+
+        let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 768.0));
+        let rects = layout.compute_rects(viewport, &metrics).unwrap();
+        let source_bounds = rects
+            .groups
+            .iter()
+            .find(|entry| entry.group == group)
+            .expect("the group should have a source rectangle")
+            .rect;
+        let bounds = group_drag_bounds(
+            source_bounds,
+            Point::new(40.0, 25.0),
+            group_has_header(&layout, group),
+            &metrics,
+        );
+
+        layout
+            .apply(docked_group_float_command(&layout, group, bounds), &metrics)
+            .expect("dragging a group should float the whole group");
+        assert_eq!(layout.validate(&metrics), Ok(()));
+
+        let floating_id = layout
+            .floating_groups()
+            .next()
+            .map(|(id, _)| id)
+            .expect("the group should now be floating");
+        let floating_tabs_group = floating_root_tabs_group(&layout, floating_id)
+            .expect("the floating composition should retain a tab group");
+        let Node::Tabs(floating_tabs) = layout.node(floating_tabs_group).unwrap() else {
+            panic!("the floating root should be a tab group");
+        };
+        assert_eq!(floating_tabs.children.len(), initial_tab_count);
     }
 
     #[test]
