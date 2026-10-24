@@ -4,6 +4,9 @@ pub(crate) mod flyout;
 pub(crate) mod main_areas;
 pub(crate) mod outer_edges;
 pub(crate) mod tree;
+pub(crate) mod tree_panels;
+pub(crate) mod tree_rail;
+pub(crate) mod tree_tabs;
 
 use dock_core::Rect;
 use gpui::{Div, Styled, div, px, rgb};
