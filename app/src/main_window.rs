@@ -1,9 +1,11 @@
 mod column_tabs_group;
+mod floating_column_tabs_group;
 mod tabs_group;
 
 use dock_core::{
-    create_initial_layout, DockCommand, DockMetrics, DockSide, DropTarget, DropZone, Layout,
-    Node, NodeId, PanelConstraints, PanelId, PanelKey, Point, Profile, Rect, Size,
+    create_initial_layout, DockCommand, DockMetrics, DockSide, DropTarget, DropZone,
+    FloatingGroupId, Layout, Node, NodeId, PanelConstraints, PanelId, PanelKey, Point,
+    Profile, Rect, Size,
 };
 use gpui::{
     AppContext, Context, CursorStyle, DragMoveEvent, InteractiveElement, IntoElement, MouseButton,
@@ -53,6 +55,27 @@ struct SplitterDragState {
 struct SplitterDragPreview;
 
 impl Render for SplitterDragPreview {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+    }
+}
+
+/// The source snapshot and geometry captured when a tab drag begins.
+#[derive(Clone)]
+pub(super) struct TabDragPayload {
+    layout_before: Layout,
+    panel: PanelId,
+    group: NodeId,
+    mouse_position_before: gpui::Point<gpui::Pixels>,
+    bounds_before: Rect,
+    floating_group: Option<FloatingGroupId>,
+}
+
+/// GPUI requires a view entity to start a drag. The floating component is rendered
+/// from Core geometry while the pointer moves.
+pub(super) struct TabDragPreview;
+
+impl Render for TabDragPreview {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         div()
     }
@@ -164,6 +187,99 @@ impl MainWindow {
         cx.notify();
     }
 
+    fn tab_drag_payload(
+        &self,
+        panel: PanelId,
+        group: NodeId,
+        group_rect: Rect,
+        mouse_position_before: gpui::Point<gpui::Pixels>,
+    ) -> TabDragPayload {
+        let floating = floating_group_for_panel(&self.core_layout, panel);
+        let (floating_group, bounds_before) = match floating {
+            Some((floating_group, bounds)) => (Some(floating_group), bounds),
+            None => (None, group_rect),
+        };
+
+        TabDragPayload {
+            layout_before: self.core_layout.clone(),
+            panel,
+            group,
+            mouse_position_before,
+            bounds_before,
+            floating_group,
+        }
+    }
+
+    fn update_tab_from_drag(
+        &mut self,
+        event: &DragMoveEvent<TabDragPayload>,
+        cx: &mut Context<Self>,
+    ) {
+        let drag = event.drag(cx);
+        let movement = event.event.position - drag.mouse_position_before;
+        let dx = movement.x.as_f32();
+        let dy = movement.y.as_f32();
+        if !dx.is_finite() || !dy.is_finite() || (dx.abs() < 0.01 && dy.abs() < 0.01) {
+            return;
+        }
+
+        let origin = Point::new(
+            drag.bounds_before.origin.x + dx,
+            drag.bounds_before.origin.y + dy,
+        );
+        let bounds = Rect::new(origin, drag.bounds_before.size);
+
+        // Rebuild from the drag-start snapshot so cumulative mouse movement is
+        // applied once and never added repeatedly to the previously moved frame.
+        self.core_layout = drag.layout_before.clone();
+        let command = if let Some(floating_group) = drag.floating_group {
+            DockCommand::MoveFloating {
+                group: floating_group,
+                origin,
+            }
+        } else {
+            let tab_count = match self.core_layout.node(drag.group) {
+                Some(Node::Tabs(tabs)) => tabs.children.len(),
+                _ => 0,
+            };
+
+            if tab_count > 1 {
+                DockCommand::FloatPanelAsGroup {
+                    panel: drag.panel,
+                    bounds,
+                }
+            } else if let Some((column, group_count)) =
+                column_containing_group(&self.core_layout, drag.group)
+            {
+                if group_count > 1 {
+                    DockCommand::FloatGroupAsColumn {
+                        group: drag.group,
+                        bounds,
+                    }
+                } else {
+                    // The dragged tab is the whole column. Float that containing
+                    // composition instead of leaving an invalid empty Column behind.
+                    DockCommand::Float {
+                        node: column,
+                        bounds,
+                    }
+                }
+            } else {
+                // Generic fallback for a tab group that is not owned by a Column.
+                DockCommand::Float {
+                    node: drag.group,
+                    bounds,
+                }
+            }
+        };
+
+        if let Err(error) = self.core_layout.apply(command, &self.core_metrics) {
+            eprintln!("Could not float dragged tab: {error:?}");
+            self.core_layout = drag.layout_before.clone();
+        }
+        cx.notify();
+    }
+
     fn render_core_groups(
         &self,
         width: f32,
@@ -193,6 +309,9 @@ impl MainWindow {
 
         for group_rect in &rects.groups {
             let group_id = group_rect.group;
+            if group_is_floating(&self.core_layout, group_id) {
+                continue;
+            }
             let has_header = group_has_header(&self.core_layout, group_id);
             let Some(tabs_view) = group_tabs_view(&self.core_layout, group_id) else {
                 continue;
@@ -212,6 +331,17 @@ impl MainWindow {
                 }
             });
 
+            let drag_mouse_position = window.mouse_position();
+            let first_drag = Some(self.tab_drag_payload(
+                tabs_view.first_panel,
+                group_id,
+                group_rect.rect,
+                drag_mouse_position,
+            ));
+            let second_drag = tabs_view.second_panel.map(|panel| {
+                self.tab_drag_payload(panel, group_id, group_rect.rect, drag_mouse_position)
+            });
+
             let group_element = if has_header {
                 column_tabs_group::render_with_tabs(
                     self.theme,
@@ -220,6 +350,8 @@ impl MainWindow {
                     group_rect.rect.size.height,
                     tabs_view.first_label,
                     tabs_view.second_label,
+                    first_drag,
+                    second_drag,
                     on_first_tab,
                     on_second_tab,
                 )
@@ -231,6 +363,8 @@ impl MainWindow {
                     group_rect.rect.size.height,
                     tabs_view.first_label,
                     tabs_view.second_label,
+                    first_drag,
+                    second_drag,
                     on_first_tab,
                     on_second_tab,
                 )
@@ -413,7 +547,74 @@ impl MainWindow {
             }
         }
 
-        root
+        // Floating trees are rendered separately so they use their own component and frame.
+        // Core returns their geometry in back-to-front z-order.
+        for floating_rect in &rects.floating_groups {
+            let Some(group_id) =
+                floating_root_tabs_group(&self.core_layout, floating_rect.group)
+            else {
+                continue;
+            };
+            let Some(group_rect) = rects.groups.iter().find(|entry| entry.group == group_id) else {
+                continue;
+            };
+            let Some(tabs_view) = group_tabs_view(&self.core_layout, group_id) else {
+                continue;
+            };
+
+            let first_group = group_id;
+            let first_panel = tabs_view.first_panel;
+            let on_first_tab = cx.listener(move |this, _, _, cx| {
+                this.activate_tab(first_group, first_panel, cx);
+            });
+            let second_group = group_id;
+            let second_panel = tabs_view.second_panel;
+            let on_second_tab = cx.listener(move |this, _, _, cx| {
+                if let Some(panel) = second_panel {
+                    this.activate_tab(second_group, panel, cx);
+                }
+            });
+
+            let drag_mouse_position = window.mouse_position();
+            let first_drag = Some(self.tab_drag_payload(
+                tabs_view.first_panel,
+                group_id,
+                group_rect.rect,
+                drag_mouse_position,
+            ));
+            let second_drag = tabs_view.second_panel.map(|panel| {
+                self.tab_drag_payload(panel, group_id, group_rect.rect, drag_mouse_position)
+            });
+
+            let floating_element = floating_column_tabs_group::render_with_tabs(
+                self.theme,
+                tabs_view.active_tab,
+                floating_rect.rect.size.width,
+                floating_rect.rect.size.height,
+                tabs_view.first_label,
+                tabs_view.second_label,
+                first_drag,
+                second_drag,
+                on_first_tab,
+                on_second_tab,
+            );
+
+            root = root.child(
+                div()
+                    .absolute()
+                    .left(px(floating_rect.rect.origin.x))
+                    .top(px(floating_rect.rect.origin.y))
+                    .w(px(floating_rect.rect.size.width))
+                    .h(px(floating_rect.rect.size.height))
+                    .child(floating_element),
+            );
+        }
+
+        root.on_drag_move::<TabDragPayload>(cx.listener(
+            |this, event: &DragMoveEvent<TabDragPayload>, _window, cx| {
+                this.update_tab_from_drag(event, cx);
+            },
+        ))
     }
 }
 
@@ -798,6 +999,96 @@ fn group_has_header(layout: &Layout, group_id: NodeId) -> bool {
     })
 }
 
+fn floating_group_for_panel(
+    layout: &Layout,
+    panel_id: PanelId,
+) -> Option<(FloatingGroupId, Rect)> {
+    layout.floating_groups().find_map(|(floating_id, floating)| {
+        let root = layout.dock_area(floating.area)?.root;
+        subtree_contains_panel(layout, root, panel_id).then_some((floating_id, floating.bounds))
+    })
+}
+
+fn group_is_floating(layout: &Layout, group_id: NodeId) -> bool {
+    layout.floating_groups().any(|(_, floating)| {
+        layout
+            .dock_area(floating.area)
+            .is_some_and(|area| subtree_contains_node(layout, area.root, group_id))
+    })
+}
+
+fn floating_root_tabs_group(layout: &Layout, floating_id: FloatingGroupId) -> Option<NodeId> {
+    let floating = layout
+        .floating_groups()
+        .find_map(|(id, floating)| (id == floating_id).then_some(floating))?;
+    let root = layout.dock_area(floating.area)?.root;
+    first_tabs_group_in_subtree(layout, root)
+}
+
+fn first_tabs_group_in_subtree(layout: &Layout, node_id: NodeId) -> Option<NodeId> {
+    match layout.node(node_id)? {
+        Node::Tabs(_) => Some(node_id),
+        Node::Column(column) => column
+            .groups
+            .iter()
+            .find_map(|child| first_tabs_group_in_subtree(layout, *child)),
+        Node::Split(split) => split
+            .children
+            .iter()
+            .find_map(|child| first_tabs_group_in_subtree(layout, *child)),
+        Node::Panel(_) => None,
+    }
+}
+
+fn subtree_contains_node(layout: &Layout, root: NodeId, target: NodeId) -> bool {
+    if root == target {
+        return true;
+    }
+    match layout.node(root) {
+        Some(Node::Column(column)) => column
+            .groups
+            .iter()
+            .any(|child| subtree_contains_node(layout, *child, target)),
+        Some(Node::Split(split)) => split
+            .children
+            .iter()
+            .any(|child| subtree_contains_node(layout, *child, target)),
+        Some(Node::Tabs(tabs)) => tabs
+            .children
+            .iter()
+            .any(|child| subtree_contains_node(layout, *child, target)),
+        Some(Node::Panel(_)) | None => false,
+    }
+}
+
+fn subtree_contains_panel(layout: &Layout, root: NodeId, target: PanelId) -> bool {
+    match layout.node(root) {
+        Some(Node::Panel(panel)) => panel.panel_id == target,
+        Some(Node::Column(column)) => column
+            .groups
+            .iter()
+            .any(|child| subtree_contains_panel(layout, *child, target)),
+        Some(Node::Split(split)) => split
+            .children
+            .iter()
+            .any(|child| subtree_contains_panel(layout, *child, target)),
+        Some(Node::Tabs(tabs)) => tabs
+            .children
+            .iter()
+            .any(|child| subtree_contains_panel(layout, *child, target)),
+        None => false,
+    }
+}
+
+fn column_containing_group(layout: &Layout, group: NodeId) -> Option<(NodeId, usize)> {
+    layout.nodes().find_map(|(node_id, node)| match node {
+        Node::Column(column) if column.groups.contains(&group) => {
+            Some((node_id, column.groups.len()))
+        }
+        _ => None,
+    })
+}
+
 fn group_containing_panel(layout: &Layout, panel_id: PanelId) -> Option<NodeId> {
     layout.nodes().find_map(|(node_id, node)| {
         let Node::Tabs(tabs) = node else {
@@ -844,6 +1135,42 @@ fn group_tabs_view(layout: &Layout, group_id: NodeId) -> Option<GroupTabsView> {
 mod tests {
     use super::build_core_layout;
     use dock_core::{Axis, DockSide, Node, Point, Rect, Size};
+
+    #[test]
+    fn floating_tree_helpers_find_panels_after_detach() {
+        let theme = ui::Theme::default();
+        let (mut layout, metrics, left_group, upper_group, _) =
+            build_core_layout(&theme).expect("initial Core layout should be valid");
+        let panel = panel_id_for_key(&layout, "color").unwrap();
+        let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 768.0));
+        let source_rects = layout.compute_rects(viewport, &metrics).unwrap();
+        let source_group_rect = source_rects
+            .groups
+            .iter()
+            .find(|item| item.group == upper_group)
+            .unwrap()
+            .rect;
+        let bounds = Rect::new(
+            Point::new(source_group_rect.origin.x + 24.0, source_group_rect.origin.y + 18.0),
+            source_group_rect.size,
+        );
+
+        layout
+            .apply(DockCommand::FloatPanelAsGroup { panel, bounds }, &metrics)
+            .expect("detaching one tab from a multi-tab group should float it");
+        assert_eq!(layout.validate(&metrics), Ok(()));
+        let (floating_id, _) = floating_group_for_panel(&layout, panel)
+            .expect("detached panel should now belong to a floating group");
+        assert!(floating_root_tabs_group(&layout, floating_id).is_some());
+        assert!(group_is_floating(
+            &layout,
+            group_containing_panel(&layout, panel).unwrap()
+        ));
+        layout
+            .compute_rects(viewport, &metrics)
+            .expect("floating geometry should be valid");
+        let _ = left_group;
+    }
 
     #[test]
     fn menu_toggles_all_panels_off_and_back_on_without_stale_group_ids() {
