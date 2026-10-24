@@ -16,7 +16,7 @@ mod tab;
 use dock_core::{Layout, NodeId};
 use gpui::{App, ClickEvent, Div, ParentElement, Styled, Window, div, px, rgb};
 
-use super::{TabDragPayload, TabDragPreview};
+use super::TabDragPayload;
 
 /// Renders any Tabs group from Core's tree.
 ///
