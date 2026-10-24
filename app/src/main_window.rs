@@ -2281,15 +2281,58 @@ fn group_tabs_view_excluding(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_core_layout, column_containing_group, floating_group_bounds,
+        build_core_layout, column_containing_group, dock_area_bounds, floating_group_bounds,
         floating_group_for_panel, floating_root_tabs_group, group_containing_panel,
-        group_has_header, group_is_floating, panel_constraints, panel_id_for_key,
-        group_tabs_view_excluding, tab_drag_bounds_for_panel,
+        group_has_header, group_is_floating, is_dock_tree_header_group, panel_constraints,
+        panel_id_for_key, group_tabs_view_excluding, tab_drag_bounds_for_panel,
         clamped_pointer_delta, panel_is_open, toggle_core_panel, floating_size_for_detach,
         floating_drag_bounds, group_drag_bounds, docked_group_float_command,
         FLOATING_HEIGHT_RATIO,
     };
     use dock_core::{Axis, DockCommand, DockSide, Node, Point, Rect, Size};
+
+    #[test]
+    fn whole_dock_tree_drag_uses_column_headers_and_covers_all_columns() {
+        let theme = ui::Theme::default();
+        let (layout, metrics, first_column_group, second_column_group, lower_group) =
+            build_core_layout(&theme).expect("initial Core layout should be valid");
+        let area = layout
+            .main_area(DockSide::Right)
+            .expect("the right dock area should exist");
+        let root = area.root;
+
+        assert!(is_dock_tree_header_group(
+            &layout,
+            DockSide::Right,
+            first_column_group
+        ));
+        assert!(is_dock_tree_header_group(
+            &layout,
+            DockSide::Right,
+            second_column_group
+        ));
+        assert!(
+            !is_dock_tree_header_group(&layout, DockSide::Right, lower_group),
+            "a group below the first row must not initiate a whole-tree drag"
+        );
+
+        let rects = layout
+            .compute_rects(Rect::new(Point::ZERO, Size::new(1200.0, 768.0)), &metrics)
+            .expect("initial geometry should be valid");
+        let bounds = dock_area_bounds(&layout, root, &rects)
+            .expect("the dock area should have measurable bounds");
+        let column_count = rects
+            .columns
+            .iter()
+            .filter(|entry| subtree_contains_node(&layout, root, entry.column))
+            .count();
+
+        assert!(column_count >= 2, "the dock tree should include both columns");
+        assert!(
+            bounds.size.width > metrics.min_column_width,
+            "bounds must cover the complete multi-column tree, not a single group"
+        );
+    }
 
     #[test]
     fn dragging_tab_hides_it_from_source_and_keeps_only_remaining_tab() {
