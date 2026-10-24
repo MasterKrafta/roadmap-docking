@@ -2285,7 +2285,8 @@ mod tests {
         floating_group_for_panel, floating_root_tabs_group, group_containing_panel,
         group_has_header, group_is_floating, is_dock_tree_header_group, panel_constraints,
         panel_id_for_key, group_tabs_view_excluding, tab_drag_bounds_for_panel,
-        clamped_pointer_delta, panel_is_open, toggle_core_panel, floating_size_for_detach,
+        subtree_contains_node, clamped_pointer_delta, panel_is_open, toggle_core_panel,
+        floating_size_for_detach,
         floating_drag_bounds, group_drag_bounds, docked_group_float_command,
         FLOATING_HEIGHT_RATIO,
     };
