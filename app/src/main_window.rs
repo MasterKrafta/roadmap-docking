@@ -1459,59 +1459,35 @@ impl Render for MainWindow {
         let dropdown_width = self.theme.metrics.default_column_width.max(1.0);
         let menu_item_height = 30.0;
         let dropdown_height = if self.dockers_menu_open {
-            menu_item_height * 4.0 + 2.0
+            menu_item_height * dock_gpui::panels::PANELS.len() as f32 + 2.0
         } else {
             0.0
         };
 
         let dropdown = if self.dockers_menu_open {
-            div()
+            let mut menu = div()
                 .flex()
                 .flex_col()
                 .w(px(dropdown_width))
                 .bg(rgb(self.theme.colors.toolbar_background))
                 .border_1()
-                .border_color(rgb(self.theme.colors.border))
-                .child(render_menu_item(
+                .border_color(rgb(self.theme.colors.border));
+
+            for definition in dock_gpui::panels::PANELS {
+                let key = definition.key;
+                menu = menu.child(render_menu_item(
                     self.theme,
                     dropdown_width,
                     menu_item_height,
-                    "Вкладка 1",
-                    panel_is_open(&self.core_layout, "layers"),
-                    cx.listener(|this, _, _, cx| {
-                        this.toggle_panel("layers", cx);
+                    definition.title.as_ref(),
+                    panel_is_open(&self.core_layout, key),
+                    cx.listener(move |this, _, _, cx| {
+                        this.toggle_panel(key, cx);
                     }),
-                ))
-                .child(render_menu_item(
-                    self.theme,
-                    dropdown_width,
-                    menu_item_height,
-                    "Вкладка 2",
-                    panel_is_open(&self.core_layout, "color"),
-                    cx.listener(|this, _, _, cx| {
-                        this.toggle_panel("color", cx);
-                    }),
-                ))
-                .child(render_menu_item(
-                    self.theme,
-                    dropdown_width,
-                    menu_item_height,
-                    "Вкладка 3",
-                    panel_is_open(&self.core_layout, "properties"),
-                    cx.listener(|this, _, _, cx| {
-                        this.toggle_panel("properties", cx);
-                    }),
-                ))
-                .child(render_menu_item(
-                    self.theme,
-                    dropdown_width,
-                    menu_item_height,
-                    "Вкладка 4",
-                    panel_is_open(&self.core_layout, "history"),
-                    cx.listener(|this, _, _, cx| {
-                        this.toggle_panel("history", cx);
-                    }),
-                ))
+                ));
+            }
+
+            menu
         } else {
             div().w(px(0.0)).h(px(0.0))
         };
