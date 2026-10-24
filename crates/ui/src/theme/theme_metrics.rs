@@ -2,6 +2,10 @@
 pub struct ThemeMetrics {
     pub column_header_height: f32,
     pub tab_strip_height: f32,
+    /// Width of the collapse/close/menu buttons in a Tabs group.
+    pub group_control_button_width: f32,
+    /// Width reserved at the end of the tab strip for a future drag target.
+    pub tab_drag_zone_width: f32,
     pub button_size: f32,
     pub button_gap: f32,
     pub content_padding: f32,
@@ -32,6 +36,8 @@ impl Default for ThemeMetrics {
         Self {
             column_header_height: 32.0,
             tab_strip_height: 28.0,
+            group_control_button_width: 34.0,
+            tab_drag_zone_width: 28.0,
             button_size: 24.0,
             button_gap: 4.0,
             content_padding: 8.0,
@@ -75,6 +81,13 @@ mod tests {
         assert!((m.drag_start_threshold - 4.0).abs() < 1e-3);
         assert!((m.drop_indicator_thickness - 4.0).abs() < 1e-3);
         assert!((m.drop_outline_thickness - 3.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn includes_tabs_group_chrome_metrics() {
+        let m = ThemeMetrics::default();
+        assert!((m.group_control_button_width - 34.0).abs() < 1e-3);
+        assert!((m.tab_drag_zone_width - 28.0).abs() < 1e-3);
     }
 
     #[test]
