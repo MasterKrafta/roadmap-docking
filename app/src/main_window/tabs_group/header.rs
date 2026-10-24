@@ -2,7 +2,7 @@ use super::{close_button, collapse_button};
 use super::super::{DockDragPreview, GroupDragPayload};
 use dock_core::NodeId;
 use gpui::{
-    AppContext, Div, InteractiveElement, ParentElement, StatefulInteractiveElement, Styled, div, px,
+    AppContext, CursorStyle, Div, InteractiveElement, ParentElement, StatefulInteractiveElement, Styled, div, px,
     rgb,
 };
 
@@ -20,7 +20,7 @@ pub(super) fn render(
         .id(format!("dock-tree-header-drag-zone-{group_id:?}"));
 
     let drag_area = match dock_tree_drag {
-        Some(payload) => drag_area.on_drag(payload, |payload, _cursor_offset, window, cx| {
+        Some(payload) => drag_area.cursor(CursorStyle::OpenHand).on_drag(payload, |payload, _cursor_offset, window, cx| {
             payload.drag_start_position.set(window.mouse_position());
             cx.new(|_| DockDragPreview)
         }),
