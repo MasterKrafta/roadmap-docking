@@ -6,7 +6,7 @@ use dock_core::{
     Node, NodeId, PanelConstraints, PanelId, PanelKey, Point, Profile, Rect, Size,
 };
 use gpui::{
-    Context, CursorStyle, DragMoveEvent, InteractiveElement, IntoElement, MouseButton,
+    AppContext, Context, CursorStyle, DragMoveEvent, InteractiveElement, IntoElement, MouseButton,
     ParentElement, Render, StatefulInteractiveElement, Styled, Window, div, px, rgb,
 };
 
