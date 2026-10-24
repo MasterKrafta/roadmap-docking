@@ -1,8 +1,12 @@
 use dock_core::{DockCommand, DragHandle, DragPayload, PanelInstance};
-use gpui::{AnyElement, ClickEvent, Context, MouseDownEvent, SharedString, Window};
+use gpui::{
+    AnyElement, ClickEvent, Context, MouseDownEvent, MouseMoveEvent, MouseUpEvent, SharedString,
+    Window,
+};
 
 use crate::host::{
     CommandClickHandler, DockHost, DragStartHandler, NoopHost, ResizeStartHandler,
+    SurfaceMouseMoveHandler, SurfaceMouseUpHandler,
 };
 use crate::main_window::MainWindow;
 use crate::requests::{DockMenuRequest, ResizeHandle};
@@ -56,6 +60,26 @@ impl DockHost for WindowHost<'_, '_> {
     }
 
     fn resize_start(&self, handle: ResizeHandle) -> ResizeStartHandler {
-        self.noop().resize_start(handle)
+        Box::new(self.cx.listener::<MouseDownEvent>(
+            move |this, event, window, cx| {
+                this.begin_resize(handle, event.position, window, cx);
+            },
+        ))
+    }
+
+    fn surface_mouse_move(&self) -> SurfaceMouseMoveHandler {
+        Box::new(self.cx.listener::<MouseMoveEvent>(
+            move |this, event, _window, cx| {
+                this.handle_surface_mouse_move(event, cx);
+            },
+        ))
+    }
+
+    fn surface_mouse_up(&self) -> SurfaceMouseUpHandler {
+        Box::new(self.cx.listener::<MouseUpEvent>(
+            move |this, event, _window, cx| {
+                this.handle_surface_mouse_up(event, cx);
+            },
+        ))
     }
 }

@@ -1,15 +1,20 @@
 use dock_core::{DockCommand, Point, Rect, Size};
-use gpui::{Context, IntoElement, ParentElement, Render, Styled, Window, div, px, rgb};
+use gpui::{
+    Context, IntoElement, MouseButton, MouseMoveEvent, MouseUpEvent, ParentElement, Render,
+    Styled, Subscription, Window, div, px, rgb,
+};
 use ui::Theme;
 
 use crate::dock::{DockController, WindowHost};
+use crate::requests::ResizeHandle;
 use crate::DockSurface;
 
-/// Host window for the dock surface. Dock commands dispatch through its controller;
-/// menu and gesture handling are connected in their dedicated roadmap stages.
+/// Host window for the dock surface. Commands and resize gestures dispatch through
+/// the controller; menu and drag handling are connected in their later roadmap stages.
 pub(crate) struct MainWindow {
     theme: Theme,
     dock: DockController,
+    activation_subscription: Option<Subscription>,
 }
 
 impl MainWindow {
@@ -17,16 +22,99 @@ impl MainWindow {
         Ok(Self {
             dock: DockController::new_initial(&theme)?,
             theme,
+            activation_subscription: None,
         })
     }
 
     pub(crate) fn apply_dock_command(&mut self, command: DockCommand) {
         let _ = self.dock.apply(command);
     }
+
+    pub(crate) fn begin_resize(
+        &mut self,
+        handle: ResizeHandle,
+        position: gpui::Point<gpui::Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let frame = match self.dock.frame(self.dock_viewport(window)) {
+            Ok(frame) => frame,
+            Err(error) => {
+                tracing::warn!(error = ?error, "could not compute frame to begin dock resize");
+                return;
+            }
+        };
+
+        if let Err(error) = self.dock.begin_resize(handle, dock_pointer(position), &frame) {
+            tracing::warn!(error = ?error, "could not begin dock resize");
+            return;
+        }
+
+        cx.notify();
+    }
+
+    pub(crate) fn handle_surface_mouse_move(
+        &mut self,
+        event: &MouseMoveEvent,
+        cx: &mut Context<Self>,
+    ) {
+        if self.dock.resize_session().is_none() {
+            return;
+        }
+
+        let pointer = dock_pointer(event.position);
+        if event.pressed_button == Some(MouseButton::Left) {
+            if let Err(error) = self.dock.update_resize(pointer) {
+                tracing::debug!(error = ?error, "dock resize preview was rejected");
+            }
+        } else if let Err(error) = self.dock.commit_resize(pointer) {
+            tracing::debug!(error = ?error, "dock resize commit was rejected");
+        }
+
+        cx.notify();
+    }
+
+    pub(crate) fn handle_surface_mouse_up(
+        &mut self,
+        event: &MouseUpEvent,
+        cx: &mut Context<Self>,
+    ) {
+        if event.button != MouseButton::Left || self.dock.resize_session().is_none() {
+            return;
+        }
+
+        if let Err(error) = self.dock.commit_resize(dock_pointer(event.position)) {
+            tracing::debug!(error = ?error, "dock resize commit was rejected");
+        }
+
+        cx.notify();
+    }
+
+    fn dock_viewport(&self, window: &Window) -> Rect {
+        let window_size = window.viewport_size();
+        let width = window_size.width.as_f32().max(1.0);
+        let height = window_size.height.as_f32().max(1.0);
+        let menu_height = self.theme.metrics.column_header_height.max(1.0);
+        Rect::new(
+            Point::ZERO,
+            Size::new(width, (height - menu_height).max(1.0)),
+        )
+    }
 }
 
 impl Render for MainWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.activation_subscription.is_none() {
+            self.activation_subscription = Some(cx.observe_window_activation(
+                window,
+                |this, window, cx| {
+                    if !window.is_window_active() && this.dock.cancel_resize() {
+                        cx.notify();
+                    }
+                },
+            ));
+        }
+
         let window_size = window.viewport_size();
         let width = window_size.width.as_f32().max(1.0);
         let height = window_size.height.as_f32().max(1.0);

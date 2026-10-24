@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 
 use dock_core::{Layout, LayoutRects, NodeId};
-use gpui::{Div, ParentElement, ScrollHandle, Styled, div, px, rgb};
+use gpui::{
+    Div, InteractiveElement, MouseButton, ParentElement, ScrollHandle, Styled, div, px, rgb,
+};
 use ui::Theme;
 
 use crate::components::RectBox;
@@ -105,5 +107,9 @@ pub(crate) fn render_layout(
         root = root.child(element);
     }
 
-    root
+    // Gesture tracking belongs to the surface root so resize handles do not each
+    // implement their own move/up state machine.
+    root.on_mouse_move(host.surface_mouse_move())
+        .on_mouse_up(MouseButton::Left, host.surface_mouse_up())
+        .on_mouse_up_out(MouseButton::Left, host.surface_mouse_up())
 }

@@ -1,5 +1,8 @@
 use dock_core::{DockCommand, DragHandle, DragPayload, PanelInstance};
-use gpui::{AnyElement, App, ClickEvent, MouseDownEvent, SharedString, Window};
+use gpui::{
+    AnyElement, App, ClickEvent, MouseDownEvent, MouseMoveEvent, MouseUpEvent, SharedString,
+    Window,
+};
 
 use crate::requests::{DockMenuRequest, ResizeHandle};
 
@@ -11,6 +14,12 @@ pub type DragStartHandler = Box<dyn Fn(&MouseDownEvent, &mut Window, &mut App) +
 
 /// Begins a resize gesture from Core-provided geometry.
 pub type ResizeStartHandler = Box<dyn Fn(&MouseDownEvent, &mut Window, &mut App) + 'static>;
+
+/// Handles pointer movement shared by all active surface gestures.
+pub type SurfaceMouseMoveHandler = Box<dyn Fn(&MouseMoveEvent, &mut Window, &mut App) + 'static>;
+
+/// Finishes the active pointer gesture when the left mouse button is released.
+pub type SurfaceMouseUpHandler = Box<dyn Fn(&MouseUpEvent, &mut Window, &mut App) + 'static>;
 
 /// Supplies panel presentation and converts UI interactions into host-owned requests.
 ///
@@ -29,6 +38,16 @@ pub trait DockHost {
     fn drag_start(&self, payload: DragPayload, handle: DragHandle) -> DragStartHandler;
 
     fn resize_start(&self, handle: ResizeHandle) -> ResizeStartHandler;
+
+    /// Installs the single root-level move listener for the active surface gesture.
+    fn surface_mouse_move(&self) -> SurfaceMouseMoveHandler {
+        Box::new(|_, _, _| {})
+    }
+
+    /// Installs the single root-level release listener for the active surface gesture.
+    fn surface_mouse_up(&self) -> SurfaceMouseUpHandler {
+        Box::new(|_, _, _| {})
+    }
 }
 
 /// A host with the standard panel registry and no-op event handlers.
