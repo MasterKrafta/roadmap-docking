@@ -311,9 +311,10 @@ impl MainWindow {
             drag.bounds_before.origin.y + dy,
         );
 
-        if let Some(floating_group) = drag.floating_group {
-            // A group that was already floating keeps moving live. Deferred creation
-            // applies only to a drag that started in the dock.
+        let source_has_other_tabs = group_has_multiple_tabs(&drag.layout_before, drag.group);
+        if let Some(floating_group) = drag.floating_group.filter(|_| !source_has_other_tabs) {
+            // When a floating group has only one tab, dragging that tab moves the
+            // window. Tabs from multi-tab floating groups use the detach preview below.
             self.tab_drag_preview = None;
             self.core_layout = drag.layout_before.clone();
             if let Err(error) = self.core_layout.apply(
@@ -501,7 +502,8 @@ impl MainWindow {
         // Rebuild from the drag-start snapshot and apply one semantic command only
         // after release, so intermediate pointer movement never changes the tree.
         self.core_layout = drag.layout_before.clone();
-        let command = if let Some(floating_group) = drag.floating_group {
+        let source_has_other_tabs = group_has_multiple_tabs(&drag.layout_before, drag.group);
+        let command = if let Some(floating_group) = drag.floating_group.filter(|_| !source_has_other_tabs) {
             DockCommand::MoveFloating {
                 group: floating_group,
                 origin,
@@ -891,7 +893,20 @@ impl MainWindow {
             let Some(group_rect) = rects.groups.iter().find(|entry| entry.group == group_id) else {
                 continue;
             };
-            let Some(tabs_view) = group_tabs_view(&self.core_layout, group_id) else {
+            // When one tab is dragged out of a floating multi-tab group, render
+            // the remaining source tab in place until the detach commits.
+            let dragged_panel = self
+                .active_tab_drag_payload
+                .as_ref()
+                .filter(|drag| {
+                    drag.floating_group == Some(floating_rect.group)
+                        && drag.group == group_id
+                        && group_has_multiple_tabs(&drag.layout_before, drag.group)
+                })
+                .map(|drag| drag.panel);
+            let Some(tabs_view) =
+                group_tabs_view_excluding(&self.core_layout, group_id, dragged_panel)
+            else {
                 continue;
             };
 
@@ -1734,6 +1749,10 @@ fn docked_group_float_command(layout: &Layout, group: NodeId, bounds: Rect) -> D
     }
 }
 
+fn group_has_multiple_tabs(layout: &Layout, group_id: NodeId) -> bool {
+    matches!(layout.node(group_id), Some(Node::Tabs(tabs)) if tabs.children.len() > 1)
+}
+
 fn group_tabs_view(layout: &Layout, group_id: NodeId) -> Option<GroupTabsView> {
     group_tabs_view_excluding(layout, group_id, None)
 }
@@ -2102,6 +2121,74 @@ mod tests {
                 "the bottom edge should not jump when the header appears"
             );
         }
+    }
+
+    #[test]
+    fn tab_can_be_detached_from_a_floating_multi_tab_group() {
+        let theme = ui::Theme::default();
+        let (mut layout, metrics, _, group, _) =
+            build_core_layout(&theme).expect("initial Core layout should be valid");
+        let panel_to_detach = panel_id_for_key(&layout, "color").unwrap();
+        let panel_to_keep = panel_id_for_key(&layout, "properties").unwrap();
+
+        let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 768.0));
+        let rects = layout.compute_rects(viewport, &metrics).unwrap();
+        let source_bounds = rects
+            .groups
+            .iter()
+            .find(|entry| entry.group == group)
+            .expect("source group should have geometry")
+            .rect;
+        let first_floating_bounds = Rect::new(
+            Point::new(source_bounds.origin.x + 30.0, source_bounds.origin.y + 25.0),
+            floating_size_for_detach(source_bounds, true, &metrics),
+        );
+
+        layout
+            .apply(
+                DockCommand::FloatGroupAsColumn {
+                    group,
+                    bounds: first_floating_bounds,
+                },
+                &metrics,
+            )
+            .expect("the two-tab source group should float");
+        assert_eq!(layout.validate(&metrics), Ok(()));
+
+        let (source_floating_id, _) = floating_group_for_panel(&layout, panel_to_keep)
+            .expect("the retained tab should belong to the floating source group");
+        assert_eq!(
+            floating_group_for_panel(&layout, panel_to_detach)
+                .map(|(id, _)| id),
+            Some(source_floating_id)
+        );
+
+        let detached_bounds = Rect::new(
+            Point::new(first_floating_bounds.origin.x + 80.0, first_floating_bounds.origin.y + 40.0),
+            floating_size_for_detach(first_floating_bounds, true, &metrics),
+        );
+        layout
+            .apply(
+                DockCommand::FloatPanelAsGroup {
+                    panel: panel_to_detach,
+                    bounds: detached_bounds,
+                },
+                &metrics,
+            )
+            .expect("a tab should be detachable from an already-floating group");
+        assert_eq!(layout.validate(&metrics), Ok(()));
+        assert_eq!(layout.floating_groups().count(), 2);
+
+        let (retained_floating_id, _) = floating_group_for_panel(&layout, panel_to_keep)
+            .expect("the retained tab should remain in the original floating window");
+        let (detached_floating_id, _) = floating_group_for_panel(&layout, panel_to_detach)
+            .expect("the extracted tab should have its own floating window");
+        assert_eq!(retained_floating_id, source_floating_id);
+        assert_ne!(detached_floating_id, source_floating_id);
+        assert!(matches!(
+            layout.node(group),
+            Some(Node::Tabs(tabs)) if tabs.children.len() == 1
+        ));
     }
 
     #[test]
