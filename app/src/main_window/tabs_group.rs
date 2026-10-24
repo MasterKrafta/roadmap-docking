@@ -23,6 +23,7 @@ use super::TabDragPayload;
 pub(super) enum GroupRenderMode {
     Layout,
     DragPreview,
+    SourcePlaceholder,
 }
 
 /// Renders any Tabs group from Core's tree.
@@ -49,13 +50,26 @@ where
     F1: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     F2: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 {
+    if mode == GroupRenderMode::SourcePlaceholder {
+        // Keep the original group slot occupied while its only tab/group is
+        // being dragged. This is visual-only; Core layout stays untouched.
+        return div()
+            .w(px(width))
+            .h(px(height))
+            .bg(rgb(theme.colors.group_background))
+            .border_1()
+            .border_color(rgb(theme.colors.border));
+    }
+
     let show_header = match mode {
         GroupRenderMode::Layout => super::group_has_header(layout, group_id),
         GroupRenderMode::DragPreview => false,
+        GroupRenderMode::SourcePlaceholder => unreachable!("handled above"),
     };
     let is_floating = match mode {
         GroupRenderMode::Layout => super::group_is_floating(layout, group_id),
         GroupRenderMode::DragPreview => true,
+        GroupRenderMode::SourcePlaceholder => unreachable!("handled above"),
     };
     let header_height = if show_header {
         theme.metrics.column_header_height.max(1.0)
