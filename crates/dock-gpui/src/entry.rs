@@ -48,11 +48,11 @@ impl AssetSource for BoxedAssetSource {
     fn load(
         &self,
         path: &str,
-    ) -> anyhow::Result<Option<std::borrow::Cow<'static, [u8]>>> {
+    ) -> gpui::Result<Option<std::borrow::Cow<'static, [u8]>>> {
         self.0.load(path)
     }
 
-    fn list(&self, path: &str) -> anyhow::Result<Vec<gpui::SharedString>> {
+    fn list(&self, path: &str) -> gpui::Result<Vec<gpui::SharedString>> {
         self.0.list(path)
     }
 }
