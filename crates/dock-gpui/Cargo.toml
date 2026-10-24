@@ -6,6 +6,7 @@ rust-version.workspace = true
 
 [dependencies]
 dock-core = { path = "../dock-core" }
+anyhow.workspace = true
 gpui.workspace = true
 ui = { path = "../ui" }
 

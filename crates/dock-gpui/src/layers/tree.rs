@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use dock_core::{Layout, LayoutRects, Node, NodeId, Point, Rect, Size};
-use gpui::AnyElement;
+use gpui::{AnyElement, IntoElement};
 
 use crate::components::{GroupFrame, GroupGrip, RectBox, TabStrip};
 use crate::host::DockHost;
