@@ -7,10 +7,10 @@ rust-version.workspace = true
 [dependencies]
 dock-core = { path = "../crates/dock-core" }
 dock-gpui = { path = "../crates/dock-gpui" }
+gpui.workspace = true
 ui = { path = "../crates/ui" }
 
 [target.'cfg(windows)'.dependencies]
-gpui.workspace = true
 gpui_platform.workspace = true
 platform-windows = { path = "../crates/platform-windows" }
 
