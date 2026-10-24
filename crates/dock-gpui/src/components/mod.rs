@@ -1,6 +1,8 @@
 //! Stateless GPUI building blocks used by the dock renderer.
 
+pub mod drop_zone;
 pub mod floating_title;
+pub mod flyout_header;
 pub mod focus_ring;
 pub mod group_frame;
 pub mod group_grip;
@@ -15,7 +17,9 @@ pub mod splitter_handle;
 pub mod tab_overflow_button;
 pub mod tab_strip;
 
+pub use drop_zone::DropZone;
 pub use floating_title::FloatingTitle;
+pub use flyout_header::FlyoutHeader;
 pub use focus_ring::with_focus_ring;
 pub use group_frame::GroupFrame;
 pub use group_grip::GroupGrip;

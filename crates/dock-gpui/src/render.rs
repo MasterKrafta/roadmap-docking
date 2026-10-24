@@ -1,14 +1,13 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::components::{
-    FloatingTitle, GroupFrame, GroupGrip, GroupMenuButton, IconButton, PanelSurface, PanelTab,
-    RailEntry, RectBox, ResizeEdgeHandle, ResizeEdgeKind, SplitterHandle, TabOverflowButton,
-    TabStrip,
+    DropZone, FloatingTitle, FlyoutHeader, GroupFrame, GroupGrip, GroupMenuButton, IconButton,
+    PanelSurface, PanelTab, RailEntry, RectBox, ResizeEdgeHandle, ResizeEdgeKind, SplitterHandle,
+    TabOverflowButton, TabStrip,
 };
 
 use crate::chrome_geometry::{GROUP_DRAG_GRIP_HEIGHT, GROUP_MENU_BUTTON_WIDTH};
 use crate::frame::FrameGeometry;
-use crate::color::blend_rgb;
 use crate::tree_query::{
     active_panel, drop_target_node, first_panel_in_subtree, main_column_ids, subtree_nodes,
 };
@@ -441,37 +440,18 @@ where
             Point::ZERO,
             Size::new(flyout.rect.size.width, header_height),
         );
-        let header = rect_element(header_rect, theme.colors.toolbar_background)
-            .text_color(rgb(theme.colors.primary_text))
-            .child(panel_title(instance));
-
-        let button_width = (flyout.rect.size.width / 2.0).min(28.0);
-        let menu_rect = Rect::new(
-            Point::new(flyout.rect.size.width - button_width * 2.0, 0.0),
-            Size::new(button_width, header_height),
-        );
-        let menu_button = IconButton::new(
-            format!("dock-flyout-menu-{:?}-{:?}", flyout.group, flyout.panel),
-            menu_rect,
-            "⋯",
-            theme,
-            make_menu_handler(DockMenuRequest::PanelGroup {
+        let header = FlyoutHeader {
+            group: flyout.group,
+            panel: flyout.panel,
+            rect: header_rect,
+            title: panel_title(instance),
+            theme: *theme,
+            on_menu: make_menu_handler(DockMenuRequest::PanelGroup {
                 group: flyout.group,
                 panel: Some(flyout.panel),
             }),
-        );
-
-        let close_rect = Rect::new(
-            Point::new(flyout.rect.size.width - button_width, 0.0),
-            Size::new(button_width, header_height),
-        );
-        let close_button = IconButton::new(
-            format!("dock-flyout-close-{:?}-{:?}", flyout.group, flyout.panel),
-            close_rect,
-            "×",
-            theme,
-            make_command_handler(DockCommand::CloseFlyout),
-        );
+            on_close: make_command_handler(DockCommand::CloseFlyout),
+        };
 
         let content_rect = Rect::new(
             Point::new(0.0, header_height),
@@ -493,8 +473,6 @@ where
             .border_1()
             .border_color(rgb(theme.colors.border))
             .child(header.into_any_element())
-            .child(menu_button.into_any_element())
-            .child(close_button.into_any_element())
             .child(content.into_any_element());
         root = root.child(overlay.into_any_element());
     }
@@ -519,17 +497,13 @@ where
             }
 
             let active = overlay.preview.target == Some(zone.target);
-            let weight = if active { 0.38 } else { 0.13 };
-            let fill = blend_rgb(theme.colors.drop_target, theme.colors.canvas_background, weight);
             root = root.child(
-                rect_element(zone_rect, fill)
-                    .border_1()
-                    .border_color(rgb(if active {
-                        theme.colors.focus
-                    } else {
-                        theme.colors.drop_target
-                    }))
-                    .into_any_element(),
+                DropZone {
+                    rect: zone_rect,
+                    active,
+                    theme: *theme,
+                }
+                .into_any_element(),
             );
         }
         let marker = Rect::new(
