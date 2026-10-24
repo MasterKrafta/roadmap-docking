@@ -62,7 +62,7 @@ where
             on_first_tab,
             on_second_tab,
         ))
-        .child(content::render_selected(
+        .child(content::render(
             theme,
             selected_tab,
             width,
