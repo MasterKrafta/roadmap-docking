@@ -639,6 +639,96 @@ impl MainWindow {
             .border_1()
             .border_color(rgb(self.theme.colors.primary_text));
 
+        for group_rect in &rects.groups {
+            let group_id = group_rect.group;
+            if !subtree_contains_node(layout, tree_root, group_id) {
+                continue;
+            }
+
+            // If a tab is currently being detached, retain the other source tab.
+            let dragged_panel = self
+                .active_tab_drag_payload
+                .as_ref()
+                .filter(|drag| {
+                    drag.floating_group == Some(floating_rect.group)
+                        && drag.group == group_id
+                        && group_has_multiple_tabs(&drag.layout_before, drag.group)
+                })
+                .map(|drag| drag.panel);
+            let Some(tabs_view) =
+                group_tabs_view_excluding(layout, group_id, dragged_panel)
+            else {
+                continue;
+            };
+
+            let first_group = group_id;
+            let first_panel = tabs_view.first_panel;
+            let on_first_tab = cx.listener(move |this, _, _, cx| {
+                this.activate_tab(first_group, first_panel, cx);
+            });
+            let second_group = group_id;
+            let second_panel = tabs_view.second_panel;
+            let on_second_tab = cx.listener(move |this, _, _, cx| {
+                if let Some(panel) = second_panel {
+                    this.activate_tab(second_group, panel, cx);
+                }
+            });
+
+            let drag_mouse_position = window.mouse_position();
+            let first_drag = Some(self.tab_drag_payload(
+                tabs_view.first_panel,
+                group_id,
+                group_rect.rect,
+                drag_mouse_position,
+                drag_viewport_size,
+            ));
+            let second_drag = tabs_view.second_panel.map(|panel| {
+                self.tab_drag_payload(
+                    panel,
+                    group_id,
+                    group_rect.rect,
+                    drag_mouse_position,
+                    drag_viewport_size,
+                )
+            });
+            let group_drag_payload = Some(self.group_drag_payload(
+                tabs_view.first_panel,
+                group_id,
+                group_rect.rect,
+                drag_mouse_position,
+                drag_viewport_size,
+            ));
+
+            let group_element = tabs_group::render(
+                layout,
+                group_id,
+                self.theme,
+                tabs_view.active_tab,
+                group_rect.rect.size.width,
+                group_rect.rect.size.height,
+                tabs_view.first_label,
+                tabs_view.second_label,
+                first_drag,
+                second_drag,
+                on_first_tab,
+                on_second_tab,
+                tabs_group::GroupRenderMode::FloatingComposition,
+                group_drag_payload.clone(),
+                group_drag_payload,
+            );
+
+            composition = composition.child(
+                div()
+                    .absolute()
+                    .left(px(group_rect.rect.origin.x - floating_rect.rect.origin.x))
+                    .top(px(group_rect.rect.origin.y - floating_rect.rect.origin.y))
+                    .w(px(group_rect.rect.size.width))
+                    .h(px(group_rect.rect.size.height))
+                    .child(group_element),
+            );
+        }
+
+
         // Keep each splitter's hit zone in the same floating container as its
         // painted bar. Global hitboxes drift when Core clamps the visible window rect.
         for (splitter_index, splitter) in rects.splitters.iter().copied().enumerate() {
@@ -750,96 +840,27 @@ impl MainWindow {
             composition = composition.child(handle);
         }
 
-        for group_rect in &rects.groups {
-            let group_id = group_rect.group;
-            if !subtree_contains_node(layout, tree_root, group_id) {
-                continue;
-            }
-
-            // If a tab is currently being detached, retain the other source tab.
-            let dragged_panel = self
-                .active_tab_drag_payload
-                .as_ref()
-                .filter(|drag| {
-                    drag.floating_group == Some(floating_rect.group)
-                        && drag.group == group_id
-                        && group_has_multiple_tabs(&drag.layout_before, drag.group)
-                })
-                .map(|drag| drag.panel);
-            let Some(tabs_view) =
-                group_tabs_view_excluding(layout, group_id, dragged_panel)
-            else {
-                continue;
-            };
-
-            let first_group = group_id;
-            let first_panel = tabs_view.first_panel;
-            let on_first_tab = cx.listener(move |this, _, _, cx| {
-                this.activate_tab(first_group, first_panel, cx);
-            });
-            let second_group = group_id;
-            let second_panel = tabs_view.second_panel;
-            let on_second_tab = cx.listener(move |this, _, _, cx| {
-                if let Some(panel) = second_panel {
-                    this.activate_tab(second_group, panel, cx);
-                }
-            });
-
-            let drag_mouse_position = window.mouse_position();
-            let first_drag = Some(self.tab_drag_payload(
-                tabs_view.first_panel,
-                group_id,
-                group_rect.rect,
-                drag_mouse_position,
-                drag_viewport_size,
-            ));
-            let second_drag = tabs_view.second_panel.map(|panel| {
-                self.tab_drag_payload(
-                    panel,
-                    group_id,
-                    group_rect.rect,
-                    drag_mouse_position,
-                    drag_viewport_size,
-                )
-            });
-            let group_drag_payload = Some(self.group_drag_payload(
-                tabs_view.first_panel,
-                group_id,
-                group_rect.rect,
-                drag_mouse_position,
-                drag_viewport_size,
-            ));
-
-            let group_element = tabs_group::render(
-                layout,
-                group_id,
-                self.theme,
-                tabs_view.active_tab,
-                group_rect.rect.size.width,
-                group_rect.rect.size.height,
-                tabs_view.first_label,
-                tabs_view.second_label,
-                first_drag,
-                second_drag,
-                on_first_tab,
-                on_second_tab,
-                tabs_group::GroupRenderMode::Layout,
-                group_drag_payload.clone(),
-                group_drag_payload,
-            );
-
-            composition = composition.child(
-                div()
-                    .absolute()
-                    .left(px(group_rect.rect.origin.x - floating_rect.rect.origin.x))
-                    .top(px(group_rect.rect.origin.y - floating_rect.rect.origin.y))
-                    .w(px(group_rect.rect.size.width))
-                    .h(px(group_rect.rect.size.height))
-                    .child(group_element),
-            );
-        }
-
         composition
+            .on_drag_move::<TabDragPayload>(cx.listener(
+                |this, event: &DragMoveEvent<TabDragPayload>, _window, cx| {
+                    this.update_tab_from_drag(event, cx);
+                    cx.stop_propagation();
+                },
+            ))
+            .on_drag_move::<GroupDragPayload>(cx.listener(
+                |this, event: &DragMoveEvent<GroupDragPayload>, _window, cx| {
+                    this.update_group_from_drag(event, cx);
+                    cx.stop_propagation();
+                },
+            ))
+            .on_drop(cx.listener(|this, drag: &TabDragPayload, window, cx| {
+                this.finish_tab_drag(drag, window.mouse_position(), cx);
+                cx.stop_propagation();
+            }))
+            .on_drop(cx.listener(|this, drag: &GroupDragPayload, window, cx| {
+                this.finish_group_drag(drag, window.mouse_position(), cx);
+                cx.stop_propagation();
+            }))
     }
 
     fn render_core_groups(
