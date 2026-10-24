@@ -176,7 +176,7 @@ impl MainWindow {
 
         // Core provides the splitter hit zones. GPUI starts the drag while Core
         // owns all sizing rules and applies each pointer delta transactionally.
-        for splitter in rects.splitters {
+        for (splitter_index, splitter) in rects.splitters.into_iter().enumerate() {
             let available_height = match self.core_layout.node(splitter.owner) {
                 Some(Node::Column(column)) => rects
                     .columns
@@ -220,6 +220,7 @@ impl MainWindow {
             };
 
             let handle = div()
+                .id(format!("dock-splitter-{splitter_index}"))
                 .absolute()
                 .left(px(splitter.rect.origin.x))
                 .top(px(splitter.rect.origin.y))
