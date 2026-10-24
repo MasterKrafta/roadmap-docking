@@ -1,7 +1,5 @@
-use gpui::{
-    Div, InteractiveElement, ParentElement, StatefulInteractiveElement, Styled, div, px,
-    rgb,
-};
+use dock_core::NodeId;
+use gpui::{IntoElement, ParentElement, StatefulInteractiveElement, Styled, div, px, rgb};
 
 use super::super::{DockDragPreview, GroupDragPayload};
 
@@ -9,8 +7,9 @@ use super::super::{DockDragPreview, GroupDragPayload};
 pub(super) fn render(
     theme: ui::Theme,
     height: f32,
+    group_id: NodeId,
     drag_payload: Option<GroupDragPayload>,
-) -> Div {
+) -> impl IntoElement {
     let zone = div()
         .flex_1()
         .justify_end()
@@ -22,7 +21,9 @@ pub(super) fn render(
                 .w(px(theme.metrics.tab_drag_zone_width.max(0.0)))
                 .h(px(height))
                 .bg(rgb(theme.colors.dock_background)),
-        );
+        )
+        // Each tab group needs its own stateful element identity.
+        .id(format!("group-drag-zone-{group_id:?}"));
 
     match drag_payload {
         Some(payload) => zone.on_drag(payload, |payload, _cursor_offset, window, cx| {
