@@ -5,7 +5,7 @@ use dock_core::{
     Node, NodeId, PanelId, Point, Profile, Rect, Size,
 };
 use gpui::{
-    App, Context, IntoElement, ParentElement, Render, ScrollHandle, Styled, Window, div, px, rgb,
+    Context, IntoElement, ParentElement, Render, ScrollHandle, Styled, Window, div, px, rgb,
 };
 use ui::Theme;
 
