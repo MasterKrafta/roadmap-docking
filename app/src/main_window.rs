@@ -23,15 +23,17 @@ impl Render for MainWindow {
         let width = viewport.width.as_f32().max(1.0);
         let height = viewport.height.as_f32().max(1.0);
 
+        let panel_width = self.theme.metrics.default_column_width.max(1.0).min(width);
+
         div()
             .flex()
             .w(px(width))
             .h(px(height))
-            .bg(rgb(self.theme.colors.window_background))
+            .bg(rgb(self.theme.colors.canvas_background))
             .child(tabs_group::render(
                 self.theme,
                 self.active_tab,
-                width,
+                panel_width,
                 height,
                 cx.listener(|this, _, _, cx| {
                     this.active_tab = 0;
@@ -42,5 +44,11 @@ impl Render for MainWindow {
                     cx.notify();
                 }),
             ))
+            .child(
+                div()
+                    .flex_1()
+                    .h(px(height))
+                    .bg(rgb(self.theme.colors.canvas_background)),
+            )
     }
 }
