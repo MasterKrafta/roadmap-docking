@@ -644,38 +644,46 @@ impl MainWindow {
                 continue;
             }
 
-            // Whole-group dragging keeps the Core layout intact and leaves a
-            // placeholder at the group's original geometry until release.
-            let dragged_group = self
-                .active_group_drag_payload
-                .as_ref()
-                .filter(|drag| drag.floating_group.is_none() && drag.group == group_id);
-            if dragged_group.is_some() {
-                let placeholder = tabs_group::render(
-                    &self.core_layout,
-                    group_id,
-                    self.theme,
-                    0,
-                    group_rect.rect.size.width,
-                    group_rect.rect.size.height,
-                    "",
-                    None,
-                    None,
-                    None,
-                    |_, _, _| {},
-                    |_, _, _| {},
-                    tabs_group::GroupRenderMode::SourcePlaceholder,
-                    None,
-                );
-                root = root.child(
-                    div()
-                        .absolute()
-                        .left(px(group_rect.rect.origin.x))
-                        .top(px(group_rect.rect.origin.y))
-                        .w(px(group_rect.rect.size.width))
-                        .h(px(group_rect.rect.size.height))
-                        .child(placeholder),
-                );
+            // While dragging one group, leave a placeholder in its source slot.
+            // When the payload is an entire dock-area root, hide every descendant
+            // group until its translated tree preview is painted below.
+            let dragged_group = self.active_group_drag_payload.as_ref().filter(|drag| {
+                drag.floating_group.is_none()
+                    && if drag.whole_area {
+                        subtree_contains_node(&self.core_layout, drag.group, group_id)
+                    } else {
+                        drag.group == group_id
+                    }
+            });
+            if let Some(drag) = dragged_group {
+                if !drag.whole_area {
+                    let placeholder = tabs_group::render(
+                        &self.core_layout,
+                        group_id,
+                        self.theme,
+                        0,
+                        group_rect.rect.size.width,
+                        group_rect.rect.size.height,
+                        "",
+                        None,
+                        None,
+                        None,
+                        |_, _, _| {},
+                        |_, _, _| {},
+                        tabs_group::GroupRenderMode::SourcePlaceholder,
+                        None,
+                        None,
+                    );
+                    root = root.child(
+                        div()
+                            .absolute()
+                            .left(px(group_rect.rect.origin.x))
+                            .top(px(group_rect.rect.origin.y))
+                            .w(px(group_rect.rect.size.width))
+                            .h(px(group_rect.rect.size.height))
+                            .child(placeholder),
+                    );
+                }
                 continue;
             }
 
@@ -756,6 +764,12 @@ impl MainWindow {
                 drag_mouse_position,
                 drag_viewport_size,
             ));
+            let header_drag_payload = self.dock_tree_drag_payload(
+                group_id,
+                &rects,
+                drag_mouse_position,
+                drag_viewport_size,
+            );
 
             let group_element = tabs_group::render(
                 &self.core_layout,
@@ -772,6 +786,7 @@ impl MainWindow {
                 on_second_tab,
                 tabs_group::GroupRenderMode::Layout,
                 group_drag_payload,
+                header_drag_payload,
             );
 
             root = root.child(
