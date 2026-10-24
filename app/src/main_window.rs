@@ -1,3 +1,5 @@
+#[allow(dead_code)]
+mod column_tabs_group;
 mod tabs_group;
 
 use gpui::{Context, IntoElement, ParentElement, Render, Styled, Window, div, px, rgb};
