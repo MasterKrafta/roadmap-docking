@@ -1,7 +1,9 @@
 use gpui::{
-    App, ClickEvent, InteractiveElement, IntoElement, ParentElement, StatefulInteractiveElement,
-    Styled, Window, div, px, rgb,
+    App, AppContext, ClickEvent, InteractiveElement, IntoElement, ParentElement,
+    StatefulInteractiveElement, Styled, Window, div, px, rgb,
 };
+
+use super::super::{TabDragPayload, TabDragPreview};
 
 /// A selectable tab. The parent owns the active-tab state and click callback.
 pub(super) fn render<F>(
@@ -10,6 +12,7 @@ pub(super) fn render<F>(
     is_active: bool,
     height: f32,
     on_click: F,
+    drag_payload: Option<TabDragPayload>,
 ) -> impl IntoElement
 where
     F: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
@@ -20,7 +23,7 @@ where
         theme.colors.toolbar_background
     };
 
-    div()
+    let tab = div()
         .flex()
         .items_center()
         .justify_center()
@@ -32,5 +35,10 @@ where
         .border_color(rgb(theme.colors.border))
         .child(label)
         .id(label)
-        .on_click(on_click)
+        .on_click(on_click);
+
+    match drag_payload {
+        Some(payload) => tab.on_drag(payload, |_, _, _, cx| cx.new(|_| TabDragPreview)),
+        None => tab,
+    }
 }
