@@ -15,7 +15,7 @@ mod tab;
 
 use gpui::{App, ClickEvent, Div, ParentElement, Styled, Window, div, px, rgb};
 
-/// Assembles one group from independent header, tab, drag-zone, button, and content components.
+/// Renders the standard two-tab column group.
 pub(super) fn render<F1, F2>(
     theme: ui::Theme,
     active_tab: usize,
@@ -28,9 +28,41 @@ where
     F1: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     F2: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 {
+    render_with_tabs(
+        theme,
+        active_tab,
+        width,
+        height,
+        "Вкладка 1",
+        Some("Вкладка 2"),
+        on_first_tab,
+        on_second_tab,
+    )
+}
+
+/// Renders a headered group using the tabs supplied by the Core layout.
+pub(super) fn render_with_tabs<F1, F2>(
+    theme: ui::Theme,
+    active_tab: usize,
+    width: f32,
+    height: f32,
+    first_tab: &'static str,
+    second_tab: Option<&'static str>,
+    on_first_tab: F1,
+    on_second_tab: F2,
+) -> Div
+where
+    F1: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    F2: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+{
     let header_height = theme.metrics.column_header_height.max(1.0);
     let tab_strip_height = theme.metrics.tab_strip_height.max(1.0);
     let content_height = (height - header_height - tab_strip_height).max(1.0);
+    let selected_tab = if active_tab == 1 {
+        second_tab.unwrap_or(first_tab)
+    } else {
+        first_tab
+    };
 
     div()
         .flex()
@@ -44,23 +76,27 @@ where
             active_tab,
             width,
             tab_strip_height,
+            first_tab,
+            second_tab,
             on_first_tab,
             on_second_tab,
         ))
-        .child(content::render(
+        .child(content::render_selected(
             theme,
-            active_tab,
+            selected_tab,
             width,
             content_height,
         ))
 }
 
-/// Arranges the two tabs, the empty drag/drop area, and the hamburger button.
+/// Arranges one or two tabs, the drag/drop area, and the hamburger button.
 fn render_tab_strip<F1, F2>(
     theme: ui::Theme,
     active_tab: usize,
     width: f32,
     height: f32,
+    first_tab: &'static str,
+    second_tab: Option<&'static str>,
     on_first_tab: F1,
     on_second_tab: F2,
 ) -> Div
@@ -68,7 +104,7 @@ where
     F1: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     F2: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 {
-    div()
+    let strip = div()
         .flex()
         .items_center()
         .w(px(width))
@@ -78,18 +114,25 @@ where
         .border_color(rgb(theme.colors.border))
         .child(tab::render(
             theme,
-            "Вкладка 1",
+            first_tab,
             active_tab == 0,
             height,
             on_first_tab,
-        ))
-        .child(tab::render(
+        ));
+
+    let strip = if let Some(second_tab) = second_tab {
+        strip.child(tab::render(
             theme,
-            "Вкладка 2",
+            second_tab,
             active_tab == 1,
             height,
             on_second_tab,
         ))
+    } else {
+        strip
+    };
+
+    strip
         .child(drag_zone::render(theme, height))
         .child(hamburger_button::render(theme, height))
 }
