@@ -217,6 +217,22 @@ fn capture_start_geometry(
     metrics: &DockMetrics,
     handle: ResizeHandle,
 ) -> Result<StartGeometry, ResizeStartError> {
+    if let ResizeHandle::Splitter {
+        owner,
+        boundary_index,
+        axis,
+    } = handle
+    {
+        let has_splitter_geometry = rects.splitters.iter().any(|entry| {
+            entry.owner == owner
+                && entry.boundary_index == boundary_index
+                && entry.axis == axis
+        });
+        if !has_splitter_geometry {
+            return Err(ResizeStartError::InvalidHandle);
+        }
+    }
+
     match handle {
         ResizeHandle::Splitter {
             owner,
@@ -490,6 +506,40 @@ mod tests {
             session.command_for_pointer(Point::new(-f32::MAX, 100.0)),
             Err(ResizeUpdateError::InvalidDelta)
         ));
+    }
+
+    #[test]
+    fn splitter_resize_requires_matching_frame_geometry() {
+        let controller = DockController::new_initial(&Theme::default()).unwrap();
+        let layout = controller.layout().clone();
+        let frame = controller
+            .frame(Rect::new(Point::ZERO, Size::new(1200.0, 800.0)))
+            .unwrap();
+
+        for axis in [Axis::X, Axis::Y] {
+            let splitter = *frame
+                .rects()
+                .splitters
+                .iter()
+                .find(|splitter| splitter.axis == axis)
+                .expect("initial layout should contain a splitter on each axis");
+            let handle = ResizeHandle::Splitter {
+                owner: splitter.owner,
+                boundary_index: splitter.boundary_index,
+                axis,
+            };
+            let mut rects = frame.rects().clone();
+            rects.splitters.retain(|entry| {
+                entry.owner != splitter.owner
+                    || entry.boundary_index != splitter.boundary_index
+                    || entry.axis != axis
+            });
+
+            assert_eq!(
+                capture_start_geometry(&layout, &rects, controller.metrics(), handle),
+                Err(ResizeStartError::InvalidHandle)
+            );
+        }
     }
 
     #[test]
