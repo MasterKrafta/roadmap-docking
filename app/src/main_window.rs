@@ -236,17 +236,27 @@ impl MainWindow {
         drag_viewport_size: Size,
     ) -> TabDragPayload {
         let floating = floating_group_for_panel(&self.core_layout, panel);
-        let (floating_group, bounds_before) = match floating {
+        let (floating_group, group_bounds) = match floating {
             Some((floating_group, bounds)) => (Some(floating_group), bounds),
             None => (None, group_rect),
         };
+        // The preview renders the dragged panel as its first and only tab.
+        // Preserve the source tab's horizontal slot under the pointer when the
+        // second tab is detached by shifting the preview/window origin by one slot.
+        let bounds_before = tab_drag_bounds_for_panel(
+            &self.core_layout,
+            group,
+            panel,
+            group_bounds,
+            self.theme.metrics.column_tab_width,
+        );
 
         TabDragPayload {
             layout_before: self.core_layout.clone(),
             panel,
             group,
             drag_start_position: Rc::new(Cell::new(mouse_position_before)),
-            drag_viewport_size,
+            drag_viewport_size: drag_viewport_size,
             bounds_before,
             floating_group,
             label: panel_label(&self.core_layout, panel).unwrap_or("Панель"),
@@ -1755,6 +1765,34 @@ fn group_has_multiple_tabs(layout: &Layout, group_id: NodeId) -> bool {
     matches!(layout.node(group_id), Some(Node::Tabs(tabs)) if tabs.children.len() > 1)
 }
 
+/// Returns drag bounds whose origin corresponds to the tab slot being dragged.
+/// A detached preview contains only one tab, so a source tab at index 1 must
+/// shift the preview one tab-width to the right to keep the cursor over that tab.
+fn tab_drag_bounds_for_panel(
+    layout: &Layout,
+    group_id: NodeId,
+    panel_id: PanelId,
+    group_bounds: Rect,
+    tab_width: f32,
+) -> Rect {
+    let tab_index = match layout.node(group_id) {
+        Some(Node::Tabs(tabs)) => tabs.children.iter().position(|child_id| {
+            matches!(
+                layout.node(*child_id),
+                Some(Node::Panel(panel)) if panel.panel_id == panel_id
+            )
+        }),
+        _ => None,
+    }
+    .unwrap_or(0);
+    let offset_x = tab_index as f32 * tab_width.max(1.0);
+
+    Rect::new(
+        Point::new(group_bounds.origin.x + offset_x, group_bounds.origin.y),
+        group_bounds.size,
+    )
+}
+
 fn group_tabs_view(layout: &Layout, group_id: NodeId) -> Option<GroupTabsView> {
     group_tabs_view_excluding(layout, group_id, None)
 }
@@ -2123,6 +2161,36 @@ mod tests {
                 "the bottom edge should not jump when the header appears"
             );
         }
+    }
+
+    #[test]
+    fn detached_second_tab_keeps_its_source_slot_under_the_pointer() {
+        let theme = ui::Theme::default();
+        let (layout, _, _, group, _) =
+            build_core_layout(&theme).expect("initial Core layout should be valid");
+        let Node::Tabs(tabs) = layout.node(group).unwrap() else {
+            panic!("source should be a Tabs group");
+        };
+        assert_eq!(tabs.children.len(), 2);
+
+        let panel_at = |index: usize| match layout.node(tabs.children[index]).unwrap() {
+            Node::Panel(panel) => panel.panel_id,
+            _ => panic!("tabs children should be panels"),
+        };
+        let first_panel = panel_at(0);
+        let second_panel = panel_at(1);
+        let source_bounds = Rect::new(Point::new(80.0, 150.0), Size::new(320.0, 480.0));
+        let tab_width = theme.metrics.column_tab_width.max(1.0);
+
+        let first_bounds =
+            tab_drag_bounds_for_panel(&layout, group, first_panel, source_bounds, tab_width);
+        let second_bounds =
+            tab_drag_bounds_for_panel(&layout, group, second_panel, source_bounds, tab_width);
+
+        assert_eq!(first_bounds.origin.x, source_bounds.origin.x);
+        assert_eq!(second_bounds.origin.x, source_bounds.origin.x + tab_width);
+        assert_eq!(second_bounds.origin.y, source_bounds.origin.y);
+        assert_eq!(second_bounds.size, source_bounds.size);
     }
 
     #[test]
