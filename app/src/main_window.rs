@@ -6,8 +6,8 @@ use dock_core::{
     Node, NodeId, PanelConstraints, PanelId, PanelKey, Point, Profile, Rect, Size,
 };
 use gpui::{
-    Context, InteractiveElement, IntoElement, ParentElement, Render, StatefulInteractiveElement,
-    Styled, Window, div, px, rgb,
+    Context, CursorStyle, DragMoveEvent, InteractiveElement, IntoElement, MouseButton,
+    ParentElement, Render, StatefulInteractiveElement, Styled, Window, div, px, rgb,
 };
 
 #[derive(Clone, Copy)]
@@ -17,6 +17,27 @@ struct GroupTabsView {
     first_label: &'static str,
     second_panel: Option<PanelId>,
     second_label: Option<&'static str>,
+}
+
+/// Snapshot captured when a splitter drag begins. Each pointer update is applied
+/// to this same baseline, so the total pointer delta is not accumulated repeatedly.
+#[derive(Clone)]
+struct SplitterDragState {
+    layout_before: Layout,
+    mouse_position_before: gpui::Point<gpui::Pixels>,
+    owner: NodeId,
+    boundary_index: usize,
+    axis: dock_core::Axis,
+    available_height: f32,
+}
+
+/// GPUI requires a view entity for a drag; resizing itself is handled by the Core layout.
+struct SplitterDragPreview;
+
+impl Render for SplitterDragPreview {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+    }
 }
 
 /// Root application window.
@@ -67,6 +88,7 @@ impl MainWindow {
         &self,
         width: f32,
         height: f32,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> gpui::Div {
         let viewport = Rect::new(Point::ZERO, Size::new(width.max(1.0), height.max(1.0)));
@@ -152,17 +174,111 @@ impl MainWindow {
             );
         }
 
-        // Splitter positions and thickness are taken from Core geometry.
+        // Core provides the splitter hit zones. GPUI starts the drag while Core
+        // owns all sizing rules and applies each pointer delta transactionally.
         for splitter in rects.splitters {
-            root = root.child(
-                div()
-                    .absolute()
-                    .left(px(splitter.rect.origin.x))
-                    .top(px(splitter.rect.origin.y))
-                    .w(px(splitter.rect.size.width))
-                    .h(px(splitter.rect.size.height))
-                    .bg(rgb(self.theme.colors.splitter)),
-            );
+            let available_height = match self.core_layout.node(splitter.owner) {
+                Some(Node::Column(column)) => rects
+                    .columns
+                    .iter()
+                    .find(|entry| entry.column == splitter.owner)
+                    .map(|entry| {
+                        (entry.rect.size.height
+                            - self.core_metrics.splitter_thickness
+                                * column.groups.len().saturating_sub(1) as f32)
+                            .max(1.0)
+                    })
+                    .unwrap_or(1.0),
+                _ => 1.0,
+            };
+
+            let drag_state = SplitterDragState {
+                layout_before: self.core_layout.clone(),
+                mouse_position_before: window.mouse_position(),
+                owner: splitter.owner,
+                boundary_index: splitter.boundary_index,
+                axis: splitter.axis,
+                available_height,
+            };
+            let cursor = match splitter.axis {
+                dock_core::Axis::X => CursorStyle::ResizeColumn,
+                dock_core::Axis::Y => CursorStyle::ResizeRow,
+            };
+            let (bar_left, bar_top, bar_width, bar_height) = match splitter.axis {
+                dock_core::Axis::X => (
+                    (splitter.rect.size.width - self.core_metrics.splitter_thickness).max(0.0) / 2.0,
+                    0.0,
+                    self.core_metrics.splitter_thickness.min(splitter.rect.size.width),
+                    splitter.rect.size.height,
+                ),
+                dock_core::Axis::Y => (
+                    0.0,
+                    (splitter.rect.size.height - self.core_metrics.splitter_thickness).max(0.0) / 2.0,
+                    splitter.rect.size.width,
+                    self.core_metrics.splitter_thickness.min(splitter.rect.size.height),
+                ),
+            };
+
+            let handle = div()
+                .absolute()
+                .left(px(splitter.rect.origin.x))
+                .top(px(splitter.rect.origin.y))
+                .w(px(splitter.rect.size.width))
+                .h(px(splitter.rect.size.height))
+                .cursor(cursor)
+                .on_mouse_down(MouseButton::Left, |_, window, cx| {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                })
+                .on_drag(drag_state, |_, _, _, cx| cx.new(|_| SplitterDragPreview))
+                .on_drag_move::<SplitterDragState>(cx.listener(
+                    move |this, event: &DragMoveEvent<SplitterDragState>, _window, cx| {
+                        let drag = event.drag(cx);
+                        let movement = event.event.position - drag.mouse_position_before;
+                        let delta = match drag.axis {
+                            dock_core::Axis::X => movement.x.as_f32(),
+                            dock_core::Axis::Y => movement.y.as_f32(),
+                        };
+                        if !delta.is_finite() || delta.abs() < 0.01 {
+                            return;
+                        }
+
+                        // Re-apply the absolute mouse displacement to the captured
+                        // state; do not add the same cumulative delta on every frame.
+                        this.core_layout = drag.layout_before.clone();
+                        let command = match drag.axis {
+                            dock_core::Axis::X => DockCommand::ResizeColumnBoundary {
+                                side: DockSide::Right,
+                                boundary_index: drag.boundary_index,
+                                delta,
+                            },
+                            dock_core::Axis::Y => DockCommand::ResizeGroups {
+                                column: drag.owner,
+                                boundary_index: drag.boundary_index,
+                                delta,
+                                available_height: drag.available_height,
+                            },
+                        };
+                        if let Err(error) =
+                            this.core_layout.apply(command, &this.core_metrics)
+                        {
+                            eprintln!("Could not resize dock splitter: {error:?}");
+                            this.core_layout = drag.layout_before.clone();
+                        }
+                        cx.notify();
+                    },
+                ))
+                .child(
+                    div()
+                        .absolute()
+                        .left(px(bar_left))
+                        .top(px(bar_top))
+                        .w(px(bar_width))
+                        .h(px(bar_height))
+                        .bg(rgb(self.theme.colors.splitter)),
+                );
+
+            root = root.child(handle);
         }
 
         root
@@ -276,7 +392,7 @@ impl Render for MainWindow {
                     ),
             )
             .child(dropdown)
-            .child(self.render_core_groups(width, content_height, cx))
+            .child(self.render_core_groups(width, content_height, window, cx))
     }
 }
 
