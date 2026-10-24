@@ -25,6 +25,8 @@ where
         height,
         "Вкладка 3",
         Some("Вкладка 4"),
+        None,
+        None,
         on_first_tab,
         on_second_tab,
     )
@@ -38,6 +40,8 @@ pub(super) fn render_with_tabs<F1, F2>(
     height: f32,
     first_tab: &'static str,
     second_tab: Option<&'static str>,
+    first_drag: Option<super::TabDragPayload>,
+    second_drag: Option<super::TabDragPayload>,
     on_first_tab: F1,
     on_second_tab: F2,
 ) -> Div
@@ -66,6 +70,8 @@ where
             tab_strip_height,
             first_tab,
             second_tab,
+            first_drag,
+            second_drag,
             on_first_tab,
             on_second_tab,
         ))
@@ -85,6 +91,8 @@ fn render_tab_strip<F1, F2>(
     height: f32,
     first_tab: &'static str,
     second_tab: Option<&'static str>,
+    first_drag: Option<super::TabDragPayload>,
+    second_drag: Option<super::TabDragPayload>,
     on_first_tab: F1,
     on_second_tab: F2,
 ) -> Div
@@ -106,6 +114,7 @@ where
             active_tab == 0,
             height,
             on_first_tab,
+            first_drag,
         ));
 
     let strip = if let Some(second_tab) = second_tab {
@@ -115,6 +124,7 @@ where
             active_tab == 1,
             height,
             on_second_tab,
+            second_drag,
         ))
     } else {
         strip
