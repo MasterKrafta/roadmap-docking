@@ -62,13 +62,16 @@ impl MainWindow {
             return;
         }
 
+        // Only movement while the left button is held updates the preview.
+        // The corresponding MouseUp handler is the single commit signal; a move
+        // without a pressed button must not finish the gesture prematurely.
+        if event.pressed_button != Some(MouseButton::Left) {
+            return;
+        }
+
         let pointer = dock_pointer(event.position);
-        if event.pressed_button == Some(MouseButton::Left) {
-            if let Err(error) = self.dock.update_resize(pointer) {
-                tracing::debug!(error = ?error, "dock resize preview was rejected");
-            }
-        } else if let Err(error) = self.dock.commit_resize(pointer) {
-            tracing::debug!(error = ?error, "dock resize commit was rejected");
+        if let Err(error) = self.dock.update_resize(pointer) {
+            tracing::debug!(error = ?error, "dock resize preview was rejected");
         }
 
         cx.notify();
