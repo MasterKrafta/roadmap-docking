@@ -110,6 +110,37 @@
     }
 
     #[test]
+    fn begin_resize_rejects_non_finite_pointer_without_starting_session() {
+        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+        let frame = controller
+            .frame(Rect::new(Point::ZERO, Size::new(1200.0, 800.0)))
+            .unwrap();
+        let splitter = *frame
+            .rects()
+            .splitters
+            .iter()
+            .find(|splitter| splitter.axis == Axis::Y)
+            .expect("initial layout should contain a vertical group splitter");
+        let baseline_version = controller.layout().version();
+
+        assert_eq!(
+            controller.begin_resize(
+                ResizeHandle::Splitter {
+                    owner: splitter.owner,
+                    boundary_index: splitter.boundary_index,
+                    axis: Axis::Y,
+                },
+                Point::new(f32::NAN, 240.0),
+                &frame,
+            ),
+            Err(super::super::resize_session::ResizeStartError::InvalidPointer)
+        );
+        assert!(controller.resize_session().is_none());
+        assert_eq!(controller.layout().version(), baseline_version);
+        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+    }
+
+    #[test]
     fn begin_resize_captures_start_geometry_and_rejects_a_second_session() {
         let mut controller = DockController::new_initial(&Theme::default()).unwrap();
         let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
