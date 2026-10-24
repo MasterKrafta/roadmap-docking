@@ -16,7 +16,7 @@ mod tab;
 use gpui::{App, ClickEvent, Div, ParentElement, Styled, Window, div, px, rgb};
 
 /// Assembles one group from independent header, tab, drag-zone, button, and content components.
-pub(super) fn render_with_tabs<F1, F2>(
+pub(super) fn render<F1, F2>(
     theme: ui::Theme,
     active_tab: usize,
     width: f32,
