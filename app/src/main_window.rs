@@ -1526,6 +1526,69 @@ fn main_column_count(layout: &Layout, side: DockSide) -> usize {
     }
 }
 
+/// The first group in the first column is the handle for moving its entire dock-area tree.
+fn dock_tree_header_group(layout: &Layout, side: DockSide) -> Option<NodeId> {
+    let root = layout.main_area(side)?.root;
+    let first_column = match layout.node(root)? {
+        Node::Column(_) => root,
+        Node::Split(split) if split.axis == dock_core::Axis::X => {
+            *split.children.first()?
+        }
+        _ => return None,
+    };
+    match layout.node(first_column)? {
+        Node::Column(column) => column.groups.first().copied(),
+        _ => None,
+    }
+}
+
+/// Computes the bounds covering every column inside one main-area root.
+fn dock_area_bounds(
+    layout: &Layout,
+    root: NodeId,
+    rects: &dock_core::LayoutRects,
+) -> Option<Rect> {
+    let mut bounds: Option<Rect> = None;
+    for column in &rects.columns {
+        if subtree_contains_node(layout, root, column.column) {
+            bounds = Some(union_rects(bounds, column.rect));
+        }
+    }
+    // Generic profile roots may not be made only of Columns. The group geometry
+    // is a safe fallback for those trees.
+    if bounds.is_none() {
+        for group in &rects.groups {
+            if subtree_contains_node(layout, root, group.group) {
+                bounds = Some(union_rects(bounds, group.rect));
+            }
+        }
+    }
+    bounds.filter(|rect| {
+        rect.origin.x.is_finite()
+            && rect.origin.y.is_finite()
+            && rect.size.width.is_finite()
+            && rect.size.height.is_finite()
+            && rect.size.width > 0.0
+            && rect.size.height > 0.0
+    })
+}
+
+fn union_rects(current: Option<Rect>, next: Rect) -> Rect {
+    let Some(current) = current else {
+        return next;
+    };
+    let left = current.origin.x.min(next.origin.x);
+    let top = current.origin.y.min(next.origin.y);
+    let right = (current.origin.x + current.size.width).max(next.origin.x + next.size.width);
+    let bottom = (current.origin.y + current.size.height).max(next.origin.y + next.size.height);
+    Rect::new(Point::new(left, top), Size::new(right - left, bottom - top))
+}
+
+fn floating_root_node(layout: &Layout, floating_group: FloatingGroupId) -> Option<NodeId> {
+    let floating = layout.floating_group(floating_group)?;
+    layout.dock_area(floating.area).map(|area| area.root)
+}
+
 fn group_containing_key(layout: &Layout, key: &str) -> Option<NodeId> {
     let panel = panel_id_if_open(layout, key)?;
     group_containing_panel(layout, panel)
