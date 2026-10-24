@@ -1,4 +1,5 @@
-#[cfg(windows)]
+// Compile the UI module on every platform for its platform-independent unit tests.
+#[cfg(any(windows, test))]
 mod main_window;
 
 #[cfg(windows)]
