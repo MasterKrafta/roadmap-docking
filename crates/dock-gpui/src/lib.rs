@@ -2,6 +2,7 @@ mod color;
 mod geometry;
 mod metrics;
 mod render;
+mod tree_query;
 pub mod panels;
 
 pub use geometry::union_rects;
