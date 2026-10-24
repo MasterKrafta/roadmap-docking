@@ -1,7 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::components::{
-    GroupFrame, GroupGrip, GroupMenuButton, IconButton, PanelTab, RectBox, TabOverflowButton,
+    FloatingTitle, GroupFrame, GroupGrip, GroupMenuButton, IconButton, PanelSurface, PanelTab,
+    RailEntry, RectBox, ResizeEdgeHandle, ResizeEdgeKind, SplitterHandle, TabOverflowButton,
     TabStrip, with_focus_ring,
 };
 
@@ -15,7 +16,7 @@ use crate::geometry::{localize_tree_rects, scroll_rect_in_viewport, translate_re
 use crate::labels::{rail_entry_label, tab_header_label};
 
 use dock_core::{
-    Axis, ColumnMode, DockCommand, DockSide, DragHandle, DragPayload, DragPreview,
+    Axis, DockCommand, DockSide, DragHandle, DragPayload, DragPreview,
     DropZoneRect, FloatingGroupId, Layout, LayoutRects, Node, NodeId, PanelId, PanelInstance,
     Point, Rect, ResizeEdge, Size,
 };
@@ -338,13 +339,17 @@ where
             Size::new(width, column_rect.rect.size.height),
         );
         root = root.child(
-            rect_element(handle_rect, theme.colors.splitter)
-                .id(format!("dock-outer-column-resize-{:?}", column_id))
-                .on_mouse_down(
-                    MouseButton::Left,
-                    make_resize_start_handler(ResizeHandle::OuterColumn { column: column_id, side }),
-                )
-                .into_any_element(),
+            ResizeEdgeHandle {
+                id: format!("dock-outer-column-resize-{:?}", column_id),
+                rect: handle_rect,
+                edge: ResizeEdgeKind::OuterColumn,
+                theme: *theme,
+                on_resize_start: make_resize_start_handler(ResizeHandle::OuterColumn {
+                    column: column_id,
+                    side,
+                }),
+            }
+            .into_any_element(),
         );
     }
 
@@ -395,15 +400,16 @@ where
         let title_rect = Rect::new(Point::ZERO, Size::new(rect.size.width, title_height));
         let payload = DragPayload::FloatingGroup { group: floating_id };
         container = container.child(
-            rect_element(title_rect, theme.colors.toolbar_background)
-                .text_color(rgb(theme.colors.primary_text))
-                .child(title)
-                .id(format!("dock-floating-title-{:?}", floating_id))
-                .on_mouse_down(
-                    MouseButton::Left,
-                    make_drag_start_handler(payload, DragHandle::FloatingTitle),
-                )
-                .into_any_element(),
+            FloatingTitle {
+                group: floating_id,
+                rect: title_rect,
+                title,
+                theme: *theme,
+                on_drag_start: make_drag_start_handler(payload, DragHandle::FloatingTitle),
+                on_close: None,
+                on_collapse: None,
+            }
+            .into_any_element(),
         );
         root = root.child(container.into_any_element());
     }
@@ -411,16 +417,17 @@ where
     // Floating resize hit zones come from Core geometry. Put corners above long edges.
     for handle in rects.floating_resize_edges.iter().rev() {
         root = root.child(
-            rect_element(handle.rect, theme.colors.splitter)
-                .id(format!("dock-floating-resize-{:?}-{:?}", handle.group, handle.edge))
-                .on_mouse_down(
-                    MouseButton::Left,
-                    make_resize_start_handler(ResizeHandle::FloatingEdge {
-                        group: handle.group,
-                        edge: handle.edge,
-                    }),
-                )
-                .into_any_element(),
+            ResizeEdgeHandle {
+                id: format!("dock-floating-resize-{:?}", handle.group),
+                rect: handle.rect,
+                edge: ResizeEdgeKind::Floating(handle.edge),
+                theme: *theme,
+                on_resize_start: make_resize_start_handler(ResizeHandle::FloatingEdge {
+                    group: handle.group,
+                    edge: handle.edge,
+                }),
+            }
+            .into_any_element(),
         );
     }
 
@@ -770,9 +777,12 @@ where
             continue;
         };
         elements.push(
-            RectBox::new(panel_rect.rect, theme.colors.group_background)
-                .child(render_panel(instance))
-                .into_any_element(),
+            PanelSurface {
+                rect: panel_rect.rect,
+                theme: *theme,
+                content: render_panel(instance),
+            }
+            .into_any_element(),
         );
     }
 
@@ -781,22 +791,22 @@ where
         .iter()
         .filter(|entry| nodes.contains(&entry.owner))
     {
-        let base = rect_element(splitter.rect, theme.colors.splitter);
         let handle = supported_splitter_handle(
             layout,
             splitter.owner,
             splitter.boundary_index,
             splitter.axis,
         );
-        if let Some(handle) = handle {
-            elements.push(
-                base.id(format!("dock-splitter-{:?}-{}", splitter.owner, splitter.boundary_index))
-                    .on_mouse_down(MouseButton::Left, make_resize_start_handler(handle))
-                    .into_any_element(),
-            );
-        } else {
-            elements.push(base.into_any_element());
-        }
+        elements.push(
+            SplitterHandle {
+                id: format!("dock-splitter-{:?}-{}", splitter.owner, splitter.boundary_index),
+                rect: splitter.rect,
+                axis: splitter.axis,
+                theme: *theme,
+                on_resize_start: handle.map(&make_resize_start_handler),
+            }
+            .into_any_element(),
+        );
     }
 
     // Rail columns flatten their panel list for presentation while retaining the Core tree.
@@ -845,33 +855,25 @@ where
             };
             let label = panel_title(instance);
             let icon = panel_icon(instance);
-            let display_label = rail_entry_label(column.mode, icon, &label);
             let active_in_model = matches!(
                 layout.node(item.group),
                 Some(Node::Tabs(tabs)) if active_panel(layout, tabs) == Some(item.panel)
             );
             let active = selected_flyout.map_or(active_in_model, |panel| panel == item.panel);
-            let background = if active {
-                theme.colors.active_tab
-            } else {
-                theme.colors.toolbar_background
-            };
-            let entry = rect_element(item_rect, background)
-                .text_color(rgb(theme.colors.primary_text));
-            let entry = if column.mode == ColumnMode::IconsOnly {
-                entry.flex().items_center().justify_center().child(display_label)
-            } else {
-                entry.flex().items_center().child(display_label)
-            };
             elements.push(
-                with_focus_ring(
-                    entry.id(format!("dock-rail-{:?}-{:?}", column_rect.column, item.panel)),
-                    theme,
-                )
-                .on_click(make_command_handler(DockCommand::OpenFlyout {
-                    column: column_rect.column,
-                    panel: item.panel,
-                }))
+                RailEntry {
+                    id: format!("dock-rail-{:?}-{:?}", column_rect.column, item.panel),
+                    rect: item_rect,
+                    mode: column.mode,
+                    icon: icon.to_owned(),
+                    title: label,
+                    active,
+                    theme: *theme,
+                    on_open: make_command_handler(DockCommand::OpenFlyout {
+                        column: column_rect.column,
+                        panel: item.panel,
+                    }),
+                }
                 .into_any_element(),
             );
         }
