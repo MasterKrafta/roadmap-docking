@@ -1133,14 +1133,40 @@ impl MainWindow {
             }
         }
 
-        // Floating trees are rendered separately so they use their own component and frame.
-        // Core returns their geometry in back-to-front z-order.
+        // Render complete floating trees. A root Tabs keeps its established renderer;
+        // floating Columns and Split(X) roots paint every descendant group and splitter.
         for floating_rect in &rects.floating_groups {
-            let Some(group_id) =
-                floating_root_tabs_group(&self.core_layout, floating_rect.group)
-            else {
+            let Some(tree_root) = floating_root_node(&self.core_layout, floating_rect.group) else {
                 continue;
             };
+            let floating_bounds =
+                floating_group_bounds(&self.core_layout, floating_rect.group)
+                    .unwrap_or(floating_rect.rect);
+
+            if !matches!(self.core_layout.node(tree_root), Some(Node::Tabs(_))) {
+                let floating_element = self.render_floating_tree(
+                    &self.core_layout,
+                    &rects,
+                    tree_root,
+                    floating_rect,
+                    floating_bounds,
+                    drag_viewport_size,
+                    window,
+                    cx,
+                );
+                root = root.child(
+                    div()
+                        .absolute()
+                        .left(px(floating_bounds.origin.x))
+                        .top(px(floating_bounds.origin.y))
+                        .w(px(floating_bounds.size.width))
+                        .h(px(floating_bounds.size.height))
+                        .child(floating_element),
+                );
+                continue;
+            }
+
+            let group_id = tree_root;
             let Some(group_rect) = rects.groups.iter().find(|entry| entry.group == group_id) else {
                 continue;
             };
@@ -1199,9 +1225,6 @@ impl MainWindow {
                 drag_viewport_size,
             ));
 
-            let floating_bounds =
-                floating_group_bounds(&self.core_layout, floating_rect.group)
-                    .unwrap_or(floating_rect.rect);
             // Keep the model's raw origin while dragging. Core's geometry snapshot
             // clamps the visible rect for layout calculations; using that clamped
             // origin for painting made the panel stop before the pointer reached
