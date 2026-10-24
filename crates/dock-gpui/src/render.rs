@@ -662,11 +662,6 @@ where
             layout.node(header.group),
             Some(Node::Tabs(tabs)) if active_panel(layout, tabs) == Some(header.panel)
         );
-        let background = if active {
-            theme.colors.active_tab
-        } else {
-            theme.colors.toolbar_background
-        };
         let payload = DragPayload::Panel { panel: header.panel };
         let activate_handler = make_command_handler(DockCommand::ActivateTab {
             group: header.group,
