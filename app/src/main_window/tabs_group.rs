@@ -1,14 +1,11 @@
-mod close_button;
-mod collapse_button;
 mod content;
 mod drag_zone;
 mod hamburger_button;
-mod header;
 mod tab;
 
 use gpui::{App, ClickEvent, Div, ParentElement, Styled, Window, div, px, rgb};
 
-/// Assembles one group from independent header, tab, drag-zone, button, and content components.
+/// Renders a Tabs group without a separate header row.
 pub(super) fn render<F1, F2>(
     theme: ui::Theme,
     active_tab: usize,
@@ -21,9 +18,8 @@ where
     F1: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     F2: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 {
-    let header_height = theme.metrics.column_header_height.max(1.0);
     let tab_strip_height = theme.metrics.tab_strip_height.max(1.0);
-    let content_height = (height - header_height - tab_strip_height).max(1.0);
+    let content_height = (height - tab_strip_height).max(1.0);
 
     div()
         .flex()
@@ -31,7 +27,6 @@ where
         .w(px(width))
         .h(px(height))
         .bg(rgb(theme.colors.group_background))
-        .child(header::render(theme, width, header_height))
         .child(render_tab_strip(
             theme,
             active_tab,
@@ -48,7 +43,7 @@ where
         ))
 }
 
-/// Arranges the two tabs, the empty drag/drop area, and the hamburger button.
+/// Arranges tabs, the open drag/drop area, and the hamburger button.
 fn render_tab_strip<F1, F2>(
     theme: ui::Theme,
     active_tab: usize,
