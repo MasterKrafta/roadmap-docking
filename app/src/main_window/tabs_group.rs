@@ -96,6 +96,49 @@ where
         ))
 }
 
+/// Renders the temporary tab-drag preview. It deliberately has no group header;
+/// the actual floating group is created only when the drag is released.
+pub(super) fn render_drag_preview(
+    theme: ui::Theme,
+    width: f32,
+    height: f32,
+    label: &'static str,
+) -> Div {
+    let tab_strip_height = theme.metrics.tab_strip_height.max(1.0);
+    let content_height = (height - tab_strip_height).max(1.0);
+
+    div()
+        .flex()
+        .flex_col()
+        .w(px(width))
+        .h(px(height))
+        .bg(rgb(theme.colors.group_background))
+        .border_1()
+        .border_color(rgb(theme.colors.primary_text))
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .w(px(width))
+                .h(px(tab_strip_height))
+                .bg(rgb(theme.colors.toolbar_background))
+                .border_1()
+                .border_color(rgb(theme.colors.border))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .w(px(theme.metrics.column_tab_width.max(1.0)))
+                        .h(px(tab_strip_height))
+                        .bg(rgb(theme.colors.active_tab))
+                        .text_color(rgb(theme.colors.primary_text))
+                        .child(label),
+                ),
+        )
+        .child(content::render(theme, label, width, content_height))
+}
+
 /// Arranges one or two tabs, the open drag/drop area, and the hamburger button.
 fn render_tab_strip<F1, F2>(
     theme: ui::Theme,
