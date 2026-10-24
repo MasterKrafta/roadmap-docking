@@ -273,7 +273,16 @@ fn capture_start_geometry(
             }
             Ok(StartGeometry::HorizontalSplit)
         }
-        ResizeHandle::OuterColumn { column, .. } => {
+        ResizeHandle::OuterColumn { column, side } => {
+            let columns = crate::tree_query::main_column_ids(layout, side);
+            let expected_outer_column = match side {
+                DockSide::Left => columns.last().copied(),
+                DockSide::Right => columns.first().copied(),
+            };
+            if expected_outer_column != Some(column) {
+                return Err(ResizeStartError::InvalidHandle);
+            }
+
             let Some(Node::Column(value)) = layout.node(column) else {
                 return Err(ResizeStartError::InvalidHandle);
             };
@@ -407,6 +416,62 @@ mod tests {
                 delta: 12.0,
             }
         );
+    }
+
+    #[test]
+    fn outer_column_resize_requires_matching_outer_side() {
+        let controller = DockController::new_initial(&Theme::default()).unwrap();
+        let layout = controller.layout().clone();
+        let frame = controller
+            .frame(Rect::new(Point::ZERO, Size::new(1200.0, 800.0)))
+            .unwrap();
+        let mut checked_any = false;
+
+        for side in [DockSide::Left, DockSide::Right] {
+            let columns = crate::tree_query::main_column_ids(&layout, side);
+            let column = match side {
+                DockSide::Left => columns.last().copied(),
+                DockSide::Right => columns.first().copied(),
+            };
+            let Some(column) = column else {
+                continue;
+            };
+            if !matches!(layout.node(column), Some(Node::Column(value)) if !value.mode.is_rail())
+                || !frame.rects().columns.iter().any(|entry| entry.column == column)
+            {
+                continue;
+            }
+
+            assert!(matches!(
+                capture_start_geometry(
+                    &layout,
+                    frame.rects(),
+                    controller.metrics(),
+                    ResizeHandle::OuterColumn { column, side },
+                ),
+                Ok(StartGeometry::OuterColumn { .. })
+            ));
+
+            let wrong_side = match side {
+                DockSide::Left => DockSide::Right,
+                DockSide::Right => DockSide::Left,
+            };
+            assert_eq!(
+                capture_start_geometry(
+                    &layout,
+                    frame.rects(),
+                    controller.metrics(),
+                    ResizeHandle::OuterColumn {
+                        column,
+                        side: wrong_side,
+                    },
+                ),
+                Err(ResizeStartError::InvalidHandle)
+            );
+            checked_any = true;
+        }
+
+        assert!(checked_any, "initial layout should expose a resizable outer column");
     }
 
     #[test]
