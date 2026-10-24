@@ -1,5 +1,6 @@
 use super::{close_button, collapse_button};
 use super::super::{DockDragPreview, GroupDragPayload};
+use dock_core::NodeId;
 use gpui::{
     AppContext, Div, InteractiveElement, ParentElement, StatefulInteractiveElement, Styled, div, px,
     rgb,
@@ -10,12 +11,13 @@ pub(super) fn render(
     theme: ui::Theme,
     width: f32,
     height: f32,
+    group_id: NodeId,
     dock_tree_drag: Option<GroupDragPayload>,
 ) -> Div {
     let drag_area = div()
         .flex_1()
         .h(px(height))
-        .id("dock-tree-header-drag-zone");
+        .id(format!("dock-tree-header-drag-zone-{group_id:?}"));
 
     let drag_area = match dock_tree_drag {
         Some(payload) => drag_area.on_drag(payload, |payload, _cursor_offset, window, cx| {
