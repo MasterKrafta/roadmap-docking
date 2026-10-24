@@ -1371,7 +1371,7 @@ mod tests {
                     panel: history,
                     target: dock_core::DropTarget::Tabs {
                         group: headered_group,
-                        index: 2,
+                        index: 1,
                     },
                 },
                 &metrics,
@@ -1404,7 +1404,7 @@ mod tests {
             .expect("detached History should belong to a new Tabs node");
         assert!(
             !group_has_header(&layout, floating_tabs),
-            "the fallback based on panel key would misclassify History as headerless"
+            "the key-based fallback ignores the source group's header mode"
         );
 
         inherit_group_header_mode_for_panel(&layout, &mut header_modes, history, true);
