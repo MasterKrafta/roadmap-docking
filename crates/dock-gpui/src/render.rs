@@ -1,10 +1,12 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::components::{
-    DropZone, FloatingTitle, FlyoutHeader, GroupFrame, GroupGrip, GroupMenuButton,
-    PanelSurface, PanelTab, RailEntry, RectBox, ResizeEdgeHandle, ResizeEdgeKind, SplitterHandle,
-    TabOverflowButton, TabStrip,
+    DropZone, FloatingTitle, FlyoutHeader, GroupFrame, GroupGrip, GroupMenuButton, PanelSurface,
+    PanelTab, RailEntry, RectBox, ResizeEdgeHandle, ResizeEdgeKind, SplitterHandle, TabOverflowButton,
+    TabStrip,
 };
+use crate::host::{CommandClickHandler, DockHost, DragStartHandler, ResizeStartHandler};
+use crate::requests::{DockMenuRequest, DragOverlay, ResizeHandle};
 
 use crate::chrome_geometry::{GROUP_DRAG_GRIP_HEIGHT, GROUP_MENU_BUTTON_WIDTH};
 use crate::frame::FrameGeometry;
@@ -15,47 +17,14 @@ use crate::geometry::{localize_tree_rects, scroll_rect_in_viewport, translate_re
 use crate::labels::tab_header_label;
 
 use dock_core::{
-    Axis, DockCommand, DockSide, DragHandle, DragPayload, DragPreview,
-    DropZoneRect, FloatingGroupId, Layout, LayoutRects, Node, NodeId, PanelId, PanelInstance,
-    Point, Rect, ResizeEdge, Size,
+    Axis, DockCommand, DockSide, DragHandle, DragPayload, Layout, LayoutRects, Node, NodeId,
+    PanelId, PanelInstance, Point, Rect, Size,
 };
 use gpui::{
-    AnyElement, App, ClickEvent, Div, InteractiveElement, IntoElement, MouseButton,
-    MouseDownEvent, ParentElement, ScrollHandle, StatefulInteractiveElement, Styled, Window, div,
-    px, rgb,
+    AnyElement, Div, InteractiveElement, IntoElement, MouseButton, ParentElement, ScrollHandle,
+    StatefulInteractiveElement, Styled, div, px, rgb,
 };
 use ui::Theme;
-
-/// A GPUI click handler created by the app for a command or a menu request.
-pub type CommandClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
-
-/// Begins a pure Core drag session from a UI interaction surface.
-pub type DragStartHandler = Box<dyn Fn(&MouseDownEvent, &mut Window, &mut App) + 'static>;
-
-/// Begins a resize gesture from Core-provided geometry.
-pub type ResizeStartHandler = Box<dyn Fn(&MouseDownEvent, &mut Window, &mut App) + 'static>;
-
-/// Semantic resize handle emitted by the GPUI adapter.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ResizeHandle {
-    Splitter { owner: NodeId, boundary_index: usize, axis: Axis },
-    OuterColumn { column: NodeId, side: DockSide },
-    FloatingEdge { group: FloatingGroupId, edge: ResizeEdge },
-}
-
-/// Source-aware, transient overlay produced from Core's drag preview and drop-zone geometry.
-#[derive(Clone, Debug)]
-pub struct DragOverlay {
-    pub preview: DragPreview,
-    pub zones: Vec<DropZoneRect>,
-}
-
-/// Requests app-owned menu state without transferring ownership of the layout to the adapter.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum DockMenuRequest {
-    TabOverflow { group: NodeId },
-    PanelGroup { group: NodeId, panel: Option<PanelId> },
-}
 
 /// Renders the Core layout using the centralized panel registry for titles, icons and content.
 ///
@@ -95,10 +64,9 @@ where
     )
 }
 
-/// Legacy callback renderer that accepts a caller-supplied geometry snapshot.
+/// Compatibility wrapper for existing callback-based callers.
 ///
-/// New code should prefer `render_frame_from_registry`, which consumes the immutable,
-/// normalized geometry and caches captured by `FrameGeometry::compute`.
+/// New code should use `render_with_host`, passing one `DockHost` instead of seven callbacks.
 #[allow(clippy::too_many_arguments)]
 pub fn render<F, T, I, H, M, D, R>(
     layout: &Layout,
@@ -123,26 +91,32 @@ where
     D: Fn(DragPayload, DragHandle) -> DragStartHandler,
     R: Fn(ResizeHandle) -> ResizeStartHandler,
 {
-    render_impl(
-        layout,
-        rects,
-        None,
-        scroll_handles,
-        theme,
-        render_panel,
-        panel_title,
-        panel_icon,
-        make_command_handler,
-        make_menu_handler,
-        make_drag_start_handler,
-        make_resize_start_handler,
-        drag_overlay,
-    )
+    let mut host = CallbackHost {
+        render_panel_callback: render_panel,
+        panel_title_callback: panel_title,
+        panel_icon_callback: panel_icon,
+        command_callback: make_command_handler,
+        menu_callback: make_menu_handler,
+        drag_start_callback: make_drag_start_handler,
+        resize_start_callback: make_resize_start_handler,
+    };
+
+    render_impl(layout, rects, None, scroll_handles, theme, &mut host, drag_overlay)
 }
 
-/// Renders from one immutable `FrameGeometry` snapshot and uses its per-frame caches.
-///
-/// Use `frame.drop_zones(layout, source, metrics)` to calculate matching drop targets.
+/// Trait-based entrypoint for rendering a caller-provided geometry snapshot.
+pub fn render_with_host(
+    layout: &Layout,
+    rects: &LayoutRects,
+    scroll_handles: &HashMap<NodeId, ScrollHandle>,
+    theme: &Theme,
+    host: &mut dyn DockHost,
+    drag_overlay: Option<&DragOverlay>,
+) -> Div {
+    render_impl(layout, rects, None, scroll_handles, theme, host, drag_overlay)
+}
+
+/// Compatibility frame-aware renderer for callback-based callers.
 #[allow(clippy::too_many_arguments)]
 pub fn render_frame_from_registry<H, M, D, R>(
     layout: &Layout,
@@ -161,40 +135,42 @@ where
     D: Fn(DragPayload, DragHandle) -> DragStartHandler,
     R: Fn(ResizeHandle) -> ResizeStartHandler,
 {
-    render_impl(
-        layout,
-        frame.rects(),
-        Some(frame),
-        scroll_handles,
-        theme,
-        crate::panels::render_panel,
-        crate::panels::panel_title,
-        crate::panels::panel_icon,
-        make_command_handler,
-        make_menu_handler,
-        make_drag_start_handler,
-        make_resize_start_handler,
-        drag_overlay,
-    )
+    let mut host = CallbackHost {
+        render_panel_callback: crate::panels::render_panel,
+        panel_title_callback: crate::panels::panel_title,
+        panel_icon_callback: crate::panels::panel_icon,
+        command_callback: make_command_handler,
+        menu_callback: make_menu_handler,
+        drag_start_callback: make_drag_start_handler,
+        resize_start_callback: make_resize_start_handler,
+    };
+
+    render_impl(layout, frame.rects(), Some(frame), scroll_handles, theme, &mut host, drag_overlay)
 }
 
-
-/// Internal implementation shared by the rectangle and frame-aware render entrypoints.
-fn render_impl<F, T, I, H, M, D, R>(
+/// Preferred frame-aware entrypoint using a single `DockHost` trait object.
+pub fn render_frame_with_host(
     layout: &Layout,
-    rects: &LayoutRects,
-    frame: Option<&FrameGeometry>,
+    frame: &FrameGeometry,
     scroll_handles: &HashMap<NodeId, ScrollHandle>,
     theme: &Theme,
-    mut render_panel: F,
-    panel_title: T,
-    panel_icon: I,
-    make_command_handler: H,
-    make_menu_handler: M,
-    make_drag_start_handler: D,
-    make_resize_start_handler: R,
+    host: &mut dyn DockHost,
     drag_overlay: Option<&DragOverlay>,
-) -> Div
+) -> Div {
+    render_impl(layout, frame.rects(), Some(frame), scroll_handles, theme, host, drag_overlay)
+}
+
+struct CallbackHost<F, T, I, H, M, D, R> {
+    render_panel_callback: F,
+    panel_title_callback: T,
+    panel_icon_callback: I,
+    command_callback: H,
+    menu_callback: M,
+    drag_start_callback: D,
+    resize_start_callback: R,
+}
+
+impl<F, T, I, H, M, D, R> DockHost for CallbackHost<F, T, I, H, M, D, R>
 where
     F: FnMut(&PanelInstance) -> AnyElement,
     T: Fn(&PanelInstance) -> String,
@@ -204,6 +180,45 @@ where
     D: Fn(DragPayload, DragHandle) -> DragStartHandler,
     R: Fn(ResizeHandle) -> ResizeStartHandler,
 {
+    fn panel_title(&self, instance: &PanelInstance) -> gpui::SharedString {
+        (self.panel_title_callback)(instance).into()
+    }
+
+    fn panel_icon(&self, instance: &PanelInstance) -> &'static str {
+        (self.panel_icon_callback)(instance)
+    }
+
+    fn render_panel(&mut self, instance: &PanelInstance) -> AnyElement {
+        (self.render_panel_callback)(instance)
+    }
+
+    fn command(&self, command: DockCommand) -> CommandClickHandler {
+        (self.command_callback)(command)
+    }
+
+    fn menu(&self, request: DockMenuRequest) -> CommandClickHandler {
+        (self.menu_callback)(request)
+    }
+
+    fn drag_start(&self, payload: DragPayload, handle: DragHandle) -> DragStartHandler {
+        (self.drag_start_callback)(payload, handle)
+    }
+
+    fn resize_start(&self, handle: ResizeHandle) -> ResizeStartHandler {
+        (self.resize_start_callback)(handle)
+    }
+}
+
+/// Internal implementation shared by the rectangle and frame-aware render entrypoints.
+fn render_impl(
+    layout: &Layout,
+    rects: &LayoutRects,
+    frame: Option<&FrameGeometry>,
+    scroll_handles: &HashMap<NodeId, ScrollHandle>,
+    theme: &Theme,
+    host: &mut dyn DockHost,
+    drag_overlay: Option<&DragOverlay>,
+) -> Div {
     let mut root = div()
         .relative()
         .w(px(rects.viewport.map_or(1.0, |value| value.size.width)))
@@ -248,13 +263,7 @@ where
                 frame,
                 &non_scrolling_nodes,
                 theme,
-                &mut render_panel,
-                &panel_title,
-                &panel_icon,
-                &make_command_handler,
-                &make_menu_handler,
-                &make_drag_start_handler,
-                &make_resize_start_handler,
+                host,
             ) {
                 root = root.child(element);
             }
@@ -288,13 +297,7 @@ where
                 frame,
                 &column_nodes,
                 theme,
-                &mut render_panel,
-                &panel_title,
-                &panel_icon,
-                &make_command_handler,
-                &make_menu_handler,
-                &make_drag_start_handler,
-                &make_resize_start_handler,
+                host,
             ) {
                 content = content.child(element);
             }
@@ -343,7 +346,7 @@ where
                 rect: handle_rect,
                 edge: ResizeEdgeKind::OuterColumn,
                 theme: *theme,
-                on_resize_start: make_resize_start_handler(ResizeHandle::OuterColumn {
+                on_resize_start: host.resize_start(ResizeHandle::OuterColumn {
                     column: column_id,
                     side,
                 }),
@@ -380,20 +383,14 @@ where
             frame,
             &nodes,
             theme,
-            &mut render_panel,
-            &panel_title,
-            &panel_icon,
-            &make_command_handler,
-            &make_menu_handler,
-            &make_drag_start_handler,
-            &make_resize_start_handler,
+            host,
         ) {
             container = container.child(element);
         }
 
         let title = first_panel_in_subtree(layout, area.root)
             .and_then(|panel| layout.panel_instance(panel))
-            .map(&panel_title)
+            .map(|instance| host.panel_title(instance).to_string())
             .unwrap_or_else(|| "Floating group".to_owned());
         let title_height = theme.metrics.column_header_height.min(rect.size.height);
         let title_rect = Rect::new(Point::ZERO, Size::new(rect.size.width, title_height));
@@ -404,7 +401,7 @@ where
                 rect: title_rect,
                 title,
                 theme: *theme,
-                on_drag_start: make_drag_start_handler(payload, DragHandle::FloatingTitle),
+                on_drag_start: host.drag_start(payload, DragHandle::FloatingTitle),
                 on_close: None,
                 on_collapse: None,
             }
@@ -421,7 +418,7 @@ where
                 rect: handle.rect,
                 edge: ResizeEdgeKind::Floating(handle.edge),
                 theme: *theme,
-                on_resize_start: make_resize_start_handler(ResizeHandle::FloatingEdge {
+                on_resize_start: host.resize_start(ResizeHandle::FloatingEdge {
                     group: handle.group,
                     edge: handle.edge,
                 }),
@@ -444,13 +441,13 @@ where
             group: flyout.group,
             panel: flyout.panel,
             rect: header_rect,
-            title: panel_title(instance),
+            title: host.panel_title(instance).to_string(),
             theme: *theme,
-            on_menu: make_menu_handler(DockMenuRequest::PanelGroup {
+            on_menu: host.menu(DockMenuRequest::PanelGroup {
                 group: flyout.group,
                 panel: Some(flyout.panel),
             }),
-            on_close: make_command_handler(DockCommand::CloseFlyout),
+            on_close: host.command(DockCommand::CloseFlyout),
         };
 
         let content_rect = Rect::new(
@@ -462,11 +459,11 @@ where
         );
         let payload = DragPayload::Panel { panel: flyout.panel };
         let content = rect_element(content_rect, theme.colors.group_background)
-            .child(render_panel(instance))
+            .child(host.render_panel(instance))
             .id(format!("dock-flyout-panel-{:?}", flyout.panel))
             .on_mouse_down(
                 MouseButton::Left,
-                make_drag_start_handler(payload, DragHandle::FlyoutPanel),
+                host.drag_start(payload, DragHandle::FlyoutPanel),
             );
 
         let overlay = rect_element(flyout.rect, theme.colors.dock_background)
@@ -536,29 +533,14 @@ fn nodes_for_root(
 }
 
 
-fn tree_elements<F, T, I, H, M, D, R>(
+fn tree_elements(
     layout: &Layout,
     rects: &LayoutRects,
     frame: Option<&FrameGeometry>,
     nodes: &HashSet<NodeId>,
     theme: &Theme,
-    render_panel: &mut F,
-    panel_title: &T,
-    panel_icon: &I,
-    make_command_handler: &H,
-    make_menu_handler: &M,
-    make_drag_start_handler: &D,
-    make_resize_start_handler: &R,
-) -> Vec<AnyElement>
-where
-    F: FnMut(&PanelInstance) -> AnyElement,
-    T: Fn(&PanelInstance) -> String,
-    I: Fn(&PanelInstance) -> &'static str,
-    H: Fn(DockCommand) -> CommandClickHandler,
-    M: Fn(DockMenuRequest) -> CommandClickHandler,
-    D: Fn(DragPayload, DragHandle) -> DragStartHandler,
-    R: Fn(ResizeHandle) -> ResizeStartHandler,
-{
+    host: &mut dyn DockHost,
+) -> Vec<AnyElement> {
     let mut elements = Vec::new();
     let mut computed_rail_groups = HashSet::new();
     if frame.is_none() {
@@ -613,7 +595,7 @@ where
                         group: group.group,
                         rect: grip_rect,
                         theme: *theme,
-                        on_drag_start: make_drag_start_handler(payload, DragHandle::GroupGrip),
+                        on_drag_start: host.drag_start(payload, DragHandle::GroupGrip),
                     }
                     .into_any_element(),
                 );
@@ -644,7 +626,7 @@ where
         );
         let label = layout
             .panel_instance(header.panel)
-            .map(panel_title)
+            .map(|instance| host.panel_title(instance).to_string())
             .unwrap_or_else(|| "Missing panel".to_owned());
         let display_label = tab_header_label(&label, collapsed, header.index);
         let active = matches!(
@@ -652,11 +634,11 @@ where
             Some(Node::Tabs(tabs)) if active_panel(layout, tabs) == Some(header.panel)
         );
         let payload = DragPayload::Panel { panel: header.panel };
-        let activate_handler = make_command_handler(DockCommand::ActivateTab {
+        let activate_handler = host.command(DockCommand::ActivateTab {
             group: header.group,
             panel: header.panel,
         });
-        let collapse_handler = make_command_handler(DockCommand::CollapseGroup {
+        let collapse_handler = host.command(DockCommand::CollapseGroup {
             group: header.group,
             collapsed: !collapsed,
         });
@@ -669,7 +651,7 @@ where
                 theme: *theme,
                 on_activate: activate_handler,
                 on_collapse_toggle: collapse_handler,
-                on_drag_start: make_drag_start_handler(payload, DragHandle::PanelTab),
+                on_drag_start: host.drag_start(payload, DragHandle::PanelTab),
             }
             .into_any_element(),
         );
@@ -685,7 +667,7 @@ where
                 group: overflow.group,
                 rect: overflow.button_rect,
                 theme: *theme,
-                on_open: make_menu_handler(DockMenuRequest::TabOverflow {
+                on_open: host.menu(DockMenuRequest::TabOverflow {
                     group: overflow.group,
                 }),
             }
@@ -715,7 +697,7 @@ where
                 panel: active_panel(layout, tabs),
                 rect: menu_rect,
                 theme: *theme,
-                on_open: make_menu_handler(DockMenuRequest::PanelGroup {
+                on_open: host.menu(DockMenuRequest::PanelGroup {
                     group: strip.group,
                     panel: active_panel(layout, tabs),
                 }),
@@ -754,7 +736,7 @@ where
             PanelSurface {
                 rect: panel_rect.rect,
                 theme: *theme,
-                content: render_panel(instance),
+                content: host.render_panel(instance),
             }
             .into_any_element(),
         );
@@ -777,7 +759,7 @@ where
                 rect: splitter.rect,
                 axis: splitter.axis,
                 theme: *theme,
-                on_resize_start: handle.map(&make_resize_start_handler),
+                on_resize_start: handle.map(|handle| host.resize_start(handle)),
             }
             .into_any_element(),
         );
@@ -827,8 +809,8 @@ where
             let Some(instance) = layout.panel_instance(item.panel) else {
                 continue;
             };
-            let label = panel_title(instance);
-            let icon = panel_icon(instance);
+            let label = host.panel_title(instance).to_string();
+            let icon = host.panel_icon(instance);
             let active_in_model = matches!(
                 layout.node(item.group),
                 Some(Node::Tabs(tabs)) if active_panel(layout, tabs) == Some(item.panel)
@@ -843,7 +825,7 @@ where
                     title: label,
                     active,
                     theme: *theme,
-                    on_open: make_command_handler(DockCommand::OpenFlyout {
+                    on_open: host.command(DockCommand::OpenFlyout {
                         column: column_rect.column,
                         panel: item.panel,
                     }),
