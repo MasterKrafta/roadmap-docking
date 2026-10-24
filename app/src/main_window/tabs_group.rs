@@ -65,8 +65,9 @@ where
 
     let show_header = match mode {
         GroupRenderMode::Layout => super::group_has_header(layout, group_id),
-        GroupRenderMode::DragPreview => false,
-        GroupRenderMode::GroupDragPreview => true,
+        // Both tab and whole-group previews are headerless; the floating layout
+        // receives its header only when the drag is committed.
+        GroupRenderMode::DragPreview | GroupRenderMode::GroupDragPreview => false,
         GroupRenderMode::SourcePlaceholder => unreachable!("handled above"),
     };
     let is_floating = match mode {
