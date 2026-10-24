@@ -1,6 +1,6 @@
 use dock_core::NodeId;
 use gpui::{
-    AppContext, InteractiveElement, IntoElement, ParentElement, StatefulInteractiveElement, Styled,
+    AppContext, CursorStyle, InteractiveElement, IntoElement, ParentElement, StatefulInteractiveElement, Styled,
     div, px, rgb,
 };
 
@@ -29,7 +29,7 @@ pub(super) fn render(
         .id(format!("group-drag-zone-{group_id:?}"));
 
     match drag_payload {
-        Some(payload) => zone.on_drag(payload, |payload, _cursor_offset, window, cx| {
+        Some(payload) => zone.cursor(CursorStyle::OpenHand).on_drag(payload, |payload, _cursor_offset, window, cx| {
             // Refresh the pointer origin at the actual drag start, just like tab dragging.
             payload.drag_start_position.set(window.mouse_position());
             cx.new(|_| DockDragPreview)
