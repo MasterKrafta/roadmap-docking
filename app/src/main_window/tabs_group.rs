@@ -177,6 +177,6 @@ where
     };
 
     strip
-        .child(group_drag_zone::render(theme, height, group_drag_payload))
+        .child(group_drag_zone::render(theme, height, group_id, group_drag_payload))
         .child(hamburger_button::render(theme, height))
 }
