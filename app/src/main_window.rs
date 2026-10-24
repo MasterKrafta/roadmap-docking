@@ -318,7 +318,7 @@ where
                 .text_color(rgb(theme.colors.primary_text))
                 .child(if is_checked { "✓" } else { "" }),
         )
-        .id(label)
+        .id(format!("dockers-menu-item-{label}"))
         .on_click(on_click)
 }
 
