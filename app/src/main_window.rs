@@ -256,7 +256,7 @@ impl MainWindow {
             panel,
             group,
             drag_start_position: Rc::new(Cell::new(mouse_position_before)),
-            drag_viewport_size: drag_viewport_size,
+            drag_viewport_size,
             bounds_before,
             floating_group,
             label: panel_label(&self.core_layout, panel).unwrap_or("Панель"),
