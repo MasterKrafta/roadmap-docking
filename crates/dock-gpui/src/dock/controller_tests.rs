@@ -1,7 +1,7 @@
     use super::DockController;
     use crate::dock::resize_session::StartGeometry;
     use crate::requests::ResizeHandle;
-    use dock_core::{Axis, Node, Point, Rect, Size};
+    use dock_core::{Axis, DockCommand, Node, Point, Rect, Size};
     use ui::Theme;
 
     #[test]
@@ -10,6 +10,103 @@
             DockController::new_initial(&Theme::default()).expect("initial layout should be valid");
         assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
         assert_eq!(controller.layout().panel_instances().count(), 4);
+    }
+
+    #[test]
+    fn history_mutations_cancel_active_resize_session() {
+        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+        let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
+        let frame = controller.frame(viewport).unwrap();
+        let splitter = *frame
+            .rects()
+            .splitters
+            .iter()
+            .find(|splitter| splitter.axis == Axis::Y)
+            .expect("initial layout should contain a vertical group splitter");
+        let owner = splitter.owner;
+        let boundary_index = splitter.boundary_index;
+        let column = match controller.layout().node(owner) {
+            Some(Node::Column(column)) => column,
+            other => panic!("vertical splitter should belong to a column, got {other:?}"),
+        };
+        let group_count = column.groups.len();
+        let baseline_ratios = column.group_ratios.clone();
+        let column_rect = frame
+            .rects()
+            .columns
+            .iter()
+            .find(|column| column.column == owner)
+            .expect("splitter column should have geometry");
+        let available_height = (column_rect.rect.size.height
+            - controller.metrics().splitter_thickness * (group_count - 1) as f32)
+            .max(0.0);
+        let handle = ResizeHandle::Splitter {
+            owner,
+            boundary_index,
+            axis: Axis::Y,
+        };
+        let start = Point::new(180.0, 240.0);
+
+        controller.begin_resize(handle, start, &frame).unwrap();
+        controller
+            .update_resize(Point::new(start.x, start.y + 16.0))
+            .unwrap();
+        assert!(controller.resize_session().is_some());
+
+        controller
+            .apply(DockCommand::ResizeGroups {
+                column: owner,
+                boundary_index,
+                delta: 12.0,
+                available_height,
+            })
+            .unwrap();
+        assert!(controller.resize_session().is_none());
+        let applied_ratios = match controller.layout().node(owner) {
+            Some(Node::Column(column)) => column.group_ratios.clone(),
+            other => panic!("resize owner should remain a column, got {other:?}"),
+        };
+        assert_ne!(applied_ratios, baseline_ratios);
+        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+
+        assert!(controller.undo().unwrap());
+        assert_eq!(
+            match controller.layout().node(owner) {
+                Some(Node::Column(column)) => column.group_ratios.clone(),
+                other => panic!("resize owner should remain a column, got {other:?}"),
+            },
+            baseline_ratios
+        );
+
+        let frame = controller.frame(viewport).unwrap();
+        controller.begin_resize(handle, start, &frame).unwrap();
+        controller
+            .update_resize(Point::new(start.x, start.y + 5.0))
+            .unwrap();
+        assert!(controller.redo().unwrap());
+        assert!(controller.resize_session().is_none());
+        assert_eq!(
+            match controller.layout().node(owner) {
+                Some(Node::Column(column)) => column.group_ratios.clone(),
+                other => panic!("resize owner should remain a column, got {other:?}"),
+            },
+            applied_ratios
+        );
+
+        let frame = controller.frame(viewport).unwrap();
+        controller.begin_resize(handle, start, &frame).unwrap();
+        controller
+            .update_resize(Point::new(start.x, start.y + 5.0))
+            .unwrap();
+        assert!(controller.undo().unwrap());
+        assert!(controller.resize_session().is_none());
+        assert_eq!(
+            match controller.layout().node(owner) {
+                Some(Node::Column(column)) => column.group_ratios.clone(),
+                other => panic!("resize owner should remain a column, got {other:?}"),
+            },
+            baseline_ratios
+        );
     }
 
     #[test]
