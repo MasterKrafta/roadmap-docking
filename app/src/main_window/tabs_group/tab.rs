@@ -1,5 +1,5 @@
 use gpui::{
-    App, AppContext, ClickEvent, InteractiveElement, IntoElement, ParentElement,
+    App, AppContext, ClickEvent, CursorStyle, InteractiveElement, IntoElement, ParentElement,
     StatefulInteractiveElement, Styled, Window, div, px, rgb,
 };
 
@@ -38,7 +38,7 @@ where
         .on_click(on_click);
 
     match drag_payload {
-        Some(payload) => tab.on_drag(payload, |payload, _cursor_offset, window, cx| {
+        Some(payload) => tab.cursor(CursorStyle::OpenHand).on_drag(payload, |payload, _cursor_offset, window, cx| {
             // The payload is built during render, which may be stale for an
             // inactive tab. Refresh the pointer origin when GPUI actually starts
             // the drag so both active and inactive tabs follow the cursor equally.
