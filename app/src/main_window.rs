@@ -2248,13 +2248,11 @@ fn group_containing_panel(layout: &Layout, panel_id: PanelId) -> Option<NodeId> 
 
 fn panel_label(layout: &Layout, panel_id: PanelId) -> Option<&'static str> {
     let instance = layout.panel_instance(panel_id)?;
-    Some(match instance.key.as_str() {
-        "layers" => "Вкладка 1",
-        "color" => "Вкладка 2",
-        "properties" => "Вкладка 3",
-        "history" => "Вкладка 4",
-        _ => "Панель",
-    })
+    Some(
+        dock_gpui::panels::def_for(instance)
+            .map(|definition| definition.title.as_ref())
+            .unwrap_or("Панель"),
+    )
 }
 
 fn docked_tab_float_command(
