@@ -236,13 +236,11 @@ fn capture_start_geometry(
             };
             let available_height = column_rect.rect.size.height
                 - metrics.splitter_thickness * group_count.saturating_sub(1) as f32;
-            if !available_height.is_finite() {
+            if !available_height.is_finite() || available_height <= 0.0 {
                 return Err(ResizeStartError::MissingColumnGeometry);
             }
 
-            Ok(StartGeometry::VerticalGroups {
-                available_height: available_height.max(0.0),
-            })
+            Ok(StartGeometry::VerticalGroups { available_height })
         }
         ResizeHandle::Splitter {
             owner,
@@ -304,7 +302,7 @@ fn capture_start_geometry(
 
 #[cfg(test)]
 mod tests {
-    use super::{ResizeSession, ResizeUpdateError, StartGeometry};
+    use super::{capture_start_geometry, ResizeSession, ResizeStartError, ResizeUpdateError, StartGeometry};
     use crate::dock::DockController;
     use crate::requests::ResizeHandle;
     use dock_core::{Axis, DockCommand, DockSide, Node, Point, Rect, ResizeEdge, Size};
@@ -465,6 +463,48 @@ mod tests {
             session.command_for_pointer(Point::new(120.0, f32::INFINITY)),
             Err(ResizeUpdateError::InvalidPointer)
         ));
+    }
+
+
+    #[test]
+    fn vertical_resize_rejects_zero_available_height_at_start() {
+        let controller = DockController::new_initial(&Theme::default()).unwrap();
+        let layout = controller.layout().clone();
+        let frame = controller
+            .frame(Rect::new(Point::ZERO, Size::new(1200.0, 800.0)))
+            .unwrap();
+        let splitter = frame
+            .rects()
+            .splitters
+            .iter()
+            .find(|splitter| splitter.axis == Axis::Y)
+            .expect("initial layout should contain a vertical group splitter");
+        let group_count = match layout.node(splitter.owner) {
+            Some(Node::Column(column)) => column.groups.len(),
+            other => panic!("vertical splitter should belong to a column, got {other:?}"),
+        };
+        let mut rects = frame.rects().clone();
+        let column_rect = rects
+            .columns
+            .iter_mut()
+            .find(|column| column.column == splitter.owner)
+            .expect("splitter column should have geometry");
+        column_rect.rect.size.height =
+            controller.metrics().splitter_thickness * (group_count - 1) as f32;
+
+        assert_eq!(
+            capture_start_geometry(
+                &layout,
+                &rects,
+                controller.metrics(),
+                crate::requests::ResizeHandle::Splitter {
+                    owner: splitter.owner,
+                    boundary_index: splitter.boundary_index,
+                    axis: Axis::Y,
+                },
+            ),
+            Err(ResizeStartError::MissingColumnGeometry)
+        );
     }
 
 }
