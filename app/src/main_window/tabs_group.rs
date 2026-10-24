@@ -102,7 +102,7 @@ where
         group
     };
     let group = if show_header {
-        group.child(header::render(theme, width, header_height))
+        group.child(header::render(theme, width, header_height, !is_floating))
     } else {
         group
     };
