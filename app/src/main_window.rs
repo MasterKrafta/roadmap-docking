@@ -1135,7 +1135,7 @@ fn group_tabs_view(layout: &Layout, group_id: NodeId) -> Option<GroupTabsView> {
 mod tests {
     use super::{
         build_core_layout, floating_group_for_panel, floating_root_tabs_group,
-        group_containing_panel, group_is_floating, panel_id_for_key,
+        column_containing_group, group_containing_panel, group_is_floating, panel_id_for_key,
     };
     use dock_core::{Axis, DockCommand, DockSide, Node, Point, Rect, Size};
 
@@ -1173,6 +1173,40 @@ mod tests {
             .compute_rects(viewport, &metrics)
             .expect("floating geometry should be valid");
         let _ = left_group;
+    }
+
+    #[test]
+    fn floating_single_tab_group_detaches_its_containing_column() {
+        let theme = ui::Theme::default();
+        let (mut layout, metrics, left_group, _, _) =
+            build_core_layout(&theme).expect("initial Core layout should be valid");
+        let panel = panel_id_for_key(&layout, "layers").unwrap();
+        let (column, group_count) = column_containing_group(&layout, left_group).unwrap();
+        assert_eq!(group_count, 1);
+
+        let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 768.0));
+        let source_rects = layout.compute_rects(viewport, &metrics).unwrap();
+        let source_group_rect = source_rects
+            .groups
+            .iter()
+            .find(|item| item.group == left_group)
+            .unwrap()
+            .rect;
+        let bounds = Rect::new(
+            Point::new(source_group_rect.origin.x + 30.0, source_group_rect.origin.y + 20.0),
+            source_group_rect.size,
+        );
+
+        layout
+            .apply(DockCommand::Float { node: column, bounds }, &metrics)
+            .expect("floating the only group should detach its containing column");
+        assert_eq!(layout.validate(&metrics), Ok(()));
+        let (floating_id, _) = floating_group_for_panel(&layout, panel)
+            .expect("the panel should belong to the new floating column");
+        assert!(floating_root_tabs_group(&layout, floating_id).is_some());
+        layout
+            .compute_rects(viewport, &metrics)
+            .expect("single-tab floating geometry should be valid");
     }
 
     #[test]
