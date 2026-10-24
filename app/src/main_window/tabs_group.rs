@@ -1,20 +1,39 @@
+#[path = "tabs_group/close_button.rs"]
+mod close_button;
+#[path = "tabs_group/collapse_button.rs"]
+mod collapse_button;
+#[path = "tabs_group/content.rs"]
 mod content;
+#[path = "tabs_group/drag_zone.rs"]
 mod drag_zone;
+#[path = "tabs_group/hamburger_button.rs"]
 mod hamburger_button;
+#[path = "tabs_group/header.rs"]
+mod header;
+#[path = "tabs_group/tab.rs"]
 mod tab;
 
+use dock_core::{Layout, NodeId};
 use gpui::{App, ClickEvent, Div, ParentElement, Styled, Window, div, px, rgb};
 
-/// Renders a headerless group using the tabs supplied by the Core layout.
+use super::{TabDragPayload, TabDragPreview};
+
+/// Renders any Tabs group from Core's tree.
+///
+/// Header visibility and floating styling are derived from the current layout:
+/// the first group in a docked column has a header, groups below it do not,
+/// and every floating composition has its own header and frame.
 pub(super) fn render<F1, F2>(
+    layout: &Layout,
+    group_id: NodeId,
     theme: ui::Theme,
     active_tab: usize,
     width: f32,
     height: f32,
     first_tab: &'static str,
     second_tab: Option<&'static str>,
-    first_drag: Option<super::TabDragPayload>,
-    second_drag: Option<super::TabDragPayload>,
+    first_drag: Option<TabDragPayload>,
+    second_drag: Option<TabDragPayload>,
     on_first_tab: F1,
     on_second_tab: F2,
 ) -> Div
@@ -22,20 +41,41 @@ where
     F1: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     F2: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 {
+    let show_header = super::group_has_header(layout, group_id);
+    let is_floating = super::group_is_floating(layout, group_id);
+    let header_height = if show_header {
+        theme.metrics.column_header_height.max(1.0)
+    } else {
+        0.0
+    };
     let tab_strip_height = theme.metrics.tab_strip_height.max(1.0);
-    let content_height = (height - tab_strip_height).max(1.0);
+    let content_height = (height - header_height - tab_strip_height).max(1.0);
     let selected_tab = if active_tab == 1 {
         second_tab.unwrap_or(first_tab)
     } else {
         first_tab
     };
 
-    div()
+    let group = div()
         .flex()
         .flex_col()
         .w(px(width))
         .h(px(height))
-        .bg(rgb(theme.colors.group_background))
+        .bg(rgb(theme.colors.group_background));
+    let group = if is_floating {
+        group
+            .border_1()
+            .border_color(rgb(theme.colors.primary_text))
+    } else {
+        group
+    };
+    let group = if show_header {
+        group.child(header::render(theme, width, header_height))
+    } else {
+        group
+    };
+
+    group
         .child(render_tab_strip(
             theme,
             active_tab,
@@ -56,7 +96,7 @@ where
         ))
 }
 
-/// Arranges one or two tabs, the drag/drop area, and the hamburger button.
+/// Arranges one or two tabs, the open drag/drop area, and the hamburger button.
 fn render_tab_strip<F1, F2>(
     theme: ui::Theme,
     active_tab: usize,
@@ -64,8 +104,8 @@ fn render_tab_strip<F1, F2>(
     height: f32,
     first_tab: &'static str,
     second_tab: Option<&'static str>,
-    first_drag: Option<super::TabDragPayload>,
-    second_drag: Option<super::TabDragPayload>,
+    first_drag: Option<TabDragPayload>,
+    second_drag: Option<TabDragPayload>,
     on_first_tab: F1,
     on_second_tab: F2,
 ) -> Div
