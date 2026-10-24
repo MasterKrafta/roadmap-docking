@@ -43,6 +43,13 @@ where
                 .h(px(height))
                 .bg(rgb(theme.colors.toolbar_background)),
         )
+        // Reserved blank area for the future tab-drag/drop target.
+        .child(
+            div()
+                .w(px(28.0))
+                .h(px(height))
+                .bg(rgb(theme.colors.dock_background)),
+        )
         .child(
             div()
                 .flex()
