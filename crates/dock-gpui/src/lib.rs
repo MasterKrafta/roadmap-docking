@@ -1,3 +1,4 @@
+mod chrome_geometry;
 mod color;
 mod geometry;
 mod labels;
@@ -8,7 +9,8 @@ pub mod panels;
 
 pub use geometry::union_rects;
 pub use metrics::dock_metrics_from_theme;
+pub use chrome_geometry::normalize_docked_group_geometry;
 pub use render::{
     CommandClickHandler, DockMenuRequest, DragOverlay, DragStartHandler, ResizeHandle,
-    ResizeStartHandler, normalize_docked_group_geometry, render, render_from_registry,
+    ResizeStartHandler, render, render_from_registry,
 };
