@@ -1,6 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::components::{with_focus_ring, IconButton, PanelTab, RectBox};
+use crate::components::{
+    GroupFrame, GroupGrip, GroupMenuButton, IconButton, PanelTab, RectBox, TabOverflowButton,
+    TabStrip, with_focus_ring,
+};
 
 use crate::chrome_geometry::{GROUP_DRAG_GRIP_HEIGHT, GROUP_MENU_BUTTON_WIDTH};
 use crate::frame::FrameGeometry;
@@ -600,10 +603,11 @@ where
 
     for group in rects.groups.iter().filter(|entry| nodes.contains(&entry.group)) {
         elements.push(
-            rect_element(group.rect, theme.colors.group_background)
-                .border_1()
-                .border_color(rgb(theme.colors.border))
-                .into_any_element(),
+            GroupFrame {
+                rect: group.rect,
+                theme: *theme,
+            }
+            .into_any_element(),
         );
 
         // A 4 px drag grip is emitted only when this group's strip was moved
@@ -624,13 +628,13 @@ where
                     Size::new(group.rect.size.width, grip_height),
                 );
                 elements.push(
-                    rect_element(grip_rect, theme.colors.toolbar_background)
-                        .id(format!("dock-group-grip-{:?}", group.group))
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            make_drag_start_handler(payload, DragHandle::GroupGrip),
-                        )
-                        .into_any_element(),
+                    GroupGrip {
+                        group: group.group,
+                        rect: grip_rect,
+                        theme: *theme,
+                        on_drag_start: make_drag_start_handler(payload, DragHandle::GroupGrip),
+                    }
+                    .into_any_element(),
                 );
             }
         }
@@ -640,7 +644,11 @@ where
     // the separate thin grip above it; menu and tab controls remain independent.
     for strip in rects.tab_strips.iter().filter(|entry| nodes.contains(&entry.group)) {
         elements.push(
-            RectBox::new(strip.rect, theme.colors.toolbar_background).into_any_element(),
+            TabStrip {
+                rect: strip.rect,
+                theme: *theme,
+            }
+            .into_any_element(),
         );
     }
 
@@ -692,15 +700,14 @@ where
         .filter(|entry| nodes.contains(&entry.group))
     {
         elements.push(
-            IconButton::new(
-                format!("dock-tab-overflow-{:?}", overflow.group),
-                overflow.button_rect,
-                "⋯",
-                theme,
-                make_menu_handler(DockMenuRequest::TabOverflow {
+            TabOverflowButton {
+                group: overflow.group,
+                rect: overflow.button_rect,
+                theme: *theme,
+                on_open: make_menu_handler(DockMenuRequest::TabOverflow {
                     group: overflow.group,
                 }),
-            )
+            }
             .into_any_element(),
         );
     }
@@ -722,17 +729,16 @@ where
             Size::new(button_width, strip.rect.size.height),
         );
         elements.push(
-            IconButton::new(
-                format!("dock-group-menu-{:?}", strip.group),
-                menu_rect,
-                "☰",
-                theme,
-                make_menu_handler(DockMenuRequest::PanelGroup {
+            GroupMenuButton {
+                group: strip.group,
+                panel: active_panel(layout, tabs),
+                rect: menu_rect,
+                theme: *theme,
+                on_open: make_menu_handler(DockMenuRequest::PanelGroup {
                     group: strip.group,
                     panel: active_panel(layout, tabs),
                 }),
-            )
-            .with_border()
+            }
             .into_any_element(),
         );
     }
