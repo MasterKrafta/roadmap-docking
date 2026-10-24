@@ -15,8 +15,6 @@ where
     F1: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     F2: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 {
-    let tab_width = theme.metrics.column_tab_width.max(1.0);
-
     div()
         .flex()
         .items_center()
