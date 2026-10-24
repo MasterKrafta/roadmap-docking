@@ -1288,7 +1288,17 @@ impl MainWindow {
         }
 
         if let Some(preview) = &self.group_drag_preview {
-            if let Some(tabs_view) = group_tabs_view(&preview.layout, preview.group) {
+            if preview.whole_area {
+                root = root.child(render_docked_tree_preview(
+                    &preview.layout,
+                    &rects,
+                    preview.group,
+                    preview.source_bounds,
+                    preview.bounds,
+                    self.theme,
+                    &self.core_metrics,
+                ));
+            } else if let Some(tabs_view) = group_tabs_view(&preview.layout, preview.group) {
                 let preview_element = tabs_group::render(
                     &preview.layout,
                     preview.group,
@@ -1780,6 +1790,99 @@ fn union_rects(current: Option<Rect>, next: Rect) -> Rect {
 fn floating_root_node(layout: &Layout, floating_group: FloatingGroupId) -> Option<NodeId> {
     let floating = layout.floating_group(floating_group)?;
     layout.dock_area(floating.area).map(|area| area.root)
+}
+
+/// Paints a translated copy of a dock-area tree while Core's source layout stays unchanged.
+fn render_docked_tree_preview(
+    layout: &Layout,
+    rects: &dock_core::LayoutRects,
+    tree_root: NodeId,
+    source_bounds: Rect,
+    preview_bounds: Rect,
+    theme: ui::Theme,
+    metrics: &DockMetrics,
+) -> gpui::Div {
+    let mut composition = div()
+        .absolute()
+        .left(px(preview_bounds.origin.x))
+        .top(px(preview_bounds.origin.y))
+        .w(px(preview_bounds.size.width))
+        .h(px(preview_bounds.size.height))
+        .overflow_hidden()
+        .bg(rgb(theme.colors.group_background))
+        .border_1()
+        .border_color(rgb(theme.colors.border));
+
+    for splitter in &rects.splitters {
+        if !subtree_contains_node(layout, tree_root, splitter.owner) {
+            continue;
+        }
+        let (bar_left, bar_top, bar_width, bar_height) = match splitter.axis {
+            dock_core::Axis::X => (
+                (splitter.rect.size.width - metrics.splitter_thickness).max(0.0) / 2.0,
+                0.0,
+                metrics.splitter_thickness.min(splitter.rect.size.width),
+                splitter.rect.size.height,
+            ),
+            dock_core::Axis::Y => (
+                0.0,
+                (splitter.rect.size.height - metrics.splitter_thickness).max(0.0) / 2.0,
+                splitter.rect.size.width,
+                metrics.splitter_thickness.min(splitter.rect.size.height),
+            ),
+        };
+        composition = composition.child(
+            div()
+                .absolute()
+                .left(px(
+                    splitter.rect.origin.x - source_bounds.origin.x + bar_left,
+                ))
+                .top(px(
+                    splitter.rect.origin.y - source_bounds.origin.y + bar_top,
+                ))
+                .w(px(bar_width))
+                .h(px(bar_height))
+                .bg(rgb(theme.colors.splitter)),
+        );
+    }
+
+    for group_rect in &rects.groups {
+        let group_id = group_rect.group;
+        if !subtree_contains_node(layout, tree_root, group_id) {
+            continue;
+        }
+        let Some(tabs_view) = group_tabs_view(layout, group_id) else {
+            continue;
+        };
+        let group_element = tabs_group::render(
+            layout,
+            group_id,
+            theme,
+            tabs_view.active_tab,
+            group_rect.rect.size.width,
+            group_rect.rect.size.height,
+            tabs_view.first_label,
+            tabs_view.second_label,
+            None,
+            None,
+            |_, _, _| {},
+            |_, _, _| {},
+            tabs_group::GroupRenderMode::Layout,
+            None,
+            None,
+        );
+        composition = composition.child(
+            div()
+                .absolute()
+                .left(px(group_rect.rect.origin.x - source_bounds.origin.x))
+                .top(px(group_rect.rect.origin.y - source_bounds.origin.y))
+                .w(px(group_rect.rect.size.width))
+                .h(px(group_rect.rect.size.height))
+                .child(group_element),
+        );
+    }
+
+    composition
 }
 
 fn group_containing_key(layout: &Layout, key: &str) -> Option<NodeId> {
