@@ -44,6 +44,8 @@ where
 
 /// Empty header area with the two controls aligned on the right.
 fn render_header(theme: ui::Theme, width: f32, height: f32) -> Div {
+    let control_button_width = theme.metrics.group_control_button_width.max(1.0);
+
     div()
         .flex()
         .items_center()
@@ -58,7 +60,7 @@ fn render_header(theme: ui::Theme, width: f32, height: f32) -> Div {
                 .flex()
                 .items_center()
                 .justify_center()
-                .w(px(34.0))
+                .w(px(control_button_width))
                 .h(px(height))
                 .bg(rgb(theme.colors.toolbar_background))
                 .text_color(rgb(theme.colors.primary_text))
@@ -71,7 +73,7 @@ fn render_header(theme: ui::Theme, width: f32, height: f32) -> Div {
                 .flex()
                 .items_center()
                 .justify_center()
-                .w(px(34.0))
+                .w(px(control_button_width))
                 .h(px(height))
                 .bg(rgb(theme.colors.toolbar_background))
                 .text_color(rgb(theme.colors.primary_text))
@@ -94,6 +96,9 @@ where
     F1: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     F2: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 {
+    let control_button_width = theme.metrics.group_control_button_width.max(1.0);
+    let drag_zone_width = theme.metrics.tab_drag_zone_width.max(0.0);
+
     div()
         .flex()
         .items_center()
@@ -125,7 +130,7 @@ where
         // Reserved blank area for the future tab-drag/drop target.
         .child(
             div()
-                .w(px(28.0))
+                .w(px(drag_zone_width))
                 .h(px(height))
                 .bg(rgb(theme.colors.dock_background)),
         )
@@ -134,7 +139,7 @@ where
                 .flex()
                 .items_center()
                 .justify_center()
-                .w(px(34.0))
+                .w(px(control_button_width))
                 .h(px(height))
                 .bg(rgb(theme.colors.toolbar_background))
                 .text_color(rgb(theme.colors.primary_text))
