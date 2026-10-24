@@ -1,8 +1,8 @@
-use dock_core::{DragHandle, DragPayload, Node, NodeId, Point, Rect, Size};
+use dock_core::{ColumnMode, DragHandle, DragPayload, Node, NodeId, Point, Rect, Size};
 use gpui::{AnyElement, IntoElement};
 
-use crate::components::{GroupMenuButton, PanelTab, TabOverflowButton};
-use crate::dock::{activate_tab, collapse_group};
+use crate::components::{ColumnModeButton, GroupMenuButton, PanelTab, TabOverflowButton};
+use crate::dock::{activate_tab, collapse_group, cycle_column_mode};
 use crate::host::DockHost;
 use crate::labels::tab_header_label;
 use crate::requests::DockMenuRequest;
@@ -70,6 +70,42 @@ pub(crate) fn render(
         let Some(Node::Tabs(tabs)) = layout.node(strip.group) else { continue; };
         let strip_bounds = area.rect(strip.rect);
         let button_width = crate::chrome_geometry::GROUP_MENU_BUTTON_WIDTH.min(strip.rect.size.width);
+        let mode_button_column = layout.nodes().find_map(|(column_id, node)| match node {
+            Node::Column(column)
+                if column.groups.first().copied() == Some(strip.group)
+                    && column.mode == ColumnMode::Expanded =>
+            {
+                Some((column_id, column.mode))
+            }
+            _ => None,
+        });
+        let mode_button_width = if mode_button_column.is_some() {
+            crate::chrome_geometry::GROUP_MENU_BUTTON_WIDTH
+                .min((strip.rect.size.width - button_width).max(0.0))
+        } else {
+            0.0
+        };
+        if let Some((column_id, mode)) = mode_button_column
+            && mode_button_width > 0.0
+        {
+            elements.push(
+                ColumnModeButton {
+                    column: column_id,
+                    mode,
+                    rect: Rect::new(
+                        Point::new(
+                            strip_bounds.origin.x + strip_bounds.size.width
+                                - button_width - mode_button_width,
+                            strip_bounds.origin.y,
+                        ),
+                        Size::new(mode_button_width, strip_bounds.size.height),
+                    ),
+                    theme: *theme,
+                    on_toggle: host.command(cycle_column_mode(column_id, mode)),
+                }
+                .into_any_element(),
+            );
+        }
         let menu_rect = Rect::new(
             Point::new(strip_bounds.origin.x + strip_bounds.size.width - button_width, strip_bounds.origin.y),
             Size::new(button_width, strip_bounds.size.height),

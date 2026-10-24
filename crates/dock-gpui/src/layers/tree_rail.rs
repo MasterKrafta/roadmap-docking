@@ -1,7 +1,9 @@
-use dock_core::{Node, Point, Rect, Size};
+use dock_core::{Node, Rect, Size};
 use gpui::{AnyElement, IntoElement};
 
-use crate::components::RailEntry;
+use crate::components::{ColumnModeButton, RailEntry};
+use crate::chrome_geometry::rail_control_row_height;
+use crate::dock::cycle_column_mode;
 use crate::host::DockHost;
 use crate::surface::RenderData;
 
@@ -27,6 +29,32 @@ pub(crate) fn render(
             .map(|flyout| flyout.panel);
         let column_bounds = area.column_rect(column_rect.column, column_rect.rect);
         let visible_bottom = column_bounds.origin.y + column_bounds.size.height;
+        let button_is_pinned_elsewhere = matches!(
+            area.content_column,
+            Some((owner, _)) if owner == column_rect.column
+        );
+        if !button_is_pinned_elsewhere {
+            let button_height = rail_control_row_height(
+                theme.metrics.tab_strip_height,
+                theme.metrics.collapsed_group_height,
+                column_bounds.size.height,
+            );
+            if button_height > 0.0 {
+                elements.push(
+                    ColumnModeButton {
+                        column: column_rect.column,
+                        mode: column.mode,
+                        rect: Rect::new(
+                            column_bounds.origin,
+                            Size::new(column_bounds.size.width, button_height),
+                        ),
+                        theme: *theme,
+                        on_toggle: host.command(cycle_column_mode(column_rect.column, column.mode)),
+                    }
+                    .into_any_element(),
+                );
+            }
+        }
 
         for item in items {
             let Some(header) = rects.tab_headers.iter().find(|header| {

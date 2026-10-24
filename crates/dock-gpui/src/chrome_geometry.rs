@@ -1,10 +1,24 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::tree_query::{active_panel, floating_title_groups_in_tree};
-use dock_core::{DockMetrics, Layout, LayoutRects, Node, NodeId, PanelId};
+use dock_core::{
+    ColumnMode, DockMetrics, Layout, LayoutRects, Node, NodeId, PanelId, Rect, Size,
+    VerticalOverflow,
+};
 
 pub(crate) const GROUP_MENU_BUTTON_WIDTH: f32 = 28.0;
 pub(crate) const GROUP_DRAG_GRIP_HEIGHT: f32 = 4.0;
+
+/// Height of the pinned control row placed above rail items.
+pub(crate) fn rail_control_row_height(
+    tab_strip_height: f32,
+    collapsed_group_height: f32,
+    column_height: f32,
+) -> f32 {
+    tab_strip_height
+        .max(collapsed_group_height)
+        .min(column_height.max(0.0))
+}
 
 #[derive(Clone, Copy)]
 struct GroupChromeGeometry {
@@ -28,7 +42,11 @@ pub fn normalize_docked_group_geometry(
             continue;
         };
         if column.mode.is_rail() {
-            rail_groups.extend(column.groups.iter().copied());
+            if let Ok(items) = layout.column_display_order(column_rect.column) {
+                rail_groups.extend(items.into_iter().map(|item| item.group));
+            } else {
+                rail_groups.extend(column.groups.iter().copied());
+            }
         }
     }
 
@@ -69,6 +87,48 @@ pub fn normalize_docked_group_geometry(
             }
         }
     }
+
+    // A rail keeps its mode switch pinned at the top. Shift the rail items
+    // together so rendering, hit targets, and later drop zones share geometry.
+    let mut rail_column_reservations = HashMap::<NodeId, f32>::new();
+    let mut rail_group_shifts = HashMap::<NodeId, f32>::new();
+    for column_rect in &rects.columns {
+        let Some(Node::Column(column)) = layout.node(column_rect.column) else {
+            continue;
+        };
+        if !column.mode.is_rail() {
+            continue;
+        }
+        let reserved = rail_control_row_height(
+            metrics.tab_strip_height,
+            metrics.collapsed_group_height,
+            column_rect.rect.size.height,
+        );
+        if reserved <= 0.0 {
+            continue;
+        }
+        rail_column_reservations.insert(column_rect.column, reserved);
+        if let Ok(items) = layout.column_display_order(column_rect.column) {
+            for item in items {
+                rail_group_shifts.entry(item.group).or_insert(reserved);
+            }
+        } else {
+            for group in &column.groups {
+                rail_group_shifts.entry(*group).or_insert(reserved);
+            }
+        }
+    }
+
+    let mode_button_groups = rects
+        .columns
+        .iter()
+        .filter_map(|column_rect| match layout.node(column_rect.column) {
+            Some(Node::Column(column)) if column.mode == ColumnMode::Expanded => {
+                column.groups.first().copied()
+            }
+            _ => None,
+        })
+        .collect::<HashSet<_>>();
 
     let mut groups = HashMap::<NodeId, GroupChromeGeometry>::new();
     let mut active_panel_shifts = HashMap::<PanelId, f32>::new();
@@ -153,8 +213,61 @@ pub fn normalize_docked_group_geometry(
         }
     }
 
-    // Reserve separate horizontal areas for the panel menu and group dragging.
-    // This is applied to floating Tabs groups too, so their menu never covers a tab.
+    // Reserve the pinned rail row in both group and tab-header geometry. Grow
+    // existing scroll extents, or create an overflow record if this row alone
+    // pushes rail content beyond its viewport.
+    for group in &mut rects.groups {
+        if let Some(shift) = rail_group_shifts.get(&group.group) {
+            group.rect.origin.y += *shift;
+        }
+    }
+    for header in &mut rects.tab_headers {
+        if let Some(shift) = rail_group_shifts.get(&header.group) {
+            header.rect.origin.y += *shift;
+        }
+    }
+
+    for (column_id, reserved) in &rail_column_reservations {
+        let Some(column_rect) = rects.columns.iter().find(|entry| entry.column == *column_id) else {
+            continue;
+        };
+        let group_ids = layout
+            .column_display_order(*column_id)
+            .map(|items| items.into_iter().map(|item| item.group).collect::<HashSet<_>>())
+            .unwrap_or_else(|_| match layout.node(*column_id) {
+                Some(Node::Column(column)) => column.groups.iter().copied().collect(),
+                _ => HashSet::new(),
+            });
+        let required_bottom = rects
+            .groups
+            .iter()
+            .filter(|entry| group_ids.contains(&entry.group))
+            .map(|entry| entry.rect.origin.y + entry.rect.size.height)
+            .fold(column_rect.rect.origin.y, f32::max);
+        let required_height = (required_bottom - column_rect.rect.origin.y)
+            .max(column_rect.rect.size.height);
+
+        if let Some(overflow) = rects
+            .vertical_overflow
+            .iter_mut()
+            .find(|entry| entry.owner == *column_id)
+        {
+            overflow.content_extent.size.height =
+                (overflow.content_extent.size.height + *reserved).max(required_height);
+        } else if required_height > column_rect.rect.size.height {
+            rects.vertical_overflow.push(VerticalOverflow::new(
+                *column_id,
+                column_rect.rect,
+                Rect::new(
+                    column_rect.rect.origin,
+                    Size::new(column_rect.rect.size.width, required_height),
+                ),
+            ));
+        }
+    }
+
+    // Reserve separate horizontal areas for the mode button, overflow and group menu.
+    // This is applied to floating Tabs groups too, so controls never cover a tab.
     for group_rect in &rects.groups {
         let group_id = group_rect.group;
         if rail_groups.contains(&group_id) || !matches!(layout.node(group_id), Some(Node::Tabs(_))) {
@@ -162,15 +275,20 @@ pub fn normalize_docked_group_geometry(
         }
         let width = group_rect.rect.size.width.max(0.0);
         let menu_width = GROUP_MENU_BUTTON_WIDTH.min(width);
+        let mode_width = if mode_button_groups.contains(&group_id) {
+            GROUP_MENU_BUTTON_WIDTH.min((width - menu_width).max(0.0))
+        } else {
+            0.0
+        };
         let has_overflow = rects.tab_overflows.iter().any(|entry| entry.group == group_id);
         let overflow_width = if has_overflow {
             metrics
                 .tab_overflow_button_width
-                .min((width - menu_width).max(0.0))
+                .min((width - menu_width - mode_width).max(0.0))
         } else {
             0.0
         };
-        let tabs_width = (width - menu_width - overflow_width).max(0.0);
+        let tabs_width = (width - menu_width - mode_width - overflow_width).max(0.0);
 
         let mut header_indices = rects
             .tab_headers
@@ -211,11 +329,12 @@ pub fn normalize_docked_group_geometry(
 #[cfg(test)]
 mod tests {
     use super::{
-        normalize_docked_group_geometry, GROUP_DRAG_GRIP_HEIGHT, GROUP_MENU_BUTTON_WIDTH,
+        normalize_docked_group_geometry, rail_control_row_height, GROUP_DRAG_GRIP_HEIGHT,
+        GROUP_MENU_BUTTON_WIDTH,
     };
     use dock_core::{
-        create_initial_layout, DockCommand, DockMetrics, DockSide, DropTarget, Layout, Node,
-        NodeId, PanelConstraints, PanelKey, Point, Profile, Rect, Size,
+        create_initial_layout, ColumnMode, DockCommand, DockMetrics, DockSide, DropTarget,
+        Layout, Node, NodeId, PanelConstraints, PanelKey, Point, Profile, Rect, Size,
     };
 
     fn layout_with_tab_count(tab_count: usize, metrics: DockMetrics) -> (Layout, NodeId) {
@@ -320,7 +439,8 @@ mod tests {
             headers.sort_by_key(|header| header.index);
             assert_eq!(headers.len(), tab_count);
 
-            let tabs_width = (group_rect.size.width - GROUP_MENU_BUTTON_WIDTH).max(0.0);
+            let tabs_width =
+                (group_rect.size.width - GROUP_MENU_BUTTON_WIDTH * 2.0).max(0.0);
             let expected_tab_width = tabs_width / tab_count as f32;
             let mut expected_left = group_rect.origin.x;
             for header in headers {
@@ -470,9 +590,130 @@ mod tests {
             .map(|header| header.rect.origin.x + header.rect.size.width)
             .fold(group_rect.origin.x, f32::max);
         let menu_left = group_rect.origin.x + group_rect.size.width - GROUP_MENU_BUTTON_WIDTH;
+        let mode_button_left = menu_left - GROUP_MENU_BUTTON_WIDTH;
         assert!(
-            (menu_left - tab_right).abs() < 0.001,
-            "the menu button should sit directly after the tabs, without sharing their hit area"
+            (mode_button_left - tab_right).abs() < 0.001,
+            "the mode button should sit directly after the tabs, without sharing their hit area"
+        );
+        assert!(
+            (mode_button_left + GROUP_MENU_BUTTON_WIDTH - menu_left).abs() < 0.001,
+            "the mode button and group menu should have adjacent, distinct hit areas"
+        );
+    }
+
+    #[test]
+    fn rail_mode_reserves_a_pinned_control_row_and_shifts_item_geometry() {
+        let metrics = DockMetrics {
+            tab_strip_height: 24.0,
+            collapsed_group_height: 20.0,
+            ..DockMetrics::default()
+        };
+        let constraints = PanelConstraints::new(
+            Size::new(80.0, 80.0),
+            Size::new(180.0, 140.0),
+            Some(Size::new(800.0, 600.0)),
+            false,
+        );
+        let descriptors = ["layers", "color", "properties", "history"]
+            .into_iter()
+            .map(|key| (PanelKey::new(key).unwrap(), constraints))
+            .collect::<Vec<_>>();
+        let mut layout =
+            create_initial_layout(Profile::Photoshop, &descriptors, metrics).unwrap();
+        let column_id = layout.main_area(DockSide::Right).unwrap().root;
+        layout
+            .apply(
+                DockCommand::SetColumnMode {
+                    column: column_id,
+                    mode: ColumnMode::IconsOnly,
+                },
+                &metrics,
+            )
+            .unwrap();
+
+        let viewport = Rect::new(Point::ZERO, Size::new(1000.0, 500.0));
+        let mut rects = layout.compute_rects(viewport, &metrics).unwrap();
+        let column_rect = rects
+            .columns
+            .iter()
+            .find(|entry| entry.column == column_id)
+            .unwrap()
+            .rect;
+        let first_header_before = rects.tab_headers[0].rect;
+        let first_group_before = rects.groups[0].rect;
+        normalize_docked_group_geometry(&layout, &metrics, &mut rects);
+
+        let reserved = rail_control_row_height(
+            metrics.tab_strip_height,
+            metrics.collapsed_group_height,
+            column_rect.size.height,
+        );
+        assert_eq!(reserved, 24.0);
+        assert_eq!(
+            rects.tab_headers[0].rect.origin.y,
+            first_header_before.origin.y + reserved
+        );
+        assert_eq!(
+            rects.groups[0].rect.origin.y,
+            first_group_before.origin.y + reserved
+        );
+        assert!(
+            rects.tab_headers.iter().all(|header| {
+                header.rect.origin.y >= column_rect.origin.y + reserved
+            }),
+            "every rail item must start below the pinned mode-control row"
+        );
+    }
+
+    #[test]
+    fn rail_control_row_extends_existing_overflow_content() {
+        let metrics = DockMetrics::default();
+        let constraints = PanelConstraints::new(
+            Size::new(80.0, 60.0),
+            Size::new(180.0, 140.0),
+            Some(Size::new(800.0, 600.0)),
+            false,
+        );
+        let descriptors = ["layers", "color", "properties", "history"]
+            .into_iter()
+            .map(|key| (PanelKey::new(key).unwrap(), constraints))
+            .collect::<Vec<_>>();
+        let mut layout =
+            create_initial_layout(Profile::Photoshop, &descriptors, metrics).unwrap();
+        let column_id = layout.main_area(DockSide::Right).unwrap().root;
+        layout
+            .apply(
+                DockCommand::SetColumnMode {
+                    column: column_id,
+                    mode: ColumnMode::IconsOnly,
+                },
+                &metrics,
+            )
+            .unwrap();
+
+        let viewport = Rect::new(Point::ZERO, Size::new(1000.0, 50.0));
+        let mut rects = layout.compute_rects(viewport, &metrics).unwrap();
+        let original_overflow = rects
+            .vertical_overflow
+            .iter()
+            .find(|entry| entry.owner == column_id)
+            .copied()
+            .expect("the rail items should overflow the short viewport");
+        normalize_docked_group_geometry(&layout, &metrics, &mut rects);
+
+        let updated = rects
+            .vertical_overflow
+            .iter()
+            .find(|entry| entry.owner == column_id)
+            .expect("the rail control row must preserve the scroll region");
+        let row_height = rail_control_row_height(
+            metrics.tab_strip_height,
+            metrics.collapsed_group_height,
+            original_overflow.viewport.size.height,
+        );
+        assert_eq!(
+            updated.content_extent.size.height,
+            original_overflow.content_extent.size.height + row_height
         );
     }
 

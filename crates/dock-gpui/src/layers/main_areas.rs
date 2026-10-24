@@ -1,12 +1,15 @@
 use std::collections::{HashMap, HashSet};
 
-use dock_core::{DockSide, Node, NodeId, Point, Rect};
+use dock_core::{DockSide, Node, NodeId, Point, Rect, Size};
 use gpui::{
     AnyElement, InteractiveElement, IntoElement, ParentElement, ScrollHandle,
     StatefulInteractiveElement, Styled, div, px,
 };
 
+use crate::chrome_geometry::rail_control_row_height;
 use crate::geometry::translate_rect_to_local;
+use crate::components::ColumnModeButton;
+use crate::dock::cycle_column_mode;
 use crate::host::DockHost;
 use crate::surface::RenderData;
 
@@ -107,6 +110,33 @@ pub(crate) fn render(
                     .child(content)
                     .into_any_element(),
             );
+
+            // Keep rail-mode controls fixed to the viewport, outside the scrollable
+            // content whose tab headers were shifted down to reserve this row.
+            if let Some(Node::Column(column)) = layout.node(overflow.owner)
+                && column.mode.is_rail()
+            {
+                let button_height = rail_control_row_height(
+                    theme.metrics.tab_strip_height,
+                    theme.metrics.collapsed_group_height,
+                    overflow.viewport.size.height,
+                );
+                if button_height > 0.0 {
+                    elements.push(
+                        ColumnModeButton {
+                            column: overflow.owner,
+                            mode: column.mode,
+                            rect: Rect::new(
+                                overflow.viewport.origin,
+                                Size::new(overflow.viewport.size.width, button_height),
+                            ),
+                            theme: *theme,
+                            on_toggle: host.command(cycle_column_mode(overflow.owner, column.mode)),
+                        }
+                        .into_any_element(),
+                    );
+                }
+            }
         }
     }
 

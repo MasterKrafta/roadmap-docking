@@ -1,5 +1,5 @@
 use dock_core::{
-    DockCommand, FloatingGroupId, Layout, Node, NodeId, PanelId, PanelKey,
+    ColumnMode, DockCommand, FloatingGroupId, Layout, Node, NodeId, PanelId, PanelKey,
 };
 use ui::Theme;
 
@@ -11,6 +11,16 @@ pub(crate) fn activate_tab(group: NodeId, panel: PanelId) -> DockCommand {
 /// Builds the command used to toggle a group's collapsed state.
 pub(crate) fn collapse_group(group: NodeId, collapsed: bool) -> DockCommand {
     DockCommand::CollapseGroup { group, collapsed }
+}
+
+/// Builds the next command in the column presentation cycle.
+pub(crate) fn cycle_column_mode(column: NodeId, current: ColumnMode) -> DockCommand {
+    let mode = match current {
+        ColumnMode::Expanded => ColumnMode::IconsAndLabels,
+        ColumnMode::IconsAndLabels => ColumnMode::IconsOnly,
+        ColumnMode::IconsOnly => ColumnMode::Expanded,
+    };
+    DockCommand::SetColumnMode { column, mode }
 }
 
 /// Builds the command used to close one panel instance.
@@ -91,11 +101,13 @@ fn collect_tab_groups(layout: &Layout, node_id: NodeId, groups: &mut Vec<NodeId>
 #[cfg(test)]
 mod tests {
     use super::{
-        activate_tab, close_floating, close_group, close_panel, collapse_group, toggle_panel,
+        activate_tab, close_floating, close_group, close_panel, collapse_group,
+        cycle_column_mode, toggle_panel,
     };
     use crate::dock::DockController;
     use dock_core::{
-        DockCommand, DockSide, FloatingGroupId, Layout, Node, NodeId, PanelKey, Point, Rect, Size,
+        ColumnMode, DockCommand, DockSide, FloatingGroupId, Layout, Node, NodeId, PanelKey, Point,
+        Rect, Size,
     };
     use slotmap::Key;
     use ui::Theme;
@@ -139,6 +151,21 @@ mod tests {
                 collapsed: true,
             }
         );
+    }
+
+    #[test]
+    fn cycle_column_mode_uses_the_three_mode_order() {
+        let column = NodeId::null();
+        for (current, expected) in [
+            (ColumnMode::Expanded, ColumnMode::IconsAndLabels),
+            (ColumnMode::IconsAndLabels, ColumnMode::IconsOnly),
+            (ColumnMode::IconsOnly, ColumnMode::Expanded),
+        ] {
+            assert_eq!(
+                cycle_column_mode(column, current),
+                DockCommand::SetColumnMode { column, mode: expected }
+            );
+        }
     }
 
     #[test]
