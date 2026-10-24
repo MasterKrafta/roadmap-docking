@@ -1,5 +1,5 @@
 use gpui::{
-    App, ClickEvent, Div, IntoElement, ParentElement, StatefulInteractiveElement, Styled, Window, div, px, rgb,
+    App, ClickEvent, Div, InteractiveElement, IntoElement, ParentElement, StatefulInteractiveElement, Styled, Window, div, px, rgb,
 };
 
 /// Renders one tab group: header, switchable tab strip, and active tab content.
