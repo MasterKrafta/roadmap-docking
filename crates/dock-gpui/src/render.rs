@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use crate::components::{
     FloatingTitle, GroupFrame, GroupGrip, GroupMenuButton, IconButton, PanelSurface, PanelTab,
     RailEntry, RectBox, ResizeEdgeHandle, ResizeEdgeKind, SplitterHandle, TabOverflowButton,
-    TabStrip, with_focus_ring,
+    TabStrip,
 };
 
 use crate::chrome_geometry::{GROUP_DRAG_GRIP_HEIGHT, GROUP_MENU_BUTTON_WIDTH};
@@ -22,7 +22,7 @@ use dock_core::{
 };
 use gpui::{
     AnyElement, App, ClickEvent, Div, InteractiveElement, IntoElement, MouseButton,
-    MouseDownEvent, ParentElement, ScrollHandle, StatefulInteractiveElement, Styled, Window, div,
+    MouseDownEvent, ParentElement, ScrollHandle, Styled, Window, div,
     px, rgb,
 };
 use ui::Theme;
