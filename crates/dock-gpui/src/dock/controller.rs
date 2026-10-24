@@ -135,6 +135,42 @@ impl DockController {
         }
     }
 
+    /// Commits the final pointer position as a single persistent history entry.
+    ///
+    /// The preview is discarded first, then the final absolute-delta command is
+    /// applied through UndoRedoHistory against the original pointer-down state.
+    pub(crate) fn commit_resize(
+        &mut self,
+        pointer: Point,
+    ) -> Result<CommandOutcome, ResizeUpdateError> {
+        let session = match std::mem::replace(&mut self.session, Session::Idle) {
+            Session::Resize(session) => session,
+            Session::Idle => return Err(ResizeUpdateError::NoActiveSession),
+        };
+        let command = session.command_for_pointer(pointer);
+        self.layout = session.into_baseline();
+        self.last_error = None;
+
+        let command = command?;
+        let result = self.history.apply(&mut self.layout, command, &self.metrics);
+        self.track_command_result(result, "resize_commit")
+            .map_err(ResizeUpdateError::Command)
+    }
+
+    /// Cancels an active resize and restores the exact pointer-down snapshot.
+    ///
+    /// Returns false when there is no resize session to cancel.
+    pub(crate) fn cancel_resize(&mut self) -> bool {
+        match std::mem::replace(&mut self.session, Session::Idle) {
+            Session::Resize(session) => {
+                self.layout = session.into_baseline();
+                self.last_error = None;
+                true
+            }
+            Session::Idle => false,
+        }
+    }
+
     /// Computes the normalized frame geometry for the current layout and viewport.
     pub(crate) fn frame(&self, viewport: Rect) -> Result<FrameGeometry, ComputeRectsError> {
         FrameGeometry::compute(&self.layout, viewport, &self.metrics)
@@ -324,6 +360,119 @@ mod tests {
         );
     }
 
+
+    #[test]
+    fn committing_resize_records_one_undo_step_for_the_whole_gesture() {
+        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+        let frame = controller
+            .frame(Rect::new(Point::ZERO, Size::new(1200.0, 800.0)))
+            .unwrap();
+        let splitter = *frame
+            .rects()
+            .splitters
+            .iter()
+            .find(|splitter| splitter.axis == Axis::Y)
+            .expect("initial layout should contain a vertical group splitter");
+        let owner = splitter.owner;
+        let original_ratios = match controller.layout().node(owner) {
+            Some(Node::Column(column)) => column.group_ratios.clone(),
+            other => panic!("vertical splitter should belong to a column, got {other:?}"),
+        };
+        let start = Point::new(180.0, 240.0);
+        controller
+            .begin_resize(
+                ResizeHandle::Splitter {
+                    owner,
+                    boundary_index: splitter.boundary_index,
+                    axis: Axis::Y,
+                },
+                start,
+                &frame,
+            )
+            .unwrap();
+
+        controller
+            .update_resize(Point::new(start.x, start.y + 16.0))
+            .unwrap();
+        let preview_ratios = match controller.layout().node(owner) {
+            Some(Node::Column(column)) => column.group_ratios.clone(),
+            _ => panic!("resize owner should remain a column"),
+        };
+        controller
+            .commit_resize(Point::new(start.x, start.y + 16.0))
+            .unwrap();
+
+        assert_eq!(
+            match controller.layout().node(owner) {
+                Some(Node::Column(column)) => column.group_ratios.clone(),
+                _ => panic!("resize owner should remain a column"),
+            },
+            preview_ratios
+        );
+        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+        assert!(controller.resize_session().is_none());
+        assert!(controller.undo().unwrap());
+        assert_eq!(
+            match controller.layout().node(owner) {
+                Some(Node::Column(column)) => column.group_ratios.clone(),
+                _ => panic!("resize owner should remain a column after undo"),
+            },
+            original_ratios
+        );
+        assert!(!controller.undo().unwrap(), "one resize should create one undo step");
+    }
+
+    #[test]
+    fn cancelling_resize_restores_baseline_and_clears_the_session() {
+        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+        let frame = controller
+            .frame(Rect::new(Point::ZERO, Size::new(1200.0, 800.0)))
+            .unwrap();
+        let splitter = *frame
+            .rects()
+            .splitters
+            .iter()
+            .find(|splitter| splitter.axis == Axis::Y)
+            .expect("initial layout should contain a vertical group splitter");
+        let owner = splitter.owner;
+        let original_ratios = match controller.layout().node(owner) {
+            Some(Node::Column(column)) => column.group_ratios.clone(),
+            other => panic!("vertical splitter should belong to a column, got {other:?}"),
+        };
+        let baseline_version = controller.layout().version();
+        let start = Point::new(180.0, 240.0);
+        controller
+            .begin_resize(
+                ResizeHandle::Splitter {
+                    owner,
+                    boundary_index: splitter.boundary_index,
+                    axis: Axis::Y,
+                },
+                start,
+                &frame,
+            )
+            .unwrap();
+        controller
+            .update_resize(Point::new(start.x, start.y + 16.0))
+            .unwrap();
+        assert!(controller.cancel_resize());
+
+        assert_eq!(controller.layout().version(), baseline_version);
+        assert_eq!(
+            match controller.layout().node(owner) {
+                Some(Node::Column(column)) => column.group_ratios.clone(),
+                _ => panic!("resize owner should remain a column after cancel"),
+            },
+            original_ratios
+        );
+        assert!(controller.resize_session().is_none());
+        assert!(!controller.cancel_resize());
+        assert!(matches!(
+            controller.update_resize(start),
+            Err(super::super::resize_session::ResizeUpdateError::NoActiveSession)
+        ));
+        assert!(!controller.undo().unwrap());
+    }
 
     #[test]
     fn resize_preview_is_recomputed_from_baseline_and_zero_delta_restores_it() {

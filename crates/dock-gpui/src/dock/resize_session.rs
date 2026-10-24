@@ -77,6 +77,11 @@ impl ResizeSession {
         &self.baseline
     }
 
+    /// Returns ownership of the pointer-down snapshot when the session ends.
+    pub(super) fn into_baseline(self) -> Layout {
+        self.baseline
+    }
+
     pub(super) fn pointer_start(&self) -> Point {
         self.pointer_start
     }
