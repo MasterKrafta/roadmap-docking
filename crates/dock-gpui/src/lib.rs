@@ -14,5 +14,5 @@ pub use metrics::dock_metrics_from_theme;
 pub use chrome_geometry::normalize_docked_group_geometry;
 pub use render::{
     CommandClickHandler, DockMenuRequest, DragOverlay, DragStartHandler, ResizeHandle,
-    ResizeStartHandler, render, render_from_registry,
+    ResizeStartHandler, render, render_frame_from_registry, render_from_registry,
 };

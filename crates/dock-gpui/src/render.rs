@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::chrome_geometry::{GROUP_DRAG_GRIP_HEIGHT, GROUP_MENU_BUTTON_WIDTH};
+use crate::frame::FrameGeometry;
 use crate::color::blend_rgb;
 use crate::tree_query::{
     active_panel, drop_target_node, first_panel_in_subtree, main_column_ids, subtree_nodes,
@@ -89,13 +90,95 @@ where
     )
 }
 
-/// Renders the current Core model and its freshly-computed geometry as GPUI elements.
+/// Legacy callback renderer that accepts a caller-supplied geometry snapshot.
 ///
-/// The adapter reads Layout and emits typed command/menu requests; it does not mutate or clone
-/// Layout. The app supplies panel content factories and owns all menu state.
+/// New code should prefer `render_frame_from_registry`, which consumes the immutable,
+/// normalized geometry and caches captured by `FrameGeometry::compute`.
+#[allow(clippy::too_many_arguments)]
 pub fn render<F, T, I, H, M, D, R>(
     layout: &Layout,
     rects: &LayoutRects,
+    scroll_handles: &HashMap<NodeId, ScrollHandle>,
+    theme: &Theme,
+    render_panel: F,
+    panel_title: T,
+    panel_icon: I,
+    make_command_handler: H,
+    make_menu_handler: M,
+    make_drag_start_handler: D,
+    make_resize_start_handler: R,
+    drag_overlay: Option<&DragOverlay>,
+) -> Div
+where
+    F: FnMut(&PanelInstance) -> AnyElement,
+    T: Fn(&PanelInstance) -> String,
+    I: Fn(&PanelInstance) -> &'static str,
+    H: Fn(DockCommand) -> CommandClickHandler,
+    M: Fn(DockMenuRequest) -> CommandClickHandler,
+    D: Fn(DragPayload, DragHandle) -> DragStartHandler,
+    R: Fn(ResizeHandle) -> ResizeStartHandler,
+{
+    render_impl(
+        layout,
+        rects,
+        None,
+        scroll_handles,
+        theme,
+        render_panel,
+        panel_title,
+        panel_icon,
+        make_command_handler,
+        make_menu_handler,
+        make_drag_start_handler,
+        make_resize_start_handler,
+        drag_overlay,
+    )
+}
+
+/// Renders from one immutable `FrameGeometry` snapshot and uses its per-frame caches.
+///
+/// Use `frame.drop_zones(layout, source, metrics)` to calculate matching drop targets.
+#[allow(clippy::too_many_arguments)]
+pub fn render_frame_from_registry<H, M, D, R>(
+    layout: &Layout,
+    frame: &FrameGeometry,
+    scroll_handles: &HashMap<NodeId, ScrollHandle>,
+    theme: &Theme,
+    make_command_handler: H,
+    make_menu_handler: M,
+    make_drag_start_handler: D,
+    make_resize_start_handler: R,
+    drag_overlay: Option<&DragOverlay>,
+) -> Div
+where
+    H: Fn(DockCommand) -> CommandClickHandler,
+    M: Fn(DockMenuRequest) -> CommandClickHandler,
+    D: Fn(DragPayload, DragHandle) -> DragStartHandler,
+    R: Fn(ResizeHandle) -> ResizeStartHandler,
+{
+    render_impl(
+        layout,
+        frame.rects(),
+        Some(frame),
+        scroll_handles,
+        theme,
+        crate::panels::render_panel,
+        crate::panels::panel_title,
+        crate::panels::panel_icon,
+        make_command_handler,
+        make_menu_handler,
+        make_drag_start_handler,
+        make_resize_start_handler,
+        drag_overlay,
+    )
+}
+
+
+/// Internal implementation shared by the rectangle and frame-aware render entrypoints.
+fn render_impl<F, T, I, H, M, D, R>(
+    layout: &Layout,
+    rects: &LayoutRects,
+    frame: Option<&FrameGeometry>,
     scroll_handles: &HashMap<NodeId, ScrollHandle>,
     theme: &Theme,
     mut render_panel: F,
@@ -133,7 +216,7 @@ where
         let Some(area) = layout.main_area(side) else {
             continue;
         };
-        let nodes = subtree_nodes(layout, area.root);
+        let nodes = nodes_for_root(layout, area.root, frame);
         let overflow_columns: Vec<_> = rects
             .vertical_overflow
             .iter()
@@ -146,7 +229,7 @@ where
 
         let mut non_scrolling_nodes = nodes;
         for overflow in &overflow_columns {
-            let column_nodes = subtree_nodes(layout, overflow.owner);
+            let column_nodes = nodes_for_root(layout, overflow.owner, frame);
             for node in &column_nodes {
                 non_scrolling_nodes.remove(node);
             }
@@ -157,6 +240,7 @@ where
             for element in tree_elements(
                 layout,
                 rects,
+                frame,
                 &non_scrolling_nodes,
                 theme,
                 &mut render_panel,
@@ -175,7 +259,7 @@ where
             let Some(scroll_handle) = scroll_handles.get(&overflow.owner) else {
                 continue;
             };
-            let column_nodes = subtree_nodes(layout, overflow.owner);
+            let column_nodes = nodes_for_root(layout, overflow.owner, frame);
             let mut local_rects = localize_tree_rects(rects, overflow.viewport.origin);
             let Some(column_rect) = local_rects
                 .columns
@@ -196,6 +280,7 @@ where
             for element in tree_elements(
                 layout,
                 &local_rects,
+                frame,
                 &column_nodes,
                 theme,
                 &mut render_panel,
@@ -274,7 +359,7 @@ where
         // Floating stacks are rendered as a single clipped container. Core geometry stays
         // in window coordinates; a translated snapshot lets its descendants render locally.
         let local_rects = localize_tree_rects(rects, rect.origin);
-        let nodes = subtree_nodes(layout, area.root);
+        let nodes = nodes_for_root(layout, area.root, frame);
         let mut container = rect_element(rect, theme.colors.dock_background)
             .overflow_hidden()
             .border_1()
@@ -283,6 +368,7 @@ where
         for element in tree_elements(
             layout,
             &local_rects,
+            frame,
             &nodes,
             theme,
             &mut render_panel,
@@ -453,9 +539,21 @@ where
 }
 
 
+fn nodes_for_root(
+    layout: &Layout,
+    root: NodeId,
+    frame: Option<&FrameGeometry>,
+) -> HashSet<NodeId> {
+    frame
+        .and_then(|frame| frame.nodes_in_root(root).cloned())
+        .unwrap_or_else(|| subtree_nodes(layout, root))
+}
+
+
 fn tree_elements<F, T, I, H, M, D, R>(
     layout: &Layout,
     rects: &LayoutRects,
+    frame: Option<&FrameGeometry>,
     nodes: &HashSet<NodeId>,
     theme: &Theme,
     render_panel: &mut F,
@@ -476,16 +574,21 @@ where
     R: Fn(ResizeHandle) -> ResizeStartHandler,
 {
     let mut elements = Vec::new();
-    let mut rail_groups = HashSet::new();
-    for column_rect in rects.columns.iter().filter(|entry| nodes.contains(&entry.column)) {
-        if matches!(
-            layout.node(column_rect.column),
-            Some(Node::Column(column)) if column.mode.is_rail()
-        ) && let Ok(items) = layout.column_display_order(column_rect.column)
-        {
-            rail_groups.extend(items.into_iter().map(|item| item.group));
+    let mut computed_rail_groups = HashSet::new();
+    if frame.is_none() {
+        for column_rect in rects.columns.iter().filter(|entry| nodes.contains(&entry.column)) {
+            if matches!(
+                layout.node(column_rect.column),
+                Some(Node::Column(column)) if column.mode.is_rail()
+            ) && let Ok(items) = layout.column_display_order(column_rect.column)
+            {
+                computed_rail_groups.extend(items.into_iter().map(|item| item.group));
+            }
         }
     }
+    let rail_groups = frame
+        .map(FrameGeometry::rail_groups)
+        .unwrap_or(&computed_rail_groups);
 
     for column in rects.columns.iter().filter(|entry| nodes.contains(&entry.column)) {
         elements.push(
@@ -643,20 +746,28 @@ where
         );
     }
 
-    let panel_node_ids: HashMap<PanelId, NodeId> = layout
-        .nodes()
-        .filter_map(|(node_id, node)| match node {
-            Node::Panel(panel) => Some((panel.panel_id, node_id)),
-            _ => None,
-        })
-        .collect();
-
     // Core emits content rectangles only for visible active panels. Call the
     // app-owned factory only after confirming that a panel belongs to this area.
+    // FrameGeometry already contains the panel-to-node index, avoiding a full
+    // Layout walk for every rendered area in the frame.
+    let legacy_panel_nodes = frame.is_none().then(|| {
+        layout
+            .nodes()
+            .filter_map(|(node_id, node)| match node {
+                Node::Panel(panel) => Some((panel.panel_id, node_id)),
+                _ => None,
+            })
+            .collect::<HashMap<PanelId, NodeId>>()
+    });
     for panel_rect in rects.panels.iter().filter(|entry| {
-        panel_node_ids
-            .get(&entry.panel)
-            .is_some_and(|node_id| nodes.contains(node_id))
+        let node_id = frame
+            .and_then(|frame| frame.panel_node(entry.panel))
+            .or_else(|| {
+                legacy_panel_nodes
+                    .as_ref()
+                    .and_then(|nodes| nodes.get(&entry.panel).copied())
+            });
+        node_id.is_some_and(|node_id| nodes.contains(&node_id))
     }) {
         let Some(instance) = layout.panel_instance(panel_rect.panel) else {
             continue;

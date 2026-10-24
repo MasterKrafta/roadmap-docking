@@ -17,6 +17,7 @@ use crate::tree_query::subtree_nodes;
 pub struct FrameGeometry {
     rects: LayoutRects,
     nodes_by_area: HashMap<DockAreaId, HashSet<NodeId>>,
+    nodes_by_root: HashMap<NodeId, HashSet<NodeId>>,
     rail_groups: HashSet<NodeId>,
     panel_nodes: HashMap<PanelId, NodeId>,
 }
@@ -31,10 +32,23 @@ impl FrameGeometry {
         let mut rects = layout.compute_rects(viewport, metrics)?;
         normalize_docked_group_geometry(layout, metrics, &mut rects);
 
-        let nodes_by_area = layout
-            .dock_areas()
-            .map(|(area_id, area)| (area_id, subtree_nodes(layout, area.root)))
-            .collect();
+        let mut nodes_by_area = HashMap::new();
+        let mut nodes_by_root = HashMap::<NodeId, HashSet<NodeId>>::new();
+        for (area_id, area) in layout.dock_areas() {
+            let nodes = nodes_by_root
+                .entry(area.root)
+                .or_insert_with(|| subtree_nodes(layout, area.root))
+                .clone();
+            nodes_by_area.insert(area_id, nodes);
+        }
+        // Scroll columns are subtrees inside a main area rather than independent
+        // DockArea entries. Cache their roots too so rendering does not walk them
+        // repeatedly while building the scroll viewport and its content.
+        for column in &rects.columns {
+            nodes_by_root
+                .entry(column.column)
+                .or_insert_with(|| subtree_nodes(layout, column.column));
+        }
 
         let mut rail_groups = HashSet::new();
         for column_rect in &rects.columns {
@@ -58,6 +72,7 @@ impl FrameGeometry {
         Ok(Self {
             rects,
             nodes_by_area,
+            nodes_by_root,
             rail_groups,
             panel_nodes,
         })
@@ -71,6 +86,12 @@ impl FrameGeometry {
     /// Returns the cached set of tree nodes belonging to a dock area.
     pub fn nodes_in_area(&self, area: DockAreaId) -> Option<&HashSet<NodeId>> {
         self.nodes_by_area.get(&area)
+    }
+
+    /// Returns the cached set of tree nodes below an arbitrary dock-area or
+    /// column root used during this frame.
+    pub(crate) fn nodes_in_root(&self, root: NodeId) -> Option<&HashSet<NodeId>> {
+        self.nodes_by_root.get(&root)
     }
 
     /// Returns the groups presented as rail entries in this frame.
