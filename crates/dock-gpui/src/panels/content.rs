@@ -6,9 +6,7 @@ use gpui::{AnyElement, Div, IntoElement, ParentElement, Styled, div, px, rgb};
 /// This is the registry callback. The enclosing dock element owns its bounds
 /// and background, so this function only supplies the panel's inner content.
 pub fn render_registered(instance: &PanelInstance) -> AnyElement {
-    let selected_tab = super::def_for(instance)
-        .map(|definition| definition.title.to_string())
-        .unwrap_or_else(|| "Missing panel".to_owned());
+    let selected_tab = super::panel_title(instance);
 
     div()
         .flex()
@@ -17,6 +15,16 @@ pub fn render_registered(instance: &PanelInstance) -> AnyElement {
         .justify_center()
         .child(format!("Контент: {selected_tab}"))
         .child(div().child(format!("Выбрана {selected_tab}")))
+        .into_any_element()
+}
+
+/// Renders a visible fallback when Core contains a panel key that has no registry entry.
+pub fn render_missing(instance: &PanelInstance) -> AnyElement {
+    div()
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(format!("Missing panel: {}", instance.key))
         .into_any_element()
 }
 

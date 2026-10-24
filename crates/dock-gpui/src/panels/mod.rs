@@ -1,10 +1,9 @@
 //! Central registry of panel metadata and content renderers.
 
 use dock_core::{PanelConstraints, PanelInstance, PanelKey, Size};
-use gpui::SharedString;
+use gpui::{AnyElement, SharedString};
 use ui::Theme;
 
-use gpui::AnyElement;
 
 pub mod content;
 
@@ -54,6 +53,30 @@ pub fn def_for(instance: &PanelInstance) -> Option<&'static PanelDef> {
     PANELS
         .iter()
         .find(|definition| definition.key == instance.key.as_str())
+}
+
+/// Returns the title used by tabs, floating titles and flyout headers.
+///
+/// Unknown panel kinds use a visible fallback instead of panicking.
+pub fn panel_title(instance: &PanelInstance) -> String {
+    def_for(instance)
+        .map(|definition| definition.title.to_string())
+        .unwrap_or_else(|| "Missing panel".to_owned())
+}
+
+/// Returns the rail icon for a panel, or a question mark for unknown kinds.
+pub fn panel_icon(instance: &PanelInstance) -> &'static str {
+    def_for(instance)
+        .map(|definition| definition.icon)
+        .unwrap_or("?")
+}
+
+/// Renders the registered panel content, using an explicit fallback for unknown kinds.
+pub fn render_panel(instance: &PanelInstance) -> AnyElement {
+    match def_for(instance) {
+        Some(definition) => (definition.content)(instance),
+        None => content::render_missing(instance),
+    }
 }
 
 /// Creates the descriptors consumed by `create_initial_layout`.
@@ -123,4 +146,30 @@ mod tests {
 
         assert!(def_for(&unknown).is_none());
     }
+
+
+    #[test]
+    fn registry_helpers_supply_title_icon_and_unknown_fallbacks() {
+        let constraints = PanelConstraints::new(
+            Size::new(120.0, 80.0),
+            Size::new(280.0, 220.0),
+            None,
+            false,
+        );
+        let layers = PanelInstance::new(
+            PanelKey::new("layers").expect("built-in key should be valid"),
+            constraints,
+        );
+        assert_eq!(super::panel_title(&layers), "Вкладка 1");
+        assert_eq!(super::panel_icon(&layers), "▤");
+
+        let unknown = PanelInstance::new(
+            PanelKey::new("unknown-panel").expect("test key should be valid"),
+            constraints,
+        );
+        assert_eq!(super::panel_title(&unknown), "Missing panel");
+        assert_eq!(super::panel_icon(&unknown), "?");
+        let _fallback = super::render_panel(&unknown);
+    }
+
 }

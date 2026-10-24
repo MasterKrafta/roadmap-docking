@@ -261,6 +261,44 @@ pub enum DockMenuRequest {
     PanelGroup { group: NodeId, panel: Option<PanelId> },
 }
 
+/// Renders the Core layout using the centralized panel registry for titles, icons and content.
+///
+/// The existing callback-based `render` remains available during migration, while
+/// this entrypoint ensures panel presentation comes from `panels::PANELS`.
+#[allow(clippy::too_many_arguments)]
+pub fn render_from_registry<H, M, D, R>(
+    layout: &Layout,
+    rects: &LayoutRects,
+    scroll_handles: &HashMap<NodeId, ScrollHandle>,
+    theme: &Theme,
+    make_command_handler: H,
+    make_menu_handler: M,
+    make_drag_start_handler: D,
+    make_resize_start_handler: R,
+    drag_overlay: Option<&DragOverlay>,
+) -> Div
+where
+    H: Fn(DockCommand) -> CommandClickHandler,
+    M: Fn(DockMenuRequest) -> CommandClickHandler,
+    D: Fn(DragPayload, DragHandle) -> DragStartHandler,
+    R: Fn(ResizeHandle) -> ResizeStartHandler,
+{
+    render(
+        layout,
+        rects,
+        scroll_handles,
+        theme,
+        crate::panels::render_panel,
+        crate::panels::panel_title,
+        crate::panels::panel_icon,
+        make_command_handler,
+        make_menu_handler,
+        make_drag_start_handler,
+        make_resize_start_handler,
+        drag_overlay,
+    )
+}
+
 /// Renders the current Core model and its freshly-computed geometry as GPUI elements.
 ///
 /// The adapter reads Layout and emits typed command/menu requests; it does not mutate or clone
