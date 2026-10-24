@@ -6,6 +6,7 @@ use crate::tree_query::{
     main_column_ids, subtree_nodes,
 };
 use crate::geometry::{localize_tree_rects, scroll_rect_in_viewport, translate_rect_to_local};
+use crate::labels::{rail_entry_label, tab_header_label};
 
 use dock_core::{
     Axis, ColumnMode, DockCommand, DockMetrics, DockSide, DragHandle, DragPayload, DragPreview,
@@ -1005,48 +1006,17 @@ fn rect_element(rect: Rect, color: u32) -> Div {
 
 
 
-fn rail_entry_label(mode: ColumnMode, icon: &str, title: &str) -> String {
-    match mode {
-        ColumnMode::IconsOnly => icon.to_owned(),
-        ColumnMode::IconsAndLabels => format!("{icon}  {title}"),
-        ColumnMode::Expanded => title.to_owned(),
-    }
-}
 
-fn tab_header_label(title: &str, collapsed: bool, tab_index: usize) -> String {
-    if collapsed && tab_index == 0 {
-        format!("▸ {title}")
-    } else {
-        title.to_owned()
-    }
-}
 
 #[cfg(test)]
 mod tests {
     use super::{
-        normalize_docked_group_geometry, rail_entry_label, tab_header_label,
-        GROUP_DRAG_GRIP_HEIGHT, GROUP_MENU_BUTTON_WIDTH,
+        normalize_docked_group_geometry, GROUP_DRAG_GRIP_HEIGHT, GROUP_MENU_BUTTON_WIDTH,
     };
     use dock_core::{
-        create_initial_layout, ColumnMode, DockMetrics, DockSide, Node, PanelConstraints, PanelKey,
+        create_initial_layout, DockMetrics, DockSide, Node, PanelConstraints, PanelKey,
         Point, Profile, Rect, Size,
     };
-
-    #[test]
-    fn rail_modes_have_distinct_icon_and_label_presentations() {
-        assert_eq!(rail_entry_label(ColumnMode::IconsOnly, "▱", "Layers"), "▱");
-        assert_eq!(
-            rail_entry_label(ColumnMode::IconsAndLabels, "▱", "Layers"),
-            "▱  Layers"
-        );
-    }
-
-    #[test]
-    fn collapsed_stack_marker_appears_only_on_the_first_tab() {
-        assert_eq!(tab_header_label("Layers", true, 0), "▸ Layers");
-        assert_eq!(tab_header_label("Color", true, 1), "Color");
-        assert_eq!(tab_header_label("Layers", false, 0), "Layers");
-    }
 
     #[test]
     fn collapsed_floating_root_tabs_are_positioned_below_the_window_title() {

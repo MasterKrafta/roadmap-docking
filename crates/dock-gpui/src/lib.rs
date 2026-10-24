@@ -1,5 +1,6 @@
 mod color;
 mod geometry;
+mod labels;
 mod metrics;
 mod render;
 mod tree_query;
