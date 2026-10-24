@@ -1347,7 +1347,6 @@ fn group_tabs_view(layout: &Layout, group_id: NodeId) -> Option<GroupTabsView> {
         let Some(Node::Panel(panel)) = layout.node(*child_id) else {
             return None;
         };
-        let instance = layout.panel_instance(panel.panel_id)?;
         let label = panel_label(layout, panel.panel_id)?;
         Some((panel.panel_id, label))
     });
