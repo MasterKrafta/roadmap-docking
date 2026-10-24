@@ -4,6 +4,7 @@ use gpui::{Div, ParentElement, Styled, div, px, rgb};
 pub(super) fn render(theme: ui::Theme, height: f32) -> Div {
     div()
         .flex_1()
+        .justify_end()
         .h(px(height))
         .bg(rgb(theme.colors.toolbar_background))
         .child(
