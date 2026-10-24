@@ -1842,7 +1842,7 @@ mod tests {
         build_core_layout, column_containing_group, floating_group_bounds,
         floating_group_for_panel, floating_root_tabs_group, group_containing_panel,
         group_has_header, group_is_floating, panel_constraints, panel_id_for_key,
-        group_tabs_view_excluding,
+        group_tabs_view_excluding, tab_drag_bounds_for_panel,
         clamped_pointer_delta, panel_is_open, toggle_core_panel, floating_size_for_detach,
         floating_drag_bounds, group_drag_bounds, docked_group_float_command,
         FLOATING_HEIGHT_RATIO,
