@@ -108,6 +108,7 @@ where
 
     group
         .child(render_tab_strip(
+            group_id,
             theme,
             active_tab,
             width,
@@ -130,6 +131,7 @@ where
 
 /// Arranges one or two tabs, the open drag/drop area, and the hamburger button.
 fn render_tab_strip<F1, F2>(
+    group_id: NodeId,
     theme: ui::Theme,
     active_tab: usize,
     width: f32,
