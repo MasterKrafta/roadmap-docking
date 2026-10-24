@@ -3,6 +3,8 @@ mod floating_column_tabs_group;
 mod floating_tabs_group;
 mod tabs_group;
 
+use std::collections::{HashMap, HashSet};
+
 use dock_core::{
     create_initial_layout, DockCommand, DockMetrics, DockSide, DropTarget, DropZone,
     FloatingGroupId, Layout, Node, NodeId, PanelConstraints, PanelId, PanelKey, Point,
@@ -92,18 +94,40 @@ pub(crate) struct MainWindow {
     dockers_menu_open: bool,
     core_layout: Layout,
     core_metrics: DockMetrics,
+    // Header presence is UI presentation state, not a field in Core's Tabs node.
+    // Preserve it by group identity when a tab becomes a new floating group.
+    group_header_modes: HashMap<NodeId, bool>,
 }
 
 impl MainWindow {
     pub(crate) fn new(theme: ui::Theme) -> Result<Self, String> {
-        let (core_layout, core_metrics, _, _, _) = build_core_layout(&theme)?;
+        let (
+            core_layout,
+            core_metrics,
+            one_tab_headered_group,
+            two_tab_headered_group,
+            one_tab_headerless_group,
+        ) = build_core_layout(&theme)?;
+        let group_header_modes = HashMap::from([
+            (one_tab_headered_group, true),
+            (two_tab_headered_group, true),
+            (one_tab_headerless_group, false),
+        ]);
 
         Ok(Self {
             theme,
             dockers_menu_open: false,
             core_layout,
             core_metrics,
+            group_header_modes,
         })
+    }
+
+    fn has_group_header(&self, group_id: NodeId) -> bool {
+        self.group_header_modes
+            .get(&group_id)
+            .copied()
+            .unwrap_or_else(|| group_has_header(&self.core_layout, group_id))
     }
 
     fn activate_tab(&mut self, group: NodeId, panel: PanelId, cx: &mut Context<Self>) {
@@ -189,6 +213,7 @@ impl MainWindow {
         ) {
             eprintln!("Could not toggle dock panel '{key}': {error}");
         }
+        synchronize_group_header_modes(&self.core_layout, &mut self.group_header_modes);
         cx.notify();
     }
 
@@ -223,6 +248,15 @@ impl MainWindow {
         cx: &mut Context<Self>,
     ) {
         let drag = event.drag(cx);
+        let source_has_header = self
+            .group_header_modes
+            .get(&drag.group)
+            .copied()
+            .unwrap_or_else(|| group_has_header(&drag.layout_before, drag.group));
+        let source_tab_count = match drag.layout_before.node(drag.group) {
+            Some(Node::Tabs(tabs)) => tabs.children.len(),
+            _ => 0,
+        };
         let current_pointer = Point::new(
             event.event.position.x.as_f32(),
             event.event.position.y.as_f32(),
@@ -254,7 +288,7 @@ impl MainWindow {
             // area. The headerless History group uses the matching no-header sizing.
             floating_size_for_detach(
                 drag.bounds_before,
-                group_has_header(&drag.layout_before, drag.group),
+                source_has_header,
                 &self.core_metrics,
             )
         };
@@ -269,12 +303,7 @@ impl MainWindow {
                 origin,
             }
         } else {
-            let tab_count = match self.core_layout.node(drag.group) {
-                Some(Node::Tabs(tabs)) => tabs.children.len(),
-                _ => 0,
-            };
-
-            if tab_count > 1 {
+            if source_tab_count > 1 {
                 DockCommand::FloatPanelAsGroup {
                     panel: drag.panel,
                     bounds,
@@ -304,9 +333,25 @@ impl MainWindow {
             }
         };
 
-        if let Err(error) = self.core_layout.apply(command, &self.core_metrics) {
-            eprintln!("Could not float dragged tab: {error:?}");
-            self.core_layout = drag.layout_before.clone();
+        let applied = match self.core_layout.apply(command, &self.core_metrics) {
+            Ok(_) => true,
+            Err(error) => {
+                eprintln!("Could not float dragged tab: {error:?}");
+                self.core_layout = drag.layout_before.clone();
+                false
+            }
+        };
+
+        synchronize_group_header_modes(&self.core_layout, &mut self.group_header_modes);
+        if applied && drag.floating_group.is_none() && source_tab_count > 1 {
+            // FloatPanelAsGroup creates a new Tabs node. Its presentation mode comes
+            // from the source group, not from the detached panel's key/name.
+            inherit_group_header_mode_for_panel(
+                &self.core_layout,
+                &mut self.group_header_modes,
+                drag.panel,
+                source_has_header,
+            );
         }
         cx.notify();
     }
@@ -349,7 +394,7 @@ impl MainWindow {
             if group_is_floating(&self.core_layout, group_id) {
                 continue;
             }
-            let has_header = group_has_header(&self.core_layout, group_id);
+            let has_header = self.has_group_header(group_id);
             let Some(tabs_view) = group_tabs_view(&self.core_layout, group_id) else {
                 continue;
             };
@@ -644,7 +689,7 @@ impl MainWindow {
             // clamps the visible rect for layout calculations; using that clamped
             // origin for painting made the panel stop before the pointer reached
             // the app-window edge.
-            let floating_element = if group_has_header(&self.core_layout, group_id) {
+            let floating_element = if self.has_group_header(group_id) {
                 floating_column_tabs_group::render(
                     self.theme,
                     tabs_view.active_tab,
@@ -1059,6 +1104,28 @@ fn group_containing_key(layout: &Layout, key: &str) -> Option<NodeId> {
     group_containing_panel(layout, panel)
 }
 
+fn synchronize_group_header_modes(layout: &Layout, modes: &mut HashMap<NodeId, bool>) {
+    let live_tabs: HashSet<NodeId> = layout
+        .nodes()
+        .filter_map(|(node_id, node)| matches!(node, Node::Tabs(_)).then_some(node_id))
+        .collect();
+    modes.retain(|group_id, _| live_tabs.contains(group_id));
+}
+
+fn inherit_group_header_mode_for_panel(
+    layout: &Layout,
+    modes: &mut HashMap<NodeId, bool>,
+    panel_id: PanelId,
+    has_header: bool,
+) {
+    synchronize_group_header_modes(layout, modes);
+    if let Some(group_id) = group_containing_panel(layout, panel_id) {
+        modes.insert(group_id, has_header);
+    }
+}
+
+// Fallback policy for groups without recorded presentation metadata.
+// Initial groups and groups created by detaching a tab use explicit modes above.
 fn group_has_header(layout: &Layout, group_id: NodeId) -> bool {
     let Some(Node::Tabs(tabs)) = layout.node(group_id) else {
         return false;
@@ -1256,7 +1323,7 @@ mod tests {
         floating_group_for_panel, floating_root_tabs_group, group_containing_panel,
         group_has_header, group_is_floating, panel_constraints, panel_id_for_key,
         clamped_pointer_delta, panel_is_open, toggle_core_panel, floating_size_for_detach,
-        FLOATING_HEIGHT_RATIO,
+        synchronize_group_header_modes, inherit_group_header_mode_for_panel, FLOATING_HEIGHT_RATIO,
     };
     use dock_core::{Axis, DockCommand, DockSide, Node, Point, Rect, Size};
 
@@ -1283,6 +1350,65 @@ mod tests {
             .expect("a tab should detach into a floating group");
         let floating = layout.floating_groups().next().unwrap();
         assert!(floating_group_bounds(&layout, floating.0).is_some());
+    }
+
+    #[test]
+    fn detached_panel_inherits_header_mode_from_its_source_group() {
+        use std::collections::HashMap;
+
+        let theme = ui::Theme::default();
+        let (mut layout, metrics, headered_group, _, headerless_group) =
+            build_core_layout(&theme).expect("initial Core layout should be valid");
+        let mut header_modes =
+            HashMap::from([(headered_group, true), (headerless_group, false)]);
+        let history = panel_id_for_key(&layout, "history").unwrap();
+
+        // Move History into a group that explicitly has a header. Its panel key must
+        // not override the source group's component type when it is later detached.
+        layout
+            .apply(
+                DockCommand::MovePanel {
+                    panel: history,
+                    target: dock_core::DropTarget::Tabs {
+                        group: headered_group,
+                        index: 2,
+                    },
+                },
+                &metrics,
+            )
+            .expect("History should join the headered group");
+
+        let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 768.0));
+        let rects = layout.compute_rects(viewport, &metrics).unwrap();
+        let source_bounds = rects
+            .groups
+            .iter()
+            .find(|entry| entry.group == headered_group)
+            .expect("headered source group should have geometry")
+            .rect;
+        let size = floating_size_for_detach(source_bounds, true, &metrics);
+        let bounds = Rect::new(
+            Point::new(source_bounds.origin.x + 20.0, source_bounds.origin.y + 16.0),
+            size,
+        );
+
+        layout
+            .apply(
+                DockCommand::FloatPanelAsGroup { panel: history, bounds },
+                &metrics,
+            )
+            .expect("History should detach as its own floating group");
+        assert_eq!(layout.validate(&metrics), Ok(()));
+
+        let floating_tabs = group_containing_panel(&layout, history)
+            .expect("detached History should belong to a new Tabs node");
+        assert!(
+            !group_has_header(&layout, floating_tabs),
+            "the fallback based on panel key would misclassify History as headerless"
+        );
+
+        inherit_group_header_mode_for_panel(&layout, &mut header_modes, history, true);
+        assert_eq!(header_modes.get(&floating_tabs), Some(&true));
     }
 
     #[test]
