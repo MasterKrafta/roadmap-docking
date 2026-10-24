@@ -62,33 +62,19 @@ impl Render for SplitterDragPreview {
 pub(crate) struct MainWindow {
     theme: ui::Theme,
     dockers_menu_open: bool,
-    checked_panels: [bool; 4],
     core_layout: Layout,
     core_metrics: DockMetrics,
-    one_tab_column_group: NodeId,
-    two_tab_column_group: NodeId,
-    one_tab_headerless_group: NodeId,
 }
 
 impl MainWindow {
     pub(crate) fn new(theme: ui::Theme) -> Result<Self, String> {
-        let (
-            core_layout,
-            core_metrics,
-            one_tab_column_group,
-            two_tab_column_group,
-            one_tab_headerless_group,
-        ) = build_core_layout(&theme)?;
+        let (core_layout, core_metrics, _, _, _) = build_core_layout(&theme)?;
 
         Ok(Self {
             theme,
             dockers_menu_open: false,
-            checked_panels: [false; 4],
             core_layout,
             core_metrics,
-            one_tab_column_group,
-            two_tab_column_group,
-            one_tab_headerless_group,
         })
     }
 
@@ -165,6 +151,19 @@ impl MainWindow {
         cx.notify();
     }
 
+    fn toggle_panel(&mut self, key: &'static str, cx: &mut Context<Self>) {
+        let constraints = panel_constraints(&self.theme);
+        if let Err(error) = toggle_core_panel(
+            &mut self.core_layout,
+            &self.core_metrics,
+            constraints,
+            key,
+        ) {
+            eprintln!("Could not toggle dock panel '{key}': {error}");
+        }
+        cx.notify();
+    }
+
     fn render_core_groups(
         &self,
         width: f32,
@@ -192,16 +191,9 @@ impl MainWindow {
             .h(px(height))
             .bg(rgb(self.theme.colors.canvas_background));
 
-        let group_specs = [
-            (self.one_tab_column_group, true),
-            (self.two_tab_column_group, true),
-            (self.one_tab_headerless_group, false),
-        ];
-
-        for (group_id, has_header) in group_specs {
-            let Some(group_rect) = rects.groups.iter().find(|entry| entry.group == group_id) else {
-                continue;
-            };
+        for group_rect in &rects.groups {
+            let group_id = group_rect.group;
+            let has_header = group_has_header(&self.core_layout, group_id);
             let Some(tabs_view) = group_tabs_view(&self.core_layout, group_id) else {
                 continue;
             };
@@ -452,10 +444,9 @@ impl Render for MainWindow {
                     dropdown_width,
                     menu_item_height,
                     "Вкладка 1",
-                    self.checked_panels[0],
+                    panel_is_open(&self.core_layout, "layers"),
                     cx.listener(|this, _, _, cx| {
-                        this.checked_panels[0] = !this.checked_panels[0];
-                        cx.notify();
+                        this.toggle_panel("layers", cx);
                     }),
                 ))
                 .child(render_menu_item(
@@ -463,10 +454,9 @@ impl Render for MainWindow {
                     dropdown_width,
                     menu_item_height,
                     "Вкладка 2",
-                    self.checked_panels[1],
+                    panel_is_open(&self.core_layout, "color"),
                     cx.listener(|this, _, _, cx| {
-                        this.checked_panels[1] = !this.checked_panels[1];
-                        cx.notify();
+                        this.toggle_panel("color", cx);
                     }),
                 ))
                 .child(render_menu_item(
@@ -474,10 +464,9 @@ impl Render for MainWindow {
                     dropdown_width,
                     menu_item_height,
                     "Вкладка 3",
-                    self.checked_panels[2],
+                    panel_is_open(&self.core_layout, "properties"),
                     cx.listener(|this, _, _, cx| {
-                        this.checked_panels[2] = !this.checked_panels[2];
-                        cx.notify();
+                        this.toggle_panel("properties", cx);
                     }),
                 ))
                 .child(render_menu_item(
@@ -485,10 +474,9 @@ impl Render for MainWindow {
                     dropdown_width,
                     menu_item_height,
                     "Вкладка 4",
-                    self.checked_panels[3],
+                    panel_is_open(&self.core_layout, "history"),
                     cx.listener(|this, _, _, cx| {
-                        this.checked_panels[3] = !this.checked_panels[3];
-                        cx.notify();
+                        this.toggle_panel("history", cx);
                     }),
                 ))
         } else {
@@ -582,12 +570,7 @@ fn build_core_layout(
     theme: &ui::Theme,
 ) -> Result<(Layout, DockMetrics, NodeId, NodeId, NodeId), String> {
     let metrics = dock_gpui::dock_metrics_from_theme(theme);
-    let constraints = PanelConstraints::new(
-        Size::new(120.0, 80.0),
-        Size::new(theme.metrics.default_column_width.max(120.0), 220.0),
-        None,
-        false,
-    );
+    let constraints = panel_constraints(theme);
     let descriptors = ["layers", "color", "properties", "history"]
         .into_iter()
         .map(|key| {
@@ -674,6 +657,147 @@ fn panel_id_for_key(layout: &Layout, key: &str) -> Result<PanelId, String> {
         .ok_or_else(|| format!("Core layout does not contain the panel '{key}'"))
 }
 
+fn panel_constraints(theme: &ui::Theme) -> PanelConstraints {
+    PanelConstraints::new(
+        Size::new(120.0, 80.0),
+        Size::new(theme.metrics.default_column_width.max(120.0), 220.0),
+        None,
+        false,
+    )
+}
+
+fn panel_id_if_open(layout: &Layout, key: &str) -> Option<PanelId> {
+    layout
+        .panel_instances()
+        .find_map(|(id, instance)| (instance.key.as_str() == key).then_some(id))
+}
+
+fn panel_is_open(layout: &Layout, key: &str) -> bool {
+    panel_id_if_open(layout, key).is_some()
+}
+
+fn toggle_core_panel(
+    layout: &mut Layout,
+    metrics: &DockMetrics,
+    constraints: PanelConstraints,
+    key: &str,
+) -> Result<(), String> {
+    if let Some(panel) = panel_id_if_open(layout, key) {
+        layout
+            .apply(DockCommand::ClosePanel { panel }, metrics)
+            .map_err(|error| format!("could not close panel '{key}': {error:?}"))?;
+        return Ok(());
+    }
+
+    let panel_key = PanelKey::new(key).map_err(str::to_owned)?;
+    let target = panel_open_target(layout, key)?;
+    layout
+        .apply(
+            DockCommand::OpenPanel {
+                key: panel_key,
+                constraints,
+                target: Some(target),
+            },
+            metrics,
+        )
+        .map_err(|error| format!("could not open panel '{key}': {error:?}"))?;
+    Ok(())
+}
+
+fn panel_open_target(layout: &Layout, key: &str) -> Result<DropTarget, String> {
+    let right_column_count = main_column_count(layout, DockSide::Right);
+
+    match key {
+        // Layers always gets its own first column, to the left of the other panels.
+        "layers" => Ok(DropTarget::MainColumn {
+            side: DockSide::Right,
+            index: 0,
+        }),
+        // Color and Properties belong to the same tab group whenever both are open.
+        "color" => {
+            if let Some(group) = group_containing_key(layout, "properties") {
+                return Ok(DropTarget::Tabs { group, index: 0 });
+            }
+            if let Some(group) = group_containing_key(layout, "history") {
+                return Ok(DropTarget::GroupEdge {
+                    group,
+                    zone: DropZone::Top,
+                });
+            }
+            Ok(DropTarget::MainColumn {
+                side: DockSide::Right,
+                index: right_column_count,
+            })
+        }
+        "properties" => {
+            if let Some(group) = group_containing_key(layout, "color") {
+                let index = match layout.node(group) {
+                    Some(Node::Tabs(tabs)) => tabs.children.len(),
+                    _ => {
+                        return Err("the Color panel's group is no longer available".to_owned());
+                    }
+                };
+                return Ok(DropTarget::Tabs { group, index });
+            }
+            if let Some(group) = group_containing_key(layout, "history") {
+                return Ok(DropTarget::GroupEdge {
+                    group,
+                    zone: DropZone::Top,
+                });
+            }
+            Ok(DropTarget::MainColumn {
+                side: DockSide::Right,
+                index: right_column_count,
+            })
+        }
+        // History remains below the Color/Properties group whenever that group exists.
+        "history" => {
+            if let Some(group) = group_containing_key(layout, "color")
+                .or_else(|| group_containing_key(layout, "properties"))
+            {
+                return Ok(DropTarget::GroupEdge {
+                    group,
+                    zone: DropZone::Bottom,
+                });
+            }
+            Ok(DropTarget::MainColumn {
+                side: DockSide::Right,
+                index: right_column_count,
+            })
+        }
+        _ => Err(format!("unknown dock panel key '{key}'")),
+    }
+}
+
+fn main_column_count(layout: &Layout, side: DockSide) -> usize {
+    let Some(area) = layout.main_area(side) else {
+        return 0;
+    };
+    match layout.node(area.root) {
+        Some(Node::Column(_)) => 1,
+        Some(Node::Split(split)) if split.axis == dock_core::Axis::X => split.children.len(),
+        _ => 0,
+    }
+}
+
+fn group_containing_key(layout: &Layout, key: &str) -> Option<NodeId> {
+    let panel = panel_id_if_open(layout, key)?;
+    group_containing_panel(layout, panel)
+}
+
+fn group_has_header(layout: &Layout, group_id: NodeId) -> bool {
+    let Some(Node::Tabs(tabs)) = layout.node(group_id) else {
+        return false;
+    };
+    tabs.children.iter().any(|child_id| match layout.node(*child_id) {
+        Some(Node::Panel(panel)) => layout
+            .panel_instance(panel.panel_id)
+            .map(|instance| instance.key.as_str() != "history")
+            .unwrap_or(true),
+        _ => true,
+    })
+}
+
 fn group_containing_panel(layout: &Layout, panel_id: PanelId) -> Option<NodeId> {
     layout.nodes().find_map(|(node_id, node)| {
         let Node::Tabs(tabs) = node else {
@@ -720,6 +844,37 @@ fn group_tabs_view(layout: &Layout, group_id: NodeId) -> Option<GroupTabsView> {
 mod tests {
     use super::build_core_layout;
     use dock_core::{Axis, DockSide, Node, Point, Rect, Size};
+
+    #[test]
+    fn menu_toggles_all_panels_off_and_back_on_without_stale_group_ids() {
+        let theme = ui::Theme::default();
+        let (mut layout, metrics, _, _, _) =
+            build_core_layout(&theme).expect("initial Core layout should be valid");
+        let constraints = panel_constraints(&theme);
+        let keys = ["layers", "color", "properties", "history"];
+
+        for key in keys {
+            assert!(panel_is_open(&layout, key));
+            toggle_core_panel(&mut layout, &metrics, constraints, key)
+                .expect("menu should close an open panel");
+            assert!(!panel_is_open(&layout, key));
+            assert_eq!(layout.validate(&metrics), Ok(()));
+        }
+
+        for key in ["history", "properties", "color", "layers"] {
+            assert!(!panel_is_open(&layout, key));
+            toggle_core_panel(&mut layout, &metrics, constraints, key)
+                .expect("menu should reopen a closed panel");
+            assert!(panel_is_open(&layout, key));
+            assert_eq!(layout.validate(&metrics), Ok(()));
+            layout
+                .compute_rects(
+                    Rect::new(Point::ZERO, Size::new(1200.0, 768.0)),
+                    &metrics,
+                )
+                .expect("layout geometry should remain valid after toggling");
+        }
+    }
 
     #[test]
     fn core_layout_places_one_tab_column_left_of_two_stacked_groups() {
