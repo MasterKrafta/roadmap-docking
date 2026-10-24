@@ -305,7 +305,7 @@ impl MainWindow {
             let Some(area) = self.core_layout.main_area(side) else {
                 continue;
             };
-            if dock_tree_header_group(&self.core_layout, side) != Some(header_group) {
+            if !is_dock_tree_header_group(&self.core_layout, side, header_group) {
                 continue;
             }
             let root = area.root;
@@ -1729,20 +1729,15 @@ fn main_column_count(layout: &Layout, side: DockSide) -> usize {
     }
 }
 
-/// The first group in the first column is the handle for moving its entire dock-area tree.
-fn dock_tree_header_group(layout: &Layout, side: DockSide) -> Option<NodeId> {
-    let root = layout.main_area(side)?.root;
-    let first_column = match layout.node(root)? {
-        Node::Column(_) => root,
-        Node::Split(split) if split.axis == dock_core::Axis::X => {
-            *split.children.first()?
-        }
-        _ => return None,
+/// Only the top group in each main-dock column can initiate a whole-tree drag.
+fn is_dock_tree_header_group(layout: &Layout, side: DockSide, group_id: NodeId) -> bool {
+    let Some(root) = layout.main_area(side).map(|area| area.root) else {
+        return false;
     };
-    match layout.node(first_column)? {
-        Node::Column(column) => column.groups.first().copied(),
-        _ => None,
-    }
+    layout.nodes().any(|(column_id, node)| {
+        matches!(node, Node::Column(column) if column.groups.first() == Some(&group_id))
+            && subtree_contains_node(layout, root, column_id)
+    })
 }
 
 /// Computes the bounds covering every column inside one main-area root.
