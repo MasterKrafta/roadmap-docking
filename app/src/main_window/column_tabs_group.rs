@@ -15,33 +15,6 @@ mod tab;
 
 use gpui::{App, ClickEvent, Div, ParentElement, Styled, Window, div, px, rgb};
 
-/// Renders the standard two-tab column group.
-pub(super) fn render<F1, F2>(
-    theme: ui::Theme,
-    active_tab: usize,
-    width: f32,
-    height: f32,
-    on_first_tab: F1,
-    on_second_tab: F2,
-) -> Div
-where
-    F1: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    F2: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-{
-    render_with_tabs(
-        theme,
-        active_tab,
-        width,
-        height,
-        "Вкладка 1",
-        Some("Вкладка 2"),
-        None,
-        None,
-        on_first_tab,
-        on_second_tab,
-    )
-}
-
 /// Renders a headered group using the tabs supplied by the Core layout.
 pub(super) fn render_with_tabs<F1, F2>(
     theme: ui::Theme,
