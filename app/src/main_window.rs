@@ -401,7 +401,44 @@ impl MainWindow {
             if group_is_floating(&self.core_layout, group_id) {
                 continue;
             }
-            let Some(tabs_view) = group_tabs_view(&self.core_layout, group_id) else {
+
+            // A docked source stays in Core while dragging, but its visual source
+            // updates: hide the dragged tab, or show an empty placeholder when
+            // the dragged tab was the group's only tab.
+            let dragged_panel = self
+                .active_tab_drag_payload
+                .as_ref()
+                .filter(|drag| drag.floating_group.is_none() && drag.group == group_id)
+                .map(|drag| drag.panel);
+            let Some(tabs_view) =
+                group_tabs_view_excluding(&self.core_layout, group_id, dragged_panel)
+            else {
+                if dragged_panel.is_some() {
+                    let placeholder = tabs_group::render(
+                        &self.core_layout,
+                        group_id,
+                        self.theme,
+                        0,
+                        group_rect.rect.size.width,
+                        group_rect.rect.size.height,
+                        "",
+                        None,
+                        None,
+                        None,
+                        |_, _, _| {},
+                        |_, _, _| {},
+                        tabs_group::GroupRenderMode::SourcePlaceholder,
+                    );
+                    root = root.child(
+                        div()
+                            .absolute()
+                            .left(px(group_rect.rect.origin.x))
+                            .top(px(group_rect.rect.origin.y))
+                            .w(px(group_rect.rect.size.width))
+                            .h(px(group_rect.rect.size.height))
+                            .child(placeholder),
+                    );
+                }
                 continue;
             };
 
@@ -1373,21 +1410,34 @@ fn docked_tab_float_command(
 }
 
 fn group_tabs_view(layout: &Layout, group_id: NodeId) -> Option<GroupTabsView> {
+    group_tabs_view_excluding(layout, group_id, None)
+}
+
+fn group_tabs_view_excluding(
+    layout: &Layout,
+    group_id: NodeId,
+    excluded_panel: Option<PanelId>,
+) -> Option<GroupTabsView> {
     let Some(Node::Tabs(tabs)) = layout.node(group_id) else {
         return None;
     };
-    let mut children = tabs.children.iter().take(2).filter_map(|child_id| {
+    let mut children = tabs.children.iter().filter_map(|child_id| {
         let Some(Node::Panel(panel)) = layout.node(*child_id) else {
             return None;
         };
-        let label = panel_label(layout, panel.panel_id)?;
-        Some((panel.panel_id, label))
-    });
+        (Some(panel.panel_id) != excluded_panel)
+            .then(|| panel_label(layout, panel.panel_id).map(|label| (panel.panel_id, label)))
+            .flatten()
+    }).take(2);
 
     let (first_panel, first_label) = children.next()?;
     let second = children.next();
     Some(GroupTabsView {
-        active_tab: tabs.active_index.min(if second.is_some() { 1 } else { 0 }),
+        active_tab: if excluded_panel.is_some() {
+            0
+        } else {
+            tabs.active_index.min(if second.is_some() { 1 } else { 0 })
+        },
         first_panel,
         first_label,
         second_panel: second.map(|(panel, _)| panel),
@@ -1402,10 +1452,45 @@ mod tests {
         build_core_layout, column_containing_group, floating_group_bounds,
         floating_group_for_panel, floating_root_tabs_group, group_containing_panel,
         group_has_header, group_is_floating, panel_constraints, panel_id_for_key,
+        group_tabs_view_excluding,
         clamped_pointer_delta, panel_is_open, toggle_core_panel, floating_size_for_detach,
         floating_drag_bounds, FLOATING_HEIGHT_RATIO,
     };
     use dock_core::{Axis, DockCommand, DockSide, Node, Point, Rect, Size};
+
+    #[test]
+    fn dragging_tab_hides_it_from_source_and_keeps_only_remaining_tab() {
+        let theme = ui::Theme::default();
+        let (layout, _, _, upper_group, lower_group) =
+            build_core_layout(&theme).expect("initial Core layout should be valid");
+        let Node::Tabs(source_tabs) = layout.node(upper_group).unwrap() else {
+            panic!("upper group should be a tab group");
+        };
+        assert_eq!(source_tabs.children.len(), 2);
+
+        let dragged_panel = match layout.node(source_tabs.children[0]).unwrap() {
+            Node::Panel(panel) => panel.panel_id,
+            _ => panic!("tab child should be a Panel"),
+        };
+        let remaining = group_tabs_view_excluding(&layout, upper_group, Some(dragged_panel))
+            .expect("the source group should keep the tab that was not dragged");
+        assert!(remaining.second_panel.is_none());
+        assert_ne!(remaining.first_panel, dragged_panel);
+        assert_eq!(remaining.active_tab, 0);
+
+        let Node::Tabs(lower_tabs) = layout.node(lower_group).unwrap() else {
+            panic!("lower group should be a tab group");
+        };
+        assert_eq!(lower_tabs.children.len(), 1);
+        let only_panel = match layout.node(lower_tabs.children[0]).unwrap() {
+            Node::Panel(panel) => panel.panel_id,
+            _ => panic!("tab child should be a Panel"),
+        };
+        assert!(
+            group_tabs_view_excluding(&layout, lower_group, Some(only_panel)).is_none(),
+            "a group whose only tab is dragged should leave a placeholder"
+        );
+    }
 
     #[test]
     fn floating_rendering_uses_the_correct_header_mode() {
