@@ -137,7 +137,7 @@ fn render_menu_item<F>(
     label: &'static str,
     is_checked: bool,
     on_click: F,
-) -> gpui::Div
+) -> impl IntoElement
 where
     F: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 {
