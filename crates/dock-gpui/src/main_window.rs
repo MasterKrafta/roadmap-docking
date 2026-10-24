@@ -1,13 +1,12 @@
-use dock_core::{Point, Rect, Size};
+use dock_core::{DockCommand, Point, Rect, Size};
 use gpui::{Context, IntoElement, ParentElement, Render, Styled, Window, div, px, rgb};
 use ui::Theme;
 
-use crate::dock::DockController;
-use crate::{DockSurface, NoopHost};
+use crate::dock::{DockController, WindowHost};
+use crate::DockSurface;
 
-/// Temporary picture-only host window used while the new surface architecture is validated.
-///
-/// Interaction handling and the command controller arrive in the following roadmap stages.
+/// Host window for the dock surface. Dock commands dispatch through its controller;
+/// menu and gesture handling are connected in their dedicated roadmap stages.
 pub(crate) struct MainWindow {
     theme: Theme,
     dock: DockController,
@@ -20,10 +19,14 @@ impl MainWindow {
             theme,
         })
     }
+
+    pub(crate) fn apply_dock_command(&mut self, command: DockCommand) {
+        let _ = self.dock.apply(command);
+    }
 }
 
 impl Render for MainWindow {
-    fn render(&mut self, window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let window_size = window.viewport_size();
         let width = window_size.width.as_f32().max(1.0);
         let height = window_size.height.as_f32().max(1.0);
@@ -49,7 +52,7 @@ impl Render for MainWindow {
                 .or_insert_with(gpui::ScrollHandle::new);
         }
 
-        let mut host = NoopHost;
+        let mut host = WindowHost::new(cx);
         div()
             .flex()
             .flex_col()

@@ -28,7 +28,7 @@ impl Default for RunOptions {
     }
 }
 
-/// Starts the platform window and renders the temporary no-op dock host.
+/// Starts the platform window and renders the dock surface with controller-backed command handling.
 pub fn run(options: RunOptions) {
     #[cfg(windows)]
     run_windows(options);
