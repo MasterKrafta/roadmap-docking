@@ -71,6 +71,7 @@ pub(super) struct TabDragPayload {
     panel: PanelId,
     group: NodeId,
     mouse_position_before: gpui::Point<gpui::Pixels>,
+    drag_viewport_size: Size,
     bounds_before: Rect,
     floating_group: Option<FloatingGroupId>,
 }
@@ -197,6 +198,7 @@ impl MainWindow {
         group: NodeId,
         group_rect: Rect,
         mouse_position_before: gpui::Point<gpui::Pixels>,
+        drag_viewport_size: Size,
     ) -> TabDragPayload {
         let floating = floating_group_for_panel(&self.core_layout, panel);
         let (floating_group, bounds_before) = match floating {
@@ -209,6 +211,7 @@ impl MainWindow {
             panel,
             group,
             mouse_position_before,
+            drag_viewport_size,
             bounds_before,
             floating_group,
         }
@@ -220,9 +223,18 @@ impl MainWindow {
         cx: &mut Context<Self>,
     ) {
         let drag = event.drag(cx);
-        let movement = event.event.position - drag.mouse_position_before;
-        let dx = movement.x.as_f32();
-        let dy = movement.y.as_f32();
+        let current_pointer = Point::new(
+            event.event.position.x.as_f32(),
+            event.event.position.y.as_f32(),
+        );
+        let pointer_before = Point::new(
+            drag.mouse_position_before.x.as_f32(),
+            drag.mouse_position_before.y.as_f32(),
+        );
+        let movement =
+            clamped_pointer_delta(current_pointer, pointer_before, drag.drag_viewport_size);
+        let dx = movement.x;
+        let dy = movement.y;
         if !dx.is_finite() || !dy.is_finite() || (dx.abs() < 0.01 && dy.abs() < 0.01) {
             return;
         }
@@ -307,6 +319,11 @@ impl MainWindow {
         cx: &mut Context<Self>,
     ) -> gpui::Div {
         let viewport = Rect::new(Point::ZERO, Size::new(width.max(1.0), height.max(1.0)));
+        let window_viewport = window.viewport_size();
+        let drag_viewport_size = Size::new(
+            window_viewport.width.as_f32().max(1.0),
+            window_viewport.height.as_f32().max(1.0),
+        );
         let rects = match self.core_layout.compute_rects(viewport, &self.core_metrics) {
             Ok(rects) => rects,
             Err(error) => {
@@ -357,9 +374,16 @@ impl MainWindow {
                 group_id,
                 group_rect.rect,
                 drag_mouse_position,
+                drag_viewport_size,
             ));
             let second_drag = tabs_view.second_panel.map(|panel| {
-                self.tab_drag_payload(panel, group_id, group_rect.rect, drag_mouse_position)
+                self.tab_drag_payload(
+                    panel,
+                    group_id,
+                    group_rect.rect,
+                    drag_mouse_position,
+                    drag_viewport_size,
+                )
             });
 
             let group_element = render_tabs_group(
@@ -588,9 +612,16 @@ impl MainWindow {
                 group_id,
                 group_rect.rect,
                 drag_mouse_position,
+                drag_viewport_size,
             ));
             let second_drag = tabs_view.second_panel.map(|panel| {
-                self.tab_drag_payload(panel, group_id, group_rect.rect, drag_mouse_position)
+                self.tab_drag_payload(
+                    panel,
+                    group_id,
+                    group_rect.rect,
+                    drag_mouse_position,
+                    drag_viewport_size,
+                )
             });
 
             let floating_bounds =
@@ -1092,6 +1123,17 @@ fn group_has_header(layout: &Layout, group_id: NodeId) -> bool {
     })
 }
 
+fn clamped_pointer_delta(current: Point, start: Point, viewport_size: Size) -> Point {
+    let max_x = viewport_size.width.max(1.0);
+    let max_y = viewport_size.height.max(1.0);
+    let current_x = current.x.clamp(0.0, max_x);
+    let current_y = current.y.clamp(0.0, max_y);
+    let start_x = start.x.clamp(0.0, max_x);
+    let start_y = start.y.clamp(0.0, max_y);
+
+    Point::new(current_x - start_x, current_y - start_y)
+}
+
 fn floating_size_for_detach(
     source_bounds: Rect,
     has_header: bool,
@@ -1264,7 +1306,8 @@ mod tests {
         build_core_layout, column_containing_group, floating_group_bounds,
         floating_group_for_panel, floating_root_tabs_group, group_containing_panel,
         group_has_header, group_is_floating, panel_constraints, panel_id_for_key,
-        panel_is_open, toggle_core_panel, floating_size_for_detach, FLOATING_HEIGHT_RATIO,
+        clamped_pointer_delta, panel_is_open, toggle_core_panel, floating_size_for_detach,
+        FLOATING_HEIGHT_RATIO,
     };
     use dock_core::{Axis, DockCommand, DockSide, Node, Point, Rect, Size};
 
@@ -1291,6 +1334,20 @@ mod tests {
             .expect("a tab should detach into a floating group");
         let floating = layout.floating_groups().next().unwrap();
         assert!(floating_group_bounds(&layout, floating.0).is_some());
+    }
+
+    #[test]
+    fn floating_drag_uses_pointer_until_it_reaches_the_window_edge() {
+        let viewport = Size::new(1200.0, 800.0);
+        let start = Point::new(300.0, 200.0);
+
+        let beyond_right_bottom =
+            clamped_pointer_delta(Point::new(1300.0, 900.0), start, viewport);
+        assert_eq!(beyond_right_bottom, Point::new(900.0, 600.0));
+
+        let beyond_left_top =
+            clamped_pointer_delta(Point::new(-20.0, -10.0), start, viewport);
+        assert_eq!(beyond_left_top, Point::new(-300.0, -200.0));
     }
 
     #[test]
