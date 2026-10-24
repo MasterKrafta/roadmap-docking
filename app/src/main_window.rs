@@ -346,7 +346,6 @@ impl MainWindow {
             if group_is_floating(&self.core_layout, group_id) {
                 continue;
             }
-            let has_header = group_has_header(&self.core_layout, group_id);
             let Some(tabs_view) = group_tabs_view(&self.core_layout, group_id) else {
                 continue;
             };
