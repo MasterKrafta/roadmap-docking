@@ -103,7 +103,7 @@ where
         group
     };
     let group = if show_header {
-        group.child(header::render(theme, width, header_height, header_drag_payload))
+        group.child(header::render(theme, width, header_height, group_id, header_drag_payload))
     } else {
         group
     };
