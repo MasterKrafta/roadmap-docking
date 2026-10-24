@@ -75,10 +75,51 @@ fn supported_splitter_handle(
         Axis::Y if matches!(layout.node(owner), Some(Node::Column(_))) => {
             Some(ResizeHandle::Splitter { owner, boundary_index, axis })
         }
-        Axis::X if [DockSide::Left, DockSide::Right].into_iter().any(|side| {
-            layout.main_area(side).is_some_and(|area| area.root == owner)
-                && !main_column_ids(layout, side).is_empty()
-        }) => Some(ResizeHandle::Splitter { owner, boundary_index, axis }),
+        Axis::X
+            if matches!(layout.node(owner), Some(Node::Split(split)) if split.axis == Axis::X)
+                || [DockSide::Left, DockSide::Right].into_iter().any(|side| {
+                    layout.main_area(side).is_some_and(|area| area.root == owner)
+                        && !main_column_ids(layout, side).is_empty()
+                }) =>
+        {
+            Some(ResizeHandle::Splitter {
+                owner,
+                boundary_index,
+                axis,
+            })
+        }
         _ => None,
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::supported_splitter_handle;
+    use crate::dock::DockController;
+    use crate::requests::ResizeHandle;
+    use dock_core::{Axis, Node};
+    use ui::Theme;
+
+    #[test]
+    fn horizontal_split_nodes_expose_resize_handles() {
+        let controller = DockController::new_initial(&Theme::default()).unwrap();
+        let layout = controller.layout();
+        let owner = layout
+            .nodes()
+            .find_map(|(id, node)| match node {
+                Node::Split(split) if split.axis == Axis::X => Some(id),
+                _ => None,
+            })
+            .expect("initial dock layout should contain a horizontal split");
+
+        assert_eq!(
+            supported_splitter_handle(layout, owner, 0, Axis::X),
+            Some(ResizeHandle::Splitter {
+                owner,
+                boundary_index: 0,
+                axis: Axis::X,
+            })
+        );
     }
 }
