@@ -1133,8 +1133,11 @@ fn group_tabs_view(layout: &Layout, group_id: NodeId) -> Option<GroupTabsView> {
 
 #[cfg(test)]
 mod tests {
-    use super::build_core_layout;
-    use dock_core::{Axis, DockSide, Node, Point, Rect, Size};
+    use super::{
+        build_core_layout, floating_group_for_panel, floating_root_tabs_group,
+        group_containing_panel, group_is_floating, panel_id_for_key,
+    };
+    use dock_core::{Axis, DockCommand, DockSide, Node, Point, Rect, Size};
 
     #[test]
     fn floating_tree_helpers_find_panels_after_detach() {
