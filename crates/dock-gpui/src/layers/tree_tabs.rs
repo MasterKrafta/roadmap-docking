@@ -1,7 +1,8 @@
-use dock_core::{DockCommand, DragHandle, DragPayload, Node, Point, Rect, Size};
+use dock_core::{DragHandle, DragPayload, Node, NodeId, Point, Rect, Size};
 use gpui::{AnyElement, IntoElement};
 
 use crate::components::{GroupMenuButton, PanelTab, TabOverflowButton};
+use crate::dock::{activate_tab, collapse_group};
 use crate::host::DockHost;
 use crate::labels::tab_header_label;
 use crate::requests::DockMenuRequest;
@@ -14,7 +15,7 @@ pub(crate) fn render(
     data: &RenderData<'_>,
     host: &mut dyn DockHost,
     area: TreeArea<'_>,
-    rail_groups: &std::collections::HashSet<dock_core::NodeId>,
+    rail_groups: &std::collections::HashSet<NodeId>,
 ) -> Vec<AnyElement> {
     let layout = data.layout;
     let theme = data.theme;
@@ -42,14 +43,8 @@ pub(crate) fn render(
                 label: display_label,
                 active,
                 theme: *theme,
-                on_activate: host.command(DockCommand::ActivateTab {
-                    group: header.group,
-                    panel: header.panel,
-                }),
-                on_collapse_toggle: host.command(DockCommand::CollapseGroup {
-                    group: header.group,
-                    collapsed: !collapsed,
-                }),
+                on_activate: host.command(activate_tab(header.group, header.panel)),
+                on_collapse_toggle: host.command(collapse_group(header.group, !collapsed)),
                 on_drag_start: host.drag_start(
                     DragPayload::Panel { panel: header.panel },
                     DragHandle::PanelTab,
