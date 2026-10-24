@@ -19,16 +19,34 @@ struct GroupTabsView {
     second_label: Option<&'static str>,
 }
 
+/// Meaning of a splitter gesture, including the canvas-facing outer edge.
+#[derive(Clone, Copy)]
+enum SplitterResizeTarget {
+    ColumnBoundary {
+        side: DockSide,
+        boundary_index: usize,
+    },
+    ColumnOuterEdge {
+        side: DockSide,
+        column: NodeId,
+        width_before: f32,
+        max_width: f32,
+    },
+    Groups {
+        column: NodeId,
+        boundary_index: usize,
+        available_height: f32,
+    },
+}
+
 /// Snapshot captured when a splitter drag begins. Each pointer update is applied
 /// to this same baseline, so the total pointer delta is not accumulated repeatedly.
 #[derive(Clone)]
 struct SplitterDragState {
     layout_before: Layout,
     mouse_position_before: gpui::Point<gpui::Pixels>,
-    owner: NodeId,
-    boundary_index: usize,
     axis: dock_core::Axis,
-    available_height: f32,
+    target: SplitterResizeTarget,
 }
 
 /// GPUI requires a view entity for a drag; resizing itself is handled by the Core layout.
@@ -80,6 +98,69 @@ impl MainWindow {
             &self.core_metrics,
         ) {
             eprintln!("Could not activate dock tab: {error:?}");
+        }
+        cx.notify();
+    }
+
+    fn update_splitter_from_drag(
+        &mut self,
+        event: &DragMoveEvent<SplitterDragState>,
+        cx: &mut Context<Self>,
+    ) {
+        let drag = event.drag(cx);
+        let movement = event.event.position - drag.mouse_position_before;
+        let delta = match drag.axis {
+            dock_core::Axis::X => movement.x.as_f32(),
+            dock_core::Axis::Y => movement.y.as_f32(),
+        };
+        if !delta.is_finite() || delta.abs() < 0.01 {
+            return;
+        }
+
+        // Re-apply the absolute mouse displacement to the captured state; do not
+        // accumulate the same displacement repeatedly across move events.
+        self.core_layout = drag.layout_before.clone();
+        let command = match drag.target {
+            SplitterResizeTarget::ColumnBoundary {
+                side,
+                boundary_index,
+            } => DockCommand::ResizeColumnBoundary {
+                side,
+                boundary_index,
+                delta,
+            },
+            SplitterResizeTarget::ColumnOuterEdge {
+                side,
+                column,
+                width_before,
+                max_width,
+            } => {
+                // The canvas-facing edge is the right edge for a left dock and
+                // the left edge for a right dock.
+                let width_delta = match side {
+                    DockSide::Left => movement.x.as_f32(),
+                    DockSide::Right => -movement.x.as_f32(),
+                };
+                DockCommand::ResizeColumn {
+                    column,
+                    width: (width_before + width_delta).min(max_width),
+                }
+            }
+            SplitterResizeTarget::Groups {
+                column,
+                boundary_index,
+                available_height,
+            } => DockCommand::ResizeGroups {
+                column,
+                boundary_index,
+                delta,
+                available_height,
+            },
+        };
+
+        if let Err(error) = self.core_layout.apply(command, &self.core_metrics) {
+            eprintln!("Could not resize dock splitter: {error:?}");
+            self.core_layout = drag.layout_before.clone();
         }
         cx.notify();
     }
@@ -192,13 +273,22 @@ impl MainWindow {
                 _ => 1.0,
             };
 
+            let target = match splitter.axis {
+                dock_core::Axis::X => SplitterResizeTarget::ColumnBoundary {
+                    side: DockSide::Right,
+                    boundary_index: splitter.boundary_index,
+                },
+                dock_core::Axis::Y => SplitterResizeTarget::Groups {
+                    column: splitter.owner,
+                    boundary_index: splitter.boundary_index,
+                    available_height,
+                },
+            };
             let drag_state = SplitterDragState {
                 layout_before: self.core_layout.clone(),
                 mouse_position_before: window.mouse_position(),
-                owner: splitter.owner,
-                boundary_index: splitter.boundary_index,
                 axis: splitter.axis,
-                available_height,
+                target,
             };
             let cursor = match splitter.axis {
                 dock_core::Axis::X => CursorStyle::ResizeColumn,
@@ -234,39 +324,7 @@ impl MainWindow {
                 .on_drag(drag_state, |_, _, _, cx| cx.new(|_| SplitterDragPreview))
                 .on_drag_move::<SplitterDragState>(cx.listener(
                     move |this, event: &DragMoveEvent<SplitterDragState>, _window, cx| {
-                        let drag = event.drag(cx);
-                        let movement = event.event.position - drag.mouse_position_before;
-                        let delta = match drag.axis {
-                            dock_core::Axis::X => movement.x.as_f32(),
-                            dock_core::Axis::Y => movement.y.as_f32(),
-                        };
-                        if !delta.is_finite() || delta.abs() < 0.01 {
-                            return;
-                        }
-
-                        // Re-apply the absolute mouse displacement to the captured
-                        // state; do not add the same cumulative delta on every frame.
-                        this.core_layout = drag.layout_before.clone();
-                        let command = match drag.axis {
-                            dock_core::Axis::X => DockCommand::ResizeColumnBoundary {
-                                side: DockSide::Right,
-                                boundary_index: drag.boundary_index,
-                                delta,
-                            },
-                            dock_core::Axis::Y => DockCommand::ResizeGroups {
-                                column: drag.owner,
-                                boundary_index: drag.boundary_index,
-                                delta,
-                                available_height: drag.available_height,
-                            },
-                        };
-                        if let Err(error) =
-                            this.core_layout.apply(command, &this.core_metrics)
-                        {
-                            eprintln!("Could not resize dock splitter: {error:?}");
-                            this.core_layout = drag.layout_before.clone();
-                        }
-                        cx.notify();
+                        this.update_splitter_from_drag(event, cx);
                     },
                 ))
                 .child(
@@ -280,6 +338,87 @@ impl MainWindow {
                 );
 
             root = root.child(handle);
+        }
+
+        // The left edge of the right dock is its canvas-facing outer boundary.
+        // Core emits splitters only between siblings, so this edge uses ResizeColumn.
+        let right_dock_outer_column = self.core_layout.main_area(DockSide::Right).and_then(|area| {
+            match self.core_layout.node(area.root) {
+                Some(Node::Column(_)) => Some(area.root),
+                Some(Node::Split(split)) if split.axis == dock_core::Axis::X => {
+                    split.children.first().copied()
+                }
+                _ => None,
+            }
+        });
+        if let Some(column_id) = right_dock_outer_column {
+            let width_before = match self.core_layout.node(column_id) {
+                Some(Node::Column(column))
+                    if matches!(column.mode, dock_core::ColumnMode::Expanded) =>
+                {
+                    Some(column.width)
+                }
+                _ => None,
+            };
+            let column_rect = rects.columns.iter().find(|entry| entry.column == column_id);
+            let canvas_rect = rects.canvas;
+            if let (Some(width_before), Some(column_rect), Some(canvas_rect)) =
+                (width_before, column_rect, canvas_rect)
+            {
+                let hit_width = self.core_metrics.splitter_hit_zone.min(width);
+                let hit_height = column_rect.rect.size.height;
+                if hit_width > 0.0 && hit_height > 0.0 {
+                    // Do not let this outer-edge resize consume the canvas below
+                    // Core's minimum canvas width, even before canvas bounds have
+                    // been persisted in CanvasState.
+                    let max_width = width_before
+                        + (canvas_rect.size.width - self.core_metrics.min_canvas_width).max(0.0);
+                    let handle_left = (column_rect.rect.origin.x - hit_width / 2.0)
+                        .clamp(0.0, (width - hit_width).max(0.0));
+                    let bar_width = self.core_metrics.splitter_thickness.min(hit_width);
+                    let drag_state = SplitterDragState {
+                        layout_before: self.core_layout.clone(),
+                        mouse_position_before: window.mouse_position(),
+                        axis: dock_core::Axis::X,
+                        target: SplitterResizeTarget::ColumnOuterEdge {
+                            side: DockSide::Right,
+                            column: column_id,
+                            width_before,
+                            max_width,
+                        },
+                    };
+
+                    let handle = div()
+                        .id("dock-right-outer-left-resize")
+                        .absolute()
+                        .left(px(handle_left))
+                        .top(px(column_rect.rect.origin.y))
+                        .w(px(hit_width))
+                        .h(px(hit_height))
+                        .cursor(CursorStyle::ResizeColumn)
+                        .on_mouse_down(MouseButton::Left, |_, window, cx| {
+                            window.prevent_default();
+                            cx.stop_propagation();
+                        })
+                        .on_drag(drag_state, |_, _, _, cx| cx.new(|_| SplitterDragPreview))
+                        .on_drag_move::<SplitterDragState>(cx.listener(
+                            move |this, event: &DragMoveEvent<SplitterDragState>, _window, cx| {
+                                this.update_splitter_from_drag(event, cx);
+                            },
+                        ))
+                        .child(
+                            div()
+                                .absolute()
+                                .left(px((hit_width - bar_width) / 2.0))
+                                .top(px(0.0))
+                                .w(px(bar_width))
+                                .h(px(hit_height))
+                                .bg(rgb(self.theme.colors.splitter)),
+                        );
+
+                    root = root.child(handle);
+                }
+            }
         }
 
         root
