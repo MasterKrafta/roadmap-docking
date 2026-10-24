@@ -176,6 +176,57 @@
     }
 
     #[test]
+    fn failed_resize_commit_restores_baseline_and_clears_session() {
+        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+        let frame = controller
+            .frame(Rect::new(Point::ZERO, Size::new(1200.0, 800.0)))
+            .unwrap();
+        let splitter = *frame
+            .rects()
+            .splitters
+            .iter()
+            .find(|splitter| splitter.axis == Axis::Y)
+            .expect("initial layout should contain a vertical group splitter");
+        let owner = splitter.owner;
+        let boundary_index = splitter.boundary_index;
+        let original_ratios = match controller.layout().node(owner) {
+            Some(Node::Column(column)) => column.group_ratios.clone(),
+            other => panic!("vertical splitter should belong to a column, got {other:?}"),
+        };
+        let baseline_version = controller.layout().version();
+        let start = Point::new(180.0, 240.0);
+        controller
+            .begin_resize(
+                ResizeHandle::Splitter {
+                    owner,
+                    boundary_index,
+                    axis: Axis::Y,
+                },
+                start,
+                &frame,
+            )
+            .unwrap();
+        controller
+            .update_resize(Point::new(start.x, start.y + 16.0))
+            .unwrap();
+
+        assert!(matches!(
+            controller.commit_resize(Point::new(f32::NAN, start.y)),
+            Err(super::super::resize_session::ResizeUpdateError::InvalidPointer)
+        ));
+        assert_eq!(controller.layout().version(), baseline_version);
+        assert_eq!(
+            match controller.layout().node(owner) {
+                Some(Node::Column(column)) => column.group_ratios.clone(),
+                _ => panic!("resize owner should remain a column after failed commit"),
+            },
+            original_ratios
+        );
+        assert!(controller.resize_session().is_none());
+        assert!(!controller.undo().unwrap());
+    }
+
+    #[test]
     fn resize_preview_is_recomputed_from_baseline_and_zero_delta_restores_it() {
         let mut controller = DockController::new_initial(&Theme::default()).unwrap();
         let frame = controller
