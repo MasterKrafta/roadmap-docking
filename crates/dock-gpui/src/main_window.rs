@@ -1,24 +1,21 @@
-use std::collections::HashMap;
-
 use dock_core::{
     create_initial_layout, DockCommand, DockMetrics, DockSide, DropTarget, DropZone, Layout,
     Node, NodeId, PanelId, Point, Profile, Rect, Size,
 };
 use gpui::{
-    Context, IntoElement, ParentElement, Render, ScrollHandle, Styled, Window, div, px, rgb,
+    Context, IntoElement, ParentElement, Render, Styled, Window, div, px, rgb,
 };
 use ui::Theme;
 
 use crate::{DockSurface, FrameGeometry, NoopHost, dock_metrics_from_theme};
+use crate::dock::DockController;
 
 /// Temporary picture-only host window used while the new surface architecture is validated.
 ///
 /// Interaction handling and the command controller arrive in the following roadmap stages.
 pub(crate) struct MainWindow {
     theme: Theme,
-    layout: Layout,
-    metrics: DockMetrics,
-    scroll_handles: HashMap<NodeId, ScrollHandle>,
+    dock: DockController,
 }
 
 impl MainWindow {
@@ -26,9 +23,7 @@ impl MainWindow {
         let (layout, metrics) = build_initial_layout(&theme)?;
         Ok(Self {
             theme,
-            layout,
-            metrics,
-            scroll_handles: HashMap::new(),
+            dock: DockController::new(layout, metrics),
         })
     }
 }
@@ -42,7 +37,7 @@ impl Render for MainWindow {
         let content_height = (height - menu_height).max(1.0);
         let viewport = Rect::new(Point::ZERO, Size::new(width, content_height));
 
-        let frame = match FrameGeometry::compute(&self.layout, viewport, &self.metrics) {
+        let frame = match FrameGeometry::compute(self.dock.layout(), viewport, self.dock.metrics()) {
             Ok(frame) => frame,
             Err(error) => {
                 return div()
@@ -54,9 +49,10 @@ impl Render for MainWindow {
             }
         };
         for overflow in &frame.rects().vertical_overflow {
-            self.scroll_handles
+            self.dock
+                .scroll_handles_mut()
                 .entry(overflow.owner)
-                .or_insert_with(ScrollHandle::new);
+                .or_insert_with(gpui::ScrollHandle::new);
         }
 
         let mut host = NoopHost;
@@ -80,9 +76,9 @@ impl Render for MainWindow {
             )
             .child(
                 DockSurface::new(
-                    &self.layout,
+                    self.dock.layout(),
                     &frame,
-                    &self.scroll_handles,
+                    self.dock.scroll_handles(),
                     &self.theme,
                     None,
                 )

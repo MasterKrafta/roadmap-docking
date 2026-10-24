@@ -4,6 +4,7 @@ pub mod requests;
 pub mod surface;
 mod chrome_geometry;
 mod color;
+mod dock;
 mod entry;
 mod frame;
 mod geometry;
