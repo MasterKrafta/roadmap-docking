@@ -33,8 +33,13 @@ pub(crate) struct MainWindow {
 
 impl MainWindow {
     pub(crate) fn new(theme: ui::Theme) -> Result<Self, String> {
-        let (core_layout, core_metrics, one_tab_column_group, two_tab_column_group, one_tab_headerless_group) =
-            build_core_layout(&theme)?;
+        let (
+            core_layout,
+            core_metrics,
+            one_tab_column_group,
+            two_tab_column_group,
+            one_tab_headerless_group,
+        ) = build_core_layout(&theme)?;
 
         Ok(Self {
             theme,
@@ -452,4 +457,55 @@ fn group_tabs_view(layout: &Layout, group_id: NodeId) -> Option<GroupTabsView> {
         second_panel: second.map(|(panel, _)| panel),
         second_label: second.map(|(_, label)| label),
     })
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::build_core_layout;
+    use dock_core::{Axis, DockSide, Node, Point, Rect, Size};
+
+    #[test]
+    fn core_layout_places_one_tab_column_left_of_two_stacked_groups() {
+        let theme = ui::Theme::default();
+        let (layout, metrics, left_group, upper_group, lower_group) =
+            build_core_layout(&theme).expect("initial Core layout should be valid");
+
+        assert_eq!(layout.validate(&metrics), Ok(()));
+
+        let right_area = layout.main_area(DockSide::Right).unwrap();
+        let Node::Split(main_split) = layout.node(right_area.root).unwrap() else {
+            panic!("right dock root should be the horizontal split between columns");
+        };
+        assert_eq!(main_split.axis, Axis::X);
+        assert_eq!(main_split.children.len(), 2);
+
+        let Node::Column(left_column) = layout.node(main_split.children[0]).unwrap() else {
+            panic!("first split child should be the left column");
+        };
+        let Node::Column(right_column) = layout.node(main_split.children[1]).unwrap() else {
+            panic!("second split child should be the right column");
+        };
+        assert_eq!(left_column.groups, vec![left_group]);
+        assert_eq!(right_column.groups, vec![upper_group, lower_group]);
+
+        for (group_id, expected_tabs) in [(left_group, 1), (upper_group, 2), (lower_group, 1)] {
+            let Node::Tabs(tabs) = layout.node(group_id).unwrap() else {
+                panic!("column child should be a Tabs group");
+            };
+            assert_eq!(tabs.children.len(), expected_tabs);
+        }
+
+        let rects = layout
+            .compute_rects(
+                Rect::new(Point::ZERO, Size::new(1200.0, 768.0)),
+                &metrics,
+            )
+            .expect("initial tree should produce geometry");
+        assert!(rects.groups.iter().any(|entry| entry.group == left_group));
+        assert!(rects.groups.iter().any(|entry| entry.group == upper_group));
+        assert!(rects.groups.iter().any(|entry| entry.group == lower_group));
+        assert!(rects.splitters.iter().any(|splitter| splitter.axis == Axis::X));
+        assert!(rects.splitters.iter().any(|splitter| splitter.axis == Axis::Y));
+    }
 }
