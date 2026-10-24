@@ -1,3 +1,4 @@
+pub mod components;
 mod chrome_geometry;
 mod color;
 mod frame;

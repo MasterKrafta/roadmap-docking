@@ -1,5 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::components::RectBox;
+
 use crate::chrome_geometry::{GROUP_DRAG_GRIP_HEIGHT, GROUP_MENU_BUTTON_WIDTH};
 use crate::frame::FrameGeometry;
 use crate::color::blend_rgb;
@@ -206,7 +208,7 @@ where
         .bg(rgb(theme.colors.window_background));
 
     if let Some(canvas) = rects.canvas {
-        root = root.child(rect_element(canvas, theme.colors.canvas_background).into_any_element());
+        root = root.child(RectBox::new(canvas, theme.colors.canvas_background));
     }
 
     // Main dock areas are painted first; floating areas are layered above them.
@@ -592,7 +594,7 @@ where
 
     for column in rects.columns.iter().filter(|entry| nodes.contains(&entry.column)) {
         elements.push(
-            rect_element(column.rect, theme.colors.dock_background).into_any_element(),
+            RectBox::new(column.rect, theme.colors.dock_background).into_any_element(),
         );
     }
 
@@ -638,7 +640,7 @@ where
     // the separate thin grip above it; menu and tab controls remain independent.
     for strip in rects.tab_strips.iter().filter(|entry| nodes.contains(&entry.group)) {
         elements.push(
-            rect_element(strip.rect, theme.colors.toolbar_background).into_any_element(),
+            RectBox::new(strip.rect, theme.colors.toolbar_background).into_any_element(),
         );
     }
 
@@ -773,7 +775,7 @@ where
             continue;
         };
         elements.push(
-            rect_element(panel_rect.rect, theme.colors.group_background)
+            RectBox::new(panel_rect.rect, theme.colors.group_background)
                 .child(render_panel(instance))
                 .into_any_element(),
         );
