@@ -271,14 +271,15 @@ impl MainWindow {
             }
         } else {
             let source_has_header = group_has_header(&drag.layout_before, drag.group);
-            let floating_size = floating_size_for_detach(
+            let (preview_bounds, _) = floating_drag_bounds(
                 drag.bounds_before,
+                movement,
                 source_has_header,
                 &self.core_metrics,
             );
             self.tab_drag_preview = Some(TabDragPreviewState {
                 label: drag.label,
-                bounds: Rect::new(origin, floating_size),
+                bounds: preview_bounds,
             });
         }
 
@@ -327,17 +328,17 @@ impl MainWindow {
             }
         } else {
             let source_has_header = group_has_header(&drag.layout_before, drag.group);
-            let floating_size = floating_size_for_detach(
+            let (_, floating_bounds) = floating_drag_bounds(
                 drag.bounds_before,
+                movement,
                 source_has_header,
                 &self.core_metrics,
             );
-            let bounds = Rect::new(origin, floating_size);
             docked_tab_float_command(
                 &drag.layout_before,
                 drag.panel,
                 drag.group,
-                bounds,
+                floating_bounds,
             )
         };
 
@@ -1128,6 +1129,44 @@ fn clamped_pointer_delta(current: Point, start: Point, viewport_size: Size) -> P
     Point::new(current_x - start_x, current_y - start_y)
 }
 
+fn floating_drag_bounds(
+    source_bounds: Rect,
+    movement: Point,
+    source_has_header: bool,
+    metrics: &DockMetrics,
+) -> (Rect, Rect) {
+    let floating_size = floating_size_for_detach(source_bounds, source_has_header, metrics);
+    let header_height = metrics.header_height.max(1.0);
+    let source_header_height = if source_has_header {
+        header_height
+    } else {
+        0.0
+    };
+
+    // Keep the tab strip at the same pointer-relative location before and after
+    // release. During preview the tab strip is at the top; after release, the
+    // floating header is inserted above it without changing the bottom edge.
+    let preview_bounds = Rect::new(
+        Point::new(
+            source_bounds.origin.x + movement.x,
+            source_bounds.origin.y + movement.y + source_header_height,
+        ),
+        Size::new(
+            floating_size.width,
+            (floating_size.height - header_height).max(1.0),
+        ),
+    );
+    let floating_bounds = Rect::new(
+        Point::new(
+            source_bounds.origin.x + movement.x,
+            source_bounds.origin.y + movement.y + source_header_height - header_height,
+        ),
+        floating_size,
+    );
+
+    (preview_bounds, floating_bounds)
+}
+
 fn floating_size_for_detach(
     source_bounds: Rect,
     has_header: bool,
@@ -1332,7 +1371,7 @@ mod tests {
         floating_group_for_panel, floating_root_tabs_group, group_containing_panel,
         group_has_header, group_is_floating, panel_constraints, panel_id_for_key,
         clamped_pointer_delta, panel_is_open, toggle_core_panel, floating_size_for_detach,
-        FLOATING_HEIGHT_RATIO,
+        floating_drag_bounds, FLOATING_HEIGHT_RATIO,
     };
     use dock_core::{Axis, DockCommand, DockSide, Node, Point, Rect, Size};
 
@@ -1494,6 +1533,38 @@ mod tests {
             + (source_content_without_header * FLOATING_HEIGHT_RATIO).max(minimum_content_height))
             .max(minimum_floating_height);
         assert!((without_header.height - expected_without_header).abs() < 0.001);
+    }
+
+    #[test]
+    fn headerless_drag_preview_and_final_window_keep_the_tab_strip_aligned() {
+        let theme = ui::Theme::default();
+        let (_, metrics, _, _, _) =
+            build_core_layout(&theme).expect("initial Core layout should be valid");
+        let source_bounds = Rect::new(Point::new(100.0, 150.0), Size::new(320.0, 500.0));
+        let movement = Point::new(37.0, 29.0);
+        let header_height = metrics.header_height.max(1.0);
+
+        for source_has_header in [false, true] {
+            let (preview, floating) =
+                floating_drag_bounds(source_bounds, movement, source_has_header, &metrics);
+
+            assert!(
+                (preview.origin.y - (floating.origin.y + header_height)).abs() < 0.001,
+                "the final header must be inserted above the preview tab strip"
+            );
+            assert!((preview.size.width - floating.size.width).abs() < 0.001);
+            assert!(
+                (preview.size.height + header_height - floating.size.height).abs() < 0.001,
+                "the preview reserves exactly the header height"
+            );
+            assert!(
+                ((preview.origin.y + preview.size.height)
+                    - (floating.origin.y + floating.size.height))
+                    .abs()
+                    < 0.001,
+                "the bottom edge should not jump when the header appears"
+            );
+        }
     }
 
     #[test]
