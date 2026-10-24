@@ -1990,8 +1990,9 @@ mod tests {
             &metrics,
         );
 
+        let command = docked_group_float_command(&layout, group, bounds);
         layout
-            .apply(docked_group_float_command(&layout, group, bounds), &metrics)
+            .apply(command, &metrics)
             .expect("dragging a group should float the whole group");
         assert_eq!(layout.validate(&metrics), Ok(()));
 
