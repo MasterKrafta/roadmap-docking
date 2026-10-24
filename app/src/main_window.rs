@@ -741,8 +741,6 @@ impl Render for MainWindow {
     }
 }
 
-/// A menu row with a right-side checkmark that can be toggled independently.
-
 /// Routes each group to exactly one of the four visual components.
 ///
 /// The floating state and the optional header are independent:
@@ -770,24 +768,57 @@ where
 {
     match (floating, has_header) {
         (true, true) => floating_column_tabs_group::render_with_tabs(
-            theme, active_tab, width, height, first_tab, second_tab, first_drag, second_drag,
-            on_first_tab, on_second_tab,
+            theme,
+            active_tab,
+            width,
+            height,
+            first_tab,
+            second_tab,
+            first_drag,
+            second_drag,
+            on_first_tab,
+            on_second_tab,
         ),
         (true, false) => floating_tabs_group::render_with_tabs(
-            theme, active_tab, width, height, first_tab, second_tab, first_drag, second_drag,
-            on_first_tab, on_second_tab,
+            theme,
+            active_tab,
+            width,
+            height,
+            first_tab,
+            second_tab,
+            first_drag,
+            second_drag,
+            on_first_tab,
+            on_second_tab,
         ),
         (false, true) => column_tabs_group::render_with_tabs(
-            theme, active_tab, width, height, first_tab, second_tab, first_drag, second_drag,
-            on_first_tab, on_second_tab,
+            theme,
+            active_tab,
+            width,
+            height,
+            first_tab,
+            second_tab,
+            first_drag,
+            second_drag,
+            on_first_tab,
+            on_second_tab,
         ),
         (false, false) => tabs_group::render_with_tabs(
-            theme, active_tab, width, height, first_tab, second_tab, first_drag, second_drag,
-            on_first_tab, on_second_tab,
+            theme,
+            active_tab,
+            width,
+            height,
+            first_tab,
+            second_tab,
+            first_drag,
+            second_drag,
+            on_first_tab,
+            on_second_tab,
         ),
     }
 }
 
+/// A menu row with a right-side checkmark that can be toggled independently.
 fn render_menu_item<F>(
     theme: ui::Theme,
     width: f32,
@@ -1061,7 +1092,11 @@ fn group_has_header(layout: &Layout, group_id: NodeId) -> bool {
     })
 }
 
-fn floating_size_for_detach(source_bounds: Rect, has_header: bool, metrics: &DockMetrics) -> Size {
+fn floating_size_for_detach(
+    source_bounds: Rect,
+    has_header: bool,
+    metrics: &DockMetrics,
+) -> Size {
     let header_height = if has_header {
         metrics.header_height.max(1.0)
     } else {
@@ -1069,8 +1104,8 @@ fn floating_size_for_detach(source_bounds: Rect, has_header: bool, metrics: &Doc
     };
     let tab_strip_height = metrics.tab_strip_height.max(1.0);
     let minimum_content_height = metrics.min_group_height.max(1.0);
-    let source_content_height =
-        (source_bounds.size.height - header_height - tab_strip_height).max(minimum_content_height);
+    let source_content_height = (source_bounds.size.height - header_height - tab_strip_height)
+        .max(minimum_content_height);
     let floating_content_height =
         (source_content_height * FLOATING_HEIGHT_RATIO).max(minimum_content_height);
 
