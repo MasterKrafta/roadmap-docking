@@ -2333,6 +2333,30 @@ mod tests {
             bounds.size.width > metrics.min_column_width,
             "bounds must cover the complete multi-column tree, not a single group"
         );
+
+        let mut floating_layout = layout.clone();
+        floating_layout
+            .apply(
+                DockCommand::Float {
+                    node: root,
+                    bounds,
+                },
+                &metrics,
+            )
+            .expect("Core should float the complete dock-area root");
+        let floating = floating_layout
+            .floating_groups()
+            .next()
+            .expect("the complete tree should become a floating composition");
+        let floating_root = floating_layout
+            .dock_area(floating.1.area)
+            .expect("floating area should exist")
+            .root;
+        assert_eq!(floating_root, root);
+        assert!(floating_layout.main_area(DockSide::Right).is_none());
+        assert!(subtree_contains_node(&floating_layout, floating_root, first_column_group));
+        assert!(subtree_contains_node(&floating_layout, floating_root, second_column_group));
+        assert!(subtree_contains_node(&floating_layout, floating_root, lower_group));
     }
 
     #[test]
