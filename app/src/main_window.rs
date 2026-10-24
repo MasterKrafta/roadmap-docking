@@ -387,7 +387,7 @@ impl MainWindow {
             });
 
             let group_element = if has_header {
-                column_tabs_group::render_with_tabs(
+                column_tabs_group::render(
                     self.theme,
                     tabs_view.active_tab,
                     group_rect.rect.size.width,
@@ -400,7 +400,7 @@ impl MainWindow {
                     on_second_tab,
                 )
             } else {
-                tabs_group::render_with_tabs(
+                tabs_group::render(
                     self.theme,
                     tabs_view.active_tab,
                     group_rect.rect.size.width,
@@ -645,7 +645,7 @@ impl MainWindow {
             // origin for painting made the panel stop before the pointer reached
             // the app-window edge.
             let floating_element = if group_has_header(&self.core_layout, group_id) {
-                floating_column_tabs_group::render_with_tabs(
+                floating_column_tabs_group::render(
                     self.theme,
                     tabs_view.active_tab,
                     floating_bounds.size.width,
@@ -658,7 +658,7 @@ impl MainWindow {
                     on_second_tab,
                 )
             } else {
-                floating_tabs_group::render_with_tabs(
+                floating_tabs_group::render(
                     self.theme,
                     tabs_view.active_tab,
                     floating_bounds.size.width,
