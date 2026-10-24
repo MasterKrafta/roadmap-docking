@@ -33,6 +33,16 @@ impl DockController {
             .apply(&mut self.layout, command, &self.metrics)
     }
 
+    /// Restores the preceding recorded layout revision, if one exists.
+    pub(crate) fn undo(&mut self) -> Result<bool, CommandError> {
+        self.history.undo(&mut self.layout, &self.metrics)
+    }
+
+    /// Reapplies the next recorded layout revision, if one exists.
+    pub(crate) fn redo(&mut self) -> Result<bool, CommandError> {
+        self.history.redo(&mut self.layout, &self.metrics)
+    }
+
     pub(crate) fn layout(&self) -> &Layout {
         &self.layout
     }
