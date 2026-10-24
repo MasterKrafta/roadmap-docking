@@ -7,6 +7,7 @@ rust-version.workspace = true
 [dependencies]
 dock-core = { path = "../dock-core" }
 gpui.workspace = true
+tracing.workspace = true
 ui = { path = "../ui" }
 
 [target.'cfg(windows)'.dependencies]

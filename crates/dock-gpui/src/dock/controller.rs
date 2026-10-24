@@ -17,6 +17,7 @@ pub(crate) struct DockController {
     metrics: DockMetrics,
     history: UndoRedoHistory,
     scroll_handles: HashMap<NodeId, ScrollHandle>,
+    last_error: Option<CommandError>,
 }
 
 impl DockController {
@@ -26,6 +27,7 @@ impl DockController {
             metrics,
             history: UndoRedoHistory::new(),
             scroll_handles: HashMap::new(),
+            last_error: None,
         }
     }
 
@@ -34,23 +36,54 @@ impl DockController {
         &mut self,
         command: DockCommand,
     ) -> Result<CommandOutcome, CommandError> {
-        self.history
-            .apply(&mut self.layout, command, &self.metrics)
+        let result = self
+            .history
+            .apply(&mut self.layout, command, &self.metrics);
+        self.track_command_result(result, "apply")
     }
 
     /// Restores the preceding recorded layout revision, if one exists.
     pub(crate) fn undo(&mut self) -> Result<bool, CommandError> {
-        self.history.undo(&mut self.layout, &self.metrics)
+        let result = self.history.undo(&mut self.layout, &self.metrics);
+        self.track_command_result(result, "undo")
     }
 
     /// Reapplies the next recorded layout revision, if one exists.
     pub(crate) fn redo(&mut self) -> Result<bool, CommandError> {
-        self.history.redo(&mut self.layout, &self.metrics)
+        let result = self.history.redo(&mut self.layout, &self.metrics);
+        self.track_command_result(result, "redo")
     }
 
     /// Computes the normalized frame geometry for the current layout and viewport.
     pub(crate) fn frame(&self, viewport: Rect) -> Result<FrameGeometry, ComputeRectsError> {
         FrameGeometry::compute(&self.layout, viewport, &self.metrics)
+    }
+
+    /// Returns the most recent command/history error, if the last operation failed.
+    pub(crate) fn last_error(&self) -> Option<&CommandError> {
+        self.last_error.as_ref()
+    }
+
+    fn track_command_result<T>(
+        &mut self,
+        result: Result<T, CommandError>,
+        operation: &'static str,
+    ) -> Result<T, CommandError> {
+        match result {
+            Ok(value) => {
+                self.last_error = None;
+                Ok(value)
+            }
+            Err(error) => {
+                tracing::warn!(
+                    operation,
+                    error = %error,
+                    "dock controller operation failed"
+                );
+                self.last_error = Some(error.clone());
+                Err(error)
+            }
+        }
     }
 
     pub(crate) fn layout(&self) -> &Layout {
