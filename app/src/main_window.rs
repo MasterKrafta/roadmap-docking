@@ -391,7 +391,7 @@ impl MainWindow {
             }
         } else {
             let source_has_header = group_has_header(&drag.layout_before, drag.group);
-            let bounds = group_drag_bounds(
+            let (preview_bounds, _) = group_drag_bounds(
                 drag.bounds_before,
                 movement,
                 source_has_header,
@@ -400,7 +400,7 @@ impl MainWindow {
             self.group_drag_preview = Some(GroupDragPreviewState {
                 layout: drag.layout_before.clone(),
                 group: drag.group,
-                bounds,
+                bounds: preview_bounds,
             });
         }
 
@@ -443,13 +443,13 @@ impl MainWindow {
             }
         } else {
             let source_has_header = group_has_header(&drag.layout_before, drag.group);
-            let bounds = group_drag_bounds(
+            let (_, floating_bounds) = group_drag_bounds(
                 drag.bounds_before,
                 movement,
                 source_has_header,
                 &self.core_metrics,
             );
-            docked_group_float_command(&drag.layout_before, drag.group, bounds)
+            docked_group_float_command(&drag.layout_before, drag.group, floating_bounds)
         };
 
         if let Err(error) = self.core_layout.apply(command, &self.core_metrics) {
@@ -1504,29 +1504,49 @@ fn floating_drag_bounds(
     (preview_bounds, floating_bounds)
 }
 
+/// Returns (headerless_preview_bounds, final_floating_bounds).
+/// The preview and final window share their bottom edge and tab-strip position,
+/// so adding the floating header on release does not make the group jump.
 fn group_drag_bounds(
     source_bounds: Rect,
     movement: Point,
     source_has_header: bool,
     metrics: &DockMetrics,
-) -> Rect {
+) -> (Rect, Rect) {
     let header_height = metrics.header_height.max(1.0);
-    let (header_offset, height_offset) = if source_has_header {
-        (0.0, 0.0)
-    } else {
-        (-header_height, header_height)
-    };
-
-    Rect::new(
+    let moved_source = Rect::new(
         Point::new(
             source_bounds.origin.x + movement.x,
-            source_bounds.origin.y + movement.y + header_offset,
+            source_bounds.origin.y + movement.y,
         ),
-        Size::new(
-            source_bounds.size.width,
-            (source_bounds.size.height + height_offset).max(1.0),
-        ),
-    )
+        source_bounds.size,
+    );
+
+    if source_has_header {
+        let preview_bounds = Rect::new(
+            Point::new(
+                moved_source.origin.x,
+                moved_source.origin.y + header_height,
+            ),
+            Size::new(
+                moved_source.size.width,
+                (moved_source.size.height - header_height).max(1.0),
+            ),
+        );
+        (preview_bounds, moved_source)
+    } else {
+        let floating_bounds = Rect::new(
+            Point::new(
+                moved_source.origin.x,
+                moved_source.origin.y - header_height,
+            ),
+            Size::new(
+                moved_source.size.width,
+                moved_source.size.height + header_height,
+            ),
+        );
+        (moved_source, floating_bounds)
+    }
 }
 
 fn floating_size_for_detach(
@@ -1983,7 +2003,7 @@ mod tests {
             .find(|entry| entry.group == group)
             .expect("the group should have a source rectangle")
             .rect;
-        let bounds = group_drag_bounds(
+        let (_, bounds) = group_drag_bounds(
             source_bounds,
             Point::new(40.0, 25.0),
             group_has_header(&layout, group),
@@ -2010,7 +2030,7 @@ mod tests {
     }
 
     #[test]
-    fn group_drag_keeps_all_group_height_and_adds_header_above_headerless_source() {
+    fn group_drag_preview_is_headerless_and_keeps_pointer_side_of_tab_strip_aligned() {
         let theme = ui::Theme::default();
         let (_, metrics, _, _, _) =
             build_core_layout(&theme).expect("initial Core layout should be valid");
@@ -2018,20 +2038,38 @@ mod tests {
         let movement = Point::new(25.0, 35.0);
         let header_height = metrics.header_height.max(1.0);
 
-        let headerless = group_drag_bounds(source, movement, false, &metrics);
-        assert_eq!(headerless.origin.x, source.origin.x + movement.x);
-        assert!(
-            (headerless.origin.y + header_height - (source.origin.y + movement.y)).abs() < 0.001
-        );
-        assert_eq!(headerless.size.width, source.size.width);
-        assert_eq!(headerless.size.height, source.size.height + header_height);
+        for source_has_header in [false, true] {
+            let (preview, floating) =
+                group_drag_bounds(source, movement, source_has_header, &metrics);
 
-        let headered = group_drag_bounds(source, movement, true, &metrics);
-        assert_eq!(
-            headered.origin,
-            Point::new(source.origin.x + movement.x, source.origin.y + movement.y)
-        );
-        assert_eq!(headered.size, source.size);
+            assert_eq!(preview.origin.x, source.origin.x + movement.x);
+            assert_eq!(floating.origin.x, preview.origin.x);
+            assert!(
+                (preview.origin.y - (floating.origin.y + header_height)).abs() < 0.001,
+                "the final floating header must be inserted above the headerless preview"
+            );
+            assert!(
+                ((preview.origin.y + preview.size.height)
+                    - (floating.origin.y + floating.size.height))
+                    .abs()
+                    < 0.001,
+                "the bottom edge must stay still when the header appears"
+            );
+            assert_eq!(preview.size.width, source.size.width);
+            assert_eq!(floating.size.width, source.size.width);
+
+            if source_has_header {
+                assert_eq!(preview.origin.y, source.origin.y + movement.y + header_height);
+                assert_eq!(preview.size.height, source.size.height - header_height);
+                assert_eq!(floating.origin.y, source.origin.y + movement.y);
+                assert_eq!(floating.size.height, source.size.height);
+            } else {
+                assert_eq!(preview.origin.y, source.origin.y + movement.y);
+                assert_eq!(preview.size.height, source.size.height);
+                assert_eq!(floating.origin.y, source.origin.y + movement.y - header_height);
+                assert_eq!(floating.size.height, source.size.height + header_height);
+            }
+        }
     }
 
     #[test]
