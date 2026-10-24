@@ -1,4 +1,4 @@
-use gpui::{Context, IntoElement, Render, Styled, Window, div, px, rgb};
+use gpui::{Context, IntoElement, ParentElement, Render, Styled, Window, div, px, rgb};
 
 /// Minimal application window used as the clean starting point for the docking UI.
 pub(crate) struct MainWindow {
