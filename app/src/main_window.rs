@@ -712,6 +712,7 @@ impl MainWindow {
                         |_, _, _| {},
                         tabs_group::GroupRenderMode::SourcePlaceholder,
                         None,
+                        None,
                     );
                     root = root.child(
                         div()
@@ -802,7 +803,14 @@ impl MainWindow {
 
         // Core provides the splitter hit zones. GPUI starts the drag while Core
         // owns all sizing rules and applies each pointer delta transactionally.
-        for (splitter_index, splitter) in rects.splitters.into_iter().enumerate() {
+        for (splitter_index, splitter) in rects.splitters.iter().copied().enumerate() {
+            if self.active_group_drag_payload.as_ref().is_some_and(|drag| {
+                drag.whole_area
+                    && drag.floating_group.is_none()
+                    && subtree_contains_node(&self.core_layout, drag.group, splitter.owner)
+            }) {
+                continue;
+            }
             let available_height = match self.core_layout.node(splitter.owner) {
                 Some(Node::Column(column)) => rects
                     .columns
@@ -896,7 +904,11 @@ impl MainWindow {
                 _ => None,
             }
         });
-        if let Some(column_id) = right_dock_outer_column {
+        if let Some(column_id) = right_dock_outer_column.filter(|_| {
+            !self.active_group_drag_payload.as_ref().is_some_and(|drag| {
+                drag.whole_area && drag.floating_group.is_none()
+            })
+        }) {
             let width_before = match self.core_layout.node(column_id) {
                 Some(Node::Column(column))
                     if matches!(column.mode, dock_core::ColumnMode::Expanded) =>
@@ -1054,6 +1066,7 @@ impl MainWindow {
                 on_second_tab,
                 tabs_group::GroupRenderMode::Layout,
                 group_drag_payload,
+                None,
             );
 
             root = root.child(
@@ -1083,6 +1096,7 @@ impl MainWindow {
                 |_, _, _| {},
                 tabs_group::GroupRenderMode::DragPreview,
                 None,
+                None,
             );
             root = root.child(
                 div()
@@ -1111,6 +1125,7 @@ impl MainWindow {
                     |_, _, _| {},
                     |_, _, _| {},
                     tabs_group::GroupRenderMode::GroupDragPreview,
+                    None,
                     None,
                 );
                 root = root.child(
