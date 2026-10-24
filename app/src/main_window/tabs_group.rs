@@ -43,7 +43,7 @@ where
         ))
 }
 
-/// Arranges tabs, the open drag/drop area, and the hamburger button.
+/// Arranges tabs 3 and 4, the open drag/drop area, and the hamburger button.
 fn render_tab_strip<F1, F2>(
     theme: ui::Theme,
     active_tab: usize,
@@ -66,14 +66,14 @@ where
         .border_color(rgb(theme.colors.border))
         .child(tab::render(
             theme,
-            "Вкладка 1",
+            "Вкладка 3",
             active_tab == 0,
             height,
             on_first_tab,
         ))
         .child(tab::render(
             theme,
-            "Вкладка 2",
+            "Вкладка 4",
             active_tab == 1,
             height,
             on_second_tab,
