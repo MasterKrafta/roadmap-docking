@@ -22,6 +22,8 @@ use super::{GroupDragPayload, TabDragPayload};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum GroupRenderMode {
     Layout,
+    /// All groups inside a floating Column/Split composition compact their content.
+    FloatingComposition,
     DragPreview,
     GroupDragPreview,
     SourcePlaceholder,
@@ -65,7 +67,9 @@ where
     }
 
     let show_header = match mode {
-        GroupRenderMode::Layout => super::group_has_header(layout, group_id),
+        GroupRenderMode::Layout | GroupRenderMode::FloatingComposition => {
+            super::group_has_header(layout, group_id)
+        }
         // Both tab and whole-group previews are headerless; the floating layout
         // receives its header only when the drag is committed.
         GroupRenderMode::DragPreview | GroupRenderMode::GroupDragPreview => false,
@@ -73,7 +77,9 @@ where
     };
     let is_floating = match mode {
         GroupRenderMode::Layout => super::group_is_floating(layout, group_id),
-        GroupRenderMode::DragPreview | GroupRenderMode::GroupDragPreview => true,
+        GroupRenderMode::FloatingComposition
+        | GroupRenderMode::DragPreview
+        | GroupRenderMode::GroupDragPreview => true,
         GroupRenderMode::SourcePlaceholder => unreachable!("handled above"),
     };
     let header_height = if show_header {
@@ -82,7 +88,13 @@ where
         0.0
     };
     let tab_strip_height = theme.metrics.tab_strip_height.max(1.0);
-    let content_height = (height - header_height - tab_strip_height).max(1.0);
+    let content_ratio = if mode == GroupRenderMode::FloatingComposition {
+        super::FLOATING_HEIGHT_RATIO
+    } else {
+        1.0
+    };
+    let content_height =
+        ((height - header_height - tab_strip_height).max(1.0) * content_ratio).max(1.0);
     let selected_tab = if active_tab == 1 {
         second_tab.unwrap_or(first_tab)
     } else {
