@@ -1,14 +1,23 @@
 use std::collections::HashMap;
 
 use dock_core::{
-    create_initial_layout, CommandError, CommandOutcome, ComputeRectsError, DockCommand,
-    DockMetrics, DockSide, DropTarget, DropZone, Layout, Node, NodeId, PanelId, Profile, Rect,
-    UndoRedoHistory,
+    create_initial_layout, Axis, CommandError, CommandOutcome, ComputeRectsError, DockCommand,
+    DockMetrics, DockSide, DropTarget, DropZone, Layout, Node, NodeId, PanelId, Point, Profile,
+    Rect, UndoRedoHistory,
 };
 use gpui::ScrollHandle;
 use ui::Theme;
 
 use crate::{dock_metrics_from_theme, FrameGeometry};
+use crate::requests::ResizeHandle;
+
+use super::resize_session::{ResizeSession, ResizeStartError};
+
+#[derive(Debug)]
+enum Session {
+    Idle,
+    Resize(ResizeSession),
+}
 
 /// Owns the live layout and the view-local state needed to render it.
 ///
@@ -19,6 +28,7 @@ pub(crate) struct DockController {
     metrics: DockMetrics,
     history: UndoRedoHistory,
     scroll_handles: HashMap<NodeId, ScrollHandle>,
+    session: Session,
     last_error: Option<CommandError>,
 }
 
@@ -34,6 +44,7 @@ impl DockController {
             metrics,
             history: UndoRedoHistory::new(),
             scroll_handles: HashMap::new(),
+            session: Session::Idle,
             last_error: None,
         })
     }
@@ -59,6 +70,39 @@ impl DockController {
     pub(crate) fn redo(&mut self) -> Result<bool, CommandError> {
         let result = self.history.redo(&mut self.layout, &self.metrics);
         self.track_command_result(result, "redo")
+    }
+
+    /// Begins a resize only when no other pointer session is active.
+    ///
+    /// The frame is the normalized geometry snapshot that produced the clicked
+    /// handle, so the session captures its starting measurements exactly once.
+    pub(crate) fn begin_resize(
+        &mut self,
+        handle: ResizeHandle,
+        pointer_start: Point,
+        frame: &FrameGeometry,
+    ) -> Result<(), ResizeStartError> {
+        if !matches!(&self.session, Session::Idle) {
+            return Err(ResizeStartError::SessionAlreadyActive);
+        }
+
+        let session = ResizeSession::begin(
+            &self.layout,
+            frame.rects(),
+            &self.metrics,
+            handle,
+            pointer_start,
+        )?;
+        self.session = Session::Resize(session);
+        Ok(())
+    }
+
+    /// Returns the active resize snapshot, if a resize gesture is in progress.
+    pub(crate) fn resize_session(&self) -> Option<&ResizeSession> {
+        match &self.session {
+            Session::Resize(session) => Some(session),
+            Session::Idle => None,
+        }
     }
 
     /// Computes the normalized frame geometry for the current layout and viewport.
@@ -188,6 +232,9 @@ fn panel_id_for_key(layout: &Layout, key: &str) -> Result<PanelId, String> {
 #[cfg(test)]
 mod tests {
     use super::DockController;
+    use crate::dock::resize_session::StartGeometry;
+    use crate::requests::ResizeHandle;
+    use dock_core::{Axis, Node, Point, Rect, Size};
     use ui::Theme;
 
     #[test]
@@ -196,5 +243,54 @@ mod tests {
             DockController::new_initial(&Theme::default()).expect("initial layout should be valid");
         assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
         assert_eq!(controller.layout().panel_instances().count(), 4);
+    }
+
+    #[test]
+    fn begin_resize_captures_start_geometry_and_rejects_a_second_session() {
+        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+        let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
+        let frame = controller.frame(viewport).unwrap();
+        let splitter = *frame
+            .rects()
+            .splitters
+            .iter()
+            .find(|splitter| splitter.axis == Axis::Y)
+            .expect("the initial layout should contain a vertical group splitter");
+        let group_count = match controller.layout().node(splitter.owner) {
+            Some(Node::Column(column)) => column.groups.len(),
+            other => panic!("vertical splitter should belong to a column, got {other:?}"),
+        };
+        let column_rect = frame
+            .rects()
+            .columns
+            .iter()
+            .find(|column| column.column == splitter.owner)
+            .expect("splitter column should have geometry");
+        let expected_available_height = (column_rect.rect.size.height
+            - controller.metrics().splitter_thickness * (group_count - 1) as f32)
+            .max(0.0);
+        let handle = ResizeHandle::Splitter {
+            owner: splitter.owner,
+            boundary_index: splitter.boundary_index,
+            axis: Axis::Y,
+        };
+        let pointer = Point::new(180.0, 240.0);
+
+        controller.begin_resize(handle, pointer, &frame).unwrap();
+
+        let session = controller.resize_session().unwrap();
+        assert_eq!(session.handle(), handle);
+        assert_eq!(session.pointer_start(), pointer);
+        assert_eq!(
+            session.start_geometry(),
+            StartGeometry::VerticalGroups {
+                available_height: expected_available_height,
+            }
+        );
+        assert_eq!(session.baseline().panel_instances().count(), 4);
+        assert_eq!(
+            controller.begin_resize(handle, pointer, &frame),
+            Err(super::super::resize_session::ResizeStartError::SessionAlreadyActive)
+        );
     }
 }
