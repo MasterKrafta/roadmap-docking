@@ -1,5 +1,5 @@
 use gpui::{
-    App, ClickEvent, Div, InteractiveElement, ParentElement, Styled, Window, div, px, rgb,
+    App, ClickEvent, Div, IntoElement, ParentElement, StatefulInteractiveElement, Styled, Window, div, px, rgb,
 };
 
 /// Renders one tab group: header, switchable tab strip, and active tab content.
@@ -150,7 +150,7 @@ fn tab<F>(
     is_active: bool,
     height: f32,
     on_click: F,
-) -> Div
+) -> impl IntoElement
 where
     F: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 {
@@ -171,6 +171,7 @@ where
         .border_1()
         .border_color(rgb(theme.colors.border))
         .child(label)
+        .id(label)
         .on_click(on_click)
 }
 
