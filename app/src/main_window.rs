@@ -1,6 +1,3 @@
-mod column_tabs_group;
-mod floating_column_tabs_group;
-mod floating_tabs_group;
 mod tabs_group;
 
 use dock_core::{
@@ -386,33 +383,20 @@ impl MainWindow {
                 )
             });
 
-            let group_element = if has_header {
-                column_tabs_group::render(
-                    self.theme,
-                    tabs_view.active_tab,
-                    group_rect.rect.size.width,
-                    group_rect.rect.size.height,
-                    tabs_view.first_label,
-                    tabs_view.second_label,
-                    first_drag,
-                    second_drag,
-                    on_first_tab,
-                    on_second_tab,
-                )
-            } else {
-                tabs_group::render(
-                    self.theme,
-                    tabs_view.active_tab,
-                    group_rect.rect.size.width,
-                    group_rect.rect.size.height,
-                    tabs_view.first_label,
-                    tabs_view.second_label,
-                    first_drag,
-                    second_drag,
-                    on_first_tab,
-                    on_second_tab,
-                )
-            };
+            let group_element = tabs_group::render(
+                &self.core_layout,
+                group_id,
+                self.theme,
+                tabs_view.active_tab,
+                group_rect.rect.size.width,
+                group_rect.rect.size.height,
+                tabs_view.first_label,
+                tabs_view.second_label,
+                first_drag,
+                second_drag,
+                on_first_tab,
+                on_second_tab,
+            );
 
             root = root.child(
                 div()
@@ -644,33 +628,20 @@ impl MainWindow {
             // clamps the visible rect for layout calculations; using that clamped
             // origin for painting made the panel stop before the pointer reached
             // the app-window edge.
-            let floating_element = if group_has_header(&self.core_layout, group_id) {
-                floating_column_tabs_group::render(
-                    self.theme,
-                    tabs_view.active_tab,
-                    floating_bounds.size.width,
-                    floating_bounds.size.height,
-                    tabs_view.first_label,
-                    tabs_view.second_label,
-                    first_drag,
-                    second_drag,
-                    on_first_tab,
-                    on_second_tab,
-                )
-            } else {
-                floating_tabs_group::render(
-                    self.theme,
-                    tabs_view.active_tab,
-                    floating_bounds.size.width,
-                    floating_bounds.size.height,
-                    tabs_view.first_label,
-                    tabs_view.second_label,
-                    first_drag,
-                    second_drag,
-                    on_first_tab,
-                    on_second_tab,
-                )
-            };
+            let floating_element = tabs_group::render(
+                &self.core_layout,
+                group_id,
+                self.theme,
+                tabs_view.active_tab,
+                floating_bounds.size.width,
+                floating_bounds.size.height,
+                tabs_view.first_label,
+                tabs_view.second_label,
+                first_drag,
+                second_drag,
+                on_first_tab,
+                on_second_tab,
+            );
 
             root = root.child(
                 div()
@@ -1294,6 +1265,9 @@ mod tests {
             .expect("a tab should detach into a floating group");
         let floating = layout.floating_groups().next().unwrap();
         assert!(floating_group_bounds(&layout, floating.0).is_some());
+        let floating_tabs = floating_root_tabs_group(&layout, floating.0).unwrap();
+        assert!(group_is_floating(&layout, floating_tabs));
+        assert!(group_has_header(&layout, floating_tabs));
     }
 
     #[test]
@@ -1340,6 +1314,45 @@ mod tests {
 
         assert!(group_is_floating(&layout, floating_tabs));
         assert!(group_has_header(&layout, floating_tabs));
+    }
+
+    #[test]
+    fn remaining_group_gets_header_when_it_becomes_the_only_group_in_column() {
+        let theme = ui::Theme::default();
+        let (mut layout, metrics, _, upper_group, lower_group) =
+            build_core_layout(&theme).expect("initial Core layout should be valid");
+        let history = panel_id_for_key(&layout, "history").unwrap();
+        assert!(!group_has_header(&layout, lower_group));
+
+        let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 768.0));
+        let rects = layout.compute_rects(viewport, &metrics).unwrap();
+        let source_bounds = rects
+            .groups
+            .iter()
+            .find(|entry| entry.group == upper_group)
+            .expect("upper group should have geometry")
+            .rect;
+        let bounds = Rect::new(
+            Point::new(source_bounds.origin.x + 20.0, source_bounds.origin.y + 16.0),
+            floating_size_for_detach(source_bounds, true, &metrics),
+        );
+
+        layout
+            .apply(
+                DockCommand::FloatGroupAsColumn {
+                    group: upper_group,
+                    bounds,
+                },
+                &metrics,
+            )
+            .expect("upper group should float and leave History in the dock");
+        assert_eq!(layout.validate(&metrics), Ok(()));
+
+        let (_, remaining_group_count) = column_containing_group(&layout, lower_group)
+            .expect("History should remain in its original column");
+        assert_eq!(remaining_group_count, 1);
+        assert_eq!(group_containing_panel(&layout, history), Some(lower_group));
+        assert!(group_has_header(&layout, lower_group));
     }
 
     #[test]
