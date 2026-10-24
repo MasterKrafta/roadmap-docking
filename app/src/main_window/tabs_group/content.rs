@@ -2,12 +2,21 @@ use gpui::{Div, ParentElement, Styled, div, px, rgb};
 
 /// Placeholder content changes with the active tab.
 pub(super) fn render(theme: ui::Theme, active_tab: usize, width: f32, height: f32) -> Div {
-    let (title, description) = if active_tab == 0 {
-        ("Контент вкладки 1", "Выбрана первая вкладка")
+    let selected_tab = if active_tab == 0 {
+        "Вкладка 1"
     } else {
-        ("Контент вкладки 2", "Выбрана вторая вкладка")
+        "Вкладка 2"
     };
+    render_selected(theme, selected_tab, width, height)
+}
 
+/// Renders placeholder content for the panel selected by the Core layout.
+pub(super) fn render_selected(
+    theme: ui::Theme,
+    selected_tab: &'static str,
+    width: f32,
+    height: f32,
+) -> Div {
     div()
         .flex()
         .flex_col()
@@ -19,10 +28,10 @@ pub(super) fn render(theme: ui::Theme, active_tab: usize, width: f32, height: f3
         .text_color(rgb(theme.colors.primary_text))
         .border_1()
         .border_color(rgb(theme.colors.border))
-        .child(div().child(title))
+        .child(div().child(format!("Контент: {selected_tab}")))
         .child(
             div()
                 .text_color(rgb(theme.colors.muted_text))
-                .child(description),
+                .child(format!("Выбрана {selected_tab}")),
         )
 }
