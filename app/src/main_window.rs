@@ -75,7 +75,7 @@ pub(super) struct TabDragPayload {
 }
 
 /// Temporary presentation state only. Core's Layout is not changed until drop.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct TabDragPreviewState {
     layout: Layout,
     group: NodeId,
@@ -710,7 +710,7 @@ impl MainWindow {
             );
         }
 
-        if let Some(preview) = self.tab_drag_preview {
+        if let Some(preview) = &self.tab_drag_preview {
             let preview_element = tabs_group::render(
                 &preview.layout,
                 preview.group,
