@@ -14,3 +14,6 @@ slotmap.workspace = true
 
 [lints]
 workspace = true
+
+[target.'cfg(windows)'.dev-dependencies]
+gpui_platform.workspace = true
