@@ -52,6 +52,21 @@ fn find_column_mut(node: &mut WorkspaceNode) -> Option<&mut Vec<f32>> {
     }
 }
 
+fn deeply_nested_workspace_node(depth: usize) -> WorkspaceNode {
+    let mut node = WorkspaceNode::Panel {
+        key: key("depth-limited-panel"),
+        state: PanelState::default(),
+    };
+    for _ in 1..depth {
+        node = WorkspaceNode::Tabs {
+            children: vec![node],
+            active_index: 0,
+            collapsed: false,
+        };
+    }
+    node
+}
+
 #[test]
 fn versioned_json_round_trip_preserves_structure_without_runtime_keys() {
     let metrics = DockMetrics::default();
@@ -396,6 +411,47 @@ fn from_layout_with_metrics_rejects_invalid_layout_before_export() {
     assert!(matches!(
         WorkspaceFile::from_layout_with_metrics(&layout, &metrics),
         Err(WorkspaceFileError::InvalidLayout(_))
+    ));
+}
+
+#[test]
+fn programmatic_workspace_depth_is_rejected_before_migration_and_restore() {
+    let metrics = DockMetrics::default();
+    let (layout, descriptors) = sample_layout();
+    let mut file = WorkspaceFile::from_layout(&layout).unwrap();
+    file.layout.left = None;
+    file.layout.right = Some(deeply_nested_workspace_node(257));
+    file.layout.floating_groups.clear();
+
+    // Version 1 migration is recursive too, so the same iterative preflight
+    // must reject deep DTOs before trying either migration or restoration.
+    for version in [1, WORKSPACE_VERSION] {
+        let mut candidate = file.clone();
+        candidate.version = version;
+        assert!(matches!(
+            candidate.into_layout(&descriptors, &metrics),
+            Err(WorkspaceFileError::Json(message)) if message.contains("maximum depth of 256")
+        ));
+    }
+}
+
+#[test]
+fn from_layout_rejects_programmatic_tree_depth_before_recursive_export() {
+    let mut builder = LayoutBuilder::new(crate::Profile::Generic);
+    let (_, mut root) = builder.panel(key("export-depth-root"), constraints());
+    for index in 0..256 {
+        let (_, side) = builder.panel(
+            key(&format!("export-depth-side-{index}")),
+            constraints(),
+        );
+        root = builder.split(Axis::X, vec![root, side], vec![0.5, 0.5]);
+    }
+    builder.main_area(DockSide::Right, root);
+    let layout = builder.build();
+
+    assert!(matches!(
+        WorkspaceFile::from_layout(&layout),
+        Err(WorkspaceFileError::InvalidRuntimeLayout(message)) if message.contains("maximum workspace depth of 256")
     ));
 }
 
