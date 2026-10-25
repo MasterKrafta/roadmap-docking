@@ -965,6 +965,50 @@ fn workspace_load_renumbers_duplicate_floating_z_orders_and_preserves_paint_orde
 }
 
 #[test]
+fn floating_bounds_clamped_diagnostic_keeps_json_index_after_earlier_group_is_removed() {
+    let metrics = DockMetrics::default();
+    let (layout, mut descriptors) = sample_layout();
+    descriptors
+        .iter_mut()
+        .find(|(key, _)| key.as_str() == "layers")
+        .expect("sample contains layers descriptor")
+        .1
+        .singleton = true;
+
+    let mut file = WorkspaceFile::from_layout(&layout).unwrap();
+    // This first JSON entry duplicates the singleton panel already in the main
+    // dock, so normalization removes it before floating bounds get clamped.
+    file.layout.floating_groups.insert(
+        0,
+        crate::workspace_floating_group::WorkspaceFloatingGroup {
+            root: WorkspaceNode::Panel {
+                key: key("layers"),
+                state: PanelState::default(),
+            },
+            bounds: Rect::new(Point::new(20.0, 25.0), Size::new(420.0, 320.0)),
+            z_order: 20,
+        },
+    );
+
+    let original = Rect::new(Point::new(44.0, 55.0), Size::new(420.0, 320.0));
+    let region = Rect::new(Point::ZERO, Size::new(300.0, 200.0));
+    let report = WorkspaceFile::load_json(
+        &file.to_json_pretty().unwrap(),
+        &descriptors,
+        &metrics,
+        WorkspaceLoadOptions::new(Some(region)),
+    )
+    .expect("remaining floating group should clamp after normalizing the duplicate singleton");
+
+    assert_eq!(report.layout.floating_groups_in_paint_order().len(), 1);
+    assert!(report.diagnostics.contains(&WorkspaceDiagnostic::FloatingBoundsClamped {
+        index: 1,
+        original,
+        clamped: region,
+    }));
+}
+
+#[test]
 fn workspace_normalizes_empty_floating_columns_before_clamping_bounds() {
     let metrics = DockMetrics::default();
     let (layout, descriptors) = sample_layout();
