@@ -1172,12 +1172,14 @@ fn floating_edge_rect_for_column(
         .map_err(ComputeRectsError::Geometry)?;
     let left = edge_rect.origin.x.max(column_rect.origin.x);
     let right = edge_right.min(column_right);
-    Rect::new(
+    let result = Rect::new(
         Point::new(left, edge_rect.origin.y),
         Size::new((right - left).max(0.0), edge_rect.size.height),
-    )
-    .validate()
-    .map_err(ComputeRectsError::Geometry)
+    );
+    result
+        .validate()
+        .map_err(ComputeRectsError::Geometry)?;
+    Ok(result)
 }
 
 fn floating_edge_rect(
