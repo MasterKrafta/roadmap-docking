@@ -722,6 +722,49 @@ mod tests {
     }
 
     #[test]
+    fn single_axis_floating_edges_resize_expected_sides() {
+        let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
+        let group = dock_core::FloatingGroupId::null();
+        let start_bounds = Rect::new(Point::new(10.0, 20.0), Size::new(300.0, 200.0));
+        let cases = [
+            (
+                ResizeEdge::Left,
+                Rect::new(Point::new(30.0, 20.0), Size::new(280.0, 200.0)),
+            ),
+            (
+                ResizeEdge::Top,
+                Rect::new(Point::new(10.0, 50.0), Size::new(300.0, 170.0)),
+            ),
+            (
+                ResizeEdge::Right,
+                Rect::new(Point::new(10.0, 20.0), Size::new(320.0, 200.0)),
+            ),
+            (
+                ResizeEdge::Bottom,
+                Rect::new(Point::new(10.0, 20.0), Size::new(300.0, 230.0)),
+            ),
+        ];
+
+        for (edge, expected_bounds) in cases {
+            let session = session(
+                &layout,
+                ResizeHandle::FloatingEdge { group, edge },
+                StartGeometry::FloatingEdge {
+                    bounds: start_bounds,
+                },
+            );
+            assert_eq!(
+                session.command_for_pointer(Point::new(120.0, 130.0)).unwrap(),
+                DockCommand::ResizeFloatingBounds {
+                    group,
+                    bounds: expected_bounds,
+                },
+                "unexpected resized bounds for {edge:?}"
+            );
+        }
+    }
+
+    #[test]
     fn floating_corner_edges_resize_expected_sides() {
         let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
         let group = dock_core::FloatingGroupId::null();
