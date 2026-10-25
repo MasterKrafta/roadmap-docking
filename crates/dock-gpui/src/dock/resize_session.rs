@@ -294,10 +294,10 @@ fn capture_start_geometry(
             let Some(column_rect) = rects.columns.iter().find(|entry| entry.column == column) else {
                 return Err(ResizeStartError::MissingColumnGeometry);
             };
-            let start_width = column_rect.rect.size.width;
-            if !start_width.is_finite() || start_width <= 0.0 {
+            if column_rect.rect.validate_non_empty().is_err() {
                 return Err(ResizeStartError::MissingColumnGeometry);
             }
+            let start_width = column_rect.rect.size.width;
             Ok(StartGeometry::OuterColumn { start_width })
         }
         ResizeHandle::FloatingEdge { group, edge } => {
@@ -476,6 +476,45 @@ mod tests {
         }
 
         assert!(checked_any, "initial layout should expose a resizable outer column");
+    }
+
+    #[test]
+    fn outer_column_resize_rejects_invalid_column_rect() {
+        let controller = DockController::new_initial(&Theme::default()).unwrap();
+        let layout = controller.layout().clone();
+        let frame = controller
+            .frame(Rect::new(Point::ZERO, Size::new(1200.0, 800.0)))
+            .unwrap();
+        let (column, side) = [DockSide::Left, DockSide::Right]
+            .into_iter()
+            .find_map(|side| {
+                let columns = crate::tree_query::main_column_ids(&layout, side);
+                let column = match side {
+                    DockSide::Left => columns.last().copied(),
+                    DockSide::Right => columns.first().copied(),
+                }?;
+                (matches!(layout.node(column), Some(Node::Column(value)) if !value.mode.is_rail())
+                    && frame.rects().columns.iter().any(|entry| entry.column == column))
+                .then_some((column, side))
+            })
+            .expect("initial layout should expose a resizable outer column");
+        let mut rects = frame.rects().clone();
+        let column_rect = rects
+            .columns
+            .iter_mut()
+            .find(|entry| entry.column == column)
+            .expect("outer column geometry should exist");
+        column_rect.rect.size.height = 0.0;
+
+        assert_eq!(
+            capture_start_geometry(
+                &layout,
+                &rects,
+                controller.metrics(),
+                ResizeHandle::OuterColumn { column, side },
+            ),
+            Err(ResizeStartError::MissingColumnGeometry)
+        );
     }
 
     #[test]
