@@ -1,6 +1,8 @@
 use super::helpers::*;
 use super::*;
 
+const MAX_LAYOUT_TREE_DEPTH: usize = 256;
+
 impl Layout {
     /// Validates the entire model and returns every detected issue.
     ///
@@ -400,6 +402,32 @@ impl Layout {
                     group: flyout.group,
                     reason: "panel is not a child of the flyout group",
                 });
+            }
+        }
+
+        // Bound recursive validation/normalization work for programmatically
+        // built trees as well as serde-loaded DTOs. Longest-depth tracking also
+        // lets us stop a cyclic graph before a recursive walk can exhaust stack.
+        let mut pending = roots.iter().copied().map(|root| (root, 1usize)).collect::<Vec<_>>();
+        let mut deepest = HashMap::<NodeId, usize>::new();
+        for node_id in self.nodes.keys() {
+            if !deepest.contains_key(&node_id) {
+                pending.push((node_id, 1));
+            }
+            while let Some((current, depth)) = pending.pop() {
+                if depth > MAX_LAYOUT_TREE_DEPTH {
+                    errors.push(ValidationError::TreeTooDeep {
+                        max_depth: MAX_LAYOUT_TREE_DEPTH,
+                    });
+                    return Err(errors);
+                }
+                if deepest.get(&current).is_some_and(|known| *known >= depth) {
+                    continue;
+                }
+                deepest.insert(current, depth);
+                if let Some(node) = self.nodes.get(current) {
+                    pending.extend(node.children().iter().copied().map(|child| (child, depth + 1)));
+                }
             }
         }
 

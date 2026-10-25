@@ -384,6 +384,31 @@ fn current_schema_missing_expanded_width_is_repaired_with_diagnostic() {
 }
 
 #[test]
+fn from_layout_with_metrics_rejects_invalid_layout_before_export() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+    let (_, panel) = builder.panel(key("invalid-export-panel"), constraints());
+    let group = builder.tabs(vec![panel], 0, false);
+    let column = builder.column(100.0, ColumnMode::Expanded, vec![group], vec![1.0]);
+    builder.main_area(DockSide::Right, column);
+    let layout = builder.build();
+
+    assert!(matches!(
+        WorkspaceFile::from_layout_with_metrics(&layout, &metrics),
+        Err(WorkspaceFileError::InvalidLayout(_))
+    ));
+}
+
+#[test]
+fn workspace_json_size_limit_is_checked_before_parsing() {
+    let oversized = " ".repeat(16 * 1024 * 1024 + 1);
+    assert!(matches!(
+        WorkspaceFile::from_json_with_diagnostics(&oversized),
+        Err(WorkspaceFileError::Json(message)) if message.contains("maximum size")
+    ));
+}
+
+#[test]
 fn unsupported_file_versions_and_malformed_json_return_errors() {
     let (layout, descriptors) = sample_layout();
     let mut file = WorkspaceFile::from_layout(&layout).unwrap();

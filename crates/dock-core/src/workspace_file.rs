@@ -16,6 +16,11 @@ pub const WORKSPACE_FORMAT: &str = "roadmap-docking-workspace";
 /// Current public workspace JSON schema version.
 pub const WORKSPACE_VERSION: u32 = 2;
 
+/// Maximum accepted JSON workspace file size (16 MiB).
+const MAX_WORKSPACE_JSON_BYTES: usize = 16 * 1024 * 1024;
+/// Maximum number of tree nodes restored from one workspace (including floating trees).
+const MAX_WORKSPACE_NODES: usize = 100_000;
+
 /// Versioned, JSON-encoded persistent workspace boundary.
 ///
 /// Persist and restore this type, not Layout or individual arena-backed model
@@ -40,6 +45,10 @@ impl WorkspaceFile {
     }
 
     /// Captures persistent state without exposing runtime arena keys or UI state.
+    ///
+    /// This serializer has no DockMetrics argument, so it checks exported references
+    /// but cannot enforce metric-dependent invariants. Prefer `from_layout_with_metrics`
+    /// when the active metric profile is available.
     pub fn from_layout(layout: &Layout) -> Result<Self, WorkspaceFileError> {
         let left = layout
             .main_area(DockSide::Left)
@@ -77,6 +86,17 @@ impl WorkspaceFile {
         }))
     }
 
+    /// Validates a Layout against the active metrics before exporting it.
+    pub fn from_layout_with_metrics(
+        layout: &Layout,
+        metrics: &DockMetrics,
+    ) -> Result<Self, WorkspaceFileError> {
+        layout
+            .validate(metrics)
+            .map_err(WorkspaceFileError::InvalidLayout)?;
+        Self::from_layout(layout)
+    }
+
     /// Parses a workspace file and migrates supported older versions.
     ///
     /// This convenience method returns the upgraded file. Use
@@ -90,6 +110,11 @@ impl WorkspaceFile {
     pub fn from_json_with_diagnostics(
         json: &str,
     ) -> Result<(Self, Vec<WorkspaceDiagnostic>), WorkspaceFileError> {
+        if json.len() > MAX_WORKSPACE_JSON_BYTES {
+            return Err(WorkspaceFileError::Json(format!(
+                "workspace JSON exceeds the maximum size of {MAX_WORKSPACE_JSON_BYTES} bytes"
+            )));
+        }
         let value: serde_json::Value = serde_json::from_str(json)
             .map_err(|error| WorkspaceFileError::Json(error.to_string()))?;
 
@@ -193,6 +218,12 @@ impl WorkspaceFile {
             });
         }
         self.validate_header()?;
+        let node_count = workspace_node_count(&self.layout, MAX_WORKSPACE_NODES);
+        if node_count > MAX_WORKSPACE_NODES {
+            return Err(WorkspaceFileError::Json(format!(
+                "workspace contains more than the maximum of {MAX_WORKSPACE_NODES} nodes"
+            )));
+        }
         metrics
             .validate()
             .map_err(WorkspaceFileError::InvalidMetrics)?;
@@ -371,6 +402,29 @@ impl Layout {
     pub fn to_workspace_file(&self) -> Result<WorkspaceFile, WorkspaceFileError> {
         WorkspaceFile::from_layout(self)
     }
+}
+
+fn workspace_node_count(layout: &WorkspaceLayout, limit: usize) -> usize {
+    let mut pending = Vec::<&WorkspaceNode>::new();
+    pending.extend(layout.left.iter());
+    pending.extend(layout.right.iter());
+    pending.extend(layout.floating_groups.iter().map(|group| &group.root));
+
+    let mut count = 0;
+    while let Some(node) = pending.pop() {
+        count += 1;
+        if count > limit {
+            return count;
+        }
+        match node {
+            WorkspaceNode::Split { children, .. } | WorkspaceNode::Tabs { children, .. } => {
+                pending.extend(children);
+            }
+            WorkspaceNode::Column { groups, .. } => pending.extend(groups),
+            WorkspaceNode::Panel { .. } => {}
+        }
+    }
+    count
 }
 
 fn migrate_v1_to_v2(mut file: WorkspaceFile) -> WorkspaceFile {

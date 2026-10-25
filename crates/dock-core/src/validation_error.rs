@@ -24,6 +24,9 @@ pub enum ValidationError {
     #[error("cycle detected from node {from:?} to node {to:?}")]
     NodeCycle { from: NodeId, to: NodeId },
 
+    #[error("layout tree exceeds the maximum depth of {max_depth} nodes")]
+    TreeTooDeep { max_depth: usize },
+
     #[error("node {node:?} has {references} incoming ownership references")]
     MultipleParents { node: NodeId, references: usize },
 
