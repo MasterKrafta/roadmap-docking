@@ -314,6 +314,8 @@ fn validation_accepts_narrow_canvas_but_rejects_invalid_metrics() {
             .any(|error| matches!(error, ValidationError::InvalidMetrics { .. }))
     );
 
+}
+
 #[test]
 fn detailed_geometry_errors_preserve_layout_validation_issues() {
     let metrics = DockMetrics::default();
@@ -346,4 +348,4 @@ fn detailed_geometry_errors_preserve_layout_validation_issues() {
         }
     )));
 }
-}
+
