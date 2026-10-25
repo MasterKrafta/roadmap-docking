@@ -1,6 +1,55 @@
 use super::*;
 
 impl Layout {
+    fn try_reorder_panel_within_tabs(
+        &mut self,
+        panel: crate::PanelId,
+        source_group: NodeId,
+        source_index: usize,
+        target_group: NodeId,
+        target_index: usize,
+    ) -> Result<Option<CommandApplication>, CommandError> {
+        if source_group != target_group {
+            return Ok(None);
+        }
+        if target_index == source_index || target_index == source_index + 1 {
+            return Ok(Some(CommandApplication::persistent()));
+        }
+
+        let tabs = match self.nodes.get_mut(source_group) {
+            Some(Node::Tabs(tabs)) => tabs,
+            _ => {
+                return Err(CommandError::InvalidTarget {
+                    reason: "panel parent is not a Tabs node",
+                });
+            }
+        };
+        let active_node = tabs.children.get(tabs.active_index).copied();
+        let moved = tabs.children.remove(source_index);
+        let insert_index = if target_index > source_index {
+            target_index - 1
+        } else {
+            target_index
+        };
+        tabs.children
+            .insert(insert_index.min(tabs.children.len()), moved);
+        if let Some(active_node) = active_node
+            && let Some(active_index) = tabs.children.iter().position(|id| *id == active_node)
+        {
+            tabs.active_index = active_index;
+        }
+
+        Ok(Some(CommandApplication {
+            actual_value: None,
+            inverse: Some(DockCommand::ReorderTab {
+                group: source_group,
+                panel,
+                to_index: source_index,
+            }),
+            persistent: true,
+        }))
+    }
+
     pub(super) fn apply_panel_transfer_command(
         &mut self,
         command: &DockCommand,
@@ -80,46 +129,15 @@ impl Layout {
                         index,
                     },
                 ) = (self.tab_parent_index(panel_node), *target)
+                    && let Some(application) = self.try_reorder_panel_within_tabs(
+                        *panel,
+                        source_group,
+                        source_index,
+                        target_group,
+                        index,
+                    )?
                 {
-                    if source_group == target_group
-                        && (index == source_index || index == source_index + 1)
-                    {
-                        return Ok(CommandApplication::persistent());
-                    }
-                    if source_group == target_group {
-                        let tabs = match self.nodes.get_mut(source_group) {
-                            Some(Node::Tabs(tabs)) => tabs,
-                            _ => {
-                                return Err(CommandError::InvalidTarget {
-                                    reason: "panel parent is not a Tabs node",
-                                });
-                            }
-                        };
-                        let active_node = tabs.children.get(tabs.active_index).copied();
-                        let moved = tabs.children.remove(source_index);
-                        let insert_index = if index > source_index {
-                            index - 1
-                        } else {
-                            index
-                        };
-                        tabs.children
-                            .insert(insert_index.min(tabs.children.len()), moved);
-                        if let Some(active_node) = active_node
-                            && let Some(active_index) =
-                                tabs.children.iter().position(|id| *id == active_node)
-                        {
-                            tabs.active_index = active_index;
-                        }
-                        return Ok(CommandApplication {
-                            actual_value: None,
-                            inverse: Some(DockCommand::ReorderTab {
-                                group: source_group,
-                                panel: *panel,
-                                to_index: source_index,
-                            }),
-                            persistent: true,
-                        });
-                    }
+                    return Ok(application);
                 }
                 let inverse = self
                     .tab_parent_index(panel_node)
