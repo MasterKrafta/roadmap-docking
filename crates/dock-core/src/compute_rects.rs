@@ -1343,7 +1343,7 @@ fn push_resize_edges(
 
 #[cfg(test)]
 mod tests {
-    use super::{minimum_node_size, ComputeRectsError};
+    use super::{minimum_node_size, weighted_sizes, ComputeRectsError};
     use crate::layout_builder::LayoutBuilder;
     use crate::{
         Axis, ColumnMode, DockMetrics, DockSide, GeometryError,
@@ -1367,6 +1367,25 @@ mod tests {
 
     fn viewport(width: f32, height: f32) -> Rect {
         Rect::new(Point::ZERO, Size::new(width, height))
+    }
+
+    #[test]
+    fn weighted_sizes_assigns_f32_rounding_remainder_to_last_active_child() {
+        let weights = [0.33333334_f32; 3];
+        let available = 997.3_f32;
+        let minimums = [1.0_f32; 3];
+
+        let sizes = weighted_sizes(&weights, available, &minimums, Axis::Y)
+            .expect("valid positive weights should allocate the full stack");
+
+        let assigned_before_last = sizes[0] + sizes[1];
+        assert_eq!(sizes[2], available - assigned_before_last);
+        assert_ne!(
+            sizes[2],
+            available * weights[2] / weights.iter().sum::<f32>(),
+            "the last child must absorb accumulated f32 rounding instead of taking its raw ratio"
+        );
+        assert!((sizes.iter().sum::<f32>() - available).abs() <= f32::EPSILON * available);
     }
 
     #[test]
