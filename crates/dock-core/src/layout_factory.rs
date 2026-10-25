@@ -10,27 +10,93 @@ use crate::{
 
 const REQUIRED_PANEL_KEYS: [&str; 4] = ["layers", "color", "properties", "history"];
 
+/// Typed reasons why the baseline layout factory could not create a layout.
+#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
+pub enum InitialLayoutError {
+    /// The supplied docking metrics are invalid.
+    #[error("dock metrics are invalid: {source}")]
+    InvalidMetrics {
+        #[source]
+        source: crate::GeometryError,
+    },
+    /// Two panel descriptors use the same stable key.
+    #[error("panel descriptor keys must be unique")]
+    DuplicatePanelKey,
+    /// A descriptor's size constraints are invalid.
+    #[error("panel descriptor contains invalid constraints for '{key}': {source}")]
+    InvalidPanelConstraints {
+        key: String,
+        #[source]
+        source: crate::GeometryError,
+    },
+    /// One of the baseline panel descriptors is absent.
+    #[error("missing required panel descriptor: {key}")]
+    MissingRequiredPanel { key: &'static str },
+    /// Group members have incompatible minimum/maximum width constraints.
+    #[error("panel minimum width exceeds the maximum width allowed by its tab group")]
+    ConflictingPanelWidthConstraints,
+}
+
+impl InitialLayoutError {
+    fn as_static_str(&self) -> &'static str {
+        match self {
+            Self::InvalidMetrics { .. } => "dock metrics are invalid",
+            Self::DuplicatePanelKey => "panel descriptor keys must be unique",
+            Self::InvalidPanelConstraints { .. } => {
+                "panel descriptor contains invalid constraints"
+            }
+            Self::MissingRequiredPanel { key } => match *key {
+                "layers" => "missing required panel descriptor: layers",
+                "color" => "missing required panel descriptor: color",
+                "properties" => "missing required panel descriptor: properties",
+                _ => "missing required panel descriptor: history",
+            },
+            Self::ConflictingPanelWidthConstraints => {
+                "panel minimum width exceeds the maximum width allowed by its tab group"
+            }
+        }
+    }
+}
+
 /// Creates the required baseline composition without constructing any UI.
 ///
-/// The application supplies its descriptor keys and constraints, keeping the
-/// registry and PanelDescriptor type in app. The same composition is built for
-/// the explicitly selected profile; profile-specific restrictions are enforced
-/// by Layout validation.
+/// This legacy entry point retains its static-string error for source compatibility.
+/// New callers that need diagnostic detail should use create_initial_layout_with_error.
 pub fn create_initial_layout(
     profile: Profile,
     descriptors: &[(PanelKey, PanelConstraints)],
     metrics: DockMetrics,
 ) -> Result<Layout, &'static str> {
-    metrics.validate().map_err(|_| "dock metrics are invalid")?;
+    create_initial_layout_with_error(profile, descriptors, metrics)
+        .map_err(|error| error.as_static_str())
+}
+
+/// Creates the required baseline composition with typed, inspectable errors.
+///
+/// The application supplies its descriptor keys and constraints, keeping the
+/// registry and PanelDescriptor type in app. The same composition is built for
+/// the explicitly selected profile; profile-specific restrictions are enforced
+/// by Layout validation.
+pub fn create_initial_layout_with_error(
+    profile: Profile,
+    descriptors: &[(PanelKey, PanelConstraints)],
+    metrics: DockMetrics,
+) -> Result<Layout, InitialLayoutError> {
+    metrics
+        .validate()
+        .map_err(|source| InitialLayoutError::InvalidMetrics { source })?;
 
     let mut seen = HashSet::with_capacity(descriptors.len());
     for (key, constraints) in descriptors {
         if !seen.insert(key.as_str()) {
-            return Err("panel descriptor keys must be unique");
+            return Err(InitialLayoutError::DuplicatePanelKey);
         }
-        constraints
-            .validate()
-            .map_err(|_| "panel descriptor contains invalid constraints")?;
+        constraints.validate().map_err(|source| {
+            InitialLayoutError::InvalidPanelConstraints {
+                key: key.to_string(),
+                source,
+            }
+        })?;
     }
 
     for key in REQUIRED_PANEL_KEYS {
@@ -38,12 +104,7 @@ pub fn create_initial_layout(
             .iter()
             .any(|(candidate, _)| candidate.as_str() == key)
         {
-            return Err(match key {
-                "layers" => "missing required panel descriptor: layers",
-                "color" => "missing required panel descriptor: color",
-                "properties" => "missing required panel descriptor: properties",
-                _ => "missing required panel descriptor: history",
-            });
+            return Err(InitialLayoutError::MissingRequiredPanel { key });
         }
     }
 
@@ -54,14 +115,14 @@ pub fn create_initial_layout(
             .map(|(key, constraints)| (key.clone(), *constraints))
     };
 
-    let (layers_key, layers_constraints) =
-        descriptor("layers").ok_or("missing required panel descriptor: layers")?;
-    let (color_key, color_constraints) =
-        descriptor("color").ok_or("missing required panel descriptor: color")?;
-    let (properties_key, properties_constraints) =
-        descriptor("properties").ok_or("missing required panel descriptor: properties")?;
-    let (history_key, history_constraints) =
-        descriptor("history").ok_or("missing required panel descriptor: history")?;
+    let (layers_key, layers_constraints) = descriptor("layers")
+        .ok_or(InitialLayoutError::MissingRequiredPanel { key: "layers" })?;
+    let (color_key, color_constraints) = descriptor("color")
+        .ok_or(InitialLayoutError::MissingRequiredPanel { key: "color" })?;
+    let (properties_key, properties_constraints) = descriptor("properties")
+        .ok_or(InitialLayoutError::MissingRequiredPanel { key: "properties" })?;
+    let (history_key, history_constraints) = descriptor("history")
+        .ok_or(InitialLayoutError::MissingRequiredPanel { key: "history" })?;
 
     // Both built-in groups are tab stacks, so their minimum width is the widest
     // panel minimum in that group. The column must satisfy both groups and the
@@ -95,7 +156,7 @@ pub fn create_initial_layout(
         );
     }
     if maximum_column_width.is_some_and(|maximum| minimum_column_width > maximum) {
-        return Err("panel minimum width exceeds the maximum width allowed by its tab group");
+        return Err(InitialLayoutError::ConflictingPanelWidthConstraints);
     }
     let column_width = metrics
         .default_column_width
@@ -154,7 +215,7 @@ pub fn create_initial_layout(
 
 #[cfg(test)]
 mod tests {
-    use super::create_initial_layout;
+    use super::{create_initial_layout, create_initial_layout_with_error, InitialLayoutError};
     use crate::{
         Column, ColumnMode, DockMetrics, DockSide, Node, PanelConstraints, PanelKey, Point, Profile,
         Rect, Size,
@@ -237,6 +298,41 @@ mod tests {
                 .unwrap_err(),
             "panel descriptor keys must be unique"
         );
+    }
+
+    #[test]
+    fn typed_factory_errors_preserve_failure_categories() {
+        let mut incomplete = descriptors();
+        incomplete.retain(|(key, _)| key.as_str() != "history");
+        assert!(matches!(
+            create_initial_layout_with_error(Profile::Generic, &incomplete, DockMetrics::default()),
+            Err(InitialLayoutError::MissingRequiredPanel { key: "history" })
+        ));
+
+        let metrics = DockMetrics {
+            default_column_width: f32::NAN,
+            ..DockMetrics::default()
+        };
+        assert!(matches!(
+            create_initial_layout_with_error(Profile::Generic, &descriptors(), metrics),
+            Err(InitialLayoutError::InvalidMetrics { .. })
+        ));
+
+        let mut invalid_constraints = descriptors();
+        invalid_constraints[0].1 = PanelConstraints::new(
+            Size::new(400.0, 80.0),
+            Size::new(280.0, 220.0),
+            None,
+            false,
+        );
+        assert!(matches!(
+            create_initial_layout_with_error(
+                Profile::Generic,
+                &invalid_constraints,
+                DockMetrics::default()
+            ),
+            Err(InitialLayoutError::InvalidPanelConstraints { .. })
+        ));
     }
 
     #[test]
