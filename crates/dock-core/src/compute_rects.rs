@@ -163,10 +163,13 @@ impl Layout {
             );
         }
         if available_canvas < metrics.min_canvas_width {
-            return Err(ComputeRectsError::InsufficientCanvasWidth {
-                available: available_canvas,
-                minimum: metrics.min_canvas_width,
-            });
+            return Err(
+                ComputeRectsError::InsufficientCanvasWidth {
+                    available: available_canvas,
+                    minimum: metrics.min_canvas_width,
+                }
+                .into(),
+            );
         }
 
         let viewport_right = viewport
