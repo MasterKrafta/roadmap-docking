@@ -183,9 +183,17 @@ impl DockController {
         }
     }
 
-    /// Computes the normalized frame geometry for the current layout and viewport.
-    pub(crate) fn frame(&self, viewport: Rect) -> Result<FrameGeometry, ComputeRectsError> {
-        FrameGeometry::compute(&self.layout, viewport, &self.metrics)
+    /// Computes frame geometry and synchronizes the measured canvas remainder.
+    ///
+    /// The viewport is host-measured. Once geometry resolves the dock columns,
+    /// record the resulting canvas bounds so subsequent column-resize commands
+    /// use the current window size rather than a stale saved measurement.
+    pub(crate) fn frame(&mut self, viewport: Rect) -> Result<FrameGeometry, ComputeRectsError> {
+        let frame = FrameGeometry::compute(&self.layout, viewport, &self.metrics)?;
+        self.layout
+            .update_canvas_bounds(frame.rects().canvas)
+            .map_err(ComputeRectsError::Geometry)?;
+        Ok(frame)
     }
 
     /// Returns the most recent command/history error, if the last operation failed.
