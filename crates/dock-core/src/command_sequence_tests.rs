@@ -461,6 +461,51 @@ fn existing_but_wrong_node_types_and_forbidden_targets_are_rejected_atomically()
 }
 
 #[test]
+fn move_group_to_main_column_reorders_single_group_columns_without_panicking() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Generic);
+    let mut columns = Vec::new();
+    let mut groups = Vec::new();
+
+    for name in ["move-column-a", "move-column-b", "move-column-c"] {
+        let (_, panel) = builder.panel(PanelKey::new(name).unwrap(), constraints());
+        let group = builder.tabs(vec![panel], 0, false);
+        let column = builder.column(
+            280.0,
+            ColumnMode::Expanded,
+            vec![group],
+            vec![1.0],
+        );
+        columns.push(column);
+        groups.push(group);
+    }
+
+    let root = builder.split(Axis::X, columns.clone(), vec![0.25, 0.25, 0.5]);
+    builder.main_area(DockSide::Right, root);
+    let mut layout = builder.build();
+    assert_eq!(layout.validate(&metrics), Ok(()));
+
+    let outcome = layout
+        .apply(
+            DockCommand::MoveGroupToMainColumn {
+                group: groups[0],
+                side: DockSide::Right,
+                index: 3,
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    assert_eq!(outcome.new_version, 1);
+    let root = layout.main_area(DockSide::Right).unwrap().root;
+    let Some(Node::Split(split)) = layout.node(root) else {
+        panic!("main root must remain a horizontal split");
+    };
+    assert_eq!(split.children, vec![columns[1], columns[2], columns[0]]);
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
 fn source_equals_target_and_same_position_commands_are_successful_noops() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Generic);
