@@ -24,7 +24,7 @@ impl std::fmt::Display for ComputeRectsError {
         match self {
             Self::InvalidMetrics => formatter.write_str("dock metrics are invalid"),
             Self::InvalidLayout => formatter.write_str("layout is invalid"),
-            Self::Geometry(error) => write!(formatter, "invalid geometry: {error:?}"),
+            Self::Geometry(error) => write!(formatter, "invalid geometry: {error}"),
             Self::InsufficientCanvasWidth { available, minimum } => write!(
                 formatter,
                 "Canvas width {available} is below the minimum {minimum}"
@@ -42,3 +42,18 @@ impl std::fmt::Display for ComputeRectsError {
 }
 
 impl std::error::Error for ComputeRectsError {}
+
+
+#[cfg(test)]
+mod tests {
+    use super::ComputeRectsError;
+    use crate::GeometryError;
+
+    #[test]
+    fn display_uses_geometry_error_message_instead_of_debug_format() {
+        assert_eq!(
+            ComputeRectsError::Geometry(GeometryError::NonFinite).to_string(),
+            "invalid geometry: geometry contains a non-finite value"
+        );
+    }
+}
