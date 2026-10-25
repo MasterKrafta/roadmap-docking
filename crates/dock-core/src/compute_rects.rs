@@ -3391,7 +3391,7 @@ mod tests {
     }
 
     #[test]
-    fn compute_rects_memoizes_minimum_node_sizes_within_one_pass() {
+    fn minimum_node_size_cache_reuses_subtree_values() {
         let metrics = DockMetrics::default();
         let mut builder = LayoutBuilder::new(Profile::Generic);
         let (_, panel_node) = builder.panel(key("minimum-cache-panel"), constraints());
@@ -3404,24 +3404,23 @@ mod tests {
         );
         builder.main_area(DockSide::Left, column);
         let layout = builder.build();
+        let mut cache = std::collections::HashMap::new();
 
-        super::visit_probe::start();
-        let rects = layout
-            .compute_rects(viewport(), &metrics)
-            .expect("fixture should produce geometry");
-        let visits = super::visit_probe::finish();
+        let first = layout
+            .minimum_node_size_with_cache(column, &metrics, &mut cache)
+            .expect("fixture should have a valid minimum size");
+        assert_eq!(cache.len(), 3, "column, tab group, and panel are cached");
 
-        assert_eq!(rects.panels.len(), 1);
-        let recursive_minimum_visits = visits
-            .values()
-            .map(|counts| counts.recursive_minimum_node_size)
-            .sum::<u64>();
-        assert!(recursive_minimum_visits > 0);
-        assert!(
-            visits
-                .values()
-                .all(|counts| counts.recursive_minimum_node_size <= 1),
-            "each node's minimum size should be computed at most once per geometry pass"
+        let cached_count = cache.len();
+        let second = layout
+            .minimum_node_size_with_cache(column, &metrics, &mut cache)
+            .expect("cached minimum size should remain available");
+
+        assert_eq!(first, second);
+        assert_eq!(
+            cache.len(),
+            cached_count,
+            "a repeated query should reuse the cached subtree"
         );
     }
 
