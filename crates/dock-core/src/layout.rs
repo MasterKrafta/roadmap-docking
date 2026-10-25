@@ -1209,6 +1209,7 @@ mod command_floating;
 mod command_floating_dispatch;
 mod command_group_resize_dispatch;
 mod command_column_resize_dispatch;
+mod command_column_resize_boundaries;
 mod command_column_resize_single;
 mod command_column_resize_helpers;
 mod command_layout_state_dispatch;
