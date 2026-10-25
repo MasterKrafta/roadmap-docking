@@ -382,6 +382,83 @@ fn c44_split_group_moves_whole_tabs_into_an_existing_floating_stack() {
 }
 
 #[test]
+fn c44_split_group_preserves_existing_floating_stack_ratios_when_inserting_sibling() {
+    let metrics = DockMetrics::default();
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, source_panel) = builder.panel(
+        PanelKey::new("c44-floating-ratio-source").unwrap(),
+        descriptors()[0].1,
+    );
+    let source_group = builder.tabs(vec![source_panel], 0, false);
+    let source_column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![source_group],
+        vec![1.0],
+    );
+    builder.main_area(DockSide::Left, source_column);
+
+    let (_, top_panel) = builder.panel(
+        PanelKey::new("c44-floating-ratio-top").unwrap(),
+        descriptors()[0].1,
+    );
+    let top_group = builder.tabs(vec![top_panel], 0, false);
+    let (_, middle_panel) = builder.panel(
+        PanelKey::new("c44-floating-ratio-middle").unwrap(),
+        descriptors()[0].1,
+    );
+    let middle_group = builder.tabs(vec![middle_panel], 0, false);
+    let (_, bottom_panel) = builder.panel(
+        PanelKey::new("c44-floating-ratio-bottom").unwrap(),
+        descriptors()[0].1,
+    );
+    let bottom_group = builder.tabs(vec![bottom_panel], 0, false);
+    let floating_root = builder.split(
+        Axis::Y,
+        vec![top_group, middle_group, bottom_group],
+        vec![0.2, 0.3, 0.5],
+    );
+    let floating_id = builder.floating_group(
+        floating_root,
+        Rect::new(Point::new(60.0, 70.0), Size::new(400.0, 480.0)),
+        1,
+    );
+
+    let mut layout = builder.build();
+    assert_eq!(layout.validate(&metrics), Ok(()));
+
+    layout
+        .apply(
+            DockCommand::SplitGroup {
+                group: source_group,
+                target_group: middle_group,
+                zone: DropZone::Bottom,
+                ratio: 0.25,
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    let floating = layout.floating_group(floating_id).unwrap();
+    let root = layout.dock_area(floating.area).unwrap().root;
+    let Node::Split(split) = layout.node(root).unwrap() else {
+        panic!("inserting beside an existing floating group should retain Split(Y)");
+    };
+    assert_eq!(
+        split.children,
+        vec![top_group, middle_group, source_group, bottom_group]
+    );
+    let expected_ratios = [0.2, 0.225, 0.075, 0.5];
+    assert_eq!(split.ratios.len(), expected_ratios.len());
+    for (actual, expected) in split.ratios.iter().zip(expected_ratios) {
+        assert!((actual - expected).abs() < 1.0e-5);
+    }
+    assert!(layout.main_area(DockSide::Left).is_none());
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
 fn c44_split_group_on_adjacent_column_slot_is_a_noop() {
     let metrics = DockMetrics::default();
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
