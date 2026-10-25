@@ -105,6 +105,31 @@ impl Layout {
         }))
     }
 
+    fn validate_flyout_panel_owner(
+        &self,
+        panel: crate::PanelId,
+        reason: &'static str,
+    ) -> Result<(), CommandError> {
+        if self.flyout.is_some_and(|flyout| flyout.panel == panel) {
+            Ok(())
+        } else {
+            Err(CommandError::InvalidTarget { reason })
+        }
+    }
+
+    fn finish_flyout_panel_transfer(
+        &mut self,
+        before: &Layout,
+        mut applied: CommandApplication,
+    ) -> CommandApplication {
+        self.flyout = None;
+        if self.same_persistent_state(before) {
+            applied.persistent = false;
+            applied.inverse = None;
+        }
+        applied
+    }
+
     fn apply_flyout_panel_transfer_command(
         &mut self,
         command: &DockCommand,
@@ -112,11 +137,10 @@ impl Layout {
     ) -> Result<CommandApplication, CommandError> {
         match command {
             DockCommand::MovePanelFromFlyout { panel, target } => {
-                if !self.flyout.is_some_and(|flyout| flyout.panel == *panel) {
-                    return Err(CommandError::InvalidTarget {
-                        reason: "MovePanelFromFlyout requires the dragged panel to own the active flyout",
-                    });
-                }
+                self.validate_flyout_panel_owner(
+                    *panel,
+                    "MovePanelFromFlyout requires the dragged panel to own the active flyout",
+                )?;
 
                 let before = self.clone();
                 let mut applied = self.apply_command(
@@ -126,23 +150,14 @@ impl Layout {
                     },
                     metrics,
                 )?;
-                // A valid release is the flyout's terminal transition, even when the
-                // target resolves to the panel's current position. Invalid commands
-                // return before this point, so the source remains visible on failure.
-                self.flyout = None;
-                if self.same_persistent_state(&before) {
-                    // Closing a flyout after a successful no-op drop is still transient.
-                    applied.persistent = false;
-                    applied.inverse = None;
-                }
-                Ok(applied)
+                // A valid release ends the flyout only after the nested command succeeds.
+                Ok(self.finish_flyout_panel_transfer(&before, applied))
             }
             DockCommand::FloatPanelFromFlyout { panel, bounds } => {
-                if !self.flyout.is_some_and(|flyout| flyout.panel == *panel) {
-                    return Err(CommandError::InvalidTarget {
-                        reason: "FloatPanelFromFlyout requires the dragged panel to own the active flyout",
-                    });
-                }
+                self.validate_flyout_panel_owner(
+                    *panel,
+                    "FloatPanelFromFlyout requires the dragged panel to own the active flyout",
+                )?;
                 let node = self
                     .find_panel_node(*panel)
                     .ok_or(CommandError::MissingPanel { panel: *panel })?;
@@ -154,12 +169,7 @@ impl Layout {
                     },
                     metrics,
                 )?;
-                self.flyout = None;
-                if self.same_persistent_state(&before) {
-                    applied.persistent = false;
-                    applied.inverse = None;
-                }
-                Ok(applied)
+                Ok(self.finish_flyout_panel_transfer(&before, applied))
             }
             _ => Err(CommandError::InvalidTarget {
                 reason: "apply flyout panel transfer command received an unsupported command",
