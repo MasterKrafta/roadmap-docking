@@ -847,3 +847,115 @@ fn floating_one_group_column_can_detach_from_horizontal_composition() {
         Some(Node::Column(column)) if column.groups == vec![sibling_group]
     ));
 }
+
+#[test]
+fn docking_floating_stack_into_column_preserves_existing_group_ratio_proportions() {
+    let metrics = DockMetrics::default();
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+    let (_, main_a) = builder.panel(PanelKey::new("ratio-main-a").unwrap(), descriptors()[0].1);
+    let (_, main_b) = builder.panel(PanelKey::new("ratio-main-b").unwrap(), descriptors()[0].1);
+    let group_a = builder.tabs(vec![main_a], 0, false);
+    let group_b = builder.tabs(vec![main_b], 0, false);
+    let column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![group_a, group_b],
+        vec![0.8, 0.2],
+    );
+    builder.main_area(DockSide::Right, column);
+
+    let (_, floating_a) = builder.panel(PanelKey::new("ratio-floating-a").unwrap(), descriptors()[0].1);
+    let (_, floating_b) = builder.panel(PanelKey::new("ratio-floating-b").unwrap(), descriptors()[0].1);
+    let floating_group_a = builder.tabs(vec![floating_a], 0, false);
+    let floating_group_b = builder.tabs(vec![floating_b], 0, false);
+    let stack = builder.split(Axis::Y, vec![floating_group_a, floating_group_b], vec![0.5, 0.5]);
+    let floating = builder.floating_group(
+        stack,
+        Rect::new(Point::new(30.0, 40.0), Size::new(420.0, 320.0)),
+        1,
+    );
+    let mut layout = builder.build();
+
+    layout.apply(
+        DockCommand::DockFloating {
+            group: floating,
+            target: DropTarget::ColumnSlot { column, index: 2 },
+        },
+        &metrics,
+    ).unwrap();
+
+    let Some(Node::Column(column_value)) = layout.node(column) else {
+        panic!("main root should remain the target column");
+    };
+    assert_eq!(column_value.groups, vec![group_a, group_b, floating_group_a, floating_group_b]);
+    assert_eq!(column_value.group_ratios.len(), 4);
+    assert!((column_value.group_ratios[0] - 0.4).abs() < 1.0e-4);
+    assert!((column_value.group_ratios[1] - 0.1).abs() < 1.0e-4);
+    assert!((column_value.group_ratios[2] - 0.25).abs() < 1.0e-4);
+    assert!((column_value.group_ratios[3] - 0.25).abs() < 1.0e-4);
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
+fn docking_floating_group_onto_its_own_descendant_is_a_no_op() {
+    let metrics = DockMetrics::default();
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+    let (_, panel) = builder.panel(PanelKey::new("floating-self-drop").unwrap(), descriptors()[0].1);
+    let root = builder.tabs(vec![panel], 0, false);
+    let floating = builder.floating_group(
+        root,
+        Rect::new(Point::new(20.0, 30.0), Size::new(400.0, 300.0)),
+        1,
+    );
+    let mut layout = builder.build();
+    let before_version = layout.version();
+
+    let outcome = layout.apply(
+        DockCommand::DockFloating {
+            group: floating,
+            target: DropTarget::Tabs { group: root, index: 1 },
+        },
+        &metrics,
+    ).unwrap();
+
+    assert_eq!(layout.version(), before_version);
+    assert!(outcome.changed_nodes.is_empty());
+    assert!(outcome.inverse.is_none());
+    assert!(layout.floating_group(floating).is_some());
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
+fn floating_geometry_commands_report_the_affected_root_for_ui_invalidation() {
+    let metrics = DockMetrics::default();
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+    let (_, main_panel) = builder.panel(PanelKey::new("changed-node-main").unwrap(), descriptors()[0].1);
+    let main_group = builder.tabs(vec![main_panel], 0, false);
+    let main_column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![main_group],
+        vec![1.0],
+    );
+    builder.main_area(DockSide::Right, main_column);
+
+    let (_, floating_panel) = builder.panel(PanelKey::new("changed-node-floating").unwrap(), descriptors()[0].1);
+    let floating_root = builder.tabs(vec![floating_panel], 0, false);
+    let floating = builder.floating_group(
+        floating_root,
+        Rect::new(Point::new(10.0, 20.0), Size::new(400.0, 300.0)),
+        1,
+    );
+    let mut layout = builder.build();
+
+    let moved = layout.apply(
+        DockCommand::MoveFloating { group: floating, origin: Point::new(50.0, 60.0) },
+        &metrics,
+    ).unwrap();
+    assert!(moved.changed_nodes.contains(&floating_root));
+
+    let chrome = layout.apply(DockCommand::SetChrome { mode: crate::ChromeMode::DockHidden }, &metrics).unwrap();
+    assert!(chrome.changed_nodes.contains(&main_column));
+    assert!(chrome.changed_nodes.contains(&floating_root));
+}
+

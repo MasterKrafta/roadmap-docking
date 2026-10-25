@@ -939,3 +939,30 @@ fn c43_opening_existing_singleton_activates_it_without_toggling_or_validating_ne
     assert!(second.inverse.is_none());
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
+
+#[test]
+fn moving_panel_to_own_group_edge_is_a_no_op() {
+    let metrics = DockMetrics::default();
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+    let (panel_id, panel_node) = builder.panel(PanelKey::new("own-edge-panel").unwrap(), descriptors()[0].1);
+    let (_, sibling_node) = builder.panel(PanelKey::new("own-edge-sibling").unwrap(), descriptors()[0].1);
+    let group = builder.tabs(vec![panel_node, sibling_node], 0, true);
+    let column = builder.column(metrics.default_column_width, crate::ColumnMode::Expanded, vec![group], vec![1.0]);
+    builder.main_area(DockSide::Right, column);
+    let mut layout = builder.build();
+    let before_version = layout.version();
+
+    let outcome = layout.apply(
+        DockCommand::MovePanel {
+            panel: panel_id,
+            target: DropTarget::GroupEdge { group, zone: crate::DropZone::Top },
+        },
+        &metrics,
+    ).unwrap();
+
+    assert_eq!(layout.version(), before_version);
+    assert!(outcome.changed_nodes.is_empty());
+    assert!(matches!(layout.node(group), Some(Node::Tabs(tabs)) if tabs.collapsed && tabs.children == vec![panel_node,sibling_node]));
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
