@@ -140,7 +140,7 @@ impl DockController {
             Err(error) => {
                 tracing::warn!(error = %error, "dock resize preview was rejected");
                 self.last_error = Some(error.clone());
-                Err(ResizeUpdateError::Command(error))
+                Err(ResizeUpdateError::Command)
             }
         }
     }
@@ -166,7 +166,7 @@ impl DockController {
         let command = command?;
         let result = self.history.apply(&mut self.layout, command, &self.metrics);
         self.track_command_result(result, "resize_commit")
-            .map_err(ResizeUpdateError::Command)
+            .map_err(|_| ResizeUpdateError::Command)
     }
 
     /// Cancels an active resize and restores the exact pointer-down snapshot.
