@@ -198,10 +198,14 @@ impl Layout {
                     .ok_or(ComputeRectsError::InvalidLayout)?;
                 let mut floating_output = LayoutRects::default();
                 let result = (|| {
-                    let bounds =
-                        clamp_floating_bounds_with_cache(
-                            self, area.root, floating.bounds, viewport, metrics, &mut minimum_sizes,
-                        )?;
+                    let bounds = clamp_floating_bounds_with_cache(
+                        self,
+                        area.root,
+                        floating.bounds,
+                        viewport,
+                        metrics,
+                        &mut minimum_sizes,
+                    )?;
                     floating_output
                         .floating_groups
                         .push(FloatingGroupRect::new(id, bounds, floating.z_order));
@@ -365,12 +369,14 @@ fn minimum_node_size(
 ) -> Result<Size, ComputeRectsError> {
     #[cfg(test)]
     visit_probe::record_minimum_node_size_helper(id);
-    layout.minimum_node_size_with_cache(id, metrics, minimum_sizes).map_err(|error| match error {
-        crate::CommandError::InvalidValue { field: "size", .. } => {
-            ComputeRectsError::Geometry(GeometryError::ArithmeticOverflow)
-        }
-        _ => ComputeRectsError::InvalidLayout,
-    })
+    layout
+        .minimum_node_size_with_cache(id, metrics, minimum_sizes)
+        .map_err(|error| match error {
+            crate::CommandError::InvalidValue { field: "size", .. } => {
+                ComputeRectsError::Geometry(GeometryError::ArithmeticOverflow)
+            }
+            _ => ComputeRectsError::InvalidLayout,
+        })
 }
 
 fn layout_node(
@@ -1043,12 +1049,16 @@ fn minimum_floating_size(
 ) -> Result<Size, ComputeRectsError> {
     #[cfg(test)]
     visit_probe::record_minimum_node_size_helper(root);
-    layout.minimum_floating_size_with_cache(root, metrics, minimum_sizes).map_err(|error| match error {
-        crate::CommandError::InvalidValue { field: "size", reason } if reason.contains("overflow") => {
-            ComputeRectsError::Geometry(GeometryError::ArithmeticOverflow)
-        }
-        _ => ComputeRectsError::InvalidLayout,
-    })
+    layout
+        .minimum_floating_size_with_cache(root, metrics, minimum_sizes)
+        .map_err(|error| match error {
+            crate::CommandError::InvalidValue { field: "size", reason }
+                if reason.contains("overflow") =>
+            {
+                ComputeRectsError::Geometry(GeometryError::ArithmeticOverflow)
+            }
+            _ => ComputeRectsError::InvalidLayout,
+        })
 }
 
 pub(crate) fn clamp_floating_bounds(
