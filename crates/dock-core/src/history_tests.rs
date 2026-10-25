@@ -691,7 +691,8 @@ fn undo_preserves_panel_runtime_size_changed_after_checkpoint() {
 
     assert!(history.undo(&mut fixture.layout, &metrics).unwrap());
     let panel = fixture.layout.panel_instance(fixture.layers).unwrap();
-    assert_eq!(panel.state.last_known_size(), Some(Size::new(460.0, constraints().preferred_size.height)));
+    assert_eq!(panel.state.last_known_size(), None);
+    assert_eq!(fixture.layout.flyout_width(&panel.key), Some(460.0));
 }
 
 #[test]

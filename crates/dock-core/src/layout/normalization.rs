@@ -247,6 +247,7 @@ impl Layout {
             flyout_auto_collapse: true,
             history_identity: Arc::new(()),
             flyout_widths: HashMap::new(),
+            flyout_width_order: VecDeque::new(),
         }
     }
 }

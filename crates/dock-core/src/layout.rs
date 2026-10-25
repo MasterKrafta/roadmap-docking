@@ -54,6 +54,7 @@ pub struct Layout {
     flyout_auto_collapse: bool,
     history_identity: Arc<()>,
     flyout_widths: HashMap<PanelKey, f32>,
+    flyout_width_order: VecDeque<PanelKey>,
 }
 
 impl Layout {
@@ -75,6 +76,7 @@ impl Layout {
             flyout_auto_collapse: true,
             history_identity: Arc::new(()),
             flyout_widths: HashMap::new(),
+            flyout_width_order: VecDeque::new(),
         }
     }
 
@@ -107,6 +109,7 @@ impl Layout {
             flyout_auto_collapse: true,
             history_identity: Arc::new(()),
             flyout_widths: HashMap::new(),
+            flyout_width_order: VecDeque::new(),
         }
     }
 

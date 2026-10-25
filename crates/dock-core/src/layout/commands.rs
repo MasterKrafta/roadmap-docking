@@ -1914,9 +1914,20 @@ impl Layout {
                     .max_size
                     .map(|size| size.width)
                     .unwrap_or(f32::MAX);
+                if !width.is_finite() {
+                    return Err(CommandError::InvalidValue {
+                        field: "width",
+                        reason: "flyout width must be finite",
+                    });
+                }
                 let actual_width = (*width).clamp(constraints.min_size.width, max_width);
-                if self.flyout_widths.get(&key).copied() != Some(actual_width) {
-                    self.flyout_widths.insert(key, actual_width);
+                self.flyout_width_order.retain(|remembered| *remembered != key);
+                self.flyout_width_order.push_back(key.clone());
+                self.flyout_widths.insert(key, actual_width);
+                while self.flyout_width_order.len() > MAX_REMEMBERED_DOCK_LOCATIONS {
+                    if let Some(expired) = self.flyout_width_order.pop_front() {
+                        self.flyout_widths.remove(&expired);
+                    }
                 }
                 Ok(CommandApplication::transient())
             }
@@ -3426,6 +3437,7 @@ impl Layout {
             && self.flyout == other.flyout
             && self.flyout_auto_collapse == other.flyout_auto_collapse
             && self.flyout_widths == other.flyout_widths
+            && self.flyout_width_order == other.flyout_width_order
     }
 
     pub(super) fn changed_node_ids(&self, other: &Self, command: &DockCommand) -> Vec<NodeId> {
