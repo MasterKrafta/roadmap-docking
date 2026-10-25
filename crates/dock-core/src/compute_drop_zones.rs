@@ -65,7 +65,7 @@ impl Layout {
             .validate()
             .map_err(|reason| ComputeRectsError::InvalidMetrics { reason })?;
         self.validate_cached(metrics)
-            .map_err(|errors| ComputeRectsError::LayoutValidation { errors })?;
+            .map_err(|errors| ComputeRectsError::InvalidLayout { errors })?;
         Ok(())
     }
 
@@ -76,7 +76,7 @@ impl Layout {
         metrics: &DockMetrics,
         tree_index: &DropZoneTreeIndex,
     ) -> Result<Vec<DropZoneRect>, ComputeRectsError> {
-        let viewport = rects.viewport.ok_or(ComputeRectsError::InvalidLayout)?;
+        let viewport = rects.viewport.ok_or(ComputeRectsError::InvalidLayoutState)?;
         viewport
             .validate_non_empty()
             .map_err(ComputeRectsError::Geometry)?;
@@ -87,7 +87,7 @@ impl Layout {
                 .iter()
                 .any(|panel| self.panel_instance(*panel).is_none())
         {
-            return Err(ComputeRectsError::InvalidLayout);
+            return Err(ComputeRectsError::InvalidLayoutState);
         }
 
         // Validate the geometry entries we are about to use. A stale target ID
@@ -1005,13 +1005,13 @@ fn source_root(
 ) -> Result<NodeId, ComputeRectsError> {
     match source {
         DropSource::Panel { panel } => {
-            panel_node(tree_index, panel).ok_or(ComputeRectsError::InvalidLayout)
+            panel_node(tree_index, panel).ok_or(ComputeRectsError::InvalidLayoutState)
         }
         DropSource::Group { group } => {
             if matches!(layout.node(group), Some(Node::Tabs(_))) {
                 Ok(group)
             } else {
-                Err(ComputeRectsError::InvalidLayout)
+                Err(ComputeRectsError::InvalidLayoutState)
             }
         }
     }
@@ -1260,7 +1260,7 @@ fn group_edge_rect(rect: Rect, zone: DropZone, edge_width: f32) -> Result<Rect, 
             Point::new(rect.origin.x, rect.origin.y + rect.size.height - y_band),
             Size::new(rect.size.width, y_band),
         ),
-        _ => return Err(ComputeRectsError::InvalidLayout),
+        _ => return Err(ComputeRectsError::InvalidLayoutState),
     };
     result.validate().map_err(ComputeRectsError::Geometry)?;
     Ok(result)
@@ -1317,7 +1317,7 @@ fn floating_edge_rect(
         // Keep stack insertion below the floating title and tab-strip hit bands.
         DropZone::Top => rect.origin.y + metrics.header_height + metrics.tab_strip_height,
         DropZone::Bottom => rect.origin.y + rect.size.height - height,
-        _ => return Err(ComputeRectsError::InvalidLayout),
+        _ => return Err(ComputeRectsError::InvalidLayoutState),
     };
     let result = Rect::new(
         Point::new(rect.origin.x + inset_x, y),
