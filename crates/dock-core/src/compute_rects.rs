@@ -109,7 +109,7 @@ impl Layout {
             .validate_non_empty()
             .map_err(ComputeRectsError::Geometry)?;
         self.validate_cached(metrics)
-            .map_err(|errors| ComputeRectsError::LayoutValidation { errors })?;
+            .map_err(|errors| ComputeRectsError::InvalidLayout { errors })?;
 
         // Cache minimum sizes only for this immutable geometry pass. The cache
         // cannot outlive the exact layout and metrics used to calculate it.
@@ -193,7 +193,7 @@ impl Layout {
             for (id, floating) in self.floating_groups_in_paint_order() {
                 let area = self
                     .dock_area(floating.area)
-                    .ok_or(ComputeRectsError::InvalidLayout)?;
+                    .ok_or(ComputeRectsError::InvalidLayoutState)?;
                 let mut floating_output = LayoutRects::default();
                 let result = (|| {
                     let bounds = clamp_floating_bounds_with_cache(
@@ -246,8 +246,8 @@ fn compute_flyout_rect(
         .columns
         .iter()
         .find(|column| column.column == flyout.column)
-        .ok_or(ComputeRectsError::InvalidLayout)?;
-    let canvas = output.canvas.ok_or(ComputeRectsError::InvalidLayout)?;
+        .ok_or(ComputeRectsError::InvalidLayoutState)?;
+    let canvas = output.canvas.ok_or(ComputeRectsError::InvalidLayoutState)?;
     let canvas_right = canvas
         .checked_right()
         .map_err(ComputeRectsError::Geometry)?;
@@ -264,12 +264,12 @@ fn compute_flyout_rect(
         (ResizeEdge::Left, rail.rect.origin.x, canvas.size.width)
     } else {
         // Flyouts are anchored to main-dock rails, not floating columns.
-        return Err(ComputeRectsError::InvalidLayout);
+        return Err(ComputeRectsError::InvalidLayoutState);
     };
 
     let instance = layout
         .panel_instance(flyout.panel)
-        .ok_or(ComputeRectsError::InvalidLayout)?;
+        .ok_or(ComputeRectsError::InvalidLayoutState)?;
     let constraints = instance.constraints;
     let min_width = constraints.min_size.width;
     let preferred_width = layout
@@ -293,7 +293,7 @@ fn compute_flyout_rect(
     let x = match resize_edge {
         ResizeEdge::Right => anchor_x,
         ResizeEdge::Left => anchor_x - width,
-        _ => return Err(ComputeRectsError::InvalidLayout),
+        _ => return Err(ComputeRectsError::InvalidLayoutState),
     };
     let rect = Rect::new(
         Point::new(x, viewport.origin.y),
@@ -318,7 +318,7 @@ fn preferred_width(
 ) -> Result<f32, ComputeRectsError> {
     #[cfg(test)]
     visit_probe::record_preferred_width(id);
-    let node = layout.node(id).ok_or(ComputeRectsError::InvalidLayout)?;
+    let node = layout.node(id).ok_or(ComputeRectsError::InvalidLayoutState)?;
     let width = match node {
         Node::Column(column) => effective_column_width(column, metrics),
         Node::Tabs(_) | Node::Panel(_) => metrics
@@ -375,9 +375,9 @@ fn minimum_node_size(
                 reason: "computed minimum size overflowed",
             } => ComputeRectsError::Geometry(GeometryError::ArithmeticOverflow),
             crate::CommandError::InvalidValue { field: "size", .. } => {
-                ComputeRectsError::InvalidLayout
+                ComputeRectsError::InvalidLayoutState
             }
-            _ => ComputeRectsError::InvalidLayout,
+            _ => ComputeRectsError::InvalidLayoutState,
         })
 }
 
@@ -390,7 +390,7 @@ fn layout_node(
     output: &mut LayoutRects,
 ) -> Result<(), ComputeRectsError> {
     rect.validate().map_err(ComputeRectsError::Geometry)?;
-    let node = layout.node(id).ok_or(ComputeRectsError::InvalidLayout)?;
+    let node = layout.node(id).ok_or(ComputeRectsError::InvalidLayoutState)?;
 
     // Columns and vertical splits manage their own stack overflow. Other nodes
     // need an expanded content rect when the parent viewport is shorter than
@@ -431,7 +431,7 @@ fn layout_node(
         Node::Panel(panel) => {
             let minimum = layout
                 .panel_instance(panel.panel_id)
-                .ok_or(ComputeRectsError::InvalidLayout)?
+                .ok_or(ComputeRectsError::InvalidLayoutState)?
                 .constraints
                 .min_size;
             if content_rect.size.width < minimum.width {
@@ -486,7 +486,7 @@ fn layout_column(
         let slot_height = metrics.effective_collapsed_group_height();
         let display_order = layout
             .column_display_order(id)
-            .map_err(|_| ComputeRectsError::InvalidLayout)?;
+            .map_err(|_| ComputeRectsError::InvalidLayoutState)?;
         let required = slot_height * display_order.len() as f32;
         if !required.is_finite() {
             return Err(ComputeRectsError::Geometry(
@@ -811,7 +811,7 @@ fn layout_split_inner(
         return Ok(());
     }
     if split.ratios.len() != split.children.len() {
-        return Err(ComputeRectsError::InvalidLayout);
+        return Err(ComputeRectsError::InvalidLayoutState);
     }
 
     match split.axis {
@@ -920,7 +920,7 @@ fn allocate_stack_heights(
     minimum_sizes: &mut HashMap<NodeId, Size>,
 ) -> Result<StackAllocation, ComputeRectsError> {
     if ratios.len() != children.len() {
-        return Err(ComputeRectsError::InvalidLayout);
+        return Err(ComputeRectsError::InvalidLayoutState);
     }
     if ratios.is_empty() {
         return Ok(StackAllocation {
@@ -1059,7 +1059,7 @@ fn minimum_floating_size(
             {
                 ComputeRectsError::Geometry(GeometryError::ArithmeticOverflow)
             }
-            _ => ComputeRectsError::InvalidLayout,
+            _ => ComputeRectsError::InvalidLayoutState,
         })
 }
 
@@ -1167,7 +1167,7 @@ fn weighted_sizes(
     axis: Axis,
 ) -> Result<Vec<f32>, ComputeRectsError> {
     if weights.len() != minimums.len() {
-        return Err(ComputeRectsError::InvalidLayout);
+        return Err(ComputeRectsError::InvalidLayoutState);
     }
     if weights.is_empty() {
         return Ok(Vec::new());
@@ -1211,7 +1211,7 @@ fn weighted_sizes(
     while !active.is_empty() {
         let weight_sum: f32 = active.iter().map(|index| weights[*index]).sum();
         if !weight_sum.is_finite() || weight_sum <= 0.0 {
-            return Err(ComputeRectsError::InvalidLayout);
+            return Err(ComputeRectsError::InvalidLayoutState);
         }
         let undersized = active
             .iter()
@@ -2532,7 +2532,7 @@ mod tests {
                 &metrics,
                 &mut std::collections::HashMap::new(),
             ),
-            Err(ComputeRectsError::InvalidLayout)
+            Err(ComputeRectsError::InvalidLayoutState)
         ));
     }
 
