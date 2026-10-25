@@ -20,6 +20,8 @@ pub const WORKSPACE_VERSION: u32 = 2;
 const MAX_WORKSPACE_JSON_BYTES: usize = 16 * 1024 * 1024;
 /// Maximum number of tree nodes restored from one workspace (including floating trees).
 const MAX_WORKSPACE_NODES: usize = 100_000;
+/// Maximum nesting depth accepted by workspace import/export, counting the root as level 1.
+const MAX_WORKSPACE_TREE_DEPTH: usize = 256;
 
 /// Versioned, JSON-encoded persistent workspace boundary.
 ///
@@ -210,6 +212,10 @@ impl WorkspaceFile {
         options: WorkspaceLoadOptions,
         mut diagnostics: Vec<WorkspaceDiagnostic>,
     ) -> Result<WorkspaceLoadResult, WorkspaceFileError> {
+        // DTOs can be constructed directly in Rust, bypassing serde_json's
+        // recursion limit. Check limits iteratively before migration/restore,
+        // both of which recurse through the nested workspace tree.
+        validate_workspace_tree_limits(&self.layout)?;
         if self.version == 1 {
             self = migrate_v1_to_v2(self);
             diagnostics.push(WorkspaceDiagnostic::SchemaMigrated {
@@ -218,12 +224,6 @@ impl WorkspaceFile {
             });
         }
         self.validate_header()?;
-        let node_count = workspace_node_count(&self.layout, MAX_WORKSPACE_NODES);
-        if node_count > MAX_WORKSPACE_NODES {
-            return Err(WorkspaceFileError::Json(format!(
-                "workspace contains more than the maximum of {MAX_WORKSPACE_NODES} nodes"
-            )));
-        }
         metrics
             .validate()
             .map_err(WorkspaceFileError::InvalidMetrics)?;
@@ -407,27 +407,43 @@ impl Layout {
     }
 }
 
-fn workspace_node_count(layout: &WorkspaceLayout, limit: usize) -> usize {
-    let mut pending = Vec::<&WorkspaceNode>::new();
-    pending.extend(layout.left.iter());
-    pending.extend(layout.right.iter());
-    pending.extend(layout.floating_groups.iter().map(|group| &group.root));
+fn validate_workspace_tree_limits(
+    layout: &WorkspaceLayout,
+) -> Result<(), WorkspaceFileError> {
+    let mut pending = Vec::<(&WorkspaceNode, usize)>::new();
+    pending.extend(layout.left.iter().map(|node| (node, 1)));
+    pending.extend(layout.right.iter().map(|node| (node, 1)));
+    pending.extend(
+        layout
+            .floating_groups
+            .iter()
+            .map(|group| (&group.root, 1)),
+    );
 
-    let mut count = 0;
-    while let Some(node) = pending.pop() {
+    let mut count = 0usize;
+    while let Some((node, depth)) = pending.pop() {
+        if depth > MAX_WORKSPACE_TREE_DEPTH {
+            return Err(WorkspaceFileError::Json(format!(
+                "workspace tree exceeds the maximum depth of {MAX_WORKSPACE_TREE_DEPTH}"
+            )));
+        }
         count += 1;
-        if count > limit {
-            return count;
+        if count > MAX_WORKSPACE_NODES {
+            return Err(WorkspaceFileError::Json(format!(
+                "workspace contains more than the maximum of {MAX_WORKSPACE_NODES} nodes"
+            )));
         }
         match node {
             WorkspaceNode::Split { children, .. } | WorkspaceNode::Tabs { children, .. } => {
-                pending.extend(children);
+                pending.extend(children.iter().map(|child| (child, depth + 1)));
             }
-            WorkspaceNode::Column { groups, .. } => pending.extend(groups),
+            WorkspaceNode::Column { groups, .. } => {
+                pending.extend(groups.iter().map(|group| (group, depth + 1)));
+            }
             WorkspaceNode::Panel { .. } => {}
         }
     }
-    count
+    Ok(())
 }
 
 fn migrate_v1_to_v2(mut file: WorkspaceFile) -> WorkspaceFile {
@@ -475,6 +491,19 @@ fn node_to_workspace(
     layout: &Layout,
     node_id: NodeId,
 ) -> Result<WorkspaceNode, WorkspaceFileError> {
+    node_to_workspace_at_depth(layout, node_id, 1)
+}
+
+fn node_to_workspace_at_depth(
+    layout: &Layout,
+    node_id: NodeId,
+    depth: usize,
+) -> Result<WorkspaceNode, WorkspaceFileError> {
+    if depth > MAX_WORKSPACE_TREE_DEPTH {
+        return Err(WorkspaceFileError::InvalidRuntimeLayout(format!(
+            "layout tree exceeds the maximum workspace depth of {MAX_WORKSPACE_TREE_DEPTH}"
+        )));
+    }
     let node = layout.node(node_id).ok_or_else(|| {
         WorkspaceFileError::InvalidRuntimeLayout(
             "a dock area or child references a missing node".to_owned(),
@@ -487,7 +516,7 @@ fn node_to_workspace(
             children: split
                 .children
                 .iter()
-                .map(|child| node_to_workspace(layout, *child))
+                .map(|child| node_to_workspace_at_depth(layout, *child, depth + 1))
                 .collect::<Result<_, _>>()?,
             ratios: split.ratios.clone(),
         }),
@@ -495,7 +524,7 @@ fn node_to_workspace(
             children: tabs
                 .children
                 .iter()
-                .map(|child| node_to_workspace(layout, *child))
+                .map(|child| node_to_workspace_at_depth(layout, *child, depth + 1))
                 .collect::<Result<_, _>>()?,
             active_index: tabs.active_index,
             collapsed: tabs.collapsed,
@@ -517,7 +546,7 @@ fn node_to_workspace(
             groups: column
                 .groups
                 .iter()
-                .map(|group| node_to_workspace(layout, *group))
+                .map(|group| node_to_workspace_at_depth(layout, *group, depth + 1))
                 .collect::<Result<_, _>>()?,
             group_ratios: column.group_ratios.clone(),
             last_expanded_width: column.last_expanded_width,
