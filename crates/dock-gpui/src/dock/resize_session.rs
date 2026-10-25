@@ -792,6 +792,39 @@ mod tests {
     }
 
     #[test]
+    fn floating_corner_edges_reject_zero_sized_bounds() {
+        let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
+        let group = dock_core::FloatingGroupId::null();
+        let cases = [
+            (ResizeEdge::TopLeft, Point::new(400.0, 100.0)),
+            (ResizeEdge::TopLeft, Point::new(100.0, 300.0)),
+            (ResizeEdge::TopRight, Point::new(-200.0, 100.0)),
+            (ResizeEdge::TopRight, Point::new(100.0, 300.0)),
+            (ResizeEdge::BottomLeft, Point::new(400.0, 100.0)),
+            (ResizeEdge::BottomLeft, Point::new(100.0, -100.0)),
+            (ResizeEdge::BottomRight, Point::new(-200.0, 100.0)),
+            (ResizeEdge::BottomRight, Point::new(100.0, -100.0)),
+        ];
+
+        for (edge, pointer) in cases {
+            let session = session(
+                &layout,
+                ResizeHandle::FloatingEdge {
+                    group,
+                    edge,
+                },
+                StartGeometry::FloatingEdge {
+                    bounds: Rect::new(Point::new(10.0, 20.0), Size::new(300.0, 200.0)),
+                },
+            );
+            assert!(matches!(
+                session.command_for_pointer(pointer),
+                Err(ResizeUpdateError::InvalidBounds)
+            ), "zero-sized bounds must be rejected for {edge:?} at {pointer:?}");
+        }
+    }
+
+    #[test]
     fn floating_corner_edges_resize_expected_sides() {
         let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
         let group = dock_core::FloatingGroupId::null();
