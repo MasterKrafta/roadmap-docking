@@ -9,7 +9,7 @@ impl Layout {
         match command {
             DockCommand::Float { node, bounds } => self.apply_float_command(node, bounds),
             DockCommand::FloatGroupAsColumn { group, bounds } => {
-                self.float_group_as_column(*group, *bounds, metrics)
+                self.apply_float_group_as_column_command(*group, *bounds, metrics)
             }
             DockCommand::FloatPanelAsGroup { panel, bounds } => {
                 self.float_panel_as_group(*panel, *bounds, metrics)
