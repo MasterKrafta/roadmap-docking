@@ -324,7 +324,7 @@ fn detailed_geometry_errors_preserve_layout_validation_issues() {
     let Node::Column(column) = layout.nodes.get_mut(root).unwrap() else {
         panic!("factory should create a column");
     };
-    column.group_ratios = vec![0.2; column.groups.len()];
+    column.group_ratios = vec![0.2, 0.2];
     // Direct test mutation bypasses the normal revision/cache invalidation path.
     layout.validation_cache.set(None);
 
