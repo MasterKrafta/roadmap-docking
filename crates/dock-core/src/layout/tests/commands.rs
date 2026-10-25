@@ -186,6 +186,129 @@ fn apply_vertical_group_split_uses_the_requested_target_groups_ratio() {
 }
 
 #[test]
+fn main_column_ratios_reset_visible_widths() {
+    let metrics = DockMetrics::default();
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, first_panel) =
+        builder.panel(PanelKey::new("reset-main-width-first").unwrap(), descriptors()[0].1);
+    let first_group = builder.tabs(vec![first_panel], 0, false);
+    let first_column = builder.column(
+        360.0,
+        crate::ColumnMode::Expanded,
+        vec![first_group],
+        vec![1.0],
+    );
+
+    let (_, second_panel) =
+        builder.panel(PanelKey::new("reset-main-width-second").unwrap(), descriptors()[0].1);
+    let second_group = builder.tabs(vec![second_panel], 0, false);
+    let second_column = builder.column(
+        200.0,
+        crate::ColumnMode::Expanded,
+        vec![second_group],
+        vec![1.0],
+    );
+
+    let root = builder.split(Axis::X, vec![first_column, second_column], vec![0.9, 0.1]);
+    builder.main_area(DockSide::Left, root);
+    let mut layout = builder.build();
+    assert_eq!(layout.validate(&metrics), Ok(()));
+
+    layout
+        .apply(DockCommand::ResetMainColumnRatios { side: DockSide::Left }, &metrics)
+        .unwrap();
+
+    let (first_width, second_width) = match (layout.node(first_column), layout.node(second_column)) {
+        (Some(Node::Column(first)), Some(Node::Column(second))) => (first.width, second.width),
+        _ => panic!("both main columns must remain in the layout"),
+    };
+    assert!((first_width - 280.0).abs() < 1.0e-3);
+    assert!((second_width - 280.0).abs() < 1.0e-3);
+    assert!(matches!(
+        layout.node(root),
+        Some(Node::Split(split)) if split.ratios == vec![0.5, 0.5]
+    ));
+
+    let rects = layout
+        .compute_rects(Rect::new(Point::ZERO, Size::new(1200.0, 800.0)), &metrics)
+        .unwrap();
+    for column in [first_column, second_column] {
+        let rect = rects.columns.iter().find(|rect| rect.column == column).unwrap();
+        assert!((rect.rect.size.width - 280.0).abs() < 1.0e-3);
+    }
+}
+
+#[test]
+fn main_column_split_group_ratio_controls_new_column_width() {
+    let metrics = DockMetrics::default();
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, source_panel) =
+        builder.panel(PanelKey::new("ratio-main-width-source").unwrap(), descriptors()[0].1);
+    let source_group = builder.tabs(vec![source_panel], 0, false);
+    let source_column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![source_group],
+        vec![1.0],
+    );
+    builder.main_area(DockSide::Left, source_column);
+
+    let (_, target_panel) =
+        builder.panel(PanelKey::new("ratio-main-width-target").unwrap(), descriptors()[0].1);
+    let target_group = builder.tabs(vec![target_panel], 0, false);
+    let target_column = builder.column(
+        360.0,
+        crate::ColumnMode::Expanded,
+        vec![target_group],
+        vec![1.0],
+    );
+    builder.main_area(DockSide::Right, target_column);
+
+    let mut layout = builder.build();
+    assert_eq!(layout.validate(&metrics), Ok(()));
+
+    layout
+        .apply(
+            DockCommand::SplitGroup {
+                group: source_group,
+                target_group,
+                zone: DropZone::Right,
+                ratio: 0.4,
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    let root = layout.main_area(DockSide::Right).unwrap().root;
+    let new_column = match layout.node(root) {
+        Some(Node::Split(split)) => {
+            assert_eq!(split.children.len(), 2);
+            assert_eq!(split.ratios, vec![0.6, 0.4]);
+            split.children.iter().copied().find(|id| *id != target_column).unwrap()
+        }
+        other => panic!("expected a horizontal split of main columns, found {other:?}"),
+    };
+    assert!(matches!(
+        layout.node(target_column),
+        Some(Node::Column(column)) if (column.width - 360.0).abs() < 1.0e-3
+    ));
+    assert!(matches!(
+        layout.node(new_column),
+        Some(Node::Column(column)) if (column.width - 240.0).abs() < 1.0e-3
+    ));
+
+    let rects = layout
+        .compute_rects(Rect::new(Point::ZERO, Size::new(1600.0, 900.0)), &metrics)
+        .unwrap();
+    assert!(matches!(
+        rects.columns.iter().find(|rect| rect.column == new_column),
+        Some(rect) if (rect.rect.size.width - 240.0).abs() < 1.0e-3
+    ));
+}
+
+#[test]
 fn apply_version_overflow_rejects_commit_atomically() {
     let metrics = DockMetrics::default();
     let mut layout = initial_layout(Profile::Generic);

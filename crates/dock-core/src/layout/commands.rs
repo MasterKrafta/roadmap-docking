@@ -724,7 +724,7 @@ impl Layout {
                     group_ratios: vec![1.0],
                     last_expanded_width: Some(metrics.default_column_width),
                 }));
-                self.insert_existing_column_at(*side, *index, new_column, None)?;
+                self.insert_existing_column_at(*side, *index, new_column, None, metrics)?;
                 self.remember_subtree_dock_locations(*group);
                 Ok(CommandApplication {
                     actual_value: None,
@@ -1418,16 +1418,24 @@ impl Layout {
                 let Some(area) = self.main_area(*side).copied() else {
                     return Ok(CommandApplication::persistent());
                 };
-                match self.nodes.get(area.root) {
+                let root = self.nodes.get(area.root).cloned();
+                match root {
                     Some(Node::Column(_)) => Ok(CommandApplication::persistent()),
                     Some(Node::Split(split)) if split.axis == Axis::X => {
-                        let equal = equal_ratios(split.children.len());
-                        if split.ratios == equal {
-                            return Ok(CommandApplication::persistent());
+                        if split.children.iter().any(|child| {
+                            !matches!(self.nodes.get(*child), Some(Node::Column(_)))
+                        }) {
+                            return Err(CommandError::InvalidTarget {
+                                reason: "main horizontal split contains a non-Column child",
+                            });
                         }
-                        if let Some(Node::Split(split)) = self.nodes.get_mut(area.root) {
-                            split.ratios = equal;
-                        }
+                        let first_column = split.children.first().copied().ok_or(
+                            CommandError::InvalidTarget {
+                                reason: "main horizontal split has no columns",
+                            },
+                        )?;
+                        self.reset_main_column_widths(*side, metrics)?;
+                        self.sync_main_column_ratios(first_column)?;
                         Ok(CommandApplication::persistent())
                     }
                     Some(_) => Err(CommandError::InvalidTarget {
@@ -2541,7 +2549,7 @@ impl Layout {
                     group_ratios: vec![1.0],
                     last_expanded_width: Some(metrics.default_column_width),
                 }));
-                self.insert_existing_column_at(side, index, column, None)
+                self.insert_existing_column_at(side, index, column, None, metrics)
             }
             DropTarget::ColumnSlot { column, index } => {
                 let group = self.group_node_for(node)?;
@@ -2586,18 +2594,92 @@ impl Layout {
         }
     }
 
+    fn resize_inserted_column_for_split_ratio(
+        &mut self,
+        target_column: NodeId,
+        new_column: NodeId,
+        ratio: f32,
+        metrics: &DockMetrics,
+    ) -> Result<(), CommandError> {
+        if !ratio.is_finite() || ratio <= 0.0 || ratio >= 1.0 {
+            return Err(CommandError::InvalidValue {
+                field: "ratio",
+                reason: "split ratio must be between zero and one",
+            });
+        }
+        let target_width = match self.nodes.get(target_column) {
+            Some(Node::Column(column)) => column.width,
+            Some(_) => {
+                return Err(CommandError::InvalidTarget {
+                    reason: "split-ratio target must be a Column node",
+                });
+            }
+            None => return Err(CommandError::MissingNode { node: target_column }),
+        };
+        let minimum = self.minimum_column_width(new_column, metrics)?;
+        let maximum = self
+            .maximum_column_width(new_column)?
+            .unwrap_or(f32::MAX);
+        if !target_width.is_finite()
+            || target_width <= 0.0
+            || !minimum.is_finite()
+            || !maximum.is_finite()
+            || maximum < minimum
+        {
+            return Err(CommandError::InvalidValue {
+                field: "width",
+                reason: "split-ratio column width constraints are invalid",
+            });
+        }
+
+        // Ratio describes the inserted column's share of the inserted/target
+        // pair. Existing columns keep their widths; the new column grows or
+        // shrinks to make the requested ratio visible, subject to its limits.
+        let requested_width = target_width * ratio / (1.0 - ratio);
+        if !requested_width.is_finite() || requested_width <= 0.0 {
+            return Err(CommandError::InvalidValue {
+                field: "width",
+                reason: "split-ratio column width overflowed",
+            });
+        }
+        let width = requested_width.clamp(minimum, maximum);
+        let Some(Node::Column(column)) = self.nodes.get_mut(new_column) else {
+            return Err(CommandError::InvalidTarget {
+                reason: "inserted main column changed unexpectedly",
+            });
+        };
+        column.width = width;
+        if !column.mode.is_rail() {
+            column.last_expanded_width = Some(width);
+        }
+        Ok(())
+    }
+
     pub(super) fn insert_existing_column_at(
         &mut self,
         side: DockSide,
         index: usize,
         new_column: NodeId,
         split_ratio: Option<(f32, usize)>,
+        metrics: &DockMetrics,
     ) -> Result<(), CommandError> {
         if !matches!(self.nodes.get(new_column), Some(Node::Column(_))) {
             return Err(CommandError::InvalidTarget {
                 reason: "inserted main column is not a Column node",
             });
         }
+        let split_ratio = if let Some((ratio, target_index)) = split_ratio {
+            if !ratio.is_finite() || ratio <= 0.0 || ratio >= 1.0 {
+                return Err(CommandError::InvalidValue {
+                    field: "ratio",
+                    reason: "split ratio must be between zero and one",
+                });
+            }
+            Some((ratio, target_index))
+        } else {
+            None
+        };
+
         let Some(area_id) = self.main_areas[side_index(side)] else {
             if index != 0 {
                 return Err(CommandError::InvalidValue {
@@ -2616,6 +2698,7 @@ impl Layout {
                 reason: "main dock side references a missing area",
             })?
             .root;
+
         match self.nodes.get(area_root).cloned() {
             Some(Node::Column(_)) => {
                 if index > 1 {
@@ -2624,42 +2707,33 @@ impl Layout {
                         reason: "column insertion index is outside the dock",
                     });
                 }
+                if let Some((ratio, target_index)) = split_ratio {
+                    if target_index != 0 {
+                        return Err(CommandError::InvalidTarget {
+                            reason: "split ratio target does not identify the existing column",
+                        });
+                    }
+                    self.resize_inserted_column_for_split_ratio(
+                        area_root,
+                        new_column,
+                        ratio,
+                        metrics,
+                    )?;
+                }
                 let children = if index == 0 {
                     vec![new_column, area_root]
                 } else {
                     vec![area_root, new_column]
                 };
-                let ratios = match split_ratio {
-                    Some((ratio, target_index))
-                        if target_index == 0 && ratio.is_finite() && ratio > 0.0 && ratio < 1.0 =>
-                    {
-                        if index == 0 {
-                            vec![ratio, 1.0 - ratio]
-                        } else {
-                            vec![1.0 - ratio, ratio]
-                        }
-                    }
-                    Some((_, target_index)) if target_index != 0 => {
-                        return Err(CommandError::InvalidTarget {
-                            reason: "split ratio target does not identify the existing column",
-                        });
-                    }
-                    Some(_) => {
-                        return Err(CommandError::InvalidValue {
-                            field: "ratio",
-                            reason: "split ratio must be between zero and one",
-                        });
-                    }
-                    None => equal_ratios(2),
-                };
                 let split = self.nodes.insert(Node::Split(crate::Split {
                     axis: Axis::X,
-                    ratios,
+                    ratios: equal_ratios(2),
                     children,
                 }));
                 if let Some(area) = self.dock_areas.get_mut(area_id) {
                     area.root = split;
                 }
+                self.sync_main_column_ratios(new_column)?;
                 Ok(())
             }
             Some(Node::Split(mut split)) if split.axis == Axis::X => {
@@ -2679,35 +2753,32 @@ impl Layout {
                     });
                 }
                 let old_len = split.children.len();
-                let ratios = if let Some((ratio, target_index)) = split_ratio {
-                    if !ratio.is_finite() || ratio <= 0.0 || ratio >= 1.0 {
-                        return Err(CommandError::InvalidValue {
-                            field: "ratio",
-                            reason: "split ratio must be between zero and one",
-                        });
-                    }
-                    if target_index >= old_len || index > old_len {
+                if let Some((ratio, target_index)) = split_ratio {
+                    if target_index >= old_len {
                         return Err(CommandError::InvalidTarget {
                             reason: "split ratio target or column insertion index is outside the dock",
                         });
                     }
-                    let mut weights = if ratio_issues(&split.ratios, old_len).is_empty() {
-                        split.ratios.clone()
-                    } else {
-                        equal_ratios(old_len)
-                    };
-                    let target_weight = weights[target_index];
-                    weights[target_index] = target_weight * (1.0 - ratio);
-                    weights.insert(index, target_weight * ratio);
-                    normalized_ratios(weights.into_iter().map(Some).collect())
-                } else {
-                    equal_ratios(old_len + 1)
-                };
+                    let target_column = split.children[target_index];
+                    self.resize_inserted_column_for_split_ratio(
+                        target_column,
+                        new_column,
+                        ratio,
+                        metrics,
+                    )?;
+                }
                 split.children.insert(index, new_column);
-                split.ratios = ratios;
+                // Main-column Split(X) ratios mirror visible column widths. They
+                // are recalculated after the tree is updated below.
+                split.ratios = equal_ratios(old_len + 1);
                 if let Some(Node::Split(current)) = self.nodes.get_mut(area_root) {
                     *current = split;
+                } else {
+                    return Err(CommandError::InvalidTarget {
+                        reason: "main horizontal split changed unexpectedly",
+                    });
                 }
+                self.sync_main_column_ratios(new_column)?;
                 Ok(())
             }
             Some(_) => Err(CommandError::InvalidTarget {
@@ -2873,6 +2944,7 @@ impl Layout {
                             insert_at,
                             column,
                             Some((split_ratio, column_index)),
+                            metrics,
                         )
                     }
                     _ => Err(CommandError::InvalidTarget {
@@ -3073,7 +3145,7 @@ impl Layout {
                     group_ratios: normalized_ratios(split.ratios.into_iter().map(Some).collect()),
                     last_expanded_width: Some(metrics.default_column_width),
                 }));
-                self.insert_existing_column_at(side, index, column, None)
+                self.insert_existing_column_at(side, index, column, None, metrics)
             }
             (Some(Node::Split(split)), DropTarget::RailSlot { column, index })
                 if split.axis == Axis::Y =>

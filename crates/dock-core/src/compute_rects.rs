@@ -973,7 +973,7 @@ fn push_vertical_overflow(
     Ok(())
 }
 
-fn append_floating_geometry(output: &mut LayoutRects, mut floating: LayoutRects) {
+fn append_floating_geometry(output: &mut LayoutRects, floating: LayoutRects) {
     output.columns.extend(floating.columns);
     output.groups.extend(floating.groups);
     output.tab_strips.extend(floating.tab_strips);
