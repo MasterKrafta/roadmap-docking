@@ -1294,11 +1294,15 @@ impl Layout {
                 let right_id = current_split.children[*boundary_index + 1];
                 let left = match self.nodes.get(left_id) {
                     Some(Node::Column(column)) => column.clone(),
-                    _ => unreachable!("split child kind was validated above"),
+                    _ => return Err(CommandError::InvalidTarget {
+                        reason: "split column boundary references a non-Column node",
+                    }),
                 };
                 let right = match self.nodes.get(right_id) {
                     Some(Node::Column(column)) => column.clone(),
-                    _ => unreachable!("split child kind was validated above"),
+                    _ => return Err(CommandError::InvalidTarget {
+                        reason: "split column boundary references a non-Column node",
+                    }),
                 };
 
                 let actual_delta = if left.mode.is_rail() || right.mode.is_rail() {
@@ -1350,10 +1354,12 @@ impl Layout {
                         .children
                         .iter()
                         .map(|child_id| match self.nodes.get(*child_id) {
-                            Some(Node::Column(column)) => column.width,
-                            _ => unreachable!("split child kind was validated above"),
+                            Some(Node::Column(column)) => Ok(column.width),
+                            _ => Err(CommandError::InvalidTarget {
+                                reason: "split column boundary references a non-Column node",
+                            }),
                         })
-                        .collect();
+                        .collect::<Result<_, _>>()?;
                     let total_width = widths.iter().sum::<f32>();
                     if !total_width.is_finite() || total_width <= 0.0 {
                         return Err(CommandError::InvalidValue {

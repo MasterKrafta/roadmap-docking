@@ -43,18 +43,25 @@ impl Layout {
             let Some(area_id) = area_id else {
                 continue;
             };
-            let root = self
-                .dock_areas
-                .get(area_id)
-                .expect("preflight validation rejects missing main areas")
-                .root;
+            let side = if index == 0 { DockSide::Left } else { DockSide::Right };
+            let Some(area) = self.dock_areas.get(area_id).copied() else {
+                return Err(vec![ValidationError::InvalidMainArea {
+                    area: area_id,
+                    side,
+                    reason: "references a missing DockAreaId",
+                }]);
+            };
 
-            match self.normalize_node(root) {
+            match self.normalize_node(area.root) {
                 Some(normalized_root) => {
-                    self.dock_areas
-                        .get_mut(area_id)
-                        .expect("main area remains present")
-                        .root = normalized_root;
+                    let Some(area) = self.dock_areas.get_mut(area_id) else {
+                        return Err(vec![ValidationError::InvalidMainArea {
+                            area: area_id,
+                            side,
+                            reason: "references a missing DockAreaId",
+                        }]);
+                    };
+                    area.root = normalized_root;
                 }
                 None => {
                     self.dock_areas.remove(area_id);
@@ -70,18 +77,22 @@ impl Layout {
             let Some(group) = self.floating_groups.get(group_id).copied() else {
                 continue;
             };
-            let root = self
-                .dock_areas
-                .get(group.area)
-                .expect("preflight validation rejects missing floating areas")
-                .root;
+            let Some(area) = self.dock_areas.get(group.area).copied() else {
+                return Err(vec![ValidationError::InvalidFloatingGroup {
+                    group: group_id,
+                    reason: "references a missing DockAreaId",
+                }]);
+            };
 
-            match self.normalize_node(root) {
+            match self.normalize_node(area.root) {
                 Some(normalized_root) => {
-                    self.dock_areas
-                        .get_mut(group.area)
-                        .expect("floating area remains present")
-                        .root = normalized_root;
+                    let Some(area) = self.dock_areas.get_mut(group.area) else {
+                        return Err(vec![ValidationError::InvalidFloatingGroup {
+                            group: group_id,
+                            reason: "references a missing DockAreaId",
+                        }]);
+                    };
+                    area.root = normalized_root;
                 }
                 None => {
                     self.floating_groups.remove(group_id);
@@ -147,10 +158,10 @@ impl Layout {
                     .position(|(old_index, _)| *old_index == old_active_index)
                     .unwrap_or_else(|| old_active_index.min(kept.len() - 1));
                 tabs.children = kept.into_iter().map(|(_, child)| child).collect();
-                *self
-                    .nodes
-                    .get_mut(node_id)
-                    .expect("node exists during normalization") = Node::Tabs(tabs);
+                let Some(node) = self.nodes.get_mut(node_id) else {
+                    return None;
+                };
+                *node = Node::Tabs(tabs);
                 Some(node_id)
             }
             Node::Split(mut split) => {
@@ -178,10 +189,10 @@ impl Layout {
                         split.children = kept.iter().map(|(child, _)| *child).collect();
                         split.ratios =
                             normalized_ratios(kept.iter().map(|(_, ratio)| *ratio).collect());
-                        *self
-                            .nodes
-                            .get_mut(node_id)
-                            .expect("node exists during normalization") = Node::Split(split);
+                        let Some(node) = self.nodes.get_mut(node_id) else {
+                            return None;
+                        };
+                        *node = Node::Split(split);
                         Some(node_id)
                     }
                 }
@@ -206,10 +217,10 @@ impl Layout {
                 column.groups = kept.iter().map(|(group, _)| *group).collect();
                 column.group_ratios =
                     normalized_ratios(kept.iter().map(|(_, ratio)| *ratio).collect());
-                *self
-                    .nodes
-                    .get_mut(node_id)
-                    .expect("node exists during normalization") = Node::Column(column);
+                let Some(node) = self.nodes.get_mut(node_id) else {
+                    return None;
+                };
+                *node = Node::Column(column);
                 Some(node_id)
             }
         }

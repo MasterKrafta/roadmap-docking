@@ -54,11 +54,14 @@ pub fn create_initial_layout(
             .map(|(key, constraints)| (key.clone(), *constraints))
     };
 
-    let (layers_key, layers_constraints) = descriptor("layers").expect("required key checked");
-    let (color_key, color_constraints) = descriptor("color").expect("required key checked");
+    let (layers_key, layers_constraints) =
+        descriptor("layers").ok_or("missing required panel descriptor: layers")?;
+    let (color_key, color_constraints) =
+        descriptor("color").ok_or("missing required panel descriptor: color")?;
     let (properties_key, properties_constraints) =
-        descriptor("properties").expect("required key checked");
-    let (history_key, history_constraints) = descriptor("history").expect("required key checked");
+        descriptor("properties").ok_or("missing required panel descriptor: properties")?;
+    let (history_key, history_constraints) =
+        descriptor("history").ok_or("missing required panel descriptor: history")?;
 
     // Both built-in groups are tab stacks, so their minimum width is the widest
     // panel minimum in that group. The column must satisfy both groups and the
