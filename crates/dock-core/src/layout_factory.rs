@@ -34,47 +34,12 @@ pub enum InitialLayoutError {
     ConflictingPanelWidthConstraints,
 }
 
-impl InitialLayoutError {
-    fn as_static_str(&self) -> &'static str {
-        match self {
-            Self::InvalidMetrics { .. } => "dock metrics are invalid",
-            Self::DuplicatePanelKey => "panel descriptor keys must be unique",
-            Self::InvalidPanelConstraints { .. } => {
-                "panel descriptor contains invalid constraints"
-            }
-            Self::MissingRequiredPanel { key } => match *key {
-                "layers" => "missing required panel descriptor: layers",
-                "color" => "missing required panel descriptor: color",
-                "properties" => "missing required panel descriptor: properties",
-                _ => "missing required panel descriptor: history",
-            },
-            Self::ConflictingPanelWidthConstraints => {
-                "panel minimum width exceeds the maximum width allowed by its tab group"
-            }
-        }
-    }
-}
-
 /// Creates the required baseline composition without constructing any UI.
 ///
-/// This legacy entry point retains its static-string error for source compatibility.
-/// New callers that need diagnostic detail should use create_initial_layout_with_error.
+/// Errors preserve their category and relevant validation details. The
+/// application supplies descriptor keys and constraints, keeping the registry
+/// and PanelDescriptor type in the UI adapter.
 pub fn create_initial_layout(
-    profile: Profile,
-    descriptors: &[(PanelKey, PanelConstraints)],
-    metrics: DockMetrics,
-) -> Result<Layout, &'static str> {
-    create_initial_layout_with_error(profile, descriptors, metrics)
-        .map_err(|error| error.as_static_str())
-}
-
-/// Creates the required baseline composition with typed, inspectable errors.
-///
-/// The application supplies its descriptor keys and constraints, keeping the
-/// registry and PanelDescriptor type in app. The same composition is built for
-/// the explicitly selected profile; profile-specific restrictions are enforced
-/// by Layout validation.
-pub fn create_initial_layout_with_error(
     profile: Profile,
     descriptors: &[(PanelKey, PanelConstraints)],
     metrics: DockMetrics,
@@ -212,7 +177,7 @@ pub fn create_initial_layout_with_error(
 
 #[cfg(test)]
 mod tests {
-    use super::{create_initial_layout, create_initial_layout_with_error, InitialLayoutError};
+    use super::{create_initial_layout, InitialLayoutError};
     use crate::{
         Column, ColumnMode, DockMetrics, DockSide, Node, PanelConstraints, PanelKey, Point, Profile,
         Rect, Size,
@@ -282,34 +247,32 @@ mod tests {
     fn factory_requires_all_builtin_keys_and_unique_descriptors() {
         let mut incomplete = descriptors();
         incomplete.retain(|(key, _)| key.as_str() != "history");
-        assert_eq!(
-            create_initial_layout(Profile::Generic, &incomplete, DockMetrics::default())
-                .unwrap_err(),
-            "missing required panel descriptor: history"
-        );
+        assert!(matches!(
+            create_initial_layout(Profile::Generic, &incomplete, DockMetrics::default()),
+            Err(InitialLayoutError::MissingRequiredPanel { key: "history" })
+        ));
 
         let mut duplicate = descriptors();
         duplicate.push(duplicate[0].clone());
         assert_eq!(
-            create_initial_layout(Profile::Generic, &duplicate, DockMetrics::default())
-                .unwrap_err(),
-            "panel descriptor keys must be unique"
+            create_initial_layout(Profile::Generic, &duplicate, DockMetrics::default()).unwrap_err(),
+            InitialLayoutError::DuplicatePanelKey
         );
     }
 
     #[test]
-    fn typed_factory_errors_preserve_failure_categories() {
+    fn factory_errors_preserve_failure_categories() {
         let mut incomplete = descriptors();
         incomplete.retain(|(key, _)| key.as_str() != "history");
         assert!(matches!(
-            create_initial_layout_with_error(Profile::Generic, &incomplete, DockMetrics::default()),
+            create_initial_layout(Profile::Generic, &incomplete, DockMetrics::default()),
             Err(InitialLayoutError::MissingRequiredPanel { key: "history" })
         ));
 
         let mut duplicate = descriptors();
         duplicate.push(duplicate[0].clone());
         assert!(matches!(
-            create_initial_layout_with_error(Profile::Generic, &duplicate, DockMetrics::default()),
+            create_initial_layout(Profile::Generic, &duplicate, DockMetrics::default()),
             Err(InitialLayoutError::DuplicatePanelKey)
         ));
 
@@ -327,7 +290,7 @@ mod tests {
             false,
         );
         assert!(matches!(
-            create_initial_layout_with_error(
+            create_initial_layout(
                 Profile::Generic,
                 &conflicting_widths,
                 DockMetrics::default()
@@ -340,7 +303,7 @@ mod tests {
             ..DockMetrics::default()
         };
         assert!(matches!(
-            create_initial_layout_with_error(Profile::Generic, &descriptors(), metrics),
+            create_initial_layout(Profile::Generic, &descriptors(), metrics),
             Err(InitialLayoutError::InvalidMetrics { .. })
         ));
 
@@ -352,7 +315,7 @@ mod tests {
             false,
         );
         assert!(matches!(
-            create_initial_layout_with_error(
+            create_initial_layout(
                 Profile::Generic,
                 &invalid_constraints,
                 DockMetrics::default()
@@ -435,7 +398,7 @@ mod tests {
         for profile in [Profile::Generic, Profile::Photoshop] {
             assert_eq!(
                 create_initial_layout(profile, &items, DockMetrics::default()).unwrap_err(),
-                "panel minimum width exceeds the maximum width allowed by its tab group"
+                InitialLayoutError::ConflictingPanelWidthConstraints
             );
         }
     }
