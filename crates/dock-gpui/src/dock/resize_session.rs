@@ -105,9 +105,6 @@ impl ResizeSession {
 
         let delta_x = pointer.x - self.pointer_start.x;
         let delta_y = pointer.y - self.pointer_start.y;
-        if !delta_x.is_finite() || !delta_y.is_finite() {
-            return Err(ResizeUpdateError::InvalidDelta);
-        }
 
         match (self.handle, self.start_geometry) {
             (
@@ -118,6 +115,9 @@ impl ResizeSession {
                 },
                 StartGeometry::VerticalGroups { available_height },
             ) if available_height.is_finite() && available_height > 0.0 => {
+                if !delta_y.is_finite() {
+                    return Err(ResizeUpdateError::InvalidDelta);
+                }
                 Ok(DockCommand::ResizeGroups {
                     column: owner,
                     boundary_index,
@@ -133,6 +133,9 @@ impl ResizeSession {
                 },
                 StartGeometry::HorizontalSplit,
             ) => {
+                if !delta_x.is_finite() {
+                    return Err(ResizeUpdateError::InvalidDelta);
+                }
                 if self
                     .baseline
                     .main_area(DockSide::Left)
@@ -165,6 +168,9 @@ impl ResizeSession {
                 ResizeHandle::OuterColumn { column, side },
                 StartGeometry::OuterColumn { start_width },
             ) => {
+                if !delta_x.is_finite() {
+                    return Err(ResizeUpdateError::InvalidDelta);
+                }
                 let width = match side {
                     DockSide::Left => start_width + delta_x,
                     DockSide::Right => start_width - delta_x,
@@ -178,6 +184,27 @@ impl ResizeSession {
                 ResizeHandle::FloatingEdge { group, edge },
                 StartGeometry::FloatingEdge { bounds },
             ) => {
+                let uses_x = matches!(
+                    edge,
+                    ResizeEdge::Left
+                        | ResizeEdge::TopLeft
+                        | ResizeEdge::BottomLeft
+                        | ResizeEdge::Right
+                        | ResizeEdge::TopRight
+                        | ResizeEdge::BottomRight
+                );
+                let uses_y = matches!(
+                    edge,
+                    ResizeEdge::Top
+                        | ResizeEdge::TopLeft
+                        | ResizeEdge::TopRight
+                        | ResizeEdge::Bottom
+                        | ResizeEdge::BottomLeft
+                        | ResizeEdge::BottomRight
+                );
+                if (uses_x && !delta_x.is_finite()) || (uses_y && !delta_y.is_finite()) {
+                    return Err(ResizeUpdateError::InvalidDelta);
+                }
                 let bounds = resized_floating_bounds(bounds, edge, delta_x, delta_y);
                 if bounds.validate_non_empty().is_err() {
                     return Err(ResizeUpdateError::InvalidBounds);
@@ -596,7 +623,33 @@ mod tests {
 
 
     #[test]
-    fn command_for_pointer_rejects_overflowing_delta() {
+    fn command_for_pointer_rejects_overflowing_used_delta() {
+        let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
+        let owner = layout
+            .nodes()
+            .find_map(|(id, node)| matches!(node, Node::Column(_)).then_some(id))
+            .unwrap();
+        let mut session = session(
+            &layout,
+            ResizeHandle::Splitter {
+                owner,
+                boundary_index: 0,
+                axis: Axis::Y,
+            },
+            StartGeometry::VerticalGroups {
+                available_height: 640.0,
+            },
+        );
+        session.pointer_start = Point::new(100.0, f32::MAX);
+
+        assert!(matches!(
+            session.command_for_pointer(Point::new(100.0, -f32::MAX)),
+            Err(ResizeUpdateError::InvalidDelta)
+        ));
+    }
+
+    #[test]
+    fn command_for_pointer_ignores_overflowing_unused_axis_delta() {
         let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
         let owner = layout
             .nodes()
@@ -615,10 +668,15 @@ mod tests {
         );
         session.pointer_start = Point::new(f32::MAX, 100.0);
 
-        assert!(matches!(
-            session.command_for_pointer(Point::new(-f32::MAX, 100.0)),
-            Err(ResizeUpdateError::InvalidDelta)
-        ));
+        assert_eq!(
+            session.command_for_pointer(Point::new(-f32::MAX, 110.0)),
+            Ok(DockCommand::ResizeGroups {
+                column: owner,
+                boundary_index: 0,
+                delta: 10.0,
+                available_height: 640.0,
+            })
+        );
     }
 
     #[test]
