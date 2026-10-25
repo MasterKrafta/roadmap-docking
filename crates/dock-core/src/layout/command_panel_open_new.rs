@@ -1,4 +1,5 @@
 use super::*;
+use crate::PanelConstraints;
 
 impl Layout {
     pub(super) fn insert_new_panel_for_open_target(

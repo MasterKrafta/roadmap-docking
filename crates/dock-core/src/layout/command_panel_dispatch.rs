@@ -37,7 +37,7 @@ impl Layout {
                     *constraints,
                     resolved_target,
                     metrics,
-                )?
+                )
             }
             DockCommand::ClosePanel { panel } => {
                 if !self.panel_instances.contains_key(*panel) {
