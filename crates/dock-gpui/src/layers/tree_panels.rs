@@ -1,13 +1,12 @@
 use std::collections::HashMap;
 
-use dock_core::{Axis, DockSide, Layout, Node, NodeId, PanelId};
+use dock_core::{Axis, Layout, Node, NodeId, PanelId};
 use gpui::{AnyElement, IntoElement};
 
 use crate::components::{PanelSurface, SplitterHandle};
 use crate::host::DockHost;
 use crate::requests::ResizeHandle;
 use crate::surface::RenderData;
-use crate::tree_query::main_column_ids;
 
 use super::tree::TreeArea;
 
@@ -71,25 +70,26 @@ fn supported_splitter_handle(
     boundary_index: usize,
     axis: Axis,
 ) -> Option<ResizeHandle> {
-    match axis {
-        Axis::Y if matches!(layout.node(owner), Some(Node::Column(_))) => {
-            Some(ResizeHandle::Splitter { owner, boundary_index, axis })
+    let supported = match (axis, layout.node(owner)) {
+        (Axis::Y, Some(Node::Column(column))) => {
+            boundary_index < column.groups.len().saturating_sub(1)
         }
-        Axis::X
-            if matches!(layout.node(owner), Some(Node::Split(split)) if split.axis == Axis::X)
-                || [DockSide::Left, DockSide::Right].into_iter().any(|side| {
-                    layout.main_area(side).is_some_and(|area| area.root == owner)
-                        && !main_column_ids(layout, side).is_empty()
-                }) =>
-        {
-            Some(ResizeHandle::Splitter {
-                owner,
-                boundary_index,
-                axis,
-            })
+        (Axis::X, Some(Node::Split(split))) => {
+            split.axis == Axis::X
+                && boundary_index < split.children.len().saturating_sub(1)
+                && split
+                    .children
+                    .iter()
+                    .all(|child| matches!(layout.node(*child), Some(Node::Column(_))))
         }
-        _ => None,
-    }
+        _ => false,
+    };
+
+    supported.then_some(ResizeHandle::Splitter {
+        owner,
+        boundary_index,
+        axis,
+    })
 }
 
 
@@ -100,6 +100,56 @@ mod tests {
     use crate::requests::ResizeHandle;
     use dock_core::{Axis, Node};
     use ui::Theme;
+
+    #[test]
+    fn splitter_handles_reject_out_of_range_boundaries_on_both_axes() {
+        let controller = DockController::new_initial(&Theme::default()).unwrap();
+        let layout = controller.layout();
+
+        let (column_id, group_count) = layout
+            .nodes()
+            .find_map(|(id, node)| match node {
+                Node::Column(column) if column.groups.len() >= 2 => {
+                    Some((id, column.groups.len()))
+                }
+                _ => None,
+            })
+            .expect("initial layout should contain a column with multiple groups");
+        assert!(supported_splitter_handle(
+            layout,
+            column_id,
+            group_count - 2,
+            Axis::Y
+        ).is_some());
+        assert!(supported_splitter_handle(
+            layout,
+            column_id,
+            group_count - 1,
+            Axis::Y
+        ).is_none());
+
+        let (split_id, child_count) = layout
+            .nodes()
+            .find_map(|(id, node)| match node {
+                Node::Split(split) if split.axis == Axis::X && split.children.len() >= 2 => {
+                    Some((id, split.children.len()))
+                }
+                _ => None,
+            })
+            .expect("initial layout should contain a horizontal split");
+        assert!(supported_splitter_handle(
+            layout,
+            split_id,
+            child_count - 2,
+            Axis::X
+        ).is_some());
+        assert!(supported_splitter_handle(
+            layout,
+            split_id,
+            child_count - 1,
+            Axis::X
+        ).is_none());
+    }
 
     #[test]
     fn horizontal_split_nodes_expose_resize_handles() {
