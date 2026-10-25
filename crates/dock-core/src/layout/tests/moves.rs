@@ -58,7 +58,11 @@ fn c44_horizontal_split_creates_a_neighbor_column_with_semantic_order() {
         layout.node(new_column),
         Some(Node::Column(column)) if column.groups == vec![source_group]
     ));
-    assert_eq!(split.ratios, vec![0.75, 0.25]);
+    let target_width = metrics.default_column_width;
+    let new_width = metrics.min_column_width;
+    let total_width = target_width + new_width;
+    assert!((split.ratios[0] - target_width / total_width).abs() < 1.0e-5);
+    assert!((split.ratios[1] - new_width / total_width).abs() < 1.0e-5);
     assert!(matches!(
         layout.node(source_group),
         Some(Node::Tabs(tabs)) if tabs.children == vec![source_panel] && tabs.collapsed
