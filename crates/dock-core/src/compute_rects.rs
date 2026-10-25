@@ -704,7 +704,7 @@ fn layout_floating_root(
     match layout.node(id) {
         Some(Node::Column(column))
             if column.groups.len() > 1
-                && floating_branch_starts_collapsed(layout, id)
+                && layout.floating_branch_starts_collapsed(id)
                 && rect.size.height > title_height =>
         {
             let content_rect = Rect::new(
@@ -720,24 +720,7 @@ fn layout_floating_root(
     }
 }
 
-/// Whether the first visible vertical branch of a floating composition starts
-/// with a collapsed group and therefore lacks the normal header-height reserve.
-fn floating_branch_starts_collapsed(layout: &Layout, id: NodeId) -> bool {
-    match layout.node(id) {
-        Some(Node::Tabs(tabs)) => tabs.collapsed,
-        Some(Node::Column(column)) => column
-            .groups
-            .first()
-            .is_some_and(|group| {
-                matches!(layout.node(*group), Some(Node::Tabs(tabs)) if tabs.collapsed)
-            }),
-        Some(Node::Split(split)) if split.axis == Axis::Y => split
-            .children
-            .first()
-            .is_some_and(|child| floating_branch_starts_collapsed(layout, *child)),
-        _ => false,
-    }
-}
+
 
 fn layout_split_inner(
     layout: &Layout,
@@ -803,7 +786,7 @@ fn layout_split_inner(
                     Size::new(widths[index], rect.size.height),
                 );
                 if reserve_title_for_collapsed_branches
-                    && floating_branch_starts_collapsed(layout, *child)
+                    && layout.floating_branch_starts_collapsed(*child)
                 {
                     let title_height = metrics.header_height.min(child_rect.size.height);
                     if child_rect.size.height > title_height {
@@ -966,6 +949,21 @@ fn push_vertical_overflow(
     Ok(())
 }
 
+fn minimum_floating_size(
+    layout: &Layout,
+    root: NodeId,
+    metrics: &DockMetrics,
+) -> Result<Size, ComputeRectsError> {
+    #[cfg(test)]
+    visit_probe::record_minimum_node_size_helper(root);
+    layout.minimum_floating_size(root, metrics).map_err(|error| match error {
+        crate::CommandError::InvalidValue { field: "size", .. } => {
+            ComputeRectsError::Geometry(GeometryError::ArithmeticOverflow)
+        }
+        _ => ComputeRectsError::InvalidLayout,
+    })
+}
+
 pub(crate) fn clamp_floating_bounds(
     layout: &Layout,
     root: NodeId,
@@ -979,7 +977,7 @@ pub(crate) fn clamp_floating_bounds(
     client_area
         .validate_non_empty()
         .map_err(ComputeRectsError::Geometry)?;
-    let minimum = minimum_node_size(layout, root, metrics)?;
+    let minimum = minimum_floating_size(layout, root, metrics)?;
     if minimum.width > client_area.size.width {
         return Err(ComputeRectsError::InsufficientSpace {
             axis: Axis::X,
@@ -1619,6 +1617,118 @@ mod tests {
             (collapsed_strip.origin.y - expanded_strip.origin.y).abs() < PIXEL_TOLERANCE,
             "both horizontal branches must align their tab strips below the shared title"
         );
+    }
+
+    #[test]
+    fn floating_horizontal_split_minimum_includes_title_for_collapsed_branches() {
+        let metrics = DockMetrics::default();
+        let mut builder = LayoutBuilder::new(Profile::Photoshop);
+        let mut columns = Vec::new();
+        let mut groups = Vec::new();
+
+        for name in ["floating-min-split-left", "floating-min-split-right"] {
+            let (_, panel_node) = builder.panel(key(name), constraints());
+            let group = builder.tabs(vec![panel_node], 0, true);
+            let column = builder.column(
+                300.0,
+                ColumnMode::Expanded,
+                vec![group],
+                vec![1.0],
+            );
+            groups.push(group);
+            columns.push(column);
+        }
+
+        let root = builder.split(Axis::X, columns, vec![0.5, 0.5]);
+        let requested_bounds = Rect::new(
+            Point::new(40.0, 50.0),
+            Size::new(604.0, 40.0),
+        );
+        let floating = builder.floating_group(root, requested_bounds, 1);
+        let layout = builder.build();
+
+        let rects = layout
+            .compute_rects(viewport(1000.0, 700.0), &metrics)
+            .unwrap();
+        let floating_rect = rects
+            .floating_groups
+            .iter()
+            .find(|entry| entry.group == floating)
+            .expect("floating split should have geometry")
+            .rect;
+
+        assert_eq!(
+            floating_rect.size.height,
+            metrics.header_height + metrics.effective_collapsed_group_height()
+        );
+        assert_eq!(
+            layout.floating_group(floating).unwrap().bounds,
+            requested_bounds,
+            "geometry clamping must not mutate persistent model bounds"
+        );
+        for group in groups {
+            let group_rect = rects
+                .groups
+                .iter()
+                .find(|entry| entry.group == group)
+                .expect("collapsed branch should have group geometry")
+                .rect;
+            assert_eq!(
+                group_rect.origin.y,
+                floating_rect.origin.y + metrics.header_height
+            );
+            assert_eq!(
+                group_rect.size.height,
+                metrics.effective_collapsed_group_height()
+            );
+        }
+        assert!(rects.vertical_overflow.is_empty());
+    }
+
+    #[test]
+    fn floating_multi_group_column_minimum_includes_title_for_collapsed_first_group() {
+        let metrics = DockMetrics::default();
+        let mut builder = LayoutBuilder::new(Profile::Photoshop);
+        let (_, collapsed_panel) =
+            builder.panel(key("floating-min-column-collapsed"), constraints());
+        let collapsed_group = builder.tabs(vec![collapsed_panel], 0, true);
+        let (_, expanded_panel) =
+            builder.panel(key("floating-min-column-expanded"), constraints());
+        let expanded_group = builder.tabs(vec![expanded_panel], 0, false);
+        let column = builder.column(
+            300.0,
+            ColumnMode::Expanded,
+            vec![collapsed_group, expanded_group],
+            vec![0.5, 0.5],
+        );
+        let requested_bounds = Rect::new(
+            Point::new(40.0, 50.0),
+            Size::new(300.0, 100.0),
+        );
+        let floating = builder.floating_group(column, requested_bounds, 1);
+        let layout = builder.build();
+
+        let rects = layout
+            .compute_rects(viewport(1000.0, 700.0), &metrics)
+            .unwrap();
+        let actual_bounds = rects
+            .floating_groups
+            .iter()
+            .find(|entry| entry.group == floating)
+            .expect("floating column should have geometry")
+            .rect;
+
+        let expanded_minimum = metrics
+            .min_group_height
+            .max(metrics.header_height + metrics.tab_strip_height + constraints().min_size.height);
+        let required_without_title = metrics.effective_collapsed_group_height()
+            + expanded_minimum
+            + metrics.splitter_thickness;
+        assert_eq!(
+            actual_bounds.size.height,
+            required_without_title + metrics.header_height
+        );
+        assert!(rects.vertical_overflow.is_empty());
     }
 
     #[test]
