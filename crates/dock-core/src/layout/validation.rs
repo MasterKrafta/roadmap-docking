@@ -408,25 +408,38 @@ impl Layout {
         // Bound recursive validation/normalization work for programmatically
         // built trees as well as serde-loaded DTOs. Longest-depth tracking also
         // lets us stop a cyclic graph before a recursive walk can exhaust stack.
-        let mut pending = roots.iter().copied().map(|root| (root, 1usize)).collect::<Vec<_>>();
-        let mut deepest = HashMap::<NodeId, usize>::new();
-        for node_id in self.nodes.keys() {
-            if !deepest.contains_key(&node_id) {
-                pending.push((node_id, 1));
+        let mut colors = HashMap::<NodeId, u8>::new();
+        let mut pending = Vec::<(NodeId, usize, bool)>::new();
+        for start in roots.iter().copied().chain(self.nodes.keys()) {
+            if colors.contains_key(&start) {
+                continue;
             }
-            while let Some((current, depth)) = pending.pop() {
+            pending.push((start, 1, false));
+            while let Some((current, depth, exiting)) = pending.pop() {
+                if exiting {
+                    colors.insert(current, 2);
+                    continue;
+                }
                 if depth > MAX_LAYOUT_TREE_DEPTH {
                     errors.push(ValidationError::TreeTooDeep {
                         max_depth: MAX_LAYOUT_TREE_DEPTH,
                     });
                     return Err(errors);
                 }
-                if deepest.get(&current).is_some_and(|known| *known >= depth) {
-                    continue;
+                match colors.get(&current).copied() {
+                    Some(1) | Some(2) => continue,
+                    _ => {}
                 }
-                deepest.insert(current, depth);
+                colors.insert(current, 1);
+                pending.push((current, depth, true));
                 if let Some(node) = self.nodes.get(current) {
-                    pending.extend(node.children().iter().copied().map(|child| (child, depth + 1)));
+                    pending.extend(
+                        node.children()
+                            .iter()
+                            .rev()
+                            .copied()
+                            .map(|child| (child, depth + 1, false)),
+                    );
                 }
             }
         }

@@ -55,6 +55,51 @@ fn initial_factory_layout_passes_validation() {
 }
 
 #[test]
+fn validation_rejects_programmatically_constructed_trees_beyond_depth_limit() {
+    let mut nodes = SlotMap::<NodeId, Node>::with_key();
+    let mut panels = SlotMap::<PanelId, PanelInstance>::with_key();
+    let first_panel = panels.insert(PanelInstance::new(
+        PanelKey::new("deep-tree-0").unwrap(),
+        descriptors()[0].1,
+    ));
+    let mut root = nodes.insert(Node::Panel(crate::Panel::new(first_panel)));
+
+    // The JSON loader has its own parser-depth guard; this builds the same shape
+    // through the runtime model to protect callers using programmatic construction.
+    for depth in 0..=256 {
+        let panel_id = panels.insert(PanelInstance::new(
+            PanelKey::new(format!("deep-tree-{depth}-side")).unwrap(),
+            descriptors()[0].1,
+        ));
+        let side = nodes.insert(Node::Panel(crate::Panel::new(panel_id)));
+        root = nodes.insert(Node::Split(Split {
+            axis: Axis::Y,
+            children: vec![root, side],
+            ratios: vec![0.5, 0.5],
+        }));
+    }
+    let mut areas = SlotMap::<DockAreaId, DockArea>::with_key();
+    let area = areas.insert(DockArea::main(DockSide::Right, root));
+    let layout = Layout::from_parts(
+        nodes,
+        panels,
+        areas,
+        [None, Some(area)],
+        SlotMap::<FloatingGroupId, FloatingGroup>::with_key(),
+        CanvasState::default(),
+        Profile::Generic,
+        0,
+        ChromeMode::Visible,
+    );
+
+    let errors = layout.validate(&DockMetrics::default()).unwrap_err();
+    assert!(errors.iter().any(|error| matches!(
+        error,
+        ValidationError::TreeTooDeep { max_depth: 256 }
+    )));
+}
+
+#[test]
 fn validation_collects_ratio_and_tabs_errors() {
     let mut layout = initial_layout(Profile::Generic);
     let root = layout.main_area(DockSide::Right).unwrap().root;
