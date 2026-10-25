@@ -98,7 +98,7 @@ mod tests {
     use super::supported_splitter_handle;
     use crate::dock::DockController;
     use crate::requests::ResizeHandle;
-    use dock_core::{Axis, Node};
+    use dock_core::{Axis, DockCommand, DockSide, Node, Point, Rect, Size};
     use ui::Theme;
 
     #[test]
@@ -149,6 +149,29 @@ mod tests {
             child_count - 1,
             Axis::X
         ).is_none());
+    }
+
+    #[test]
+    fn floating_horizontal_split_exposes_resize_handle() {
+        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+        let owner = controller.layout().main_area(DockSide::Right).unwrap().root;
+        assert!(matches!(
+            controller.layout().node(owner),
+            Some(Node::Split(split)) if split.axis == Axis::X
+        ));
+        controller.apply(DockCommand::Float {
+            node: owner,
+            bounds: Rect::new(Point::new(80.0, 60.0), Size::new(700.0, 560.0)),
+        }).unwrap();
+
+        assert_eq!(
+            supported_splitter_handle(controller.layout(), owner, 0, Axis::X),
+            Some(ResizeHandle::Splitter {
+                owner,
+                boundary_index: 0,
+                axis: Axis::X,
+            })
+        );
     }
 
     #[test]
