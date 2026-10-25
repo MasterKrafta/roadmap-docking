@@ -458,6 +458,40 @@ mod tests {
     }
 
     #[test]
+    fn horizontal_splitter_ignores_unused_y_delta_overflow() {
+        let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
+        let (side, owner) = [DockSide::Left, DockSide::Right]
+            .into_iter()
+            .find_map(|side| {
+                let owner = layout.main_area(side)?.root;
+                matches!(layout.node(owner), Some(Node::Split(split)) if split.axis == Axis::X)
+                    .then_some((side, owner))
+            })
+            .expect("initial layout should have a horizontal main-area root");
+        let mut session = session(
+            &layout,
+            ResizeHandle::Splitter {
+                owner,
+                boundary_index: 0,
+                axis: Axis::X,
+            },
+            StartGeometry::HorizontalSplit,
+        );
+        session.pointer_start = Point::new(100.0, f32::MAX);
+
+        assert_eq!(
+            session
+                .command_for_pointer(Point::new(110.0, -f32::MAX))
+                .unwrap(),
+            DockCommand::ResizeColumnBoundary {
+                side,
+                boundary_index: 0,
+                delta: 10.0,
+            }
+        );
+    }
+
+    #[test]
     fn outer_column_resize_requires_matching_outer_side() {
         let controller = DockController::new_initial(&Theme::default()).unwrap();
         let layout = controller.layout().clone();
