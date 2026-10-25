@@ -9,40 +9,7 @@ impl Layout {
     ) -> Result<CommandApplication, CommandError> {
         match command {
             DockCommand::MoveFloating { group, origin } => {
-                // Do not clamp to a monitor/work-area here: the adapter applies
-                // its visible-area policy; Core stores finite logical coordinates.
-                if !origin.is_finite() {
-                    return Err(CommandError::InvalidValue {
-                        field: "origin",
-                        reason: "origin coordinates must be finite",
-                    });
-                }
-                let floating = self
-                    .floating_groups
-                    .get(*group)
-                    .copied()
-                    .ok_or(CommandError::MissingFloatingGroup { group: *group })?;
-                let bounds = Rect::new(*origin, floating.bounds.size);
-                bounds
-                    .validate_non_empty()
-                    .map_err(|error| CommandError::InvalidValue {
-                        field: "origin",
-                        reason: geometry_error_reason(error),
-                    })?;
-                if floating.bounds.origin == *origin {
-                    return Ok(CommandApplication::persistent());
-                }
-                if let Some(value) = self.floating_groups.get_mut(*group) {
-                    value.bounds.origin = *origin;
-                }
-                Ok(CommandApplication {
-                    actual_value: None,
-                    inverse: Some(DockCommand::MoveFloating {
-                        group: *group,
-                        origin: floating.bounds.origin,
-                    }),
-                    persistent: true,
-                })
+                self.apply_move_floating_command(*group, *origin)
             }
             DockCommand::ResizeFloating { group, size } => {
                 size.validate_positive()
