@@ -27,6 +27,23 @@
     }
 
     #[test]
+    fn frame_syncs_computed_canvas_bounds_without_advancing_layout_version() {
+        let mut controller = DockController::new_initial(&Theme::default())
+            .expect("initial layout should be valid");
+        let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
+        let initial_version = controller.layout().version();
+
+        let frame = controller.frame(viewport).unwrap();
+
+        assert_eq!(
+            controller.layout().canvas().last_known_bounds(),
+            frame.rects().canvas
+        );
+        assert_eq!(controller.layout().version(), initial_version);
+        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+    }
+
+    #[test]
     fn history_mutations_cancel_active_resize_session() {
         let mut controller = DockController::new_initial(&Theme::default()).unwrap();
         let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
