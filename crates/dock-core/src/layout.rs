@@ -1,5 +1,6 @@
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::fmt;
 use std::sync::{Arc, Weak};
 
 use slotmap::SlotMap;
@@ -15,6 +16,30 @@ use crate::{
 const RATIO_TOLERANCE: f32 = 1.0e-4;
 const PIXEL_TOLERANCE: f32 = 1.0e-3;
 const MAX_REMEMBERED_DOCK_LOCATIONS: usize = 256;
+
+/**
+ * Internal validation memoization is not part of the logical Layout state.
+ * Keep Debug snapshots stable when read-only operations warm the cache.
+ */
+#[derive(Clone, Default)]
+struct ValidationCache(Cell<Option<(u64, DockMetrics)>>);
+
+impl ValidationCache {
+    fn get(&self) -> Option<(u64, DockMetrics)> {
+        self.0.get()
+    }
+
+    fn set(&self, value: Option<(u64, DockMetrics)>) {
+        self.0.set(value);
+    }
+}
+
+impl fmt::Debug for ValidationCache {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("ValidationCache")
+    }
+}
+
 
 /// Arena parts restored from the persistent workspace DTO.
 #[cfg(feature = "serde")]
@@ -56,7 +81,7 @@ pub struct Layout {
     history_identity: Arc<()>,
     flyout_widths: HashMap<PanelKey, f32>,
     flyout_width_order: VecDeque<PanelKey>,
-    validation_cache: Cell<Option<(u64, DockMetrics)>>,
+    validation_cache: ValidationCache,
 }
 
 impl Layout {
@@ -79,7 +104,7 @@ impl Layout {
             history_identity: Arc::new(()),
             flyout_widths: HashMap::new(),
             flyout_width_order: VecDeque::new(),
-            validation_cache: Cell::new(None),
+            validation_cache: ValidationCache::default(),
         }
     }
 
@@ -113,7 +138,7 @@ impl Layout {
             history_identity: Arc::new(()),
             flyout_widths: HashMap::new(),
             flyout_width_order: VecDeque::new(),
-            validation_cache: Cell::new(None),
+            validation_cache: ValidationCache::default(),
         }
     }
 
