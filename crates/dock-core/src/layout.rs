@@ -1256,6 +1256,7 @@ mod command_group_edge_floating;
 mod command_group_edge_generic;
 mod command_group_edge_photoshop_column;
 mod command_target_insertion;
+mod command_target_group_node;
 mod command_target_group_insert;
 mod command_target_rail_slot_index;
 mod command_target_column_insert;
