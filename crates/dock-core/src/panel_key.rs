@@ -1,5 +1,27 @@
 use std::{fmt, str::FromStr};
 
+/// A typed reason why a panel key does not satisfy the stable-key syntax.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
+pub enum PanelKeyError {
+    /// The key is empty.
+    #[error("panel key must not be empty")]
+    Empty,
+    /// The key contains unsupported characters or separators.
+    #[error("panel key must contain lowercase ASCII letters/digits separated by single hyphens")]
+    InvalidSyntax,
+}
+
+impl PanelKeyError {
+    const fn as_static_str(&self) -> &'static str {
+        match self {
+            Self::Empty => "panel key must not be empty",
+            Self::InvalidSyntax => {
+                "panel key must contain lowercase ASCII letters/digits separated by single hyphens"
+            }
+        }
+    }
+}
+
 /// Stable identifier for a panel kind, not a runtime panel instance.
 ///
 /// Accepted keys are non-empty lowercase ASCII segments separated by single
@@ -8,11 +30,18 @@ use std::{fmt, str::FromStr};
 pub struct PanelKey(String);
 
 impl PanelKey {
-    /// Creates a panel key after validating its stable, serialization-safe syntax.
+    /// Creates a panel key using the legacy static-string error for source compatibility.
+    ///
+    /// New callers that need to inspect the failure should use PanelKey::try_new.
     pub fn new(value: impl Into<String>) -> Result<Self, &'static str> {
+        Self::try_new(value).map_err(|error| error.as_static_str())
+    }
+
+    /// Creates a panel key and preserves the validation failure as a typed error.
+    pub fn try_new(value: impl Into<String>) -> Result<Self, PanelKeyError> {
         let value = value.into();
         if value.is_empty() {
-            return Err("panel key must not be empty");
+            return Err(PanelKeyError::Empty);
         }
 
         let valid = value.split('-').all(|segment| {
@@ -22,9 +51,7 @@ impl PanelKey {
                     .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
         });
         if !valid {
-            return Err(
-                "panel key must contain lowercase ASCII letters/digits separated by single hyphens",
-            );
+            return Err(PanelKeyError::InvalidSyntax);
         }
         Ok(Self(value))
     }
@@ -116,6 +143,15 @@ mod tests {
         ] {
             assert!(PanelKey::new(key).is_err(), "accepted invalid key: {key}");
         }
+    }
+
+    #[test]
+    fn try_new_reports_typed_validation_errors() {
+        assert_eq!(PanelKey::try_new(""), Err(super::PanelKeyError::Empty));
+        assert_eq!(
+            PanelKey::try_new("Bad Key"),
+            Err(super::PanelKeyError::InvalidSyntax)
+        );
     }
 
     #[test]
