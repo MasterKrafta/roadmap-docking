@@ -21,7 +21,7 @@ impl Layout {
         metrics
             .validate()
             .map_err(|_| ComputeRectsError::InvalidMetrics)?;
-        self.validate(metrics)
+        self.validate_cached(metrics)
             .map_err(|_| ComputeRectsError::InvalidLayout)?;
         let tree_index = DropZoneTreeIndex::new(self);
         let viewport = rects.viewport.ok_or(ComputeRectsError::InvalidLayout)?;

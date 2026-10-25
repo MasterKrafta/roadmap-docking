@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Weak};
 
@@ -55,6 +56,7 @@ pub struct Layout {
     history_identity: Arc<()>,
     flyout_widths: HashMap<PanelKey, f32>,
     flyout_width_order: VecDeque<PanelKey>,
+    validation_cache: Cell<Option<(u64, DockMetrics)>>,
 }
 
 impl Layout {
@@ -77,6 +79,7 @@ impl Layout {
             history_identity: Arc::new(()),
             flyout_widths: HashMap::new(),
             flyout_width_order: VecDeque::new(),
+            validation_cache: Cell::new(None),
         }
     }
 
@@ -110,6 +113,7 @@ impl Layout {
             history_identity: Arc::new(()),
             flyout_widths: HashMap::new(),
             flyout_width_order: VecDeque::new(),
+            validation_cache: Cell::new(None),
         }
     }
 
@@ -122,12 +126,13 @@ impl Layout {
         let mut groups: Vec<_> = self
             .floating_groups
             .iter()
-            .map(|(id, group)| (id, group.z_order))
+            .enumerate()
+            .map(|(original_index, (id, group))| (original_index, id, group.z_order))
             .collect();
-        groups.sort_by_key(|(_, z_order)| *z_order);
+        groups.sort_by_key(|(_, _, z_order)| *z_order);
 
         let mut changes = Vec::new();
-        for (index, (id, _)) in groups.into_iter().enumerate() {
+        for (index, id, _) in groups {
             let Some(group) = self.floating_groups.get(id).copied() else {
                 return Err((index, crate::ComputeRectsError::InvalidLayout));
             };
@@ -1046,6 +1051,21 @@ impl Layout {
 
     pub(crate) fn flyout_width(&self, key: &PanelKey) -> Option<f32> {
         self.flyout_widths.get(key).copied()
+    }
+
+    /// Validates once per persistent revision and metric set for render/drag hot paths.
+    /// Public `validate` always performs the full check for callers asking for diagnostics.
+    pub(crate) fn validate_cached(&self, metrics: &DockMetrics) -> Result<(), Vec<ValidationError>> {
+        if self
+            .validation_cache
+            .get()
+            .is_some_and(|(version, cached_metrics)| version == self.version && cached_metrics == *metrics)
+        {
+            return Ok(());
+        }
+        self.validate(metrics)?;
+        self.validation_cache.set(Some((self.version, *metrics)));
+        Ok(())
     }
 
     /// Records host-measured canvas bounds without creating a persistent command revision.

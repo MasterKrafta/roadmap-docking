@@ -409,6 +409,17 @@ fn workspace_json_size_limit_is_checked_before_parsing() {
 }
 
 #[test]
+fn malformed_version_field_reports_type_error_not_missing_field() {
+    let (layout, _) = sample_layout();
+    let mut value = serde_json::to_value(WorkspaceFile::from_layout(&layout).unwrap()).unwrap();
+    value["version"] = serde_json::json!("2");
+    assert!(matches!(
+        WorkspaceFile::from_json(&value.to_string()),
+        Err(WorkspaceFileError::Json(message)) if message.contains("must be a non-negative integer")
+    ));
+}
+
+#[test]
 fn unsupported_file_versions_and_malformed_json_return_errors() {
     let (layout, descriptors) = sample_layout();
     let mut file = WorkspaceFile::from_layout(&layout).unwrap();

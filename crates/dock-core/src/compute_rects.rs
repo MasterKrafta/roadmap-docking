@@ -106,7 +106,7 @@ impl Layout {
         viewport
             .validate_non_empty()
             .map_err(ComputeRectsError::Geometry)?;
-        self.validate(metrics)
+        self.validate_cached(metrics)
             .map_err(|_| ComputeRectsError::InvalidLayout)?;
 
         // Hidden chrome changes presentation only. Keep the main-dock tree in

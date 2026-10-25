@@ -128,12 +128,12 @@ impl WorkspaceFile {
             });
         }
 
-        let version_u64 = value
+        let version_value = value
             .get("version")
-            .and_then(serde_json::Value::as_u64)
-            .ok_or_else(|| {
-                WorkspaceFileError::Json("missing non-negative integer field 'version'".to_owned())
-            })?;
+            .ok_or_else(|| WorkspaceFileError::Json("missing field 'version'".to_owned()))?;
+        let version_u64 = version_value.as_u64().ok_or_else(|| {
+            WorkspaceFileError::Json("field 'version' must be a non-negative integer".to_owned())
+        })?;
         let version = u32::try_from(version_u64).map_err(|_| {
             WorkspaceFileError::Json(
                 "workspace version is outside the supported integer range".to_owned(),
@@ -243,9 +243,9 @@ impl WorkspaceFile {
         // Preserve the typed floating-bounds error and the pre-normalization
         // z-order index even though tree normalization now runs before clamping.
         if visible_region.is_some() {
-            let mut ordered_floating = self.layout.floating_groups.iter().collect::<Vec<_>>();
-            ordered_floating.sort_by_key(|group| group.z_order);
-            for (index, group) in ordered_floating.into_iter().enumerate() {
+            let mut ordered_floating = self.layout.floating_groups.iter().enumerate().collect::<Vec<_>>();
+            ordered_floating.sort_by_key(|(_, group)| group.z_order);
+            for (index, (_, group)) in ordered_floating.into_iter() {
                 group
                     .bounds
                     .validate_non_empty()
