@@ -21,7 +21,6 @@ impl Layout {
                     metrics,
                 )
             }
-
             DockCommand::ResetColumnRatios {
                 column,
                 available_height,
