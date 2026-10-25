@@ -254,6 +254,63 @@
 
 
     #[test]
+    fn outer_column_resize_commits_and_undoes_on_both_sides() {
+        for side in [DockSide::Left, DockSide::Right] {
+            let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+            let columns = crate::tree_query::main_column_ids(controller.layout(), side);
+            let column = match side {
+                DockSide::Left => columns.last().copied(),
+                DockSide::Right => columns.first().copied(),
+            }
+            .expect("initial layout should expose an outer column");
+            assert!(matches!(
+                controller.layout().node(column),
+                Some(Node::Column(value)) if !value.mode.is_rail()
+            ));
+            let original_width = match controller.layout().node(column) {
+                Some(Node::Column(value)) => value.width,
+                other => panic!("outer resize target should be a column, got {other:?}"),
+            };
+            let frame = controller
+                .frame(Rect::new(Point::ZERO, Size::new(1200.0, 800.0)))
+                .unwrap();
+            let column_rect = frame
+                .rects()
+                .columns
+                .iter()
+                .find(|entry| entry.column == column)
+                .expect("outer column should have frame geometry");
+            let start = Point::new(column_rect.rect.origin.x, column_rect.rect.origin.y);
+            let end = Point::new(start.x + 16.0, start.y);
+
+            controller
+                .begin_resize(
+                    ResizeHandle::OuterColumn { column, side },
+                    start,
+                    &frame,
+                )
+                .unwrap();
+            controller.update_resize(end).unwrap();
+            let preview_width = match controller.layout().node(column) {
+                Some(Node::Column(value)) => value.width,
+                _ => panic!("outer resize target should remain a column"),
+            };
+            assert_ne!(preview_width, original_width, "{side:?} preview must resize");
+            controller.commit_resize(end).unwrap();
+            assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+            assert!(controller.undo().unwrap());
+            assert_eq!(
+                match controller.layout().node(column) {
+                    Some(Node::Column(value)) => value.width,
+                    _ => panic!("outer resize target should remain a column after undo"),
+                },
+                original_width
+            );
+            assert!(!controller.undo().unwrap(), "one outer resize must create one undo step");
+        }
+    }
+
+    #[test]
     fn horizontal_main_split_resize_commits_and_undoes_as_one_gesture() {
         let mut controller = DockController::new_initial(&Theme::default()).unwrap();
         let owner = controller
