@@ -26,7 +26,7 @@ impl Layout {
     ) -> Result<HitResult, ComputeRectsError> {
         metrics
             .validate()
-            .map_err(|_| ComputeRectsError::InvalidMetrics)?;
+            .map_err(|reason| ComputeRectsError::InvalidMetrics { reason })?;
         point.validate().map_err(ComputeRectsError::Geometry)?;
 
         let floating_order = floating_front_to_back(&rects.floating_groups);
@@ -140,7 +140,7 @@ fn flyout_resize_hit_rect(
     let edge_x = match flyout.resize_edge {
         ResizeEdge::Left => flyout.rect.origin.x,
         ResizeEdge::Right => flyout.rect.origin.x + flyout.rect.size.width,
-        _ => return Err(ComputeRectsError::InvalidLayout),
+        _ => return Err(ComputeRectsError::InvalidLayoutState),
     };
     let rect = Rect::new(
         Point::new(edge_x - half_zone, flyout.rect.origin.y),
@@ -169,7 +169,7 @@ fn collect_subtree(
     if !nodes.insert(root) {
         return Ok(());
     }
-    match layout.node(root).ok_or(ComputeRectsError::InvalidLayout)? {
+    match layout.node(root).ok_or(ComputeRectsError::InvalidLayoutState)? {
         Node::Split(split) => {
             for child in &split.children {
                 collect_subtree(layout, *child, nodes, panels)?;
@@ -401,8 +401,7 @@ mod tests {
     use crate::layout_builder::LayoutBuilder;
     use crate::{
         Axis, ColumnMode, DockMetrics, DockSide, DropSource, DropTarget, DropZone,
-        GeometryError,
-        PanelConstraints, PanelKey, Profile, ResizeEdge, Size,
+        GeometryError, LayoutRects, PanelConstraints, PanelKey, Profile, ResizeEdge, Size,
     };
 
     fn constraints() -> PanelConstraints {
@@ -494,6 +493,22 @@ mod tests {
             top_floating.expect("fixture must contain a frontmost floating window"),
             top_panel.expect("fixture must contain a frontmost panel"),
         )
+    }
+
+    #[test]
+    fn hit_test_preserves_metric_validation_reason() {
+        let layout = LayoutBuilder::new(Profile::Generic).build();
+        let metrics = DockMetrics {
+            min_canvas_width: 0.0,
+            ..DockMetrics::default()
+        };
+
+        assert_eq!(
+            layout.hit_test(Point::ZERO, &LayoutRects::default(), &metrics),
+            Err(ComputeRectsError::InvalidMetrics {
+                reason: "min_canvas_width must be positive",
+            })
+        );
     }
 
     #[test]
