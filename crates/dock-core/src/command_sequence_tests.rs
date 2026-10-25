@@ -1391,13 +1391,18 @@ fn expected_small_viewport_errors_are_constraints_not_layout_regressions() {
     );
     let floating_layout = builder.build();
     assert_eq!(floating_layout.validate(&metrics), Ok(()));
-    assert!(matches!(
-        floating_layout.compute_rects(
+    let constrained_rects = floating_layout
+        .compute_rects(
             Rect::new(Point::ZERO, Size::new(1000.0, 100.0)),
-            &metrics
-        ),
-        Err(ComputeRectsError::InsufficientSpace { axis: Axis::Y, .. })
-    ));
+            &metrics,
+        )
+        .expect("an undersized floating window is isolated from the rest of geometry");
+    assert_eq!(
+        constrained_rects.canvas,
+        Some(Rect::new(Point::ZERO, Size::new(1000.0, 100.0)))
+    );
+    assert!(constrained_rects.floating_groups.is_empty());
+    assert!(constrained_rects.panels.is_empty());
     assert_eq!(floating_layout.validate(&metrics), Ok(()));
     assert!(floating_layout
         .compute_rects(
