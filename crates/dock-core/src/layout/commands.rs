@@ -2842,22 +2842,13 @@ impl Layout {
                     reason: "split ratio target does not identify an existing group",
                 });
             }
-            let mut weights = if column.group_ratios.len() == old_len
-                && column
-                    .group_ratios
-                    .iter()
-                    .all(|value| value.is_finite() && *value >= 0.0)
-                && column.group_ratios.iter().copied().sum::<f32>().is_finite()
-                && column.group_ratios.iter().copied().sum::<f32>() > f32::EPSILON
-            {
-                normalized_ratios(column.group_ratios.iter().copied().map(Some).collect())
-            } else {
-                equal_ratios(old_len)
-            };
-            let target_weight = weights[target_index];
-            weights[target_index] = target_weight * (1.0 - ratio);
-            weights.insert(index, target_weight * ratio);
-            normalized_ratios(weights.into_iter().map(Some).collect())
+            split_sibling_ratios(
+                &column.group_ratios,
+                old_len,
+                target_index,
+                index,
+                ratio,
+            )
         } else if column.groups.is_empty() {
             vec![1.0]
         } else {
@@ -3023,25 +3014,13 @@ impl Layout {
                                         target_index + 1
                                     };
                                     let old_len = split.children.len();
-                                    let mut weights = if split.ratios.len() == old_len
-                                        && split
-                                            .ratios
-                                            .iter()
-                                            .all(|value| value.is_finite() && *value >= 0.0)
-                                        && split.ratios.iter().copied().sum::<f32>().is_finite()
-                                        && split.ratios.iter().copied().sum::<f32>() > f32::EPSILON
-                                    {
-                                        normalized_ratios(
-                                            split.ratios.iter().copied().map(Some).collect(),
-                                        )
-                                    } else {
-                                        equal_ratios(old_len)
-                                    };
-                                    let target_weight = weights[target_index];
-                                    weights[target_index] = target_weight * (1.0 - split_ratio);
-                                    weights.insert(insert_at, target_weight * split_ratio);
-                                    let new_ratios =
-                                        normalized_ratios(weights.into_iter().map(Some).collect());
+                                    let new_ratios = split_sibling_ratios(
+                                        &split.ratios,
+                                        old_len,
+                                        target_index,
+                                        insert_at,
+                                        split_ratio,
+                                    );
                                     let Some(Node::Split(split)) = self.nodes.get_mut(parent)
                                     else {
                                         return Err(CommandError::InvalidTarget {
@@ -3484,4 +3463,32 @@ fn allowed_area_rejection_reason(area: AllowedArea) -> &'static str {
     } else {
         "panel constraints disallow the requested dock area"
     }
+}
+
+/// Computes sibling ratios when a new item takes a share of an existing target item.
+/// Invalid old ratios fall back to equal weights, matching normalization behavior.
+fn split_sibling_ratios(
+    current_ratios: &[f32],
+    sibling_count: usize,
+    target_index: usize,
+    insert_at: usize,
+    ratio: f32,
+) -> Vec<f32> {
+    let current_sum: f32 = current_ratios.iter().copied().sum();
+    let has_valid_ratios = current_ratios.len() == sibling_count
+        && current_ratios
+            .iter()
+            .all(|value| value.is_finite() && *value >= 0.0)
+        && current_sum.is_finite()
+        && current_sum > f32::EPSILON;
+    let mut weights = if has_valid_ratios {
+        normalized_ratios(current_ratios.iter().copied().map(Some).collect())
+    } else {
+        equal_ratios(sibling_count)
+    };
+
+    let target_weight = weights[target_index];
+    weights[target_index] = target_weight * (1.0 - ratio);
+    weights.insert(insert_at, target_weight * ratio);
+    normalized_ratios(weights.into_iter().map(Some).collect())
 }
