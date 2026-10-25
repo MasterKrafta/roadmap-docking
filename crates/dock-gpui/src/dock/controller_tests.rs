@@ -341,7 +341,7 @@
             original_ratios
         );
         assert!(controller.resize_session().is_none());
-        assert!(!controller.undo(), "a zero-delta resize must not add history");
+        assert!(!controller.undo().unwrap(), "a zero-delta resize must not add history");
         assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
     }
 
