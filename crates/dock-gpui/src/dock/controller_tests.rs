@@ -1,8 +1,22 @@
     use super::DockController;
     use crate::dock::resize_session::StartGeometry;
     use crate::requests::ResizeHandle;
-    use dock_core::{Axis, DockCommand, Node, Point, Rect, Size};
+    use dock_core::{Axis, DockCommand, DockSide, Node, NodeId, Point, Rect, Size};
     use ui::Theme;
+
+    fn horizontal_split_widths(controller: &DockController, split_id: NodeId) -> Vec<f32> {
+        let Some(Node::Split(split)) = controller.layout().node(split_id) else {
+            panic!("expected a horizontal split");
+        };
+        split
+            .children
+            .iter()
+            .map(|child| match controller.layout().node(*child) {
+                Some(Node::Column(column)) => column.width,
+                other => panic!("horizontal split child should be a column, got {other:?}"),
+            })
+            .collect()
+    }
 
     #[test]
     fn initial_render_layout_is_valid() {
@@ -238,6 +252,115 @@
         );
     }
 
+
+    #[test]
+    fn horizontal_main_split_resize_commits_and_undoes_as_one_gesture() {
+        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+        let owner = controller
+            .layout()
+            .main_area(DockSide::Right)
+            .map(|area| area.root)
+            .expect("initial layout should have a right main area");
+        assert!(matches!(
+            controller.layout().node(owner),
+            Some(Node::Split(split)) if split.axis == Axis::X && split.children.len() >= 2
+        ));
+        let original_widths = horizontal_split_widths(&controller, owner);
+        let frame = controller
+            .frame(Rect::new(Point::ZERO, Size::new(1200.0, 800.0)))
+            .unwrap();
+        let splitter = *frame
+            .rects()
+            .splitters
+            .iter()
+            .find(|entry| entry.owner == owner && entry.axis == Axis::X)
+            .expect("main horizontal split should have splitter geometry");
+        let start = Point::new(splitter.rect.origin.x, splitter.rect.origin.y);
+        let end = Point::new(start.x + 16.0, start.y);
+
+        controller
+            .begin_resize(
+                ResizeHandle::Splitter {
+                    owner,
+                    boundary_index: splitter.boundary_index,
+                    axis: Axis::X,
+                },
+                start,
+                &frame,
+            )
+            .unwrap();
+        controller.update_resize(end).unwrap();
+        assert_ne!(horizontal_split_widths(&controller, owner), original_widths);
+        controller.commit_resize(end).unwrap();
+        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+        assert!(controller.undo().unwrap());
+        assert_eq!(horizontal_split_widths(&controller, owner), original_widths);
+        assert!(!controller.undo().unwrap(), "one resize must create one undo step");
+    }
+
+    #[test]
+    fn floating_horizontal_split_resize_commits_and_undoes_as_one_gesture() {
+        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+        let owner = controller
+            .layout()
+            .main_area(DockSide::Right)
+            .map(|area| area.root)
+            .expect("initial layout should have a right main area");
+        assert!(matches!(
+            controller.layout().node(owner),
+            Some(Node::Split(split)) if split.axis == Axis::X && split.children.len() >= 2
+        ));
+        controller
+            .apply(DockCommand::Float {
+                node: owner,
+                bounds: Rect::new(Point::new(80.0, 60.0), Size::new(700.0, 560.0)),
+            })
+            .unwrap();
+        let floating_id = controller
+            .layout()
+            .floating_groups()
+            .find_map(|(id, floating)| {
+                controller
+                    .layout()
+                    .dock_area(floating.area)
+                    .is_some_and(|area| area.root == owner)
+                    .then_some(id)
+            })
+            .expect("horizontal split should now be a floating root");
+        assert!(controller.layout().main_area(DockSide::Right).is_none());
+        let original_widths = horizontal_split_widths(&controller, owner);
+        let frame = controller
+            .frame(Rect::new(Point::ZERO, Size::new(1200.0, 800.0)))
+            .unwrap();
+        let splitter = *frame
+            .rects()
+            .splitters
+            .iter()
+            .find(|entry| entry.owner == owner && entry.axis == Axis::X)
+            .expect("floating horizontal split should have splitter geometry");
+        let start = Point::new(splitter.rect.origin.x, splitter.rect.origin.y);
+        let end = Point::new(start.x + 16.0, start.y);
+
+        controller
+            .begin_resize(
+                ResizeHandle::Splitter {
+                    owner,
+                    boundary_index: splitter.boundary_index,
+                    axis: Axis::X,
+                },
+                start,
+                &frame,
+            )
+            .unwrap();
+        controller.update_resize(end).unwrap();
+        assert_ne!(horizontal_split_widths(&controller, owner), original_widths);
+        controller.commit_resize(end).unwrap();
+        assert!(controller.layout().floating_group(floating_id).is_some());
+        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+        assert!(controller.undo().unwrap());
+        assert_eq!(horizontal_split_widths(&controller, owner), original_widths);
+        assert!(!controller.undo().unwrap(), "the resize gesture must have one undo step");
+    }
 
     #[test]
     fn committing_resize_records_one_undo_step_for_the_whole_gesture() {
