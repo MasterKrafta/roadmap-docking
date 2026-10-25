@@ -301,6 +301,10 @@ fn capture_start_geometry(
             Ok(StartGeometry::OuterColumn { start_width })
         }
         ResizeHandle::FloatingEdge { group, edge } => {
+            if layout.floating_group(group).is_none() {
+                return Err(ResizeStartError::MissingFloatingGeometry);
+            }
+
             let Some(floating) = rects
                 .floating_groups
                 .iter()
@@ -687,6 +691,60 @@ mod tests {
                 Err(ResizeStartError::InvalidHandle)
             );
         }
+    }
+
+    #[test]
+    fn floating_resize_requires_group_in_current_layout() {
+        let controller = DockController::new_initial(&Theme::default()).unwrap();
+        let mut stale_layout = controller.layout().clone();
+        let group = stale_layout
+            .nodes()
+            .find_map(|(id, node)| match node {
+                Node::Column(column) if column.groups.len() > 1 => {
+                    column.groups.first().copied()
+                }
+                _ => None,
+            })
+            .expect("initial layout should contain a column with multiple groups");
+        stale_layout
+            .apply(
+                DockCommand::Float {
+                    node: group,
+                    bounds: Rect::new(Point::new(80.0, 60.0), Size::new(320.0, 220.0)),
+                },
+                controller.metrics(),
+            )
+            .unwrap();
+        let (floating_id, _) = stale_layout
+            .floating_groups()
+            .next()
+            .expect("floating command should create a floating group");
+        let frame = crate::FrameGeometry::compute(
+            &stale_layout,
+            Rect::new(Point::ZERO, Size::new(1200.0, 800.0)),
+            controller.metrics(),
+        )
+        .unwrap();
+        let edge = frame
+            .rects()
+            .floating_resize_edges
+            .iter()
+            .find(|entry| entry.group == floating_id)
+            .expect("floating frame should contain resize-edge geometry");
+
+        assert!(controller.layout().floating_group(floating_id).is_none());
+        assert_eq!(
+            capture_start_geometry(
+                controller.layout(),
+                frame.rects(),
+                controller.metrics(),
+                ResizeHandle::FloatingEdge {
+                    group: floating_id,
+                    edge: edge.edge,
+                },
+            ),
+            Err(ResizeStartError::MissingFloatingGeometry)
+        );
     }
 
     #[test]
