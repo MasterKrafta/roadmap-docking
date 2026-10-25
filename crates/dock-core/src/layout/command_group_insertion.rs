@@ -1,5 +1,5 @@
 use super::*;
-use super::commands::split_sibling_ratios;
+use super::helpers::split_sibling_ratios;
 
 impl Layout {
     pub(super) fn merge_group_into_tabs(

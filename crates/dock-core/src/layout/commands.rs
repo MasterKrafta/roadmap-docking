@@ -1932,49 +1932,4 @@ impl Layout {
             }
         }
     }
-
-    pub(super) fn same_persistent_state(&self, other: &Self) -> bool {
-        self.nodes.iter().eq(other.nodes.iter())
-            && self.panel_instances.iter().eq(other.panel_instances.iter())
-            && self.dock_areas.iter().eq(other.dock_areas.iter())
-            && self.main_areas == other.main_areas
-            && self.floating_groups.iter().eq(other.floating_groups.iter())
-            && self.last_dock_locations == other.last_dock_locations
-            && self.canvas == other.canvas
-            && self.profile == other.profile
-            && self.version == other.version
-            && self.chrome == other.chrome
-    }
-
-
-
-
-}
-
-/// Computes sibling ratios when a new item takes a share of an existing target item.
-/// Invalid old ratios fall back to equal weights, matching normalization behavior.
-pub(super) fn split_sibling_ratios(
-    current_ratios: &[f32],
-    sibling_count: usize,
-    target_index: usize,
-    insert_at: usize,
-    ratio: f32,
-) -> Vec<f32> {
-    let current_sum: f32 = current_ratios.iter().copied().sum();
-    let has_valid_ratios = current_ratios.len() == sibling_count
-        && current_ratios
-            .iter()
-            .all(|value| value.is_finite() && *value >= 0.0)
-        && current_sum.is_finite()
-        && current_sum > f32::EPSILON;
-    let mut weights = if has_valid_ratios {
-        normalized_ratios(current_ratios.iter().copied().map(Some).collect())
-    } else {
-        equal_ratios(sibling_count)
-    };
-
-    let target_weight = weights[target_index];
-    weights[target_index] = target_weight * (1.0 - ratio);
-    weights.insert(insert_at, target_weight * ratio);
-    normalized_ratios(weights.into_iter().map(Some).collect())
 }
