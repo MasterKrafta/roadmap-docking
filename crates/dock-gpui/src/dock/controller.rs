@@ -246,7 +246,7 @@ fn build_initial_layout(theme: &Theme) -> Result<(Layout, DockMetrics), String> 
     let metrics = dock_metrics_from_theme(theme);
     let descriptors = crate::panels::descriptors(theme);
     let mut layout = create_initial_layout(Profile::Photoshop, &descriptors, metrics)
-        .map_err(|error| format!("{error:?}"))?;
+        .map_err(|error| error.to_string())?;
 
     let (single_tab_group, multi_tab_group) = {
         let area = layout
