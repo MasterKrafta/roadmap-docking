@@ -3199,6 +3199,7 @@ mod tests {
         let taller_metrics = DockMetrics {
             header_height: 70.0,
             tab_strip_height: 70.0,
+            min_group_height: 140.0,
             ..metrics
         };
         assert_eq!(taller_metrics.validate(), Ok(()));
