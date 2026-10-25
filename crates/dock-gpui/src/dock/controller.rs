@@ -393,13 +393,23 @@ mod floating_resize_anchor_tests {
                 assert!((actual_bottom - original_bottom).abs() < 0.01);
                 assert!(actual.size.height > 1.0, "Core should clamp to minimum height");
             }
-            _ => unreachable!("test covers the left and top edges"),
+            ResizeEdge::TopLeft => {
+                let original_right = original.origin.x + original.size.width;
+                let actual_right = actual.origin.x + actual.size.width;
+                let original_bottom = original.origin.y + original.size.height;
+                let actual_bottom = actual.origin.y + actual.size.height;
+                assert!((actual_right - original_right).abs() < 0.01);
+                assert!((actual_bottom - original_bottom).abs() < 0.01);
+                assert!(actual.size.width > 1.0, "Core should clamp to minimum width");
+                assert!(actual.size.height > 1.0, "Core should clamp to minimum height");
+            }
+            _ => unreachable!("test covers left, top, and top-left edges"),
         }
     }
 
     #[test]
     fn floating_left_and_top_resize_keep_opposite_edge_anchored_at_minimum() {
-        for edge in [ResizeEdge::Left, ResizeEdge::Top] {
+        for edge in [ResizeEdge::Left, ResizeEdge::Top, ResizeEdge::TopLeft] {
             let mut controller = DockController::new_initial(&Theme::default()).unwrap();
             let group = controller
                 .layout()
@@ -437,7 +447,8 @@ mod floating_resize_anchor_tests {
                     original_bounds.origin.x + original_bounds.size.width / 2.0,
                     original_bounds.origin.y,
                 ),
-                _ => unreachable!("test covers the left and top edges"),
+                ResizeEdge::TopLeft => original_bounds.origin,
+                _ => unreachable!("test covers the left, top, and top-left edges"),
             };
             let end = match edge {
                 ResizeEdge::Left => {
@@ -446,7 +457,11 @@ mod floating_resize_anchor_tests {
                 ResizeEdge::Top => {
                     Point::new(start.x, start.y + original_bounds.size.height - 1.0)
                 }
-                _ => unreachable!("test covers the left and top edges"),
+                ResizeEdge::TopLeft => Point::new(
+                    start.x + original_bounds.size.width - 1.0,
+                    start.y + original_bounds.size.height - 1.0,
+                ),
+                _ => unreachable!("test covers the left, top, and top-left edges"),
             };
             controller
                 .begin_resize(
