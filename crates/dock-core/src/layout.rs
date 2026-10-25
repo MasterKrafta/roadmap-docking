@@ -1251,6 +1251,7 @@ mod command_group_transfer_operations;
 mod command_group_transfer_reorder;
 mod command_changes;
 mod command_group_insertion;
+mod command_group_edge_floating;
 mod command_target_insertion;
 mod commands;
 mod drag_drop;
