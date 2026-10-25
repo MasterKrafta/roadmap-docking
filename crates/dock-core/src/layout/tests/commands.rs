@@ -1,6 +1,26 @@
 use super::*;
 
 #[test]
+fn open_panel_expands_collapsed_photoshop_target_group() {
+    let metrics = DockMetrics::default();
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+    let (_, existing_panel) = builder.panel(PanelKey::new("open-collapsed-existing").unwrap(), descriptors()[0].1);
+    let group = builder.tabs(vec![existing_panel], 0, true);
+    let column = builder.column(metrics.default_column_width, crate::ColumnMode::Expanded, vec![group], vec![1.0]);
+    builder.main_area(DockSide::Right, column);
+    let mut layout = builder.build();
+
+    layout.apply(DockCommand::OpenPanel {
+        key: PanelKey::new("open-collapsed-new").unwrap(),
+        constraints: descriptors()[0].1,
+        target: Some(DropTarget::Tabs { group, index: 1 }),
+    }, &metrics).unwrap();
+
+    assert!(matches!(layout.node(group), Some(Node::Tabs(tabs)) if !tabs.collapsed && tabs.children.len() == 2));
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
 fn apply_commits_a_successful_change_and_increments_version_once() {
     let metrics = DockMetrics::default();
     let mut layout = initial_layout(Profile::Generic);

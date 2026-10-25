@@ -82,7 +82,7 @@ impl Layout {
                 field: "version",
                 reason: "layout version overflow",
             })?;
-        let changed_nodes = self.changed_node_ids(&candidate);
+        let changed_nodes = self.changed_node_ids(&candidate, command);
         candidate.version = next_version;
         *self = candidate;
 
@@ -179,6 +179,12 @@ impl Layout {
                     self.insert_panel_for_rail_slot(panel_node, column, index, metrics)?;
                 } else {
                     self.insert_node_for_target(panel_node, resolved_target, metrics, Some(0.5))?;
+                    if self.profile == Profile::Photoshop
+                        && let DropTarget::Tabs { group, .. } = resolved_target
+                        && let Some(Node::Tabs(tabs)) = self.nodes.get_mut(group)
+                    {
+                        tabs.collapsed = false;
+                    }
                 }
                 self.remember_panel_dock_location(panel_node);
                 Ok(CommandApplication {
@@ -369,6 +375,11 @@ impl Layout {
                     .find_panel_node(*panel)
                     .ok_or(CommandError::MissingPanel { panel: *panel })?;
                 self.validate_drop_target(*target, metrics)?;
+                if let DropTarget::GroupEdge { group: target_group, .. } = *target
+                    && self.tab_parent_index(panel_node).is_some_and(|(source_group, _)| source_group == target_group)
+                {
+                    return Ok(CommandApplication::persistent());
+                }
                 self.validate_panel_ids_allowed_for_target(&[*panel], *target)?;
                 if let (
                     Some((source_group, source_index)),
@@ -2853,8 +2864,23 @@ impl Layout {
             weights[target_index] = target_weight * (1.0 - ratio);
             weights.insert(index, target_weight * ratio);
             normalized_ratios(weights.into_iter().map(Some).collect())
+        } else if column.groups.is_empty() {
+            vec![1.0]
         } else {
-            equal_ratios(groups.len())
+            let old_ratios = normalized_ratios(
+                column.groups.iter().enumerate().map(|(index, _)| column.group_ratios.get(index).copied()).collect(),
+            );
+            let old_scale = column.groups.len() as f32 / groups.len() as f32;
+            let mut preserved = Vec::with_capacity(groups.len());
+            for group_index in 0..groups.len() {
+                if group_index == index {
+                    preserved.push(1.0 / groups.len() as f32);
+                } else {
+                    let old_index = if group_index < index { group_index } else { group_index - 1 };
+                    preserved.push(old_ratios[old_index] * old_scale);
+                }
+            }
+            normalized_ratios(preserved.into_iter().map(Some).collect())
         };
         let Some(Node::Column(column)) = self.nodes.get_mut(column_id) else {
             return Err(CommandError::InvalidTarget {
@@ -3105,18 +3131,10 @@ impl Layout {
             })?
             .root;
         self.validate_drop_target(target, metrics)?;
-        if let DropTarget::Tabs {
-            group: target_group,
-            ..
+        if target.referenced_node_id().is_some_and(|node| self.is_descendant_or_same(root, node)) {
+            return Ok(());
         }
-        | DropTarget::GroupTabs {
-            group: target_group,
-            ..
-        } = target
-        {
-            if self.is_descendant_or_same(root, target_group) {
-                return Ok(());
-            }
+        if let DropTarget::Tabs { .. } | DropTarget::GroupTabs { .. } = target {
             if matches!(self.nodes.get(root), Some(Node::Split(split)) if split.axis == Axis::Y) {
                 return Err(CommandError::InvalidTarget {
                     reason: "a floating stack cannot be merged into a tab strip; target a dock column or rail slot",
@@ -3413,7 +3431,7 @@ impl Layout {
             && self.flyout_auto_collapse == other.flyout_auto_collapse
     }
 
-    pub(super) fn changed_node_ids(&self, other: &Self) -> Vec<NodeId> {
+    pub(super) fn changed_node_ids(&self, other: &Self, command: &DockCommand) -> Vec<NodeId> {
         let mut changed = Vec::new();
         for (id, node) in self.nodes.iter() {
             if other.nodes.get(id) != Some(node) {
@@ -3423,6 +3441,37 @@ impl Layout {
         for (id, _) in other.nodes.iter() {
             if !self.nodes.contains_key(id) {
                 changed.push(id);
+            }
+        }
+
+        // Some persistent presentation commands change geometry/stacking without
+        // changing the underlying Node values; return roots for adapter invalidation.
+        let mut affected = Vec::new();
+        match command {
+            DockCommand::MoveFloating { group, .. }
+            | DockCommand::ResizeFloatingBounds { group, .. }
+            | DockCommand::ResizeFloating { group, .. }
+            | DockCommand::RaiseFloating { group }
+            | DockCommand::DockFloating { group, .. } => {
+                for layout in [self, other] {
+                    if let Some(floating) = layout.floating_group(*group)
+                        && let Some(area) = layout.dock_area(floating.area)
+                    {
+                        affected.push(area.root);
+                    }
+                }
+            }
+            DockCommand::SetChrome { .. } => {
+                for layout in [self, other] {
+                    affected.extend(layout.main_areas.iter().flatten().filter_map(|area_id| layout.dock_area(*area_id).map(|area| area.root)));
+                    affected.extend(layout.floating_groups.values().filter_map(|group| layout.dock_area(group.area).map(|area| area.root)));
+                }
+            }
+            _ => {}
+        }
+        for node in affected {
+            if !changed.contains(&node) {
+                changed.push(node);
             }
         }
         changed

@@ -100,28 +100,23 @@ impl Layout {
     }
 
     pub(super) fn default_open_target(&self) -> Result<DropTarget, CommandError> {
-        // Both built-in profiles default to the right dock. Panel-kind-specific
-        // placement remains app/descriptor policy and can be supplied explicitly.
-        let side = match self.profile {
-            Profile::Generic | Profile::Photoshop => DockSide::Right,
-        };
-        if let Some(area) = self.main_area(side) {
-            if let Some(group) = self.first_tabs_in_subtree(area.root) {
+        // Prefer the right dock, but use an existing compatible group on the left
+        // if the right root has none. If neither side has Tabs, append a right column.
+        for side in [DockSide::Right, DockSide::Left] {
+            if let Some(area) = self.main_area(side)
+                && let Some(group) = self.first_tabs_in_subtree(area.root)
+            {
                 let index = match self.nodes.get(group) {
                     Some(Node::Tabs(tabs)) => tabs.children.len(),
-                    _ => {
-                        return Err(CommandError::InvalidTarget {
-                            reason: "profile default placement did not resolve to a Tabs node",
-                        });
-                    }
+                    _ => return Err(CommandError::InvalidTarget {
+                        reason: "profile default placement did not resolve to a Tabs node",
+                    }),
                 };
                 return Ok(DropTarget::Tabs { group, index });
             }
-            return Err(CommandError::InvalidTarget {
-                reason: "profile default placement has no compatible tab group on the right dock",
-            });
         }
-        Ok(DropTarget::MainColumn { side, index: 0 })
+        let index = self.main_columns(DockSide::Right).map_or(0, |columns| columns.len());
+        Ok(DropTarget::MainColumn { side: DockSide::Right, index })
     }
 
     pub(super) fn first_tabs_in_subtree(&self, root: NodeId) -> Option<NodeId> {
