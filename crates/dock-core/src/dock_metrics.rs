@@ -4,8 +4,7 @@
 /// Photoshop reference/design. UI code should consume this object rather than
 /// re-declaring these constants.
 #[derive(Clone, Copy, Debug, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(default))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct DockMetrics {
     pub default_column_width: f32,
     pub min_column_width: f32,
@@ -39,58 +38,28 @@ impl DockMetrics {
     /// Validates finiteness, positivity, and the required metric relationships.
     pub fn validate(self) -> Result<(), &'static str> {
         let positive = [
-            ("default_column_width", self.default_column_width),
-            ("min_column_width", self.min_column_width),
-            ("rail_width", self.rail_width),
-            ("splitter_thickness", self.splitter_thickness),
-            ("splitter_hit_zone", self.splitter_hit_zone),
-            ("edge_drop_width", self.edge_drop_width),
-            ("drag_threshold", self.drag_threshold),
-            ("min_group_height", self.min_group_height),
-            ("collapsed_group_height", self.collapsed_group_height),
-            ("header_height", self.header_height),
-            ("tab_strip_height", self.tab_strip_height),
-            ("min_tab_width", self.min_tab_width),
-            ("tab_overflow_button_width", self.tab_overflow_button_width),
-            ("min_canvas_width", self.min_canvas_width),
+            ("default_column_width", self.default_column_width, "default_column_width must be finite", "default_column_width must be positive"),
+            ("min_column_width", self.min_column_width, "min_column_width must be finite", "min_column_width must be positive"),
+            ("rail_width", self.rail_width, "rail_width must be finite", "rail_width must be positive"),
+            ("splitter_thickness", self.splitter_thickness, "splitter_thickness must be finite", "splitter_thickness must be positive"),
+            ("splitter_hit_zone", self.splitter_hit_zone, "splitter_hit_zone must be finite", "splitter_hit_zone must be positive"),
+            ("edge_drop_width", self.edge_drop_width, "edge_drop_width must be finite", "edge_drop_width must be positive"),
+            ("drag_threshold", self.drag_threshold, "drag_threshold must be finite", "drag_threshold must be positive"),
+            ("min_group_height", self.min_group_height, "min_group_height must be finite", "min_group_height must be positive"),
+            ("collapsed_group_height", self.collapsed_group_height, "collapsed_group_height must be finite", "collapsed_group_height must be positive"),
+            ("header_height", self.header_height, "header_height must be finite", "header_height must be positive"),
+            ("tab_strip_height", self.tab_strip_height, "tab_strip_height must be finite", "tab_strip_height must be positive"),
+            ("min_tab_width", self.min_tab_width, "min_tab_width must be finite", "min_tab_width must be positive"),
+            ("tab_overflow_button_width", self.tab_overflow_button_width, "tab_overflow_button_width must be finite", "tab_overflow_button_width must be positive"),
+            ("min_canvas_width", self.min_canvas_width, "min_canvas_width must be finite", "min_canvas_width must be positive"),
         ];
 
-        for (name, value) in positive {
+        for (_name, value, non_finite, non_positive) in positive {
             if !value.is_finite() {
-                return Err(match name {
-                    "default_column_width" => "default_column_width must be finite",
-                    "min_column_width" => "min_column_width must be finite",
-                    "rail_width" => "rail_width must be finite",
-                    "splitter_thickness" => "splitter_thickness must be finite",
-                    "splitter_hit_zone" => "splitter_hit_zone must be finite",
-                    "edge_drop_width" => "edge_drop_width must be finite",
-                    "drag_threshold" => "drag_threshold must be finite",
-                    "min_group_height" => "min_group_height must be finite",
-                    "collapsed_group_height" => "collapsed_group_height must be finite",
-                    "header_height" => "header_height must be finite",
-                    "tab_strip_height" => "tab_strip_height must be finite",
-                    "min_tab_width" => "min_tab_width must be finite",
-                    "tab_overflow_button_width" => "tab_overflow_button_width must be finite",
-                    _ => "min_canvas_width must be finite",
-                });
+                return Err(non_finite);
             }
             if value <= 0.0 {
-                return Err(match name {
-                    "default_column_width" => "default_column_width must be positive",
-                    "min_column_width" => "min_column_width must be positive",
-                    "rail_width" => "rail_width must be positive",
-                    "splitter_thickness" => "splitter_thickness must be positive",
-                    "splitter_hit_zone" => "splitter_hit_zone must be positive",
-                    "edge_drop_width" => "edge_drop_width must be positive",
-                    "drag_threshold" => "drag_threshold must be positive",
-                    "min_group_height" => "min_group_height must be positive",
-                    "collapsed_group_height" => "collapsed_group_height must be positive",
-                    "header_height" => "header_height must be positive",
-                    "tab_strip_height" => "tab_strip_height must be positive",
-                    "min_tab_width" => "min_tab_width must be positive",
-                    "tab_overflow_button_width" => "tab_overflow_button_width must be positive",
-                    _ => "min_canvas_width must be positive",
-                });
+                return Err(non_positive);
             }
         }
 
@@ -114,6 +83,80 @@ impl DockMetrics {
         }
 
         Ok(())
+    }
+}
+
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for DockMetrics {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        #[serde(default)]
+        struct Wire {
+            default_column_width: f32,
+            min_column_width: f32,
+            rail_width: f32,
+            splitter_thickness: f32,
+            splitter_hit_zone: f32,
+            edge_drop_width: f32,
+            drag_threshold: f32,
+            min_group_height: f32,
+            collapsed_group_height: f32,
+            header_height: f32,
+            tab_strip_height: f32,
+            min_tab_width: f32,
+            tab_overflow_button_width: f32,
+            min_canvas_width: f32,
+            max_columns: usize,
+        }
+
+        impl Default for Wire {
+            fn default() -> Self {
+                let metrics = DockMetrics::default();
+                Self {
+                    default_column_width: metrics.default_column_width,
+                    min_column_width: metrics.min_column_width,
+                    rail_width: metrics.rail_width,
+                    splitter_thickness: metrics.splitter_thickness,
+                    splitter_hit_zone: metrics.splitter_hit_zone,
+                    edge_drop_width: metrics.edge_drop_width,
+                    drag_threshold: metrics.drag_threshold,
+                    min_group_height: metrics.min_group_height,
+                    collapsed_group_height: metrics.collapsed_group_height,
+                    header_height: metrics.header_height,
+                    tab_strip_height: metrics.tab_strip_height,
+                    min_tab_width: metrics.min_tab_width,
+                    tab_overflow_button_width: metrics.tab_overflow_button_width,
+                    min_canvas_width: metrics.min_canvas_width,
+                    max_columns: metrics.max_columns,
+                }
+            }
+        }
+
+        use serde::Deserialize as _;
+        let wire = Wire::deserialize(deserializer)?;
+        let metrics = Self {
+            default_column_width: wire.default_column_width,
+            min_column_width: wire.min_column_width,
+            rail_width: wire.rail_width,
+            splitter_thickness: wire.splitter_thickness,
+            splitter_hit_zone: wire.splitter_hit_zone,
+            edge_drop_width: wire.edge_drop_width,
+            drag_threshold: wire.drag_threshold,
+            min_group_height: wire.min_group_height,
+            collapsed_group_height: wire.collapsed_group_height,
+            header_height: wire.header_height,
+            tab_strip_height: wire.tab_strip_height,
+            min_tab_width: wire.min_tab_width,
+            tab_overflow_button_width: wire.tab_overflow_button_width,
+            min_canvas_width: wire.min_canvas_width,
+            max_columns: wire.max_columns,
+        };
+        metrics.validate().map_err(serde::de::Error::custom)?;
+        Ok(metrics)
     }
 }
 
@@ -173,6 +216,15 @@ mod tests {
         assert_eq!(metrics.min_tab_width, 72.0);
         assert_eq!(metrics.tab_overflow_button_width, 28.0);
         assert_eq!(metrics.validate(), Ok(()));
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn serde_deserialization_rejects_invalid_metric_relationships() {
+        let invalid = r#"{ "header_height": 60.0, "tab_strip_height": 40.0, "min_group_height": 80.0 }"#;
+        assert!(serde_json::from_str::<DockMetrics>(invalid).is_err());
+        let defaults: DockMetrics = serde_json::from_str("{}").unwrap();
+        assert_eq!(defaults, DockMetrics::default());
     }
 
     #[test]
