@@ -125,46 +125,16 @@ impl Layout {
                         });
                     }
                 };
-                let actual_delta = if left.mode.is_rail() || right.mode.is_rail() {
-                    0.0
-                } else {
-                    let left_min = self.minimum_column_width(left_id, metrics)?;
-                    let right_min = self.minimum_column_width(right_id, metrics)?;
-                    let left_max = self.maximum_column_width(left_id)?.unwrap_or(f32::INFINITY);
-                    let right_max = self
-                        .maximum_column_width(right_id)?
-                        .unwrap_or(f32::INFINITY);
-                    let lower_delta = (left_min - left.width).max(right.width - right_max);
-                    let upper_delta = (right.width - right_min).min(left_max - left.width);
-                    if lower_delta > upper_delta {
-                        return Err(CommandError::InvalidValue {
-                            field: "delta",
-                            reason: "adjacent columns have incompatible min/max width constraints",
-                        });
-                    }
-                    (*delta).clamp(lower_delta, upper_delta)
-                };
+                let actual_delta = self.resize_adjacent_columns(
+                    left_id,
+                    right_id,
+                    &left,
+                    &right,
+                    *delta,
+                    metrics,
+                    "resized column width is not finite and positive",
+                )?;
                 if actual_delta != 0.0 {
-                    let new_left = left.width + actual_delta;
-                    let new_right = right.width - actual_delta;
-                    if !new_left.is_finite()
-                        || !new_right.is_finite()
-                        || new_left <= 0.0
-                        || new_right <= 0.0
-                    {
-                        return Err(CommandError::InvalidValue {
-                            field: "delta",
-                            reason: "resized column width is not finite and positive",
-                        });
-                    }
-                    if let Some(Node::Column(column)) = self.nodes.get_mut(left_id) {
-                        column.width = new_left;
-                        column.last_expanded_width = Some(new_left);
-                    }
-                    if let Some(Node::Column(column)) = self.nodes.get_mut(right_id) {
-                        column.width = new_right;
-                        column.last_expanded_width = Some(new_right);
-                    }
                     self.sync_main_column_ratios(left_id)?;
                 }
                 Ok(CommandApplication {
@@ -233,48 +203,16 @@ impl Layout {
                     }),
                 };
 
-                let actual_delta = if left.mode.is_rail() || right.mode.is_rail() {
-                    0.0
-                } else {
-                    let left_min = self.minimum_column_width(left_id, metrics)?;
-                    let right_min = self.minimum_column_width(right_id, metrics)?;
-                    let left_max = self.maximum_column_width(left_id)?.unwrap_or(f32::INFINITY);
-                    let right_max = self
-                        .maximum_column_width(right_id)?
-                        .unwrap_or(f32::INFINITY);
-                    let lower_delta = (left_min - left.width).max(right.width - right_max);
-                    let upper_delta = (right.width - right_min).min(left_max - left.width);
-                    if lower_delta > upper_delta {
-                        return Err(CommandError::InvalidValue {
-                            field: "delta",
-                            reason: "adjacent columns have incompatible min/max width constraints",
-                        });
-                    }
-                    (*delta).clamp(lower_delta, upper_delta)
-                };
-
+                let actual_delta = self.resize_adjacent_columns(
+                    left_id,
+                    right_id,
+                    &left,
+                    &right,
+                    *delta,
+                    metrics,
+                    "resized split column width is not finite and positive",
+                )?;
                 if actual_delta != 0.0 {
-                    let new_left = left.width + actual_delta;
-                    let new_right = right.width - actual_delta;
-                    if !new_left.is_finite()
-                        || !new_right.is_finite()
-                        || new_left <= 0.0
-                        || new_right <= 0.0
-                    {
-                        return Err(CommandError::InvalidValue {
-                            field: "delta",
-                            reason: "resized split column width is not finite and positive",
-                        });
-                    }
-                    if let Some(Node::Column(column)) = self.nodes.get_mut(left_id) {
-                        column.width = new_left;
-                        column.last_expanded_width = Some(new_left);
-                    }
-                    if let Some(Node::Column(column)) = self.nodes.get_mut(right_id) {
-                        column.width = new_right;
-                        column.last_expanded_width = Some(new_right);
-                    }
-
                     // Split(X) of Columns is laid out from each Column's requested
                     // width. Keep ratios in sync so the tree remains meaningful if
                     // another layout mode later consumes the stored ratios.
@@ -350,5 +288,62 @@ impl Layout {
                 reason: "column resize dispatcher received an unsupported command",
             }),
         }
+    }
+
+    /// Resizes two adjacent Columns using their combined min/max constraints.
+    /// Main-dock and nested Split(X) callers share this invariant; each caller
+    /// remains responsible for syncing its containing layout ratios.
+    fn resize_adjacent_columns(
+        &mut self,
+        left_id: NodeId,
+        right_id: NodeId,
+        left: &Column,
+        right: &Column,
+        requested_delta: f32,
+        metrics: &DockMetrics,
+        width_error_reason: &'static str,
+    ) -> Result<f32, CommandError> {
+        let actual_delta = if left.mode.is_rail() || right.mode.is_rail() {
+            0.0
+        } else {
+            let left_min = self.minimum_column_width(left_id, metrics)?;
+            let right_min = self.minimum_column_width(right_id, metrics)?;
+            let left_max = self.maximum_column_width(left_id)?.unwrap_or(f32::INFINITY);
+            let right_max = self.maximum_column_width(right_id)?.unwrap_or(f32::INFINITY);
+            let lower_delta = (left_min - left.width).max(right.width - right_max);
+            let upper_delta = (right.width - right_min).min(left_max - left.width);
+            if lower_delta > upper_delta {
+                return Err(CommandError::InvalidValue {
+                    field: "delta",
+                    reason: "adjacent columns have incompatible min/max width constraints",
+                });
+            }
+            requested_delta.clamp(lower_delta, upper_delta)
+        };
+
+        if actual_delta != 0.0 {
+            let new_left = left.width + actual_delta;
+            let new_right = right.width - actual_delta;
+            if !new_left.is_finite()
+                || !new_right.is_finite()
+                || new_left <= 0.0
+                || new_right <= 0.0
+            {
+                return Err(CommandError::InvalidValue {
+                    field: "delta",
+                    reason: width_error_reason,
+                });
+            }
+            if let Some(Node::Column(column)) = self.nodes.get_mut(left_id) {
+                column.width = new_left;
+                column.last_expanded_width = Some(new_left);
+            }
+            if let Some(Node::Column(column)) = self.nodes.get_mut(right_id) {
+                column.width = new_right;
+                column.last_expanded_width = Some(new_right);
+            }
+        }
+
+        Ok(actual_delta)
     }
 }
