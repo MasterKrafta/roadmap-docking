@@ -15,7 +15,7 @@ impl Layout {
         }
     }
 
-    fn allowed_area_for_column_target(
+    pub(super) fn allowed_area_for_column_target(
         &self,
         column_id: NodeId,
     ) -> Result<AllowedArea, CommandError> {
