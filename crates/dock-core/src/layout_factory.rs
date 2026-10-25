@@ -309,6 +309,35 @@ mod tests {
             Err(InitialLayoutError::MissingRequiredPanel { key: "history" })
         ));
 
+        let mut duplicate = descriptors();
+        duplicate.push(duplicate[0].clone());
+        assert!(matches!(
+            create_initial_layout_with_error(Profile::Generic, &duplicate, DockMetrics::default()),
+            Err(InitialLayoutError::DuplicatePanelKey)
+        ));
+
+        let mut conflicting_widths = descriptors();
+        conflicting_widths[0].1 = PanelConstraints::new(
+            Size::new(400.0, 80.0),
+            Size::new(420.0, 220.0),
+            Some(Size::new(450.0, 300.0)),
+            false,
+        );
+        conflicting_widths[1].1 = PanelConstraints::new(
+            Size::new(120.0, 80.0),
+            Size::new(200.0, 220.0),
+            Some(Size::new(350.0, 300.0)),
+            false,
+        );
+        assert!(matches!(
+            create_initial_layout_with_error(
+                Profile::Generic,
+                &conflicting_widths,
+                DockMetrics::default()
+            ),
+            Err(InitialLayoutError::ConflictingPanelWidthConstraints)
+        ));
+
         let metrics = DockMetrics {
             default_column_width: f32::NAN,
             ..DockMetrics::default()
