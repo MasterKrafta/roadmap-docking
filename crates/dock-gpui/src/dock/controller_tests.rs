@@ -301,6 +301,51 @@
     }
 
     #[test]
+    fn committing_resize_without_movement_does_not_create_undo_step() {
+        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+        let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
+        let frame = controller.frame(viewport).unwrap();
+        let splitter = *frame
+            .rects()
+            .splitters
+            .iter()
+            .find(|splitter| splitter.axis == Axis::Y)
+            .expect("initial layout should contain a vertical group splitter");
+        let owner = splitter.owner;
+        let original_ratios = match controller.layout().node(owner) {
+            Some(Node::Column(column)) => column.group_ratios.clone(),
+            other => panic!("vertical splitter should belong to a column, got {other:?}"),
+        };
+        let original_version = controller.layout().version();
+        let start = Point::new(180.0, 240.0);
+
+        controller
+            .begin_resize(
+                ResizeHandle::Splitter {
+                    owner,
+                    boundary_index: splitter.boundary_index,
+                    axis: Axis::Y,
+                },
+                start,
+                &frame,
+            )
+            .unwrap();
+        controller.commit_resize(start).unwrap();
+
+        assert_eq!(controller.layout().version(), original_version);
+        assert_eq!(
+            match controller.layout().node(owner) {
+                Some(Node::Column(column)) => column.group_ratios.clone(),
+                _ => panic!("resize owner should remain a column"),
+            },
+            original_ratios
+        );
+        assert!(controller.resize_session().is_none());
+        assert!(!controller.undo(), "a zero-delta resize must not add history");
+        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+    }
+
+    #[test]
     fn cancelling_resize_restores_baseline_and_clears_the_session() {
         let mut controller = DockController::new_initial(&Theme::default()).unwrap();
         let frame = controller
