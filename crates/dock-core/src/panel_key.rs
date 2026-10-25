@@ -131,7 +131,7 @@ mod tests {
     fn new_reports_typed_validation_errors() {
         assert_eq!(PanelKey::new(""), Err(super::PanelKeyError::Empty));
         assert_eq!(
-            PanelKey::try_new("Bad Key"),
+            PanelKey::new("Bad Key"),
             Err(super::PanelKeyError::InvalidSyntax)
         );
     }
