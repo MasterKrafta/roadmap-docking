@@ -196,13 +196,27 @@ impl Layout {
             .filter(|(_, group)| !self.group_is_collapsed(**group))
             .map(|(index, _)| heights[index])
             .sum();
-        let mut ratios = vec![0.0; column.groups.len()];
         if expanded_height <= 0.0 {
             return Ok(column.group_ratios.clone());
         }
+
+        // Reset the visible groups without discarding the saved weight of a
+        // collapsed group. Once expanded again, it should recover its share
+        // instead of being constrained to its minimum height.
+        let collapsed_weight: f32 = column
+            .groups
+            .iter()
+            .enumerate()
+            .filter(|(_, group)| self.group_is_collapsed(**group))
+            .map(|(index, _)| column.group_ratios[index])
+            .sum();
+        let remaining_weight = (1.0 - collapsed_weight).max(0.0);
+        let mut ratios = vec![0.0; column.groups.len()];
         for (index, group) in column.groups.iter().copied().enumerate() {
-            if !self.group_is_collapsed(group) {
-                ratios[index] = heights[index] / expanded_height;
+            if self.group_is_collapsed(group) {
+                ratios[index] = column.group_ratios[index];
+            } else {
+                ratios[index] = heights[index] / expanded_height * remaining_weight;
             }
         }
         Ok(normalized_ratios(ratios.into_iter().map(Some).collect()))

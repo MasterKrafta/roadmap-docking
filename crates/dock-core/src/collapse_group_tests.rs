@@ -395,6 +395,88 @@ fn reexpand_after_resize_and_reorder_restores_saved_weights_with_current_viewpor
 }
 
 #[test]
+fn reset_column_ratios_preserves_collapsed_group_weights() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+    let mut groups = Vec::new();
+
+    for name in ["reset-ratio-a", "reset-ratio-b", "reset-ratio-c"] {
+        let (_, panel_node) = builder.panel(key(name), constraints());
+        groups.push(builder.tabs(vec![panel_node], 0, false));
+    }
+
+    let column = builder.column(
+        280.0,
+        ColumnMode::Expanded,
+        groups.clone(),
+        vec![0.2, 0.3, 0.5],
+    );
+    builder.main_area(DockSide::Left, column);
+    let mut layout = builder.build();
+
+    layout
+        .apply(
+            DockCommand::CollapseGroup {
+                group: groups[0],
+                collapsed: true,
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    layout
+        .apply(
+            DockCommand::ResetColumnRatios {
+                column,
+                available_height: 1000.0,
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    let ratios_after_reset = match layout.node(column).unwrap() {
+        Node::Column(column) => column.group_ratios.clone(),
+        other => panic!("expected Column, found {other:?}"),
+    };
+    assert!((ratios_after_reset[0] - 0.2).abs() < 1.0e-4);
+    assert!((ratios_after_reset[1] - 0.4).abs() < 1.0e-4);
+    assert!((ratios_after_reset[2] - 0.4).abs() < 1.0e-4);
+
+    layout
+        .apply(
+            DockCommand::CollapseGroup {
+                group: groups[0],
+                collapsed: false,
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    let ratios_after_expand = match layout.node(column).unwrap() {
+        Node::Column(column) => column.group_ratios.clone(),
+        other => panic!("expected Column, found {other:?}"),
+    };
+    assert!((ratios_after_expand[0] - 0.2).abs() < 1.0e-4);
+
+    let rects = layout
+        .compute_rects(viewport(1200.0, 1200.0), &metrics)
+        .unwrap();
+    let first_group_rect = rects
+        .groups
+        .iter()
+        .find(|rect| rect.group == groups[0])
+        .expect("expanded group should have geometry");
+    let minimum_expanded_height = metrics
+        .min_group_height
+        .max(metrics.header_height + metrics.tab_strip_height + constraints().min_size.height);
+    assert!(
+        first_group_rect.rect.size.height > minimum_expanded_height + 20.0,
+        "reset must preserve the group's saved weight so expansion restores more than minimum height; rect={:?}, minimum={minimum_expanded_height}",
+        first_group_rect.rect
+    );
+}
+
+#[test]
 fn center_drop_of_panel_expands_collapsed_target_in_photoshop_profile() {
     let metrics = DockMetrics::default();
     let (mut layout, target_group, _, first_panel, active_panel, source_panel) = layout_with_tabs();
