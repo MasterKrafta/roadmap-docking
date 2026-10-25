@@ -166,10 +166,10 @@ impl Layout {
         let mut changes = Vec::new();
         for (index, id, _) in groups {
             let Some(group) = self.floating_groups.get(id).copied() else {
-                return Err((index, crate::ComputeRectsError::InvalidLayout));
+                return Err((index, crate::ComputeRectsError::InvalidLayoutState));
             };
             let Some(root) = self.dock_areas.get(group.area).map(|area| area.root) else {
-                return Err((index, crate::ComputeRectsError::InvalidLayout));
+                return Err((index, crate::ComputeRectsError::InvalidLayoutState));
             };
             let original = group.bounds;
             let clamped = crate::compute_rects::clamp_floating_bounds(
@@ -183,7 +183,7 @@ impl Layout {
 
             if clamped != original {
                 let Some(group) = self.floating_groups.get_mut(id) else {
-                    return Err((index, crate::ComputeRectsError::InvalidLayout));
+                    return Err((index, crate::ComputeRectsError::InvalidLayoutState));
                 };
                 group.bounds = clamped;
                 changes.push((index, original, clamped));
