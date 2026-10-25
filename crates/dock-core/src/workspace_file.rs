@@ -209,6 +209,22 @@ impl WorkspaceFile {
             None
         };
 
+        // Preserve the typed floating-bounds error and the pre-normalization
+        // z-order index even though tree normalization now runs before clamping.
+        if visible_region.is_some() {
+            let mut ordered_floating = self.layout.floating_groups.iter().collect::<Vec<_>>();
+            ordered_floating.sort_by_key(|group| group.z_order);
+            for (index, group) in ordered_floating.into_iter().enumerate() {
+                group
+                    .bounds
+                    .validate_non_empty()
+                    .map_err(|reason| WorkspaceFileError::InvalidFloatingBounds {
+                        index,
+                        reason,
+                    })?;
+            }
+        }
+
         let mut descriptors_by_key = HashMap::<String, PanelConstraints>::new();
         for (key, constraints) in descriptors {
             constraints.validate().map_err(|reason| {
@@ -287,6 +303,12 @@ impl WorkspaceFile {
             chrome: self.layout.chrome,
         });
 
+        match layout.normalize_for_workspace_load(metrics) {
+            Ok(Some(issues)) => diagnostics.push(WorkspaceDiagnostic::LayoutNormalized { issues }),
+            Ok(None) => {}
+            Err(issues) => return Err(WorkspaceFileError::InvalidLayout(issues)),
+        }
+
         if let Some(region) = visible_region {
             let changes = layout
                 .clamp_floating_groups_for_workspace_load(region, metrics)
@@ -320,12 +342,6 @@ impl WorkspaceFile {
                     clamped,
                 }
             }));
-        }
-
-        match layout.normalize_for_workspace_load(metrics) {
-            Ok(Some(issues)) => diagnostics.push(WorkspaceDiagnostic::LayoutNormalized { issues }),
-            Ok(None) => {}
-            Err(issues) => return Err(WorkspaceFileError::InvalidLayout(issues)),
         }
 
         Ok(WorkspaceLoadResult {

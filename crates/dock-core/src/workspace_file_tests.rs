@@ -928,3 +928,57 @@ fn workspace_load_renumbers_duplicate_floating_z_orders_and_preserves_paint_orde
     }));
 }
 
+#[test]
+fn workspace_normalizes_empty_floating_columns_before_clamping_bounds() {
+    let metrics = DockMetrics::default();
+    let (layout, descriptors) = sample_layout();
+    let mut file = WorkspaceFile::from_layout(&layout).unwrap();
+    let floating_tabs = file
+        .layout
+        .floating_groups
+        .first()
+        .expect("sample has a floating group")
+        .root
+        .clone();
+
+    file.layout.floating_groups[0].root = WorkspaceNode::Split {
+        axis: Axis::X,
+        children: vec![
+            WorkspaceNode::Column {
+                width: metrics.default_column_width,
+                mode: ColumnMode::Expanded,
+                groups: vec![floating_tabs],
+                group_ratios: vec![1.0],
+                last_expanded_width: Some(metrics.default_column_width),
+            },
+            WorkspaceNode::Column {
+                width: metrics.default_column_width,
+                mode: ColumnMode::Expanded,
+                groups: Vec::new(),
+                group_ratios: Vec::new(),
+                last_expanded_width: Some(metrics.default_column_width),
+            },
+        ],
+        ratios: vec![0.5, 0.5],
+    };
+
+    let region = Rect::new(Point::ZERO, Size::new(1200.0, 900.0));
+    let report = WorkspaceFile::load_json(
+        &file.to_json_pretty().unwrap(),
+        &descriptors,
+        &metrics,
+        WorkspaceLoadOptions::new(Some(region)),
+    )
+    .expect("the empty floating column should be normalized before minimum-size clamping");
+
+    assert_eq!(report.layout.floating_groups_in_paint_order().len(), 1);
+    assert!(report.layout.validate(&metrics).is_ok());
+    let floating = report.layout.floating_groups_in_paint_order();
+    let area = report.layout.dock_area(floating[0].1.area).unwrap();
+    assert!(matches!(report.layout.node(area.root), Some(crate::Node::Column(column)) if column.groups.len() == 1));
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        matches!(diagnostic, WorkspaceDiagnostic::LayoutNormalized { issues }
+            if issues.iter().any(|issue| issue.contains("must contain at least one group before normalization")))
+    }));
+}
+
