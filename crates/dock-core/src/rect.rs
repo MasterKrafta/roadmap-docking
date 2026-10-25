@@ -77,7 +77,9 @@ impl Rect {
 
     /// Returns whether the point lies inside the half-open rectangle.
     pub fn contains(self, point: Point) -> Result<bool, GeometryError> {
-        self.validate()?;
+        // Validate non-edge metadata once, then compute each checked edge once.
+        self.origin.validate()?;
+        self.size.validate()?;
         point.validate()?;
         let right = self.checked_right()?;
         let bottom = self.checked_bottom()?;

@@ -11,7 +11,7 @@ use crate::{
 ///
 /// A session never owns or mutates `Layout`. It exposes preview data while
 /// dragging and emits at most one semantic `DragDropRequest` on valid release.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct DragSession {
     state: DragState,
     threshold: f32,
@@ -88,7 +88,12 @@ impl DragSession {
     /// Moving after a target was resolved clears that target. The adapter must
     /// resolve the target again for the new point before release.
     pub fn pointer_move(&mut self, position: Point) -> Result<(), DragSessionError> {
-        Self::validate_position(position)?;
+        if !position.is_finite() {
+            if matches!(self.state, DragState::Pressed { .. } | DragState::Dragging { .. }) {
+                self.cancel_with_reason(DragCancelReason::InvalidPointerPosition)?;
+            }
+            return Err(DragSessionError::InvalidPointerPosition);
+        }
 
         self.state = match self.state {
             DragState::Pressed {
@@ -180,7 +185,12 @@ impl DragSession {
         position: Point,
         resolved_target: Option<DropTarget>,
     ) -> Result<Option<DragDropRequest>, DragSessionError> {
-        Self::validate_position(position)?;
+        if !position.is_finite() {
+            if matches!(self.state, DragState::Pressed { .. } | DragState::Dragging { .. }) {
+                self.cancel_with_reason(DragCancelReason::InvalidPointerPosition)?;
+            }
+            return Err(DragSessionError::InvalidPointerPosition);
+        }
 
         let current_state = self.state;
         let handle = self.handle.unwrap_or_else(|| match current_state {
@@ -456,6 +466,33 @@ mod tests {
                 reason: DragCancelReason::BelowThreshold,
             }
         );
+    }
+
+    #[test]
+    fn non_finite_release_cancels_active_drag_instead_of_leaving_it_stuck() {
+        let payload = panel_payload();
+        let mut session = session();
+        session.pointer_down(payload, Point::ZERO).unwrap();
+        session.pointer_move(Point::new(8.0, 0.0)).unwrap();
+
+        assert_eq!(
+            session.pointer_up(Point::new(f32::NAN, 0.0), Some(DropTarget::FreeArea)),
+            Err(DragSessionError::InvalidPointerPosition)
+        );
+        assert!(matches!(
+            session.state(),
+            DragState::Cancelled { payload: cancelled, reason: DragCancelReason::InvalidPointerPosition, .. }
+                if cancelled == payload
+        ));
+    }
+
+    #[test]
+    fn non_finite_move_cancels_active_drag() {
+        let payload = panel_payload();
+        let mut session = session();
+        session.pointer_down(payload, Point::ZERO).unwrap();
+        assert_eq!(session.pointer_move(Point::new(0.0, f32::INFINITY)), Err(DragSessionError::InvalidPointerPosition));
+        assert!(matches!(session.state(), DragState::Cancelled { reason: DragCancelReason::InvalidPointerPosition, .. }));
     }
 
     #[test]

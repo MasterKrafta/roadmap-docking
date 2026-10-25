@@ -14,4 +14,6 @@ pub enum DragCancelReason {
     NoValidTarget,
     /// An explicit adapter/application cancellation.
     Explicit,
+    /// A non-finite pointer coordinate invalidated the active gesture.
+    InvalidPointerPosition,
 }
