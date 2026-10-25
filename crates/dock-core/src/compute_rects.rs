@@ -637,12 +637,24 @@ fn layout_tabs(
                 (requested_visible_width, requested_button_width)
             };
 
+            let visible_indices: Vec<usize> = if visible_count == 0 {
+                Vec::new()
+            } else {
+                // Keep the active tab visible by selecting a contiguous window
+                // that contains it instead of always exposing only the oldest tabs.
+                let start = tabs
+                    .active_index
+                    .saturating_sub(visible_count - 1)
+                    .min(tab_count - visible_count);
+                (start..start + visible_count).collect()
+            };
             if visible_count > 0 {
                 let tab_width = visible_width / visible_count as f32;
-                for (index, child_id) in tabs.children.iter().take(visible_count).enumerate() {
-                    if let Some(Node::Panel(panel)) = layout.node(*child_id) {
-                        let x = group_rect.origin.x + tab_width * index as f32;
-                        let width = if index + 1 == visible_count {
+                for (display_index, child_index) in visible_indices.iter().copied().enumerate() {
+                    let child_id = tabs.children[child_index];
+                    if let Some(Node::Panel(panel)) = layout.node(child_id) {
+                        let x = group_rect.origin.x + tab_width * display_index as f32;
+                        let width = if display_index + 1 == visible_count {
                             (group_rect.origin.x + visible_width) - x
                         } else {
                             tab_width
@@ -652,7 +664,7 @@ fn layout_tabs(
                         output.tab_headers.push(TabHeaderRect::new(
                             id,
                             panel.panel_id,
-                            index,
+                            child_index,
                             header_rect,
                         ));
                     }
@@ -669,8 +681,9 @@ fn layout_tabs(
             let hidden_tabs = tabs
                 .children
                 .iter()
-                .skip(visible_count)
-                .filter_map(|child_id| match layout.node(*child_id) {
+                .enumerate()
+                .filter(|(index, _)| !visible_indices.contains(index))
+                .filter_map(|(_, child_id)| match layout.node(*child_id) {
                     Some(Node::Panel(panel)) => Some(panel.panel_id),
                     _ => None,
                 })
@@ -728,6 +741,17 @@ fn layout_floating_root(
     match layout.node(id) {
         Some(Node::Column(column))
             if column.groups.len() > 1
+                && layout.floating_branch_starts_collapsed(id)
+                && rect.size.height > title_height =>
+        {
+            let content_rect = Rect::new(
+                Point::new(rect.origin.x, rect.origin.y + title_height),
+                Size::new(rect.size.width, rect.size.height - title_height),
+            );
+            layout_node(layout, id, content_rect, metrics, output)
+        }
+        Some(Node::Split(split))
+            if split.axis == Axis::Y
                 && layout.floating_branch_starts_collapsed(id)
                 && rect.size.height > title_height =>
         {
@@ -1157,8 +1181,17 @@ fn weighted_sizes(
             remaining -= minimums[index];
             active.retain(|candidate| *candidate != index);
         } else {
-            for index in active {
-                output[index] = remaining * weights[index] / weight_sum;
+            let last_active_position = active.len().saturating_sub(1);
+            let mut assigned = 0.0_f32;
+            for (position, index) in active.iter().copied().enumerate() {
+                let size = if position == last_active_position {
+                    remaining - assigned
+                } else {
+                    let size = remaining * weights[index] / weight_sum;
+                    assigned += size;
+                    size
+                };
+                output[index] = size;
             }
             break;
         }

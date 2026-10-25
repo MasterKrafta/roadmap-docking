@@ -106,6 +106,9 @@ impl DockMetrics {
         if self.collapsed_group_height > self.min_group_height {
             return Err("collapsed_group_height must not exceed min_group_height");
         }
+        if self.header_height + self.tab_strip_height > self.min_group_height {
+            return Err("header_height + tab_strip_height must not exceed min_group_height");
+        }
         if self.max_columns == 0 {
             return Err("max_columns must be positive");
         }
@@ -246,5 +249,14 @@ mod tests {
             ..DockMetrics::default()
         };
         assert!(metrics.validate().is_err());
+
+        let metrics = DockMetrics {
+            min_group_height: 40.0,
+            ..DockMetrics::default()
+        };
+        assert_eq!(
+            metrics.validate(),
+            Err("header_height + tab_strip_height must not exceed min_group_height")
+        );
     }
 }

@@ -585,6 +585,10 @@ impl Layout {
                 let base = self.minimum_node_size(node_id, metrics)?;
                 Size::new(base.width, base.height + metrics.header_height)
             }
+            Some(Node::Split(split)) if split.axis == Axis::Y && self.floating_branch_starts_collapsed(node_id) => {
+                let base = self.minimum_node_size(node_id, metrics)?;
+                Size::new(base.width, base.height + metrics.header_height)
+            }
             Some(Node::Split(split)) if split.axis == Axis::X => {
                 let mut width = 0.0_f32;
                 let mut height = 0.0_f32;

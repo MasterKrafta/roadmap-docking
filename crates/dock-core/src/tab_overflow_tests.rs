@@ -21,6 +21,14 @@ fn two_or_more_tabs_layout(
     width: f32,
     tab_count: usize,
 ) -> (crate::Layout, crate::NodeId, Vec<PanelId>) {
+    two_or_more_tabs_layout_with_active(width, tab_count, 0)
+}
+
+fn two_or_more_tabs_layout_with_active(
+    width: f32,
+    tab_count: usize,
+    active_index: usize,
+) -> (crate::Layout, crate::NodeId, Vec<PanelId>) {
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
     let mut panel_ids = Vec::with_capacity(tab_count);
     let mut panel_nodes = Vec::with_capacity(tab_count);
@@ -32,7 +40,7 @@ fn two_or_more_tabs_layout(
         panel_nodes.push(node);
     }
 
-    let group = builder.tabs(panel_nodes, 0, false);
+    let group = builder.tabs(panel_nodes, active_index, false);
     let column = builder.column(width, ColumnMode::Expanded, vec![group], vec![1.0]);
     builder.main_area(DockSide::Left, column);
     (builder.build(), group, panel_ids)
@@ -80,6 +88,21 @@ fn tab_headers_compress_before_hidden_tabs_move_to_overflow_menu() {
         )
         .unwrap();
     assert_eq!(hit, HitResult::TabOverflowButton { group });
+}
+
+#[test]
+fn active_tab_is_not_hidden_when_its_index_exceeds_visible_overflow_window() {
+    let metrics = DockMetrics::default();
+    let (layout, group, panels) = two_or_more_tabs_layout_with_active(200.0, 4, 3);
+    let rects = layout.compute_rects(viewport(), &metrics).unwrap();
+
+    assert_eq!(rects.tab_headers.len(), 2);
+    assert_eq!(rects.tab_headers[0].panel, panels[2]);
+    assert_eq!(rects.tab_headers[0].index, 2);
+    assert_eq!(rects.tab_headers[1].panel, panels[3]);
+    assert_eq!(rects.tab_headers[1].index, 3);
+    assert_eq!(rects.tab_headers.iter().all(|header| header.group == group), true);
+    assert_eq!(rects.tab_overflows[0].hidden_tabs, vec![panels[0], panels[1]]);
 }
 
 #[test]
