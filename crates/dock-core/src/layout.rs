@@ -1206,6 +1206,7 @@ impl Layout {
 mod column_display_order;
 mod command_target_policy;
 mod command_floating;
+mod command_floating_dispatch;
 mod command_changes;
 mod command_group_insertion;
 mod command_target_insertion;
