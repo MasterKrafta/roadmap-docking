@@ -1001,6 +1001,55 @@ mod tests {
     }
 
     #[test]
+    fn splitter_resize_rejects_boundary_without_adjacent_children() {
+        let controller = DockController::new_initial(&Theme::default()).unwrap();
+        let layout = controller.layout().clone();
+        let frame = controller
+            .frame(Rect::new(Point::ZERO, Size::new(1200.0, 800.0)))
+            .unwrap();
+
+        for axis in [Axis::X, Axis::Y] {
+            let splitter = *frame
+                .rects()
+                .splitters
+                .iter()
+                .find(|entry| entry.axis == axis)
+                .expect("initial layout should contain a splitter on each axis");
+            let child_count = match (axis, layout.node(splitter.owner)) {
+                (Axis::X, Some(Node::Split(split))) => split.children.len(),
+                (Axis::Y, Some(Node::Column(column))) => column.groups.len(),
+                _ => panic!("splitter owner should match its axis"),
+            };
+            let invalid_boundary = child_count.saturating_sub(1);
+            let mut rects = frame.rects().clone();
+            let geometry = rects
+                .splitters
+                .iter_mut()
+                .find(|entry| {
+                    entry.owner == splitter.owner
+                        && entry.boundary_index == splitter.boundary_index
+                        && entry.axis == axis
+                })
+                .expect("matching splitter geometry should exist");
+            geometry.boundary_index = invalid_boundary;
+
+            assert_eq!(
+                capture_start_geometry(
+                    &layout,
+                    &rects,
+                    controller.metrics(),
+                    ResizeHandle::Splitter {
+                        owner: splitter.owner,
+                        boundary_index: invalid_boundary,
+                        axis,
+                    },
+                ),
+                Err(ResizeStartError::InvalidHandle)
+            );
+        }
+    }
+
+    #[test]
     fn floating_resize_requires_group_in_current_layout() {
         let controller = DockController::new_initial(&Theme::default()).unwrap();
         let mut stale_layout = controller.layout().clone();
