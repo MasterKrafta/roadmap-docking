@@ -722,6 +722,33 @@ mod tests {
     }
 
     #[test]
+    fn single_axis_floating_edges_reject_zero_sized_bounds() {
+        let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
+        let group = dock_core::FloatingGroupId::null();
+        let start_bounds = Rect::new(Point::new(10.0, 20.0), Size::new(300.0, 200.0));
+        let cases = [
+            (ResizeEdge::Left, Point::new(400.0, 100.0)),
+            (ResizeEdge::Top, Point::new(100.0, 300.0)),
+            (ResizeEdge::Right, Point::new(-200.0, 100.0)),
+            (ResizeEdge::Bottom, Point::new(100.0, -100.0)),
+        ];
+
+        for (edge, pointer) in cases {
+            let session = session(
+                &layout,
+                ResizeHandle::FloatingEdge { group, edge },
+                StartGeometry::FloatingEdge {
+                    bounds: start_bounds,
+                },
+            );
+            assert!(matches!(
+                session.command_for_pointer(pointer),
+                Err(ResizeUpdateError::InvalidBounds)
+            ), "zero-sized bounds must be rejected for {edge:?}");
+        }
+    }
+
+    #[test]
     fn single_axis_floating_edges_resize_expected_sides() {
         let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
         let group = dock_core::FloatingGroupId::null();
