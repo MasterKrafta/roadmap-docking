@@ -59,7 +59,11 @@ fn hidden_chrome_gives_canvas_the_full_viewport_without_deleting_dock_nodes() {
             .unwrap();
 
         assert_eq!(layout.chrome(), mode);
-        assert!(outcome.changed_nodes.is_empty());
+        let expected_roots = [DockSide::Left, DockSide::Right]
+            .into_iter()
+            .filter_map(|side| layout.main_area(side).map(|area| area.root))
+            .collect::<Vec<_>>();
+        assert_eq!(outcome.changed_nodes, expected_roots);
         assert_eq!(
             outcome.inverse,
             Some(DockCommand::SetChrome {
