@@ -779,3 +779,152 @@ fn workspace_load_reports_conflicting_expanded_content_minimum_and_maximum() {
         ), "incompatible min/max constraints must fail for {profile:?}");
     }
 }
+
+#[test]
+fn workspace_load_clears_stale_canvas_bounds_when_metrics_require_more_width() {
+    let metrics = DockMetrics::default();
+    let (layout, descriptors) = sample_layout();
+    let mut file = WorkspaceFile::from_layout(&layout).unwrap();
+    file.layout.canvas = CanvasState::new(Some(Rect::new(
+        Point::new(12.0, 0.0),
+        Size::new(metrics.min_canvas_width - 40.0, 600.0),
+    )));
+
+    let report = WorkspaceFile::load_json(
+        &file.to_json_pretty().unwrap(),
+        &descriptors,
+        &metrics,
+        WorkspaceLoadOptions::default(),
+    )
+    .expect("a stale canvas measurement should not reject the workspace");
+
+    assert_eq!(report.layout.canvas().last_known_bounds(), None);
+    assert!(report.layout.validate(&metrics).is_ok());
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        matches!(diagnostic, WorkspaceDiagnostic::LayoutNormalized { issues }
+            if issues.iter().any(|issue| issue.contains("canvas last_known_bounds cleared")))
+    }));
+}
+
+#[test]
+fn workspace_load_keeps_first_singleton_panel_and_removes_duplicate_with_diagnostic() {
+    let metrics = DockMetrics::default();
+    let (layout, mut descriptors) = sample_layout();
+    for (panel_key, constraints) in &mut descriptors {
+        if panel_key.as_str() == "layers" {
+            constraints.singleton = true;
+        }
+    }
+
+    let mut file = WorkspaceFile::from_layout(&layout).unwrap();
+    let Some(WorkspaceNode::Column { groups, .. }) = file.layout.right.as_mut() else {
+        panic!("right main area must serialize as a column");
+    };
+    let Some(WorkspaceNode::Tabs { children, .. }) = groups.first_mut() else {
+        panic!("column group must serialize as tabs");
+    };
+    let duplicate = children.first().expect("first tab exists").clone();
+    children.push(duplicate);
+
+    let report = WorkspaceFile::load_json(
+        &file.to_json_pretty().unwrap(),
+        &descriptors,
+        &metrics,
+        WorkspaceLoadOptions::default(),
+    )
+    .expect("a duplicate singleton should be repaired without losing the first panel");
+
+    assert_eq!(
+        report
+            .layout
+            .panel_instances()
+            .filter(|(_, instance)| instance.key.as_str() == "layers")
+            .count(),
+        1
+    );
+    let right = report.layout.main_area(DockSide::Right).unwrap().root;
+    let Some(crate::Node::Column(column)) = report.layout.node(right) else {
+        panic!("right main root must remain a column");
+    };
+    let Some(crate::Node::Tabs(tabs)) = report.layout.node(column.groups[0]) else {
+        panic!("first column group must remain tabs");
+    };
+    assert_eq!(tabs.children.len(), 2);
+    assert!(report.layout.validate(&metrics).is_ok());
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        matches!(diagnostic, WorkspaceDiagnostic::LayoutNormalized { issues }
+            if issues.iter().any(|issue| issue.contains("duplicate instance") && issue.contains("kept")))
+    }));
+}
+
+#[test]
+fn workspace_load_merges_excess_main_columns_without_losing_panels() {
+    let (layout, descriptors) = sample_layout();
+    let mut file = WorkspaceFile::from_layout(&layout).unwrap();
+    let first_column = file.layout.right.take().unwrap();
+    file.layout.right = Some(WorkspaceNode::Split {
+        axis: Axis::X,
+        children: vec![first_column.clone(), first_column.clone(), first_column],
+        ratios: vec![1.0 / 3.0; 3],
+    });
+    let metrics = DockMetrics {
+        max_columns: 2,
+        ..DockMetrics::default()
+    };
+
+    let report = WorkspaceFile::load_json(
+        &file.to_json_pretty().unwrap(),
+        &descriptors,
+        &metrics,
+        WorkspaceLoadOptions::default(),
+    )
+    .expect("a workspace with more columns than the current limit should be repaired");
+
+    let right = report.layout.main_area(DockSide::Right).unwrap().root;
+    let Some(crate::Node::Split(split)) = report.layout.node(right) else {
+        panic!("two retained main columns should remain in a horizontal split");
+    };
+    assert_eq!(split.children.len(), 2);
+    assert_eq!(report.layout.panel_instances().count(), 7);
+    assert!(report.layout.validate(&metrics).is_ok());
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        matches!(diagnostic, WorkspaceDiagnostic::LayoutNormalized { issues }
+            if issues.iter().any(|issue| issue.contains("merged into column") && issue.contains("max_columns")))
+    }));
+}
+
+#[test]
+fn workspace_load_renumbers_duplicate_floating_z_orders_and_preserves_paint_order() {
+    let metrics = DockMetrics::default();
+    let (layout, descriptors) = sample_layout();
+    let mut file = WorkspaceFile::from_layout(&layout).unwrap();
+    let duplicate = file
+        .layout
+        .floating_groups
+        .first()
+        .expect("sample has one floating group")
+        .clone();
+    file.layout.floating_groups.push(duplicate);
+
+    let report = WorkspaceFile::load_json(
+        &file.to_json_pretty().unwrap(),
+        &descriptors,
+        &metrics,
+        WorkspaceLoadOptions::default(),
+    )
+    .expect("duplicate floating z-order values should be repaired");
+
+    let z_orders: Vec<_> = report
+        .layout
+        .floating_groups_in_paint_order()
+        .iter()
+        .map(|(_, group)| group.z_order)
+        .collect();
+    assert_eq!(z_orders, vec![0, 1]);
+    assert!(report.layout.validate(&metrics).is_ok());
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        matches!(diagnostic, WorkspaceDiagnostic::LayoutNormalized { issues }
+            if issues.iter().any(|issue| issue.contains("duplicate stacking order")))
+    }));
+}
+
