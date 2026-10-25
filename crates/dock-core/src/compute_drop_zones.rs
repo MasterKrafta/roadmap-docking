@@ -530,13 +530,13 @@ impl Layout {
                     else {
                         continue;
                     };
-                    let column_top_rect = floating_edge_rect_for_column(
+                    let column_top_rect = floating_edge_rect_for_branch(
                         floating_rect.rect,
                         column_rect.rect,
                         DropZone::Top,
                         metrics,
                     )?;
-                    let column_bottom_rect = floating_edge_rect_for_column(
+                    let column_bottom_rect = floating_edge_rect_for_branch(
                         floating_rect.rect,
                         column_rect.rect,
                         DropZone::Bottom,
@@ -579,6 +579,64 @@ impl Layout {
                             },
                             DropZone::FloatingBottom,
                             column_bottom_rect,
+                        )?;
+                    }
+                }
+
+                // Generic-profile horizontal splits may contain Tabs nodes
+                // directly, without a containing Column. Preserve edge targets for
+                // those branches as well by clipping the zone to each group rect.
+                for target_group in target_groups.iter().filter(|group| {
+                    owner_column(self, &tree_index, group.group).is_none()
+                }) {
+                    let top_branch_rect = floating_edge_rect_for_branch(
+                        floating_rect.rect,
+                        target_group.rect,
+                        DropZone::Top,
+                        metrics,
+                    )?;
+                    let bottom_branch_rect = floating_edge_rect_for_branch(
+                        floating_rect.rect,
+                        target_group.rect,
+                        DropZone::Bottom,
+                        metrics,
+                    )?;
+                    if !(matches!(source, DropSource::Group { .. })
+                        && group_edge_is_noop(
+                            self,
+                            &tree_index,
+                            source,
+                            target_group.group,
+                            DropZone::Top,
+                        ))
+                    {
+                        push_zone(
+                            &mut zones,
+                            DropTarget::GroupEdge {
+                                group: target_group.group,
+                                zone: DropZone::Top,
+                            },
+                            DropZone::FloatingTop,
+                            top_branch_rect,
+                        )?;
+                    }
+                    if !(matches!(source, DropSource::Group { .. })
+                        && group_edge_is_noop(
+                            self,
+                            &tree_index,
+                            source,
+                            target_group.group,
+                            DropZone::Bottom,
+                        ))
+                    {
+                        push_zone(
+                            &mut zones,
+                            DropTarget::GroupEdge {
+                                group: target_group.group,
+                                zone: DropZone::Bottom,
+                            },
+                            DropZone::FloatingBottom,
+                            bottom_branch_rect,
                         )?;
                     }
                 }
@@ -1157,7 +1215,7 @@ fn group_center_rect(rect: Rect, metrics: &DockMetrics) -> Result<Rect, ComputeR
     Ok(result)
 }
 
-fn floating_edge_rect_for_column(
+fn floating_edge_rect_for_branch(
     floating_bounds: Rect,
     column_rect: Rect,
     edge: DropZone,
