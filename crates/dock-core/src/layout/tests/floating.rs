@@ -959,3 +959,39 @@ fn floating_geometry_commands_report_the_affected_root_for_ui_invalidation() {
     assert!(chrome.changed_nodes.contains(&floating_root));
 }
 
+#[test]
+fn floating_vertical_stack_reserves_title_row_when_first_group_collapsed() {
+    let metrics = DockMetrics::default();
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, top_panel) = builder.panel(
+        PanelKey::new("floating-title-collapsed").unwrap(),
+        descriptors()[0].1,
+    );
+    let top_group = builder.tabs(vec![top_panel], 0, true);
+
+    let (_, bottom_panel) = builder.panel(
+        PanelKey::new("floating-title-expanded").unwrap(),
+        descriptors()[0].1,
+    );
+    let bottom_group = builder.tabs(vec![bottom_panel], 0, false);
+
+    let root = builder.split(Axis::Y, vec![top_group, bottom_group], vec![0.5, 0.5]);
+    builder.floating_group(
+        root,
+        Rect::new(Point::new(20.0, 30.0), Size::new(440.0, 400.0)),
+        1,
+    );
+    let layout = builder.build();
+    assert_eq!(layout.validate(&metrics), Ok(()));
+
+    let rects = layout
+        .compute_rects(
+            Rect::new(Point::ZERO, Size::new(1200.0, 900.0)),
+            &metrics,
+        )
+        .unwrap();
+    let top_rect = rects.groups.iter().find(|entry| entry.group == top_group).unwrap();
+    assert_eq!(top_rect.rect.origin.y, 30.0 + metrics.header_height);
+    assert!(rects.groups.iter().any(|entry| entry.group == bottom_group));
+}
