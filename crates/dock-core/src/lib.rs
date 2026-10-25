@@ -132,7 +132,9 @@ pub use group_rect::GroupRect;
 pub use hit_result::HitResult;
 pub use last_dock_location::LastDockLocation;
 pub use layout::Layout;
-pub use layout_factory::create_initial_layout;
+pub use layout_factory::{
+    create_initial_layout, create_initial_layout_with_error, InitialLayoutError,
+};
 pub use layout_rects::LayoutRects;
 pub use node::Node;
 pub use node_id::NodeId;
@@ -140,7 +142,7 @@ pub use panel::Panel;
 pub use panel_constraints::PanelConstraints;
 pub use panel_id::PanelId;
 pub use panel_instance::PanelInstance;
-pub use panel_key::PanelKey;
+pub use panel_key::{PanelKey, PanelKeyError};
 pub use panel_rect::PanelRect;
 pub use panel_state::PanelState;
 pub use point::Point;
