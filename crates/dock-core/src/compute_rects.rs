@@ -1126,21 +1126,6 @@ fn clamp_floating_bounds_with_cache(
         .height
         .max(minimum.height)
         .min(client_area.size.height);
-    if width < minimum.width || height < minimum.height {
-        return Err(ComputeRectsError::InsufficientSpace {
-            axis: if width < minimum.width {
-                Axis::X
-            } else {
-                Axis::Y
-            },
-            available: if width < minimum.width { width } else { height },
-            required: if width < minimum.width {
-                minimum.width
-            } else {
-                minimum.height
-            },
-        });
-    }
     let client_right = client_area
         .checked_right()
         .map_err(ComputeRectsError::Geometry)?;
@@ -1152,8 +1137,11 @@ fn clamp_floating_bounds_with_cache(
             GeometryError::NonPositiveDimension,
         ));
     }
-    let max_x = client_right - width;
-    let max_y = client_bottom - height;
+    // Compute the remaining extent before adding it to the origin. Subtracting
+    // a large window size from a rounded far edge can otherwise round the
+    // minimum origin one representable f32 step outside the client area.
+    let max_x = client_area.origin.x + (client_area.size.width - width);
+    let max_y = client_area.origin.y + (client_area.size.height - height);
     if !max_x.is_finite()
         || !max_y.is_finite()
         || max_x < client_area.origin.x
@@ -3054,6 +3042,48 @@ mod tests {
                 GeometryError::NonPositiveDimension
             ))
         );
+    }
+
+    #[test]
+    fn floating_bounds_clamp_handles_rounding_at_large_client_origin() {
+        let metrics = DockMetrics::default();
+        let mut builder = LayoutBuilder::new(Profile::Generic);
+        let (_, panel_node) = builder.panel(
+            key("large-origin-floating-clamp"),
+            PanelConstraints::new(
+                Size::new(160.0, 100.0),
+                Size::new(180.0, 140.0),
+                Some(Size::new(800.0, 600.0)),
+                false,
+            ),
+        );
+        let root = builder.tabs(vec![panel_node], 0, false);
+        let layout = builder.build();
+
+        // At 2^24, f32 spacing above the origin is two units. The client
+        // width rounds its right edge down to +200, so deriving max_x as
+        // checked_right - width can round below the origin.
+        let origin_x = 16_777_216.0_f32;
+        let client_area = Rect::new(
+            Point::new(origin_x, 0.0),
+            Size::new(200.6, 300.0),
+        );
+        assert_eq!(client_area.validate_non_empty(), Ok(()));
+        let bounds = Rect::new(Point::new(-50.0, 20.0), Size::new(300.0, 250.0));
+
+        let clamped = super::clamp_floating_bounds(
+            &layout,
+            root,
+            bounds,
+            client_area,
+            &metrics,
+        )
+        .expect("rounding at a large origin must not be reported as arithmetic overflow");
+
+        assert_eq!(clamped.origin.x, origin_x);
+        assert_eq!(clamped.size.width, client_area.size.width);
+        assert_eq!(clamped.checked_right(), client_area.checked_right());
+        assert!(clamped.validate_non_empty().is_ok());
     }
 
     fn add_perf_tabs_group(
