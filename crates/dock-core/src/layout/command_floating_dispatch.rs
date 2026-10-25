@@ -12,7 +12,7 @@ impl Layout {
                 self.apply_float_group_as_column_command(*group, *bounds, metrics)
             }
             DockCommand::FloatPanelAsGroup { panel, bounds } => {
-                self.float_panel_as_group(*panel, *bounds, metrics)
+                self.apply_float_panel_as_group_command(*panel, *bounds, metrics)
             }
             DockCommand::MoveFloating { .. }
             | DockCommand::ResizeFloating { .. }
