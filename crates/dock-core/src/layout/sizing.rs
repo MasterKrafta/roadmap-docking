@@ -760,10 +760,16 @@ impl Layout {
             }
         };
 
-        if !size.is_finite() || size.width < 0.0 || size.height <= 0.0 {
+        if !size.is_finite() {
             return Err(CommandError::InvalidValue {
                 field: "size",
-                reason: "computed minimum size is non-finite or has invalid dimensions",
+                reason: "computed minimum size overflowed",
+            });
+        }
+        if size.width < 0.0 || size.height <= 0.0 {
+            return Err(CommandError::InvalidValue {
+                field: "size",
+                reason: "computed minimum size has invalid dimensions",
             });
         }
         cache.insert(node_id, size);
