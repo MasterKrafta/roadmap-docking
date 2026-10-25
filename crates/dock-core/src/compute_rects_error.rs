@@ -7,7 +7,7 @@ pub enum ComputeRectsError {
     InvalidMetrics { reason: &'static str },
     /// Full diagnostics from model validation before any rectangles were emitted.
     LayoutValidation { errors: Vec<ValidationError> },
-    /// The model became unusable during geometry calculation despite the preflight.
+    /// The model's internal structure is invalid where geometry cannot proceed.
     InvalidLayout,
     /// The supplied viewport or an intermediate rectangle was invalid.
     Geometry(GeometryError),
@@ -41,7 +41,7 @@ impl std::fmt::Display for ComputeRectsError {
                         .join("; ")
                 )
             }
-            Self::InvalidLayout => formatter.write_str("layout became invalid during geometry calculation"),
+            Self::InvalidLayout => formatter.write_str("layout structure is invalid"),
             Self::Geometry(error) => write!(formatter, "invalid geometry: {error}"),
             Self::InsufficientCanvasWidth { available, minimum } => write!(
                 formatter,
