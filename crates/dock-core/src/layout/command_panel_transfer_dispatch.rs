@@ -1,6 +1,32 @@
 use super::*;
 
 impl Layout {
+    fn move_panel_to_drop_target(
+        &mut self,
+        panel_node: NodeId,
+        target: DropTarget,
+        metrics: &DockMetrics,
+    ) -> Result<(), CommandError> {
+        self.remember_panel_dock_location(panel_node);
+        self.detach_node(panel_node)?;
+        self.insert_node_for_target(panel_node, target, metrics, Some(0.5))?;
+
+        // In the Photoshop profile a center/tab drop is an explicit reveal action.
+        // Same-group reorder/no-op paths return before reaching this helper.
+        if self.profile == crate::Profile::Photoshop
+            && let DropTarget::Tabs {
+                group: target_group,
+                ..
+            } = target
+            && let Some(Node::Tabs(tabs)) = self.nodes.get_mut(target_group)
+        {
+            tabs.collapsed = false;
+        }
+
+        self.remember_panel_dock_location(panel_node);
+        Ok(())
+    }
+
     fn move_panel_to_rail_slot(
         &mut self,
         panel: crate::PanelId,
@@ -190,25 +216,7 @@ impl Layout {
                         inverse,
                     );
                 }
-                self.remember_panel_dock_location(panel_node);
-                self.detach_node(panel_node)?;
-                self.insert_node_for_target(panel_node, *target, metrics, Some(0.5))?;
-
-                // In the Photoshop profile a center/tab drop is an explicit
-                // reveal action: the target becomes expanded after a successful
-                // insertion. Same-group reorder/no-op paths returned above, so
-                // a self-drop cannot implicitly change collapse state.
-                if self.profile == crate::Profile::Photoshop
-                    && let DropTarget::Tabs {
-                        group: target_group,
-                        ..
-                    } = *target
-                    && let Some(Node::Tabs(tabs)) = self.nodes.get_mut(target_group)
-                {
-                    tabs.collapsed = false;
-                }
-
-                self.remember_panel_dock_location(panel_node);
+                self.move_panel_to_drop_target(panel_node, *target, metrics)?;
                 Ok(CommandApplication {
                     actual_value: None,
                     inverse,
