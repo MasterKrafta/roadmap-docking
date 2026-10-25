@@ -382,6 +382,51 @@ fn c44_split_group_moves_whole_tabs_into_an_existing_floating_stack() {
 }
 
 #[test]
+fn c44_split_group_on_adjacent_column_slot_is_a_noop() {
+    let metrics = DockMetrics::default();
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, top_panel) = builder.panel(
+        PanelKey::new("c44-column-noop-top").unwrap(),
+        descriptors()[0].1,
+    );
+    let top_group = builder.tabs(vec![top_panel], 0, false);
+    let (_, bottom_panel) = builder.panel(
+        PanelKey::new("c44-column-noop-bottom").unwrap(),
+        descriptors()[0].1,
+    );
+    let bottom_group = builder.tabs(vec![bottom_panel], 0, false);
+    let column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![top_group, bottom_group],
+        vec![0.4, 0.6],
+    );
+    builder.main_area(DockSide::Right, column);
+    let mut layout = builder.build();
+    assert_eq!(layout.validate(&metrics), Ok(()));
+    let before = format!("{layout:?}");
+
+    let outcome = layout
+        .apply(
+            DockCommand::SplitGroup {
+                group: top_group,
+                target_group: bottom_group,
+                zone: DropZone::Top,
+                ratio: 0.5,
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    assert_eq!(outcome.new_version, 0);
+    assert!(outcome.changed_nodes.is_empty());
+    assert!(outcome.inverse.is_none());
+    assert_eq!(format!("{layout:?}"), before);
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
 fn c44_drop_on_adjacent_floating_stack_slot_is_a_noop() {
     let metrics = DockMetrics::default();
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
