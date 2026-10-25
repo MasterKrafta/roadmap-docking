@@ -675,6 +675,45 @@ mod tests {
     }
 
     #[test]
+    fn corner_floating_edge_rejects_overflowing_used_axis_delta() {
+        let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
+        let group = dock_core::FloatingGroupId::null();
+        let start_bounds = Rect::new(Point::new(10.0, 20.0), Size::new(300.0, 200.0));
+
+        let mut overflowing_x = session(
+            &layout,
+            ResizeHandle::FloatingEdge {
+                group,
+                edge: ResizeEdge::TopLeft,
+            },
+            StartGeometry::FloatingEdge {
+                bounds: start_bounds,
+            },
+        );
+        overflowing_x.pointer_start = Point::new(f32::MAX, 100.0);
+        assert!(matches!(
+            overflowing_x.command_for_pointer(Point::new(-f32::MAX, 110.0)),
+            Err(ResizeUpdateError::InvalidDelta)
+        ));
+
+        let mut overflowing_y = session(
+            &layout,
+            ResizeHandle::FloatingEdge {
+                group,
+                edge: ResizeEdge::TopLeft,
+            },
+            StartGeometry::FloatingEdge {
+                bounds: start_bounds,
+            },
+        );
+        overflowing_y.pointer_start = Point::new(100.0, f32::MAX);
+        assert!(matches!(
+            overflowing_y.command_for_pointer(Point::new(110.0, -f32::MAX)),
+            Err(ResizeUpdateError::InvalidDelta)
+        ));
+    }
+
+    #[test]
     fn command_for_pointer_rejects_non_finite_coordinates() {
         let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
         let owner = layout
