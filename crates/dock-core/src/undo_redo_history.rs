@@ -118,7 +118,7 @@ impl UndoRedoHistory {
         let redo_checkpoint = layout.history_snapshot();
 
         if let Err(error) = layout.restore_history_snapshot(&checkpoint, metrics) {
-            self.undo.push(checkpoint);
+            self.undo.push_back(checkpoint);
             return Err(error);
         }
 
@@ -141,7 +141,7 @@ impl UndoRedoHistory {
         let undo_checkpoint = layout.history_snapshot();
 
         if let Err(error) = layout.restore_history_snapshot(&checkpoint, metrics) {
-            self.redo.push(checkpoint);
+            self.redo.push_back(checkpoint);
             return Err(error);
         }
 

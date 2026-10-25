@@ -136,7 +136,6 @@ impl<'de> serde::Deserialize<'de> for DockMetrics {
             }
         }
 
-        use serde::Deserialize as _;
         let wire = Wire::deserialize(deserializer)?;
         let metrics = Self {
             default_column_width: wire.default_column_width,

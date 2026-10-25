@@ -245,7 +245,7 @@ impl WorkspaceFile {
         if visible_region.is_some() {
             let mut ordered_floating = self.layout.floating_groups.iter().enumerate().collect::<Vec<_>>();
             ordered_floating.sort_by_key(|(_, group)| group.z_order);
-            for (index, (_, group)) in ordered_floating.into_iter() {
+            for (index, group) in ordered_floating.into_iter() {
                 group
                     .bounds
                     .validate_non_empty()
