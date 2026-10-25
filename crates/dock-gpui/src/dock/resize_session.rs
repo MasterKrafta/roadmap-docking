@@ -673,6 +673,44 @@ mod tests {
     }
 
     #[test]
+    fn floating_resize_rejects_finite_delta_when_resulting_bounds_overflow() {
+        let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
+        let group = dock_core::FloatingGroupId::null();
+
+        let mut right = session(
+            &layout,
+            ResizeHandle::FloatingEdge {
+                group,
+                edge: ResizeEdge::Right,
+            },
+            StartGeometry::FloatingEdge {
+                bounds: Rect::new(Point::ZERO, Size::new(f32::MAX, 200.0)),
+            },
+        );
+        right.pointer_start = Point::ZERO;
+        assert!(matches!(
+            right.command_for_pointer(Point::new(f32::MAX, 0.0)),
+            Err(ResizeUpdateError::InvalidBounds)
+        ));
+
+        let mut bottom = session(
+            &layout,
+            ResizeHandle::FloatingEdge {
+                group,
+                edge: ResizeEdge::Bottom,
+            },
+            StartGeometry::FloatingEdge {
+                bounds: Rect::new(Point::ZERO, Size::new(300.0, f32::MAX)),
+            },
+        );
+        bottom.pointer_start = Point::ZERO;
+        assert!(matches!(
+            bottom.command_for_pointer(Point::new(0.0, f32::MAX)),
+            Err(ResizeUpdateError::InvalidBounds)
+        ));
+    }
+
+    #[test]
     fn single_axis_floating_edge_ignores_unused_delta_overflow() {
         let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
         let group = dock_core::FloatingGroupId::null();
