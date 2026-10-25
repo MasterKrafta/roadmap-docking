@@ -300,6 +300,10 @@ fn capture_start_geometry(
             };
             if split.axis != Axis::X
                 || boundary_index >= split.children.len().saturating_sub(1)
+                || split
+                    .children
+                    .iter()
+                    .any(|child| !matches!(layout.node(*child), Some(Node::Column(_))))
             {
                 return Err(ResizeStartError::InvalidHandle);
             }
