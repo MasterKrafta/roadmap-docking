@@ -104,6 +104,8 @@ ResizeFlyout меняет panel_instances без роста версии. Это
 
 - **Подтверждённый пакет:** обработчик `DockCommand::DockFloating` вынесен из `command_floating_dispatch.rs` в `command_floating_dock_dispatch.rs` (`apply_dock_floating_command`). Диспетчер делегирует команду отдельному обработчику. Сохранены проверка существования плавающей группы и её root, валидация drop-target, проверка ограничений панелей для целевой области, собственно dock-перенос и обновление remembered dock locations после успешного переноса. Пользователь подтвердил успешные локальные тесты. Публичный API не менялся. Коммит: [выделение обработчика DockFloating](https://github.com/MasterKrafta/roadmap-docking/commit/70b8007d4ec312b3d527d30e6dcbbae38a51df21).
 
+- **Текущий пакет, ожидает локальной проверки:** обработка `DockCommand::Float` выделена из `command_floating_dispatch.rs` в `command_floating_root_dispatch.rs` (`apply_float_command`). Диспетчер теперь только маршрутизирует создание плавающего корня, создание отдельной floating-колонки/группы, изменения уже плавающего окна и `DockFloating`. В выделенном обработчике сохранены проверка существования исходного узла, валидация bounds, ограничения панелей для floating-области, ограничение типов корня для профиля Photoshop, сохранение dock locations, detach, оборачивание одиночной панели в `Tabs` и создание floating group с очередным Z-order. Публичный API не менялся; локальные тесты этого шага ещё не подтверждены. Коммит: [выделение обработчика Float](https://github.com/MasterKrafta/roadmap-docking/commit/7af60f62463f22d9a19deba480f7f9e859eda972).
+
 Оставшиеся ограничения
 ======================
 
