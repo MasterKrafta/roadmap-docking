@@ -1,6 +1,6 @@
 use dock_core::{DockCommand, Point, Rect, Size};
 use gpui::{
-    Context, DispatchPhase, IntoElement, MouseButton, MouseMoveEvent, MouseUpEvent,
+    Context, DispatchPhase, IntoElement, KeyDownEvent, MouseButton, MouseMoveEvent, MouseUpEvent,
     ParentElement, Render, Styled, Subscription, Window, div, px, rgb,
 };
 use ui::Theme;
@@ -62,14 +62,17 @@ impl MainWindow {
             return;
         }
 
-        // Only movement while the left button is held updates the preview.
-        // The corresponding MouseUp handler is the single commit signal; a move
-        // without a pressed button must not finish the gesture prematurely.
+        let pointer = dock_pointer(event.position);
         if event.pressed_button != Some(MouseButton::Left) {
+            // A move without the left button means the release event was lost.
+            // Finish the gesture here so the resize session cannot remain stuck.
+            if let Err(error) = self.dock.commit_resize(pointer) {
+                tracing::debug!(error = ?error, "dock resize commit after lost mouse-up was rejected");
+            }
+            cx.notify();
             return;
         }
 
-        let pointer = dock_pointer(event.position);
         if let Err(error) = self.dock.update_resize(pointer) {
             tracing::debug!(error = ?error, "dock resize preview was rejected");
         }
@@ -138,6 +141,23 @@ impl Render for MainWindow {
         let height = window_size.height.as_f32().max(1.0);
         let menu_height = self.theme.metrics.column_header_height.max(1.0);
         let content_height = (height - menu_height).max(1.0);
+
+        // Escape cancels an active resize and restores its pointer-down snapshot.
+        let escape_key = cx.listener::<KeyDownEvent>(|this, event, _window, cx| {
+            if event.keystroke.key.eq_ignore_ascii_case("escape") && this.dock.cancel_resize() {
+                cx.stop_propagation();
+                cx.notify();
+            }
+        });
+        window.on_key_event(
+            move |event: &KeyDownEvent, phase, window, cx| {
+                if phase == DispatchPhase::Capture
+                    && event.keystroke.key.eq_ignore_ascii_case("escape")
+                {
+                    escape_key(event, window, cx);
+                }
+            },
+        );
 
         // Element mouse-move handlers stop receiving events once the pointer leaves
         // the surface hitbox. Keep tracking the same resize gesture at window scope
