@@ -708,7 +708,7 @@ mod tests {
     }
 
     #[test]
-    fn invalid_positions_threshold_and_transitions_are_rejected_without_mutation() {
+    fn invalid_positions_threshold_and_transitions_are_rejected_with_valid_state_transitions() {
         let metrics = DockMetrics {
             drag_threshold: f32::NAN,
             ..DockMetrics::default()
@@ -731,24 +731,22 @@ mod tests {
 
         let payload = panel_payload();
         session.pointer_down(payload, Point::ZERO).unwrap();
-        let before = session.state();
 
+        // An invalid pointer position terminates the active gesture so the
+        // adapter cannot accidentally keep or commit a stale drag preview.
         assert_eq!(
             session.pointer_move(Point::new(f32::INFINITY, 0.0)),
             Err(DragSessionError::InvalidPointerPosition)
         );
-        assert_eq!(session.state(), before);
-        assert_eq!(
-            session.reset(),
-            Err(DragSessionError::CannotResetActiveGesture)
-        );
-        assert_eq!(session.state(), before);
-        assert_eq!(
-            session.pointer_down(payload, Point::ZERO),
-            Err(DragSessionError::SessionNotIdle)
-        );
-
-        session.cancel().unwrap();
+        assert!(matches!(
+            session.state(),
+            DragState::Cancelled {
+                payload: cancelled,
+                origin: Point::ZERO,
+                position: Point::ZERO,
+                reason: DragCancelReason::InvalidPointerPosition,
+            } if cancelled == payload
+        ));
         assert_eq!(
             session.pointer_move(Point::ZERO),
             Err(DragSessionError::NoActiveGesture)
@@ -757,6 +755,7 @@ mod tests {
             session.pointer_down(payload, Point::ZERO),
             Err(DragSessionError::SessionNotIdle)
         );
+
         session.reset().unwrap();
         assert_eq!(session.state(), DragState::Idle);
     }
