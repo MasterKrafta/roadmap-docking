@@ -26,12 +26,12 @@ impl Layout {
                     return Ok(application);
                 }
 
-                let resolved_target = match *target {
-                    Some(target) => target,
-                    None => self.resolve_open_target(key, metrics)?,
-                };
-                self.validate_drop_target(resolved_target, metrics)?;
-                self.validate_constraints_allowed_for_target(*constraints, resolved_target)?;
+                let resolved_target = self.resolve_and_validate_open_panel_target(
+                    key,
+                    *target,
+                    *constraints,
+                    metrics,
+                )?;
                 self.insert_new_panel_for_open_target(
                     key,
                     *constraints,

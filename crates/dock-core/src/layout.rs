@@ -1212,6 +1212,7 @@ mod command_column_resize_dispatch;
 mod command_layout_state_dispatch;
 mod command_flyout_dispatch;
 mod command_panel_dispatch;
+mod command_panel_open_target;
 mod command_panel_close_dispatch;
 mod command_panel_tab_commands;
 mod command_panel_open_new;
