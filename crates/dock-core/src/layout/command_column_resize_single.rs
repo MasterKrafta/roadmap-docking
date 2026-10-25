@@ -7,7 +7,6 @@ impl Layout {
         width: &f32,
         metrics: &DockMetrics,
     ) -> Result<CommandApplication, CommandError> {
-
         if !width.is_finite() || *width <= 0.0 {
             return Err(CommandError::InvalidValue {
                 field: "width",
