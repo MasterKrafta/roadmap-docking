@@ -1214,6 +1214,7 @@ mod command_flyout_dispatch;
 mod command_panel_dispatch;
 mod command_panel_transfer_dispatch;
 mod command_group_dispatch;
+mod command_group_transfer_dispatch;
 mod command_changes;
 mod command_group_insertion;
 mod command_target_insertion;

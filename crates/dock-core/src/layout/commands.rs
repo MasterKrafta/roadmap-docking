@@ -117,9 +117,12 @@ impl Layout {
             | DockCommand::FloatPanelFromFlyout { .. }
             | DockCommand::MovePanel { .. } => self.apply_panel_transfer_command(command, metrics),
             DockCommand::MoveGroup { .. }
-            | DockCommand::MoveGroupToMainColumn { .. }
-            | DockCommand::MergeGroup { .. }
-            | DockCommand::SplitGroup { .. } => self.apply_group_command(command, metrics),
+            | DockCommand::MoveGroupToMainColumn { .. } => {
+                self.apply_group_transfer_command(command, metrics)
+            }
+            DockCommand::MergeGroup { .. } | DockCommand::SplitGroup { .. } => {
+                self.apply_group_command(command, metrics)
+            },
             DockCommand::ResizeGroups { .. }
             | DockCommand::ResetColumnRatios { .. }
             | DockCommand::RestoreGroupRatios { .. } => {
