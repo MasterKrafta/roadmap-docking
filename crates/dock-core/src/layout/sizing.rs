@@ -568,11 +568,23 @@ impl Layout {
         node_id: NodeId,
         metrics: &DockMetrics,
     ) -> Result<Size, CommandError> {
+        self.minimum_floating_size_with_cache(node_id, metrics, &mut HashMap::new())
+    }
+
+    /// Computes floating minimum size while reusing per-node minimums in one
+    /// immutable geometry operation. The caller owns the cache, so it cannot
+    /// survive a mutation or accidentally mix layouts or metrics.
+    pub(crate) fn minimum_floating_size_with_cache(
+        &self,
+        node_id: NodeId,
+        metrics: &DockMetrics,
+        cache: &mut HashMap<NodeId, Size>,
+    ) -> Result<Size, CommandError> {
         let minimum = match self.nodes.get(node_id) {
             Some(Node::Tabs(tabs)) if tabs.collapsed && !tabs.children.is_empty() => {
                 let mut minimum = Size::ZERO;
                 for child in &tabs.children {
-                    let child_size = self.minimum_node_size(*child, metrics)?;
+                    let child_size = self.minimum_node_size_with_cache(*child, metrics, cache)?;
                     minimum.width = minimum.width.max(child_size.width);
                     minimum.height = minimum.height.max(child_size.height);
                 }
@@ -582,18 +594,18 @@ impl Layout {
                 if column.groups.len() > 1
                     && self.floating_branch_starts_collapsed(node_id) =>
             {
-                let base = self.minimum_node_size(node_id, metrics)?;
+                let base = self.minimum_node_size_with_cache(node_id, metrics, cache)?;
                 Size::new(base.width, base.height + metrics.header_height)
             }
             Some(Node::Split(split)) if split.axis == Axis::Y && self.floating_branch_starts_collapsed(node_id) => {
-                let base = self.minimum_node_size(node_id, metrics)?;
+                let base = self.minimum_node_size_with_cache(node_id, metrics, cache)?;
                 Size::new(base.width, base.height + metrics.header_height)
             }
             Some(Node::Split(split)) if split.axis == Axis::X => {
                 let mut width = 0.0_f32;
                 let mut height = 0.0_f32;
                 for child in &split.children {
-                    let child_size = self.minimum_node_size(*child, metrics)?;
+                    let child_size = self.minimum_node_size_with_cache(*child, metrics, cache)?;
                     width += child_size.width;
                     let title_reserve = if self.floating_branch_starts_collapsed(*child) {
                         metrics.header_height
@@ -606,7 +618,7 @@ impl Layout {
                     * split.children.len().saturating_sub(1) as f32;
                 Size::new(width, height)
             }
-            Some(_) => self.minimum_node_size(node_id, metrics)?,
+            Some(_) => self.minimum_node_size_with_cache(node_id, metrics, cache)?,
             None => return Err(CommandError::MissingNode { node: node_id }),
         };
 
@@ -651,6 +663,21 @@ impl Layout {
         node_id: NodeId,
         metrics: &DockMetrics,
     ) -> Result<Size, CommandError> {
+        self.minimum_node_size_with_cache(node_id, metrics, &mut HashMap::new())
+    }
+
+    /// Memoized form for immutable operations such as a single geometry pass.
+    /// The caller-provided cache must be discarded whenever the layout or metrics
+    /// change. Only successfully computed sizes are cached.
+    pub(crate) fn minimum_node_size_with_cache(
+        &self,
+        node_id: NodeId,
+        metrics: &DockMetrics,
+        cache: &mut HashMap<NodeId, Size>,
+    ) -> Result<Size, CommandError> {
+        if let Some(size) = cache.get(&node_id).copied() {
+            return Ok(size);
+        }
         #[cfg(test)]
         crate::compute_rects::record_recursive_minimum_node_size(node_id);
         let node = self
@@ -673,7 +700,7 @@ impl Layout {
                 let mut width = 0.0_f32;
                 let mut content_height = 0.0_f32;
                 for child in &tabs.children {
-                    let child_size = self.minimum_node_size(*child, metrics)?;
+                    let child_size = self.minimum_node_size_with_cache(*child, metrics, cache)?;
                     width = width.max(child_size.width);
                     content_height = content_height.max(child_size.height);
                 }
@@ -688,7 +715,7 @@ impl Layout {
                 let mut width = 0.0_f32;
                 let mut height = 0.0_f32;
                 for child in &split.children {
-                    let child_size = self.minimum_node_size(*child, metrics)?;
+                    let child_size = self.minimum_node_size_with_cache(*child, metrics, cache)?;
                     match split.axis {
                         Axis::X => {
                             width += child_size.width;
@@ -723,7 +750,7 @@ impl Layout {
             Node::Column(column) => {
                 let mut height = 0.0_f32;
                 for group in &column.groups {
-                    height += self.minimum_node_size(*group, metrics)?.height;
+                    height += self.minimum_node_size_with_cache(*group, metrics, cache)?.height;
                 }
                 height += metrics.splitter_thickness
                     * column.groups.len().saturating_sub(1) as f32;
@@ -737,6 +764,7 @@ impl Layout {
                 reason: "computed minimum size is non-finite or has invalid dimensions",
             });
         }
+        cache.insert(node_id, size);
         Ok(size)
     }
 
