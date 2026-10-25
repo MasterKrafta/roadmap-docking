@@ -61,7 +61,7 @@ DockMetrics: validate через двойной match по строковым и
 Архитектура
 commands.rs на 3370 строк стоит разбить по доменам: панели, колонки, floating, flyout.
 Ветвление if profile == … разбросано по командам, его можно вынести в стратегию.
-Логика вставки ratios продублирована в трёх местах (insert_group_at_column, insert_existing_column_at, floating insert_group_edge), как и no-op проверка соседних групп (SplitGroup и adjacent_group_edge_is_noop).
+Логика вставки ratios по-прежнему частично дублируется в insert_group_at_column и floating insert_group_edge; сведение этих путей в общий helper оставлено финальному архитектурному проходу. Повторная проверка no-op для соседних групп в SplitGroup уже переведена на общий adjacent_group_edge_is_noop; добавлен тест c44_split_group_on_adjacent_column_slot_is_a_noop.
 ResizeFlyout меняет panel_instances без роста версии. Это нарушает принцип «version = persistent state», рантайм-состояние лучше вынести из PanelInstance.
 Что сделано хорошо
 Предсказуемый DTO-слой для workspace: арены создаются заново, дубликатов ID и висячих ссылок быть не может.
@@ -95,7 +95,7 @@ ResizeFlyout меняет panel_instances без роста версии. Это
 - MovePanel на GroupEdge собственной группы и DockFloating на собственную группу/descendant теперь no-op.
 - OpenPanel разворачивает целевую свернутую Photoshop-группу; размещение по умолчанию ищет Tabs справа, затем слева, и только потом создает новую правую колонку.
 - changed_nodes включает корни, нужные для инвалидирования при перемещении/размере/z-order floating-окон и изменении chrome.
-- Вставка группы без явного split ratio сохраняет относительные пропорции существующих групп; добавлены регрессионные тесты для слияния floating stack в Column.
+- Вставка группы без явного split ratio сохраняет относительные пропорции существующих групп; добавлены регрессионные тесты для слияния floating stack в Column. Проверка соседних групп на no-op теперь использует единый `adjacent_group_edge_is_noop` и в команде `SplitGroup`; добавлен тест для соседних групп в Column.
 - Rect::contains не выполняет повторную проверку тех же геометрических данных.
 - GeometryError реализует Display/Error, а ComputeRectsError форматирует вложенную геометрическую причину через Display (не {:?}); добавлен тест `display_uses_geometry_error_message_instead_of_debug_format`. Пустая колонка теперь даёт InvalidLayout вместо ложного ArithmeticOverflow, а реальное переполнение минимального размера сохраняет ArithmeticOverflow; добавлены регрессионные тесты на оба случая. Пустой или некорректный floating subtree больше не маскируется под ArithmeticOverflow.
 - Для сохранения source compatibility старые `PanelKey::new` и `create_initial_layout` оставлены со статическими строковыми ошибками; добавлены типизированные альтернативы `PanelKey::try_new`/`PanelKeyError` и `create_initial_layout_with_error`/`InitialLayoutError` на `thiserror`, с регрессионными тестами на категории ошибок.
