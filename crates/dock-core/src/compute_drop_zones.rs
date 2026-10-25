@@ -448,88 +448,190 @@ impl Layout {
             if target_groups.is_empty() {
                 continue;
             }
-            let center_y = floating_rect.rect.origin.y + floating_rect.rect.size.height / 2.0;
-            let center_group = target_groups
-                .iter()
-                .min_by(|left, right| {
-                    let left_y = left.rect.origin.y + left.rect.size.height / 2.0;
-                    let right_y = right.rect.origin.y + right.rect.size.height / 2.0;
-                    (left_y - center_y)
-                        .abs()
-                        .partial_cmp(&(right_y - center_y).abs())
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                })
-                .copied();
-            if let Some(center_group) = center_group {
+            // A floating composition can contain multiple target groups at the same
+            // vertical position (for example, two columns in a Split(X)). Build
+            // center zones per group so point resolution picks the group actually
+            // under the pointer instead of arbitrarily choosing the first branch.
+            for target_group in &target_groups {
+                let tabs = match self.node(target_group.group) {
+                    Some(Node::Tabs(tabs)) if !tabs.collapsed => tabs,
+                    _ => continue,
+                };
                 let is_self = matches!(source, DropSource::Group { .. })
-                    && contains_node(&tree_index, source_root, center_group.group);
+                    && contains_node(&tree_index, source_root, target_group.group);
                 let panel_already_in_group = match source {
                     DropSource::Panel { panel } => {
-                        panel_node(&tree_index, panel).and_then(|node_id| direct_parent(&tree_index, node_id))
-                            == Some(center_group.group)
+                        panel_node(&tree_index, panel)
+                            .and_then(|node_id| direct_parent(&tree_index, node_id))
+                            == Some(target_group.group)
                     }
                     DropSource::Group { .. } => false,
                 };
-                if !is_self && !panel_already_in_group {
-                    let tabs = match self.node(center_group.group) {
-                        Some(Node::Tabs(tabs)) => tabs,
-                        _ => continue,
-                    };
-                    let target = match source {
-                        DropSource::Panel { .. } => DropTarget::Tabs {
-                            group: center_group.group,
-                            index: tabs.children.len(),
-                        },
-                        DropSource::Group { .. } => DropTarget::GroupTabs {
-                            group: center_group.group,
-                            index: tabs.children.len(),
-                        },
-                    };
-                    let bounds = floating_rect.rect;
-                    let left = metrics.edge_drop_width.min(bounds.size.width / 3.0);
-                    let top = bounds.origin.y + metrics.header_height + metrics.tab_strip_height;
-                    let bottom = bounds.origin.y + bounds.size.height
-                        - metrics.edge_drop_width.min(bounds.size.height / 3.0);
-                    let center_rect = Rect::new(
-                        Point::new(left + bounds.origin.x, top),
-                        Size::new(
-                            (bounds.size.width - 2.0 * left).max(0.0),
-                            (bottom - top).max(0.0),
-                        ),
-                    );
-                    push_zone(&mut zones, target, DropZone::FloatingCenter, center_rect)?;
+                if is_self || panel_already_in_group {
+                    continue;
                 }
+                let target = match source {
+                    DropSource::Panel { .. } => DropTarget::Tabs {
+                        group: target_group.group,
+                        index: tabs.children.len(),
+                    },
+                    DropSource::Group { .. } => DropTarget::GroupTabs {
+                        group: target_group.group,
+                        index: tabs.children.len(),
+                    },
+                };
+                push_zone(
+                    &mut zones,
+                    target,
+                    DropZone::FloatingCenter,
+                    group_center_rect(target_group.rect, metrics)?,
+                )?;
             }
 
-            let first_group = target_groups.first().copied().unwrap();
-            let last_group = target_groups.last().copied().unwrap();
             let top_rect = floating_edge_rect(floating_rect.rect, DropZone::Top, metrics)?;
             let bottom_rect = floating_edge_rect(floating_rect.rect, DropZone::Bottom, metrics)?;
-            if !(matches!(source, DropSource::Group { .. })
-                && group_edge_is_noop(self, &tree_index, source, first_group.group, DropZone::Top))
-            {
-                push_zone(
-                    &mut zones,
-                    DropTarget::GroupEdge {
-                        group: first_group.group,
-                        zone: DropZone::Top,
-                    },
-                    DropZone::FloatingTop,
-                    top_rect,
-                )?;
-            }
-            if !(matches!(source, DropSource::Group { .. })
-                && group_edge_is_noop(self, &tree_index, source, last_group.group, DropZone::Bottom))
-            {
-                push_zone(
-                    &mut zones,
-                    DropTarget::GroupEdge {
-                        group: last_group.group,
-                        zone: DropZone::Bottom,
-                    },
-                    DropZone::FloatingBottom,
-                    bottom_rect,
-                )?;
+            let horizontal_composition =
+                matches!(self.node(area.root), Some(Node::Split(split)) if split.axis == crate::Axis::X);
+            if horizontal_composition {
+                // In a horizontal composition, the top and bottom edge zones
+                // span each column independently. Thus dropping over the right
+                // branch addresses its top/bottom group, not the left branch.
+                let mut columns = Vec::new();
+                for target_group in &target_groups {
+                    let Some(column) = owner_column(self, &tree_index, target_group.group) else {
+                        continue;
+                    };
+                    if !columns.contains(&column) {
+                        columns.push(column);
+                    }
+                }
+                for column in columns {
+                    let mut column_groups: Vec<_> = target_groups
+                        .iter()
+                        .filter(|group| {
+                            owner_column(self, &tree_index, group.group) == Some(column)
+                        })
+                        .collect();
+                    column_groups.sort_by(|left, right| {
+                        left.rect
+                            .origin
+                            .y
+                            .partial_cmp(&right.rect.origin.y)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                    let Some(first_group) = column_groups.first().copied() else {
+                        continue;
+                    };
+                    let Some(last_group) = column_groups.last().copied() else {
+                        continue;
+                    };
+                    let Some(column_rect) =
+                        rects.columns.iter().find(|entry| entry.column == column)
+                    else {
+                        continue;
+                    };
+                    let column_top_rect = floating_edge_rect_for_column(
+                        floating_rect.rect,
+                        column_rect.rect,
+                        DropZone::Top,
+                        metrics,
+                    )?;
+                    let column_bottom_rect = floating_edge_rect_for_column(
+                        floating_rect.rect,
+                        column_rect.rect,
+                        DropZone::Bottom,
+                        metrics,
+                    )?;
+
+                    if !(matches!(source, DropSource::Group { .. })
+                        && group_edge_is_noop(
+                            self,
+                            &tree_index,
+                            source,
+                            first_group.group,
+                            DropZone::Top,
+                        ))
+                    {
+                        push_zone(
+                            &mut zones,
+                            DropTarget::GroupEdge {
+                                group: first_group.group,
+                                zone: DropZone::Top,
+                            },
+                            DropZone::FloatingTop,
+                            column_top_rect,
+                        )?;
+                    }
+                    if !(matches!(source, DropSource::Group { .. })
+                        && group_edge_is_noop(
+                            self,
+                            &tree_index,
+                            source,
+                            last_group.group,
+                            DropZone::Bottom,
+                        ))
+                    {
+                        push_zone(
+                            &mut zones,
+                            DropTarget::GroupEdge {
+                                group: last_group.group,
+                                zone: DropZone::Bottom,
+                            },
+                            DropZone::FloatingBottom,
+                            column_bottom_rect,
+                        )?;
+                    }
+                }
+            } else {
+                // A vertically stacked floating root has one outer top and
+                // bottom: those zones target its first and last groups.
+                target_groups.sort_by(|left, right| {
+                    left.rect
+                        .origin
+                        .y
+                        .partial_cmp(&right.rect.origin.y)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+                let first_group = target_groups.first().copied().unwrap();
+                let last_group = target_groups.last().copied().unwrap();
+                if !(matches!(source, DropSource::Group { .. })
+                    && group_edge_is_noop(
+                        self,
+                        &tree_index,
+                        source,
+                        first_group.group,
+                        DropZone::Top,
+                    ))
+                {
+                    push_zone(
+                        &mut zones,
+                        DropTarget::GroupEdge {
+                            group: first_group.group,
+                            zone: DropZone::Top,
+                        },
+                        DropZone::FloatingTop,
+                        top_rect,
+                    )?;
+                }
+                if !(matches!(source, DropSource::Group { .. })
+                    && group_edge_is_noop(
+                        self,
+                        &tree_index,
+                        source,
+                        last_group.group,
+                        DropZone::Bottom,
+                    ))
+                {
+                    push_zone(
+                        &mut zones,
+                        DropTarget::GroupEdge {
+                            group: last_group.group,
+                            zone: DropZone::Bottom,
+                        },
+                        DropZone::FloatingBottom,
+                        bottom_rect,
+                    )?;
+                }
             }
 
             // Generic profile also supports horizontal nested splits within a floating area.
@@ -1053,6 +1155,29 @@ fn group_center_rect(rect: Rect, metrics: &DockMetrics) -> Result<Rect, ComputeR
     );
     result.validate().map_err(ComputeRectsError::Geometry)?;
     Ok(result)
+}
+
+fn floating_edge_rect_for_column(
+    floating_bounds: Rect,
+    column_rect: Rect,
+    edge: DropZone,
+    metrics: &DockMetrics,
+) -> Result<Rect, ComputeRectsError> {
+    let edge_rect = floating_edge_rect(floating_bounds, edge, metrics)?;
+    let edge_right = edge_rect
+        .checked_right()
+        .map_err(ComputeRectsError::Geometry)?;
+    let column_right = column_rect
+        .checked_right()
+        .map_err(ComputeRectsError::Geometry)?;
+    let left = edge_rect.origin.x.max(column_rect.origin.x);
+    let right = edge_right.min(column_right);
+    Rect::new(
+        Point::new(left, edge_rect.origin.y),
+        Size::new((right - left).max(0.0), edge_rect.size.height),
+    )
+    .validate()
+    .map_err(ComputeRectsError::Geometry)
 }
 
 fn floating_edge_rect(
@@ -1769,6 +1894,128 @@ mod tests {
                 zone: DropZone::Top
             })
         );
+    }
+
+    #[test]
+    fn floating_horizontal_composition_drop_zones_target_the_branch_under_pointer() {
+        let metrics = DockMetrics::default();
+        let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+        let (source_panel, source_node) = builder.panel(key("float-x-source"), constraints());
+        let source_group = builder.tabs(vec![source_node], 0, false);
+        let source_column =
+            builder.column(280.0, ColumnMode::Expanded, vec![source_group], vec![1.0]);
+        builder.main_area(DockSide::Left, source_column);
+
+        let (_, left_panel_node) = builder.panel(key("float-x-left"), constraints());
+        let left_group = builder.tabs(vec![left_panel_node], 0, false);
+        let left_column =
+            builder.column(300.0, ColumnMode::Expanded, vec![left_group], vec![1.0]);
+
+        let (_, right_panel_node) = builder.panel(key("float-x-right"), constraints());
+        let right_group = builder.tabs(vec![right_panel_node], 0, false);
+        let right_column =
+            builder.column(300.0, ColumnMode::Expanded, vec![right_group], vec![1.0]);
+
+        let root = builder.split(crate::Axis::X, vec![left_column, right_column], vec![0.5, 0.5]);
+        let bounds = Rect::new(Point::new(500.0, 120.0), Size::new(604.0, 320.0));
+        let floating_id = builder.floating_group(root, bounds, 4);
+        let layout = builder.build();
+        let rects = layout.compute_rects(viewport(), &metrics).unwrap();
+        let zones = layout
+            .compute_drop_zones(
+                DropSource::Panel { panel: source_panel },
+                &rects,
+                &metrics,
+            )
+            .unwrap();
+
+        let right_group_rect = rects
+            .groups
+            .iter()
+            .find(|entry| entry.group == right_group)
+            .unwrap()
+            .rect;
+        let right_center = Point::new(
+            right_group_rect.origin.x + right_group_rect.size.width / 2.0,
+            right_group_rect.origin.y
+                + metrics.header_height
+                + metrics.tab_strip_height
+                + 40.0,
+        );
+        assert_eq!(
+            layout
+                .resolve_drop(
+                    right_center,
+                    DropSource::Panel { panel: source_panel },
+                    &rects,
+                    &metrics,
+                )
+                .unwrap(),
+            Some(DropTarget::Tabs {
+                group: right_group,
+                index: 1,
+            })
+        );
+
+        for (x, expected_group, edge, zone) in [
+            (
+                rects.columns.iter().find(|entry| entry.column == left_column).unwrap().rect.origin.x + 100.0,
+                left_group,
+                DropZone::Top,
+                DropZone::FloatingTop,
+            ),
+            (
+                rects.columns.iter().find(|entry| entry.column == right_column).unwrap().rect.origin.x + 100.0,
+                right_group,
+                DropZone::Top,
+                DropZone::FloatingTop,
+            ),
+            (
+                rects.columns.iter().find(|entry| entry.column == left_column).unwrap().rect.origin.x + 100.0,
+                left_group,
+                DropZone::Bottom,
+                DropZone::FloatingBottom,
+            ),
+            (
+                rects.columns.iter().find(|entry| entry.column == right_column).unwrap().rect.origin.x + 100.0,
+                right_group,
+                DropZone::Bottom,
+                DropZone::FloatingBottom,
+            ),
+        ] {
+            let edge_zone = zones
+                .iter()
+                .find(|entry| {
+                    entry.zone == zone
+                        && entry.target
+                            == DropTarget::GroupEdge {
+                                group: expected_group,
+                                zone: edge,
+                            }
+                })
+                .expect("each horizontal branch should have its own floating edge target");
+            let point = Point::new(
+                x,
+                edge_zone.rect.origin.y + edge_zone.rect.size.height / 2.0,
+            );
+            assert_eq!(
+                layout
+                    .resolve_drop(
+                        point,
+                        DropSource::Panel { panel: source_panel },
+                        &rects,
+                        &metrics,
+                    )
+                    .unwrap(),
+                Some(DropTarget::GroupEdge {
+                    group: expected_group,
+                    zone: edge,
+                })
+            );
+        }
+
+        assert!(layout.floating_group(floating_id).is_some());
     }
 
     #[test]
