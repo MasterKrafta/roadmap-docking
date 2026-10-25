@@ -1,6 +1,35 @@
 use super::*;
 
 impl Layout {
+    fn move_panel_to_rail_slot(
+        &mut self,
+        panel: crate::PanelId,
+        panel_node: NodeId,
+        column: NodeId,
+        index: usize,
+        metrics: &DockMetrics,
+        inverse: Option<DockCommand>,
+    ) -> Result<CommandApplication, CommandError> {
+        let order = self.column_display_order(column)?;
+        if let Some(source_index) = order.iter().position(|item| item.panel == panel)
+            && (index == source_index || index == source_index + 1)
+        {
+            return Ok(CommandApplication::persistent());
+        }
+
+        self.remember_panel_dock_location(panel_node);
+        let moved = self.insert_panel_for_rail_slot(panel_node, column, index, metrics)?;
+        if !moved {
+            return Ok(CommandApplication::persistent());
+        }
+        self.remember_panel_dock_location(panel_node);
+        Ok(CommandApplication {
+            actual_value: None,
+            inverse,
+            persistent: true,
+        })
+    }
+
     fn try_reorder_panel_within_tabs(
         &mut self,
         panel: crate::PanelId,
@@ -152,24 +181,14 @@ impl Layout {
                         })
                     });
                 if let DropTarget::RailSlot { column, index } = *target {
-                    let order = self.column_display_order(column)?;
-                    if let Some(source_index) = order.iter().position(|item| item.panel == *panel)
-                        && (index == source_index || index == source_index + 1)
-                    {
-                        return Ok(CommandApplication::persistent());
-                    }
-                    self.remember_panel_dock_location(panel_node);
-                    let moved =
-                        self.insert_panel_for_rail_slot(panel_node, column, index, metrics)?;
-                    if !moved {
-                        return Ok(CommandApplication::persistent());
-                    }
-                    self.remember_panel_dock_location(panel_node);
-                    return Ok(CommandApplication {
-                        actual_value: None,
+                    return self.move_panel_to_rail_slot(
+                        *panel,
+                        panel_node,
+                        column,
+                        index,
+                        metrics,
                         inverse,
-                        persistent: true,
-                    });
+                    );
                 }
                 self.remember_panel_dock_location(panel_node);
                 self.detach_node(panel_node)?;
