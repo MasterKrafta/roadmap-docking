@@ -313,4 +313,37 @@ fn validation_accepts_narrow_canvas_but_rejects_invalid_metrics() {
             .iter()
             .any(|error| matches!(error, ValidationError::InvalidMetrics { .. }))
     );
+
+#[test]
+fn detailed_geometry_errors_preserve_layout_validation_issues() {
+    let metrics = DockMetrics::default();
+    let mut layout = initial_layout(Profile::Generic);
+    let root = layout.main_area(DockSide::Right).unwrap().root;
+    let Node::Column(column) = layout.nodes.get_mut(root).unwrap() else {
+        panic!("factory should create a column");
+    };
+    column.group_ratios = vec![0.2; column.groups.len()];
+    // Direct test mutation bypasses the normal revision/cache invalidation path.
+    layout.validation_cache.set(None);
+
+    let expected_errors = layout.validate(&metrics).unwrap_err();
+    let error = layout
+        .compute_rects_with_diagnostics(
+            Rect::new(Point::ZERO, Size::new(1200.0, 700.0)),
+            &metrics,
+        )
+        .unwrap_err();
+
+    let crate::ComputeRectsDiagnosticError::InvalidLayout { errors } = error else {
+        panic!("invalid layout should retain its validation errors");
+    };
+    assert_eq!(errors, expected_errors);
+    assert!(errors.iter().any(|error| matches!(
+        error,
+        ValidationError::InvalidColumn {
+            reason: "ratios must sum to 1.0 within 1e-4",
+            ..
+        }
+    )));
+}
 }
