@@ -525,7 +525,7 @@ mod tests {
 
     #[test]
     fn outer_column_resize_requires_matching_outer_side() {
-        let controller = DockController::new_initial(&Theme::default()).unwrap();
+        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
         let layout = controller.layout().clone();
         let frame = controller
             .frame(Rect::new(Point::ZERO, Size::new(1200.0, 800.0)))
@@ -581,7 +581,7 @@ mod tests {
 
     #[test]
     fn outer_column_resize_rejects_invalid_column_rect() {
-        let controller = DockController::new_initial(&Theme::default()).unwrap();
+        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
         let layout = controller.layout().clone();
         let frame = controller
             .frame(Rect::new(Point::ZERO, Size::new(1200.0, 800.0)))
@@ -1167,7 +1167,7 @@ mod tests {
 
     #[test]
     fn splitter_resize_requires_matching_frame_geometry() {
-        let controller = DockController::new_initial(&Theme::default()).unwrap();
+        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
         let layout = controller.layout().clone();
         let frame = controller
             .frame(Rect::new(Point::ZERO, Size::new(1200.0, 800.0)))
@@ -1201,7 +1201,7 @@ mod tests {
 
     #[test]
     fn splitter_resize_rejects_empty_frame_geometry() {
-        let controller = DockController::new_initial(&Theme::default()).unwrap();
+        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
         let layout = controller.layout().clone();
         let frame = controller
             .frame(Rect::new(Point::ZERO, Size::new(1200.0, 800.0)))
@@ -1240,7 +1240,7 @@ mod tests {
 
     #[test]
     fn splitter_resize_rejects_boundary_without_adjacent_children() {
-        let controller = DockController::new_initial(&Theme::default()).unwrap();
+        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
         let layout = controller.layout().clone();
         let frame = controller
             .frame(Rect::new(Point::ZERO, Size::new(1200.0, 800.0)))
@@ -1293,7 +1293,7 @@ mod tests {
         let mut stale_layout = controller.layout().clone();
         let group = stale_layout
             .nodes()
-            .find_map(|(id, node)| match node {
+            .find_map(|(_, node)| match node {
                 Node::Column(column) if column.groups.len() > 1 => {
                     column.groups.first().copied()
                 }
@@ -1347,7 +1347,7 @@ mod tests {
         let mut layout = controller.layout().clone();
         let group = layout
             .nodes()
-            .find_map(|(id, node)| match node {
+            .find_map(|(_, node)| match node {
                 Node::Column(column) if column.groups.len() > 1 => {
                     column.groups.first().copied()
                 }
@@ -1403,7 +1403,7 @@ mod tests {
 
     #[test]
     fn vertical_resize_rejects_invalid_column_rect_at_start() {
-        let controller = DockController::new_initial(&Theme::default()).unwrap();
+        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
         let layout = controller.layout().clone();
         let frame = controller
             .frame(Rect::new(Point::ZERO, Size::new(1200.0, 800.0)))
@@ -1439,7 +1439,7 @@ mod tests {
 
     #[test]
     fn vertical_resize_rejects_zero_available_height_at_start() {
-        let controller = DockController::new_initial(&Theme::default()).unwrap();
+        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
         let layout = controller.layout().clone();
         let frame = controller
             .frame(Rect::new(Point::ZERO, Size::new(1200.0, 800.0)))
