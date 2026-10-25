@@ -1205,6 +1205,7 @@ impl Layout {
 
 mod column_display_order;
 mod command_target_policy;
+mod command_target_insertion;
 mod commands;
 mod drag_drop;
 mod helpers;
