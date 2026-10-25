@@ -294,16 +294,14 @@ fn floating_bounds_and_duplicate_z_order_are_validated() {
 }
 
 #[test]
-fn validation_rejects_invalid_metrics_and_canvas_width() {
+fn validation_accepts_narrow_canvas_but_rejects_invalid_metrics() {
     let mut layout = Layout::new(Profile::Generic);
     layout.canvas = CanvasState::new(Some(Rect::new(Point::ZERO, Size::new(200.0, 600.0))));
-    let errors = layout.validate(&DockMetrics::default()).unwrap_err();
-    assert!(errors.iter().any(|error| matches!(
-        error,
-        ValidationError::InvalidCanvas {
-            reason: "canvas width is below min_canvas_width"
-        }
-    )));
+
+    // The measured Canvas can be narrower than min_canvas_width when the host
+    // window is small. Geometry reports insufficient room without invalidating
+    // the persistent Layout model.
+    assert_eq!(layout.validate(&DockMetrics::default()), Ok(()));
 
     let metrics = DockMetrics {
         max_columns: 0,
