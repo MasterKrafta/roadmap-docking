@@ -71,7 +71,7 @@ fn deeply_nested_workspace_node(depth: usize) -> WorkspaceNode {
 fn versioned_json_round_trip_preserves_structure_without_runtime_keys() {
     let metrics = DockMetrics::default();
     let (layout, descriptors) = sample_layout();
-    let mut file = WorkspaceFile::from_layout(&layout).unwrap();
+    let mut file = WorkspaceFile::from_layout(&layout, &metrics).unwrap();
     assert_eq!(file.version, WORKSPACE_VERSION);
 
     file.layout.chrome = ChromeMode::DockHidden;
@@ -166,7 +166,7 @@ fn versioned_json_round_trip_preserves_structure_without_runtime_keys() {
 fn version_one_workspace_migrates_to_current_version_with_diagnostic() {
     let metrics = DockMetrics::default();
     let (layout, descriptors) = sample_layout();
-    let file = WorkspaceFile::from_layout(&layout).unwrap();
+    let file = WorkspaceFile::from_layout(&layout, &metrics).unwrap();
     let mut legacy: serde_json::Value = serde_json::to_value(&file).unwrap();
     legacy["version"] = serde_json::json!(1);
     legacy["layout"]["right"]
@@ -219,7 +219,7 @@ fn migrated_recoverable_damage_is_normalized_and_round_trips_without_losing_unkn
         .filter(|(panel_key, _)| panel_key.as_str() != "history")
         .collect::<Vec<_>>();
 
-    let file = WorkspaceFile::from_layout(&layout).unwrap();
+    let file = WorkspaceFile::from_layout(&layout, &metrics).unwrap();
     let mut legacy: serde_json::Value = serde_json::to_value(&file).unwrap();
     legacy["version"] = serde_json::json!(1);
     legacy["layout"]["right"]
@@ -284,7 +284,7 @@ fn migrated_recoverable_damage_is_normalized_and_round_trips_without_losing_unkn
     );
 
     // Export the recovered in-memory model as canonical v2 JSON and reopen it.
-    let canonical_file = report.layout.to_workspace_file().unwrap();
+    let canonical_file = report.layout.to_workspace_file(&metrics).unwrap();
     assert_eq!(canonical_file.version, WORKSPACE_VERSION);
     let canonical_json = canonical_file.to_json_pretty().unwrap();
     assert_eq!(
@@ -327,7 +327,7 @@ fn migrated_recoverable_damage_is_normalized_and_round_trips_without_losing_unkn
         "canonical v2 workspace should need no further normalization"
     );
     assert_eq!(
-        reopened.layout.to_workspace_file().unwrap(),
+        reopened.layout.to_workspace_file(&metrics).unwrap(),
         canonical_file,
         "recover → serialize → reload should stabilize the workspace representation"
     );
@@ -335,8 +335,9 @@ fn migrated_recoverable_damage_is_normalized_and_round_trips_without_losing_unkn
 
 #[test]
 fn damaged_workspace_schema_is_rejected_before_layout_normalization() {
+    let metrics = DockMetrics::default();
     let (layout, descriptors) = sample_layout();
-    let file = WorkspaceFile::from_layout(&layout).unwrap();
+    let file = WorkspaceFile::from_layout(&layout, &metrics).unwrap();
     let original: serde_json::Value = serde_json::to_value(&file).unwrap();
 
     let mut unknown_node_type = original.clone();
@@ -370,7 +371,7 @@ fn damaged_workspace_schema_is_rejected_before_layout_normalization() {
 fn current_schema_missing_expanded_width_is_repaired_with_diagnostic() {
     let metrics = DockMetrics::default();
     let (layout, descriptors) = sample_layout();
-    let file = WorkspaceFile::from_layout(&layout).unwrap();
+    let file = WorkspaceFile::from_layout(&layout, &metrics).unwrap();
     let mut value: serde_json::Value = serde_json::to_value(&file).unwrap();
     value["layout"]["right"]
         .as_object_mut()
@@ -399,7 +400,7 @@ fn current_schema_missing_expanded_width_is_repaired_with_diagnostic() {
 }
 
 #[test]
-fn from_layout_with_metrics_rejects_invalid_layout_before_export() {
+fn from_layout_rejects_invalid_layout_before_export() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
     let (_, panel) = builder.panel(key("invalid-export-panel"), constraints());
@@ -409,7 +410,7 @@ fn from_layout_with_metrics_rejects_invalid_layout_before_export() {
     let layout = builder.build();
 
     assert!(matches!(
-        WorkspaceFile::from_layout_with_metrics(&layout, &metrics),
+        WorkspaceFile::from_layout(&layout, &metrics),
         Err(WorkspaceFileError::InvalidLayout(_))
     ));
 }
@@ -418,7 +419,7 @@ fn from_layout_with_metrics_rejects_invalid_layout_before_export() {
 fn programmatic_workspace_depth_is_rejected_before_migration_and_restore() {
     let metrics = DockMetrics::default();
     let (layout, descriptors) = sample_layout();
-    let mut file = WorkspaceFile::from_layout(&layout).unwrap();
+    let mut file = WorkspaceFile::from_layout(&layout, &metrics).unwrap();
     file.layout.left = None;
     file.layout.right = Some(deeply_nested_workspace_node(257));
     file.layout.floating_groups.clear();
@@ -437,6 +438,7 @@ fn programmatic_workspace_depth_is_rejected_before_migration_and_restore() {
 
 #[test]
 fn from_layout_rejects_programmatic_tree_depth_before_recursive_export() {
+    let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(crate::Profile::Generic);
     let (_, mut root) = builder.panel(key("export-depth-root"), constraints());
     for index in 0..256 {
@@ -450,7 +452,7 @@ fn from_layout_rejects_programmatic_tree_depth_before_recursive_export() {
     let layout = builder.build();
 
     assert!(matches!(
-        WorkspaceFile::from_layout(&layout),
+        WorkspaceFile::from_layout(&layout, &metrics),
         Err(WorkspaceFileError::InvalidRuntimeLayout(message)) if message.contains("maximum workspace depth of 256")
     ));
 }
@@ -466,8 +468,9 @@ fn workspace_json_size_limit_is_checked_before_parsing() {
 
 #[test]
 fn malformed_version_field_reports_type_error_not_missing_field() {
+    let metrics = DockMetrics::default();
     let (layout, _) = sample_layout();
-    let original = serde_json::to_value(WorkspaceFile::from_layout(&layout).unwrap()).unwrap();
+    let original = serde_json::to_value(WorkspaceFile::from_layout(&layout, &metrics).unwrap()).unwrap();
 
     for malformed_version in [serde_json::json!("2"), serde_json::json!(2.0)] {
         let mut value = original.clone();
@@ -483,8 +486,9 @@ fn malformed_version_field_reports_type_error_not_missing_field() {
 
 #[test]
 fn unsupported_file_versions_and_malformed_json_return_errors() {
+    let metrics = DockMetrics::default();
     let (layout, descriptors) = sample_layout();
-    let mut file = WorkspaceFile::from_layout(&layout).unwrap();
+    let mut file = WorkspaceFile::from_layout(&layout, &metrics).unwrap();
     file.version = 99;
     let json = serde_json::to_string(&file).unwrap();
 
@@ -510,7 +514,7 @@ fn unsupported_file_versions_and_malformed_json_return_errors() {
 fn unknown_panel_keys_are_preserved_as_placeholders_with_warning() {
     let metrics = DockMetrics::default();
     let (layout, descriptors) = sample_layout();
-    let file = WorkspaceFile::from_layout(&layout).unwrap();
+    let file = WorkspaceFile::from_layout(&layout, &metrics).unwrap();
     let known_descriptors = descriptors
         .into_iter()
         .filter(|(panel_key, _)| panel_key.as_str() != "history")
@@ -548,7 +552,7 @@ fn unknown_panel_keys_are_preserved_as_placeholders_with_warning() {
 fn safe_ratio_repair_is_normalized_and_reported() {
     let metrics = DockMetrics::default();
     let (layout, descriptors) = sample_layout();
-    let mut file = WorkspaceFile::from_layout(&layout).unwrap();
+    let mut file = WorkspaceFile::from_layout(&layout, &metrics).unwrap();
     let root = file.layout.right.as_mut().unwrap();
     *find_column_mut(root).expect("main root has a column") = vec![0.25];
     let json = serde_json::to_string(&file).unwrap();
@@ -576,7 +580,7 @@ fn safe_ratio_repair_is_normalized_and_reported() {
 fn out_of_range_active_tab_is_clamped_to_last_child_and_reported() {
     let metrics = DockMetrics::default();
     let (layout, descriptors) = sample_layout();
-    let mut file = WorkspaceFile::from_layout(&layout).unwrap();
+    let mut file = WorkspaceFile::from_layout(&layout, &metrics).unwrap();
     let Some(WorkspaceNode::Column { groups, .. }) = file.layout.right.as_mut() else {
         panic!("main root must serialize as a column");
     };
@@ -613,7 +617,7 @@ fn out_of_range_active_tab_is_clamped_to_last_child_and_reported() {
 fn invalid_profile_specific_tree_is_reported_instead_of_guessed_at() {
     let metrics = DockMetrics::default();
     let (layout, descriptors) = sample_layout();
-    let mut file = WorkspaceFile::from_layout(&layout).unwrap();
+    let mut file = WorkspaceFile::from_layout(&layout, &metrics).unwrap();
     file.layout.right = Some(WorkspaceNode::Split {
         axis: Axis::Y,
         children: vec![WorkspaceNode::Tabs {
@@ -640,7 +644,7 @@ fn invalid_profile_specific_tree_is_reported_instead_of_guessed_at() {
 fn floating_bounds_are_clamped_to_current_visible_client_region() {
     let metrics = DockMetrics::default();
     let (layout, descriptors) = sample_layout();
-    let file = WorkspaceFile::from_layout(&layout).unwrap();
+    let file = WorkspaceFile::from_layout(&layout, &metrics).unwrap();
     let region = Rect::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
 
     let report = WorkspaceFile::load_json(
@@ -670,7 +674,7 @@ fn floating_bounds_are_clamped_to_current_visible_client_region() {
 fn client_region_smaller_than_floating_minimum_is_reported_not_shrunk_below_minimum() {
     let metrics = DockMetrics::default();
     let (layout, descriptors) = sample_layout();
-    let file = WorkspaceFile::from_layout(&layout);
+    let file = WorkspaceFile::from_layout(&layout, &metrics);
 
     assert!(matches!(
         file.unwrap().into_layout_with_options(
@@ -706,7 +710,7 @@ fn stale_profile_rail_width_is_repaired_and_reported() {
             vec![1.0],
         );
         builder.main_area(DockSide::Right, rail);
-        let file = WorkspaceFile::from_layout(&builder.build()).unwrap();
+        let file = WorkspaceFile::from_layout(&builder.build(), &metrics).unwrap();
         let json = serde_json::to_string(&file).unwrap();
 
         let report = WorkspaceFile::load_json(
@@ -745,7 +749,7 @@ fn invalid_visible_region_returns_an_error() {
         Rect::new(Point::new(0.0, 16_777_216.0), Size::new(100.0, 1.0)),
         Rect::new(Point::new(f32::MAX, 0.0), Size::new(1.0, 100.0)),
     ] {
-        let fresh_file = WorkspaceFile::from_layout(&layout).unwrap();
+        let fresh_file = WorkspaceFile::from_layout(&layout, &metrics).unwrap();
         assert!(matches!(
             fresh_file.into_layout_with_options(
                 &descriptors,
@@ -785,7 +789,7 @@ fn workspace_load_expands_narrow_expanded_column_and_preserves_restore_width() {
             Err(crate::ComputeRectsError::InvalidLayout)
         ));
 
-        let mut file = WorkspaceFile::from_layout(&source).unwrap();
+        let mut file = WorkspaceFile::from_layout_unchecked_for_test(&source).unwrap();
         let Some(WorkspaceNode::Column {
             width,
             last_expanded_width,
@@ -860,7 +864,7 @@ fn workspace_load_reports_conflicting_expanded_content_minimum_and_maximum() {
         let group = builder.tabs(vec![wide_panel, narrow_panel], 0, false);
         let column = builder.column(400.0, ColumnMode::Expanded, vec![group], vec![1.0]);
         builder.main_area(DockSide::Right, column);
-        let file = WorkspaceFile::from_layout(&builder.build()).unwrap();
+        let file = WorkspaceFile::from_layout_unchecked_for_test(&builder.build()).unwrap();
         let json = serde_json::to_string(&file).unwrap();
 
         assert!(matches!(
@@ -882,7 +886,7 @@ fn workspace_load_reports_conflicting_expanded_content_minimum_and_maximum() {
 fn workspace_load_clears_stale_canvas_bounds_when_metrics_require_more_width() {
     let metrics = DockMetrics::default();
     let (layout, descriptors) = sample_layout();
-    let mut file = WorkspaceFile::from_layout(&layout).unwrap();
+    let mut file = WorkspaceFile::from_layout(&layout, &metrics).unwrap();
     file.layout.canvas = CanvasState::new(Some(Rect::new(
         Point::new(12.0, 0.0),
         Size::new(metrics.min_canvas_width - 40.0, 600.0),
@@ -914,7 +918,7 @@ fn workspace_load_keeps_first_singleton_panel_and_removes_duplicate_with_diagnos
         }
     }
 
-    let mut file = WorkspaceFile::from_layout(&layout).unwrap();
+    let mut file = WorkspaceFile::from_layout(&layout, &metrics).unwrap();
     let Some(WorkspaceNode::Column { groups, .. }) = file.layout.right.as_mut() else {
         panic!("right main area must serialize as a column");
     };
@@ -957,8 +961,9 @@ fn workspace_load_keeps_first_singleton_panel_and_removes_duplicate_with_diagnos
 
 #[test]
 fn workspace_load_merges_excess_main_columns_without_losing_panels() {
+    let metrics = DockMetrics::default();
     let (layout, descriptors) = sample_layout();
-    let mut file = WorkspaceFile::from_layout(&layout).unwrap();
+    let mut file = WorkspaceFile::from_layout(&layout, &metrics).unwrap();
     let first_column = file.layout.right.take().unwrap();
     file.layout.right = Some(WorkspaceNode::Split {
         axis: Axis::X,
@@ -995,7 +1000,7 @@ fn workspace_load_merges_excess_main_columns_without_losing_panels() {
 fn workspace_load_renumbers_duplicate_floating_z_orders_and_preserves_paint_order() {
     let metrics = DockMetrics::default();
     let (layout, descriptors) = sample_layout();
-    let mut file = WorkspaceFile::from_layout(&layout).unwrap();
+    let mut file = WorkspaceFile::from_layout(&layout, &metrics).unwrap();
     let duplicate = file
         .layout
         .floating_groups
@@ -1037,7 +1042,7 @@ fn floating_bounds_clamped_diagnostic_keeps_json_index_after_earlier_group_is_re
         .1
         .singleton = true;
 
-    let mut file = WorkspaceFile::from_layout(&layout).unwrap();
+    let mut file = WorkspaceFile::from_layout(&layout, &metrics).unwrap();
     // This first JSON entry duplicates the singleton panel already in the main
     // dock, so normalization removes it before floating bounds get clamped.
     file.layout.floating_groups.insert(
@@ -1074,7 +1079,7 @@ fn floating_bounds_clamped_diagnostic_keeps_json_index_after_earlier_group_is_re
 fn workspace_normalizes_empty_floating_columns_before_clamping_bounds() {
     let metrics = DockMetrics::default();
     let (layout, descriptors) = sample_layout();
-    let mut file = WorkspaceFile::from_layout(&layout).unwrap();
+    let mut file = WorkspaceFile::from_layout(&layout, &metrics).unwrap();
     let floating_tabs = file
         .layout
         .floating_groups
