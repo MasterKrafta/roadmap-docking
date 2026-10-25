@@ -37,7 +37,7 @@ impl fmt::Display for ComputeRectsDiagnosticError {
                         .join("; ")
                 )
             }
-            Self::Computation(error) => error.fmt(formatter),
+            Self::Computation(error) => fmt::Display::fmt(error, formatter),
         }
     }
 }
