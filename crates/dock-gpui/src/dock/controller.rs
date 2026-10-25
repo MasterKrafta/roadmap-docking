@@ -269,6 +269,21 @@ fn build_initial_layout(theme: &Theme) -> Result<(Layout, DockMetrics), String> 
         )
         .map_err(|error| format!("Could not place the second tab group: {error:?}"))?;
 
+    // Move history to a different group first. Dock-core intentionally treats
+    // moving a panel to the edge of its own group as a no-op.
+    layout
+        .apply(
+            DockCommand::MovePanel {
+                panel: history_panel,
+                target: DropTarget::Tabs {
+                    group: single_tab_group,
+                    index: 1,
+                },
+            },
+            &metrics,
+        )
+        .map_err(|error| format!("Could not stage the history panel: {error:?}"))?;
+
     layout
         .apply(
             DockCommand::MovePanel {
