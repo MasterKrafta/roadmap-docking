@@ -157,17 +157,7 @@ impl Layout {
 
                 let inverse = self.inverse_for_move_group_to_main_column(*group, &source);
 
-                self.remember_subtree_dock_locations(*group);
-                self.detach_node(*group)?;
-                let new_column = self.nodes.insert(Node::Column(crate::Column {
-                    width: metrics.default_column_width,
-                    mode: ColumnMode::Expanded,
-                    groups: vec![*group],
-                    group_ratios: vec![1.0],
-                    last_expanded_width: Some(metrics.default_column_width),
-                }));
-                self.insert_existing_column_at(*side, *index, new_column, None, metrics)?;
-                self.remember_subtree_dock_locations(*group);
+                self.move_group_to_new_main_column(*group, *side, *index, metrics)?;
                 Ok(CommandApplication {
                     actual_value: None,
                     inverse,
@@ -178,6 +168,27 @@ impl Layout {
                 reason: "group transfer dispatcher received an unsupported command",
             }),
         }
+    }
+
+    fn move_group_to_new_main_column(
+        &mut self,
+        group: NodeId,
+        side: DockSide,
+        index: usize,
+        metrics: &DockMetrics,
+    ) -> Result<(), CommandError> {
+        self.remember_subtree_dock_locations(group);
+        self.detach_node(group)?;
+        let new_column = self.nodes.insert(Node::Column(crate::Column {
+            width: metrics.default_column_width,
+            mode: ColumnMode::Expanded,
+            groups: vec![group],
+            group_ratios: vec![1.0],
+            last_expanded_width: Some(metrics.default_column_width),
+        }));
+        self.insert_existing_column_at(side, index, new_column, None, metrics)?;
+        self.remember_subtree_dock_locations(group);
+        Ok(())
     }
 
     fn group_main_column_source(&self, group: NodeId) -> GroupMainColumnSource {
