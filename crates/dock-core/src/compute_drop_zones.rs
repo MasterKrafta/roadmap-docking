@@ -63,9 +63,9 @@ impl Layout {
     fn validate_drop_zone_state(&self, metrics: &DockMetrics) -> Result<(), ComputeRectsError> {
         metrics
             .validate()
-            .map_err(|_| ComputeRectsError::InvalidMetrics)?;
+            .map_err(|reason| ComputeRectsError::InvalidMetrics { reason })?;
         self.validate_cached(metrics)
-            .map_err(|_| ComputeRectsError::InvalidLayout)?;
+            .map_err(|errors| ComputeRectsError::LayoutValidation { errors })?;
         Ok(())
     }
 
