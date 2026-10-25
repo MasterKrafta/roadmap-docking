@@ -15,6 +15,7 @@ use crate::tree_query::subtree_nodes;
 /// tree walks when drawing separate dock areas.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FrameGeometry {
+    layout_version: u64,
     rects: LayoutRects,
     nodes_by_area: HashMap<DockAreaId, HashSet<NodeId>>,
     nodes_by_root: HashMap<NodeId, HashSet<NodeId>>,
@@ -29,6 +30,7 @@ impl FrameGeometry {
         viewport: Rect,
         metrics: &DockMetrics,
     ) -> Result<Self, ComputeRectsError> {
+        let layout_version = layout.version();
         let mut rects = layout.compute_rects(viewport, metrics)?;
         normalize_docked_group_geometry(layout, metrics, &mut rects);
 
@@ -70,12 +72,18 @@ impl FrameGeometry {
             .collect();
 
         Ok(Self {
+            layout_version,
             rects,
             nodes_by_area,
             nodes_by_root,
             rail_groups,
             panel_nodes,
         })
+    }
+
+    /// Returns the layout revision used to compute this frame snapshot.
+    pub const fn layout_version(&self) -> u64 {
+        self.layout_version
     }
 
     /// Returns the normalized rectangle snapshot. It cannot be mutated here.
