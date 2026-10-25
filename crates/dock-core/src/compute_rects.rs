@@ -1881,6 +1881,86 @@ mod tests {
     }
 
     #[test]
+    fn floating_vertical_split_minimum_includes_title_for_collapsed_first_branch() {
+        let metrics = DockMetrics::default();
+        let mut builder = LayoutBuilder::new(Profile::Photoshop);
+        let (_, collapsed_panel) =
+            builder.panel(key("floating-y-min-collapsed"), constraints());
+        let collapsed_group = builder.tabs(vec![collapsed_panel], 0, true);
+        let (_, expanded_panel) =
+            builder.panel(key("floating-y-min-expanded"), constraints());
+        let expanded_group = builder.tabs(vec![expanded_panel], 0, false);
+        let root = builder.split(
+            Axis::Y,
+            vec![collapsed_group, expanded_group],
+            vec![0.5, 0.5],
+        );
+        let requested_bounds = Rect::new(
+            Point::new(40.0, 50.0),
+            Size::new(300.0, 100.0),
+        );
+        let floating = builder.floating_group(root, requested_bounds, 1);
+        let layout = builder.build();
+
+        let rects = layout
+            .compute_rects(viewport(1000.0, 700.0), &metrics)
+            .expect("floating vertical split should reserve its title row");
+        let actual_bounds = rects
+            .floating_groups
+            .iter()
+            .find(|entry| entry.group == floating)
+            .expect("floating vertical split should have geometry")
+            .rect;
+        let group_rect = |group| {
+            rects
+                .groups
+                .iter()
+                .find(|entry| entry.group == group)
+                .expect("both split branches should have geometry")
+                .rect
+        };
+        let collapsed_rect = group_rect(collapsed_group);
+        let expanded_rect = group_rect(expanded_group);
+        let expanded_minimum = metrics
+            .min_group_height
+            .max(metrics.header_height + metrics.tab_strip_height + constraints().min_size.height);
+        let required_without_title = metrics.effective_collapsed_group_height()
+            + expanded_minimum
+            + metrics.splitter_thickness;
+
+        assert_eq!(
+            actual_bounds.size.height,
+            required_without_title + metrics.header_height
+        );
+        assert_eq!(
+            collapsed_rect.origin.y,
+            actual_bounds.origin.y + metrics.header_height
+        );
+        assert_eq!(
+            collapsed_rect.size.height,
+            metrics.effective_collapsed_group_height()
+        );
+        assert_eq!(
+            expanded_rect.origin.y,
+            collapsed_rect.origin.y
+                + collapsed_rect.size.height
+                + metrics.splitter_thickness
+        );
+        assert!(
+            ((expanded_rect.origin.y + expanded_rect.size.height)
+                - (actual_bounds.origin.y + actual_bounds.size.height))
+            .abs()
+                < PIXEL_TOLERANCE
+        );
+        assert_eq!(
+            layout.floating_group(floating).unwrap().bounds,
+            requested_bounds,
+            "geometry clamping must not mutate persistent model bounds"
+        );
+        assert!(rects.vertical_overflow.is_empty());
+    }
+
+    #[test]
     fn floating_collapsed_group_stays_strip_sized_inside_window_bounds() {
         let metrics = DockMetrics::default();
         let mut builder = LayoutBuilder::new(Profile::Photoshop);
