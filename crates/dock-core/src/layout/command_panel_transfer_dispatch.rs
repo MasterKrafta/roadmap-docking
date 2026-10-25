@@ -44,18 +44,7 @@ impl Layout {
                 {
                     return Ok(application);
                 }
-                let inverse = self
-                    .tab_parent_index(panel_node)
-                    .and_then(|(group, index)| {
-                        let source_group_has_other_tabs = matches!(
-                            self.nodes.get(group),
-                            Some(Node::Tabs(tabs)) if tabs.children.len() > 1
-                        );
-                        source_group_has_other_tabs.then_some(DockCommand::MovePanel {
-                            panel: *panel,
-                            target: DropTarget::Tabs { group, index },
-                        })
-                    });
+                let inverse = self.panel_transfer_inverse(*panel, panel_node);
                 if let DropTarget::RailSlot { column, index } = *target {
                     return self.move_panel_to_rail_slot(
                         *panel,
