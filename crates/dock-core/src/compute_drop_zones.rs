@@ -850,7 +850,6 @@ impl Layout {
     }
 }
 
-
 impl DropZoneResolver<'_> {
     /// Resolves a pointer position using the cached legal zones and tree index.
     ///
