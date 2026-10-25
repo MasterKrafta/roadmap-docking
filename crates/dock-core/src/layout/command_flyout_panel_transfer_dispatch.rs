@@ -39,7 +39,7 @@ impl Layout {
                 )?;
 
                 let before = self.clone();
-                let mut applied = self.apply_command(
+                let applied = self.apply_command(
                     &DockCommand::MovePanel {
                         panel: *panel,
                         target: *target,
@@ -58,7 +58,7 @@ impl Layout {
                     .find_panel_node(*panel)
                     .ok_or(CommandError::MissingPanel { panel: *panel })?;
                 let before = self.clone();
-                let mut applied = self.apply_command(
+                let applied = self.apply_command(
                     &DockCommand::Float {
                         node,
                         bounds: *bounds,

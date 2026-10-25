@@ -1,7 +1,7 @@
 use super::*;
 
 impl Layout {
-    fn panel_transfer_inverse(
+    pub(super) fn panel_transfer_inverse(
         &self,
         panel: crate::PanelId,
         panel_node: NodeId,
