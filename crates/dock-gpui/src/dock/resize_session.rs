@@ -32,7 +32,7 @@ pub(crate) enum ResizeUpdateError {
     InvalidDelta,
     InvalidStartGeometry,
     InvalidBounds,
-    Command(dock_core::CommandError),
+    Command,
 }
 
 /// Immutable starting point for a pointer-driven resize gesture.
