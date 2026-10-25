@@ -183,17 +183,41 @@ impl Layout {
         // window geometry nor child-panel geometry is emitted in hidden modes.
         if self.chrome().dock_visible() {
             // Preserve deterministic back-to-front order in the geometry snapshot.
+            // A single floating window may not fit the current client area. Build
+            // its geometry separately so a local failure cannot discard the main
+            // dock or leave partially emitted rectangles for that window.
             for (id, floating) in self.floating_groups_in_paint_order() {
                 let area = self
                     .dock_area(floating.area)
                     .ok_or(ComputeRectsError::InvalidLayout)?;
-                let bounds =
-                    clamp_floating_bounds(self, area.root, floating.bounds, viewport, metrics)?;
-                output
-                    .floating_groups
-                    .push(FloatingGroupRect::new(id, bounds, floating.z_order));
-                push_resize_edges(id, bounds, metrics, &mut output)?;
-                layout_floating_root(self, area.root, bounds, metrics, &mut output)?;
+                let mut floating_output = LayoutRects::default();
+                let result = (|| {
+                    let bounds =
+                        clamp_floating_bounds(self, area.root, floating.bounds, viewport, metrics)?;
+                    floating_output
+                        .floating_groups
+                        .push(FloatingGroupRect::new(id, bounds, floating.z_order));
+                    push_resize_edges(id, bounds, metrics, &mut floating_output)?;
+                    layout_floating_root(
+                        self,
+                        area.root,
+                        bounds,
+                        metrics,
+                        &mut floating_output,
+                    )?;
+                    Ok::<(), ComputeRectsError>(())
+                })();
+
+                match result {
+                    Ok(()) => append_floating_geometry(&mut output, floating_output),
+                    Err(error) => {
+                        tracing::warn!(
+                            floating_group = ?id,
+                            error = %error,
+                            "omitting floating group from geometry snapshot"
+                        );
+                    }
+                }
             }
         }
 
@@ -947,6 +971,22 @@ fn push_vertical_overflow(
         .vertical_overflow
         .push(VerticalOverflow::new(owner, viewport, content_extent));
     Ok(())
+}
+
+fn append_floating_geometry(output: &mut LayoutRects, mut floating: LayoutRects) {
+    output.columns.extend(floating.columns);
+    output.groups.extend(floating.groups);
+    output.tab_strips.extend(floating.tab_strips);
+    output.tab_headers.extend(floating.tab_headers);
+    output.tab_overflows.extend(floating.tab_overflows);
+    output.panels.extend(floating.panels);
+    output.splitters.extend(floating.splitters);
+    output.floating_groups.extend(floating.floating_groups);
+    output
+        .floating_resize_edges
+        .extend(floating.floating_resize_edges);
+    output.drop_zones.extend(floating.drop_zones);
+    output.vertical_overflow.extend(floating.vertical_overflow);
 }
 
 fn minimum_floating_size(
@@ -2255,28 +2295,71 @@ mod tests {
     }
 
     #[test]
-    fn floating_minimum_must_fit_client_height() {
+    fn unfit_floating_window_does_not_abort_geometry_for_other_areas() {
         let metrics = DockMetrics::default();
         let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+        let (main_panel, main_panel_node) =
+            builder.panel(key("float-fallback-main"), constraints());
+        let main_group = builder.tabs(vec![main_panel_node], 0, false);
+        let main_column =
+            builder.column(280.0, ColumnMode::Expanded, vec![main_group], vec![1.0]);
+        builder.main_area(DockSide::Left, main_column);
+
         let tight = PanelConstraints::new(
             Size::new(160.0, 100.0),
             Size::new(180.0, 140.0),
             Some(Size::new(800.0, 600.0)),
             false,
         );
-        let (_, panel_node) = builder.panel(key("float-too-tall"), tight);
-        let group = builder.tabs(vec![panel_node], 0, false);
-        builder.floating_group(
-            group,
+        let (too_tall_panel, too_tall_panel_node) =
+            builder.panel(key("float-too-tall"), tight);
+        let too_tall_group = builder.tabs(vec![too_tall_panel_node], 0, false);
+        let too_tall_floating = builder.floating_group(
+            too_tall_group,
             Rect::new(Point::new(30.0, 20.0), Size::new(200.0, 90.0)),
             1,
         );
+
+        let (visible_panel, visible_panel_node) =
+            builder.panel(key("float-still-visible"), constraints());
+        let visible_group = builder.tabs(vec![visible_panel_node], 0, false);
+        let visible_floating = builder.floating_group(
+            visible_group,
+            Rect::new(Point::new(260.0, 20.0), Size::new(200.0, 90.0)),
+            2,
+        );
         let layout = builder.build();
 
-        assert!(matches!(
-            layout.compute_rects(viewport(1000.0, 100.0), &metrics),
-            Err(ComputeRectsError::InsufficientSpace { axis: Axis::Y, .. })
-        ));
+        let rects = layout
+            .compute_rects(viewport(1000.0, 140.0), &metrics)
+            .expect("one unfit floating window must not abort the whole snapshot");
+
+        assert!(
+            rects.columns.iter().any(|column| column.column == main_column),
+            "main dock geometry should still be available"
+        );
+        assert!(
+            rects.panels.iter().any(|panel| panel.panel == main_panel),
+            "main dock panel geometry should still be available"
+        );
+        assert!(
+            rects.floating_groups.iter().any(|group| group.group == visible_floating),
+            "a valid floating window should remain visible"
+        );
+        assert!(
+            !rects.floating_groups.iter().any(|group| group.group == too_tall_floating),
+            "a floating window that cannot fit should be omitted from this snapshot"
+        );
+        assert!(
+            rects.panels.iter().any(|panel| panel.panel == visible_panel),
+            "the valid floating panel should remain available"
+        );
+        assert!(
+            !rects.panels.iter().any(|panel| panel.panel == too_tall_panel),
+            "failed floating geometry must not leave partial panel rectangles"
+        );
+        assert!(layout.validate(&metrics).is_ok());
     }
 
     #[test]
