@@ -587,6 +587,47 @@ mod tests {
     }
 
     #[test]
+    fn outer_column_resize_rejects_overflowing_computed_width() {
+        let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
+        let column = layout
+            .nodes()
+            .find_map(|(id, node)| matches!(node, Node::Column(_)).then_some(id))
+            .unwrap();
+
+        let mut left = session(
+            &layout,
+            ResizeHandle::OuterColumn {
+                column,
+                side: DockSide::Left,
+            },
+            StartGeometry::OuterColumn {
+                start_width: f32::MAX,
+            },
+        );
+        left.pointer_start = Point::ZERO;
+        assert!(matches!(
+            left.command_for_pointer(Point::new(f32::MAX, 0.0)),
+            Err(ResizeUpdateError::InvalidBounds)
+        ));
+
+        let mut right = session(
+            &layout,
+            ResizeHandle::OuterColumn {
+                column,
+                side: DockSide::Right,
+            },
+            StartGeometry::OuterColumn {
+                start_width: f32::MAX,
+            },
+        );
+        right.pointer_start = Point::ZERO;
+        assert!(matches!(
+            right.command_for_pointer(Point::new(-f32::MAX, 0.0)),
+            Err(ResizeUpdateError::InvalidBounds)
+        ));
+    }
+
+    #[test]
     fn outer_columns_use_opposite_width_delta_and_floating_edges_keep_the_opposite_corner() {
         let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
         let column = layout
