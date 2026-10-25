@@ -14,12 +14,16 @@ impl Layout {
                 side,
                 boundary_index,
                 delta,
-            } => self.apply_resize_column_boundary_command(side, boundary_index, delta, metrics),
+            } => {
+                self.apply_resize_column_boundary_command(side, boundary_index, delta, metrics)
+            }
             DockCommand::ResizeSplitColumnBoundary {
                 split,
                 boundary_index,
                 delta,
-            } => self.apply_resize_split_column_boundary_command(split, boundary_index, delta, metrics),
+            } => {
+                self.apply_resize_split_column_boundary_command(split, boundary_index, delta, metrics)
+            }
             DockCommand::ResetMainColumnRatios { side } => {
                 let Some(area) = self.main_area(*side).copied() else {
                     return Ok(CommandApplication::persistent());
