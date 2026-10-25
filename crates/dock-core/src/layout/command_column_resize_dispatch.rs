@@ -24,52 +24,15 @@ impl Layout {
                     None => return Err(CommandError::MissingNode { node: *column }),
                 };
                 let old_width = current.width;
-                if let Some((side, column_index)) = self.main_column_position(*column) {
-                    let main_columns = self.main_columns(side)?;
-                    let canvas_adjacent = match side {
-                        DockSide::Left => column_index + 1 == main_columns.len(),
-                        DockSide::Right => column_index == 0,
-                    };
-                    if !canvas_adjacent {
-                        return Err(CommandError::InvalidTarget {
-                            reason: "interior main columns must be resized through ResizeColumnBoundary",
-                        });
-                    }
-                }
-                let min_width = self.minimum_column_width(*column, metrics)?;
-                let panel_max = self.maximum_column_width(*column)?;
-                let mut max_width = panel_max.unwrap_or(f32::MAX);
-
-                // When the canvas has a measured remainder, resizing an outer
-                // main-dock column consumes or returns that remainder. Preserve
-                // the mandatory min_canvas_width rather than letting the UI
-                // render a canvas narrower than Core's own invariant.
-                if self.main_column_position(*column).is_some()
-                    && let Some(bounds) = self.canvas.last_known_bounds
-                {
-                    let room = (bounds.size.width - metrics.min_canvas_width).max(0.0);
-                    let canvas_cap = old_width + room;
-                    if canvas_cap.is_finite() {
-                        max_width = max_width.min(canvas_cap);
-                    }
-                }
-                if max_width < min_width {
-                    return Err(CommandError::InvalidValue {
-                        field: "width",
-                        reason: "column minimum width exceeds its effective maximum width",
-                    });
-                }
-                let actual_width = match current.mode {
-                    ColumnMode::Expanded => width.clamp(min_width, max_width),
-                    ColumnMode::IconsAndLabels => metrics.min_column_width,
-                    ColumnMode::IconsOnly => metrics.rail_width,
-                };
-                if !actual_width.is_finite() || actual_width <= 0.0 {
-                    return Err(CommandError::InvalidValue {
-                        field: "width",
-                        reason: "effective width is not finite and positive",
-                    });
-                }
+                let (min_width, max_width) =
+                    self.column_resize_limits(*column, &current, metrics)?;
+                let actual_width = Self::effective_column_width(
+                    *width,
+                    current.mode,
+                    min_width,
+                    max_width,
+                    metrics,
+                )?;
                 let actual_delta = actual_width - old_width;
                 if actual_delta != 0.0 {
                     if let Some(Node::Column(column)) = self.nodes.get_mut(*column) {
@@ -89,7 +52,7 @@ impl Layout {
                     }),
                     persistent: true,
                 })
-            }
+            },
             DockCommand::ResizeColumnBoundary {
                 side,
                 boundary_index,
@@ -345,5 +308,71 @@ impl Layout {
         }
 
         Ok(actual_delta)
+    }
+ 
+    /// Computes width limits for ResizeColumn, including the main-dock canvas cap.
+    fn column_resize_limits(
+        &self,
+        column_id: NodeId,
+        current: &Column,
+        metrics: &DockMetrics,
+    ) -> Result<(f32, f32), CommandError> {
+        let main_position = self.main_column_position(column_id);
+        if let Some((side, column_index)) = main_position {
+            let main_columns = self.main_columns(side)?;
+            let canvas_adjacent = match side {
+                DockSide::Left => column_index + 1 == main_columns.len(),
+                DockSide::Right => column_index == 0,
+            };
+            if !canvas_adjacent {
+                return Err(CommandError::InvalidTarget {
+                    reason: "interior main columns must be resized through ResizeColumnBoundary",
+                });
+            }
+        }
+
+        let min_width = self.minimum_column_width(column_id, metrics)?;
+        let panel_max = self.maximum_column_width(column_id)?;
+        let mut max_width = panel_max.unwrap_or(f32::MAX);
+
+        // Resizing an outer main-dock column consumes or returns the measured
+        // canvas remainder. Keep the required min_canvas_width available.
+        if main_position.is_some()
+            && let Some(bounds) = self.canvas.last_known_bounds
+        {
+            let room = (bounds.size.width - metrics.min_canvas_width).max(0.0);
+            let canvas_cap = current.width + room;
+            if canvas_cap.is_finite() {
+                max_width = max_width.min(canvas_cap);
+            }
+        }
+        if max_width < min_width {
+            return Err(CommandError::InvalidValue {
+                field: "width",
+                reason: "column minimum width exceeds its effective maximum width",
+            });
+        }
+        Ok((min_width, max_width))
+    }
+
+    fn effective_column_width(
+        requested_width: f32,
+        mode: ColumnMode,
+        min_width: f32,
+        max_width: f32,
+        metrics: &DockMetrics,
+    ) -> Result<f32, CommandError> {
+        let actual_width = match mode {
+            ColumnMode::Expanded => requested_width.clamp(min_width, max_width),
+            ColumnMode::IconsAndLabels => metrics.min_column_width,
+            ColumnMode::IconsOnly => metrics.rail_width,
+        };
+        if !actual_width.is_finite() || actual_width <= 0.0 {
+            return Err(CommandError::InvalidValue {
+                field: "width",
+                reason: "effective width is not finite and positive",
+            });
+        }
+        Ok(actual_width)
     }
 }

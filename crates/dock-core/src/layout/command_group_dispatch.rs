@@ -282,15 +282,7 @@ impl Layout {
                     let moving_panels = self.panel_ids_in_subtree(*group);
                     self.validate_panel_ids_allowed_for_target(&moving_panels, target)?;
 
-                    // Dropping a whole group into the center of a collapsed
-                    // target also reveals that target in the Photoshop profile.
-                    // This is inside the transaction candidate, so an invalid
-                    // merge still leaves the live Layout unchanged.
-                    if self.profile == crate::Profile::Photoshop
-                        && let Some(Node::Tabs(tabs)) = self.nodes.get_mut(*target_group)
-                    {
-                        tabs.collapsed = false;
-                    }
+                    self.reveal_merge_target_for_profile(*target_group);
                 }
                 self.merge_group_into_tabs(*group, *target_group, *index)?;
                 if group == target_group {
@@ -438,6 +430,16 @@ impl Layout {
             _ => Err(CommandError::InvalidTarget {
                 reason: "apply group command received an unsupported command",
             }),
+        }
+    }
+
+    /// Photoshop profile treats merging into a collapsed group as revealing it.
+    /// Called only after merge-target and panel constraints have been validated.
+    fn reveal_merge_target_for_profile(&mut self, target_group: NodeId) {
+        if self.profile == crate::Profile::Photoshop
+            && let Some(Node::Tabs(tabs)) = self.nodes.get_mut(target_group)
+        {
+            tabs.collapsed = false;
         }
     }
 }
