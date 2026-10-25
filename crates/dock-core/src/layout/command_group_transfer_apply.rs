@@ -1,0 +1,121 @@
+use super::*;
+use crate::AllowedArea;
+
+impl Layout {
+    pub(super) fn apply_move_group_command(
+        &mut self,
+        group: &NodeId,
+        column: &NodeId,
+        index: &usize,
+    ) -> Result<CommandApplication, CommandError> {
+        match self.nodes.get(*group) {
+            Some(Node::Tabs(_)) => {}
+            Some(_) => {
+                return Err(CommandError::InvalidTarget {
+                    reason: "MoveGroup source must be a Tabs node",
+                });
+            }
+            None => return Err(CommandError::MissingNode { node: *group }),
+        };
+        let target_groups = match self.nodes.get(*column) {
+            Some(Node::Column(column)) => column.groups.clone(),
+            Some(_) => {
+                return Err(CommandError::InvalidTarget {
+                    reason: "MoveGroup target must be a Column node",
+                });
+            }
+            None => return Err(CommandError::MissingNode { node: *column }),
+        };
+        if *index > target_groups.len() {
+            return Err(CommandError::InvalidValue {
+                field: "index",
+                reason: "group insertion index is outside the column",
+            });
+        }
+        let target_area = self.allowed_area_for_column_target(*column)?;
+        let moving_panels = self.panel_ids_in_subtree(*group);
+        self.validate_panel_ids_allowed_for_area(&moving_panels, target_area)?;
+        let source_parent = self.find_parent(*group);
+        if source_parent == Some(*column)
+            && let Some(application) = self.try_reorder_group_within_column(
+                *group,
+                *column,
+                *index,
+                &target_groups,
+            )?
+        {
+            return Ok(application);
+        }
+        let source_column = source_parent.and_then(|parent| match self.nodes.get(parent) {
+            Some(Node::Column(column)) if column.groups.len() > 1 => column
+                .groups
+                .iter()
+                .position(|id| *id == *group)
+                .map(|index| (parent, index)),
+            _ => None,
+        });
+        let inverse =
+            source_column.map(|(source_column, source_index)| DockCommand::MoveGroup {
+                group: *group,
+                column: source_column,
+                index: source_index,
+            });
+        self.move_group_to_existing_column(*group, *column, *index)?;
+        Ok(CommandApplication {
+            actual_value: None,
+            inverse,
+            persistent: true,
+        })
+    }
+
+    pub(super) fn apply_move_group_to_main_column_command(
+        &mut self,
+        group: &NodeId,
+        side: &DockSide,
+        index: &usize,
+        metrics: &DockMetrics,
+    ) -> Result<CommandApplication, CommandError> {
+        if !matches!(self.nodes.get(*group), Some(Node::Tabs(_))) {
+            return Err(if self.nodes.contains_key(*group) {
+                CommandError::InvalidTarget {
+                    reason: "MoveGroupToMainColumn source must be a Tabs node",
+                }
+            } else {
+                CommandError::MissingNode { node: *group }
+            });
+        }
+
+        let target_columns = self.main_columns(*side)?;
+        if *index > target_columns.len() {
+            return Err(CommandError::InvalidValue {
+                field: "index",
+                reason: "main-column insertion index is outside the dock",
+            });
+        }
+
+        let moving_panels = self.panel_ids_in_subtree(*group);
+        self.validate_panel_ids_allowed_for_area(&moving_panels, AllowedArea::MAIN_DOCK)?;
+
+        let source = self.group_main_column_source(*group);
+
+        if let Some(application) = self.try_reorder_sole_group_main_column(
+            *group,
+            *side,
+            *index,
+            source.column,
+            source.position,
+            source.is_sole_group,
+        )? {
+            return Ok(application);
+        }
+
+        let inverse = self.inverse_for_move_group_to_main_column(*group, &source);
+
+        self.move_group_to_new_main_column(*group, *side, *index, metrics)?;
+        Ok(CommandApplication {
+            actual_value: None,
+            inverse,
+            persistent: true,
+        })
+    }
+}

@@ -1232,6 +1232,7 @@ mod command_panel_tab_reorder;
 mod command_flyout_panel_transfer_dispatch;
 mod command_group_dispatch;
 mod command_group_transfer_dispatch;
+mod command_group_transfer_apply;
 mod command_group_transfer_operations;
 mod command_group_transfer_reorder;
 mod command_changes;
