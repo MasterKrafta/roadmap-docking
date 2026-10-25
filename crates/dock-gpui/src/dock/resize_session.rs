@@ -16,6 +16,7 @@ pub(super) enum StartGeometry {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ResizeStartError {
     InvalidPointer,
+    StaleFrameGeometry,
     InvalidHandle,
     MissingColumnGeometry,
     MissingFloatingGeometry,
