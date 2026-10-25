@@ -20,15 +20,6 @@ impl Layout {
                 reason: geometry_error_reason(reason),
             });
         }
-        if metrics_are_valid
-            && let Some(bounds) = self.canvas.last_known_bounds()
-            && bounds.size.width + PIXEL_TOLERANCE < metrics.min_canvas_width
-        {
-            errors.push(ValidationError::InvalidCanvas {
-                reason: "canvas width is below min_canvas_width",
-            });
-        }
-
         let mut panel_placements: HashMap<PanelId, NodeId> = HashMap::new();
 
         for (node_id, node) in self.nodes.iter() {

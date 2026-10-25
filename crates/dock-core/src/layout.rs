@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Weak};
 
 use slotmap::SlotMap;
 
@@ -13,11 +14,7 @@ use crate::{
 const RATIO_TOLERANCE: f32 = 1.0e-4;
 const PIXEL_TOLERANCE: f32 = 1.0e-3;
 
-/// Complete UI-independent docking state.
-///
-/// Layout is the sole owner of runtime arenas. Public access is read-only;
-/// external edits are performed only through Layout::apply and typed DockCommand
-/// values. Flyout state is transient and kept separately from the persistent tree.
+/// Arena parts restored from the persistent workspace DTO.
 #[cfg(feature = "serde")]
 pub(crate) struct WorkspaceLayoutParts {
     pub(crate) nodes: SlotMap<NodeId, Node>,
@@ -34,6 +31,11 @@ pub(crate) struct WorkspaceLayoutParts {
 pub(crate) type FloatingBoundsClampResult =
     Result<Vec<(usize, Rect, Rect)>, (usize, crate::ComputeRectsError)>;
 
+/// Complete UI-independent docking state.
+///
+/// Layout is the sole owner of runtime arenas. Public access is read-only;
+/// external edits are performed only through Layout::apply and typed DockCommand
+/// values. Clones retain the same history lineage; newly created or loaded layouts do not.
 #[derive(Clone, Debug)]
 pub struct Layout {
     nodes: SlotMap<NodeId, Node>,
@@ -48,6 +50,7 @@ pub struct Layout {
     chrome: ChromeMode,
     flyout: Option<FlyoutState>,
     flyout_auto_collapse: bool,
+    history_identity: Arc<()>,
 }
 
 impl Layout {
@@ -66,6 +69,7 @@ impl Layout {
             chrome: ChromeMode::Visible,
             flyout: None,
             flyout_auto_collapse: true,
+            history_identity: Arc::new(()),
         }
     }
 
@@ -95,6 +99,7 @@ impl Layout {
             chrome,
             flyout: None,
             flyout_auto_collapse: true,
+            history_identity: Arc::new(()),
         }
     }
 
@@ -803,7 +808,9 @@ impl Layout {
         let mut panel_map = HashMap::<PanelId, PanelId>::new();
         for (old_id, instance) in snapshot.panel_instances.iter() {
             let new_id = if let Some(current) = candidate.panel_instances.get_mut(old_id) {
+                let runtime_state = current.state;
                 *current = instance.clone();
+                current.state = runtime_state;
                 old_id
             } else {
                 candidate.panel_instances.insert(instance.clone())
@@ -1019,6 +1026,24 @@ impl Layout {
             .map_err(|errors| CommandError::InvalidLayout { errors })?;
         *self = candidate;
         Ok(())
+    }
+
+    /// Opaque identity shared by Layout clones, but not separately loaded layouts.
+    pub(crate) fn history_identity(&self) -> Weak<()> {
+        Arc::downgrade(&self.history_identity)
+    }
+
+    /// Records host-measured canvas bounds without creating a persistent command revision.
+    /// Narrow windows are valid measurements and must not block layout commands.
+    pub fn update_canvas_bounds(&mut self, bounds: Option<Rect>) -> Result<bool, GeometryError> {
+        if let Some(bounds) = bounds {
+            bounds.validate_non_empty()?;
+        }
+        if self.canvas.last_known_bounds() == bounds {
+            return Ok(false);
+        }
+        self.canvas = CanvasState::new(bounds);
+        Ok(true)
     }
 
     pub const fn profile(&self) -> Profile {

@@ -648,6 +648,53 @@ fn undo_clears_transient_flyout_and_preserves_session_preference() {
 }
 
 #[test]
+fn narrow_canvas_measurements_can_be_updated_without_blocking_commands() {
+    let metrics = DockMetrics::default();
+    let mut fixture = fixture();
+    let narrow = Rect::new(Point::ZERO, Size::new(100.0, 600.0));
+    assert!(fixture.layout.update_canvas_bounds(Some(narrow)).unwrap());
+    assert_eq!(fixture.layout.canvas().last_known_bounds(), Some(narrow));
+    assert_eq!(fixture.layout.validate(&metrics), Ok(()));
+    assert!(fixture.layout.apply(DockCommand::SetChrome { mode: ChromeMode::DockHidden }, &metrics).is_ok());
+    assert_eq!(fixture.layout.update_canvas_bounds(Some(narrow)), Ok(false));
+}
+
+#[test]
+fn undo_history_discards_checkpoints_when_used_with_a_replaced_layout() {
+    let metrics = DockMetrics::default();
+    let mut original = fixture();
+    let mut history = UndoRedoHistory::new();
+    history.apply(&mut original.layout, DockCommand::ResizeColumn { column: original.column, width: 320.0 }, &metrics).unwrap();
+    assert!(history.can_undo());
+
+    let mut replacement = fixture();
+    assert!(!history.undo(&mut replacement.layout, &metrics).unwrap());
+    assert_eq!(history.undo_len(), 0);
+    assert_eq!(history.redo_len(), 0);
+    assert_eq!(replacement.layout.version(), 0);
+
+    history.apply(&mut replacement.layout, DockCommand::ResizeColumn { column: replacement.column, width: 330.0 }, &metrics).unwrap();
+    assert!(history.undo(&mut replacement.layout, &metrics).unwrap());
+    assert_eq!(history.undo_len(), 0);
+}
+
+#[test]
+fn undo_preserves_panel_runtime_size_changed_after_checkpoint() {
+    let metrics = DockMetrics::default();
+    let mut fixture = fixture();
+    fixture.layout.apply(DockCommand::SetColumnMode { column: fixture.column, mode: ColumnMode::IconsOnly }, &metrics).unwrap();
+    fixture.layout.apply(DockCommand::OpenFlyout { column: fixture.column, panel: fixture.layers }, &metrics).unwrap();
+    fixture.layout.apply(DockCommand::ResizeFlyout { panel: fixture.layers, width: 320.0 }, &metrics).unwrap();
+    let mut history = UndoRedoHistory::new();
+    history.apply(&mut fixture.layout, DockCommand::SetChrome { mode: ChromeMode::DockHidden }, &metrics).unwrap();
+    fixture.layout.apply(DockCommand::ResizeFlyout { panel: fixture.layers, width: 460.0 }, &metrics).unwrap();
+
+    assert!(history.undo(&mut fixture.layout, &metrics).unwrap());
+    let panel = fixture.layout.panel_instance(fixture.layers).unwrap();
+    assert_eq!(panel.state.last_known_size(), Some(Size::new(460.0, constraints().preferred_size.height)));
+}
+
+#[test]
 fn new_persistent_command_after_undo_discards_redo_branch() {
     let metrics = DockMetrics::default();
     let mut fixture = fixture();

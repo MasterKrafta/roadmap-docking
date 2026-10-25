@@ -244,6 +244,7 @@ impl Layout {
             chrome,
             flyout: None,
             flyout_auto_collapse: true,
-        }
+            history_identity: Arc::new(()),
+}
     }
 }
