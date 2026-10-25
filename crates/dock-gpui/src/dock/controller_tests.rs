@@ -254,6 +254,41 @@
 
 
     #[test]
+    fn floating_edge_resize_commits_and_undoes_as_one_gesture() {
+        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+        let group = controller.layout().nodes().find_map(|(id, node)| match node {
+            Node::Column(column) if column.groups.len() > 1 => column.groups.first().copied(),
+            _ => None,
+        }).expect("initial layout should contain a column with multiple groups");
+        controller.apply(DockCommand::Float {
+            node: group,
+            bounds: Rect::new(Point::new(80.0, 60.0), Size::new(500.0, 400.0)),
+        }).unwrap();
+        let (floating_id, original_bounds) = controller.layout().floating_groups().next()
+            .map(|(id, floating)| (id, floating.bounds))
+            .expect("Float should create a floating window");
+        let frame = controller.frame(Rect::new(Point::ZERO, Size::new(1200.0, 800.0))).unwrap();
+        let edge = *frame.rects().floating_resize_edges.iter()
+            .find(|entry| entry.group == floating_id && entry.edge == dock_core::ResizeEdge::Right)
+            .expect("floating window should expose a right resize edge");
+        let start = Point::new(edge.rect.origin.x, edge.rect.origin.y);
+        let end = Point::new(start.x + 20.0, start.y);
+
+        controller.begin_resize(
+            ResizeHandle::FloatingEdge { group: floating_id, edge: dock_core::ResizeEdge::Right },
+            start,
+            &frame,
+        ).unwrap();
+        controller.update_resize(end).unwrap();
+        assert_ne!(controller.layout().floating_group(floating_id).unwrap().bounds, original_bounds);
+        controller.commit_resize(end).unwrap();
+        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+        assert!(controller.undo().unwrap());
+        assert_eq!(controller.layout().floating_group(floating_id).unwrap().bounds, original_bounds);
+        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+    }
+
+    #[test]
     fn outer_column_resize_commits_and_undoes_on_both_sides() {
         for side in [DockSide::Left, DockSide::Right] {
             let mut controller = DockController::new_initial(&Theme::default()).unwrap();
