@@ -1207,6 +1207,7 @@ mod column_display_order;
 mod command_target_policy;
 mod command_floating_dock_operation;
 mod command_floating_dock_main_column;
+mod command_floating_dock_rail_slot;
 mod command_floating_raise;
 mod command_floating_move;
 mod command_floating_resize;
