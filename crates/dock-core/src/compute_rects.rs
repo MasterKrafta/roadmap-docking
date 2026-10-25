@@ -1528,7 +1528,8 @@ mod tests {
         let mut panels = Vec::new();
         let mut children = Vec::new();
         for index in 0..4 {
-            let (panel, child) = builder.panel(key(&format!("tiny-overflow-{index}")), constraints());
+            let (panel, child) =
+                builder.panel(key(&format!("tiny-overflow-{index}")), constraints());
             panels.push(panel);
             children.push(child);
         }
