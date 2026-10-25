@@ -46,12 +46,30 @@ impl WorkspaceFile {
         }
     }
 
-    /// Captures persistent state without exposing runtime arena keys or UI state.
+    /// Exports a validated Layout using the active metric profile.
     ///
-    /// This serializer has no DockMetrics argument, so it checks exported references
-    /// but cannot enforce metric-dependent invariants. Prefer `from_layout_with_metrics`
-    /// when the active metric profile is available.
-    pub fn from_layout(layout: &Layout) -> Result<Self, WorkspaceFileError> {
+    /// The structural export runs first so malformed or excessively deep runtime
+    /// trees are rejected before recursive model validation.
+    pub fn from_layout(
+        layout: &Layout,
+        metrics: &DockMetrics,
+    ) -> Result<Self, WorkspaceFileError> {
+        let file = Self::export_layout_unchecked(layout)?;
+        layout
+            .validate(metrics)
+            .map_err(WorkspaceFileError::InvalidLayout)?;
+        Ok(file)
+    }
+
+    /// Export helper for test fixtures that deliberately need an invalid Layout.
+    #[cfg(test)]
+    pub(crate) fn from_layout_unchecked_for_test(
+        layout: &Layout,
+    ) -> Result<Self, WorkspaceFileError> {
+        Self::export_layout_unchecked(layout)
+    }
+
+    fn export_layout_unchecked(layout: &Layout) -> Result<Self, WorkspaceFileError> {
         let left = layout
             .main_area(DockSide::Left)
             .map(|area| node_to_workspace(layout, area.root))
@@ -86,17 +104,6 @@ impl WorkspaceFile {
             right,
             floating_groups,
         }))
-    }
-
-    /// Validates a Layout against the active metrics before exporting it.
-    pub fn from_layout_with_metrics(
-        layout: &Layout,
-        metrics: &DockMetrics,
-    ) -> Result<Self, WorkspaceFileError> {
-        layout
-            .validate(metrics)
-            .map_err(WorkspaceFileError::InvalidLayout)?;
-        Self::from_layout(layout)
     }
 
     /// Parses a workspace file and migrates supported older versions.
@@ -401,9 +408,12 @@ impl WorkspaceFile {
 }
 
 impl Layout {
-    /// Creates a stable workspace DTO suitable for the public JSON boundary.
-    pub fn to_workspace_file(&self) -> Result<WorkspaceFile, WorkspaceFileError> {
-        WorkspaceFile::from_layout(self)
+    /// Creates a validated workspace DTO suitable for the public JSON boundary.
+    pub fn to_workspace_file(
+        &self,
+        metrics: &DockMetrics,
+    ) -> Result<WorkspaceFile, WorkspaceFileError> {
+        WorkspaceFile::from_layout(self, metrics)
     }
 }
 
