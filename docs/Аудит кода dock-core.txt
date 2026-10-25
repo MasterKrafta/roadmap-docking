@@ -102,6 +102,8 @@ ResizeFlyout меняет panel_instances без роста версии. Это
 
 - **Подтверждённый пакет:** обработчики `DockCommand::MoveFloating`, `ResizeFloating`, `ResizeFloatingBounds` и `RaiseFloating` вынесены из `command_floating_dispatch.rs` в `command_floating_window_dispatch.rs` (`apply_floating_window_command`). Основной диспетчер маршрутизирует эти четыре команды в новый модуль. Сохранены проверки конечности координат и валидности размеров, применение минимального размера плавающего окна, `actual_value`, обратные команды для перемещения/изменения границ и обновление Z-порядка. Пользователь подтвердил успешные локальные тесты. Публичный API не менялся. Коммит: [выделение обработчиков плавающего окна](https://github.com/MasterKrafta/roadmap-docking/commit/d4405e81fba71a1dbdf5dfbaf04f64b207b5f483).
 
+- **Текущий пакет, ожидает локальной проверки:** обработчик `DockCommand::DockFloating` вынесен из `command_floating_dispatch.rs` в `command_floating_dock_dispatch.rs` (`apply_dock_floating_command`). Диспетчер теперь делегирует команду отдельному обработчику. Сохранены проверка существования плавающей группы и её root, валидация drop-target, проверка ограничений панелей для целевой области, собственно dock-перенос и обновление remembered dock locations после успешного переноса. Публичный API не менялся; локальные тесты после этого рефакторинга ещё не подтверждены. Коммит: [выделение обработчика DockFloating](https://github.com/MasterKrafta/roadmap-docking/commit/70b8007d4ec312b3d527d30e6dcbbae38a51df21).
+
 Оставшиеся ограничения
 ======================
 
