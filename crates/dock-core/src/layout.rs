@@ -147,14 +147,21 @@ impl Layout {
         &mut self,
         client_area: Rect,
         metrics: &DockMetrics,
+        original_indices: &HashMap<FloatingGroupId, usize>,
     ) -> FloatingBoundsClampResult {
         let mut groups: Vec<_> = self
             .floating_groups
             .iter()
             .enumerate()
-            .map(|(original_index, (id, group))| (original_index, id, group.z_order))
+            .map(|(fallback_index, (id, group))| {
+                (
+                    original_indices.get(&id).copied().unwrap_or(fallback_index),
+                    id,
+                    group.z_order,
+                )
+            })
             .collect();
-        groups.sort_by_key(|(_, _, z_order)| *z_order);
+        groups.sort_by_key(|(original_index, _, z_order)| (*z_order, *original_index));
 
         let mut changes = Vec::new();
         for (index, id, _) in groups {
