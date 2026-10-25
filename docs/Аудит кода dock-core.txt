@@ -96,7 +96,7 @@ ResizeFlyout меняет panel_instances без роста версии. Это
 - changed_nodes включает корни, нужные для инвалидирования при перемещении/размере/z-order floating-окон и изменении chrome.
 - Вставка группы без явного split ratio сохраняет относительные пропорции существующих групп; добавлены регрессионные тесты для слияния floating stack в Column.
 - Rect::contains не выполняет повторную проверку тех же геометрических данных.
-- GeometryError реализует Display/Error, а ComputeRectsError форматирует вложенную геометрическую причину через Display (не {:?}); добавлен тест `display_uses_geometry_error_message_instead_of_debug_format`. Пустой или некорректный floating subtree больше не маскируется под ArithmeticOverflow.
+- GeometryError реализует Display/Error, а ComputeRectsError форматирует вложенную геометрическую причину через Display (не {:?}); добавлен тест `display_uses_geometry_error_message_instead_of_debug_format`. Пустая колонка теперь даёт InvalidLayout вместо ложного ArithmeticOverflow, а реальное переполнение минимального размера сохраняет ArithmeticOverflow; добавлены регрессионные тесты на оба случая. Пустой или некорректный floating subtree больше не маскируется под ArithmeticOverflow.
 - Документация Layout перемещена на саму структуру; устранены assumption-based expect/unreachable в отмеченных путях normalization, factory и ResizeSplitColumnBoundary.
 - DockMetrics проверяет связь header_height + tab_strip_height с min_group_height, а serde-десериализация с defaults теперь тоже валидирует значения. Проверки полей упрощены без двойного match по строковым именам.
 - Workspace JSON ограничен 16 MiB, дерево — 100 000 узлов, а глубина runtime tree ограничена 256 перед рекурсивной валидацией.
