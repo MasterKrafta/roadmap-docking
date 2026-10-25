@@ -318,7 +318,7 @@
                             side: DockSide::Left,
                             index: 0,
                         },
-                        controller.metrics(),
+                        &controller.metrics,
                     )
                     .expect("test setup should create a left main column");
             }
