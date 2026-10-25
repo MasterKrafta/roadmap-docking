@@ -105,7 +105,7 @@ impl Layout {
         }))
     }
 
-    pub(super) fn apply_panel_transfer_command(
+    fn apply_flyout_panel_transfer_command(
         &mut self,
         command: &DockCommand,
         metrics: &DockMetrics,
@@ -160,6 +160,22 @@ impl Layout {
                     applied.inverse = None;
                 }
                 Ok(applied)
+            }
+            _ => Err(CommandError::InvalidTarget {
+                reason: "apply flyout panel transfer command received an unsupported command",
+            }),
+        }
+    }
+
+    pub(super) fn apply_panel_transfer_command(
+        &mut self,
+        command: &DockCommand,
+        metrics: &DockMetrics,
+    ) -> Result<CommandApplication, CommandError> {
+        match command {
+            DockCommand::MovePanelFromFlyout { .. }
+            | DockCommand::FloatPanelFromFlyout { .. } => {
+                self.apply_flyout_panel_transfer_command(command, metrics)
             }
             DockCommand::MovePanel { panel, target } => {
                 if matches!(target, DropTarget::GroupTabs { .. }) {
