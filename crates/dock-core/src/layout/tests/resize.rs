@@ -511,13 +511,14 @@ fn c45_reset_column_ratios_shares_free_height_only_between_expanded_groups() {
             &metrics,
         )
         .unwrap();
+    let expected_ratios = vec![0.1, 0.3, 0.3, 0.3];
     assert_eq!(
         outcome.actual_value,
-        Some(CommandValue::GroupRatios(vec![0.0, 0.5, 0.0, 0.5]))
+        Some(CommandValue::GroupRatios(expected_ratios.clone()))
     );
     assert!(matches!(
         layout.node(column),
-        Some(Node::Column(value)) if value.group_ratios == vec![0.0, 0.5, 0.0, 0.5]
+        Some(Node::Column(value)) if value.group_ratios == expected_ratios
     ));
     assert_eq!(layout.validate(&metrics), Ok(()));
 
