@@ -669,13 +669,15 @@ mod tests {
         session.pointer_start = Point::new(f32::MAX, 100.0);
 
         assert_eq!(
-            session.command_for_pointer(Point::new(-f32::MAX, 110.0)),
-            Ok(DockCommand::ResizeGroups {
+            session
+                .command_for_pointer(Point::new(-f32::MAX, 110.0))
+                .unwrap(),
+            DockCommand::ResizeGroups {
                 column: owner,
                 boundary_index: 0,
                 delta: 10.0,
                 available_height: 640.0,
-            })
+            }
         );
     }
 
