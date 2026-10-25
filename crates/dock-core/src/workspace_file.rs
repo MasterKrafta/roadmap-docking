@@ -279,6 +279,7 @@ impl WorkspaceFile {
         let mut dock_areas = SlotMap::<DockAreaId, DockArea>::with_key();
         let mut main_areas = [None, None];
         let mut floating_groups = SlotMap::<FloatingGroupId, FloatingGroup>::with_key();
+        let mut floating_group_json_indices = HashMap::<FloatingGroupId, usize>::new();
         let mut unknown_panel_keys = BTreeSet::new();
 
         for (side, root) in [
@@ -304,7 +305,7 @@ impl WorkspaceFile {
             main_areas[index] = Some(area_id);
         }
 
-        for group in &self.layout.floating_groups {
+        for (json_index, group) in self.layout.floating_groups.iter().enumerate() {
             let root = restore_node(
                 &group.root,
                 &descriptors_by_key,
@@ -314,7 +315,9 @@ impl WorkspaceFile {
                 &mut panel_instances,
             )?;
             let area_id = dock_areas.insert(DockArea::floating(root));
-            floating_groups.insert(FloatingGroup::new(area_id, group.bounds, group.z_order));
+            let floating_id =
+                floating_groups.insert(FloatingGroup::new(area_id, group.bounds, group.z_order));
+            floating_group_json_indices.insert(floating_id, json_index);
         }
 
         diagnostics.extend(
@@ -342,7 +345,7 @@ impl WorkspaceFile {
 
         if let Some(region) = visible_region {
             let changes = layout
-                .clamp_floating_groups_for_workspace_load(region, metrics)
+                .clamp_floating_groups_for_workspace_load(region, metrics, &floating_group_json_indices)
                 .map_err(|(index, error)| match error {
                     ComputeRectsError::InsufficientSpace {
                         axis,
