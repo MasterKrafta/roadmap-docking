@@ -6,9 +6,9 @@ pub enum ComputeRectsError {
     /// Dock metrics failed their consistency checks.
     InvalidMetrics { reason: &'static str },
     /// Full diagnostics from model validation before any rectangles were emitted.
-    LayoutValidation { errors: Vec<ValidationError> },
+    InvalidLayout { errors: Vec<ValidationError> },
     /// The model's internal structure is invalid where geometry cannot proceed.
-    InvalidLayout,
+    InvalidLayoutState,
     /// The supplied viewport or an intermediate rectangle was invalid.
     Geometry(GeometryError),
     /// Dock widths would leave less than the configured minimum Canvas width.
@@ -27,7 +27,7 @@ impl std::fmt::Display for ComputeRectsError {
             Self::InvalidMetrics { reason } => {
                 write!(formatter, "dock metrics are invalid: {reason}")
             }
-            Self::LayoutValidation { errors } => {
+            Self::InvalidLayout { errors } => {
                 if errors.is_empty() {
                     return formatter.write_str("layout is invalid");
                 }
@@ -41,7 +41,7 @@ impl std::fmt::Display for ComputeRectsError {
                         .join("; ")
                 )
             }
-            Self::InvalidLayout => formatter.write_str("layout structure is invalid"),
+            Self::InvalidLayoutState => formatter.write_str("layout structure is invalid"),
             Self::Geometry(error) => write!(formatter, "invalid geometry: {error}"),
             Self::InsufficientCanvasWidth { available, minimum } => write!(
                 formatter,
@@ -76,7 +76,7 @@ mod tests {
 
     #[test]
     fn display_preserves_layout_validation_reasons() {
-        let error = ComputeRectsError::LayoutValidation {
+        let error = ComputeRectsError::InvalidLayout {
             errors: vec![ValidationError::InvalidCanvas {
                 reason: "stored canvas bounds are invalid",
             }],
