@@ -133,9 +133,7 @@ pub use group_rect::GroupRect;
 pub use hit_result::HitResult;
 pub use last_dock_location::LastDockLocation;
 pub use layout::Layout;
-pub use layout_factory::{
-    create_initial_layout, create_initial_layout_with_error, InitialLayoutError,
-};
+pub use layout_factory::{create_initial_layout, InitialLayoutError};
 pub use layout_rects::LayoutRects;
 pub use node::Node;
 pub use node_id::NodeId;
