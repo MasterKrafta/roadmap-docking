@@ -141,6 +141,55 @@
     }
 
     #[test]
+    fn begin_resize_rejects_stale_frame_geometry() {
+        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+        let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
+        let frame = controller.frame(viewport).unwrap();
+        let splitter = *frame
+            .rects()
+            .splitters
+            .iter()
+            .find(|splitter| splitter.axis == Axis::Y)
+            .expect("initial layout should contain a vertical group splitter");
+        let column_rect = frame
+            .rects()
+            .columns
+            .iter()
+            .find(|column| column.column == splitter.owner)
+            .expect("splitter column should have geometry");
+        let group_count = match controller.layout().node(splitter.owner) {
+            Some(Node::Column(column)) => column.groups.len(),
+            other => panic!("vertical splitter should belong to a column, got {other:?}"),
+        };
+        let available_height = column_rect.rect.size.height
+            - controller.metrics().splitter_thickness * (group_count - 1) as f32;
+        let handle = ResizeHandle::Splitter {
+            owner: splitter.owner,
+            boundary_index: splitter.boundary_index,
+            axis: Axis::Y,
+        };
+
+        controller
+            .apply(DockCommand::ResizeGroups {
+                column: splitter.owner,
+                boundary_index: splitter.boundary_index,
+                delta: 12.0,
+                available_height,
+            })
+            .unwrap();
+        let current_version = controller.layout().version();
+        assert_ne!(frame.layout_version(), current_version);
+
+        assert_eq!(
+            controller.begin_resize(handle, Point::new(180.0, 240.0), &frame),
+            Err(super::super::resize_session::ResizeStartError::StaleFrameGeometry)
+        );
+        assert!(controller.resize_session().is_none());
+        assert_eq!(controller.layout().version(), current_version);
+        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+    }
+
+    #[test]
     fn begin_resize_captures_start_geometry_and_rejects_a_second_session() {
         let mut controller = DockController::new_initial(&Theme::default()).unwrap();
         let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
