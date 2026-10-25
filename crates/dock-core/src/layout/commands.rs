@@ -859,39 +859,16 @@ impl Layout {
                     }
                 }
 
-                if let Some(source_column) = self.find_owner_column(*group)
-                    && self.find_owner_column(*target_group) == Some(source_column)
-                {
-                    let groups = match self.nodes.get(source_column) {
-                        Some(Node::Column(column)) => column.groups.clone(),
-                        _ => Vec::new(),
-                    };
-                    let source_index = groups.iter().position(|id| id == group);
-                    let target_index = groups.iter().position(|id| id == target_group);
-                    if let (Some(source_index), Some(target_index)) = (source_index, target_index)
-                        && ((*zone == DropZone::Top && source_index + 1 == target_index)
-                            || (*zone == DropZone::Bottom && target_index + 1 == source_index))
-                    {
-                        return Ok(CommandApplication::persistent());
-                    }
-                }
-                // A floating vertical stack has the same neighboring no-op
-                // rule as a Column's ordered group list.
-                if matches!(zone, DropZone::Top | DropZone::Bottom)
-                    && let (Some(source_parent), Some(target_parent)) =
-                        (self.find_parent(*group), self.find_parent(*target_group))
-                    && source_parent == target_parent
-                    && let Some(Node::Split(split)) = self.nodes.get(source_parent)
-                    && split.axis == Axis::Y
-                {
-                    let source_index = split.children.iter().position(|id| id == group);
-                    let target_index = split.children.iter().position(|id| id == target_group);
-                    if let (Some(source_index), Some(target_index)) = (source_index, target_index)
-                        && ((*zone == DropZone::Top && source_index + 1 == target_index)
-                            || (*zone == DropZone::Bottom && target_index + 1 == source_index))
-                    {
-                        return Ok(CommandApplication::persistent());
-                    }
+                let source_parent = self.find_parent(*group);
+                let target_parent = self.find_parent(*target_group);
+                if self.adjacent_group_edge_is_noop(
+                    *group,
+                    *target_group,
+                    *zone,
+                    source_parent,
+                    target_parent,
+                ) {
+                    return Ok(CommandApplication::persistent());
                 }
 
                 let source_column = self.find_owner_column(*group);
