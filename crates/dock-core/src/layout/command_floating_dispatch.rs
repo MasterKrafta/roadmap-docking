@@ -72,20 +72,7 @@ impl Layout {
                 self.apply_floating_window_command(command, metrics)
             }
             DockCommand::DockFloating { group, target } => {
-                let root = self
-                    .floating_groups
-                    .get(*group)
-                    .and_then(|floating| self.dock_areas.get(floating.area).map(|area| area.root))
-                    .ok_or(CommandError::MissingFloatingGroup { group: *group })?;
-                self.validate_drop_target(*target, metrics)?;
-                let panel_nodes = self.panel_nodes_in_subtree(root);
-                let moving_panels = self.panel_ids_in_subtree(root);
-                self.validate_panel_ids_allowed_for_target(&moving_panels, *target)?;
-                self.dock_floating_group(*group, *target, metrics)?;
-                for panel_node in panel_nodes {
-                    self.remember_panel_dock_location(panel_node);
-                }
-                Ok(CommandApplication::persistent())
+                self.apply_dock_floating_command(group, target, metrics)
             }
             _ => Err(CommandError::InvalidTarget {
                 reason: "floating command dispatcher received a non-floating command",
