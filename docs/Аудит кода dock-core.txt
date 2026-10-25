@@ -1,0 +1,70 @@
+Аудит статический: собрать и запустить тесты не удалось. crates.io из песочницы недоступен (прокси вернул 403), а workspace-Cargo.toml в архив не попал. Проверял чтением кода: около 11 тыс. строк production-кода из ~31 тыс., остальное тесты. Выборочно перепроверил Copy у DragSession, неверный doc-комментарий в layout.rs и логику layout_floating_root. Остальное опирается на чтение кода тремя проверяющими.
+
+Общий вывод. Код качественный: #![forbid(unsafe_code)], транзакционный apply (клон → команда → нормализация → валидация → коммит), строгая валидация геометрии с проверкой NaN/inf, идемпотентная нормализация. Критических дефектов и подтверждённых паник из публичного API я не нашёл. Проблемы в основном в граничных случаях геометрии, UX-логике drop-зон и производительности горячих путей.
+
+Medium
+compute_rects может вернуть Err для всего снимка из-за одного плавающего окна (compute_rects.rs:696-721, 982-996). layout_floating_root вычитает высоту заголовка для свёрнутой первой группы, а clamp_floating_bounds берёт минимум из minimum_node_size, где этого резерва нет.
+Сценарий: окно с X-split, первая ветка свёрнута, высота 40. После clamp остаётся 40 − 28 = 12, и layout_tabs возвращает InsufficientSpace. Пропадает и main dock.
+Фикс: учесть резерв заголовка в минимуме для floating-корня. Ошибку одного окна лучше деградировать, а не ронять весь снимок.
+Drop-зоны FloatingCenter/Top/Bottom выбирают не ту группу (compute_drop_zones.rs:436-533). Группа выбирается по минимальной вертикальной дистанции, а при X-split у всех групп одинаковый y. Drop на центр правой группы кладёт таб в левую.
+hit_test не может вернуть часть drop-зон (hit_test.rs:260-329). TabHeader и header-band проверяются раньше, поэтому TabInsertion, RailInsertion и зона Top всегда перекрыты. Приоритеты 0 и 1 в drop_zone_priority недостижимы. Во время drag нужно вызывать resolve_drop, либо проверять drop-зоны первыми.
+ResetColumnRatios обнуляет вес свёрнутых групп (sizing.rs:172-208). После развёртывания такая группа получает только минимальную высоту.
+Ratios главного Split(X) — мёртвые данные (commands.rs:1417-1440, 2632-2705, 2864-2876; compute_rects.rs:767-772). Геометрия берёт preferred_width, поэтому ResetMainColumnRatios и параметр ratio в SplitGroup не меняют ничего видимого, но пишут запись в undo и поднимают версию.
+Холодная загрузка workspace падает целиком на нерепарируемых ошибках (layout/validation.rs:23-29, helpers.rs:121-144). load_json возвращает InvalidLayout, если:
+canvas.last_known_bounds.width < min_canvas_width (метрики изменились между версиями);
+появился дубликат singleton-панели;
+после уменьшения max_columns их стало слишком много;
+в файле повторяется z_order.
+Лучше репарировать с диагностикой, как уже сделано для ratios и пустых узлов.
+Clamp плавающих групп при загрузке идёт до нормализации (layout.rs:102-141, workspace_file.rs:290 раньше :325). На «сыром» дереве он может дать фатальную InvalidRuntimeLayout (не проверено до конца).
+Undo не привязан к конкретному Layout (undo_redo_history.rs:73-137). Если применить историю к другому Layout (например, после загрузки workspace без history.clear()), снапшот может перезаписать чужие узлы по совпавшим ключам арены. Нужен epoch/uuid, проверяемый в undo/redo.
+Undo откатывает рантайм-состояние панелей (layout.rs:331-333). *current = instance.clone() возвращает старый last_known_size, поэтому undo несвязанной команды сбрасывает ширину flyout.
+Ядро не получает реальный размер окна (canvas_state.rs, sizing.rs:211-249). last_known_bounds меняется только внутри ResizeColumn. При узком канвасе validate делает невыполнимой любую команду, в том числе «лечащую».
+Производительность горячих путей:
+resolve_drop на каждый mouse-move делает полную validate, строит два индекса и аллоцирует все зоны (compute_drop_zones.rs:15-30, 635, 660);
+каждый apply делает три validate плюс клон, так что ResizeColumn и MoveFloating стоят O(n) на кадр;
+Rect::contains валидирует дважды (rect.rs:79-88);
+minimum_node_size пересчитывается рекурсивно, find_parent линейный.
+Фикс: кэш зон на время drag-сессии, меньше валидации в горячем пути.
+
+Low
+DragSession — Copy (drag_session.rs:14). Копию можно довести до Dropped дважды, и гарантия «один запрос» держится только на дисциплине вызывающего. Нужно оставить только Clone.
+pointer_up с NaN/∞ оставляет жест в Dragging (drag_session.rs:178-183). Адаптер должен сам вызвать cancel().
+Активный таб может скрыться в overflow (compute_rects.rs:603-658). visible_count берёт первые N табов, не глядя на active_index.
+MovePanel на GroupEdge собственной группы с одной панелью (commands.rs:362-477, достижимость uncertain) не no-op: меняются NodeId, теряется collapsed, пишется запись в undo.
+DockFloating на собственную группу (commands.rs:3158-3161) откатывается с невнятной UnreachableNode.
+OpenPanel не разворачивает свёрнутую Photoshop-группу (commands.rs:2513-2526), хотя MovePanel разворачивает.
+default_open_target без запасного варианта (tree.rs:108-123): OpenPanel падает, если в правом доке нет Tabs.
+changed_node_ids покрывает только узлы (commands.rs:3344-3357). Для MoveFloating, ResizeFloating, SetChrome и z-order версия растёт, а changed_nodes = [], что ломает адаптеры с кэшем по этому полю.
+insert_group_at_column без split_ratio сбрасывает пропорции всех групп целевой колонки (commands.rs:2786).
+Потеря диагностики:
+.map_err(|_| InvalidLayout/InvalidMetrics) отбрасывает причину (compute_rects.rs:103-110);
+у GeometryError нет Display и Error, поэтому используется {:?};
+пустая колонка даёт вводящее в заблуждение ArithmeticOverflow (sizing.rs:519-548);
+ошибки layout_factory и PanelKey::new — &'static str вместо thiserror;
+индекс в диагностике FloatingBoundsClamped относится к отсортированному порядку, а не к JSON (layout.rs:102-141);
+версия 2.0 даёт сообщение «missing non-negative integer field».
+Float-дрейф: последняя группа в стеке получает remaining*w/sum без компенсации остатка (compute_rects.rs:1105-1128), тогда как у табов остаток отдан последнему элементу.
+Floating Split(Y) не получает резерв заголовка, Column получает (compute_rects.rs:696-720). Это неконсистентно.
+Недостижимый код в clamp_floating_bounds (compute_rects.rs:1012-1037), плюс возможный ложный ArithmeticOverflow на больших origin (~1e7) из-за округления f32.
+Рекурсия без лимита глубины в tree.rs, normalization.rs, validation.rs. Для JSON-загрузки это ограничивает serde_json (128 уровней), но для программно построенных деревьев защиты нет. У JSON нет лимита размера и числа узлов.
+from_layout не валидирует layout (workspace_file.rs:43-78), поэтому можно сохранить файл, который потом не загрузится.
+unreachable! и expect в commands.rs:1284,1288,1342 и normalization.rs:49,56,76,84,153,184,212. Сейчас недостижимы, но держатся на порядке вызовов. Лучше ok_or(...).
+inverse есть не у всех команд. Undo работает через снапшоты, но в публичном API стоит задокументировать, какие команды имеют inverse.
+push_bounded на Vec::remove(0) вместо VecDeque. last_dock_locations растёт без границы.
+Doc-комментарий Layout стоит перед WorkspaceLayoutParts (layout.rs:16-20), так что у публичной структуры документации нет.
+Cargo.toml и API:
+serde_json и proptest указаны с литеральными версиями, остальное идёт через workspace;
+все ~80 модулей одновременно pub mod и re-export, поэтому любой рефакторинг файлов ломает API;
+код использует Option::is_none_or, а это Rust ≥ 1.82. Проверьте rust-version в workspace.
+DockMetrics: validate через двойной match по строковым именам хрупок. Нет проверок связей между метриками (например, header_height + tab_strip_height против min_group_height), а при serde(default) валидации после десериализации нет.
+Архитектура
+commands.rs на 3370 строк стоит разбить по доменам: панели, колонки, floating, flyout.
+Ветвление if profile == … разбросано по командам, его можно вынести в стратегию.
+Логика вставки ratios продублирована в трёх местах (insert_group_at_column, insert_existing_column_at, floating insert_group_edge), как и no-op проверка соседних групп (SplitGroup и adjacent_group_edge_is_noop).
+ResizeFlyout меняет panel_instances без роста версии. Это нарушает принцип «version = persistent state», рантайм-состояние лучше вынести из PanelInstance.
+Что сделано хорошо
+Предсказуемый DTO-слой для workspace: арены создаются заново, дубликатов ID и висячих ссылок быть не может.
+Неизвестные ключи панелей сохраняются как placeholder с диагностикой, то есть forward-compat продуман.
+Машина состояний DragSession корректно закрывает двойной commit, а weighted_sizes завершается и учитывает нулевые веса.
+Нормализация покрыта proptest.

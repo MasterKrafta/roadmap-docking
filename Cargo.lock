@@ -1075,6 +1075,7 @@ dependencies = [
  "gpui",
  "gpui_platform",
  "slotmap",
+ "tracing",
  "ui",
 ]
 
