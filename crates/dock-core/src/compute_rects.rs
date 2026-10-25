@@ -1370,8 +1370,8 @@ mod tests {
     use super::{minimum_node_size, ComputeRectsError};
     use crate::layout_builder::LayoutBuilder;
     use crate::{
-        Axis, ColumnMode, DockMetrics, DockSide, GeometryError, LayoutRects, Node,
-        PanelConstraints, PanelKey, Point, Profile, Rect, Size,
+        Axis, ColumnMode, ComputeRectsDiagnosticError, DockMetrics, DockSide, GeometryError,
+        LayoutRects, Node, PanelConstraints, PanelKey, Point, Profile, Rect, Size,
     };
 
     const PIXEL_TOLERANCE: f32 = 1.0e-3;
@@ -1391,6 +1391,26 @@ mod tests {
 
     fn viewport(width: f32, height: f32) -> Rect {
         Rect::new(Point::ZERO, Size::new(width, height))
+    }
+
+    #[test]
+    fn detailed_compute_rects_preserves_metric_reason_and_legacy_error_category() {
+        let layout = crate::Layout::new(Profile::Generic);
+        let metrics = DockMetrics {
+            min_canvas_width: 0.0,
+            ..DockMetrics::default()
+        };
+
+        assert_eq!(
+            layout.compute_rects_with_diagnostics(viewport(1000.0, 500.0), &metrics),
+            Err(ComputeRectsDiagnosticError::InvalidMetrics {
+                reason: "min_canvas_width must be positive",
+            })
+        );
+        assert_eq!(
+            layout.compute_rects(viewport(1000.0, 500.0), &metrics),
+            Err(ComputeRectsError::InvalidMetrics)
+        );
     }
 
     // Test-only stand-in for the renderer's final logical->physical pixel snap.
