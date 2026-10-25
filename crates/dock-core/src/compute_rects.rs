@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    Axis, Column, ColumnMode, ColumnRect, ComputeRectsDiagnosticError, ComputeRectsError,
-    DockMetrics, DockSide,
+    Axis, Column, ColumnMode, ColumnRect, ComputeRectsError, DockMetrics, DockSide,
     FloatingGroupRect, FloatingResizeEdgeRect, FlyoutRect, GeometryError, GroupRect, Layout,
     LayoutRects, Node, NodeId, PanelRect, Point, Rect, ResizeEdge, Size, SplitterRect,
     TabHeaderRect, TabOverflowRect, TabStripRect, Tabs, VerticalOverflow,
@@ -103,35 +102,14 @@ impl Layout {
         viewport: Rect,
         metrics: &DockMetrics,
     ) -> Result<LayoutRects, ComputeRectsError> {
-        self.compute_rects_with_diagnostics(viewport, metrics)
-            .map_err(|error| match error {
-                ComputeRectsDiagnosticError::InvalidMetrics { .. } => {
-                    ComputeRectsError::InvalidMetrics
-                }
-                ComputeRectsDiagnosticError::InvalidLayout { .. } => {
-                    ComputeRectsError::InvalidLayout
-                }
-                ComputeRectsDiagnosticError::Computation(error) => error,
-            })
-    }
-
-    /// Resolves rectangles and preserves metric/layout validation diagnostics.
-    ///
-    /// Unlike `compute_rects`, this additive API returns the original metric
-    /// validation reason or the full list of `ValidationError` values.
-    pub fn compute_rects_with_diagnostics(
-        &self,
-        viewport: Rect,
-        metrics: &DockMetrics,
-    ) -> Result<LayoutRects, ComputeRectsDiagnosticError> {
         metrics
             .validate()
-            .map_err(|reason| ComputeRectsDiagnosticError::InvalidMetrics { reason })?;
+            .map_err(|reason| ComputeRectsError::InvalidMetrics { reason })?;
         viewport
             .validate_non_empty()
             .map_err(ComputeRectsError::Geometry)?;
         self.validate_cached(metrics)
-            .map_err(|errors| ComputeRectsDiagnosticError::InvalidLayout { errors })?;
+            .map_err(|errors| ComputeRectsError::LayoutValidation { errors })?;
 
         // Cache minimum sizes only for this immutable geometry pass. The cache
         // cannot outlive the exact layout and metrics used to calculate it.
@@ -158,18 +136,13 @@ impl Layout {
 
         let available_canvas = viewport.size.width - left_width - right_width;
         if !available_canvas.is_finite() {
-            return Err(
-                ComputeRectsError::Geometry(GeometryError::ArithmeticOverflow).into(),
-            );
+            return Err(ComputeRectsError::Geometry(GeometryError::ArithmeticOverflow));
         }
         if available_canvas < metrics.min_canvas_width {
-            return Err(
-                ComputeRectsError::InsufficientCanvasWidth {
-                    available: available_canvas,
-                    minimum: metrics.min_canvas_width,
-                }
-                .into(),
-            );
+            return Err(ComputeRectsError::InsufficientCanvasWidth {
+                available: available_canvas,
+                minimum: metrics.min_canvas_width,
+            });
         }
 
         let viewport_right = viewport
@@ -1373,7 +1346,7 @@ mod tests {
     use super::{minimum_node_size, ComputeRectsError};
     use crate::layout_builder::LayoutBuilder;
     use crate::{
-        Axis, ColumnMode, ComputeRectsDiagnosticError, DockMetrics, DockSide, GeometryError,
+        Axis, ColumnMode, DockMetrics, DockSide, GeometryError,
         LayoutRects, Node, PanelConstraints, PanelKey, Point, Profile, Rect, Size,
     };
 
@@ -1397,7 +1370,7 @@ mod tests {
     }
 
     #[test]
-    fn detailed_compute_rects_preserves_metric_reason_and_legacy_error_category() {
+    fn compute_rects_preserves_metric_validation_reason() {
         let layout = crate::Layout::new(Profile::Generic);
         let metrics = DockMetrics {
             min_canvas_width: 0.0,
@@ -1405,14 +1378,10 @@ mod tests {
         };
 
         assert_eq!(
-            layout.compute_rects_with_diagnostics(viewport(1000.0, 500.0), &metrics),
-            Err(ComputeRectsDiagnosticError::InvalidMetrics {
+            layout.compute_rects(viewport(1000.0, 500.0), &metrics),
+            Err(ComputeRectsError::InvalidMetrics {
                 reason: "min_canvas_width must be positive",
             })
-        );
-        assert_eq!(
-            layout.compute_rects(viewport(1000.0, 500.0), &metrics),
-            Err(ComputeRectsError::InvalidMetrics)
         );
     }
 
