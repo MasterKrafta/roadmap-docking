@@ -82,9 +82,9 @@ impl Layout {
         let area_id = self.dock_areas.insert(DockArea::floating(root));
         self.floating_groups
             .insert(FloatingGroup::new(area_id, bounds, next_z));
-        Ok(CommandApplication::/// Detach a group from a multi-group Column and make it the sole group in
-/// a new floating Column. The caller decides whether detaching the group is
-/// structurally valid; this command still rejects a last-group detach.
+        Ok(CommandApplication::persistent())
+    }
+
     pub(super) fn dock_floating_group(
         &mut self,
         group_id: FloatingGroupId,
@@ -226,9 +226,9 @@ impl Layout {
         }
     }
 
-persistent())
-    }
-
+    /// Detach a group from a multi-group Column and make it the sole group in
+    /// a new floating Column. The caller decides whether detaching the group is
+    /// structurally valid; this command still rejects a last-group detach.
     pub(super) fn float_group_as_column(
         &mut self,
         group: NodeId,
