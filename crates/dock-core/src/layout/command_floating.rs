@@ -1,5 +1,6 @@
 use super::*;
 use super::helpers::geometry_error_reason;
+use crate::AllowedArea;
 
 impl Layout {
     pub(super) fn float_group_as_column(
