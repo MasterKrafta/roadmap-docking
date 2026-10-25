@@ -63,7 +63,7 @@ impl Layout {
             (Some(Node::Split(_)), _) => Err(CommandError::InvalidTarget {
                 reason: "floating split stacks can only be docked into a main column or icon rail",
             }),
-            (Some(_), _) => self.dock_floating_root_to_target(root, target, metrics)
+            (Some(_), _) => self.dock_floating_root_to_target(root, target, metrics),
             (None, _) => Err(CommandError::MissingNode { node: root }),
         }
     }
