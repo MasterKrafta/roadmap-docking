@@ -593,6 +593,51 @@ mod tests {
     }
 
     #[test]
+    fn single_axis_floating_edge_ignores_unused_delta_overflow() {
+        let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
+        let group = dock_core::FloatingGroupId::null();
+        let start_bounds = Rect::new(Point::new(10.0, 20.0), Size::new(300.0, 200.0));
+
+        let mut top = session(
+            &layout,
+            ResizeHandle::FloatingEdge {
+                group,
+                edge: ResizeEdge::Top,
+            },
+            StartGeometry::FloatingEdge {
+                bounds: start_bounds,
+            },
+        );
+        top.pointer_start = Point::new(f32::MAX, 100.0);
+        assert_eq!(
+            top.command_for_pointer(Point::new(-f32::MAX, 110.0)).unwrap(),
+            DockCommand::ResizeFloatingBounds {
+                group,
+                bounds: Rect::new(Point::new(10.0, 30.0), Size::new(300.0, 190.0)),
+            }
+        );
+
+        let mut right = session(
+            &layout,
+            ResizeHandle::FloatingEdge {
+                group,
+                edge: ResizeEdge::Right,
+            },
+            StartGeometry::FloatingEdge {
+                bounds: start_bounds,
+            },
+        );
+        right.pointer_start = Point::new(100.0, f32::MAX);
+        assert_eq!(
+            right.command_for_pointer(Point::new(110.0, -f32::MAX)).unwrap(),
+            DockCommand::ResizeFloatingBounds {
+                group,
+                bounds: Rect::new(Point::new(10.0, 20.0), Size::new(310.0, 200.0)),
+            }
+        );
+    }
+
+    #[test]
     fn command_for_pointer_rejects_non_finite_coordinates() {
         let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
         let owner = layout
