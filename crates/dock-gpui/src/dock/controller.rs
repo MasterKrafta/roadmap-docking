@@ -90,6 +90,9 @@ impl DockController {
         if !matches!(&self.session, Session::Idle) {
             return Err(ResizeStartError::SessionAlreadyActive);
         }
+        if frame.layout_version() != self.layout.version() {
+            return Err(ResizeStartError::StaleFrameGeometry);
+        }
 
         let session = ResizeSession::begin(
             &self.layout,
