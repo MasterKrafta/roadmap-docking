@@ -1213,6 +1213,7 @@ mod command_layout_state_dispatch;
 mod command_flyout_dispatch;
 mod command_panel_dispatch;
 mod command_panel_transfer_dispatch;
+mod command_panel_tab_reorder;
 mod command_flyout_panel_transfer_dispatch;
 mod command_group_dispatch;
 mod command_group_transfer_dispatch;
