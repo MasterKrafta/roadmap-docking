@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
 use crate::{
-    Axis, Column, ColumnMode, ColumnRect, ComputeRectsError, DockMetrics, DockSide,
+    Axis, Column, ColumnMode, ColumnRect, ComputeRectsDiagnosticError, ComputeRectsError,
+    DockMetrics, DockSide,
     FloatingGroupRect, FloatingResizeEdgeRect, FlyoutRect, GeometryError, GroupRect, Layout,
     LayoutRects, Node, NodeId, PanelRect, Point, Rect, ResizeEdge, Size, SplitterRect,
     TabHeaderRect, TabOverflowRect, TabStripRect, Tabs, VerticalOverflow,
@@ -102,14 +103,35 @@ impl Layout {
         viewport: Rect,
         metrics: &DockMetrics,
     ) -> Result<LayoutRects, ComputeRectsError> {
+        self.compute_rects_with_diagnostics(viewport, metrics)
+            .map_err(|error| match error {
+                ComputeRectsDiagnosticError::InvalidMetrics { .. } => {
+                    ComputeRectsError::InvalidMetrics
+                }
+                ComputeRectsDiagnosticError::InvalidLayout { .. } => {
+                    ComputeRectsError::InvalidLayout
+                }
+                ComputeRectsDiagnosticError::Computation(error) => error,
+            })
+    }
+
+    /// Resolves rectangles and preserves metric/layout validation diagnostics.
+    ///
+    /// Unlike `compute_rects`, this additive API returns the original metric
+    /// validation reason or the full list of `ValidationError` values.
+    pub fn compute_rects_with_diagnostics(
+        &self,
+        viewport: Rect,
+        metrics: &DockMetrics,
+    ) -> Result<LayoutRects, ComputeRectsDiagnosticError> {
         metrics
             .validate()
-            .map_err(|_| ComputeRectsError::InvalidMetrics)?;
+            .map_err(|reason| ComputeRectsDiagnosticError::InvalidMetrics { reason })?;
         viewport
             .validate_non_empty()
             .map_err(ComputeRectsError::Geometry)?;
         self.validate_cached(metrics)
-            .map_err(|_| ComputeRectsError::InvalidLayout)?;
+            .map_err(|errors| ComputeRectsDiagnosticError::InvalidLayout { errors })?;
 
         // Cache minimum sizes only for this immutable geometry pass. The cache
         // cannot outlive the exact layout and metrics used to calculate it.
@@ -136,9 +158,9 @@ impl Layout {
 
         let available_canvas = viewport.size.width - left_width - right_width;
         if !available_canvas.is_finite() {
-            return Err(ComputeRectsError::Geometry(
-                GeometryError::ArithmeticOverflow,
-            ));
+            return Err(
+                ComputeRectsError::Geometry(GeometryError::ArithmeticOverflow).into(),
+            );
         }
         if available_canvas < metrics.min_canvas_width {
             return Err(ComputeRectsError::InsufficientCanvasWidth {
