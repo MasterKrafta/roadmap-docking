@@ -72,18 +72,7 @@ impl Layout {
                         column: source_column,
                         index: source_index,
                     });
-                self.remember_subtree_dock_locations(*group);
-                self.detach_node(*group)?;
-                let new_len = match self.nodes.get(*column) {
-                    Some(Node::Column(value)) => value.groups.len(),
-                    _ => {
-                        return Err(CommandError::InvalidTarget {
-                            reason: "MoveGroup target changed unexpectedly",
-                        });
-                    }
-                };
-                self.insert_group_at_column(*column, *group, (*index).min(new_len), None)?;
-                self.remember_subtree_dock_locations(*group);
+                self.move_group_to_existing_column(*group, *column, *index)?;
                 Ok(CommandApplication {
                     actual_value: None,
                     inverse,
@@ -187,6 +176,27 @@ impl Layout {
             inverse,
             persistent: true,
         }))
+    }
+
+    fn move_group_to_existing_column(
+        &mut self,
+        group: NodeId,
+        column: NodeId,
+        index: usize,
+    ) -> Result<(), CommandError> {
+        self.remember_subtree_dock_locations(group);
+        self.detach_node(group)?;
+        let new_len = match self.nodes.get(column) {
+            Some(Node::Column(value)) => value.groups.len(),
+            _ => {
+                return Err(CommandError::InvalidTarget {
+                    reason: "MoveGroup target changed unexpectedly",
+                });
+            }
+        };
+        self.insert_group_at_column(column, group, index.min(new_len), None)?;
+        self.remember_subtree_dock_locations(group);
+        Ok(())
     }
 
     fn move_group_to_new_main_column(
