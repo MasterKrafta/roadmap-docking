@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use dock_core::{
     create_initial_layout, Axis, CommandError, CommandOutcome, ComputeRectsError, DockCommand,
     DockMetrics, DockSide, DropTarget, DropZone, Layout, Node, NodeId, PanelId, Point, Profile,
-    Rect, UndoRedoHistory,
+    Rect, ResizeEdge, UndoRedoHistory,
 };
 use gpui::ScrollHandle;
 use ui::Theme;
@@ -11,7 +11,7 @@ use ui::Theme;
 use crate::{dock_metrics_from_theme, FrameGeometry};
 use crate::requests::ResizeHandle;
 
-use super::resize_session::{ResizeSession, ResizeStartError, ResizeUpdateError};
+use super::resize_session::{ResizeSession, ResizeStartError, ResizeUpdateError, StartGeometry};
 
 #[derive(Debug)]
 enum Session {
@@ -123,10 +123,12 @@ impl DockController {
     ) -> Result<CommandOutcome, ResizeUpdateError> {
         let (mut candidate, command) = match &self.session {
             Session::Idle => return Err(ResizeUpdateError::NoActiveSession),
-            Session::Resize(session) => (
-                session.baseline().clone(),
-                session.command_for_pointer(pointer)?,
-            ),
+            Session::Resize(session) => {
+                let command = session.command_for_pointer(pointer)?;
+                let command =
+                    preserve_floating_resize_anchor(session, command, &self.metrics);
+                (session.baseline().clone(), command)
+            }
         };
 
         match candidate.apply(command, &self.metrics) {
@@ -155,7 +157,9 @@ impl DockController {
             Session::Resize(session) => session,
             Session::Idle => return Err(ResizeUpdateError::NoActiveSession),
         };
-        let command = session.command_for_pointer(pointer);
+        let command = session
+            .command_for_pointer(pointer)
+            .map(|command| preserve_floating_resize_anchor(&session, command, &self.metrics));
         self.layout = session.into_baseline();
         self.last_error = None;
 
@@ -301,6 +305,177 @@ fn panel_id_for_key(layout: &Layout, key: &str) -> Result<PanelId, String> {
         .panel_instances()
         .find_map(|(id, instance)| (instance.key.as_str() == key).then_some(id))
         .ok_or_else(|| format!("Core layout does not contain the panel '{key}'"))
+}
+
+/// Corrects the origin when Core clamps a floating resize to its minimum size.
+///
+/// ResizeFloatingBounds keeps the requested origin while clamping dimensions. For
+/// left/top edges, that would move the opposite edge during a minimum-size clamp.
+fn preserve_floating_resize_anchor(
+    session: &ResizeSession,
+    command: DockCommand,
+    metrics: &DockMetrics,
+) -> DockCommand {
+    let (group, requested_bounds) = match &command {
+        DockCommand::ResizeFloatingBounds { group, bounds } => (*group, *bounds),
+        _ => return command,
+    };
+    let ResizeHandle::FloatingEdge { edge, .. } = session.handle() else {
+        return command;
+    };
+    let StartGeometry::FloatingEdge {
+        bounds: start_bounds,
+    } = session.start_geometry()
+    else {
+        return command;
+    };
+    let adjusts_x = matches!(
+        edge,
+        ResizeEdge::Left | ResizeEdge::TopLeft | ResizeEdge::BottomLeft
+    );
+    let adjusts_y = matches!(
+        edge,
+        ResizeEdge::Top | ResizeEdge::TopLeft | ResizeEdge::TopRight
+    );
+    if !adjusts_x && !adjusts_y {
+        return command;
+    }
+
+    let mut probe = session.baseline().clone();
+    if probe.apply(command.clone(), metrics).is_err() {
+        return command;
+    }
+    let Some(actual_bounds) = probe
+        .floating_group(group)
+        .map(|floating| floating.bounds)
+    else {
+        return command;
+    };
+
+    let mut corrected_bounds = actual_bounds;
+    if adjusts_x && actual_bounds.size.width > requested_bounds.size.width {
+        corrected_bounds.origin.x =
+            start_bounds.origin.x + start_bounds.size.width - actual_bounds.size.width;
+    }
+    if adjusts_y && actual_bounds.size.height > requested_bounds.size.height {
+        corrected_bounds.origin.y =
+            start_bounds.origin.y + start_bounds.size.height - actual_bounds.size.height;
+    }
+
+    if corrected_bounds == actual_bounds {
+        command
+    } else {
+        DockCommand::ResizeFloatingBounds {
+            group,
+            bounds: corrected_bounds,
+        }
+    }
+}
+
+#[cfg(test)]
+mod floating_resize_anchor_tests {
+    use super::DockController;
+    use crate::requests::ResizeHandle;
+    use dock_core::{DockCommand, Node, Point, Rect, ResizeEdge, Size};
+    use ui::Theme;
+
+    fn assert_opposite_edge_anchored(edge: ResizeEdge, original: Rect, actual: Rect) {
+        match edge {
+            ResizeEdge::Left => {
+                let original_right = original.origin.x + original.size.width;
+                let actual_right = actual.origin.x + actual.size.width;
+                assert!((actual_right - original_right).abs() < 0.01);
+                assert!(actual.size.width > 1.0, "Core should clamp to minimum width");
+            }
+            ResizeEdge::Top => {
+                let original_bottom = original.origin.y + original.size.height;
+                let actual_bottom = actual.origin.y + actual.size.height;
+                assert!((actual_bottom - original_bottom).abs() < 0.01);
+                assert!(actual.size.height > 1.0, "Core should clamp to minimum height");
+            }
+            _ => unreachable!("test covers the left and top edges"),
+        }
+    }
+
+    #[test]
+    fn floating_left_and_top_resize_keep_opposite_edge_anchored_at_minimum() {
+        for edge in [ResizeEdge::Left, ResizeEdge::Top] {
+            let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+            let group = controller
+                .layout()
+                .nodes()
+                .find_map(|(_, node)| match node {
+                    Node::Column(column) if column.groups.len() > 1 => {
+                        column.groups.first().copied()
+                    }
+                    _ => None,
+                })
+                .expect("initial layout should contain a multi-group column");
+            let initial_bounds = Rect::new(Point::new(80.0, 60.0), Size::new(500.0, 400.0));
+            controller
+                .apply(DockCommand::Float {
+                    node: group,
+                    bounds: initial_bounds,
+                })
+                .unwrap();
+            let (floating_id, original_bounds) = controller
+                .layout()
+                .floating_groups()
+                .next()
+                .map(|(id, floating)| (id, floating.bounds))
+                .expect("Float should create a floating window");
+            let frame = controller
+                .frame(Rect::new(Point::ZERO, Size::new(1200.0, 800.0)))
+                .unwrap();
+
+            let start = match edge {
+                ResizeEdge::Left => Point::new(
+                    original_bounds.origin.x,
+                    original_bounds.origin.y + original_bounds.size.height / 2.0,
+                ),
+                ResizeEdge::Top => Point::new(
+                    original_bounds.origin.x + original_bounds.size.width / 2.0,
+                    original_bounds.origin.y,
+                ),
+                _ => unreachable!("test covers the left and top edges"),
+            };
+            let end = match edge {
+                ResizeEdge::Left => {
+                    Point::new(start.x + original_bounds.size.width - 1.0, start.y)
+                }
+                ResizeEdge::Top => {
+                    Point::new(start.x, start.y + original_bounds.size.height - 1.0)
+                }
+                _ => unreachable!("test covers the left and top edges"),
+            };
+            controller
+                .begin_resize(
+                    ResizeHandle::FloatingEdge {
+                        group: floating_id,
+                        edge,
+                    },
+                    start,
+                    &frame,
+                )
+                .unwrap();
+            controller.update_resize(end).unwrap();
+            let preview_bounds = controller
+                .layout()
+                .floating_group(floating_id)
+                .unwrap()
+                .bounds;
+            assert_opposite_edge_anchored(edge, original_bounds, preview_bounds);
+
+            controller.commit_resize(end).unwrap();
+            let committed_bounds = controller
+                .layout()
+                .floating_group(floating_id)
+                .unwrap()
+                .bounds;
+            assert_opposite_edge_anchored(edge, original_bounds, committed_bounds);
+            assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+        }
+    }
 }
 
 #[cfg(test)]
