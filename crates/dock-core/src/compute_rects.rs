@@ -650,12 +650,19 @@ fn layout_tabs(
             let requested_button_width =
                 metrics.tab_overflow_button_width.min(group_rect.size.width);
             let requested_visible_width = (group_rect.size.width - requested_button_width).max(0.0);
-            let visible_count =
+            let mut visible_count =
                 ((requested_visible_width / metrics.min_tab_width).floor() as usize).min(tab_count);
-            // When even one minimum-width tab cannot fit beside the button,
-            // let the button occupy the whole strip instead of leaving a blank gap.
+            // Preserve access to the active tab even if the strip is too narrow
+            // to fit a minimum-width tab beside the overflow button. In that
+            // case, shrink both regions rather than giving the button the whole strip.
             let (visible_width, button_width) = if visible_count == 0 {
-                (0.0, group_rect.size.width)
+                visible_count = 1;
+                let fallback_button_width =
+                    requested_button_width.min(group_rect.size.width * 0.5);
+                (
+                    (group_rect.size.width - fallback_button_width).max(0.0),
+                    fallback_button_width,
+                )
             } else {
                 (requested_visible_width, requested_button_width)
             };
@@ -1510,6 +1517,41 @@ mod tests {
         assert!(
             (heights.iter().sum::<f32>() + 2.0 * metrics.splitter_thickness - 500.0).abs()
                 < PIXEL_TOLERANCE
+        );
+    }
+
+    #[test]
+    fn active_tab_remains_visible_when_overflow_button_cannot_share_minimum_tab_width() {
+        let mut metrics = DockMetrics::default();
+        metrics.min_tab_width = 500.0;
+        let mut builder = LayoutBuilder::new(Profile::Photoshop);
+        let mut panels = Vec::new();
+        let mut children = Vec::new();
+        for index in 0..4 {
+            let (panel, child) = builder.panel(key(&format!("tiny-overflow-{index}")), constraints());
+            panels.push(panel);
+            children.push(child);
+        }
+        let active_index = children.len() - 1;
+        let group = builder.tabs(children, active_index, false);
+        let column = builder.column(280.0, ColumnMode::Expanded, vec![group], vec![1.0]);
+        builder.main_area(DockSide::Left, column);
+        let layout = builder.build();
+
+        let rects = layout
+            .compute_rects(viewport(1000.0, 500.0), &metrics)
+            .unwrap();
+
+        assert!(!rects.tab_overflows.is_empty());
+        let active_header = rects
+            .tab_headers
+            .iter()
+            .find(|header| header.panel == panels[active_index])
+            .expect("active tab must keep a visible header during overflow");
+        assert!(active_header.rect.size.width > 0.0);
+        assert!(
+            !rects.tab_overflows[0].hidden_tabs.contains(&panels[active_index]),
+            "the active tab must not be included in the hidden-tabs menu"
         );
     }
 
