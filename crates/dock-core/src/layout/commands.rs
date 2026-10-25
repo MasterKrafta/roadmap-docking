@@ -101,21 +101,15 @@ impl Layout {
         command: &DockCommand,
         metrics: &DockMetrics,
     ) -> Result<CommandApplication, CommandError> {
-        if matches!(
-            command,
-            DockCommand::Float { .. }
-                | DockCommand::FloatGroupAsColumn { .. }
-                | DockCommand::FloatPanelAsGroup { .. }
-                | DockCommand::MoveFloating { .. }
-                | DockCommand::ResizeFloating { .. }
-                | DockCommand::ResizeFloatingBounds { .. }
-                | DockCommand::RaiseFloating { .. }
-                | DockCommand::DockFloating { .. }
-        ) {
-            return self.apply_floating_command(command, metrics);
-        }
-
         match command {
+            DockCommand::Float { .. }
+            | DockCommand::FloatGroupAsColumn { .. }
+            | DockCommand::FloatPanelAsGroup { .. }
+            | DockCommand::MoveFloating { .. }
+            | DockCommand::ResizeFloating { .. }
+            | DockCommand::ResizeFloatingBounds { .. }
+            | DockCommand::RaiseFloating { .. }
+            | DockCommand::DockFloating { .. } => self.apply_floating_command(command, metrics),
             DockCommand::OpenPanel {
                 key,
                 constraints,
