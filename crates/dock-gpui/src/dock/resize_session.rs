@@ -279,6 +279,9 @@ fn capture_start_geometry(
             let Some(column_rect) = rects.columns.iter().find(|entry| entry.column == owner) else {
                 return Err(ResizeStartError::MissingColumnGeometry);
             };
+            if column_rect.rect.validate_non_empty().is_err() {
+                return Err(ResizeStartError::MissingColumnGeometry);
+            }
             let available_height = column_rect.rect.size.height
                 - metrics.splitter_thickness * group_count.saturating_sub(1) as f32;
             if !available_height.is_finite() || available_height <= 0.0 {
@@ -910,6 +913,42 @@ mod tests {
                 },
             ),
             Err(ResizeStartError::MissingFloatingEdge)
+        );
+    }
+
+    #[test]
+    fn vertical_resize_rejects_invalid_column_rect_at_start() {
+        let controller = DockController::new_initial(&Theme::default()).unwrap();
+        let layout = controller.layout().clone();
+        let frame = controller
+            .frame(Rect::new(Point::ZERO, Size::new(1200.0, 800.0)))
+            .unwrap();
+        let splitter = frame
+            .rects()
+            .splitters
+            .iter()
+            .find(|splitter| splitter.axis == Axis::Y)
+            .expect("initial layout should contain a vertical group splitter");
+        let mut rects = frame.rects().clone();
+        let column_rect = rects
+            .columns
+            .iter_mut()
+            .find(|column| column.column == splitter.owner)
+            .expect("splitter column should have geometry");
+        column_rect.rect.size.width = 0.0;
+
+        assert_eq!(
+            capture_start_geometry(
+                &layout,
+                &rects,
+                controller.metrics(),
+                ResizeHandle::Splitter {
+                    owner: splitter.owner,
+                    boundary_index: splitter.boundary_index,
+                    axis: Axis::Y,
+                },
+            ),
+            Err(ResizeStartError::MissingColumnGeometry)
         );
     }
 
