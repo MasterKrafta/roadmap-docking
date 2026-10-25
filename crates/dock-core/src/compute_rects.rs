@@ -1020,7 +1020,7 @@ fn minimum_floating_size(
     #[cfg(test)]
     visit_probe::record_minimum_node_size_helper(root);
     layout.minimum_floating_size(root, metrics).map_err(|error| match error {
-        crate::CommandError::InvalidValue { field: "size", .. } => {
+        crate::CommandError::InvalidValue { field: "size", reason } if reason.contains("overflow") => {
             ComputeRectsError::Geometry(GeometryError::ArithmeticOverflow)
         }
         _ => ComputeRectsError::InvalidLayout,

@@ -610,10 +610,16 @@ impl Layout {
             None => return Err(CommandError::MissingNode { node: node_id }),
         };
 
-        if !minimum.is_finite() || minimum.width < 0.0 || minimum.height <= 0.0 {
+        if !minimum.is_finite() {
             return Err(CommandError::InvalidValue {
                 field: "size",
-                reason: "computed floating minimum size is non-finite or has invalid dimensions",
+                reason: "computed floating minimum size overflowed",
+            });
+        }
+        if minimum.width < 0.0 || minimum.height <= 0.0 {
+            return Err(CommandError::InvalidValue {
+                field: "size",
+                reason: "computed floating minimum size has invalid dimensions",
             });
         }
         Ok(minimum)
