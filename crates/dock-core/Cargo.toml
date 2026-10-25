@@ -11,12 +11,12 @@ serde = ["dep:serde", "dep:serde_json", "slotmap/serde"]
 [dependencies]
 slotmap.workspace = true
 serde = { workspace = true, optional = true }
-serde_json = { version = "1.0", optional = true }
+serde_json = { workspace = true, optional = true }
 thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-proptest = "1.6.0"
+proptest.workspace = true
 
 [lints]
 workspace = true

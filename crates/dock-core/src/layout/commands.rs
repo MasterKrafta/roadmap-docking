@@ -46,7 +46,7 @@ impl Layout {
         command: &DockCommand,
         metrics: &DockMetrics,
     ) -> Result<CommandOutcome, CommandError> {
-        self.validate(metrics)
+        self.validate_cached(metrics)
             .map_err(|errors| CommandError::InvalidLayout { errors })?;
 
         let mut candidate = self.clone();
@@ -54,6 +54,7 @@ impl Layout {
         candidate
             .normalize_in_place(metrics)
             .map_err(|errors| CommandError::InvalidLayout { errors })?;
+        candidate.validation_cache.set(Some((candidate.version, *metrics)));
 
         if candidate.same_state(self) {
             return Ok(CommandOutcome {
@@ -84,6 +85,7 @@ impl Layout {
             })?;
         let changed_nodes = self.changed_node_ids(&candidate, command);
         candidate.version = next_version;
+        candidate.validation_cache.set(Some((next_version, *metrics)));
         *self = candidate;
 
         Ok(CommandOutcome {
