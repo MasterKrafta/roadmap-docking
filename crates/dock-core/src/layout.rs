@@ -1210,6 +1210,7 @@ mod command_floating_dispatch;
 mod command_floating_window_dispatch;
 mod command_floating_dock_dispatch;
 mod command_floating_root_dispatch;
+mod command_floating_group_column;
 mod command_group_resize_dispatch;
 mod command_group_resize_boundary;
 mod command_group_resize_reset;
