@@ -1209,6 +1209,8 @@ mod command_floating;
 mod command_floating_dispatch;
 mod command_group_resize_dispatch;
 mod command_column_resize_dispatch;
+mod command_layout_state_dispatch;
+mod command_flyout_dispatch;
 mod command_panel_dispatch;
 mod command_panel_transfer_dispatch;
 mod command_group_dispatch;
