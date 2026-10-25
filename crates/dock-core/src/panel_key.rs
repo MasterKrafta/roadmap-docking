@@ -11,17 +11,6 @@ pub enum PanelKeyError {
     InvalidSyntax,
 }
 
-impl PanelKeyError {
-    const fn as_static_str(&self) -> &'static str {
-        match self {
-            Self::Empty => "panel key must not be empty",
-            Self::InvalidSyntax => {
-                "panel key must contain lowercase ASCII letters/digits separated by single hyphens"
-            }
-        }
-    }
-}
-
 /// Stable identifier for a panel kind, not a runtime panel instance.
 ///
 /// Accepted keys are non-empty lowercase ASCII segments separated by single
@@ -30,15 +19,8 @@ impl PanelKeyError {
 pub struct PanelKey(String);
 
 impl PanelKey {
-    /// Creates a panel key using the legacy static-string error for source compatibility.
-    ///
-    /// New callers that need to inspect the failure should use PanelKey::try_new.
-    pub fn new(value: impl Into<String>) -> Result<Self, &'static str> {
-        Self::try_new(value).map_err(|error| error.as_static_str())
-    }
-
     /// Creates a panel key and preserves the validation failure as a typed error.
-    pub fn try_new(value: impl Into<String>) -> Result<Self, PanelKeyError> {
+    pub fn new(value: impl Into<String>) -> Result<Self, PanelKeyError> {
         let value = value.into();
         if value.is_empty() {
             return Err(PanelKeyError::Empty);
@@ -77,14 +59,14 @@ impl AsRef<str> for PanelKey {
 }
 
 impl TryFrom<String> for PanelKey {
-    type Error = &'static str;
+    type Error = PanelKeyError;
     fn try_from(value: String) -> Result<Self, Self::Error> {
         Self::new(value)
     }
 }
 
 impl FromStr for PanelKey {
-    type Err = &'static str;
+    type Err = PanelKeyError;
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         Self::new(value)
     }
@@ -146,8 +128,8 @@ mod tests {
     }
 
     #[test]
-    fn try_new_reports_typed_validation_errors() {
-        assert_eq!(PanelKey::try_new(""), Err(super::PanelKeyError::Empty));
+    fn new_reports_typed_validation_errors() {
+        assert_eq!(PanelKey::new(""), Err(super::PanelKeyError::Empty));
         assert_eq!(
             PanelKey::try_new("Bad Key"),
             Err(super::PanelKeyError::InvalidSyntax)
