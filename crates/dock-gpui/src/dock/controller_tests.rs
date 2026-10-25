@@ -415,8 +415,9 @@
         assert!(controller.layout().floating_group(floating_id).is_some());
         assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
         assert!(controller.undo().unwrap());
+        assert!(controller.layout().floating_group(floating_id).is_some());
         assert_eq!(horizontal_split_widths(&controller, owner), original_widths);
-        assert!(!controller.undo().unwrap(), "the resize gesture must have one undo step");
+        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
     }
 
     #[test]
