@@ -51,6 +51,7 @@ pub struct Layout {
     flyout: Option<FlyoutState>,
     flyout_auto_collapse: bool,
     history_identity: Arc<()>,
+    flyout_widths: HashMap<PanelKey, f32>,
 }
 
 impl Layout {
@@ -70,6 +71,7 @@ impl Layout {
             flyout: None,
             flyout_auto_collapse: true,
             history_identity: Arc::new(()),
+            flyout_widths: HashMap::new(),
         }
     }
 
@@ -100,6 +102,7 @@ impl Layout {
             flyout: None,
             flyout_auto_collapse: true,
             history_identity: Arc::new(()),
+            flyout_widths: HashMap::new(),
         }
     }
 
@@ -1031,6 +1034,10 @@ impl Layout {
     /// Opaque identity shared by Layout clones, but not separately loaded layouts.
     pub(crate) fn history_identity(&self) -> Weak<()> {
         Arc::downgrade(&self.history_identity)
+    }
+
+    pub(crate) fn flyout_width(&self, key: &PanelKey) -> Option<f32> {
+        self.flyout_widths.get(key).copied()
     }
 
     /// Records host-measured canvas bounds without creating a persistent command revision.

@@ -261,10 +261,9 @@ fn compute_flyout_rect(
         .ok_or(ComputeRectsError::InvalidLayout)?;
     let constraints = instance.constraints;
     let min_width = constraints.min_size.width;
-    let preferred_width = instance
-        .state
-        .last_known_size()
-        .map(|size| size.width)
+    let preferred_width = layout
+        .flyout_width(&instance.key)
+        .or_else(|| instance.state.last_known_size().map(|size| size.width))
         .unwrap_or(constraints.preferred_size.width);
     let max_width = constraints
         .max_size

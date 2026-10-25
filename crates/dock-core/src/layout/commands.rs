@@ -1906,21 +1906,17 @@ impl Layout {
                 }
                 let instance = self
                     .panel_instances
-                    .get_mut(*panel)
+                    .get(*panel)
                     .ok_or(CommandError::MissingPanel { panel: *panel })?;
+                let key = instance.key.clone();
                 let constraints = instance.constraints;
                 let max_width = constraints
                     .max_size
                     .map(|size| size.width)
                     .unwrap_or(f32::MAX);
                 let actual_width = (*width).clamp(constraints.min_size.width, max_width);
-                let remembered = instance
-                    .state
-                    .last_known_size()
-                    .unwrap_or(constraints.preferred_size);
-                let next_size = Size::new(actual_width, remembered.height);
-                if instance.state.last_known_size() != Some(next_size) {
-                    instance.state = crate::PanelState::new(Some(next_size));
+                if self.flyout_widths.get(&key).copied() != Some(actual_width) {
+                    self.flyout_widths.insert(key, actual_width);
                 }
                 Ok(CommandApplication::transient())
             }
@@ -3429,6 +3425,7 @@ impl Layout {
         self.same_persistent_state(other)
             && self.flyout == other.flyout
             && self.flyout_auto_collapse == other.flyout_auto_collapse
+            && self.flyout_widths == other.flyout_widths
     }
 
     pub(super) fn changed_node_ids(&self, other: &Self, command: &DockCommand) -> Vec<NodeId> {

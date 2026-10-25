@@ -245,6 +245,7 @@ impl Layout {
             flyout: None,
             flyout_auto_collapse: true,
             history_identity: Arc::new(()),
-}
+            flyout_widths: HashMap::new(),
+        }
     }
 }

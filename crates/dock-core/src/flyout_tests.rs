@@ -364,7 +364,8 @@ fn resizing_remembers_panel_specific_width_and_exposes_canvas_facing_hit_target(
             .unwrap()
             .state
             .last_known_size(),
-        Some(Size::new(420.0, constraints().preferred_size.height)),
+        None,
+        "flyout resizing must not mutate persistent PanelInstance state",
     );
 
     let rects = fixture.layout.compute_rects(viewport(), &metrics).unwrap();
