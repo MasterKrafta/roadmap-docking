@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Weak};
 
 use slotmap::SlotMap;
@@ -13,6 +13,7 @@ use crate::{
 
 const RATIO_TOLERANCE: f32 = 1.0e-4;
 const PIXEL_TOLERANCE: f32 = 1.0e-3;
+const MAX_REMEMBERED_DOCK_LOCATIONS: usize = 256;
 
 /// Arena parts restored from the persistent workspace DTO.
 #[cfg(feature = "serde")]
@@ -44,6 +45,7 @@ pub struct Layout {
     main_areas: [Option<DockAreaId>; 2],
     floating_groups: SlotMap<FloatingGroupId, FloatingGroup>,
     last_dock_locations: HashMap<PanelKey, LastDockLocation>,
+    last_dock_location_order: VecDeque<PanelKey>,
     canvas: CanvasState,
     profile: Profile,
     version: u64,
@@ -64,6 +66,7 @@ impl Layout {
             main_areas: [None, None],
             floating_groups: SlotMap::with_key(),
             last_dock_locations: HashMap::new(),
+            last_dock_location_order: VecDeque::new(),
             canvas: CanvasState::default(),
             profile,
             version: 0,
@@ -95,6 +98,7 @@ impl Layout {
             main_areas,
             floating_groups,
             last_dock_locations: HashMap::new(),
+            last_dock_location_order: VecDeque::new(),
             canvas,
             profile,
             version: 0,
@@ -1020,6 +1024,7 @@ impl Layout {
         }
 
         candidate.last_dock_locations = snapshot.last_dock_locations.clone();
+        candidate.last_dock_location_order = snapshot.last_dock_location_order.clone();
         candidate.canvas = snapshot.canvas;
         candidate.profile = snapshot.profile;
         candidate.chrome = snapshot.chrome;

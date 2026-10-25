@@ -164,7 +164,14 @@ impl Layout {
         };
         let key = instance.key.clone();
         if let Some(location) = self.dock_location_for_node(panel_node) {
-            self.last_dock_locations.insert(key, location);
+            self.last_dock_locations.insert(key.clone(), location);
+            self.last_dock_location_order.retain(|remembered| *remembered != key);
+            self.last_dock_location_order.push_back(key);
+            while self.last_dock_location_order.len() > MAX_REMEMBERED_DOCK_LOCATIONS {
+                if let Some(expired) = self.last_dock_location_order.pop_front() {
+                    self.last_dock_locations.remove(&expired);
+                }
+            }
         }
     }
 

@@ -238,6 +238,7 @@ impl Layout {
             main_areas,
             floating_groups,
             last_dock_locations: HashMap::new(),
+            last_dock_location_order: VecDeque::new(),
             canvas,
             profile,
             version,
