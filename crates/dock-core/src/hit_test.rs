@@ -255,6 +255,43 @@ fn hit_layout_geometry(
         }
     }
 
+    // Overflow buttons are explicit interactive geometry and take priority
+    // over ordinary tab/header fallback areas in their strip.
+    for overflow in rects.tab_overflows.iter().rev() {
+        if node_in_scope(overflow.group, scope_nodes, include_only)
+            && contains(overflow.button_rect, point)?
+        {
+            return Ok(Some(HitResult::TabOverflowButton {
+                group: overflow.group,
+            }));
+        }
+    }
+
+    // Drop zones exist only in a drag snapshot. They beat ordinary group/header
+    // and tab hits, while splitters and explicit overflow buttons retain priority.
+    // Use the same explicit priority as resolve_drop when zones overlap.
+    let mut best_drop_zone = None;
+    for (index, zone) in rects.drop_zones.iter().enumerate().rev() {
+        if !target_in_scope(zone.target, scope_nodes, include_only) || !contains(zone.rect, point)?
+        {
+            continue;
+        }
+        let priority = drop_zone_priority(zone.zone);
+        let replace = best_drop_zone
+            .as_ref()
+            .map(|(best_priority, _, _)| priority < *best_priority)
+            .unwrap_or(true);
+        if replace {
+            best_drop_zone = Some((priority, index, zone));
+        }
+    }
+    if let Some((_, _, zone)) = best_drop_zone {
+        return Ok(Some(HitResult::DropZone {
+            target: zone.target,
+            zone: zone.zone,
+        }));
+    }
+
     // A GroupRect's upper header band is the non-floating group/column header.
     // Collapsed groups have no separate header: their tab strip starts at y=0.
     for group in rects.groups.iter().rev() {
@@ -281,18 +318,6 @@ fn hit_layout_geometry(
         }
     }
 
-    // Overflow buttons are explicit interactive geometry and take priority
-    // over ordinary tab/header fallback areas in their strip.
-    for overflow in rects.tab_overflows.iter().rev() {
-        if node_in_scope(overflow.group, scope_nodes, include_only)
-            && contains(overflow.button_rect, point)?
-        {
-            return Ok(Some(HitResult::TabOverflowButton {
-                group: overflow.group,
-            }));
-        }
-    }
-
     for tab in rects.tab_headers.iter().rev() {
         if node_in_scope(tab.group, scope_nodes, include_only) && contains(tab.rect, point)? {
             return Ok(Some(HitResult::TabHeader {
@@ -301,31 +326,6 @@ fn hit_layout_geometry(
                 index: tab.index,
             }));
         }
-    }
-
-    // Drop zones are semantic overlays on group bodies and win over panel
-    // content, but never over resize, splitter or tab-header hit regions.
-    // Use the same explicit priority as resolve_drop when zones overlap.
-    let mut best_drop_zone = None;
-    for (index, zone) in rects.drop_zones.iter().enumerate().rev() {
-        if !target_in_scope(zone.target, scope_nodes, include_only) || !contains(zone.rect, point)?
-        {
-            continue;
-        }
-        let priority = drop_zone_priority(zone.zone);
-        let replace = best_drop_zone
-            .as_ref()
-            .map(|(best_priority, _, _)| priority < *best_priority)
-            .unwrap_or(true);
-        if replace {
-            best_drop_zone = Some((priority, index, zone));
-        }
-    }
-    if let Some((_, _, zone)) = best_drop_zone {
-        return Ok(Some(HitResult::DropZone {
-            target: zone.target,
-            zone: zone.zone,
-        }));
     }
 
     for panel in rects.panels.iter().rev() {
@@ -400,7 +400,8 @@ mod tests {
     use super::{ComputeRectsError, HitResult, Point, Rect};
     use crate::layout_builder::LayoutBuilder;
     use crate::{
-        Axis, ColumnMode, DockMetrics, DockSide, DropSource, DropTarget, GeometryError,
+        Axis, ColumnMode, DockMetrics, DockSide, DropSource, DropTarget, DropZone,
+        GeometryError,
         PanelConstraints, PanelKey, Profile, ResizeEdge, Size,
     };
 
@@ -660,6 +661,144 @@ mod tests {
             }
         );
         assert_ne!(lower, upper);
+    }
+
+    #[test]
+    fn drop_zone_precedence_makes_tab_insertions_and_group_edges_reachable() {
+        let metrics = DockMetrics::default();
+        let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+        let (_, first_node) = builder.panel(key("drop-target-first"), constraints());
+        let (_, second_node) = builder.panel(key("drop-target-second"), constraints());
+        let target_group = builder.tabs(vec![first_node, second_node], 0, false);
+        let target_column =
+            builder.column(280.0, ColumnMode::Expanded, vec![target_group], vec![1.0]);
+        builder.main_area(DockSide::Left, target_column);
+
+        let (source_panel, source_node) = builder.panel(key("drop-source"), constraints());
+        let source_group = builder.tabs(vec![source_node], 0, false);
+        let source_column =
+            builder.column(280.0, ColumnMode::Expanded, vec![source_group], vec![1.0]);
+        builder.main_area(DockSide::Right, source_column);
+
+        let layout = builder.build();
+        let rects = layout
+            .compute_rects(viewport(1200.0, 800.0), &metrics)
+            .unwrap();
+        let zones = layout
+            .compute_drop_zones(DropSource::Panel { panel: source_panel }, &rects, &metrics)
+            .unwrap();
+        let mut drag_rects = rects.clone();
+        drag_rects.drop_zones = zones.clone();
+
+        let tab_zone = zones
+            .iter()
+            .find(|zone| {
+                zone.zone == DropZone::TabInsertion
+                    && zone.target == (DropTarget::Tabs {
+                        group: target_group,
+                        index: 0,
+                    })
+            })
+            .expect("the target tab should have an insertion zone");
+        let tab_point = Point::new(
+            tab_zone.rect.origin.x + tab_zone.rect.size.width / 2.0,
+            tab_zone.rect.origin.y + tab_zone.rect.size.height / 2.0,
+        );
+        assert_eq!(
+            layout.hit_test(tab_point, &drag_rects, &metrics).unwrap(),
+            HitResult::DropZone {
+                target: DropTarget::Tabs {
+                    group: target_group,
+                    index: 0,
+                },
+                zone: DropZone::TabInsertion,
+            }
+        );
+
+        let top_zone = zones
+            .iter()
+            .find(|zone| {
+                zone.zone == DropZone::Top
+                    && zone.target
+                        == (DropTarget::GroupEdge {
+                            group: target_group,
+                            zone: DropZone::Top,
+                        })
+            })
+            .expect("the target group should have a top-edge zone");
+        let top_point = Point::new(
+            top_zone.rect.origin.x + top_zone.rect.size.width / 2.0,
+            top_zone.rect.origin.y + top_zone.rect.size.height / 2.0,
+        );
+        assert_eq!(
+            layout.hit_test(top_point, &drag_rects, &metrics).unwrap(),
+            HitResult::DropZone {
+                target: DropTarget::GroupEdge {
+                    group: target_group,
+                    zone: DropZone::Top,
+                },
+                zone: DropZone::Top,
+            }
+        );
+    }
+
+    #[test]
+    fn drop_zone_precedence_makes_rail_insertions_reachable() {
+        let metrics = DockMetrics::default();
+        let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+        let (_, icon_node) = builder.panel(key("drop-rail-icon"), constraints());
+        let icon_group = builder.tabs(vec![icon_node], 0, true);
+        let rail_column = builder.column(
+            metrics.rail_width,
+            ColumnMode::IconsOnly,
+            vec![icon_group],
+            vec![1.0],
+        );
+        builder.main_area(DockSide::Left, rail_column);
+
+        let (source_panel, source_node) = builder.panel(key("drop-rail-source"), constraints());
+        let source_group = builder.tabs(vec![source_node], 0, false);
+        let source_column =
+            builder.column(280.0, ColumnMode::Expanded, vec![source_group], vec![1.0]);
+        builder.main_area(DockSide::Right, source_column);
+
+        let layout = builder.build();
+        let rects = layout
+            .compute_rects(viewport(1200.0, 800.0), &metrics)
+            .unwrap();
+        let zones = layout
+            .compute_drop_zones(DropSource::Panel { panel: source_panel }, &rects, &metrics)
+            .unwrap();
+        let mut drag_rects = rects.clone();
+        drag_rects.drop_zones = zones.clone();
+
+        let rail_zone = zones
+            .iter()
+            .find(|zone| {
+                zone.zone == DropZone::RailInsertion
+                    && zone.target
+                        == (DropTarget::RailSlot {
+                            column: rail_column,
+                            index: 0,
+                        })
+            })
+            .expect("the icon rail should have a first insertion zone");
+        let rail_point = Point::new(
+            rail_zone.rect.origin.x + rail_zone.rect.size.width / 2.0,
+            rail_zone.rect.origin.y + rail_zone.rect.size.height / 2.0,
+        );
+        assert_eq!(
+            layout.hit_test(rail_point, &drag_rects, &metrics).unwrap(),
+            HitResult::DropZone {
+                target: DropTarget::RailSlot {
+                    column: rail_column,
+                    index: 0,
+                },
+                zone: DropZone::RailInsertion,
+            }
+        );
     }
 
     #[test]
