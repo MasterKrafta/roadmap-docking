@@ -649,7 +649,9 @@ impl Layout {
                         // a valid out-of-range insertion was rejected above.
                         return Ok(CommandApplication::persistent());
                     };
-                    if split.axis != Axis::X || !split.children.contains(&source_column.unwrap()) {
+                    if split.axis != Axis::X
+                        || source_column.is_none_or(|column| !split.children.contains(&column))
+                    {
                         return Err(CommandError::InvalidTarget {
                             reason: "main dock column order must be represented by Split(X)",
                         });
