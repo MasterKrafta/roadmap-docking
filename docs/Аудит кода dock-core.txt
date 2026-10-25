@@ -106,6 +106,7 @@ ResizeFlyout меняет panel_instances без роста версии. Это
 - Workspace JSON ограничен 16 MiB и 100 000 узлами; глубина runtime tree ограничена 256 итеративной проверкой до рекурсивной валидации, а `normalize_node` выполняется только после этого preflight. Для программно созданных WorkspaceFile число узлов и глубина проверяются итеративно до миграции v1 и восстановления; экспорт Layout прерывает рекурсивную сериализацию с ошибкой при глубине более 256. Добавлены тесты `programmatic_workspace_depth_is_rejected_before_migration_and_restore` и `from_layout_rejects_programmatic_tree_depth_before_recursive_export`.
 - Экспорт workspace сведён к одному строгому API: `WorkspaceFile::from_layout(layout, metrics)` проверяет модель с активными метриками, а `Layout::to_workspace_file(metrics)` вызывает тот же путь. Дублирующий `from_layout_with_metrics` удалён. DTO строится с ограничением глубины до рекурсивной валидации, чтобы программно созданное чрезмерно глубокое дерево возвращало ошибку до обхода модели. Для тестовых fixtures с намеренно невалидным Layout оставлен helper только под `cfg(test)`.
 - serde_json и proptest перенесены в workspace dependencies; сообщение ошибки поля version теперь отличает отсутствующее поле от неверного типа.
+- Проверен MSRV: корневой `Cargo.toml` задаёт `workspace.package.rust-version = "1.99.1"`, а `Option::is_none_or` стабилизирован в Rust 1.82. Объявление workspace корректно, менять его не требуется.
 
 Оставшиеся ограничения (не считаются закрытыми)
 -----------------------------------------------
