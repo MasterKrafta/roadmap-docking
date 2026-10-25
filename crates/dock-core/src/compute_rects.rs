@@ -372,8 +372,12 @@ fn minimum_node_size(
     layout
         .minimum_node_size_with_cache(id, metrics, minimum_sizes)
         .map_err(|error| match error {
+            crate::CommandError::InvalidValue {
+                field: "size",
+                reason: "computed minimum size overflowed",
+            } => ComputeRectsError::Geometry(GeometryError::ArithmeticOverflow),
             crate::CommandError::InvalidValue { field: "size", .. } => {
-                ComputeRectsError::Geometry(GeometryError::ArithmeticOverflow)
+                ComputeRectsError::InvalidLayout
             }
             _ => ComputeRectsError::InvalidLayout,
         })
@@ -1353,7 +1357,7 @@ fn push_resize_edges(
 
 #[cfg(test)]
 mod tests {
-    use super::ComputeRectsError;
+    use super::{minimum_node_size, ComputeRectsError};
     use crate::layout_builder::LayoutBuilder;
     use crate::{
         Axis, ColumnMode, DockMetrics, DockSide, GeometryError, LayoutRects, Node,
@@ -2510,6 +2514,50 @@ mod tests {
 
     fn assert_snapshot_rectangles_are_valid(rects: &LayoutRects) {
         crate::layout_rects::assert_layout_rects_invariants(rects);
+    }
+
+    #[test]
+    fn empty_column_minimum_size_is_invalid_layout_not_arithmetic_overflow() {
+        let metrics = DockMetrics::default();
+        let mut builder = LayoutBuilder::new(Profile::Photoshop);
+        let column = builder.column(280.0, ColumnMode::Expanded, Vec::new(), Vec::new());
+        let layout = builder.build();
+
+        assert!(matches!(
+            minimum_node_size(
+                &layout,
+                column,
+                &metrics,
+                &mut std::collections::HashMap::new(),
+            ),
+            Err(ComputeRectsError::InvalidLayout)
+        ));
+    }
+
+    #[test]
+    fn overflowing_minimum_size_still_reports_arithmetic_overflow() {
+        let metrics = DockMetrics::default();
+        let mut builder = LayoutBuilder::new(Profile::Photoshop);
+        let huge_constraints = PanelConstraints::new(
+            Size::new(f32::MAX, 60.0),
+            Size::new(f32::MAX, 140.0),
+            Some(Size::new(f32::MAX, 600.0)),
+            false,
+        );
+        let (_, first) = builder.panel(key("huge-first"), huge_constraints);
+        let (_, second) = builder.panel(key("huge-second"), huge_constraints);
+        let split = builder.split(Axis::X, vec![first, second], vec![0.5, 0.5]);
+        let layout = builder.build();
+
+        assert!(matches!(
+            minimum_node_size(
+                &layout,
+                split,
+                &metrics,
+                &mut std::collections::HashMap::new(),
+            ),
+            Err(ComputeRectsError::Geometry(GeometryError::ArithmeticOverflow))
+        ));
     }
 
     #[test]
