@@ -14,11 +14,8 @@ const REQUIRED_PANEL_KEYS: [&str; 4] = ["layers", "color", "properties", "histor
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
 pub enum InitialLayoutError {
     /// The supplied docking metrics are invalid.
-    #[error("dock metrics are invalid: {source}")]
-    InvalidMetrics {
-        #[source]
-        source: crate::GeometryError,
-    },
+    #[error("dock metrics are invalid: {reason}")]
+    InvalidMetrics { reason: &'static str },
     /// Two panel descriptors use the same stable key.
     #[error("panel descriptor keys must be unique")]
     DuplicatePanelKey,
@@ -84,7 +81,7 @@ pub fn create_initial_layout_with_error(
 ) -> Result<Layout, InitialLayoutError> {
     metrics
         .validate()
-        .map_err(|source| InitialLayoutError::InvalidMetrics { source })?;
+        .map_err(|reason| InitialLayoutError::InvalidMetrics { reason })?;
 
     let mut seen = HashSet::with_capacity(descriptors.len());
     for (key, constraints) in descriptors {
