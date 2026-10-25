@@ -1933,16 +1933,6 @@ impl Layout {
         }
     }
 
-    pub(super) fn panel_ids_in_subtree(&self, root: NodeId) -> Vec<PanelId> {
-        self.panel_nodes_in_subtree(root)
-            .into_iter()
-            .filter_map(|node_id| match self.nodes.get(node_id) {
-                Some(Node::Panel(panel)) => Some(panel.panel_id),
-                _ => None,
-            })
-            .collect()
-    }
-
     pub(super) fn dock_floating_group(
         &mut self,
         group_id: FloatingGroupId,

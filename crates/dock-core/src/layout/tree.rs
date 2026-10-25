@@ -136,6 +136,16 @@ impl Layout {
         panels
     }
 
+    pub(super) fn panel_ids_in_subtree(&self, root: NodeId) -> Vec<PanelId> {
+        self.panel_nodes_in_subtree(root)
+            .into_iter()
+            .filter_map(|node_id| match self.nodes.get(node_id) {
+                Some(Node::Panel(panel)) => Some(panel.panel_id),
+                _ => None,
+            })
+            .collect()
+    }
+
     pub(super) fn collect_panel_nodes(&self, root: NodeId, panels: &mut Vec<NodeId>) {
         let Some(node) = self.nodes.get(root) else {
             return;
