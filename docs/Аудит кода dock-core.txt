@@ -1,8 +1,15 @@
-Аудит статический: собрать и запустить тесты не удалось. crates.io из песочницы недоступен (прокси вернул 403), а workspace-Cargo.toml в архив не попал. Проверял чтением кода: около 11 тыс. строк production-кода из ~31 тыс., остальное тесты. Выборочно перепроверил Copy у DragSession, неверный doc-комментарий в layout.rs и логику layout_floating_root. Остальное опирается на чтение кода тремя проверяющими.
+Аудит dock-core — текущее состояние и история
+============================================
+
+Статус актуальных задач находится в конце документа. Следующие ниже исходные замечания сохранены для истории; часть из них уже исправлена, номера строк и описания относятся к состоянию на момент первоначального аудита. Не использовать исторические замечания как перечень открытых дефектов.
+
+Исходный статический аудит (25.10.2026)
+--------------------------------------
+Исходный аудит был статическим: локально собрать и запустить тесты из той песочницы не удалось (crates.io вернул 403, workspace-Cargo.toml в архиве отсутствовал). Анализ охватывал выборочные участки production-кода. Это описание относится к исходному снимку, а не к текущей проверке.
 
 Общий вывод. Код качественный: #![forbid(unsafe_code)], транзакционный apply (клон → команда → нормализация → валидация → коммит), строгая валидация геометрии с проверкой NaN/inf, идемпотентная нормализация. Критических дефектов и подтверждённых паник из публичного API я не нашёл. Проблемы в основном в граничных случаях геометрии, UX-логике drop-зон и производительности горячих путей.
 
-Medium
+Исходные замечания Medium — исторический снимок
 compute_rects может вернуть Err для всего снимка из-за одного плавающего окна (compute_rects.rs:696-721, 982-996). layout_floating_root вычитает высоту заголовка для свёрнутой первой группы, а clamp_floating_bounds берёт минимум из minimum_node_size, где этого резерва нет.
 Сценарий: окно с X-split, первая ветка свёрнута, высота 40. После clamp остаётся 40 − 28 = 12, и layout_tabs возвращает InsufficientSpace. Пропадает и main dock.
 Фикс: учесть резерв заголовка в минимуме для floating-корня. Ошибку одного окна лучше деградировать, а не ронять весь снимок.
@@ -27,7 +34,7 @@ Rect::contains валидирует дважды (rect.rs:79-88);
 minimum_node_size пересчитывается рекурсивно, find_parent линейный.
 Фикс: кэш зон на время drag-сессии, меньше валидации в горячем пути.
 
-Low
+Исходные замечания Low — исторический снимок
 DragSession — Copy (drag_session.rs:14). Копию можно довести до Dropped дважды, и гарантия «один запрос» держится только на дисциплине вызывающего. Нужно оставить только Clone.
 pointer_up с NaN/∞ оставляет жест в Dragging (drag_session.rs:178-183). Адаптер должен сам вызвать cancel().
 Активный таб может скрыться в overflow (compute_rects.rs:603-658). visible_count берёт первые N табов, не глядя на active_index.
@@ -45,7 +52,6 @@ insert_group_at_column без split_ratio сбрасывает пропорци�
 индекс в диагностике FloatingBoundsClamped относится к отсортированному порядку, а не к JSON (layout.rs:102-141);
 версия 2.0 даёт сообщение «missing non-negative integer field».
 Float-дрейф: последняя группа в стеке получает remaining*w/sum без компенсации остатка (compute_rects.rs:1105-1128), тогда как у табов остаток отдан последнему элементу.
-Floating Split(Y) и Column должны одинаково резервировать заголовок для первой свёрнутой ветки. В текущей реализации это уже учтено в `layout_floating_root` и `minimum_floating_size`; добавлен тест `floating_vertical_split_minimum_includes_title_for_collapsed_first_branch`, который проверяет минимальную высоту, положение обеих групп, разделитель, нижнюю границу и отсутствие изменения model bounds.
 Недостижимый код в clamp_floating_bounds (compute_rects.rs:1012-1037), плюс возможный ложный ArithmeticOverflow на больших origin (~1e7) из-за округления f32.
 Рекурсия без лимита глубины в tree.rs, normalization.rs, validation.rs. Для JSON-загрузки это ограничивает serde_json (128 уровней), но для программно построенных деревьев защиты нет. У JSON нет лимита размера и числа узлов.
 from_layout не валидирует layout (workspace_file.rs:43-78), поэтому можно сохранить файл, который потом не загрузится.
@@ -58,10 +64,9 @@ serde_json и proptest указаны с литеральными версиям
 все ~80 модулей одновременно pub mod и re-export, поэтому любой рефакторинг файлов ломает API;
 код использует Option::is_none_or, а это Rust ≥ 1.82. Проверьте rust-version в workspace.
 DockMetrics: validate через двойной match по строковым именам хрупок. Нет проверок связей между метриками (например, header_height + tab_strip_height против min_group_height), а при serde(default) валидации после десериализации нет.
-Архитектура
+Архитектурные замечания исходного снимка — исторически
 commands.rs на 3370 строк стоит разбить по доменам: панели, колонки, floating, flyout.
 Ветвление if profile == … разбросано по командам, его можно вынести в стратегию.
-Расчёт весов при вставке соседней группы теперь вынесен в общий split_sibling_ratios и используется как для Column, так и для существующего floating Split(Y); тест c44_split_group_preserves_existing_floating_stack_ratios_when_inserting_sibling проверяет сохранение пропорций при вставке в середину стека. Полный рефакторинг профильных путей и расчёта ширины main-column остаётся отдельной задачей. Повторная проверка no-op для соседних групп в SplitGroup уже переведена на общий adjacent_group_edge_is_noop; добавлен тест c44_split_group_on_adjacent_column_slot_is_a_noop.
 ResizeFlyout меняет panel_instances без роста версии. Это нарушает принцип «version = persistent state», рантайм-состояние лучше вынести из PanelInstance.
 Что сделано хорошо
 Предсказуемый DTO-слой для workspace: арены создаются заново, дубликатов ID и висячих ссылок быть не может.
@@ -69,68 +74,39 @@ ResizeFlyout меняет panel_instances без роста версии. Это
 Машина состояний DragSession корректно закрывает двойной commit, а weighted_sizes завершается и учитывает нулевые веса.
 Нормализация покрыта proptest.
 
-Прогресс исправлений после исходного статического аудита (25.10.2026)
-=====================================================================
+Текущее состояние исправлений
+=============================
 
-Статус — исправления закоммичены в main; локальная сборка и тесты для этой серии должны быть подтверждены отдельно.
+После исходного аудита исправления выполнялись небольшими пакетами. Пользователь подтверждал локальные тесты после каждого последнего пакета; тесты в ходе редактирования этого документа не запускались.
 
-Исправленные пункты Medium
---------------------------
-- Изоляция ошибки геометрии одного floating-окна и корректное резервирование заголовка для свернутых веток.
-- Floating drop-зоны выбирают ветку под указателем; drop-зоны доступны hit_test во время drag.
-- ResetColumnRatios сохраняет веса свернутых групп; ResetMainColumnRatios и ratio в SplitGroup влияют на фактическую ширину main-колонок.
-- Загрузка workspace восстанавливает допустимые повреждения с диагностикой: stale canvas bounds, повторяющиеся singleton-панели, превышение max_columns и дублирующиеся z_order.
-- Дерево workspace нормализуется до вычисления минимального размера floating-окна и clamp его границ.
-- UndoRedoHistory привязан к lineage Layout; при использовании истории с другим независимо созданным/загруженным Layout устаревшие checkpoints очищаются.
-- История использует VecDeque вместо Vec::remove(0); last_dock_locations и transient flyout-width cache ограничены 256 записями.
-- Ширина flyout хранится в runtime-состоянии Layout, а не в сериализуемом PanelInstance; undo несвязанной команды не откатывает эту ширину.
-- Добавлен Layout::update_canvas_bounds для передачи реального измерения viewport; узкий canvas больше не делает validate и команды невыполнимыми.
-- Добавлен кэш успешной валидации для compute_rects, compute_drop_zones и входа apply, keyed по revision Layout и DockMetrics.
+Закрытые направления — краткая сводка
+-------------------------------------
 
-Исправленные пункты Low и граничные случаи
-------------------------------------------
-- DragSession больше не Copy; NaN/∞ при pointer_move/pointer_up отменяет жест с явной причиной.
-- Активная вкладка остается видимой при tab overflow, если под нее помещается хотя бы один tab header: выбирается окно с active_index, а hidden_tabs содержит только вкладки вне отображаемого окна. Если полоса слишком узкая даже для одной минимальной вкладки, кнопка overflow по существующему контракту занимает всю полосу, без tab headers.
-- В `clamp_floating_bounds` удалена недостижимая повторная проверка минимального размера: до этого уже проверяется, что минимум помещается в client area, а фактические ширина и высота зажимаются в допустимые пределы. Максимальные координаты теперь вычисляются как origin + оставшаяся ширина/высота, а не как округлённый дальний край минус размер окна; это предотвращает ложный `ArithmeticOverflow` около больших `f32`-координат. Добавлен регрессионный тест `floating_bounds_clamp_handles_rounding_at_large_client_origin`.
-- MovePanel на GroupEdge собственной группы и DockFloating на собственную группу/descendant теперь no-op.
-- OpenPanel разворачивает целевую свернутую Photoshop-группу; размещение по умолчанию ищет Tabs справа, затем слева, и только потом создает новую правую колонку.
-- changed_nodes включает корни, нужные для инвалидирования при перемещении/размере/z-order floating-окон и изменении chrome.
-- Вставка группы без явного split ratio сохраняет относительные пропорции существующих групп; добавлены регрессионные тесты для слияния floating stack в Column. Проверка соседних групп на no-op теперь использует единый `adjacent_group_edge_is_noop` и в команде `SplitGroup`; добавлен тест для соседних групп в Column.
-- Проверена компенсация `f32`-погрешности в `weighted_sizes`: последний активный ребёнок получает `remaining - assigned`, а не независимую пропорциональную долю. Добавлен `weighted_sizes_assigns_f32_rounding_remainder_to_last_active_child`, который использует веса `[0.33333334; 3]` и проверяет отличие последней доли от нескорректированного `available * weight / sum`.
-- Проверен резерв title-row у floating vertical Split: расчёт минимального размера и выдача геометрии оба прибавляют `header_height`, когда первая ветвь начинается со свёрнутой группы. Добавлен регрессионный тест `floating_vertical_split_minimum_includes_title_for_collapsed_first_branch`.
-- Rect::contains не выполняет повторную проверку тех же геометрических данных.
-- GeometryError реализует Display/Error, а ComputeRectsError форматирует вложенную геометрическую причину через Display (не {:?}); добавлен тест `display_uses_geometry_error_message_instead_of_debug_format`. Пустая колонка теперь даёт InvalidLayout вместо ложного ArithmeticOverflow, а реальное переполнение минимального размера сохраняет ArithmeticOverflow; добавлены регрессионные тесты на оба случая. Пустой или некорректный floating subtree больше не маскируется под ArithmeticOverflow.
-- `PanelKey::new` и `create_initial_layout` теперь возвращают типизированные ошибки напрямую (`PanelKeyError` и `InitialLayoutError`). Дублирующие `PanelKey::try_new` и `create_initial_layout_with_error`, а также преобразование категорий ошибок в `&'static str` удалены. Ошибки фабрики форматируются через `Display`, а тесты проверяют категории и детали ошибок.
-- `FloatingBoundsClamped.index` сохраняет индекс floating-группы из JSON даже при сортировке по `z_order` и удалении более ранней группы при нормализации; индекс передаётся через runtime ID, добавлен регрессионный тест `floating_bounds_clamped_diagnostic_keeps_json_index_after_earlier_group_is_removed`.
-- Документация Layout перемещена на саму структуру; устранены assumption-based expect/unreachable в отмеченных путях normalization, factory и ResizeSplitColumnBoundary. В `MoveGroupToMainColumn` оставшийся `source_column.unwrap()` заменён на явную проверку `Option`; добавлен тест перестановки колонок, каждая из которых содержит одну группу (`move_group_to_main_column_reorders_single_group_columns_without_panicking`).
-- DockMetrics проверяет связь header_height + tab_strip_height с min_group_height, а serde-десериализация с defaults теперь тоже валидирует значения. Проверки полей упрощены без двойного match по строковым именам.
-- Workspace JSON ограничен 16 MiB и 100 000 узлами; глубина runtime tree ограничена 256 итеративной проверкой до рекурсивной валидации, а `normalize_node` выполняется только после этого preflight. Для программно созданных WorkspaceFile число узлов и глубина проверяются итеративно до миграции v1 и восстановления; экспорт Layout прерывает рекурсивную сериализацию с ошибкой при глубине более 256. Добавлены тесты `programmatic_workspace_depth_is_rejected_before_migration_and_restore` и `from_layout_rejects_programmatic_tree_depth_before_recursive_export`.
-- Экспорт workspace сведён к одному строгому API: `WorkspaceFile::from_layout(layout, metrics)` проверяет модель с активными метриками, а `Layout::to_workspace_file(metrics)` вызывает тот же путь. Дублирующий `from_layout_with_metrics` удалён. DTO строится с ограничением глубины до рекурсивной валидации, чтобы программно созданное чрезмерно глубокое дерево возвращало ошибку до обхода модели. Для тестовых fixtures с намеренно невалидным Layout оставлен helper только под `cfg(test)`.
-- serde_json и proptest перенесены в workspace dependencies; сообщение ошибки поля version теперь отличает отсутствующее поле от неверного типа.
-- Проверен MSRV: корневой `Cargo.toml` задаёт `workspace.package.rust-version = "1.99.1"`, а `Option::is_none_or` стабилизирован в Rust 1.82. Объявление workspace корректно, менять его не требуется.
+- **Геометрия и drag/drop:** ошибка отдельного floating-окна больше не должна ронять весь снимок; поправлены резервирование заголовка и clamp границ; floating drop-зоны выбирают ветку под указателем; hit-test учитывает зоны при drag; обработаны переполнение вкладок, граничные f32-случаи и дублирующая проверка Rect::contains.
+- **Команды и состояние:** исправлены no-op для перемещения группы/окна в собственную цель, поведение OpenPanel, обратные команды и changed_nodes; отношения ширины и ratios влияют на реальную геометрию; runtime-состояние flyout отделено от сериализуемого состояния панели.
+- **Workspace и история:** восстановление допустимых повреждений выполняется с диагностикой; дерево нормализуется до расчёта размеров floating-окон; история привязана к lineage Layout; ограничены размер JSON, число узлов и глубина дерева; экспорт Layout требует валидной модели и явных метрик.
+- **Ошибки и валидация:** ошибки геометрии сохраняют причины, введены типизированные ошибки фабрики и PanelKey, проверяются связанные ограничения DockMetrics, добавлены безопасные проверки глубины до рекурсивных проходов.
+- **Производительность и runtime:** добавлены кэш успешной валидации и кэш минимальных размеров в геометрической операции; история использует VecDeque; ограничены вспомогательные кэши и remembered dock locations.
+- **Архитектура команд:** бывший крупный dispatcher разделён на доменные модули панелей, переносов, floating, flyout, resize, layout state и target-policy/insertion. Политики ширины и несколько алгоритмов sizing разложены на специализированные helper-функции. Структура публичного API оформлена через root-level re-exports.
+- **Последний проверенный пакет:** в MoveGroupToMainColumn вынесены сбор исходного контекста (GroupMainColumnSource), построение inverse и перестановка одногрупповой колонки. Код — https://github.com/MasterKrafta/roadmap-docking/commit/134683ab5086a606e8f464840755d38d9004e23f; описание — https://github.com/MasterKrafta/roadmap-docking/commit/201fe67655c3fd9e05796a1a8ae8dac92adbbe9b. Локальные тесты после этого пакета пользователь подтвердил как успешные.
 
-Оставшиеся ограничения (не считаются закрытыми)
------------------------------------------------
-- Добавлен DropZoneResolver: он один раз строит DropZoneTreeIndex и drop-зоны, а затем разрешает несколько позиций указателя без повторной валидации дерева и аллокации зон. Для этого вызывающий код должен хранить resolver в течение drag-сессии; текущий GPUI-адаптер еще не подключает drag/drop обработку.
-- Обход дерева, возвращающий ID панелей (`panel_ids_in_subtree`), размещён рядом с `panel_nodes_in_subtree` в `layout/tree.rs`; `commands.rs` использует общий tree helper.
-- `compute_rects` теперь мемоизирует `minimum_node_size` в локальном кэше одной неизменяемой геометрической операции; кэш общий для расчета preferred widths, основного дерева и floating-окон. Добавлен тест `minimum_node_size_cache_reuses_subtree_values`. `find_parent` по-прежнему выполняет линейный обход. Постоянный индекс родителей не добавлялся: внутри транзакции `apply` дерево меняется до увеличения версии, поэтому кэш только по revision мог бы стать устаревшим. Нужен отдельный индекс с явной областью жизни/инвалидацией.
-- Перепроверка стоимости Layout::apply: начальный self.validate_cached обычно попадает в кэш после успешной команды, поэтому исходная формулировка о трёх полных validate неточна. Однако normalize_in_place по-прежнему делает полный preflight перед рекурсивной нормализацией и полный validate после неё; вместе с транзакционным клонированием это остаётся O(n). Убирать любой из этих защитных проходов без отдельного контракта проверки/нормализации небезопасно.
-- `layout/commands.rs` теперь содержит транзакционную оболочку (`apply`, `apply_transaction`) и явную маршрутизацию команд; реализации доменных команд вынесены в отдельные диспетчеры. Расчёт долей соседних групп вынесен в `split_sibling_ratios` (`layout/helpers.rs`). Расчёт равномерных ширин при `reset_main_column_widths` декомпозирован в методы чтения текущих ширин, проверки min/max-ограничений и распределения ширин с сохранением общей ширины (`layout/sizing.rs`). Другие правила изменения main-column width и профильная логика слияния групп остаются отдельными темами последующего рефакторинга с сохранением публичного контракта.
-- Методы `float_group_as_column`, `float_panel_as_group` и `dock_floating_group` находятся в `layout/command_floating.rs`. Обработчик команд `Float`, `FloatGroupAsColumn`, `FloatPanelAsGroup`, `MoveFloating`, `ResizeFloating`, `ResizeFloatingBounds`, `RaiseFloating` и `DockFloating` выделен из большого dispatcher в `layout/command_floating_dispatch.rs`; маршрутизация сохранена без изменения логики команд.
-- Основной `apply_command` делегирует связанные команды вкладок/панелей в `command_panel_dispatch.rs` (`OpenPanel`, `ClosePanel`, `CloseGroup`, `ActivateTab`, `ReorderTab`), перенос панелей — в `command_panel_transfer_dispatch.rs` (`MovePanelFromFlyout`, `FloatPanelFromFlyout`, `MovePanel`), перенос групп и колонок — в `command_group_transfer_dispatch.rs` (`MoveGroup`, `MoveGroupToMainColumn`), а операции объединения и разделения групп — в `command_group_dispatch.rs` (`MergeGroup`, `SplitGroup`). Последний модуль тем самым разделён по ответственности: transfer/reorder отдельно от merge/split.
-- В `MoveGroupToMainColumn` состояние исходной группы собирается в `GroupMainColumnSource` через `group_main_column_source`: он хранит исходную колонку, позицию в main dock, индекс группы и признак одногрупповой колонки. `inverse_for_move_group_to_main_column` отдельно определяет обратную команду для обычного переноса, а `try_reorder_sole_group_main_column` обрабатывает перестановку существующей одногрупповой колонки на той же стороне, включая no-op слоты, проверку `Split(X)`, перенос ratio вместе с колонкой и расчёт inverse-индекса. Основной обработчик сохраняет валидацию команды, саму операцию переноса и создание новой колонки.
-- Команды изменения размеров и пропорций отделены от `commands.rs`: `ResizeGroups`, `ResetColumnRatios`, `RestoreGroupRatios` обрабатываются в `command_group_resize_dispatch.rs`; `ResizeColumn`, `ResizeColumnBoundary`, `ResizeSplitColumnBoundary`, `ResetMainColumnRatios` — в `command_column_resize_dispatch.rs`. Все варианты явно маршрутизируются из `apply_command`; проверки, профильные правила и расчёты сохранены.
-- Общее вычисление допустимого `delta` и изменение `width`/`last_expanded_width` соседних колонок для `ResizeColumnBoundary` и `ResizeSplitColumnBoundary` вынесены в `resize_adjacent_columns` (`command_column_resize_dispatch.rs`). Обновление ratios осталось у вызывающих команд: main dock синхронизирует свои колонки, а вложенный `Split(X)` — собственные ratios.
-- `reset_main_column_widths` в `layout/sizing.rs` разбит на три узких шага: `main_column_widths_for_reset` считывает ширины колонок, `main_column_width_constraints_for_reset` вычисляет ограничения (сохраняя фиксированную ширину rail и допустимый общий диапазон), `equalized_main_column_widths` выполняет прежний bisection и компенсирует остаток `f32`. Внешний метод по-прежнему применяет результат только к expanded-колонкам; численные допуски и тексты ошибок сохранены.
-- `resize_inserted_column_for_split_ratio` перенесён в `layout/sizing.rs`, рядом с min/max-расчётами ширины. `command_target_insertion.rs` вызывает его при вставке новой колонки в одноколоночный dock или в существующий `Split(X)`; формула требуемой ширины, ограничения панели и обработка rail-режимов не менялись.
-- `ResizeColumn` в `command_column_resize_dispatch.rs` теперь использует `column_resize_limits` для проверки положения main-column и расчёта min/max с учётом доступной ширины canvas, а `effective_column_width` применяет правило для Expanded/IconsAndLabels/IconsOnly и проверяет итоговое значение. Обновление модели, canvas и main-column ratios осталось в исходном обработчике.
-- Профильное поведение `MergeGroup` изолировано в `reveal_merge_target_for_profile`: после валидации merge-target и ограничений Photoshop раскрывает свернутую целевую Tabs-группу, остальные профили сохраняют прежнее состояние.
-- Команды состояния layout (`CollapseGroup`, `SetColumnMode`, `SetChrome`) выделены в `command_layout_state_dispatch.rs`; сохранены проверки целевого узла, ограничений областей, синхронизация main-column ratios и обратные команды для изменяющих persistent state операций.
-- Жизненный цикл flyout (`OpenFlyout`, `CloseFlyout`, `DismissFlyout`, `SetFlyoutAutoCollapse`, `ResizeFlyout`) выделен в `command_flyout_dispatch.rs`. Сохранены transient-семантика, проверка rail/main-dock принадлежности, ограничения ширины и ограниченный кэш ширин.
-- Сравнение постоянного и полного состояния (`same_persistent_state`, `same_state`) и расчёт изменённых узлов (`changed_node_ids`) собраны в `layout/command_changes.rs`, отдельно от диспетчера команд.
-- Доменные операции, ранее собранные в `layout/commands.rs`, выделены в отдельные модули: политики определения допустимой docking-области, валидация `DropTarget` и panel constraints (`allowed_area_for_target`, проверки Column/Tabs/GroupEdge/RailSlot и принадлежности icon rail, `validate_drop_target`, `validate_constraints_allowed_for_target`, `validate_panel_ids_allowed_for_target`, `validate_panel_ids_allowed_for_area`) находятся в `layout/command_target_policy.rs`; диспетчер вставки узла по `DropTarget` и вспомогательные операции `RailSlot` (`insert_node_for_target`, `insert_panel_for_rail_slot`, `rail_slot_group_index`), а также `group_node_for` — в `layout/command_target_insertion.rs`. Helper `allowed_area_rejection_reason` находится рядом с policy-проверками. Видимость внутренних методов, используемых между модулями, ограничена `pub(super)`. `insert_group_at_column` и `insert_existing_column_at` остаются в `layout/command_target_insertion.rs`; `insert_group_edge` и `merge_group_into_tabs` выделены в `layout/command_group_insertion.rs`. Общий helper `split_sibling_ratios` находится в `layout/helpers.rs`. Расчёт ширины новой колонки для split-ratio (`resize_inserted_column_for_split_ratio`) размещён в `layout/sizing.rs`, а вставка и изменение структуры main dock остаются в `layout/command_target_insertion.rs`. `layout/commands.rs` теперь оставлен как транзакционная оболочка и маршрутизатор команд; дальнейшая работа касается профильных правил и политики изменения ширины колонок, а не размера основного dispatcher.
-- `ComputeRectsError` сам сохраняет причину ошибки метрик (`InvalidMetrics { reason }`) и полный список ошибок начальной проверки модели (`InvalidLayout { errors }`). Для этого API изменён напрямую: отдельный `ComputeRectsDiagnosticError` и дополнительный `compute_rects_with_diagnostics` удалены; `compute_rects` — единственная точка входа для геометрии и возвращает подробные ошибки. Тип больше не Copy из-за хранения вектора `ValidationError`. Для структурной несогласованности, обнаруженной уже внутри геометрических подопераций, используется отдельный `InvalidLayoutState`. Регрессионные тесты проверяют сохранение причины метрик и деталей валидации. По тому же принципу `PanelKey::new` и `create_initial_layout` теперь являются единственными основными API и возвращают свои типизированные ошибки непосредственно; методы-дублёры для совместимости не сохраняются.
-- Публичный API намеренно оформлен через root-level фасад: все 78 production-модулей в `lib.rs` теперь private (`mod`), а используемые публичные типы и функции экспортируются через `dock_core::Type`. `DropZoneResolver` добавлен в корневые re-exports, потому что он является публичным возвращаемым типом `Layout::prepare_drop_resolver`. Проверены source-файлы `dock-gpui`, приложения и вспомогательных crates: прямых импортов вида `dock_core::some_module::Type` не найдено. Это осознанное breaking API изменение, уменьшающее зависимость внешнего кода от структуры файлов; после локальной проверки полного workspace нужно исправить любые оставшиеся интеграционные потребители.
-- Не все DockCommand гарантируют inverse; CommandOutcome документирует inverse как best-effort, а UndoRedoHistory использует снапшоты и от наличия inverse не зависит.
-- API экспорта требует метрики явно; невалидный `Layout` больше нельзя сериализовать через публичный convenience-метод в workspace-файл, который затем не сможет загрузиться.
+Оставшиеся ограничения
+======================
 
+Здесь перечисляются только реальные открытые вопросы, а не выполненные рефакторинги.
+
+1. **Интеграция drag/drop в GPUI.** DropZoneResolver умеет повторно разрешать позиции в течение drag-сессии без пересоздания зон, но текущий GPUI-адаптер ещё не подключает этот путь к обработке перетаскивания.
+2. **Линейный поиск родителя.** find_parent по-прежнему обходит дерево. Постоянный parent-index не добавлен: в ходе транзакции candidate Layout меняется до обновления версии, поэтому кэш только по revision может устаревать. Нужен индекс с чётко определённым временем жизни и инвалидацией.
+3. **Линейная стоимость транзакции.** Layout::apply клонирует модель, а нормализация выполняет preflight и последующую полную валидацию. Это остаётся O(n). Убирать защитные проходы без отдельного контракта корректности и замеров производительности нельзя; это известная стоимость, а не подтверждённый функциональный дефект.
+
+Известные контракты, не являющиеся открытыми дефектами
+------------------------------------------------------
+
+- CommandOutcome.inverse — best-effort; отмена/повтор опирается на снапшоты UndoRedoHistory.
+- Экспорт workspace требует явных метрик и валидной модели; это намеренно строгий контракт.
+- Закрытие списка исторических замечаний не означает отказа от регрессионных тестов: новые найденные дефекты следует исправлять и добавлять в тесты, но не добавлять в «Оставшиеся ограничения» уже завершённые рефакторинги.
+
+Текущий рабочий участок
+=======================
+
+Продолжается декомпозиция transfer-команд и правил изменения ширины колонок без изменения поведения и публичного API. Следующий пакет выбирается из кода, а не из списка исторических замечаний. Новые пункты в «Оставшиеся ограничения» добавляются только при подтверждении, что вопрос действительно не закрыт.
