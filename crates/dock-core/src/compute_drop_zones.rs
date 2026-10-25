@@ -6,6 +6,20 @@ use crate::{
     Rect, Size,
 };
 
+/// Reusable drop-resolution snapshot for a single drag gesture.
+///
+/// Preparing a resolver validates the layout and geometry, then builds the tree index
+/// and legal drop-zone list once. Keeping this value alive borrows the layout, geometry,
+/// and metrics immutably, preventing the cached snapshot from being used while any of
+/// those inputs are changed. Create a new resolver after a layout or viewport update.
+pub struct DropZoneResolver<'a> {
+    layout: &'a Layout,
+    rects: &'a LayoutRects,
+    _metrics: &'a DockMetrics,
+    tree_index: DropZoneTreeIndex,
+    zones: Vec<DropZoneRect>,
+}
+
 impl Layout {
     /// Builds source-aware drop affordances from an already computed geometry snapshot.
     ///
@@ -21,6 +35,29 @@ impl Layout {
         self.validate_drop_zone_state(metrics)?;
         let tree_index = DropZoneTreeIndex::new(self);
         self.compute_drop_zones_with_index(source, rects, metrics, &tree_index)
+    }
+
+    /// Prepares a reusable drop resolver for repeated pointer updates in one drag.
+    ///
+    /// The returned value computes legal zones and the tree index once. Its immutable
+    /// borrows tie the cache to this layout, geometry snapshot, and metrics; drop it and
+    /// prepare a new one after any of those inputs need to change.
+    pub fn prepare_drop_resolver<'a>(
+        &'a self,
+        source: DropSource,
+        rects: &'a LayoutRects,
+        metrics: &'a DockMetrics,
+    ) -> Result<DropZoneResolver<'a>, ComputeRectsError> {
+        self.validate_drop_zone_state(metrics)?;
+        let tree_index = DropZoneTreeIndex::new(self);
+        let zones = self.compute_drop_zones_with_index(source, rects, metrics, &tree_index)?;
+        Ok(DropZoneResolver {
+            layout: self,
+            rects,
+            _metrics: metrics,
+            tree_index,
+            zones,
+        })
     }
 
     fn validate_drop_zone_state(&self, metrics: &DockMetrics) -> Result<(), ComputeRectsError> {
@@ -797,8 +834,9 @@ impl Layout {
 
     /// Resolves the point to the highest-priority legal destination, if any.
     ///
-    /// Floating windows are handled front-to-back: a point inside the foremost
-    /// window never falls through to a lower window or the Canvas.
+    /// This one-shot convenience method prepares a temporary resolver. Call
+    /// `prepare_drop_resolver` and reuse its result when resolving multiple pointer
+    /// positions during one drag gesture.
     pub fn resolve_drop(
         &self,
         point: Point,
@@ -807,12 +845,25 @@ impl Layout {
         metrics: &DockMetrics,
     ) -> Result<Option<DropTarget>, ComputeRectsError> {
         point.validate().map_err(ComputeRectsError::Geometry)?;
-        self.validate_drop_zone_state(metrics)?;
-        let tree_index = DropZoneTreeIndex::new(self);
-        let zones = self.compute_drop_zones_with_index(source, rects, metrics, &tree_index)?;
+        self.prepare_drop_resolver(source, rects, metrics)?
+            .resolve_validated(point)
+    }
+}
 
+
+impl DropZoneResolver<'_> {
+    /// Resolves a pointer position using the cached legal zones and tree index.
+    ///
+    /// This performs only point validation and hit resolution; layout validation,
+    /// target enumeration, and zone construction were done when the resolver was prepared.
+    pub fn resolve(&self, point: Point) -> Result<Option<DropTarget>, ComputeRectsError> {
+        point.validate().map_err(ComputeRectsError::Geometry)?;
+        self.resolve_validated(point)
+    }
+
+    fn resolve_validated(&self, point: Point) -> Result<Option<DropTarget>, ComputeRectsError> {
         let mut topmost_floating: Option<(FloatingGroupId, Rect, i32)> = None;
-        for floating in &rects.floating_groups {
+        for floating in &self.rects.floating_groups {
             if floating
                 .rect
                 .contains(point)
@@ -828,13 +879,13 @@ impl Layout {
             }
         }
         if let Some((floating_id, _bounds, _z_order)) = topmost_floating {
-            let Some(floating) = self.floating_group(floating_id) else {
+            let Some(floating) = self.layout.floating_group(floating_id) else {
                 return Ok(None);
             };
-            let Some(area) = self.dock_area(floating.area) else {
+            let Some(area) = self.layout.dock_area(floating.area) else {
                 return Ok(None);
             };
-            return best_containing_zone(&zones, point, |zone| {
+            return best_containing_zone(&self.zones, point, |zone| {
                 matches!(
                     zone.zone,
                     DropZone::FloatingCenter
@@ -844,11 +895,11 @@ impl Layout {
                         | DropZone::Left
                         | DropZone::Right
                 ) && zone.target.referenced_node_id()
-                    .map(|node| contains_node(&tree_index, area.root, node))
+                    .map(|node| contains_node(&self.tree_index, area.root, node))
                     .unwrap_or(false)
             });
         }
-        best_containing_zone(&zones, point, |_| true)
+        best_containing_zone(&self.zones, point, |_| true)
     }
 }
 
@@ -2226,20 +2277,21 @@ mod tests {
             resolved,
             Some(DropTarget::GroupEdge { group, zone: DropZone::Bottom }) if group == upper_group
         ));
+        let prepared = layout
+            .prepare_drop_resolver(
+                DropSource::Panel {
+                    panel: source_panel,
+                },
+                &rects,
+                &metrics,
+            )
+            .unwrap();
+        assert_eq!(prepared.resolve(inside).unwrap(), resolved);
         for _ in 0..4 {
             assert_eq!(
-                layout
-                    .resolve_drop(
-                        inside,
-                        DropSource::Panel {
-                            panel: source_panel
-                        },
-                        &rects,
-                        &metrics,
-                    )
-                    .unwrap(),
+                prepared.resolve(inside).unwrap(),
                 resolved,
-                "drop resolution must be deterministic for identical geometry and input"
+                "cached drop resolution must be deterministic for identical geometry and input"
             );
         }
         assert_ne!(lower_group, upper_group);
