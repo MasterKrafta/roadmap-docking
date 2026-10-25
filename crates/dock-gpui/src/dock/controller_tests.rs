@@ -292,6 +292,37 @@
     fn outer_column_resize_commits_and_undoes_on_both_sides() {
         for side in [DockSide::Left, DockSide::Right] {
             let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+
+            // The initial app layout only guarantees a right-side main area.
+            // Build the missing left-side area directly in the test fixture so
+            // setup does not add an unrelated undo-history entry.
+            if side == DockSide::Left {
+                let source_column = crate::tree_query::main_column_ids(
+                    controller.layout(),
+                    DockSide::Right,
+                )
+                .first()
+                .copied()
+                .expect("initial layout should expose a source right column");
+                let group = match controller.layout().node(source_column) {
+                    Some(Node::Column(value)) => value.groups.first().copied(),
+                    other => panic!("source main column should be a column, got {other:?}"),
+                }
+                .expect("source right column should contain a group");
+
+                controller
+                    .layout
+                    .apply(
+                        DockCommand::MoveGroupToMainColumn {
+                            group,
+                            side: DockSide::Left,
+                            index: 0,
+                        },
+                        controller.metrics(),
+                    )
+                    .expect("test setup should create a left main column");
+            }
+
             let columns = crate::tree_query::main_column_ids(controller.layout(), side);
             let column = match side {
                 DockSide::Left => columns.last().copied(),
