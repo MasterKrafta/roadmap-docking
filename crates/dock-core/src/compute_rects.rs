@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::{
     Axis, Column, ColumnMode, ColumnRect, ComputeRectsError, DockMetrics, DockSide,
     FloatingGroupRect, FloatingResizeEdgeRect, FlyoutRect, GeometryError, GroupRect, Layout,
@@ -109,6 +111,10 @@ impl Layout {
         self.validate_cached(metrics)
             .map_err(|_| ComputeRectsError::InvalidLayout)?;
 
+        // Cache minimum sizes only for this immutable geometry pass. The cache
+        // cannot outlive the exact layout and metrics used to calculate it.
+        let mut minimum_sizes = HashMap::new();
+
         // Hidden chrome changes presentation only. Keep the main-dock tree in
         // Layout, but omit its geometry so the Canvas gets the full viewport.
         let (left_root, right_root) = if self.chrome().dock_visible() {
@@ -120,11 +126,11 @@ impl Layout {
             (None, None)
         };
         let left_width = match left_root {
-            Some(root) => preferred_width(self, root, metrics)?,
+            Some(root) => preferred_width(self, root, metrics, &mut minimum_sizes)?,
             None => 0.0,
         };
         let right_width = match right_root {
-            Some(root) => preferred_width(self, root, metrics)?,
+            Some(root) => preferred_width(self, root, metrics, &mut minimum_sizes)?,
             None => 0.0,
         };
 
@@ -160,14 +166,14 @@ impl Layout {
 
         if let Some(root) = left_root {
             let area = Rect::new(viewport.origin, Size::new(left_width, viewport.size.height));
-            layout_node(self, root, area, metrics, &mut output)?;
+            layout_node(self, root, area, metrics, &mut minimum_sizes, &mut output)?;
         }
         if let Some(root) = right_root {
             let area = Rect::new(
                 Point::new(right_x, viewport.origin.y),
                 Size::new(right_width, viewport.size.height),
             );
-            layout_node(self, root, area, metrics, &mut output)?;
+            layout_node(self, root, area, metrics, &mut minimum_sizes, &mut output)?;
         }
 
         // A rail flyout belongs to the dock presentation. Keep its transient
@@ -193,7 +199,9 @@ impl Layout {
                 let mut floating_output = LayoutRects::default();
                 let result = (|| {
                     let bounds =
-                        clamp_floating_bounds(self, area.root, floating.bounds, viewport, metrics)?;
+                        clamp_floating_bounds_with_cache(
+                            self, area.root, floating.bounds, viewport, metrics, &mut minimum_sizes,
+                        )?;
                     floating_output
                         .floating_groups
                         .push(FloatingGroupRect::new(id, bounds, floating.z_order));
@@ -203,6 +211,7 @@ impl Layout {
                         area.root,
                         bounds,
                         metrics,
+                        &mut minimum_sizes,
                         &mut floating_output,
                     )?;
                     Ok::<(), ComputeRectsError>(())
@@ -303,6 +312,7 @@ fn preferred_width(
     layout: &Layout,
     id: NodeId,
     metrics: &DockMetrics,
+    minimum_sizes: &mut HashMap<NodeId, Size>,
 ) -> Result<f32, ComputeRectsError> {
     #[cfg(test)]
     visit_probe::record_preferred_width(id);
@@ -311,11 +321,11 @@ fn preferred_width(
         Node::Column(column) => effective_column_width(column, metrics),
         Node::Tabs(_) | Node::Panel(_) => metrics
             .default_column_width
-            .max(minimum_node_size(layout, id, metrics)?.width),
+            .max(minimum_node_size(layout, id, metrics, minimum_sizes)?.width),
         Node::Split(split) if split.axis == Axis::X => {
             let mut width = 0.0;
             for child in &split.children {
-                width += preferred_width(layout, *child, metrics)?;
+                width += preferred_width(layout, *child, metrics, minimum_sizes)?;
             }
             width += metrics.splitter_thickness * split.children.len().saturating_sub(1) as f32;
             width
@@ -323,7 +333,7 @@ fn preferred_width(
         Node::Split(split) => {
             let mut width = 0.0_f32;
             for child in &split.children {
-                width = width.max(preferred_width(layout, *child, metrics)?);
+                width = width.max(preferred_width(layout, *child, metrics, minimum_sizes)?);
             }
             width
         }
@@ -351,10 +361,11 @@ fn minimum_node_size(
     layout: &Layout,
     id: NodeId,
     metrics: &DockMetrics,
+    minimum_sizes: &mut HashMap<NodeId, Size>,
 ) -> Result<Size, ComputeRectsError> {
     #[cfg(test)]
     visit_probe::record_minimum_node_size_helper(id);
-    layout.minimum_node_size(id, metrics).map_err(|error| match error {
+    layout.minimum_node_size_with_cache(id, metrics, minimum_sizes).map_err(|error| match error {
         crate::CommandError::InvalidValue { field: "size", .. } => {
             ComputeRectsError::Geometry(GeometryError::ArithmeticOverflow)
         }
@@ -367,6 +378,7 @@ fn layout_node(
     id: NodeId,
     rect: Rect,
     metrics: &DockMetrics,
+    minimum_sizes: &mut HashMap<NodeId, Size>,
     output: &mut LayoutRects,
 ) -> Result<(), ComputeRectsError> {
     rect.validate().map_err(ComputeRectsError::Geometry)?;
@@ -379,7 +391,7 @@ fn layout_node(
         || matches!(node, Node::Split(split) if split.axis == Axis::Y);
     let mut content_rect = rect;
     if !manages_vertical_stack {
-        let minimum = minimum_node_size(layout, id, metrics)?;
+        let minimum = minimum_node_size(layout, id, metrics, minimum_sizes)?;
         if content_rect.size.height < minimum.height {
             push_vertical_overflow(id, rect, minimum.height, output)?;
             content_rect.size.height = minimum.height;
@@ -396,6 +408,7 @@ fn layout_node(
             column,
             content_rect,
             metrics,
+            minimum_sizes,
             output,
         ),
         Node::Tabs(tabs) => layout_tabs(
@@ -404,6 +417,7 @@ fn layout_node(
             tabs,
             content_rect,
             metrics,
+            minimum_sizes,
             output,
         ),
         Node::Panel(panel) => {
@@ -437,6 +451,7 @@ fn layout_node(
             split,
             content_rect,
             metrics,
+            minimum_sizes,
             output,
         ),
     }
@@ -448,6 +463,7 @@ fn layout_column(
     column: &Column,
     rect: Rect,
     metrics: &DockMetrics,
+    minimum_sizes: &mut HashMap<NodeId, Size>,
     output: &mut LayoutRects,
 ) -> Result<(), ComputeRectsError> {
     output.columns.push(ColumnRect::new(id, rect));
@@ -515,6 +531,7 @@ fn layout_column(
         rect.size.height,
         Axis::Y,
         metrics,
+        minimum_sizes,
     )?;
     if allocation.overflows {
         push_vertical_overflow(id, rect, allocation.content_height, output)?;
@@ -527,7 +544,7 @@ fn layout_column(
             Point::new(rect.origin.x, y),
             Size::new(rect.size.width, height),
         );
-        layout_node(layout, *group_id, group_rect, metrics, output)?;
+        layout_node(layout, *group_id, group_rect, metrics, minimum_sizes, output)?;
         y += height;
 
         if index + 1 < column.groups.len() {
@@ -544,10 +561,11 @@ fn layout_tabs(
     tabs: &Tabs,
     rect: Rect,
     metrics: &DockMetrics,
+    minimum_sizes: &mut HashMap<NodeId, Size>,
     output: &mut LayoutRects,
 ) -> Result<(), ComputeRectsError> {
     let collapsed = tabs.collapsed;
-    let minimum_size = minimum_node_size(layout, id, metrics)?;
+    let minimum_size = minimum_node_size(layout, id, metrics, minimum_sizes)?;
     // Geometry and resize commands share Layout::minimum_node_size, including
     // the effective tab-strip floor for collapsed groups.
     let minimum_height = minimum_size.height;
@@ -707,7 +725,7 @@ fn layout_tabs(
         Size::new(group_rect.size.width, content_height),
     );
     if let Some(active_child) = tabs.active_child() {
-        layout_node(layout, active_child, content_rect, metrics, output)?;
+        layout_node(layout, active_child, content_rect, metrics, minimum_sizes, output)?;
     }
     Ok(())
 }
@@ -718,9 +736,10 @@ fn layout_split(
     split: &crate::Split,
     rect: Rect,
     metrics: &DockMetrics,
+    minimum_sizes: &mut HashMap<NodeId, Size>,
     output: &mut LayoutRects,
 ) -> Result<(), ComputeRectsError> {
-    layout_split_inner(layout, id, split, rect, metrics, output, false)
+    layout_split_inner(layout, id, split, rect, metrics, minimum_sizes, output, false)
 }
 
 /// Lays out a floating composition while respecting the independent window title.
@@ -734,6 +753,7 @@ fn layout_floating_root(
     id: NodeId,
     rect: Rect,
     metrics: &DockMetrics,
+    minimum_sizes: &mut HashMap<NodeId, Size>,
     output: &mut LayoutRects,
 ) -> Result<(), ComputeRectsError> {
     let title_height = metrics.header_height.min(rect.size.height);
@@ -747,7 +767,7 @@ fn layout_floating_root(
                 Point::new(rect.origin.x, rect.origin.y + title_height),
                 Size::new(rect.size.width, rect.size.height - title_height),
             );
-            layout_node(layout, id, content_rect, metrics, output)
+            layout_node(layout, id, content_rect, metrics, minimum_sizes, output)
         }
         Some(Node::Split(split))
             if split.axis == Axis::Y
@@ -758,12 +778,12 @@ fn layout_floating_root(
                 Point::new(rect.origin.x, rect.origin.y + title_height),
                 Size::new(rect.size.width, rect.size.height - title_height),
             );
-            layout_node(layout, id, content_rect, metrics, output)
+            layout_node(layout, id, content_rect, metrics, minimum_sizes, output)
         }
         Some(Node::Split(split)) if split.axis == Axis::X => {
-            layout_split_inner(layout, id, split, rect, metrics, output, true)
+            layout_split_inner(layout, id, split, rect, metrics, minimum_sizes, output, true)
         }
-        _ => layout_node(layout, id, rect, metrics, output),
+        _ => layout_node(layout, id, rect, metrics, minimum_sizes, output),
     }
 }
 
@@ -775,6 +795,7 @@ fn layout_split_inner(
     split: &crate::Split,
     rect: Rect,
     metrics: &DockMetrics,
+    minimum_sizes: &mut HashMap<NodeId, Size>,
     output: &mut LayoutRects,
     reserve_title_for_collapsed_branches: bool,
 ) -> Result<(), ComputeRectsError> {
@@ -798,7 +819,7 @@ fn layout_split_inner(
                 split
                     .children
                     .iter()
-                    .map(|child| preferred_width(layout, *child, metrics))
+                    .map(|child| preferred_width(layout, *child, metrics, minimum_sizes))
                     .collect::<Result<Vec<_>, _>>()?
             } else {
                 let minimum_widths = split
@@ -806,7 +827,7 @@ fn layout_split_inner(
                     .iter()
                     .map(|child| {
                         let minimum =
-                            minimum_node_size(layout, *child, metrics)?.width;
+                            minimum_node_size(layout, *child, metrics, minimum_sizes)?.width;
                         Ok(minimum.max(metrics.min_column_width))
                     })
                     .collect::<Result<Vec<f32>, ComputeRectsError>>()?;
@@ -841,7 +862,7 @@ fn layout_split_inner(
                         child_rect.size.height -= title_height;
                     }
                 }
-                layout_node(layout, *child, child_rect, metrics, output)?;
+                layout_node(layout, *child, child_rect, metrics, minimum_sizes, output)?;
                 x += widths[index];
                 if index + 1 < split.children.len() {
                     push_splitter(id, index, Axis::X, x, rect, metrics, output)?;
@@ -858,6 +879,7 @@ fn layout_split_inner(
                 rect.size.height,
                 Axis::Y,
                 metrics,
+                minimum_sizes,
             )?;
             if allocation.overflows {
                 push_vertical_overflow(id, rect, allocation.content_height, output)?;
@@ -868,7 +890,7 @@ fn layout_split_inner(
                     Point::new(rect.origin.x, y),
                     Size::new(rect.size.width, allocation.sizes[index]),
                 );
-                layout_node(layout, *child, child_rect, metrics, output)?;
+                layout_node(layout, *child, child_rect, metrics, minimum_sizes, output)?;
                 y += allocation.sizes[index];
                 if index + 1 < split.children.len() {
                     push_splitter(id, index, Axis::Y, y, rect, metrics, output)?;
@@ -887,6 +909,7 @@ fn allocate_stack_heights(
     available: f32,
     axis: Axis,
     metrics: &DockMetrics,
+    minimum_sizes: &mut HashMap<NodeId, Size>,
 ) -> Result<StackAllocation, ComputeRectsError> {
     if ratios.len() != children.len() {
         return Err(ComputeRectsError::InvalidLayout);
@@ -907,7 +930,7 @@ fn allocate_stack_heights(
         collapsed.push(matches!(layout.node(*child), Some(Node::Tabs(tabs)) if tabs.collapsed));
         // Query the common contract for every child; collapsed nodes report
         // their effective strip height from Layout::minimum_node_size too.
-        minimums.push(minimum_node_size(layout, *child, metrics)?.height);
+        minimums.push(minimum_node_size(layout, *child, metrics, minimum_sizes)?.height);
     }
 
     let gap_total = metrics.splitter_thickness * children.len().saturating_sub(1) as f32;
@@ -1016,10 +1039,11 @@ fn minimum_floating_size(
     layout: &Layout,
     root: NodeId,
     metrics: &DockMetrics,
+    minimum_sizes: &mut HashMap<NodeId, Size>,
 ) -> Result<Size, ComputeRectsError> {
     #[cfg(test)]
     visit_probe::record_minimum_node_size_helper(root);
-    layout.minimum_floating_size(root, metrics).map_err(|error| match error {
+    layout.minimum_floating_size_with_cache(root, metrics, minimum_sizes).map_err(|error| match error {
         crate::CommandError::InvalidValue { field: "size", reason } if reason.contains("overflow") => {
             ComputeRectsError::Geometry(GeometryError::ArithmeticOverflow)
         }
@@ -1034,13 +1058,31 @@ pub(crate) fn clamp_floating_bounds(
     client_area: Rect,
     metrics: &DockMetrics,
 ) -> Result<Rect, ComputeRectsError> {
+    clamp_floating_bounds_with_cache(
+        layout,
+        root,
+        bounds,
+        client_area,
+        metrics,
+        &mut HashMap::new(),
+    )
+}
+
+fn clamp_floating_bounds_with_cache(
+    layout: &Layout,
+    root: NodeId,
+    bounds: Rect,
+    client_area: Rect,
+    metrics: &DockMetrics,
+    minimum_sizes: &mut HashMap<NodeId, Size>,
+) -> Result<Rect, ComputeRectsError> {
     bounds
         .validate_non_empty()
         .map_err(ComputeRectsError::Geometry)?;
     client_area
         .validate_non_empty()
         .map_err(ComputeRectsError::Geometry)?;
-    let minimum = minimum_floating_size(layout, root, metrics)?;
+    let minimum = minimum_floating_size(layout, root, metrics, minimum_sizes)?;
     if minimum.width > client_area.size.width {
         return Err(ComputeRectsError::InsufficientSpace {
             axis: Axis::X,
@@ -3337,4 +3379,40 @@ mod tests {
         assert_eq!(expanded_rects.panels.len(), 1);
         assert!(collapsed_rects.panels.is_empty());
     }
+
+    #[test]
+    fn compute_rects_memoizes_minimum_node_sizes_within_one_pass() {
+        let metrics = DockMetrics::default();
+        let mut builder = LayoutBuilder::new(Profile::Generic);
+        let (_, panel_node) = builder.panel(key("minimum-cache-panel"), constraints());
+        let group = builder.tabs(vec![panel_node], 0, false);
+        let column = builder.column(
+            metrics.default_column_width,
+            ColumnMode::Expanded,
+            vec![group],
+            vec![1.0],
+        );
+        builder.main_area(DockSide::Left, column);
+        let layout = builder.build();
+
+        super::visit_probe::start();
+        let rects = layout
+            .compute_rects(viewport(), &metrics)
+            .expect("fixture should produce geometry");
+        let visits = super::visit_probe::finish();
+
+        assert_eq!(rects.panels.len(), 1);
+        let recursive_minimum_visits = visits
+            .values()
+            .map(|counts| counts.recursive_minimum_node_size)
+            .sum::<u64>();
+        assert!(recursive_minimum_visits > 0);
+        assert!(
+            visits
+                .values()
+                .all(|counts| counts.recursive_minimum_node_size <= 1),
+            "each node's minimum size should be computed at most once per geometry pass"
+        );
+    }
+
 }
