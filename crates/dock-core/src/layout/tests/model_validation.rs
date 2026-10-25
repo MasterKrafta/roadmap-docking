@@ -317,7 +317,7 @@ fn validation_accepts_narrow_canvas_but_rejects_invalid_metrics() {
 }
 
 #[test]
-fn detailed_geometry_errors_preserve_layout_validation_issues() {
+fn compute_rects_preserves_layout_validation_errors() {
     let metrics = DockMetrics::default();
     let mut layout = initial_layout(Profile::Generic);
     let root = layout.main_area(DockSide::Right).unwrap().root;
@@ -330,13 +330,10 @@ fn detailed_geometry_errors_preserve_layout_validation_issues() {
 
     let expected_errors = layout.validate(&metrics).unwrap_err();
     let error = layout
-        .compute_rects_with_diagnostics(
-            Rect::new(Point::ZERO, Size::new(1200.0, 700.0)),
-            &metrics,
-        )
+        .compute_rects(Rect::new(Point::ZERO, Size::new(1200.0, 700.0)), &metrics)
         .unwrap_err();
 
-    let crate::ComputeRectsDiagnosticError::InvalidLayout { errors } = error else {
+    let crate::ComputeRectsError::LayoutValidation { errors } = error else {
         panic!("invalid layout should retain its validation errors");
     };
     assert_eq!(errors, expected_errors);
