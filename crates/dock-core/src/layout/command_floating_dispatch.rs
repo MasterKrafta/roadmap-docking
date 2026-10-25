@@ -7,8 +7,7 @@ impl Layout {
         metrics: &DockMetrics,
     ) -> Result<CommandApplication, CommandError> {
         match command {
-            DockCommand::Float { node, bounds } => {
-                          DockCommand::Float { node, bounds } => self.apply_float_command(node, bounds),
+            DockCommand::Float { node, bounds } => self.apply_float_command(node, bounds),
             DockCommand::FloatGroupAsColumn { group, bounds } => {
                 self.float_group_as_column(*group, *bounds, metrics)
             }
