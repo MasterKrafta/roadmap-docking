@@ -615,6 +615,29 @@ mod tests {
     }
 
     #[test]
+    fn outer_column_resize_rejects_overflowing_pointer_delta() {
+        let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
+        let column = layout
+            .nodes()
+            .find_map(|(id, node)| matches!(node, Node::Column(_)).then_some(id))
+            .unwrap();
+        let mut session = session(
+            &layout,
+            ResizeHandle::OuterColumn {
+                column,
+                side: DockSide::Left,
+            },
+            StartGeometry::OuterColumn { start_width: 280.0 },
+        );
+        session.pointer_start = Point::new(f32::MAX, 100.0);
+
+        assert!(matches!(
+            session.command_for_pointer(Point::new(-f32::MAX, 100.0)),
+            Err(ResizeUpdateError::InvalidDelta)
+        ));
+    }
+
+    #[test]
     fn outer_column_resize_rejects_overflowing_computed_width() {
         let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
         let column = layout
