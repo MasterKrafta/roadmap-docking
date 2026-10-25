@@ -1,4 +1,5 @@
 use super::*;
+use crate::PanelConstraints;
 use super::helpers::geometry_error_reason;
 
 impl Layout {
