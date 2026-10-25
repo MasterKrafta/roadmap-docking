@@ -1,6 +1,13 @@
 use super::*;
 use crate::AllowedArea;
 
+struct GroupMainColumnSource {
+    column: Option<NodeId>,
+    position: Option<(DockSide, usize)>,
+    group_index: Option<usize>,
+    is_sole_group: bool,
+}
+
 impl Layout {
     pub(super) fn apply_group_transfer_command(
         &mut self,
@@ -135,52 +142,20 @@ impl Layout {
                 let moving_panels = self.panel_ids_in_subtree(*group);
                 self.validate_panel_ids_allowed_for_area(&moving_panels, AllowedArea::MAIN_DOCK)?;
 
-                let source_column = self.find_owner_column(*group);
-                let source_position =
-                    source_column.and_then(|column| self.main_column_position(column));
-                let source_group_index =
-                    source_column.and_then(|column| match self.nodes.get(column) {
-                        Some(Node::Column(value)) => value.groups.iter().position(|id| id == group),
-                        _ => None,
-                    });
-                let source_is_sole_group = source_column.is_some_and(|column| {
-                    matches!(self.nodes.get(column), Some(Node::Column(value))
-                        if value.groups.len() == 1 && value.groups[0] == *group)
-                });
+                let source = self.group_main_column_source(*group);
 
                 if let Some(application) = self.try_reorder_sole_group_main_column(
                     *group,
                     *side,
                     *index,
-                    source_column,
-                    source_position,
-                    source_is_sole_group,
+                    source.column,
+                    source.position,
+                    source.is_sole_group,
                 )? {
                     return Ok(application);
                 }
 
-                let inverse = match (source_column, source_group_index, source_position) {
-                    (Some(column), Some(group_index), _)
-                        if matches!(
-                            self.nodes.get(column),
-                            Some(Node::Column(value)) if value.groups.len() > 1
-                        ) =>
-                    {
-                        Some(DockCommand::MoveGroup {
-                            group: *group,
-                            column,
-                            index: group_index,
-                        })
-                    }
-                    (_, _, Some((source_side, source_index))) => {
-                        Some(DockCommand::MoveGroupToMainColumn {
-                            group: *group,
-                            side: source_side,
-                            index: source_index,
-                        })
-                    }
-                    _ => None,
-                };
+                let inverse = self.inverse_for_move_group_to_main_column(*group, &source);
 
                 self.remember_subtree_dock_locations(*group);
                 self.detach_node(*group)?;
@@ -202,6 +177,55 @@ impl Layout {
             _ => Err(CommandError::InvalidTarget {
                 reason: "group transfer dispatcher received an unsupported command",
             }),
+        }
+    }
+
+    fn group_main_column_source(&self, group: NodeId) -> GroupMainColumnSource {
+        let column = self.find_owner_column(group);
+        let position = column.and_then(|column| self.main_column_position(column));
+        let group_index = column.and_then(|column| match self.nodes.get(column) {
+            Some(Node::Column(value)) => value.groups.iter().position(|id| *id == group),
+            _ => None,
+        });
+        let is_sole_group = column.is_some_and(|column| {
+            matches!(self.nodes.get(column), Some(Node::Column(value))
+                if value.groups.len() == 1 && value.groups[0] == group)
+        });
+
+        GroupMainColumnSource {
+            column,
+            position,
+            group_index,
+            is_sole_group,
+        }
+    }
+
+    fn inverse_for_move_group_to_main_column(
+        &self,
+        group: NodeId,
+        source: &GroupMainColumnSource,
+    ) -> Option<DockCommand> {
+        match (source.column, source.group_index, source.position) {
+            (Some(column), Some(group_index), _)
+                if matches!(
+                    self.nodes.get(column),
+                    Some(Node::Column(value)) if value.groups.len() > 1
+                ) =>
+            {
+                Some(DockCommand::MoveGroup {
+                    group,
+                    column,
+                    index: group_index,
+                })
+            }
+            (_, _, Some((source_side, source_index))) => {
+                Some(DockCommand::MoveGroupToMainColumn {
+                    group,
+                    side: source_side,
+                    index: source_index,
+                })
+            }
+            _ => None,
         }
     }
 
