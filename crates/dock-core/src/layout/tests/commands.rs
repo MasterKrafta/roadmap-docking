@@ -285,7 +285,9 @@ fn main_column_split_group_ratio_controls_new_column_width() {
     let new_column = match layout.node(root) {
         Some(Node::Split(split)) => {
             assert_eq!(split.children.len(), 2);
-            assert_eq!(split.ratios, vec![0.6, 0.4]);
+            assert_eq!(split.ratios.len(), 2);
+            assert!((split.ratios[0] - 0.6).abs() < 1.0e-4);
+            assert!((split.ratios[1] - 0.4).abs() < 1.0e-4);
             split.children.iter().copied().find(|id| *id != target_column).unwrap()
         }
         other => panic!("expected a horizontal split of main columns, found {other:?}"),
