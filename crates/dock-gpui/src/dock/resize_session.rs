@@ -311,11 +311,14 @@ fn capture_start_geometry(
             if floating.rect.validate_non_empty().is_err() {
                 return Err(ResizeStartError::MissingFloatingGeometry);
             }
-            if !rects
+            let Some(edge_geometry) = rects
                 .floating_resize_edges
                 .iter()
-                .any(|entry| entry.group == group && entry.edge == edge)
-            {
+                .find(|entry| entry.group == group && entry.edge == edge)
+            else {
+                return Err(ResizeStartError::MissingFloatingEdge);
+            };
+            if edge_geometry.rect.validate_non_empty().is_err() {
                 return Err(ResizeStartError::MissingFloatingEdge);
             }
             Ok(StartGeometry::FloatingEdge {
@@ -645,6 +648,66 @@ mod tests {
                 Err(ResizeStartError::InvalidHandle)
             );
         }
+    }
+
+    #[test]
+    fn floating_resize_rejects_empty_edge_geometry() {
+        let controller = DockController::new_initial(&Theme::default()).unwrap();
+        let mut layout = controller.layout().clone();
+        let group = layout
+            .nodes()
+            .find_map(|(id, node)| match node {
+                Node::Column(column) if column.groups.len() > 1 => {
+                    column.groups.first().copied()
+                }
+                _ => None,
+            })
+            .expect("initial layout should contain a column with multiple groups");
+        layout
+            .apply(
+                DockCommand::Float {
+                    node: group,
+                    bounds: Rect::new(Point::new(80.0, 60.0), Size::new(320.0, 220.0)),
+                },
+                controller.metrics(),
+            )
+            .unwrap();
+        let (floating_id, _) = layout
+            .floating_groups()
+            .next()
+            .expect("floating command should create a floating group");
+        let frame = crate::FrameGeometry::compute(
+            &layout,
+            Rect::new(Point::ZERO, Size::new(1200.0, 800.0)),
+            controller.metrics(),
+        )
+        .unwrap();
+        let edge = *frame
+            .rects()
+            .floating_resize_edges
+            .iter()
+            .find(|entry| entry.group == floating_id)
+            .expect("floating frame should contain resize-edge geometry");
+        let mut rects = frame.rects().clone();
+        let edge_geometry = rects
+            .floating_resize_edges
+            .iter_mut()
+            .find(|entry| entry.group == floating_id && entry.edge == edge.edge)
+            .expect("matching floating edge geometry should exist");
+        edge_geometry.rect.size.width = 0.0;
+
+        assert_eq!(
+            capture_start_geometry(
+                &layout,
+                &rects,
+                controller.metrics(),
+                ResizeHandle::FloatingEdge {
+                    group: floating_id,
+                    edge: edge.edge,
+                },
+            ),
+            Err(ResizeStartError::MissingFloatingEdge)
+        );
     }
 
     #[test]
