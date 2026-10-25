@@ -711,6 +711,50 @@ mod tests {
     }
 
     #[test]
+    fn floating_resize_rejects_left_and_top_growth_overflow() {
+        let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
+        let group = dock_core::FloatingGroupId::null();
+
+        let mut left = session(
+            &layout,
+            ResizeHandle::FloatingEdge {
+                group,
+                edge: ResizeEdge::Left,
+            },
+            StartGeometry::FloatingEdge {
+                bounds: Rect::new(
+                    Point::new(-f32::MAX, 0.0),
+                    Size::new(f32::MAX, 200.0),
+                ),
+            },
+        );
+        left.pointer_start = Point::ZERO;
+        assert!(matches!(
+            left.command_for_pointer(Point::new(-f32::MAX, 0.0)),
+            Err(ResizeUpdateError::InvalidBounds)
+        ));
+
+        let mut top = session(
+            &layout,
+            ResizeHandle::FloatingEdge {
+                group,
+                edge: ResizeEdge::Top,
+            },
+            StartGeometry::FloatingEdge {
+                bounds: Rect::new(
+                    Point::new(0.0, -f32::MAX),
+                    Size::new(300.0, f32::MAX),
+                ),
+            },
+        );
+        top.pointer_start = Point::ZERO;
+        assert!(matches!(
+            top.command_for_pointer(Point::new(0.0, -f32::MAX)),
+            Err(ResizeUpdateError::InvalidBounds)
+        ));
+    }
+
+    #[test]
     fn single_axis_floating_edge_ignores_unused_delta_overflow() {
         let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
         let group = dock_core::FloatingGroupId::null();
