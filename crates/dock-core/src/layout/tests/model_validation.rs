@@ -333,7 +333,7 @@ fn compute_rects_preserves_layout_validation_errors() {
         .compute_rects(Rect::new(Point::ZERO, Size::new(1200.0, 700.0)), &metrics)
         .unwrap_err();
 
-    let crate::ComputeRectsError::LayoutValidation { errors } = error else {
+    let crate::ComputeRectsError::InvalidLayout { errors } = error else {
         panic!("invalid layout should retain its validation errors");
     };
     assert_eq!(errors, expected_errors);
