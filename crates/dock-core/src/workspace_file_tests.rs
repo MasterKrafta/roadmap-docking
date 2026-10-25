@@ -411,12 +411,18 @@ fn workspace_json_size_limit_is_checked_before_parsing() {
 #[test]
 fn malformed_version_field_reports_type_error_not_missing_field() {
     let (layout, _) = sample_layout();
-    let mut value = serde_json::to_value(WorkspaceFile::from_layout(&layout).unwrap()).unwrap();
-    value["version"] = serde_json::json!("2");
-    assert!(matches!(
-        WorkspaceFile::from_json(&value.to_string()),
-        Err(WorkspaceFileError::Json(message)) if message.contains("must be a non-negative integer")
-    ));
+    let original = serde_json::to_value(WorkspaceFile::from_layout(&layout).unwrap()).unwrap();
+
+    for malformed_version in [serde_json::json!("2"), serde_json::json!(2.0)] {
+        let mut value = original.clone();
+        value["version"] = malformed_version;
+        assert!(matches!(
+            WorkspaceFile::from_json(&value.to_string()),
+            Err(WorkspaceFileError::Json(message))
+                if message.contains("must be a non-negative integer")
+                    && !message.contains("missing")
+        ));
+    }
 }
 
 #[test]
