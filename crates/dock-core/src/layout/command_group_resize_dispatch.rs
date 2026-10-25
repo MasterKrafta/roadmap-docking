@@ -1,4 +1,5 @@
 use super::*;
+use super::helpers::ratio_issues;
 
 impl Layout {
     pub(super) fn apply_group_resize_command(
