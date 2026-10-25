@@ -54,36 +54,12 @@ impl Layout {
                 self.dock_floating_stack_to_column_slot(root, split, column, index)
             }
             (
-                Some(Node::Tabs(mut tabs)),
+                Some(Node::Tabs(tabs)),
                 DropTarget::Tabs {
                     group: target_group,
                     index,
                 },
-            ) => {
-                self.detach_node(root)?;
-                if let Some(Node::Tabs(old_root)) = self.nodes.get_mut(root) {
-                    old_root.children.clear();
-                    old_root.active_index = 0;
-                }
-                self.nodes.remove(root);
-                if let Some(Node::Tabs(target_tabs)) = self.nodes.get_mut(target_group) {
-                    let insert_at = index.min(target_tabs.children.len());
-                    let source_active_index = tabs.active_index;
-                    let moving_count = tabs.children.len();
-                    for (offset, child) in tabs.children.drain(..).enumerate() {
-                        target_tabs.children.insert(insert_at + offset, child);
-                    }
-                    if moving_count > 0 {
-                        target_tabs.active_index =
-                            insert_at + source_active_index.min(moving_count - 1);
-                    }
-                } else {
-                    return Err(CommandError::InvalidTarget {
-                        reason: "tab target changed unexpectedly",
-                    });
-                }
-                Ok(())
-            }
+            ) => self.dock_floating_tabs_to_tabs(root, tabs, target_group, index),
             (Some(Node::Split(_)), _) => Err(CommandError::InvalidTarget {
                 reason: "floating split stacks can only be docked into a main column or icon rail",
             }),
