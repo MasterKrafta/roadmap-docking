@@ -1,36 +1,64 @@
-# Repository instructions for coding agents
+# Инструкции для coding agents
 
-## Mandatory first read
+## 1. Обязательное чтение перед каждой задачей
 
-**Before analyzing source code, proposing repository-specific fixes, or editing any file, read the full document `docs/DOCK_SYSTEM_IMPLEMENTATION_PLAN.md` from beginning to end.** Do this at the start of every new task/session involving this repository. It is the canonical project brief, target architecture, ordered implementation roadmap, and acceptance checklist.
+Перед анализом исходников, обсуждением архитектуры или изменением репозитория полностью прочитайте от начала до конца документ **docs/DOCK_SYSTEM_IMPLEMENTATION_PLAN.md**. Повторяйте это в начале каждой новой задачи в репозитории, даже если документ уже читался в другом разговоре.
 
-Do not start by scanning implementation files. Read the plan first, then identify the relevant stage and acceptance criteria, and only then inspect the minimum source files needed for that stage.
+План определяет целевую архитектуру, этапы и критерии приёмки, но сам по себе не гарантирует, что описанный API уже реализован. Фактические сигнатуры и поведение проверяйте по текущему исходному коду. Не угадывайте API по названию или плану.
 
-## Working rules
+## 2. Приоритет инструкций и границы изменений
 
-1. Follow the plan's stages in order. Do not skip stages, combine them, or start later-stage features before the current stage meets its acceptance criteria unless the user explicitly changes the plan.
-2. Treat the plan's architecture and boundaries as requirements, not suggestions. Keep `dock-core` and `ui` unchanged by default. Before changing either one, explain why the change is needed, identify the exact file and minimal diff, and wait for the user's explicit approval. Approval for one specific change does not authorize other changes to those crates.
-3. Before editing, verify the real current API and code. The plan marks some API details as needing confirmation; do not guess signatures or assume a planned API exists.
-4. Make focused, reviewable changes. Preserve working behavior and add/adjust regression tests for the stage being implemented.
-5. Finish a stage only after applicable build, test, and lint checks where the environment permits, except for checks explicitly excluded by the known-environment rule below. Never say checks passed unless they were actually run.
-6. At the start of a task, state internally or in the work summary: the stage being addressed, its acceptance criteria, and the files expected to change. If the task does not fit the roadmap, explain the mismatch before changing architecture.
-7. Do not use one-off floating-specific patches to compensate for a broken shared interaction model. Compare floating and docked behavior against the plan's common geometry, event/session, and rendering contracts.
-8. Work one individual checklist line/subtask at a time, not one whole roadmap stage at a time. Complete that unit, then stop and report before starting the next line. Each report must state the exact checklist item, what changed, files touched, and the commit SHA/link. Mention checks only when they were actually run and useful; do not repeat the known-unavailable-checks boilerplate described below. Keep each line's changes in its own focused commit when practical; do not bundle several checklist lines into one large change.
-9. Before continuing past a completed checklist line, provide the report in the conversation. Do not wait until the entire stage is finished to report progress.
+- Следуйте плану и работайте по этапам, если пользователь явно не поставил другую задачу. Если текущая задача расходится с планом или устаревшими ограничениями в нём, отметьте расхождение и выполняйте только явно разрешённый пользователем объём. Не меняйте архитектурный план молча.
+- По умолчанию не изменяйте crates/dock-core и crates/ui. Если пользователь явно разрешил изменение конкретного участка, это разрешение относится к согласованной задаче и не является разрешением на произвольные дополнительные изменения.
+- Не изменяйте зависимости, Cargo.toml, CI-конфигурацию, лицензии и публичный API без явного запроса или согласования.
+- Не добавляйте побочные улучшения, переименования и чистку кода, не нужные для текущего пункта.
 
-10. **File decomposition follows cohesive responsibilities, not function count.** Do not create a production file for one function by default. Keep small helpers next to the operation that owns them unless they form an independently meaningful concept, algorithm, type/API boundary, or reusable subsystem. Group dispatch and closely related implementations by domain (for example, panel lifecycle/tab operations) rather than splitting them into files named for individual verbs. Treat ~300 lines as a review cue, not a hard limit or an automatic extraction trigger; a cohesive module of roughly 150–400 lines is normal, and a larger module may remain intact when splitting would make navigation harder. Before extracting, state the responsibility of each proposed module; prefer a few coherent modules over many tiny ones.
+## 3. Порядок работы и отчётность
 
-## Canonical document
+1. Определите конкретный пункт плана или текущей задачи, критерий готовности и ожидаемые файлы. Если затронуто несколько модулей, сначала кратко предложите план и границы модулей.
+2. Выполняйте **один небольшой, самодостаточный пункт за раз**, а не целый этап одним большим изменением.
+3. При построчном аудите или декомпозиции следуйте заданной пользователем гранулярности: завершите текущий пункт, отчитайтесь и остановитесь. Не переходите к следующему пункту, пока пользователь не подтвердит результат или не сообщит результаты локальных проверок.
+4. Для структурного рефакторинга сначала сохраняйте поведение и тесты; не смешивайте перенос кода с изменением логики без необходимости. Исправления поведения и связанные регрессионные тесты оформляйте отдельным понятным шагом.
+5. По возможности делайте один логический коммит на один пункт. Не объединяйте несколько несвязанных пунктов в один коммит.
 
-- `docs/DOCK_SYSTEM_IMPLEMENTATION_PLAN.md` — read this first; it is the source of truth for the planned architecture and implementation order.
+Каждый отчёт должен кратко указывать: что сделано и зачем, какие файлы изменены, SHA и ссылку коммита (если создан), а также фактический статус проверок. Не перечисляйте повторно одни и те же ограничения окружения в каждом отчёте.
 
+## 4. Декомпозиция модулей
 
-## Known environment limitation — user-directed
+**Группируйте код по цельной ответственности, а не по количеству функций.**
 
-The user has explicitly requested that agents not spend time on the following routine checks in the current environment because they are ineffective or unavailable:
+- Не создавайте отдельный production-файл для одной функции по умолчанию. Небольшие методы и вспомогательные функции оставляйте рядом с вызывающей логикой, если у них нет самостоятельной предметной ответственности, отдельного типа/API, независимого алгоритма или реального повторного использования.
+- Объединяйте тесно связанные операции одного домена в осмысленные модули: например, жизненный цикл панелей и вкладок, операции переноса панелей, правила целей стыковки, операции с деревом или валидацию. Не создавайте цепочки файлов с именами отдельных глаголов только ради разделения.
+- Ориентир в 300 строк — повод **посмотреть на границы модуля**, а не автоматически делить файл. Модули размером примерно 150–400 строк часто нормальны; больший файл можно оставить целым, если ответственность едина и разделение ухудшит поиск и понимание кода. Не допускайте и обратной крайности — сваливания несвязанных подсистем в один файл.
+- Держите тесно связанные типы вместе: структура, её impl и связанные вспомогательные типы обычно должны оставаться в одном модуле.
+- Не разделяйте файл только потому, что в нём есть тесты или он пересёк формальный порог строк. Сначала оцените предметные границы, связанные вызовы, видимость и тесты.
+- Перед извлечением кода перечислите назначение будущих модулей и объясните границы. При перемещении сохраняйте необходимый публичный путь через реэкспорт, если этого требует существующий API.
+- Не раздувайте корневые main.rs/lib.rs реализацией предметной логики. Не создавайте чрезмерную вложенность модулей.
 
-- Do not attempt local `cargo build`, `cargo test`, or `cargo clippy` runs by default.
-- Do not check GitHub Actions/commit status, probe DNS/network connectivity, or retry access diagnostics for each patch.
-- Do not perform repetitive post-edit bookkeeping checks solely to produce a verification paragraph, such as refetching the latest `main` SHA or separately checking symbol/test/import presence after every small change.
+## 5. Архитектурные границы dock-системы
 
-This exception overrides rules 5 and 8 for the checks listed above. Do not claim they passed, and do not repeat explanations about DNS, missing CI runs, or unavailable tests in every report. Focus on the requested plan line, read the relevant source before editing, keep the patch narrow, and report the actual changes and commit link. Resume any excluded checks only if the user explicitly asks or states that the environment has changed.
+Следующие правила отражают целевую архитектуру плана и применяются, если пользователь явно не согласовал другое решение:
+
+- **dock-core** содержит независимую от UI модель, команды, геометрию, валидацию, историю Undo/Redo и логику раскладки. Ядро не должно зависеть от GPUI и деталей отрисовки.
+- **dock-gpui** связывает ядро с интерфейсом и содержит адаптер, компоненты и логику хозяина интерфейса. **app** остаётся тонкой точкой запуска, а не вторым местом реализации dock-логики.
+- Раскладкой должен владеть один контроллер. Изменения дерева выполняются командами ядра через предусмотренную точку применения/историю, а не прямой мутацией из компонентов.
+- Компоненты отрисовки остаются максимально независимыми от модели: не переносите в них обход дерева, бизнес-правила и мутацию Layout. Используйте данные геометрии и идентификаторы, которые им действительно нужны.
+- Не чините отдельный случай плавающей панели разовым обходным путём, если причина находится в общей модели взаимодействия, геометрии или сессии жеста. Сравнивайте docked- и floating-сценарии и исправляйте общий контракт, когда это подтверждается кодом.
+- Не дублируйте вычисления ядра в UI-слое без подтверждённой необходимости. Геометрия отрисовки и зоны взаимодействия должны опираться на согласованные данные.
+
+## 6. Проверки в текущем окружении
+
+Пользователь запускает локальные проверки и сообщает результат. По умолчанию **не запускайте** локальные cargo build, cargo test или cargo clippy; также не проверяйте GitHub Actions/статусы коммитов, не исследуйте сеть/DNS и не повторяйте диагностику окружения после каждого изменения. Возобновляйте эти проверки только по прямой просьбе пользователя или если он сообщил, что условия изменились.
+
+- Никогда не утверждайте, что код компилируется или тесты проходят, если эти проверки фактически не запускались.
+- Если пользователь сообщает «тесты ок», фиксируйте это как результат, сообщённый пользователем, а не как запуск проверки агентом.
+- Когда пользователь присылает ошибку компиляции или теста, внимательно прочитайте весь вывод, включая контекст и подсказки компилятора. Исправляйте конкретную причину и не добавляйте в тот же шаг несвязанный рефакторинг.
+- При изменении Rust-кода сохраняйте форматирование rustfmt; не меняйте rustfmt.toml и не выполняйте массовое форматирование несвязанных файлов.
+- Изменение поведения должно сопровождаться тестом на требуемое поведение или регрессию. Не удаляйте и не ослабляйте существующие тесты ради успешного результата.
+
+## 7. Коммиты и финальный отчёт
+
+- Используйте Conventional Commits: feat:, fix:, refactor:, docs:, test: или chore:.
+- Один коммит должен выражать одну логическую правку; не включайте несвязанные изменения.
+- Не заявляйте об успешных проверках, CI или ручных сценариях без подтверждённого результата.
+- Завершая пункт, сообщайте его точное содержание, изменённые файлы, коммит (если создан) и результаты проверок. Затем остановитесь и дождитесь следующего указания пользователя.
