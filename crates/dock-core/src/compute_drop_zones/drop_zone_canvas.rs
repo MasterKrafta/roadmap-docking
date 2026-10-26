@@ -4,16 +4,16 @@ impl Layout {
     pub(super) fn append_canvas_edge_zones(
         &self,
         source: DropSource,
-                source_root: NodeId,
-                source_panels: &[PanelId],
-                tree_index: &DropZoneTreeIndex,
-                rects: &LayoutRects,
-                metrics: &DockMetrics,
-                viewport: Rect,
-                left_columns: &[(NodeId, Rect)],
-                right_columns: &[(NodeId, Rect)],
-                may_add_column: bool,
-                zones: &mut Vec<DropZoneRect>,
+        source_root: NodeId,
+        source_panels: &[PanelId],
+        tree_index: &DropZoneTreeIndex,
+        rects: &LayoutRects,
+        metrics: &DockMetrics,
+        viewport: Rect,
+        left_columns: &[(NodeId, Rect)],
+        right_columns: &[(NodeId, Rect)],
+        may_add_column: bool,
+        zones: &mut Vec<DropZoneRect>,
     ) -> Result<(), ComputeRectsError> {
         // The two outside viewport edges open/extend a dock. A whole group uses
         // its edge operation when a neighbouring column exists; panels use an exact slot.

@@ -2,11 +2,20 @@ use std::collections::HashMap;
 
 #[path = "compute_drop_zones/drop_zone_tree.rs"]
 mod drop_zone_tree;
-pub(super) use drop_zone_tree::{source_root, panel_node, collect_panels, source_allows, contains_node, direct_parent, target_area, is_rail_group, owner_column, floating_owner, source_is_floating_root, main_side_for_node, main_columns, group_main_column, edge_group_for_column, edge_group_for_dock_edge, can_add_column, group_edge_is_noop, collect_main_columns, DropZoneTreeIndex};
+pub(super) use drop_zone_tree::{
+    can_add_column, collect_main_columns, collect_panels, contains_node, direct_parent,
+    edge_group_for_column, edge_group_for_dock_edge, floating_owner, group_edge_is_noop,
+    group_main_column, is_rail_group, main_columns, main_side_for_node, owner_column,
+    panel_node, source_allows, source_is_floating_root, source_root, target_area,
+    DropZoneTreeIndex,
+};
 
 #[path = "compute_drop_zones/drop_zone_geometry.rs"]
 mod drop_zone_geometry;
-pub(super) use drop_zone_geometry::{push_zone, group_edge_rect, group_center_rect, floating_edge_rect_for_branch, floating_edge_rect};
+pub(super) use drop_zone_geometry::{
+    floating_edge_rect, floating_edge_rect_for_branch, group_center_rect, group_edge_rect,
+    push_zone,
+};
 
 #[path = "compute_drop_zones/drop_zone_resolver.rs"]
 mod drop_zone_resolver;
@@ -25,7 +34,6 @@ use crate::{
     DropZoneRect, FloatingGroupId, Layout, LayoutRects, Node, NodeId, PanelId, Point, Profile,
     Rect, Size,
 };
-
 
 impl Layout {
     /// Builds source-aware drop affordances from an already computed geometry snapshot.
@@ -131,12 +139,61 @@ impl Layout {
         );
         let mut zones = Vec::new();
 
-        self.append_main_group_zones(source, source_root, &source_panels, tree_index, rects, metrics, &left_columns, &right_columns, may_add_column, &mut zones)?;
+        self.append_main_group_zones(
+            source,
+            source_root,
+            &source_panels,
+            tree_index,
+            rects,
+            metrics,
+            &left_columns,
+            &right_columns,
+            may_add_column,
+            &mut zones,
+        )?;
         self.append_tab_insertion_zones(source, &source_panels, tree_index, rects, &mut zones)?;
-        self.append_main_column_zones(source, &source_panels, tree_index, rects, metrics, &left_columns, &right_columns, may_add_column, &mut zones)?;
-        self.append_rail_insertion_zones(source, &source_panels, tree_index, rects, &left_columns, &right_columns, &mut zones)?;
-        self.append_floating_window_zones(source, source_root, &source_panels, tree_index, rects, metrics, &mut zones)?;
-        self.append_canvas_edge_zones(source, source_root, &source_panels, tree_index, rects, metrics, viewport, &left_columns, &right_columns, may_add_column, &mut zones)?;
+        self.append_main_column_zones(
+            source,
+            &source_panels,
+            tree_index,
+            rects,
+            metrics,
+            &left_columns,
+            &right_columns,
+            may_add_column,
+            &mut zones,
+        )?;
+        self.append_rail_insertion_zones(
+            source,
+            &source_panels,
+            tree_index,
+            rects,
+            &left_columns,
+            &right_columns,
+            &mut zones,
+        )?;
+        self.append_floating_window_zones(
+            source,
+            source_root,
+            &source_panels,
+            tree_index,
+            rects,
+            metrics,
+            &mut zones,
+        )?;
+        self.append_canvas_edge_zones(
+            source,
+            source_root,
+            &source_panels,
+            tree_index,
+            rects,
+            metrics,
+            viewport,
+            &left_columns,
+            &right_columns,
+            may_add_column,
+            &mut zones,
+        )?;
         Ok(zones)
     }
 

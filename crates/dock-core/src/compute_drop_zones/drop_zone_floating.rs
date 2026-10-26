@@ -4,12 +4,12 @@ impl Layout {
     pub(super) fn append_floating_window_zones(
         &self,
         source: DropSource,
-                source_root: NodeId,
-                source_panels: &[PanelId],
-                tree_index: &DropZoneTreeIndex,
-                rects: &LayoutRects,
-                metrics: &DockMetrics,
-                zones: &mut Vec<DropZoneRect>,
+        source_root: NodeId,
+        source_panels: &[PanelId],
+        tree_index: &DropZoneTreeIndex,
+        rects: &LayoutRects,
+        metrics: &DockMetrics,
+        zones: &mut Vec<DropZoneRect>,
     ) -> Result<(), ComputeRectsError> {
         // Floating-window drop zones are stacked over their contents. Their outer
         // top/bottom targets address the first/last group in a vertical stack.
@@ -80,8 +80,10 @@ impl Layout {
 
             let top_rect = floating_edge_rect(floating_rect.rect, DropZone::Top, metrics)?;
             let bottom_rect = floating_edge_rect(floating_rect.rect, DropZone::Bottom, metrics)?;
-            let horizontal_composition =
-                matches!(self.node(area.root), Some(Node::Split(split)) if split.axis == crate::Axis::X);
+            let horizontal_composition = matches!(
+                self.node(area.root),
+                Some(Node::Split(split)) if split.axis == crate::Axis::X
+            );
             if horizontal_composition {
                 // In a horizontal composition, the top and bottom edge zones
                 // span each column independently. Thus dropping over the right

@@ -14,7 +14,11 @@ pub(super) fn push_zone(
     Ok(())
 }
 
-pub(super) fn group_edge_rect(rect: Rect, zone: DropZone, edge_width: f32) -> Result<Rect, ComputeRectsError> {
+pub(super) fn group_edge_rect(
+    rect: Rect,
+    zone: DropZone,
+    edge_width: f32,
+) -> Result<Rect, ComputeRectsError> {
     let x_band = edge_width.min(rect.size.width / 2.0);
     let y_band = edge_width.min(rect.size.height / 2.0);
     let side_height = (rect.size.height - 2.0 * y_band).max(0.0);
@@ -41,7 +45,10 @@ pub(super) fn group_edge_rect(rect: Rect, zone: DropZone, edge_width: f32) -> Re
     Ok(result)
 }
 
-pub(super) fn group_center_rect(rect: Rect, metrics: &DockMetrics) -> Result<Rect, ComputeRectsError> {
+pub(super) fn group_center_rect(
+    rect: Rect,
+    metrics: &DockMetrics,
+) -> Result<Rect, ComputeRectsError> {
     let inset_x = metrics.edge_drop_width.min(rect.size.width / 3.0);
     let content_top = (metrics.header_height + metrics.tab_strip_height).min(rect.size.height);
     let inset_bottom = metrics.edge_drop_width.min(rect.size.height / 3.0);

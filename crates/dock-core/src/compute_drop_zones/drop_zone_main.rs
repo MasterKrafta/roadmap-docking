@@ -4,15 +4,15 @@ impl Layout {
     pub(super) fn append_main_group_zones(
         &self,
         source: DropSource,
-                source_root: NodeId,
-                source_panels: &[PanelId],
-                tree_index: &DropZoneTreeIndex,
-                rects: &LayoutRects,
-                metrics: &DockMetrics,
-                left_columns: &[(NodeId, Rect)],
-                right_columns: &[(NodeId, Rect)],
-                may_add_column: bool,
-                zones: &mut Vec<DropZoneRect>,
+        source_root: NodeId,
+        source_panels: &[PanelId],
+        tree_index: &DropZoneTreeIndex,
+        rects: &LayoutRects,
+        metrics: &DockMetrics,
+        left_columns: &[(NodeId, Rect)],
+        right_columns: &[(NodeId, Rect)],
+        may_add_column: bool,
+        zones: &mut Vec<DropZoneRect>,
     ) -> Result<(), ComputeRectsError> {
         // Main-dock groups: center/tab insertion, vertical group splitting,
         // and profile-correct horizontal/column splitting.
@@ -115,10 +115,22 @@ impl Layout {
                             zone: DropZone::Right,
                         },
                     };
-                    if !group_edge_is_noop(self, tree_index, source, group_rect.group, DropZone::Left) {
+                    if !group_edge_is_noop(
+                        self,
+                        tree_index,
+                        source,
+                        group_rect.group,
+                        DropZone::Left,
+                    ) {
                         push_zone(zones, left_target, DropZone::ColumnLeft, left_edge)?;
                     }
-                    if !group_edge_is_noop(self, tree_index, source, group_rect.group, DropZone::Right) {
+                    if !group_edge_is_noop(
+                        self,
+                        tree_index,
+                        source,
+                        group_rect.group,
+                        DropZone::Right,
+                    ) {
                         push_zone(zones, right_target, DropZone::ColumnRight, right_edge)?;
                     }
                 }
@@ -145,10 +157,10 @@ impl Layout {
     pub(super) fn append_tab_insertion_zones(
         &self,
         source: DropSource,
-                source_panels: &[PanelId],
-                tree_index: &DropZoneTreeIndex,
-                rects: &LayoutRects,
-                zones: &mut Vec<DropZoneRect>,
+        source_panels: &[PanelId],
+        tree_index: &DropZoneTreeIndex,
+        rects: &LayoutRects,
+        zones: &mut Vec<DropZoneRect>,
     ) -> Result<(), ComputeRectsError> {
         // Tab strips are independent insertion/reorder affordances. Each header
         // is split into two half-open halves mapping to the exact slots before/after it.
@@ -200,14 +212,14 @@ impl Layout {
     pub(super) fn append_main_column_zones(
         &self,
         source: DropSource,
-                source_panels: &[PanelId],
-                tree_index: &DropZoneTreeIndex,
-                rects: &LayoutRects,
-                metrics: &DockMetrics,
-                left_columns: &[(NodeId, Rect)],
-                right_columns: &[(NodeId, Rect)],
-                may_add_column: bool,
-                zones: &mut Vec<DropZoneRect>,
+        source_panels: &[PanelId],
+        tree_index: &DropZoneTreeIndex,
+        rects: &LayoutRects,
+        metrics: &DockMetrics,
+        left_columns: &[(NodeId, Rect)],
+        right_columns: &[(NodeId, Rect)],
+        may_add_column: bool,
+        zones: &mut Vec<DropZoneRect>,
     ) -> Result<(), ComputeRectsError> {
         // Main-column side targets and append-to-column targets.
         for (side, columns) in [
@@ -320,12 +332,12 @@ impl Layout {
     pub(super) fn append_rail_insertion_zones(
         &self,
         source: DropSource,
-                source_panels: &[PanelId],
-                tree_index: &DropZoneTreeIndex,
-                rects: &LayoutRects,
-                left_columns: &[(NodeId, Rect)],
-                right_columns: &[(NodeId, Rect)],
-                zones: &mut Vec<DropZoneRect>,
+        source_panels: &[PanelId],
+        tree_index: &DropZoneTreeIndex,
+        rects: &LayoutRects,
+        left_columns: &[(NodeId, Rect)],
+        right_columns: &[(NodeId, Rect)],
+        zones: &mut Vec<DropZoneRect>,
     ) -> Result<(), ComputeRectsError> {
         // Exact insertion points in icon rails follow each rail's flattened group order.
         for column_rect in &rects.columns {

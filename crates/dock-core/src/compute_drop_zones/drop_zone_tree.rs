@@ -109,7 +109,11 @@ pub(super) fn target_area(
     main_side_for_node(layout, tree_index, target).map(|_| AllowedArea::MAIN_DOCK)
 }
 
-pub(super) fn is_rail_group(layout: &Layout, tree_index: &DropZoneTreeIndex, group: NodeId) -> bool {
+pub(super) fn is_rail_group(
+    layout: &Layout,
+    tree_index: &DropZoneTreeIndex,
+    group: NodeId,
+) -> bool {
     matches!(
         owner_column(layout, tree_index, group).and_then(|column| layout.node(column)),
         Some(Node::Column(column)) if column.mode.is_rail()
@@ -166,7 +170,11 @@ pub(super) fn main_side_for_node(
     })
 }
 
-pub(super) fn main_columns(layout: &Layout, rects: &LayoutRects, side: DockSide) -> Vec<(NodeId, Rect)> {
+pub(super) fn main_columns(
+    layout: &Layout,
+    rects: &LayoutRects,
+    side: DockSide,
+) -> Vec<(NodeId, Rect)> {
     let Some(root) = layout.main_area(side).map(|area| area.root) else {
         return Vec::new();
     };
@@ -338,7 +346,8 @@ pub(super) fn group_edge_is_noop(
         if let (Some(source_index), Some(target_index)) = (source_index, target_index) {
             let source_is_single = matches!(
                 layout.node(source_column),
-                Some(Node::Column(column)) if column.groups.len() == 1 && column.groups[0] == source_group
+                Some(Node::Column(column))
+                    if column.groups.len() == 1 && column.groups[0] == source_group
             );
             return source_is_single
                 && ((zone == DropZone::Left && source_index + 1 == target_index)

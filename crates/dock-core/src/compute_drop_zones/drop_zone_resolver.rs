@@ -24,7 +24,10 @@ impl DropZoneResolver<'_> {
         self.resolve_validated(point)
     }
 
-    pub(super) fn resolve_validated(&self, point: Point) -> Result<Option<DropTarget>, ComputeRectsError> {
+    pub(super) fn resolve_validated(
+        &self,
+        point: Point,
+    ) -> Result<Option<DropTarget>, ComputeRectsError> {
         let mut topmost_floating: Option<(FloatingGroupId, Rect, i32)> = None;
         for floating in &self.rects.floating_groups {
             if floating
