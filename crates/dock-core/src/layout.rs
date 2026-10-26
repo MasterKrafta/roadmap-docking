@@ -1259,6 +1259,7 @@ mod command_group_transfer_operations;
 mod command_group_transfer_reorder;
 mod command_changes;
 mod command_persistent_state_eq;
+mod command_full_state_eq;
 mod command_group_insertion;
 mod command_group_merge_tabs;
 mod command_group_edge_floating;
