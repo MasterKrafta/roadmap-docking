@@ -85,9 +85,7 @@ pub struct Layout {
 
 mod column_display_order;
 mod command_target_area;
-mod command_target_validate_panel_target;
-mod command_target_validate_panel_area;
-mod command_target_validate_constraints_target;
+mod command_target_constraints;
 mod command_target_group_icon_rail;
 mod command_target_validate_drop;
 mod command_floating_dock_operation;
