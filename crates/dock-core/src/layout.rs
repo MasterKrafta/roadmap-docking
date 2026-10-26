@@ -97,8 +97,6 @@ mod command_layout_state_dispatch;
 mod command_flyout;
 mod command_panels;
 
-mod command_panel_transfer;
-
 mod command_group_operations;
 mod command_group_transfer;
 mod command_state_comparison;
