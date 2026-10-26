@@ -165,6 +165,7 @@ mod accessors;
 mod helpers;
 mod history;
 mod initialization;
+mod node_normalization;
 mod normalization;
 mod workspace_normalization;
 mod workspace_photoshop_repairs;
