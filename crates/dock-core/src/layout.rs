@@ -774,45 +774,6 @@ impl Layout {
     }
 
     #[cfg(feature = "serde")]
-    fn repair_duplicate_floating_z_orders(&mut self) -> Vec<String> {
-        let mut seen = HashSet::new();
-        let has_duplicates = self
-            .floating_groups
-            .iter()
-            .any(|(_, group)| !seen.insert(group.z_order));
-        if !has_duplicates {
-            return Vec::new();
-        }
-
-        let mut ordered: Vec<_> = self
-            .floating_groups
-            .iter()
-            .map(|(group_id, group)| (group_id, group.z_order))
-            .collect();
-        ordered.sort_by_key(|(_, z_order)| *z_order);
-
-        // A valid workspace cannot practically contain more than i32::MAX
-        // floating groups. Keep the old invalid values if it somehow does.
-        if ordered.len() > i32::MAX as usize {
-            return Vec::new();
-        }
-
-        let mut notes = Vec::new();
-        for (index, (group_id, old_z_order)) in ordered.into_iter().enumerate() {
-            let new_z_order = index as i32;
-            if old_z_order == new_z_order {
-                continue;
-            }
-            if let Some(group) = self.floating_groups.get_mut(group_id) {
-                group.z_order = new_z_order;
-                notes.push(format!(
-                    "floating group {group_id:?}: z_order changed from {old_z_order} to {new_z_order} to remove duplicate stacking order"
-                ));
-            }
-        }
-        notes
-    }
-
     /// Captures a session-only history checkpoint without transient flyout UI.
     pub(crate) fn history_snapshot(&self) -> Self {
         let mut snapshot = self.clone();
@@ -1183,24 +1144,7 @@ impl Layout {
         self.floating_groups.iter()
     }
 
-    /// Returns floating windows in paint order: lowest z_order first (back-to-front).
-    ///
-    /// Render adapters should draw windows in this order. Valid layouts require
-    /// unique z_order values, so stacking order is unambiguous.
-    pub fn floating_groups_in_paint_order(&self) -> Vec<(FloatingGroupId, &FloatingGroup)> {
-        let mut groups: Vec<_> = self.floating_groups.iter().collect();
-        groups.sort_by_key(|(_, group)| group.z_order);
-        groups
-    }
 
-    /// Returns floating windows in hit-test order: highest z_order first.
-    ///
-    /// Input adapters should test the first returned window before the rest.
-    pub fn floating_groups_in_hit_test_order(&self) -> Vec<(FloatingGroupId, &FloatingGroup)> {
-        let mut groups: Vec<_> = self.floating_groups.iter().collect();
-        groups.sort_by_key(|(_, group)| std::cmp::Reverse(group.z_order));
-        groups
-    }
 }
 
 mod column_display_order;
@@ -1219,7 +1163,7 @@ mod command_floating_dock_rail_slot;
 mod command_floating_dock_column_slot;
 mod command_floating_dock_tabs;
 mod command_floating_dock_target;
-mod command_floating_raise;
+mod floating_z_order;
 mod command_floating_move;
 mod command_floating_resize;
 mod command_floating_resize_bounds;
@@ -1282,7 +1226,6 @@ mod column_width_constraints;
 mod group_sizing;
 mod minimum_layout_size;
 mod main_column_width_reset;
-mod sizing;
 mod tree;
 mod validation;
 
