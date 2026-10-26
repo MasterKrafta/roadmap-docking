@@ -99,10 +99,9 @@ mod command_panels;
 
 mod command_panel_transfer;
 
-mod command_group_commands;
+mod command_group_operations;
 mod command_group_transfer;
 mod command_state_comparison;
-mod command_group_edge;
 mod command_target_rail_insert;
 mod commands;
 mod drag_drop_resolution;
