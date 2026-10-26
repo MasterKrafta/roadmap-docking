@@ -1,7 +1,91 @@
 use super::*;
 
 impl Layout {
-    pub(super) fn apply_resize_column_boundary_command(
+pub(super) fn apply_column_resize_command(
+        &mut self,
+        command: &DockCommand,
+        metrics: &DockMetrics,
+    ) -> Result<CommandApplication, CommandError> {
+        match command {
+            DockCommand::ResizeColumn { column, width } => {
+                self.apply_resize_column_command(column, width, metrics)
+            }
+            DockCommand::ResizeColumnBoundary {
+                side,
+                boundary_index,
+                delta,
+            } => {
+                self.apply_resize_column_boundary_command(side, boundary_index, delta, metrics)
+            }
+            DockCommand::ResizeSplitColumnBoundary {
+                split,
+                boundary_index,
+                delta,
+            } => {
+                self.apply_resize_split_column_boundary_command(split, boundary_index, delta, metrics)
+            }
+            DockCommand::ResetMainColumnRatios { side } => {
+                self.apply_reset_main_column_ratios_command(side, metrics)
+            }
+            _ => Err(CommandError::InvalidTarget {
+                reason: "column resize dispatcher received an unsupported command",
+            }),
+        }
+    }
+
+pub(super) fn apply_resize_column_command(
+        &mut self,
+        column: &NodeId,
+        width: &f32,
+        metrics: &DockMetrics,
+    ) -> Result<CommandApplication, CommandError> {
+        if !width.is_finite() || *width <= 0.0 {
+            return Err(CommandError::InvalidValue {
+                field: "width",
+                reason: "width must be finite and positive",
+            });
+        }
+        let current = match self.nodes.get(*column) {
+            Some(Node::Column(column)) => column.clone(),
+            Some(_) => {
+                return Err(CommandError::InvalidTarget {
+                    reason: "ResizeColumn target must be a Column node",
+                });
+            }
+            None => return Err(CommandError::MissingNode { node: *column }),
+        };
+        let old_width = current.width;
+        let (min_width, max_width) =
+            self.column_resize_limits(*column, &current, metrics)?;
+        let actual_width = Self::effective_column_width(
+            *width,
+            current.mode,
+            min_width,
+            max_width,
+            metrics,
+        )?;
+        let actual_delta = actual_width - old_width;
+        if actual_delta != 0.0 {
+            if let Some(Node::Column(column)) = self.nodes.get_mut(*column) {
+                column.width = actual_width;
+                if current.mode == ColumnMode::Expanded {
+                    column.last_expanded_width = Some(actual_width);
+                }
+            }
+            self.adjust_canvas_for_column_resize(*column, actual_delta, metrics)?;
+            self.sync_main_column_ratios(*column)?;
+        }
+        Ok(CommandApplication {
+            actual_value: Some(CommandValue::ColumnWidth(actual_width)),
+            inverse: (actual_delta != 0.0).then_some(DockCommand::ResizeColumn {
+                column: *column,
+                width: old_width,
+            }),
+            persistent: true,
+        })
+    }
+
+pub(super) fn apply_resize_column_boundary_command(
         &mut self,
         side: &DockSide,
         boundary_index: &usize,
@@ -171,5 +255,42 @@ impl Layout {
             ),
             persistent: true,
         })
+    }
+
+pub(super) fn apply_reset_main_column_ratios_command(
+        &mut self,
+        side: &DockSide,
+        metrics: &DockMetrics,
+    ) -> Result<CommandApplication, CommandError> {
+        let Some(area) = self.main_area(*side).copied() else {
+            return Ok(CommandApplication::persistent());
+        };
+        let root = self.nodes.get(area.root).cloned();
+        match root {
+            Some(Node::Column(_)) => Ok(CommandApplication::persistent()),
+            Some(Node::Split(split)) if split.axis == Axis::X => {
+                if split.children.iter().any(|child| {
+                    !matches!(self.nodes.get(*child), Some(Node::Column(_)))
+                }) {
+                    return Err(CommandError::InvalidTarget {
+                        reason: "main horizontal split contains a non-Column child",
+                    });
+                }
+                let first_column = split.children.first().copied().ok_or(
+                    CommandError::InvalidTarget {
+                        reason: "main horizontal split has no columns",
+                    },
+                )?;
+                self.reset_main_column_widths(*side, metrics)?;
+                self.sync_main_column_ratios(first_column)?;
+                Ok(CommandApplication::persistent())
+            }
+            Some(_) => Err(CommandError::InvalidTarget {
+                reason: "main dock root is not a horizontal column split",
+            }),
+            None => Err(CommandError::InvalidTarget {
+                reason: "main dock root is missing",
+            }),
+        }
     }
 }
