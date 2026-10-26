@@ -4,7 +4,7 @@ use super::*;
 const MAX_LAYOUT_TREE_DEPTH: usize = 256;
 
 impl Layout {
-/// Validates the entire model and returns every detected issue.
+    /// Validates the entire model and returns every detected issue.
     ///
     /// Metrics are supplied explicitly so callers and tests use the same
     /// thresholds as the core algorithms. An empty layout is valid: the canvas
@@ -43,7 +43,7 @@ impl Layout {
         }
     }
 
-pub(super) fn validate_node_records(
+    pub(super) fn validate_node_records(
         &self,
         metrics: &DockMetrics,
         metrics_are_valid: bool,
@@ -227,7 +227,7 @@ pub(super) fn validate_node_records(
         }
     }
 
-pub(super) fn validate_dock_areas(
+    pub(super) fn validate_dock_areas(
         &self,
         metrics: &DockMetrics,
         metrics_are_valid: bool,
@@ -388,7 +388,7 @@ pub(super) fn validate_dock_areas(
         roots
     }
 
-/// Checks tree depth and graph invariants before recursive size validation.
+    /// Checks tree depth and graph invariants before recursive size validation.
     ///
     /// Returns false only when the depth limit is exceeded, which requires the
     /// caller to stop further validation immediately.
@@ -481,7 +481,7 @@ pub(super) fn validate_dock_areas(
         true
     }
 
-pub(super) fn validate_flyout(&self, errors: &mut Vec<ValidationError>) {
+    pub(super) fn validate_flyout(&self, errors: &mut Vec<ValidationError>) {
         if let Some(flyout) = self.flyout {
             match self.nodes.get(flyout.column) {
                 None => errors.push(ValidationError::InvalidFlyout {
@@ -543,7 +543,7 @@ pub(super) fn validate_flyout(&self, errors: &mut Vec<ValidationError>) {
         }
     }
 
-pub(super) fn validate_expanded_column_widths(
+    pub(super) fn validate_expanded_column_widths(
         &self,
         metrics: &DockMetrics,
         metrics_are_valid: bool,
