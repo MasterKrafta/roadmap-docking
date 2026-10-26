@@ -6,7 +6,7 @@ mod hit_test_geometry;
 use self::hit_test_floating::{all_floating_subtrees, floating_front_to_back, floating_subtree};
 use self::hit_test_geometry::{contains, flyout_resize_hit_rect, hit_layout_geometry};
 use crate::{
-    ComputeRectsError, DockMetrics, HitResult, Layout, LayoutRects, Point, Rect, Size,
+    ComputeRectsError, DockMetrics, HitResult, Layout, LayoutRects, Point, Rect,
 };
 
 impl Layout {

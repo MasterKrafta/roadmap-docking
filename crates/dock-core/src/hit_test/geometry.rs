@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use crate::{
     ComputeRectsError, DockMetrics, DropTarget, DropZone, HitResult, Layout, LayoutRects, Node,
-    NodeId, PanelId, Point, Rect, Size,
+    FlyoutRect, NodeId, PanelId, Point, Rect, ResizeEdge, Size,
 };
 
 pub(super) fn flyout_resize_hit_rect(

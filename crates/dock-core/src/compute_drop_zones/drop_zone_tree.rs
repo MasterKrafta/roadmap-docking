@@ -135,7 +135,7 @@ pub(crate) fn owner_column(
     None
 }
 
-pub(crate) fn floating_owner(
+fn floating_owner(
     layout: &Layout,
     tree_index: &DropZoneTreeIndex,
     node: NodeId,
@@ -157,7 +157,7 @@ pub(crate) fn source_is_floating_root(layout: &Layout, source_root: NodeId) -> b
     })
 }
 
-pub(crate) fn main_side_for_node(
+fn main_side_for_node(
     layout: &Layout,
     tree_index: &DropZoneTreeIndex,
     node: NodeId,
@@ -357,7 +357,7 @@ pub(crate) fn group_edge_is_noop(
     false
 }
 
-pub(crate) fn collect_main_columns(layout: &Layout, root: NodeId, output: &mut Vec<NodeId>) {
+fn collect_main_columns(layout: &Layout, root: NodeId, output: &mut Vec<NodeId>) {
     match layout.node(root) {
         Some(Node::Column(_)) => output.push(root),
         Some(Node::Split(split)) => {

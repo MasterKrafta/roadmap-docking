@@ -20,6 +20,7 @@ fn minimum_floating_size(
         })
 }
 
+#[cfg(test)]
 pub(crate) fn clamp_floating_bounds(
     layout: &Layout,
     root: NodeId,

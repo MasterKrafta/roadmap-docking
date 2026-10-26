@@ -3,9 +3,9 @@ use std::collections::HashMap;
 #[path = "compute_drop_zones/drop_zone_tree.rs"]
 mod drop_zone_tree;
 pub(super) use drop_zone_tree::{
-    can_add_column, collect_main_columns, collect_panels, contains_node, direct_parent,
-    edge_group_for_column, edge_group_for_dock_edge, floating_owner, group_edge_is_noop,
-    group_main_column, is_rail_group, main_columns, main_side_for_node, owner_column,
+    can_add_column, collect_panels, contains_node, direct_parent, edge_group_for_column,
+    edge_group_for_dock_edge, group_edge_is_noop, group_main_column, is_rail_group,
+    main_columns, owner_column,
     panel_node, source_allows, source_is_floating_root, source_root, target_area,
     DropZoneTreeIndex,
 };
@@ -20,7 +20,6 @@ pub(super) use drop_zone_geometry::{
 #[path = "compute_drop_zones/drop_zone_resolver.rs"]
 mod drop_zone_resolver;
 pub use drop_zone_resolver::DropZoneResolver;
-pub(super) use drop_zone_resolver::best_containing_zone;
 
 #[path = "compute_drop_zones/drop_zone_main.rs"]
 mod drop_zone_main;

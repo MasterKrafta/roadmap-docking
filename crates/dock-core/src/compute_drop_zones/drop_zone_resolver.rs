@@ -69,7 +69,7 @@ impl DropZoneResolver<'_> {
     }
 }
 
-pub(crate) fn best_containing_zone(
+fn best_containing_zone(
     zones: &[DropZoneRect],
     point: Point,
     include: impl Fn(&DropZoneRect) -> bool,
