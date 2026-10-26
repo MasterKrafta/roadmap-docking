@@ -7,7 +7,7 @@ use super::schema::{migrate_v1_to_v2, validate_workspace_tree_limits};
 use crate::{
     Column, ComputeRectsError, DockArea, DockAreaId, DockMetrics, DockSide, FloatingGroup,
     FloatingGroupId, Layout, Node, NodeId, Panel, PanelConstraints, PanelId, PanelInstance,
-    PanelKey, Size, Split, Tabs, WorkspaceDiagnostic, WorkspaceFileError, WorkspaceLayout,
+    PanelKey, Size, Split, Tabs, WorkspaceDiagnostic, WorkspaceFileError,
     WorkspaceLoadOptions, WorkspaceLoadResult, WorkspaceNode, layout::WorkspaceLayoutParts,
 };
 
