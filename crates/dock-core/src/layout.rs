@@ -123,8 +123,6 @@ mod group_resize_commands;
 mod group_sizing;
 mod minimum_size;
 mod main_column_width_reset;
-mod tree_navigation;
-mod tree_structure;
 mod dock_location_memory;
 #[cfg(test)]
 mod tree;
