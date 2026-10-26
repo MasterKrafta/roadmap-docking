@@ -12,7 +12,7 @@ pub(super) struct AdjacentColumnResize<'a> {
 }
 
 impl Layout {
-pub(super) fn minimum_column_width(
+    pub(super) fn minimum_column_width(
         &self,
         column_id: NodeId,
         metrics: &DockMetrics,
@@ -182,7 +182,7 @@ pub(super) fn minimum_column_width(
         self.maximum_expanded_column_width(column_id)
     }
 
-pub(super) fn effective_column_width(
+    pub(super) fn effective_column_width(
         requested_width: f32,
         mode: ColumnMode,
         min_width: f32,
@@ -409,7 +409,7 @@ pub(super) fn effective_column_width(
         Ok(())
     }
 
-pub(super) fn reset_main_column_widths(
+    pub(super) fn reset_main_column_widths(
         &mut self,
         side: DockSide,
         metrics: &DockMetrics,
