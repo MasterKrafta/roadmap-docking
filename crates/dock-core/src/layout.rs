@@ -108,7 +108,6 @@ mod normalization;
 #[cfg(feature = "serde")]
 mod workspace;
 mod workspace_repairs;
-mod workspace_column_width_repairs;
 mod group_resize_commands;
 mod group_sizing;
 mod minimum_size;
