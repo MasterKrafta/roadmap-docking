@@ -169,6 +169,9 @@ mod column_width_constraints;
 mod group_sizing;
 mod minimum_layout_size;
 mod main_column_width_reset;
+mod tree_mutations;
+mod tree_navigation;
+#[cfg(test)]
 mod tree;
 mod validation;
 
