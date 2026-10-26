@@ -94,7 +94,6 @@ mod floating_z_order;
 mod command_floating_geometry;
 mod command_floating_dispatch;
 mod command_floating_create;
-mod command_floating_dock_dispatch;
 mod command_column_resize;
 mod column_resize_helpers;
 mod command_column_effective_width;
