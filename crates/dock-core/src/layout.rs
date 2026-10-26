@@ -110,7 +110,6 @@ mod workspace_repairs;
 mod group_resize_commands;
 mod group_sizing;
 mod minimum_size;
-mod dock_location_memory;
 mod tree_navigation;
 #[cfg(test)]
 mod tree;
