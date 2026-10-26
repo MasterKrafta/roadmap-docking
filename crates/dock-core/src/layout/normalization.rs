@@ -1,11 +1,7 @@
 use super::helpers::{is_normalizable_validation_error, normalized_ratios};
-
 use super::*;
 
-
-
 impl Layout {
-
     /// Test-only wrapper for the C3 normalization contract. Production mutations
     /// call normalize_in_place on a private candidate inside Layout::apply.
     #[cfg(test)]
