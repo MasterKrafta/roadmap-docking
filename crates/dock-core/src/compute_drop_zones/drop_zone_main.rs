@@ -157,6 +157,7 @@ impl Layout {
     pub(super) fn append_tab_insertion_zones(
         &self,
         source: DropSource,
+        source_root_id: NodeId,
         source_panels: &[PanelId],
         tree_index: &DropZoneTreeIndex,
         rects: &LayoutRects,
@@ -172,8 +173,8 @@ impl Layout {
                 continue;
             }
             if matches!(source, DropSource::Group { .. })
-                && (contains_node(tree_index, source_root, header.group)
-                    || contains_node(tree_index, header.group, source_root))
+                && (contains_node(tree_index, source_root_id, header.group)
+                    || contains_node(tree_index, header.group, source_root_id))
             {
                 continue;
             }
@@ -214,7 +215,6 @@ impl Layout {
         source: DropSource,
         source_panels: &[PanelId],
         tree_index: &DropZoneTreeIndex,
-        rects: &LayoutRects,
         metrics: &DockMetrics,
         left_columns: &[(NodeId, Rect)],
         right_columns: &[(NodeId, Rect)],
@@ -331,7 +331,6 @@ impl Layout {
 
     pub(super) fn append_rail_insertion_zones(
         &self,
-        source: DropSource,
         source_panels: &[PanelId],
         tree_index: &DropZoneTreeIndex,
         rects: &LayoutRects,

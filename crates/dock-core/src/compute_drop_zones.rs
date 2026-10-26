@@ -151,12 +151,18 @@ impl Layout {
             may_add_column,
             &mut zones,
         )?;
-        self.append_tab_insertion_zones(source, &source_panels, tree_index, rects, &mut zones)?;
+        self.append_tab_insertion_zones(
+            source,
+            source_root,
+            &source_panels,
+            tree_index,
+            rects,
+            &mut zones,
+        )?;
         self.append_main_column_zones(
             source,
             &source_panels,
             tree_index,
-            rects,
             metrics,
             &left_columns,
             &right_columns,
@@ -164,7 +170,6 @@ impl Layout {
             &mut zones,
         )?;
         self.append_rail_insertion_zones(
-            source,
             &source_panels,
             tree_index,
             rects,
