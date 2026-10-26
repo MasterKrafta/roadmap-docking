@@ -9,7 +9,13 @@ pub(super) fn layout_split(
     minimum_sizes: &mut HashMap<NodeId, Size>,
     output: &mut LayoutRects,
 ) -> Result<(), ComputeRectsError> {
-    layout_split_inner(layout, id, split, rect, metrics, minimum_sizes, output, false)
+    layout_split_inner(
+        SplitLayoutContext { layout, metrics, minimum_sizes, output },
+        id,
+        split,
+        rect,
+        false,
+    )
 }
 
 /// Lays out a floating composition while respecting the independent window title.
@@ -51,22 +57,38 @@ pub(super) fn layout_floating_root(
             layout_node(layout, id, content_rect, metrics, minimum_sizes, output)
         }
         Some(Node::Split(split)) if split.axis == Axis::X => {
-            layout_split_inner(layout, id, split, rect, metrics, minimum_sizes, output, true)
+            layout_split_inner(
+                SplitLayoutContext { layout, metrics, minimum_sizes, output },
+                id,
+                split,
+                rect,
+                true,
+            )
         }
         _ => layout_node(layout, id, rect, metrics, minimum_sizes, output),
     }
 }
 
+struct SplitLayoutContext<'a> {
+    layout: &'a Layout,
+    metrics: &'a DockMetrics,
+    minimum_sizes: &'a mut HashMap<NodeId, Size>,
+    output: &'a mut LayoutRects,
+}
+
 fn layout_split_inner(
-    layout: &Layout,
+    context: SplitLayoutContext<'_>,
     id: NodeId,
     split: &crate::Split,
     rect: Rect,
-    metrics: &DockMetrics,
-    minimum_sizes: &mut HashMap<NodeId, Size>,
-    output: &mut LayoutRects,
     reserve_title_for_collapsed_branches: bool,
 ) -> Result<(), ComputeRectsError> {
+    let SplitLayoutContext {
+        layout,
+        metrics,
+        minimum_sizes,
+        output,
+    } = context;
     if split.children.is_empty() {
         return Ok(());
     }

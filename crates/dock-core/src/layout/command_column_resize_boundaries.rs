@@ -39,13 +39,15 @@ impl Layout {
             }
         };
         let actual_delta = self.resize_adjacent_columns(
-            left_id,
-            right_id,
-            &left,
-            &right,
-            *delta,
-            metrics,
-            "resized column width is not finite and positive",
+            super::column_resize_helpers::AdjacentColumnResize {
+                left_id,
+                right_id,
+                left: &left,
+                right: &right,
+                requested_delta: *delta,
+                metrics,
+                width_error_reason: "resized column width is not finite and positive",
+            },
         )?;
         if actual_delta != 0.0 {
             self.sync_main_column_ratios(left_id)?;
@@ -120,13 +122,15 @@ impl Layout {
         };
 
         let actual_delta = self.resize_adjacent_columns(
-            left_id,
-            right_id,
-            &left,
-            &right,
-            *delta,
-            metrics,
-            "resized split column width is not finite and positive",
+            super::column_resize_helpers::AdjacentColumnResize {
+                left_id,
+                right_id,
+                left: &left,
+                right: &right,
+                requested_delta: *delta,
+                metrics,
+                width_error_reason: "resized split column width is not finite and positive",
+            },
         )?;
         if actual_delta != 0.0 {
             // Split(X) of Columns is laid out from each Column's requested

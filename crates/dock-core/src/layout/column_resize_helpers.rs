@@ -1,20 +1,33 @@
 use super::helpers::*;
 use super::*;
 
+pub(super) struct AdjacentColumnResize<'a> {
+    pub(super) left_id: NodeId,
+    pub(super) right_id: NodeId,
+    pub(super) left: &'a Column,
+    pub(super) right: &'a Column,
+    pub(super) requested_delta: f32,
+    pub(super) metrics: &'a DockMetrics,
+    pub(super) width_error_reason: &'static str,
+}
+
 impl Layout {
     /// Resizes two adjacent Columns using their combined min/max constraints.
     /// Main-dock and nested Split(X) callers share this invariant; each caller
     /// remains responsible for syncing its containing layout ratios.
     pub(super) fn resize_adjacent_columns(
         &mut self,
-        left_id: NodeId,
-        right_id: NodeId,
-        left: &Column,
-        right: &Column,
-        requested_delta: f32,
-        metrics: &DockMetrics,
-        width_error_reason: &'static str,
+        request: AdjacentColumnResize<'_>,
     ) -> Result<f32, CommandError> {
+        let AdjacentColumnResize {
+            left_id,
+            right_id,
+            left,
+            right,
+            requested_delta,
+            metrics,
+            width_error_reason,
+        } = request;
         let actual_delta = if left.mode.is_rail() || right.mode.is_rail() {
             0.0
         } else {
