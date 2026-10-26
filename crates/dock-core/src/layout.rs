@@ -117,6 +117,7 @@ mod workspace_normalization;
 mod workspace_photoshop_repairs;
 mod workspace_singleton_repairs;
 mod column_width_constraints;
+mod group_resize_commands;
 mod group_sizing;
 mod minimum_size;
 mod main_column_width_reset;
