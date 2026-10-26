@@ -85,7 +85,7 @@ pub struct Layout {
 
 mod column_display_order;
 mod column_resize;
-mod column_resize_helpers;
+mod column_width_management;
 mod floating_docking;
 mod floating_operations;
 mod floating_window;
@@ -118,11 +118,9 @@ mod workspace_export;
 mod workspace_normalization;
 mod workspace_photoshop_repairs;
 mod workspace_singleton_repairs;
-mod column_width_constraints;
 mod group_resize_commands;
 mod group_sizing;
 mod minimum_size;
-mod main_column_width_reset;
 mod dock_location_memory;
 mod tree_navigation;
 #[cfg(test)]
