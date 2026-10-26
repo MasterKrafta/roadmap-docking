@@ -2,7 +2,6 @@ use super::*;
 use super::column_resize_helpers::AdjacentColumnResize;
 
 impl Layout {
-
     pub(super) fn apply_column_resize_command(
         &mut self,
         command: &DockCommand,
