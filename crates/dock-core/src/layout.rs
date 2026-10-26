@@ -107,9 +107,8 @@ mod initialization;
 mod normalization;
 #[cfg(feature = "serde")]
 mod workspace;
+mod workspace_repairs;
 mod workspace_column_width_repairs;
-mod workspace_photoshop_repairs;
-mod workspace_singleton_repairs;
 mod group_resize_commands;
 mod group_sizing;
 mod minimum_size;
