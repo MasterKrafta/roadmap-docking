@@ -1208,6 +1208,7 @@ mod command_target_policy;
 mod command_target_area_column;
 mod command_target_area_group;
 mod command_target_area_for_target;
+mod command_target_validate_panel_target;
 mod command_target_group_icon_rail;
 mod command_target_validate_drop;
 mod command_floating_dock_operation;
