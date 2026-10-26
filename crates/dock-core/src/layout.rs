@@ -1278,6 +1278,7 @@ mod ratio_helpers;
 mod graph_validation_helpers;
 mod helpers;
 mod normalization;
+mod column_width_constraints;
 mod group_sizing;
 mod sizing;
 mod tree;
