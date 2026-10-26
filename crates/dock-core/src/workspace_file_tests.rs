@@ -704,14 +704,18 @@ fn stale_profile_rail_width_is_repaired_and_reported() {
         let (_, panel_node) = builder.panel(key("layers"), constraints());
         let group = builder.tabs(vec![panel_node], 0, false);
         let rail = builder.column(
-            metrics.rail_width + 12.0,
+            metrics.rail_width,
             ColumnMode::IconsOnly,
             vec![group],
             vec![1.0],
         );
         builder.main_area(DockSide::Right, rail);
         let file = WorkspaceFile::from_layout(&builder.build(), &metrics).unwrap();
-        let json = serde_json::to_string(&file).unwrap();
+
+        // Simulate a workspace persisted by an older profile with a stale rail width.
+        let mut value: serde_json::Value = serde_json::to_value(&file).unwrap();
+        value["layout"]["right"]["width"] = serde_json::json!(metrics.rail_width + 12.0);
+        let json = value.to_string();
 
         let report = WorkspaceFile::load_json(
             &json,
