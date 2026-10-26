@@ -1,7 +1,5 @@
 use super::*;
-use crate::{
-    AllowedArea, DragDropAction, DragDropRequest, DragHandle, DragPayload, FloatingGroupId, NodeId,
-};
+use crate::{DragDropAction, DragDropRequest, DragHandle, DragPayload, FloatingGroupId};
 
 impl Layout {
     /// Resolves a completed drag request to either one command or an explicit
