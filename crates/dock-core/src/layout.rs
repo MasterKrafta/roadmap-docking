@@ -112,10 +112,7 @@ mod command_layout_state_dispatch;
 mod command_flyout_dispatch;
 mod command_panels;
 
-mod command_panel_transfer_dispatch;
-mod command_panel_move_dispatch;
-mod command_panel_transfer_inverse;
-mod command_panel_target_transfer;
+mod command_panel_transfer;
 
 mod command_flyout_panel_transfer_dispatch;
 mod command_group_dispatch;
