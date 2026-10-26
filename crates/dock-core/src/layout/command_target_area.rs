@@ -1,8 +1,5 @@
 use super::*;
-
 use crate::AllowedArea;
-
-
 
 impl Layout {
     pub(super) fn allowed_area_for_column_target(
@@ -41,7 +38,10 @@ impl Layout {
         })
     }
 
-    pub(super) fn allowed_area_for_group_target(&self, group: NodeId) -> Result<AllowedArea, CommandError> {
+    pub(super) fn allowed_area_for_group_target(
+        &self,
+        group: NodeId,
+    ) -> Result<AllowedArea, CommandError> {
         if !matches!(self.nodes.get(group), Some(Node::Tabs(_))) {
             return Err(if self.nodes.contains_key(group) {
                 CommandError::InvalidTarget {
@@ -62,7 +62,9 @@ impl Layout {
             && self.main_column_position(column_id).is_some()
         {
             return match self.nodes.get(column_id) {
-                Some(Node::Column(column)) if column.mode.is_rail() => Ok(AllowedArea::ICON_RAIL),
+                Some(Node::Column(column)) if column.mode.is_rail() => {
+                    Ok(AllowedArea::ICON_RAIL)
+                }
                 Some(Node::Column(_)) => Ok(AllowedArea::MAIN_DOCK),
                 _ => Err(CommandError::InvalidTarget {
                     reason: "drop group owner is not a Column",
@@ -84,7 +86,10 @@ impl Layout {
         })
     }
 
-    pub(super) fn allowed_area_for_target(&self, target: DropTarget) -> Result<AllowedArea, CommandError> {
+    pub(super) fn allowed_area_for_target(
+        &self,
+        target: DropTarget,
+    ) -> Result<AllowedArea, CommandError> {
         match target {
             DropTarget::Tabs { group, .. }
             | DropTarget::GroupTabs { group, .. }
@@ -96,10 +101,7 @@ impl Layout {
             DropTarget::FreeArea => Ok(AllowedArea::FLOATING),
         }
     }
-
 }
-
-
 
 pub(super) fn allowed_area_rejection_reason(area: AllowedArea) -> &'static str {
     if area == AllowedArea::MAIN_DOCK {
@@ -112,4 +114,3 @@ pub(super) fn allowed_area_rejection_reason(area: AllowedArea) -> &'static str {
         "panel constraints disallow the requested dock area"
     }
 }
-
