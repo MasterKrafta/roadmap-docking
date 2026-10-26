@@ -509,7 +509,7 @@ impl Layout {
         Ok(true)
     }
 
-/// Returns the canonical flattened panel order for a column.
+    /// Returns the canonical flattened panel order for a column.
     ///
     /// Entries follow the column's group/tree order from top to bottom, then tab
     /// order within each Tabs group from left to right. Rail modes use this order

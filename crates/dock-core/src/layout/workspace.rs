@@ -4,7 +4,7 @@ use super::*;
 use crate::{WorkspaceFile, WorkspaceFileError};
 
 impl Layout {
-#[cfg(feature = "serde")]
+    #[cfg(feature = "serde")]
     pub(crate) fn from_workspace_parts(parts: WorkspaceLayoutParts) -> Self {
         let WorkspaceLayoutParts {
             nodes,
@@ -79,7 +79,7 @@ impl Layout {
         Ok(Some(diagnostic_issues))
     }
 
-#[cfg(feature = "serde")]
+    #[cfg(feature = "serde")]
     pub(crate) fn clamp_floating_groups_for_workspace_load(
         &mut self,
         client_area: Rect,
@@ -129,7 +129,7 @@ impl Layout {
         Ok(changes)
     }
 
-/// Creates a validated workspace DTO suitable for the public JSON boundary.
+    /// Creates a validated workspace DTO suitable for the public JSON boundary.
     pub fn to_workspace_file(
         &self,
         metrics: &DockMetrics,

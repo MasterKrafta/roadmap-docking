@@ -260,7 +260,7 @@ impl Layout {
         Ok(())
     }
 
-pub(super) fn insert_group_edge(
+    pub(super) fn insert_group_edge(
         &mut self,
         new_group: NodeId,
         target_group: NodeId,

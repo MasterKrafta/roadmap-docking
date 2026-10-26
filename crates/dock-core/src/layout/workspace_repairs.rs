@@ -8,7 +8,7 @@ use super::*;
 
 impl Layout {
 
-#[cfg(feature = "serde")]
+    #[cfg(feature = "serde")]
     fn subtree_contains_panel(&self, root: NodeId) -> bool {
         fn contains_panel(
             layout: &Layout,
@@ -265,7 +265,7 @@ impl Layout {
         notes
     }
 
-#[cfg(feature = "serde")]
+    #[cfg(feature = "serde")]
     pub(super) fn repair_duplicate_singleton_panels(&mut self) -> Vec<String> {
         let mut first_by_key = HashMap::<PanelKey, (PanelId, bool)>::new();
         let mut notes = Vec::new();
@@ -424,7 +424,7 @@ impl Layout {
         }
     }
 
-#[cfg(feature = "serde")]
+    #[cfg(feature = "serde")]
     pub(super) fn repair_workspace_column_widths(
         &mut self,
         metrics: &DockMetrics,
