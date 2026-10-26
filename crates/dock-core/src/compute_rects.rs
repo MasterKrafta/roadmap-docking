@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 #[path = "compute_rects/floating_bounds.rs"]
 mod floating_bounds;
-#[cfg(test)]
+#[cfg(any(test, feature = "serde"))]
 pub(crate) use floating_bounds::clamp_floating_bounds;
 use floating_bounds::clamp_floating_bounds_with_cache;
 

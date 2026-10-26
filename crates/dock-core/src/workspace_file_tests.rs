@@ -786,7 +786,7 @@ fn workspace_load_expands_narrow_expanded_column_and_preserves_restore_width() {
                 Rect::new(Point::new(0.0, 0.0), Size::new(1000.0, 600.0)),
                 &metrics,
             ),
-            Err(crate::ComputeRectsError::InvalidLayout)
+            Err(crate::ComputeRectsError::InvalidLayout { .. })
         ));
 
         let mut file = WorkspaceFile::from_layout_unchecked_for_test(&source).unwrap();

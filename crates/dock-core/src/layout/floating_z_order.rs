@@ -41,6 +41,7 @@ impl Layout {
         Ok(CommandApplication::persistent())
     }
 
+    #[cfg(feature = "serde")]
     pub(super) fn repair_duplicate_floating_z_orders(&mut self) -> Vec<String> {
         let mut seen = HashSet::new();
         let has_duplicates = self

@@ -20,7 +20,7 @@ fn minimum_floating_size(
         })
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "serde"))]
 pub(crate) fn clamp_floating_bounds(
     layout: &Layout,
     root: NodeId,

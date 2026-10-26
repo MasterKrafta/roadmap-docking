@@ -2,7 +2,7 @@ use std::collections::{BTreeSet, HashMap};
 
 use slotmap::SlotMap;
 
-use super::WorkspaceFile;
+use super::{WORKSPACE_VERSION, WorkspaceFile};
 use super::schema::{migrate_v1_to_v2, validate_workspace_tree_limits};
 use crate::{
     Column, ComputeRectsError, DockArea, DockAreaId, DockMetrics, DockSide, FloatingGroup,
@@ -176,7 +176,7 @@ impl WorkspaceFile {
                     ComputeRectsError::Geometry(reason) => {
                         WorkspaceFileError::InvalidFloatingBounds { index, reason }
                     }
-                    ComputeRectsError::InvalidLayout => {
+                    ComputeRectsError::InvalidLayout { .. } => {
                         WorkspaceFileError::InvalidRuntimeLayout(format!(
                             "cannot clamp floating group {index}: its layout references are invalid"
                         ))
