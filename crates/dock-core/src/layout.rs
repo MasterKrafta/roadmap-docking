@@ -98,12 +98,11 @@ mod command_column_resize;
 mod column_resize_helpers;
 mod command_column_effective_width;
 mod command_layout_state_dispatch;
-mod command_flyout_dispatch;
+mod command_flyout;
 mod command_panels;
 
 mod command_panel_transfer;
 
-mod command_flyout_panel_transfer_dispatch;
 mod command_group_dispatch;
 mod command_group_transfer;
 mod command_group_transfer_operations;
