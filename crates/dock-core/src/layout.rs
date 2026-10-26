@@ -103,8 +103,7 @@ mod command_panels;
 
 mod command_panel_transfer;
 
-mod command_group_dispatch;
-mod command_group_mutations;
+mod command_group_commands;
 mod command_group_transfer;
 mod command_changed_node_ids;
 mod command_state_eq;
