@@ -1,5 +1,5 @@
 use super::*;
-use super::column_resize_helpers::AdjacentColumnResize;
+use super::column_width_management::AdjacentColumnResize;
 
 impl Layout {
     pub(super) fn apply_column_resize_command(
