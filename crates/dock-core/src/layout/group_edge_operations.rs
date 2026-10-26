@@ -260,4 +260,5 @@ impl Layout {
                 reason: "group-edge target requires a cardinal edge zone",
             }),
         }
+    }
 }
