@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn push_zone(
+pub(crate) fn push_zone(
     zones: &mut Vec<DropZoneRect>,
     target: DropTarget,
     zone: DropZone,
@@ -14,7 +14,7 @@ pub(super) fn push_zone(
     Ok(())
 }
 
-pub(super) fn group_edge_rect(
+pub(crate) fn group_edge_rect(
     rect: Rect,
     zone: DropZone,
     edge_width: f32,
@@ -45,7 +45,7 @@ pub(super) fn group_edge_rect(
     Ok(result)
 }
 
-pub(super) fn group_center_rect(
+pub(crate) fn group_center_rect(
     rect: Rect,
     metrics: &DockMetrics,
 ) -> Result<Rect, ComputeRectsError> {
@@ -63,7 +63,7 @@ pub(super) fn group_center_rect(
     Ok(result)
 }
 
-pub(super) fn floating_edge_rect_for_branch(
+pub(crate) fn floating_edge_rect_for_branch(
     floating_bounds: Rect,
     column_rect: Rect,
     edge: DropZone,
@@ -88,7 +88,7 @@ pub(super) fn floating_edge_rect_for_branch(
     Ok(result)
 }
 
-pub(super) fn floating_edge_rect(
+pub(crate) fn floating_edge_rect(
     rect: Rect,
     edge: DropZone,
     metrics: &DockMetrics,

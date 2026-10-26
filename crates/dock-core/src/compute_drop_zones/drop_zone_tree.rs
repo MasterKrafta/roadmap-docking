@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) struct DropZoneTreeIndex {
+pub(crate) struct DropZoneTreeIndex {
     parent_by_node: HashMap<NodeId, NodeId>,
     panel_by_id: HashMap<PanelId, NodeId>,
 }
@@ -40,7 +40,7 @@ impl DropZoneTreeIndex {
     }
 }
 
-pub(super) fn source_root(
+pub(crate) fn source_root(
     layout: &Layout,
     source: DropSource,
     tree_index: &DropZoneTreeIndex,
@@ -59,11 +59,11 @@ pub(super) fn source_root(
     }
 }
 
-pub(super) fn panel_node(tree_index: &DropZoneTreeIndex, panel: PanelId) -> Option<NodeId> {
+pub(crate) fn panel_node(tree_index: &DropZoneTreeIndex, panel: PanelId) -> Option<NodeId> {
     tree_index.panel_by_id.get(&panel).copied()
 }
 
-pub(super) fn collect_panels(layout: &Layout, root: NodeId) -> Vec<PanelId> {
+pub(crate) fn collect_panels(layout: &Layout, root: NodeId) -> Vec<PanelId> {
     let mut result = Vec::new();
     let mut stack = vec![root];
     while let Some(node_id) = stack.pop() {
@@ -78,7 +78,7 @@ pub(super) fn collect_panels(layout: &Layout, root: NodeId) -> Vec<PanelId> {
     result
 }
 
-pub(super) fn source_allows(layout: &Layout, panels: &[PanelId], area: AllowedArea) -> bool {
+pub(crate) fn source_allows(layout: &Layout, panels: &[PanelId], area: AllowedArea) -> bool {
     panels.iter().all(|panel| {
         layout
             .panel_instance(*panel)
@@ -87,15 +87,15 @@ pub(super) fn source_allows(layout: &Layout, panels: &[PanelId], area: AllowedAr
     })
 }
 
-pub(super) fn contains_node(tree_index: &DropZoneTreeIndex, root: NodeId, target: NodeId) -> bool {
+pub(crate) fn contains_node(tree_index: &DropZoneTreeIndex, root: NodeId, target: NodeId) -> bool {
     tree_index.contains_node(root, target)
 }
 
-pub(super) fn direct_parent(tree_index: &DropZoneTreeIndex, child: NodeId) -> Option<NodeId> {
+pub(crate) fn direct_parent(tree_index: &DropZoneTreeIndex, child: NodeId) -> Option<NodeId> {
     tree_index.direct_parent(child)
 }
 
-pub(super) fn target_area(
+pub(crate) fn target_area(
     layout: &Layout,
     tree_index: &DropZoneTreeIndex,
     target: NodeId,
@@ -109,7 +109,7 @@ pub(super) fn target_area(
     main_side_for_node(layout, tree_index, target).map(|_| AllowedArea::MAIN_DOCK)
 }
 
-pub(super) fn is_rail_group(
+pub(crate) fn is_rail_group(
     layout: &Layout,
     tree_index: &DropZoneTreeIndex,
     group: NodeId,
@@ -120,7 +120,7 @@ pub(super) fn is_rail_group(
     )
 }
 
-pub(super) fn owner_column(
+pub(crate) fn owner_column(
     layout: &Layout,
     tree_index: &DropZoneTreeIndex,
     node: NodeId,
@@ -135,7 +135,7 @@ pub(super) fn owner_column(
     None
 }
 
-pub(super) fn floating_owner(
+pub(crate) fn floating_owner(
     layout: &Layout,
     tree_index: &DropZoneTreeIndex,
     node: NodeId,
@@ -148,7 +148,7 @@ pub(super) fn floating_owner(
     })
 }
 
-pub(super) fn source_is_floating_root(layout: &Layout, source_root: NodeId) -> bool {
+pub(crate) fn source_is_floating_root(layout: &Layout, source_root: NodeId) -> bool {
     layout.floating_groups().any(|(_, floating)| {
         layout
             .dock_area(floating.area)
@@ -157,7 +157,7 @@ pub(super) fn source_is_floating_root(layout: &Layout, source_root: NodeId) -> b
     })
 }
 
-pub(super) fn main_side_for_node(
+pub(crate) fn main_side_for_node(
     layout: &Layout,
     tree_index: &DropZoneTreeIndex,
     node: NodeId,
@@ -170,7 +170,7 @@ pub(super) fn main_side_for_node(
     })
 }
 
-pub(super) fn main_columns(
+pub(crate) fn main_columns(
     layout: &Layout,
     rects: &LayoutRects,
     side: DockSide,
@@ -205,7 +205,7 @@ pub(super) fn main_columns(
         .collect()
 }
 
-pub(super) fn group_main_column(
+pub(crate) fn group_main_column(
     layout: &Layout,
     tree_index: &DropZoneTreeIndex,
     group: NodeId,
@@ -226,7 +226,7 @@ pub(super) fn group_main_column(
         .map(|index| (side, index, columns[index].1))
 }
 
-pub(super) fn edge_group_for_column(layout: &Layout, column: NodeId, last: bool) -> Option<NodeId> {
+pub(crate) fn edge_group_for_column(layout: &Layout, column: NodeId, last: bool) -> Option<NodeId> {
     let Some(Node::Column(value)) = layout.node(column) else {
         return None;
     };
@@ -237,7 +237,7 @@ pub(super) fn edge_group_for_column(layout: &Layout, column: NodeId, last: bool)
     }
 }
 
-pub(super) fn edge_group_for_dock_edge(
+pub(crate) fn edge_group_for_dock_edge(
     layout: &Layout,
     columns: &[(NodeId, Rect)],
     is_left: bool,
@@ -250,7 +250,7 @@ pub(super) fn edge_group_for_dock_edge(
     edge_group_for_column(layout, column, is_left)
 }
 
-pub(super) fn can_add_column(
+pub(crate) fn can_add_column(
     layout: &Layout,
     tree_index: &DropZoneTreeIndex,
     source: DropSource,
@@ -289,7 +289,7 @@ pub(super) fn can_add_column(
     }
 }
 
-pub(super) fn group_edge_is_noop(
+pub(crate) fn group_edge_is_noop(
     layout: &Layout,
     tree_index: &DropZoneTreeIndex,
     source: DropSource,
@@ -357,7 +357,7 @@ pub(super) fn group_edge_is_noop(
     false
 }
 
-pub(super) fn collect_main_columns(layout: &Layout, root: NodeId, output: &mut Vec<NodeId>) {
+pub(crate) fn collect_main_columns(layout: &Layout, root: NodeId, output: &mut Vec<NodeId>) {
     match layout.node(root) {
         Some(Node::Column(_)) => output.push(root),
         Some(Node::Split(split)) => {
