@@ -7,11 +7,11 @@ use super::*;
 /// and metrics immutably, preventing the cached snapshot from being used while any of
 /// those inputs are changed. Create a new resolver after a layout or viewport update.
 pub struct DropZoneResolver<'a> {
-    layout: &'a Layout,
-    rects: &'a LayoutRects,
-    _metrics: &'a DockMetrics,
-    tree_index: DropZoneTreeIndex,
-    zones: Vec<DropZoneRect>,
+    pub(super) layout: &'a Layout,
+    pub(super) rects: &'a LayoutRects,
+    pub(super) _metrics: &'a DockMetrics,
+    pub(super) tree_index: DropZoneTreeIndex,
+    pub(super) zones: Vec<DropZoneRect>,
 }
 
 impl DropZoneResolver<'_> {
