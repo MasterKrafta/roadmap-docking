@@ -84,10 +84,7 @@ pub struct Layout {
 }
 
 mod column_display_order;
-mod command_target_area_rejection_reason;
-mod command_target_area_column;
-mod command_target_area_group;
-mod command_target_area_for_target;
+mod command_target_area;
 mod command_target_validate_panel_target;
 mod command_target_validate_panel_area;
 mod command_target_validate_constraints_target;

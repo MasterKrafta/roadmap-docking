@@ -11,7 +11,7 @@ impl Layout {
             Ok(())
         } else {
             Err(CommandError::InvalidTarget {
-                reason: super::command_target_area_rejection_reason::allowed_area_rejection_reason(area),
+                reason: super::command_target_area::allowed_area_rejection_reason(area),
             })
         }
     }

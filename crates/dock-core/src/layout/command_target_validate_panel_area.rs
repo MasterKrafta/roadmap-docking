@@ -13,7 +13,7 @@ impl Layout {
                 .ok_or(CommandError::MissingPanel { panel: *panel })?;
             if !instance.constraints.allows_area(area) {
                 return Err(CommandError::InvalidTarget {
-                    reason: super::command_target_area_rejection_reason::allowed_area_rejection_reason(area),
+                    reason: super::command_target_area::allowed_area_rejection_reason(area),
                 });
             }
         }
