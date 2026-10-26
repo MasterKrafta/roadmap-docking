@@ -93,6 +93,7 @@ mod command_flyout;
 mod command_panels;
 
 mod command_group_operations;
+mod group_edge_operations;
 mod command_group_transfer;
 mod command_state_comparison;
 mod command_target_rail_insert;
