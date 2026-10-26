@@ -18,6 +18,8 @@ Do not start by scanning implementation files. Read the plan first, then identif
 8. Work one individual checklist line/subtask at a time, not one whole roadmap stage at a time. Complete that unit, then stop and report before starting the next line. Each report must state the exact checklist item, what changed, files touched, and the commit SHA/link. Mention checks only when they were actually run and useful; do not repeat the known-unavailable-checks boilerplate described below. Keep each line's changes in its own focused commit when practical; do not bundle several checklist lines into one large change.
 9. Before continuing past a completed checklist line, provide the report in the conversation. Do not wait until the entire stage is finished to report progress.
 
+10. **File decomposition follows cohesive responsibilities, not function count.** Do not create a production file for one function by default. Keep small helpers next to the operation that owns them unless they form an independently meaningful concept, algorithm, type/API boundary, or reusable subsystem. Group dispatch and closely related implementations by domain (for example, panel lifecycle/tab operations) rather than splitting them into files named for individual verbs. Treat ~300 lines as a review cue, not a hard limit or an automatic extraction trigger; a cohesive module of roughly 150–400 lines is normal, and a larger module may remain intact when splitting would make navigation harder. Before extracting, state the responsibility of each proposed module; prefer a few coherent modules over many tiny ones.
+
 ## Canonical document
 
 - `docs/DOCK_SYSTEM_IMPLEMENTATION_PLAN.md` — read this first; it is the source of truth for the planned architecture and implementation order.

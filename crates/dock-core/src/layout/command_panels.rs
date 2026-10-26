@@ -338,7 +338,7 @@ impl Layout {
         tabs.children
             .insert(insert_index.min(tabs.children.len()), moved);
         if let Some(active_node) = active_node
-            && let Some(active_index) = tabs.children.iter().position(|id| id == active_node)
+            && let Some(active_index) = tabs.children.iter().position(|id| *id == active_node)
         {
             tabs.active_index = active_index;
         }
