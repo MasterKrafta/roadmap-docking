@@ -183,6 +183,7 @@ impl Layout {
         {
             tabs.collapsed = false;
         }
+    }
 
     pub(super) fn merge_group_into_tabs(
         &mut self,
