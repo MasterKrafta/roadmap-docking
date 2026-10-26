@@ -174,6 +174,7 @@ mod tree_mutations;
 mod tree_navigation;
 #[cfg(test)]
 mod tree;
+mod validation_nodes;
 mod validation;
 
 #[cfg(test)]
