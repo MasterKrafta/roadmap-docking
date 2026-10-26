@@ -96,6 +96,7 @@ mod command_group_operations;
 mod command_group_transfer;
 mod command_state_comparison;
 mod command_target_rail_insert;
+mod command_target_validation;
 mod command_target_operations;
 mod drop_resolution;
 mod commands;
