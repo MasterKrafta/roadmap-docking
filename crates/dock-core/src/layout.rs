@@ -113,7 +113,6 @@ mod command_state_eq;
 mod command_group_edge;
 mod command_target_rail_panel_insert;
 mod command_target_insert_node;
-mod command_target_group_node;
 mod command_target_group_insert;
 mod command_target_rail_slot_index;
 mod command_target_column_insert;
