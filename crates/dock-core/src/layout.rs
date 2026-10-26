@@ -105,11 +105,9 @@ mod helpers;
 mod history;
 mod initialization;
 mod normalization;
-mod workspace_column_width_repairs;
-mod workspace_floating_bounds;
 #[cfg(feature = "serde")]
-mod workspace_export;
-mod workspace_normalization;
+mod workspace;
+mod workspace_column_width_repairs;
 mod workspace_photoshop_repairs;
 mod workspace_singleton_repairs;
 mod group_resize_commands;
