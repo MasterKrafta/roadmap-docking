@@ -1,6 +1,6 @@
 use super::*;
 use super::helpers::normalized_ratios;
-use super::group_sizing::distribute_heights_with_minimums;
+use super::group_height_distribution::distribute_heights_with_minimums;
 
 impl Layout {
     pub(super) fn equal_group_heights(
