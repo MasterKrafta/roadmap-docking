@@ -86,30 +86,6 @@ impl Layout {
     }
 
     #[cfg(feature = "serde")]
-    fn subtree_contains_panel(&self, root: NodeId) -> bool {
-        fn contains_panel(
-            layout: &Layout,
-            node_id: NodeId,
-            visited: &mut HashSet<NodeId>,
-        ) -> bool {
-            if !visited.insert(node_id) {
-                return false;
-            }
-            let Some(node) = layout.nodes.get(node_id) else {
-                return false;
-            };
-            matches!(node, Node::Panel(_))
-                || node
-                    .children()
-                    .iter()
-                    .copied()
-                    .any(|child| contains_panel(layout, child, visited))
-        }
-
-        contains_panel(self, root, &mut HashSet::new())
-    }
-
-    #[cfg(feature = "serde")]
     pub(crate) fn normalize_for_workspace_load(
         &mut self,
         metrics: &DockMetrics,
