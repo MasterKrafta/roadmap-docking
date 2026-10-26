@@ -101,8 +101,8 @@ mod command_group_operations;
 mod command_group_transfer;
 mod command_state_comparison;
 mod command_target_rail_insert;
+mod drop_resolution;
 mod commands;
-mod drag_drop_resolution;
 mod ratio_helpers;
 mod graph_validation_helpers;
 mod accessors;
@@ -124,7 +124,6 @@ mod main_column_width_reset;
 mod tree_navigation;
 mod tree_structure;
 mod dock_location_memory;
-mod tree_drop_noop;
 #[cfg(test)]
 mod tree;
 mod validation_nodes;
