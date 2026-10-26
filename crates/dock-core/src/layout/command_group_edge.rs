@@ -2,7 +2,7 @@ use super::*;
 use super::helpers::split_sibling_ratios;
 
 impl Layout {
-pub(super) fn insert_group_edge_generic(
+    pub(super) fn insert_group_edge_generic(
         &mut self,
         new_group: NodeId,
         target_group: NodeId,
@@ -50,7 +50,7 @@ pub(super) fn insert_group_edge_generic(
         Ok(())
     }
 
-pub(super) fn insert_group_edge_in_floating_stack(
+    pub(super) fn insert_group_edge_in_floating_stack(
         &mut self,
         new_group: NodeId,
         target_group: NodeId,
@@ -138,7 +138,7 @@ pub(super) fn insert_group_edge_in_floating_stack(
         }
     }
 
-pub(super) fn insert_group_edge_in_photoshop_column(
+    pub(super) fn insert_group_edge_in_photoshop_column(
         &mut self,
         new_group: NodeId,
         target_group: NodeId,

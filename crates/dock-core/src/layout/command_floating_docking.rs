@@ -2,7 +2,7 @@ use super::*;
 use super::helpers::normalized_ratios;
 
 impl Layout {
-pub(super) fn apply_dock_floating_command(
+    pub(super) fn apply_dock_floating_command(
         &mut self,
         group: &FloatingGroupId,
         target: &DropTarget,
@@ -24,7 +24,7 @@ pub(super) fn apply_dock_floating_command(
         Ok(CommandApplication::persistent())
     }
 
-pub(super) fn dock_floating_group(
+    pub(super) fn dock_floating_group(
         &mut self,
         group_id: FloatingGroupId,
         target: DropTarget,

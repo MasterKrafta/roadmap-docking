@@ -1,7 +1,7 @@
 use super::*;
 
 impl Layout {
-pub(super) fn insert_group_edge(
+    pub(super) fn insert_group_edge(
         &mut self,
         new_group: NodeId,
         target_group: NodeId,
@@ -55,7 +55,7 @@ pub(super) fn insert_group_edge(
         }
     }
 
-pub(super) fn merge_group_into_tabs(
+    pub(super) fn merge_group_into_tabs(
         &mut self,
         group: NodeId,
         target_group: NodeId,

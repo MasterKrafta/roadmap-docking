@@ -3,7 +3,7 @@ use super::helpers::geometry_error_reason;
 use crate::AllowedArea;
 
 impl Layout {
-pub(super) fn apply_float_command(
+    pub(super) fn apply_float_command(
         &mut self,
         node: &NodeId,
         bounds: &Rect,

@@ -2,7 +2,7 @@ use super::*;
 use crate::AllowedArea;
 
 impl Layout {
-pub(super) fn apply_group_transfer_command(
+    pub(super) fn apply_group_transfer_command(
         &mut self,
         command: &DockCommand,
         metrics: &DockMetrics,
@@ -20,7 +20,7 @@ pub(super) fn apply_group_transfer_command(
         }
     }
 
-pub(super) fn apply_move_group_command(
+    pub(super) fn apply_move_group_command(
         &mut self,
         group: &NodeId,
         column: &NodeId,

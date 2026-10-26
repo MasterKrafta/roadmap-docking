@@ -1,7 +1,7 @@
 use super::*;
 
 impl Layout {
-pub(super) fn is_group_in_icon_rail(&self, group: NodeId) -> bool {
+    pub(super) fn is_group_in_icon_rail(&self, group: NodeId) -> bool {
         let Some(column_id) = self.find_owner_column(group) else {
             return false;
         };
@@ -9,7 +9,7 @@ pub(super) fn is_group_in_icon_rail(&self, group: NodeId) -> bool {
             && matches!(self.nodes.get(column_id), Some(Node::Column(column)) if column.mode.is_rail())
     }
 
-pub(super) fn rail_slot_group_index(
+    pub(super) fn rail_slot_group_index(
         &self,
         column_id: NodeId,
         index: usize,
@@ -48,7 +48,7 @@ pub(super) fn rail_slot_group_index(
             })
     }
 
-pub(super) fn insert_panel_for_rail_slot(
+    pub(super) fn insert_panel_for_rail_slot(
         &mut self,
         panel_node: NodeId,
         column_id: NodeId,

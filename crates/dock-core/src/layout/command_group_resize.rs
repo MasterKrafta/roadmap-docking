@@ -2,7 +2,7 @@ use super::*;
 use super::helpers::ratio_issues;
 
 impl Layout {
-pub(super) fn apply_group_resize_command(
+    pub(super) fn apply_group_resize_command(
         &mut self,
         command: &DockCommand,
         metrics: &DockMetrics,
@@ -37,7 +37,7 @@ pub(super) fn apply_group_resize_command(
         }
     }
 
-pub(super) fn apply_resize_groups_command(
+    pub(super) fn apply_resize_groups_command(
         &mut self,
         column: &NodeId,
         boundary_index: &usize,
@@ -183,7 +183,7 @@ pub(super) fn apply_resize_groups_command(
         })
     }
 
-pub(super) fn apply_reset_column_ratios_command(
+    pub(super) fn apply_reset_column_ratios_command(
         &mut self,
         column: &NodeId,
         available_height: &f32,

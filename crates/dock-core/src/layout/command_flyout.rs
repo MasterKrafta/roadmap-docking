@@ -1,7 +1,7 @@
 use super::*;
 
 impl Layout {
-pub(super) fn apply_flyout_command(
+    pub(super) fn apply_flyout_command(
         &mut self,
         command: &DockCommand,
     ) -> Result<CommandApplication, CommandError> {
@@ -118,7 +118,7 @@ pub(super) fn apply_flyout_command(
         }
     }
 
-fn validate_flyout_panel_owner(
+    fn validate_flyout_panel_owner(
         &self,
         panel: crate::PanelId,
         reason: &'static str,

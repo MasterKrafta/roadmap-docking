@@ -1,7 +1,7 @@
 use super::*;
 
 impl Layout {
-pub(super) fn apply_column_resize_command(
+    pub(super) fn apply_column_resize_command(
         &mut self,
         command: &DockCommand,
         metrics: &DockMetrics,
@@ -33,7 +33,7 @@ pub(super) fn apply_column_resize_command(
         }
     }
 
-pub(super) fn apply_resize_column_command(
+    pub(super) fn apply_resize_column_command(
         &mut self,
         column: &NodeId,
         width: &f32,
@@ -85,7 +85,7 @@ pub(super) fn apply_resize_column_command(
         })
     }
 
-pub(super) fn apply_resize_column_boundary_command(
+    pub(super) fn apply_resize_column_boundary_command(
         &mut self,
         side: &DockSide,
         boundary_index: &usize,
@@ -257,7 +257,7 @@ pub(super) fn apply_resize_column_boundary_command(
         })
     }
 
-pub(super) fn apply_reset_main_column_ratios_command(
+    pub(super) fn apply_reset_main_column_ratios_command(
         &mut self,
         side: &DockSide,
         metrics: &DockMetrics,

@@ -103,7 +103,7 @@ impl Layout {
     }
 }
 
-pub(super) fn allowed_area_rejection_reason(area: AllowedArea) -> &'static str {
+    pub(super) fn allowed_area_rejection_reason(area: AllowedArea) -> &'static str {
     if area == AllowedArea::MAIN_DOCK {
         "panel constraints disallow the main dock area"
     } else if area == AllowedArea::FLOATING {

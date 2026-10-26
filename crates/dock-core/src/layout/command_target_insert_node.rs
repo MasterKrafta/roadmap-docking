@@ -1,7 +1,7 @@
 use super::*;
 
 impl Layout {
-pub(super) fn insert_node_for_target(
+    pub(super) fn insert_node_for_target(
         &mut self,
         node: NodeId,
         target: DropTarget,
@@ -63,7 +63,7 @@ pub(super) fn insert_node_for_target(
         }
     }
 
-pub(super) fn group_node_for(&mut self, node: NodeId) -> Result<NodeId, CommandError> {
+    pub(super) fn group_node_for(&mut self, node: NodeId) -> Result<NodeId, CommandError> {
         match self.nodes.get(node).cloned() {
             Some(Node::Tabs(_)) => Ok(node),
             Some(Node::Panel(_)) => Ok(self.nodes.insert(Node::Tabs(crate::Tabs {
