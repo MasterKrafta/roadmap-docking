@@ -1275,6 +1275,7 @@ mod command_target_column_insert;
 mod commands;
 mod drag_drop;
 mod ratio_helpers;
+mod graph_validation_helpers;
 mod helpers;
 mod normalization;
 mod sizing;
