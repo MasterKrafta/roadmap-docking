@@ -1257,7 +1257,7 @@ mod command_group_transfer_dispatch;
 mod command_group_transfer_apply;
 mod command_group_transfer_operations;
 mod command_group_transfer_reorder;
-mod command_changes;
+mod command_changed_node_ids;
 mod command_persistent_state_eq;
 mod command_full_state_eq;
 mod command_group_insertion;
