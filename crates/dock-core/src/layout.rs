@@ -773,7 +773,6 @@ impl Layout {
         contains_panel(self, root, &mut HashSet::new())
     }
 
-    #[cfg(feature = "serde")]
     /// Captures a session-only history checkpoint without transient flyout UI.
     pub(crate) fn history_snapshot(&self) -> Self {
         let mut snapshot = self.clone();
