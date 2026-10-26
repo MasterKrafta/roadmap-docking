@@ -168,6 +168,7 @@ mod initialization;
 mod node_normalization;
 mod normalization_stages;
 mod normalization;
+mod workspace_column_width_repairs;
 mod workspace_normalization;
 mod workspace_photoshop_repairs;
 mod workspace_singleton_repairs;
