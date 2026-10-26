@@ -1206,6 +1206,7 @@ impl Layout {
 mod column_display_order;
 mod command_target_policy;
 mod command_target_area_column;
+mod command_target_area_group;
 mod command_target_validate_drop;
 mod command_floating_dock_operation;
 mod command_floating_dock_main_column;
