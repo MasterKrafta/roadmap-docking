@@ -96,7 +96,6 @@ mod command_panels;
 mod command_group_operations;
 mod group_edge_operations;
 mod command_group_transfer;
-mod group_main_column_transfer;
 mod command_state_comparison;
 mod command_target_rail_insert;
 mod command_target_validation;
