@@ -83,8 +83,6 @@ pub struct Layout {
     validation_cache: ValidationCache,
 }
 
-
-
 mod column_display_order;
 mod command_target_area_rejection_reason;
 mod command_target_area_column;
@@ -122,18 +120,13 @@ mod column_resize_helpers;
 mod command_column_effective_width;
 mod command_layout_state_dispatch;
 mod command_flyout_dispatch;
-mod command_panel_dispatch;
-mod command_panel_open_dispatch;
-mod command_panel_open_target;
-mod command_panel_close_dispatch;
-mod command_panel_tab_commands;
-mod command_panel_open_new;
-mod command_panel_reopen_singleton;
+mod command_panels;
+
 mod command_panel_transfer_dispatch;
 mod command_panel_move_dispatch;
 mod command_panel_transfer_inverse;
 mod command_panel_target_transfer;
-mod command_panel_tab_reorder;
+
 mod command_flyout_panel_transfer_dispatch;
 mod command_group_dispatch;
 mod command_group_transfer_dispatch;
