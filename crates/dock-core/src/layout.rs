@@ -124,8 +124,8 @@ mod group_sizing;
 mod minimum_size;
 mod main_column_width_reset;
 mod dock_location_memory;
-#[cfg(test)]
 mod tree_navigation;
+#[cfg(test)]
 mod tree;
 mod validation_nodes;
 mod validation_areas;

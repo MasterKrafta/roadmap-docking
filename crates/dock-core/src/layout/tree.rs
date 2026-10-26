@@ -1,8 +1,6 @@
-use super::*;
-
 #[cfg(test)]
 mod input_validation_tests {
-    use super::*;
+    use super::super::*;
     use crate::{Column, ColumnMode, Tabs};
 
     #[test]
