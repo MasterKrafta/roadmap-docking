@@ -9,7 +9,7 @@ pub(super) struct GroupMainColumnSource {
 }
 
 impl Layout {
-pub(super) fn apply_group_transfer_command(
+    pub(super) fn apply_group_transfer_command(
         &mut self,
         command: &DockCommand,
         metrics: &DockMetrics,
@@ -144,7 +144,7 @@ pub(super) fn apply_group_transfer_command(
         })
     }
 
-pub(super) fn move_group_to_existing_column(
+    pub(super) fn move_group_to_existing_column(
         &mut self,
         group: NodeId,
         column: NodeId,
@@ -235,7 +235,7 @@ pub(super) fn move_group_to_existing_column(
         }
     }
 
-pub(super) fn try_reorder_group_within_column(
+    pub(super) fn try_reorder_group_within_column(
         &mut self,
         group: NodeId,
         column: NodeId,
