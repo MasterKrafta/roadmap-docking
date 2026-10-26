@@ -164,6 +164,7 @@ mod history;
 mod initialization;
 mod normalization;
 mod workspace_normalization;
+mod workspace_repairs;
 mod column_width_constraints;
 mod group_sizing;
 mod minimum_layout_size;
