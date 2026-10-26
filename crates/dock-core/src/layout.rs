@@ -1237,6 +1237,7 @@ mod command_column_resize_reset;
 mod command_column_resize_boundaries;
 mod command_column_resize_single;
 mod command_column_resize_helpers;
+mod command_column_effective_width;
 mod command_layout_state_dispatch;
 mod command_flyout_dispatch;
 mod command_panel_dispatch;
