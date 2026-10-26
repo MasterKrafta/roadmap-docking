@@ -14,7 +14,7 @@ impl Layout {
                 return Err(CommandError::InvalidTarget {
                     reason: "group height reset requires a Column node",
                 });
-                }
+            }
             None => return Err(CommandError::MissingNode { node: column_id }),
         };
         let mut heights = vec![0.0; column.groups.len()];
@@ -27,11 +27,11 @@ impl Layout {
                 fixed_height += minimum_height;
             } else {
                 expanded_indices.push(index);
-                }
             }
+        }
         if expanded_indices.is_empty() {
             return Ok(heights);
-            }
+        }
         let free_height = available_height - fixed_height;
         let all_minimums = self.group_minimum_heights(column_id, metrics)?;
         let minimums: Vec<f32> = expanded_indices
@@ -43,9 +43,9 @@ impl Layout {
             distribute_heights_with_minimums(free_height, &minimums, &equal_weights)?;
         for (index, height) in expanded_indices.into_iter().zip(expanded_heights) {
             heights[index] = height;
-            }
-        Ok(heights)
         }
+        Ok(heights)
+    }
     
     pub(super) fn group_ratios_from_heights(
         &self,
@@ -58,7 +58,7 @@ impl Layout {
                 return Err(CommandError::InvalidTarget {
                     reason: "group ratio calculation requires a Column node",
                 });
-                }
+            }
             None => return Err(CommandError::MissingNode { node: column_id }),
         };
         if heights.len() != column.groups.len() {
@@ -66,7 +66,7 @@ impl Layout {
                 field: "heights",
                 reason: "group height count must match group count",
             });
-            }
+        }
         let expanded_height: f32 = column
             .groups
             .iter()
@@ -76,7 +76,7 @@ impl Layout {
             .sum();
         if expanded_height <= 0.0 {
             return Ok(column.group_ratios.clone());
-            }
+        }
     
         // Reset the visible groups without discarding the saved weight of a
         // collapsed group. Once expanded again, it should recover its share
@@ -95,8 +95,8 @@ impl Layout {
                 ratios[index] = column.group_ratios[index];
             } else {
                 ratios[index] = heights[index] / expanded_height * remaining_weight;
-                }
             }
-        Ok(normalized_ratios(ratios.into_iter().map(Some).collect()))
         }
+        Ok(normalized_ratios(ratios.into_iter().map(Some).collect()))
+    }
 }
