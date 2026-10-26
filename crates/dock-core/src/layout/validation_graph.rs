@@ -57,7 +57,7 @@ impl Layout {
         // separate passes: cycles and missing links in an orphaned component
         // must still be reported instead of hidden by an early return.
         let mut incoming: HashMap<NodeId, usize> = HashMap::new();
-        for root in &roots {
+        for root in roots {
             *incoming.entry(*root).or_default() += 1;
         }
         let mut graph_visited = HashSet::new();
@@ -70,7 +70,7 @@ impl Layout {
                 &mut graph_visited,
                 &mut visiting,
                 &mut incoming,
-                &mut errors,
+                    errors,
             );
         }
 
@@ -86,7 +86,7 @@ impl Layout {
         }
 
         let mut reachable = HashSet::new();
-        for root in &roots {
+        for root in roots {
             mark_reachable(&self.nodes, *root, &mut reachable);
         }
         for (node_id, _) in self.nodes.iter() {
