@@ -94,7 +94,6 @@ mod command_floating_move;
 mod command_floating_resize;
 mod command_floating_resize_bounds;
 mod command_floating_dispatch;
-mod command_floating_window_dispatch;
 mod command_floating_dock_dispatch;
 mod command_floating_root_dispatch;
 mod command_floating_group_column;
