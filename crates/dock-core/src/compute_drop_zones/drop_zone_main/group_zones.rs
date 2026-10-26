@@ -3,17 +3,21 @@ use super::*;
 impl Layout {
     pub(in crate::compute_drop_zones) fn append_main_group_zones(
         &self,
-        source: DropSource,
-        source_root: NodeId,
-        source_panels: &[PanelId],
-        tree_index: &DropZoneTreeIndex,
-        rects: &LayoutRects,
-        metrics: &DockMetrics,
-        left_columns: &[(NodeId, Rect)],
-        right_columns: &[(NodeId, Rect)],
-        may_add_column: bool,
+        context: &DropZoneBuildContext<'_>,
         zones: &mut Vec<DropZoneRect>,
     ) -> Result<(), ComputeRectsError> {
+        let DropZoneBuildContext {
+            source,
+            source_root,
+            source_panels,
+            tree_index,
+            rects,
+            metrics,
+            left_columns,
+            right_columns,
+            may_add_column,
+            ..
+        } = *context;
         // Main-dock groups: center/tab insertion, vertical group splitting,
         // and profile-correct horizontal/column splitting.
         for group_rect in &rects.groups {

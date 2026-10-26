@@ -34,6 +34,20 @@ use crate::{
     Rect, Size,
 };
 
+#[derive(Clone, Copy)]
+struct DropZoneBuildContext<'a> {
+    source: DropSource,
+    source_root: NodeId,
+    source_panels: &'a [PanelId],
+    tree_index: &'a DropZoneTreeIndex,
+    rects: &'a LayoutRects,
+    metrics: &'a DockMetrics,
+    viewport: Rect,
+    left_columns: &'a [(NodeId, Rect)],
+    right_columns: &'a [(NodeId, Rect)],
+    may_add_column: bool,
+}
+
 impl Layout {
     /// Builds source-aware drop affordances from an already computed geometry snapshot.
     ///
@@ -138,66 +152,24 @@ impl Layout {
         );
         let mut zones = Vec::new();
 
-        self.append_main_group_zones(
+        let context = DropZoneBuildContext {
             source,
             source_root,
-            &source_panels,
-            tree_index,
-            rects,
-            metrics,
-            &left_columns,
-            &right_columns,
-            may_add_column,
-            &mut zones,
-        )?;
-        self.append_tab_insertion_zones(
-            source,
-            source_root,
-            &source_panels,
-            tree_index,
-            rects,
-            &mut zones,
-        )?;
-        self.append_main_column_zones(
-            source,
-            &source_panels,
-            tree_index,
-            metrics,
-            &left_columns,
-            &right_columns,
-            may_add_column,
-            &mut zones,
-        )?;
-        self.append_rail_insertion_zones(
-            &source_panels,
-            tree_index,
-            rects,
-            &left_columns,
-            &right_columns,
-            &mut zones,
-        )?;
-        self.append_floating_window_zones(
-            source,
-            source_root,
-            &source_panels,
-            tree_index,
-            rects,
-            metrics,
-            &mut zones,
-        )?;
-        self.append_canvas_edge_zones(
-            source,
-            source_root,
-            &source_panels,
+            source_panels: &source_panels,
             tree_index,
             rects,
             metrics,
             viewport,
-            &left_columns,
-            &right_columns,
+            left_columns: &left_columns,
+            right_columns: &right_columns,
             may_add_column,
-            &mut zones,
-        )?;
+        };
+        self.append_main_group_zones(&context, &mut zones)?;
+        self.append_tab_insertion_zones(&context, &mut zones)?;
+        self.append_main_column_zones(&context, &mut zones)?;
+        self.append_rail_insertion_zones(&context, &mut zones)?;
+        self.append_floating_window_zones(&context, &mut zones)?;
+        self.append_canvas_edge_zones(&context, &mut zones)?;
         Ok(zones)
     }
 

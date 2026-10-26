@@ -3,19 +3,23 @@ use super::*;
 impl Layout {
     pub(in crate::compute_drop_zones) fn append_main_column_zones(
         &self,
-        source: DropSource,
-        source_panels: &[PanelId],
-        tree_index: &DropZoneTreeIndex,
-        metrics: &DockMetrics,
-        left_columns: &[(NodeId, Rect)],
-        right_columns: &[(NodeId, Rect)],
-        may_add_column: bool,
+        context: &DropZoneBuildContext<'_>,
         zones: &mut Vec<DropZoneRect>,
     ) -> Result<(), ComputeRectsError> {
+        let DropZoneBuildContext {
+            source,
+            source_panels,
+            tree_index,
+            metrics,
+            left_columns,
+            right_columns,
+            may_add_column,
+            ..
+        } = *context;
         // Main-column side targets and append-to-column targets.
         for (side, columns) in [
-            (DockSide::Left, &left_columns),
-            (DockSide::Right, &right_columns),
+            (DockSide::Left, left_columns),
+            (DockSide::Right, right_columns),
         ] {
             for (index, (column_id, column_rect)) in columns.iter().enumerate() {
                 let Some(Node::Column(column)) = self.node(*column_id) else {

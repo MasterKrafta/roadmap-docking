@@ -22,22 +22,17 @@ struct FloatingZoneContext<'a> {
 impl Layout {
     pub(in crate::compute_drop_zones) fn append_floating_window_zones(
         &self,
-        source: DropSource,
-        source_root: NodeId,
-        source_panels: &[PanelId],
-        tree_index: &DropZoneTreeIndex,
-        rects: &LayoutRects,
-        metrics: &DockMetrics,
+        context: &DropZoneBuildContext<'_>,
         zones: &mut Vec<DropZoneRect>,
     ) -> Result<(), ComputeRectsError> {
         FloatingZoneContext {
             layout: self,
-            source,
-            source_root,
-            source_panels,
-            tree_index,
-            rects,
-            metrics,
+            source: context.source,
+            source_root: context.source_root,
+            source_panels: context.source_panels,
+            tree_index: context.tree_index,
+            rects: context.rects,
+            metrics: context.metrics,
             zones,
         }
         .append_all()

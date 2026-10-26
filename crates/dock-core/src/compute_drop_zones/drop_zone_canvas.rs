@@ -3,25 +3,28 @@ use super::*;
 impl Layout {
     pub(super) fn append_canvas_edge_zones(
         &self,
-        source: DropSource,
-        source_root: NodeId,
-        source_panels: &[PanelId],
-        tree_index: &DropZoneTreeIndex,
-        rects: &LayoutRects,
-        metrics: &DockMetrics,
-        viewport: Rect,
-        left_columns: &[(NodeId, Rect)],
-        right_columns: &[(NodeId, Rect)],
-        may_add_column: bool,
+        context: &DropZoneBuildContext<'_>,
         zones: &mut Vec<DropZoneRect>,
     ) -> Result<(), ComputeRectsError> {
+        let DropZoneBuildContext {
+            source,
+            source_root,
+            source_panels,
+            tree_index,
+            rects,
+            metrics,
+            viewport,
+            left_columns,
+            right_columns,
+            may_add_column,
+        } = *context;
         // The two outside viewport edges open/extend a dock. A whole group uses
         // its edge operation when a neighbouring column exists; panels use an exact slot.
         if source_allows(self, source_panels, AllowedArea::MAIN_DOCK) && may_add_column {
             let edge_width = metrics.edge_drop_width.min(viewport.size.width / 3.0);
             for (side, columns, zone, is_left) in [
-                (DockSide::Left, &left_columns, DropZone::DockEdge, true),
-                (DockSide::Right, &right_columns, DropZone::DockEdge, false),
+                (DockSide::Left, left_columns, DropZone::DockEdge, true),
+                (DockSide::Right, right_columns, DropZone::DockEdge, false),
             ] {
                 let rect = if is_left {
                     Rect::new(viewport.origin, Size::new(edge_width, viewport.size.height))

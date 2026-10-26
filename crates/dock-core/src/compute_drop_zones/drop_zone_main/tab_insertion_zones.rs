@@ -3,13 +3,17 @@ use super::*;
 impl Layout {
     pub(in crate::compute_drop_zones) fn append_tab_insertion_zones(
         &self,
-        source: DropSource,
-        source_root_id: NodeId,
-        source_panels: &[PanelId],
-        tree_index: &DropZoneTreeIndex,
-        rects: &LayoutRects,
+        context: &DropZoneBuildContext<'_>,
         zones: &mut Vec<DropZoneRect>,
     ) -> Result<(), ComputeRectsError> {
+        let DropZoneBuildContext {
+            source,
+            source_root: source_root_id,
+            source_panels,
+            tree_index,
+            rects,
+            ..
+        } = *context;
         // Tab strips are independent insertion/reorder affordances. Each header
         // is split into two half-open halves mapping to the exact slots before/after it.
         for header in &rects.tab_headers {

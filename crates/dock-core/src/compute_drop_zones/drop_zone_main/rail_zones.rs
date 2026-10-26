@@ -3,13 +3,17 @@ use super::*;
 impl Layout {
     pub(in crate::compute_drop_zones) fn append_rail_insertion_zones(
         &self,
-        source_panels: &[PanelId],
-        tree_index: &DropZoneTreeIndex,
-        rects: &LayoutRects,
-        left_columns: &[(NodeId, Rect)],
-        right_columns: &[(NodeId, Rect)],
+        context: &DropZoneBuildContext<'_>,
         zones: &mut Vec<DropZoneRect>,
     ) -> Result<(), ComputeRectsError> {
+        let DropZoneBuildContext {
+            source_panels,
+            tree_index,
+            rects,
+            left_columns,
+            right_columns,
+            ..
+        } = *context;
         // Exact insertion points in icon rails follow each rail's flattened group order.
         for column_rect in &rects.columns {
             let column_id = column_rect.column;
