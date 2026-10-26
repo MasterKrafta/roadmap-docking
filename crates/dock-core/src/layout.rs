@@ -94,7 +94,6 @@ mod command_floating_geometry;
 mod command_floating_commands;
 mod command_column_resize;
 mod column_resize_helpers;
-mod command_column_effective_width;
 mod command_layout_state_dispatch;
 mod command_flyout;
 mod command_panels;
