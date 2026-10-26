@@ -53,7 +53,7 @@ impl Layout {
         }
 
         // Repair finite Expanded widths against the content's complete min/max
-        // contract before the normalized self is validated or exposed.
+        // contract before the normalized layout is validated or exposed.
         let column_ids = self
             .nodes
             .iter()
