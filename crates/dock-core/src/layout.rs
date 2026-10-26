@@ -102,8 +102,7 @@ mod command_panel_transfer;
 
 mod command_group_commands;
 mod command_group_transfer;
-mod command_changed_node_ids;
-mod command_state_eq;
+mod command_state_comparison;
 mod command_group_edge;
 mod command_target_rail_insert;
 mod commands;
