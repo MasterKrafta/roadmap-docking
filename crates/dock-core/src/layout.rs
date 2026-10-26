@@ -93,8 +93,7 @@ mod command_layout_state_dispatch;
 mod command_flyout;
 mod command_panels;
 
-mod command_group_operations;
-mod group_edge_operations;
+mod group_operations;
 mod command_group_transfer;
 mod command_target_validation;
 mod command_target_operations;
