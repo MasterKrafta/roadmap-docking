@@ -1204,7 +1204,6 @@ impl Layout {
 }
 
 mod column_display_order;
-mod command_target_policy;
 mod command_target_area_rejection_reason;
 mod command_target_area_column;
 mod command_target_area_group;
