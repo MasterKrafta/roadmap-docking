@@ -178,6 +178,8 @@ mod minimum_layout_size;
 mod main_column_width_reset;
 mod tree_mutations;
 mod tree_navigation;
+mod dock_location_memory;
+mod tree_drop_noop;
 #[cfg(test)]
 mod tree;
 mod validation_nodes;
