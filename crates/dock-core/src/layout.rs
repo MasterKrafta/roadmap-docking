@@ -1280,6 +1280,7 @@ mod helpers;
 mod normalization;
 mod column_width_constraints;
 mod group_sizing;
+mod minimum_layout_size;
 mod sizing;
 mod tree;
 mod validation;
