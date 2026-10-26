@@ -70,7 +70,7 @@ impl Layout {
                 &mut graph_visited,
                 &mut visiting,
                 &mut incoming,
-                    errors,
+                errors,
             );
         }
 
