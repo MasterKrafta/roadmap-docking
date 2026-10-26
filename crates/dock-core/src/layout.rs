@@ -83,7 +83,6 @@ pub struct Layout {
     validation_cache: ValidationCache,
 }
 
-mod column_display_order;
 mod column_resize;
 mod column_width_management;
 mod floating_docking;
