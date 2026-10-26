@@ -6,9 +6,9 @@ use super::WorkspaceFile;
 use super::schema::{migrate_v1_to_v2, validate_workspace_tree_limits};
 use crate::{
     Column, ComputeRectsError, DockArea, DockAreaId, DockMetrics, DockSide, FloatingGroup,
-    FloatingGroupId, Layout, Node, NodeId, Panel, PanelConstraints, PanelId, PanelInstance, PanelKey,
-    Size, Split, Tabs, WorkspaceDiagnostic, WorkspaceFileError, WorkspaceLayout, WorkspaceLoadOptions,
-    WorkspaceLoadResult, WorkspaceNode, layout::WorkspaceLayoutParts,
+    FloatingGroupId, Layout, Node, NodeId, Panel, PanelConstraints, PanelId, PanelInstance,
+    PanelKey, Size, Split, Tabs, WorkspaceDiagnostic, WorkspaceFileError, WorkspaceLayout,
+    WorkspaceLoadOptions, WorkspaceLoadResult, WorkspaceNode, layout::WorkspaceLayoutParts,
 };
 
 impl WorkspaceFile {
@@ -50,7 +50,12 @@ impl WorkspaceFile {
         // Preserve the typed floating-bounds error and the pre-normalization
         // z-order index even though tree normalization now runs before clamping.
         if visible_region.is_some() {
-            let mut ordered_floating = self.layout.floating_groups.iter().enumerate().collect::<Vec<_>>();
+            let mut ordered_floating = self
+                .layout
+                .floating_groups
+                .iter()
+                .enumerate()
+                .collect::<Vec<_>>();
             ordered_floating.sort_by_key(|(_, group)| group.z_order);
             for (index, group) in ordered_floating.into_iter() {
                 group
@@ -152,7 +157,11 @@ impl WorkspaceFile {
 
         if let Some(region) = visible_region {
             let changes = layout
-                .clamp_floating_groups_for_workspace_load(region, metrics, &floating_group_json_indices)
+                .clamp_floating_groups_for_workspace_load(
+                    region,
+                    metrics,
+                    &floating_group_json_indices,
+                )
                 .map_err(|(index, error)| match error {
                     ComputeRectsError::InsufficientSpace {
                         axis,

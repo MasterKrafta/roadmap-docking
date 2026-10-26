@@ -5,7 +5,7 @@ use super::{
 use crate::{WorkspaceFileError, WorkspaceLayout, WorkspaceNode};
 
 impl WorkspaceFile {
-    fn validate_header(&self) -> Result<(), WorkspaceFileError> {
+    pub(super) fn validate_header(&self) -> Result<(), WorkspaceFileError> {
         if self.format != WORKSPACE_FORMAT {
             return Err(WorkspaceFileError::UnsupportedFormat {
                 found: self.format.clone(),

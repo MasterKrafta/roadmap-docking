@@ -175,7 +175,6 @@ impl WorkspaceFile {
         let (file, diagnostics) = Self::from_json_with_diagnostics(json)?;
         file.into_layout_with_diagnostics(descriptors, metrics, options, diagnostics)
     }
-
 }
 
 impl Layout {
