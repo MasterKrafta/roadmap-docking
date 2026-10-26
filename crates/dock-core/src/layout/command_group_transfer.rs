@@ -1,7 +1,5 @@
 use super::*;
 
-
-
 impl Layout {
     pub(super) fn apply_group_transfer_command(
         &mut self,
@@ -156,5 +154,4 @@ impl Layout {
             persistent: true,
         }))
     }
-
 }
