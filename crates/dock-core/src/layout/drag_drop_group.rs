@@ -1,5 +1,5 @@
 use super::*;
-use crate::{DragDropAction, DragDropRequest, NodeId};
+use crate::{AllowedArea, DragDropAction, DragDropRequest, NodeId};
 
 impl Layout {
     pub(super) fn resolve_group_grip_drag(
