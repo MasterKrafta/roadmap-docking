@@ -23,6 +23,114 @@ impl Layout {
     }
 
     #[cfg(feature = "serde")]
+    pub(crate) fn from_workspace_parts(parts: WorkspaceLayoutParts) -> Self {
+        let WorkspaceLayoutParts {
+            nodes,
+            panel_instances,
+            dock_areas,
+            main_areas,
+            floating_groups,
+            canvas,
+            profile,
+            chrome,
+        } = parts;
+
+        Self {
+            nodes,
+            panel_instances,
+            dock_areas,
+            main_areas,
+            floating_groups,
+            last_dock_locations: HashMap::new(),
+            last_dock_location_order: VecDeque::new(),
+            canvas,
+            profile,
+            version: 0,
+            chrome,
+            flyout: None,
+            flyout_auto_collapse: true,
+            history_identity: Arc::new(()),
+            flyout_widths: HashMap::new(),
+            flyout_width_order: VecDeque::new(),
+            validation_cache: ValidationCache::default(),
+        }
+    }
+
+    #[cfg(feature = "serde")]
+    pub(crate) fn clamp_floating_groups_for_workspace_load(
+        &mut self,
+        client_area: Rect,
+        metrics: &DockMetrics,
+        original_indices: &HashMap<FloatingGroupId, usize>,
+    ) -> FloatingBoundsClampResult {
+        let mut groups: Vec<_> = self
+            .floating_groups
+            .iter()
+            .enumerate()
+            .map(|(fallback_index, (id, group))| {
+                (
+                    original_indices.get(&id).copied().unwrap_or(fallback_index),
+                    id,
+                    group.z_order,
+                )
+            })
+            .collect();
+        groups.sort_by_key(|(original_index, _, z_order)| (*z_order, *original_index));
+
+        let mut changes = Vec::new();
+        for (index, id, _) in groups {
+            let Some(group) = self.floating_groups.get(id).copied() else {
+                return Err((index, crate::ComputeRectsError::InvalidLayoutState));
+            };
+            let Some(root) = self.dock_areas.get(group.area).map(|area| area.root) else {
+                return Err((index, crate::ComputeRectsError::InvalidLayoutState));
+            };
+            let original = group.bounds;
+            let clamped = crate::compute_rects::clamp_floating_bounds(
+                self,
+                root,
+                original,
+                client_area,
+                metrics,
+            )
+            .map_err(|error| (index, error))?;
+
+            if clamped != original {
+                let Some(group) = self.floating_groups.get_mut(id) else {
+                    return Err((index, crate::ComputeRectsError::InvalidLayoutState));
+                };
+                group.bounds = clamped;
+                changes.push((index, original, clamped));
+            }
+        }
+        Ok(changes)
+    }
+
+    #[cfg(feature = "serde")]
+    fn subtree_contains_panel(&self, root: NodeId) -> bool {
+        fn contains_panel(
+            layout: &Layout,
+            node_id: NodeId,
+            visited: &mut HashSet<NodeId>,
+        ) -> bool {
+            if !visited.insert(node_id) {
+                return false;
+            }
+            let Some(node) = layout.nodes.get(node_id) else {
+                return false;
+            };
+            matches!(node, Node::Panel(_))
+                || node
+                    .children()
+                    .iter()
+                    .copied()
+                    .any(|child| contains_panel(layout, child, visited))
+        }
+
+        contains_panel(self, root, &mut HashSet::new())
+    }
+
+    #[cfg(feature = "serde")]
     fn repair_duplicate_singleton_panels(&mut self) -> Vec<String> {
         let mut first_by_key = HashMap::<PanelKey, (PanelId, bool)>::new();
         let mut notes = Vec::new();
@@ -414,7 +522,6 @@ impl Layout {
         notes
     }
 
-
     #[cfg(feature = "serde")]
     pub(crate) fn normalize_for_workspace_load(
         &mut self,
@@ -579,7 +686,6 @@ impl Layout {
         *self = candidate;
         Ok(Some(diagnostic_issues))
     }
-
 
     pub(super) fn normalize_in_place(
         &mut self,
