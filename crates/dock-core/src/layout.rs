@@ -173,6 +173,7 @@ mod column_width_constraints;
 mod group_height_distribution;
 mod group_sizing;
 mod group_sizing_reset;
+mod floating_minimum_size;
 mod minimum_layout_size;
 mod main_column_width_reset;
 mod tree_mutations;
