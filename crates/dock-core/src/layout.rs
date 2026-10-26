@@ -88,7 +88,6 @@ mod column_width_management;
 mod floating_docking;
 mod floating_operations;
 mod floating_window;
-mod command_layout_state_dispatch;
 mod command_flyout;
 mod command_panels;
 
