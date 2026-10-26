@@ -6,7 +6,7 @@ use super::*;
 
 impl Layout {
 
-/// Test-only wrapper for the C3 normalization contract. Production mutations
+    /// Test-only wrapper for the C3 normalization contract. Production mutations
     /// call normalize_in_place on a private candidate inside Layout::apply.
     #[cfg(test)]
     pub(super) fn normalize(&mut self, metrics: &DockMetrics) -> Result<(), Vec<ValidationError>> {
@@ -48,7 +48,7 @@ impl Layout {
         self.validate(metrics)
     }
 
-pub(super) fn normalize_main_areas(&mut self) -> Result<(), Vec<ValidationError>> {
+    pub(super) fn normalize_main_areas(&mut self) -> Result<(), Vec<ValidationError>> {
         // Main roots are normalized first. An empty main root removes its
         // DockArea and clears the corresponding side; it never leaves an empty
         // invisible area in the arena.
@@ -148,7 +148,7 @@ pub(super) fn normalize_main_areas(&mut self) -> Result<(), Vec<ValidationError>
         }
     }
 
-/// Returns the normalized representative of a node, or None when the
+    /// Returns the normalized representative of a node, or None when the
     /// entire subtree is empty. Preflight validation guarantees that every
     /// referenced node exists and that the graph is acyclic and single-parent.
     pub(super) fn normalize_node(&mut self, node_id: NodeId) -> Option<NodeId> {
