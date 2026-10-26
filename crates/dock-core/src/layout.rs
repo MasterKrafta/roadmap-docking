@@ -104,13 +104,12 @@ mod command_panels;
 mod command_panel_transfer;
 
 mod command_group_dispatch;
+mod command_group_mutations;
 mod command_group_transfer;
 mod command_group_transfer_operations;
 mod command_group_transfer_reorder;
 mod command_changed_node_ids;
 mod command_state_eq;
-mod command_group_insertion;
-mod command_group_merge_tabs;
 mod command_group_edge;
 mod command_target_rail_panel_insert;
 mod command_target_insert_node;
