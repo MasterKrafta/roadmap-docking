@@ -66,7 +66,7 @@ impl Layout {
                     && area.side == Some(side)
                 {
                     photoshop_main_columns +=
-                        validate_photoshop_main_root(&self.nodes, area_id, area.root, &mut errors);
+                        validate_photoshop_main_root(&self.nodes, area_id, area.root, errors);
                 }
             } else {
                 errors.push(ValidationError::MissingNode {
@@ -125,7 +125,7 @@ impl Layout {
             if self.nodes.contains_key(area.root) {
                 roots.push(area.root);
                 if self.profile == Profile::Photoshop {
-                    validate_photoshop_floating_root(&self.nodes, group_id, area.root, &mut errors);
+                    validate_photoshop_floating_root(&self.nodes, group_id, area.root, errors);
                 }
             } else {
                 errors.push(ValidationError::MissingNode {
