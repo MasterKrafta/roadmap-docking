@@ -36,7 +36,6 @@ use crate::{
     TabHeaderRect, TabOverflowRect, TabStripRect, Tabs,
 };
 
-
 #[cfg(test)]
 mod visit_probe {
     use std::{
@@ -259,7 +258,6 @@ impl Layout {
         Ok(output)
     }
 }
-
 
 #[cfg(test)]
 #[path = "compute_rects/tests.rs"]
