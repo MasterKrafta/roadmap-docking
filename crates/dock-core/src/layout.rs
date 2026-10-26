@@ -104,8 +104,6 @@ mod accessors;
 mod helpers;
 mod history;
 mod initialization;
-mod node_normalization;
-mod normalization_stages;
 mod normalization;
 mod workspace_column_width_repairs;
 mod workspace_floating_bounds;
