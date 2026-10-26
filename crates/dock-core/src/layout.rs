@@ -84,8 +84,6 @@ pub struct Layout {
 }
 
 mod column_display_order;
-mod command_target_validation;
-mod command_target_insertion;
 mod column_resize;
 mod floating_operations;
 mod command_layout_state_dispatch;
@@ -96,6 +94,7 @@ mod command_group_operations;
 mod command_group_transfer;
 mod command_state_comparison;
 mod command_target_rail_insert;
+mod command_target_operations;
 mod drop_resolution;
 mod commands;
 mod ratio_helpers;
