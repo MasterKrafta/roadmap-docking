@@ -16,7 +16,7 @@ impl Layout {
             let Some(area) = target_area(self, tree_index, header.group) else {
                 continue;
             };
-            if area == AllowedArea::ICON_RAIL || !source_allows(self, &source_panels, area) {
+            if area == AllowedArea::ICON_RAIL || !source_allows(self, source_panels, area) {
                 continue;
             }
             if matches!(source, DropSource::Group { .. })

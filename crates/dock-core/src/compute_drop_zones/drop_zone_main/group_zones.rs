@@ -45,7 +45,7 @@ impl Layout {
             };
             if !source_contains_target
                 && !source_panel_is_here
-                && source_allows(self, &source_panels, area)
+                && source_allows(self, source_panels, area)
             {
                 let center_rect = group_center_rect(group_rect.rect, metrics)?;
                 let target = match source {
@@ -64,7 +64,7 @@ impl Layout {
             if source_contains_target
                 || (matches!(source, DropSource::Group { .. })
                     && contains_node(tree_index, group_rect.group, source_root))
-                || !source_allows(self, &source_panels, area)
+                || !source_allows(self, source_panels, area)
             {
                 continue;
             }
@@ -92,7 +92,7 @@ impl Layout {
             let right_edge =
                 group_edge_rect(group_rect.rect, DropZone::Right, metrics.edge_drop_width)?;
             if let Some((side, column_index, _column_rect)) =
-                group_main_column(self, tree_index, group_rect.group, &left_columns, &right_columns)
+                group_main_column(self, tree_index, group_rect.group, left_columns, right_columns)
             {
                 if may_add_column {
                     let left_target = match source {

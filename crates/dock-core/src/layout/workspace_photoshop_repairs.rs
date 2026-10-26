@@ -32,7 +32,7 @@ impl Layout {
         }
 
         let mut columns_by_side = [Vec::<NodeId>::new(), Vec::<NodeId>::new()];
-        for side_index in 0..2 {
+        for (side_index, columns_for_side) in columns_by_side.iter_mut().enumerate() {
             let Some(area_id) = self.main_areas[side_index] else {
                 continue;
             };
@@ -56,7 +56,7 @@ impl Layout {
 
             // Completely empty columns will be removed by normal normalization.
             // Do not spend the available column budget on data that has no panel.
-            columns_by_side[side_index] = columns
+            *columns_for_side = columns
                 .into_iter()
                 .filter(|column| self.subtree_contains_panel(*column))
                 .collect();

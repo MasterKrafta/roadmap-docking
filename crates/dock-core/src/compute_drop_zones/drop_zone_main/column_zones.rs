@@ -24,7 +24,7 @@ impl Layout {
                 if column.mode.is_rail() {
                     continue;
                 }
-                if !source_allows(self, &source_panels, AllowedArea::MAIN_DOCK) {
+                if !source_allows(self, source_panels, AllowedArea::MAIN_DOCK) {
                     continue;
                 }
                 let bottom = column_rect

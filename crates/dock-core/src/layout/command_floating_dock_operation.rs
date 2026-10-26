@@ -23,12 +23,12 @@ impl Layout {
         if target.referenced_node_id().is_some_and(|node| self.is_descendant_or_same(root, node)) {
             return Ok(());
         }
-        if let DropTarget::Tabs { .. } | DropTarget::GroupTabs { .. } = target {
-            if matches!(self.nodes.get(root), Some(Node::Split(split)) if split.axis == Axis::Y) {
-                return Err(CommandError::InvalidTarget {
-                    reason: "a floating stack cannot be merged into a tab strip; target a dock column or rail slot",
-                });
-            }
+        if let DropTarget::Tabs { .. } | DropTarget::GroupTabs { .. } = target
+            && matches!(self.nodes.get(root), Some(Node::Split(split)) if split.axis == Axis::Y)
+        {
+            return Err(CommandError::InvalidTarget {
+                reason: "a floating stack cannot be merged into a tab strip; target a dock column or rail slot",
+            });
         }
         match (self.nodes.get(root).cloned(), target) {
             (Some(Node::Split(split)), DropTarget::MainColumn { side, index })

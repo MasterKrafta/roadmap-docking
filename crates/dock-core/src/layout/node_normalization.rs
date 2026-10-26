@@ -30,9 +30,7 @@ impl Layout {
                     .position(|(old_index, _)| *old_index == old_active_index)
                     .unwrap_or_else(|| old_active_index.min(kept.len() - 1));
                 tabs.children = kept.into_iter().map(|(_, child)| child).collect();
-                let Some(node) = self.nodes.get_mut(node_id) else {
-                    return None;
-                };
+                let node = self.nodes.get_mut(node_id)?;
                 *node = Node::Tabs(tabs);
                 Some(node_id)
             }
@@ -61,9 +59,7 @@ impl Layout {
                         split.children = kept.iter().map(|(child, _)| *child).collect();
                         split.ratios =
                             normalized_ratios(kept.iter().map(|(_, ratio)| *ratio).collect());
-                        let Some(node) = self.nodes.get_mut(node_id) else {
-                            return None;
-                        };
+                        let node = self.nodes.get_mut(node_id)?;
                         *node = Node::Split(split);
                         Some(node_id)
                     }
@@ -89,9 +85,7 @@ impl Layout {
                 column.groups = kept.iter().map(|(group, _)| *group).collect();
                 column.group_ratios =
                     normalized_ratios(kept.iter().map(|(_, ratio)| *ratio).collect());
-                let Some(node) = self.nodes.get_mut(node_id) else {
-                    return None;
-                };
+                let node = self.nodes.get_mut(node_id)?;
                 *node = Node::Column(column);
                 Some(node_id)
             }

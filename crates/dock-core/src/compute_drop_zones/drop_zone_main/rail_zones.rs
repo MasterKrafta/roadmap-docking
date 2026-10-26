@@ -21,7 +21,7 @@ impl Layout {
             if !column.mode.is_rail() || !is_main_column {
                 continue;
             }
-            if !source_allows(self, &source_panels, AllowedArea::ICON_RAIL) {
+            if !source_allows(self, source_panels, AllowedArea::ICON_RAIL) {
                 continue;
             }
             let mut icons: Vec<_> = rects
