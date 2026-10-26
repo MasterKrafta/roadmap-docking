@@ -1,4 +1,5 @@
 use super::*;
+use crate::VerticalOverflow;
 
 pub(super) struct StackAllocation {
     pub(super) sizes: Vec<f32>,
