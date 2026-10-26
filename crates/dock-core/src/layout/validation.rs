@@ -26,114 +26,13 @@ impl Layout {
 
         let roots = self.validate_dock_areas(metrics, metrics_are_valid, &mut errors);
 
-        if let Some(flyout) = self.flyout {
-            match self.nodes.get(flyout.column) {
-                None => errors.push(ValidationError::InvalidFlyout {
-                    column: flyout.column,
-                    group: flyout.group,
-                    reason: "references a missing column node",
-                }),
-                Some(Node::Column(column)) => {
-                    if !column.mode.is_rail() {
-                        errors.push(ValidationError::InvalidFlyout {
-                            column: flyout.column,
-                            group: flyout.group,
-                            reason: "flyout column must use a rail mode",
-                        });
-                    }
-                    if !column
-                        .groups
-                        .iter()
-                        .any(|root| self.is_descendant_or_same(*root, flyout.group))
-                    {
-                        errors.push(ValidationError::InvalidFlyout {
-                            column: flyout.column,
-                            group: flyout.group,
-                            reason: "group is not a member of the referenced column",
-                        });
-                    }
-                }
-                Some(_) => errors.push(ValidationError::InvalidFlyout {
-                    column: flyout.column,
-                    group: flyout.group,
-                    reason: "column reference does not point to a Column node",
-                }),
-            }
-
-            if !self.nodes.contains_key(flyout.group) {
-                errors.push(ValidationError::InvalidFlyout {
-                    column: flyout.column,
-                    group: flyout.group,
-                    reason: "references a missing group node",
-                });
-            }
-
-            let panel_belongs_to_group = match self.nodes.get(flyout.group) {
-                Some(Node::Tabs(tabs)) => tabs.children.iter().any(|child| {
-                    matches!(
-                        self.nodes.get(*child),
-                        Some(Node::Panel(panel)) if panel.panel_id == flyout.panel
-                    )
-                }),
-                _ => false,
-            };
-            if !panel_belongs_to_group {
-                errors.push(ValidationError::InvalidFlyout {
-                    column: flyout.column,
-                    group: flyout.group,
-                    reason: "panel is not a child of the flyout group",
-                });
-            }
-        }
+        self.validate_flyout(&mut errors);
 
         if !self.validate_tree_graph(&roots, &mut errors) {
             return Err(errors);
         }
 
-        // Only recurse into width constraints after graph validation succeeds;
-        // minimum-size traversal assumes an acyclic, fully linked node tree.
-        if errors.is_empty() && metrics_are_valid {
-            for (node_id, node) in self.nodes.iter() {
-                let Node::Column(column) = node else {
-                    continue;
-                };
-                if column.mode != ColumnMode::Expanded {
-                    continue;
-                }
-
-                let minimum = match self.minimum_expanded_column_width(node_id, metrics) {
-                    Ok(minimum) => minimum,
-                    Err(_) => {
-                        errors.push(ValidationError::InvalidColumn {
-                            node: node_id,
-                            reason: "cannot compute minimum width required by expanded contents",
-                        });
-                        continue;
-                    }
-                };
-                let maximum = match self.maximum_expanded_column_width(node_id) {
-                    Ok(maximum) => maximum,
-                    Err(_) => {
-                        errors.push(ValidationError::InvalidColumn {
-                            node: node_id,
-                            reason: "cannot compute maximum width allowed by expanded contents",
-                        });
-                        continue;
-                    }
-                };
-                if maximum.is_some_and(|maximum| maximum < minimum) {
-                    errors.push(ValidationError::InvalidColumn {
-                        node: node_id,
-                        reason: "minimum width required by expanded contents exceeds panel maximum width",
-                    });
-                } else if column.width < minimum {
-                    errors.push(ValidationError::InvalidColumn {
-                        node: node_id,
-                        reason: "expanded width is below minimum width required by its contents",
-                    });
-                }
-            }
-        }
+        self.validate_expanded_column_widths(metrics, metrics_are_valid, &mut errors);
 
         if errors.is_empty() {
             Ok(())

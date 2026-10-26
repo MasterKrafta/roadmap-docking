@@ -177,6 +177,8 @@ mod tree;
 mod validation_nodes;
 mod validation_areas;
 mod validation_graph;
+mod validation_flyout;
+mod validation_width;
 mod validation;
 
 #[cfg(test)]
