@@ -101,8 +101,6 @@ mod command_target_rail_insert;
 mod command_target_validation;
 mod command_target_operations;
 mod drop_resolution;
-mod group_drag_resolution;
-mod panel_drag_resolution;
 mod commands;
 mod ratio_helpers;
 mod graph_validation_helpers;
