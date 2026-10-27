@@ -59,7 +59,7 @@ pub(crate) fn toggle_panel(layout: &Layout, key: &str, theme: &Theme) -> Option<
     })
 }
 
-/// Builds one close command for every tab group belonging to a floating window.
+/// Builds close commands for every tab group or panel leaf in a floating window.
 ///
 /// The core has no single-command CloseFloating operation, so each returned
 /// command is applied through the controller in sequence and gets its own
@@ -71,30 +71,38 @@ pub(crate) fn close_floating(
 ) -> Option<Vec<DockCommand>> {
     let floating_group = layout.floating_group(floating)?;
     let root = layout.dock_area(floating_group.area)?.root;
-    let mut groups = Vec::new();
+    let mut commands = Vec::new();
 
-    if !collect_tab_groups(layout, root, &mut groups) || groups.is_empty() {
+    if !collect_close_commands(layout, root, &mut commands) || commands.is_empty() {
         return None;
     }
 
-    Some(groups.into_iter().map(close_group).collect())
+    Some(commands)
 }
 
-fn collect_tab_groups(layout: &Layout, node_id: NodeId, groups: &mut Vec<NodeId>) -> bool {
+fn collect_close_commands(
+    layout: &Layout,
+    node_id: NodeId,
+    commands: &mut Vec<DockCommand>,
+) -> bool {
     match layout.node(node_id) {
         Some(Node::Tabs(_)) => {
-            groups.push(node_id);
+            commands.push(close_group(node_id));
+            true
+        }
+        Some(Node::Panel(panel)) => {
+            commands.push(close_panel(panel.panel_id));
             true
         }
         Some(Node::Split(split)) => split
             .children
             .iter()
-            .all(|child| collect_tab_groups(layout, *child, groups)),
+            .all(|child| collect_close_commands(layout, *child, commands)),
         Some(Node::Column(column)) => column
             .groups
             .iter()
-            .all(|group| collect_tab_groups(layout, *group, groups)),
-        Some(Node::Panel(_)) | None => false,
+            .all(|group| collect_close_commands(layout, *group, commands)),
+        None => false,
     }
 }
 
