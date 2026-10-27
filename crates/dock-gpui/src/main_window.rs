@@ -157,8 +157,14 @@ impl MainWindow {
             match self.dock.finish_drag(pointer, self.dock_viewport(window)) {
                 Ok(Some(request)) => {
                     changed = true;
-                    // Stage 11 will translate this semantic request into one DockCommand.
-                    tracing::debug!(request = ?request, "dock drag request is ready for drop commit");
+                    match self.dock.commit_drop_request(request) {
+                        Ok(action) => {
+                            tracing::debug!(action = ?action, "dock drag request resolved and committed");
+                        }
+                        Err(error) => {
+                            tracing::warn!(error = %error, "dock drag request was rejected");
+                        }
+                    }
                 }
                 Ok(None) => {}
                 Err(error) => {
