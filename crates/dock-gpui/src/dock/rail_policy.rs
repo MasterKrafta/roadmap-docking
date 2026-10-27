@@ -211,4 +211,68 @@ mod tests {
             Some(Node::Column(value)) if value.mode == ColumnMode::IconsOnly
         ));
     }
+
+    #[test]
+    fn hysteresis_keeps_the_mode_reached_when_crossing_back_through_gap() {
+        let policy = RailPolicy::new(220.0, 240.0).unwrap();
+        let theme = Theme::default();
+        let controller = crate::dock::DockController::new_initial(&theme).unwrap();
+        let baseline = controller.layout();
+        let metrics = crate::dock_metrics_from_theme(&theme);
+        let column = crate::tree_query::main_column_ids(baseline, DockSide::Right)
+            .first()
+            .copied()
+            .filter(|id| matches!(baseline.node(*id), Some(Node::Column(value)) if !value.mode.is_rail() && value.width > 220.0))
+            .expect("canvas-facing right column should exceed the collapse threshold");
+        let resize_to = |width| DockCommand::ResizeColumn { column, width };
+
+        // Enter rail below the collapse threshold.
+        let (mut preview, _, _) = policy
+            .preview(baseline, baseline, &resize_to(219.0), &metrics)
+            .unwrap();
+        assert!(matches!(
+            preview.node(column),
+            Some(Node::Column(value)) if value.mode.is_rail()
+        ));
+
+        // Moving back into the gap does not expand until the upper threshold is crossed.
+        let (next, _, _) = policy
+            .preview(baseline, &preview, &resize_to(230.0), &metrics)
+            .unwrap();
+        preview = next;
+        assert!(matches!(
+            preview.node(column),
+            Some(Node::Column(value)) if value.mode.is_rail()
+        ));
+
+        // Crossing the expand threshold switches to expanded mode.
+        let (next, _, _) = policy
+            .preview(baseline, &preview, &resize_to(241.0), &metrics)
+            .unwrap();
+        preview = next;
+        assert!(matches!(
+            preview.node(column),
+            Some(Node::Column(value))
+                if value.mode == ColumnMode::Expanded && (value.width - 241.0).abs() < 0.01
+        ));
+
+        // Returning into the gap keeps expanded mode until the collapse threshold is crossed.
+        let (next, _, _) = policy
+            .preview(baseline, &preview, &resize_to(230.0), &metrics)
+            .unwrap();
+        preview = next;
+        assert!(matches!(
+            preview.node(column),
+            Some(Node::Column(value))
+                if value.mode == ColumnMode::Expanded && (value.width - 230.0).abs() < 0.01
+        ));
+
+        let (preview, _, _) = policy
+            .preview(baseline, &preview, &resize_to(220.0), &metrics)
+            .unwrap();
+        assert!(matches!(
+            preview.node(column),
+            Some(Node::Column(value)) if value.mode.is_rail()
+        ));
+    }
 }
