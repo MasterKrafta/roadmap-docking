@@ -86,19 +86,17 @@ pub struct Layout {
 mod column_width_management;
 mod floating_operations;
 mod command_panels;
+mod drop_handling;
 
 mod group_operations;
-mod command_target_validation;
 mod command_target_operations;
-mod drop_resolution;
 mod commands;
 mod helpers;
+mod sizing;
 mod layout_api;
 mod normalization;
 #[cfg(feature = "serde")]
 mod workspace;
-mod group_sizing;
-mod minimum_size;
 mod tree_navigation;
 #[cfg(test)]
 mod tree;
