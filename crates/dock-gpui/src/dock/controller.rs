@@ -610,6 +610,8 @@ impl DockController {
     ///
     /// The preview is discarded first, then the final absolute-delta command is
     /// applied through UndoRedoHistory against the original pointer-down state.
+    /// Rail-mode selection still uses the last preview mode so releasing inside the
+    /// hysteresis gap preserves the mode reached during this gesture.
     pub(crate) fn commit_resize(
         &mut self,
         pointer: Point,
