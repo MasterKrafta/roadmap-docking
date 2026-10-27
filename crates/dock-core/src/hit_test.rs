@@ -153,7 +153,6 @@ mod hit_result_tests {
     }
 }
 
-#[path = "hit_test/geometry.rs"]
 
 use std::collections::HashSet;
 
