@@ -164,12 +164,43 @@ pub(super) fn resolve_panel_drag(
         }
         self.validate_drop_target(target, metrics)?;
 
+        if let Some(action) = self.resolve_panel_drag_noop(request, panel, panel_node, target) {
+            return Ok(action);
+        }
+
+        // A panel tab remains a panel payload; GroupTabs is reserved for
+        // a group-grip gesture and may never absorb only one dragged tab.
+        if matches!(target, DropTarget::GroupTabs { .. }) {
+            return Err(CommandError::InvalidTarget {
+                reason: "panel-tab drag cannot merge a whole group; use a Tabs insertion target",
+            });
+        }
+        self.validate_panel_ids_allowed_for_target(&[panel], target)?;
+        let command = if request.handle == DragHandle::FlyoutPanel {
+            DockCommand::MovePanelFromFlyout { panel, target }
+        } else {
+            DockCommand::MovePanel { panel, target }
+        };
+        Ok(DragDropAction::Command(command))
+    }
+
+    /// Returns an action for panel drops that leave the dock in the same position.
+    ///
+    /// Flyout drags still produce their close-on-release command, while ordinary drags
+    /// resolve to an explicit no-op.
+    fn resolve_panel_drag_noop(
+        &self,
+        request: &DragDropRequest,
+        panel: PanelId,
+        panel_node: NodeId,
+        target: DropTarget,
+    ) -> Option<DragDropAction> {
         if let (Some((source_group, source_index)), DropTarget::Tabs { group, index }) =
             (self.tab_parent_index(panel_node), target)
             && source_group == group
             && (index == source_index || index == source_index + 1)
         {
-            return Ok(if request.handle == DragHandle::FlyoutPanel {
+            return Some(if request.handle == DragHandle::FlyoutPanel {
                 DragDropAction::Command(DockCommand::MovePanelFromFlyout { panel, target })
             } else {
                 DragDropAction::NoOp
@@ -196,7 +227,7 @@ pub(super) fn resolve_panel_drag(
                             if side == source_side
                                 && (index == source_index || index == source_index + 1) =>
                         {
-                            return Ok(if request.handle == DragHandle::FlyoutPanel {
+                            return Some(if request.handle == DragHandle::FlyoutPanel {
                                 DragDropAction::Command(DockCommand::MovePanelFromFlyout {
                                     panel,
                                     target,
@@ -216,7 +247,7 @@ pub(super) fn resolve_panel_drag(
                                     )
                                 }) =>
                         {
-                            return Ok(if request.handle == DragHandle::FlyoutPanel {
+                            return Some(if request.handle == DragHandle::FlyoutPanel {
                                 DragDropAction::Command(DockCommand::MovePanelFromFlyout {
                                     panel,
                                     target,
@@ -236,27 +267,14 @@ pub(super) fn resolve_panel_drag(
             (self.tab_parent_index(panel_node), target)
             && source_group == target_group
         {
-            return Ok(if request.handle == DragHandle::FlyoutPanel {
+            return Some(if request.handle == DragHandle::FlyoutPanel {
                 DragDropAction::Command(DockCommand::MovePanelFromFlyout { panel, target })
             } else {
                 DragDropAction::NoOp
             });
         }
 
-        // A panel tab remains a panel payload; GroupTabs is reserved for
-        // a group-grip gesture and may never absorb only one dragged tab.
-        if matches!(target, DropTarget::GroupTabs { .. }) {
-            return Err(CommandError::InvalidTarget {
-                reason: "panel-tab drag cannot merge a whole group; use a Tabs insertion target",
-            });
-        }
-        self.validate_panel_ids_allowed_for_target(&[panel], target)?;
-        let command = if request.handle == DragHandle::FlyoutPanel {
-            DockCommand::MovePanelFromFlyout { panel, target }
-        } else {
-            DockCommand::MovePanel { panel, target }
-        };
-        Ok(DragDropAction::Command(command))
+        None
     }
 
 pub(super) fn resolve_group_grip_drag(
