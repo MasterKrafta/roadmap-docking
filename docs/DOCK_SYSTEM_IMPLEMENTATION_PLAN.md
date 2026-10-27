@@ -452,7 +452,7 @@ gpui      = { workspace = true }
 - **Файл:** `dock-gpui/src/dock/floating_policy.rs` (NEW).
 - **Работы:**
   1. **Raise.** mouse down любой точки плавающего окна → `RaiseFloating { group }` (контейнер окна ловит событие в фазе capture, не съедая дальнейшие обработчики). Старый код этого не делал. Применять без записи в Undo (проверить, что записывает ли её `UndoRedoHistory` — если да, просить ядро исключить).
-  2. **Живое перемещение окна** по `FloatingTitle`: тем же механизмом «снимок + абсолютная дельта», как ресайз (`MoveFloating { group, origin }`, одна запись в истории при отпускании); параллельно показывать зоны для `DockFloating`. Если на отпускании есть `DropTarget` — `DockFloating`, иначе финальный `MoveFloating`.
+  2. **Перемещение окна** по `FloatingTitle`: снимок + абсолютная дельта, на отпускании одна запись `MoveFloating { group, origin }`; эта область заголовка не показывает drop-зоны. Для стыковки используется отдельная ручка `FloatingCapture` и `DockFloating`. В Photoshop-профиле текущий resolver поддерживает обратную стыковку корневых `Tabs`/`Panel`; для корней `Column`/`Split` захватная ручка скрыта, пока Core не предложит единый корректный mapping.
   3. **Кнопки в `FloatingTitle`:** закрыть (этап 8, пункт 3) и свернуть (`CollapseGroup` для корневой группы окна).
   4. **Политика позиции:** не давать заголовку уйти за верхний край окна и меню-бар (кламп `origin.y ≥ 0` и хотя бы N px заголовка видно по горизонтали); сверить, что уже делает ядро (в старом коде есть упоминание клампа видимого прямоугольника в `compute_rects`).
 - **Удалить после этапа:** весь старый код жестов из `main_window.rs` (`TabDragPayload`, `GroupDragPayload`, `TabDragPreviewState`, `GroupDragPreviewState`, `SplitterDragState`, `update_*_from_drag`, `finish_*_drag`, `*_drag_bounds`, `docked_*_float_command`).
@@ -542,7 +542,7 @@ gpui      = { workspace = true }
 | `Float` | отрыв вкладки/группы на `FreeArea` по текущему Core resolver | `drop_commit.rs` / Core resolver | 11 | да |
 | `FloatGroupAsColumn` | отдельная команда ядра; не формируется текущим drag resolver | `group_menu.rs` (если используется) | 13 | да |
 | `FloatPanelAsGroup` | отдельная команда ядра; не формируется текущим drag resolver | UI-команда, если используется | — | да |
-| `MoveFloating` | тяга `FloatingTitle`, тяга одновкладочного плавающего окна | `floating_policy.rs` | 12 | да, одна запись |
+| `MoveFloating` | drag по основной области `FloatingTitle` без drop-target | `floating_policy.rs` / Core resolver | 11–12 | да, одна запись |
 | `ResizeFloatingBounds` | ручки края/угла окна | `resize_session.rs` | 9 | да |
 | `ResizeFloating` | резерв: только размер (программно) | `commands.rs` | 8 | да |
 | `RaiseFloating` | mouse down по окну | `layers/floating.rs` | 12 | проверить в ядре |
