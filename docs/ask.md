@@ -183,7 +183,7 @@
 
 **Проблема:** первичный аудит выявил неиспользуемые поля типографики и метрик темы. `ThemeTypography` и hover-палитра уже подключены; `default_column_split_ratio`, `group_control_button_width`, `content_padding` и `button_size` также реально влияют на layout/отрисовку. Для дальнейшего разбора остаются `tab_drag_zone_width`, `button_gap`, `edge_drop_zone_width` и `column_tab_width`. `tab_drag_zone_width` объявлен как резерв для будущей drag-зоны. Толщины `drop_indicator_thickness` и `drop_outline_thickness` используются в обводке DropZone и drag-preview.
 
-**Сделано:** `ThemeTypography` и `ThemeColors::hover` подключены в `IconButton`, `PanelTab`, `RailEntry`, `PopupMenu` и `FloatingTitle`; пользователь подтвердил прохождение локальных тестов. `drop_indicator_thickness` управляет обводкой `DropZone`, а `drop_outline_thickness` — обводкой drag-preview. Текущий шаг требует локальной проверки.
+**Закрыто:** `ThemeTypography` и `ThemeColors::hover` подключены в `IconButton`, `PanelTab`, `RailEntry`, `PopupMenu` и `FloatingTitle`; пользователь подтвердил прохождение локальных тестов. `drop_indicator_thickness` управляет обводкой `DropZone`, а `drop_outline_thickness` — обводкой drag-preview.
 
 **Сделано:** `build_initial_layout` применяет `ThemeMetrics::default_column_split_ratio` к начальному столбцу с двумя группами; пользователь подтвердил прохождение тестов. `group_control_button_width` протянут в `DockMetrics` и адаптер темы; теперь им пользуются и `normalize_docked_group_geometry`, и отрисовка кнопок в `tree_tabs.rs`, вместо отдельной константы `28 px`. Пользователь подтвердил прохождение тестов.
 
