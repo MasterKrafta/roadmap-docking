@@ -52,24 +52,36 @@ impl Layout {
         self.compute_drop_zones_with_index(source, rects, metrics, &tree_index)
     }
 
-    /// Prepares a reusable drop resolver for repeated pointer updates in one drag.
+    /// Prepares an owned resolver snapshot for repeated pointer updates in one drag.
     ///
-    /// The returned value computes legal zones and the tree index once. Its immutable
-    /// borrows tie the cache to this layout, geometry snapshot, and metrics; drop it and
-    /// prepare a new one after any of those inputs need to change.
-    pub fn prepare_drop_resolver<'a>(
-        &'a self,
+    /// Legal zones, the tree index, and floating-area lookup data are captured once.
+    /// The resolver does not borrow this layout, geometry, or metrics, so an adapter
+    /// can safely keep it in drag-session state across UI callbacks. The adapter must
+    /// discard it before resolving against a changed layout, geometry, or metrics.
+    pub fn prepare_drop_resolver(
+        &self,
         source: DropSource,
-        rects: &'a LayoutRects,
-        metrics: &'a DockMetrics,
-    ) -> Result<DropZoneResolver<'a>, ComputeRectsError> {
+        rects: &LayoutRects,
+        metrics: &DockMetrics,
+    ) -> Result<DropZoneResolver, ComputeRectsError> {
         self.validate_drop_zone_state(metrics)?;
         let tree_index = DropZoneTreeIndex::new(self);
         let zones = self.compute_drop_zones_with_index(source, rects, metrics, &tree_index)?;
+        let floating_areas = rects
+            .floating_groups
+            .iter()
+            .filter_map(|floating_rect| {
+                let floating = self.floating_group(floating_rect.group)?;
+                let area = self.dock_area(floating.area)?;
+                Some(FloatingDropArea {
+                    rect: floating_rect.rect,
+                    z_order: floating_rect.z_order,
+                    root: area.root,
+                })
+            })
+            .collect();
         Ok(DropZoneResolver {
-            layout: self,
-            rects,
-            _metrics: metrics,
+            floating_areas,
             tree_index,
             zones,
         })
@@ -370,19 +382,25 @@ impl Layout {
 
 /// Reusable drop-resolution snapshot for a single drag gesture.
 ///
-/// Preparing a resolver validates the layout and geometry, then builds the tree index
-/// and legal drop-zone list once. Keeping this value alive borrows the layout, geometry,
-/// and metrics immutably, preventing the cached snapshot from being used while any of
-/// those inputs are changed. Create a new resolver after a layout or viewport update.
-pub struct DropZoneResolver<'a> {
-    layout: &'a Layout,
-    rects: &'a LayoutRects,
-    _metrics: &'a DockMetrics,
+/// Preparing a resolver validates the source layout and geometry, then owns the tree
+/// index, legal zones, and floating-area roots needed for subsequent pointer hit tests.
+/// It intentionally does not borrow the input data, so callers can keep it in persistent
+/// UI state. Callers must discard/rebuild the snapshot after layout, geometry, or metrics
+/// change; ownership prevents dangling references, but does not make stale geometry current.
+pub struct DropZoneResolver {
+    floating_areas: Vec<FloatingDropArea>,
     tree_index: DropZoneTreeIndex,
     zones: Vec<DropZoneRect>,
 }
 
-impl DropZoneResolver<'_> {
+#[derive(Clone, Copy)]
+struct FloatingDropArea {
+    rect: Rect,
+    z_order: i32,
+    root: NodeId,
+}
+
+impl DropZoneResolver {
     /// Resolves a pointer position using the cached legal zones and tree index.
     ///
     /// This performs only point validation and hit resolution; layout validation,
@@ -396,8 +414,8 @@ impl DropZoneResolver<'_> {
         &self,
         point: Point,
     ) -> Result<Option<DropTarget>, ComputeRectsError> {
-        let mut topmost_floating: Option<(FloatingGroupId, Rect, i32)> = None;
-        for floating in &self.rects.floating_groups {
+        let mut topmost_floating: Option<&FloatingDropArea> = None;
+        for floating in &self.floating_areas {
             if floating
                 .rect
                 .contains(point)
@@ -405,20 +423,14 @@ impl DropZoneResolver<'_> {
             {
                 let replace = topmost_floating
                     .as_ref()
-                    .map(|(_, _, z)| floating.z_order > *z)
+                    .map(|current| floating.z_order > current.z_order)
                     .unwrap_or(true);
                 if replace {
-                    topmost_floating = Some((floating.group, floating.rect, floating.z_order));
+                    topmost_floating = Some(floating);
                 }
             }
         }
-        if let Some((floating_id, _bounds, _z_order)) = topmost_floating {
-            let Some(floating) = self.layout.floating_group(floating_id) else {
-                return Ok(None);
-            };
-            let Some(area) = self.layout.dock_area(floating.area) else {
-                return Ok(None);
-            };
+        if let Some(floating) = topmost_floating {
             return best_containing_zone(&self.zones, point, |zone| {
                 matches!(
                     zone.zone,
@@ -429,7 +441,7 @@ impl DropZoneResolver<'_> {
                         | DropZone::Left
                         | DropZone::Right
                 ) && zone.target.referenced_node_id()
-                    .map(|node| contains_node(&self.tree_index, area.root, node))
+                    .map(|node| contains_node(&self.tree_index, floating.root, node))
                     .unwrap_or(false)
             });
         }
