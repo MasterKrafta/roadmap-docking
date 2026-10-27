@@ -1029,6 +1029,137 @@
         assert_eq!(controller.history.redo_len(), 1);
     }
 
+    fn free_area_request(
+        payload: DragPayload,
+        handle: DragHandle,
+        origin: Point,
+        point: Point,
+    ) -> DragDropRequest {
+        DragDropRequest {
+            payload,
+            handle,
+            origin,
+            point,
+            target: Some(DropTarget::FreeArea),
+            floating_bounds: None,
+        }
+    }
+
+    fn assert_bounds_inside(bounds: Rect, viewport: Rect) {
+        assert!(bounds.origin.x >= viewport.origin.x);
+        assert!(bounds.origin.y >= viewport.origin.y);
+        assert!(bounds.origin.x + bounds.size.width <= viewport.origin.x + viewport.size.width);
+        assert!(bounds.origin.y + bounds.size.height <= viewport.origin.y + viewport.size.height);
+    }
+
+    #[test]
+    fn free_area_panel_drop_computes_bounds_floats_panel_and_records_one_undo_step() {
+        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+        let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
+        let (source_group, panel_node, panel) = first_panels_by_group(&controller)[0];
+        let frame = controller.frame(viewport).unwrap();
+        let source_rect = frame
+            .rects()
+            .groups
+            .iter()
+            .find(|entry| entry.group == source_group)
+            .expect("source group should have computed geometry")
+            .rect;
+        let origin = Point::new(
+            source_rect.origin.x + 40.0,
+            source_rect.origin.y + controller.metrics().header_height + 12.0,
+        );
+        let pointer = Point::new(600.0, 400.0);
+        let original_version = controller.layout().version();
+        let original_floating_count = controller.layout().floating_groups().count();
+
+        let action = controller
+            .commit_drop_request(
+                free_area_request(
+                    DragPayload::Panel { panel },
+                    DragHandle::PanelTab,
+                    origin,
+                    pointer,
+                ),
+                viewport,
+            )
+            .unwrap();
+
+        let bounds = match action {
+            DragDropAction::Command(DockCommand::Float { node, bounds }) => {
+                assert_eq!(node, panel_node, "panel detach must float the panel node");
+                bounds
+            }
+            other => panic!("expected a Float command for the panel, got {other:?}"),
+        };
+        assert_bounds_inside(bounds, viewport);
+        assert_eq!(controller.layout().floating_groups().count(), original_floating_count + 1);
+        assert!(controller.layout().version() > original_version);
+        assert_eq!(controller.history.undo_len(), 1);
+        assert_eq!(controller.history.redo_len(), 0);
+        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+
+        assert!(controller.undo().unwrap());
+        assert_eq!(controller.layout().floating_groups().count(), original_floating_count);
+        assert_eq!(controller.history.undo_len(), 0);
+        assert_eq!(controller.history.redo_len(), 1);
+        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+    }
+
+    #[test]
+    fn free_area_group_drop_floats_the_complete_group_and_records_one_undo_step() {
+        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+        let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
+        let (group, _, _) = first_panels_by_group(&controller)[0];
+        let frame = controller.frame(viewport).unwrap();
+        let source_rect = frame
+            .rects()
+            .groups
+            .iter()
+            .find(|entry| entry.group == group)
+            .expect("source group should have computed geometry")
+            .rect;
+        let origin = Point::new(
+            source_rect.origin.x + 35.0,
+            source_rect.origin.y + controller.metrics().header_height / 2.0,
+        );
+        let pointer = Point::new(620.0, 390.0);
+        let original_version = controller.layout().version();
+        let original_floating_count = controller.layout().floating_groups().count();
+
+        let action = controller
+            .commit_drop_request(
+                free_area_request(
+                    DragPayload::Group { group },
+                    DragHandle::GroupGrip,
+                    origin,
+                    pointer,
+                ),
+                viewport,
+            )
+            .unwrap();
+
+        let bounds = match action {
+            DragDropAction::Command(DockCommand::Float { node, bounds }) => {
+                assert_eq!(node, group, "group-grip detach must float the complete Tabs node");
+                bounds
+            }
+            other => panic!("expected a Float command for the group, got {other:?}"),
+        };
+        assert_bounds_inside(bounds, viewport);
+        assert_eq!(controller.layout().floating_groups().count(), original_floating_count + 1);
+        assert!(controller.layout().version() > original_version);
+        assert_eq!(controller.history.undo_len(), 1);
+        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+
+        assert!(controller.undo().unwrap());
+        assert_eq!(controller.layout().floating_groups().count(), original_floating_count);
+        assert_eq!(controller.history.undo_len(), 0);
+        assert!(controller.redo().unwrap());
+        assert_eq!(controller.layout().floating_groups().count(), original_floating_count + 1);
+        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+    }
+
     #[test]
     fn no_op_drop_does_not_change_layout_or_history() {
         let mut controller = DockController::new_initial(&Theme::default()).unwrap();
