@@ -94,12 +94,9 @@ mod commands;
 mod helpers;
 mod sizing;
 mod layout_api;
-mod normalization;
 #[cfg(feature = "serde")]
 mod workspace;
 mod tree_navigation;
-#[cfg(test)]
-mod tree;
 mod validation;
 
 #[cfg(test)]
