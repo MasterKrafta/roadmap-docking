@@ -3377,3 +3377,77 @@ fn rail_threshold_resize_is_one_undoable_action() {
     ));
 }
 
+#[test]
+fn frame_prunes_scroll_handles_for_removed_columns() {
+    let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+    let (column_id, _) = controller
+        .layout()
+        .nodes()
+        .find_map(|(id, node)| match node {
+            Node::Column(column) if column.groups.len() > 1 => Some((id, column.groups.len())),
+            _ => None,
+        })
+        .expect("initial layout should have a multi-group column");
+    let stale_node = NodeId::null();
+
+    controller
+        .scroll_handles_mut()
+        .insert(column_id, gpui::ScrollHandle::new());
+    controller
+        .scroll_handles_mut()
+        .insert(stale_node, gpui::ScrollHandle::new());
+
+    controller
+        .apply(DockCommand::Float {
+            node: column_id,
+            bounds: Rect::new(Point::new(60.0, 40.0), Size::new(560.0, 440.0)),
+        })
+        .unwrap();
+    let floating_id = controller
+        .layout()
+        .floating_groups()
+        .next()
+        .map(|(id, _)| id)
+        .expect("floating the column should create a floating group");
+    controller.close_floating(floating_id).unwrap();
+    assert!(
+        controller.layout().node(column_id).is_none(),
+        "closing every group should remove the old column node"
+    );
+
+    controller
+        .frame(Rect::new(Point::ZERO, Size::new(1200.0, 800.0)))
+        .unwrap();
+
+    assert!(
+        !controller.scroll_handles().contains_key(&column_id),
+        "a handle for a removed column must be discarded"
+    );
+    assert!(
+        !controller.scroll_handles().contains_key(&stale_node),
+        "handles without a live Column owner must be discarded"
+    );
+}
+
+#[test]
+fn frame_preserves_scroll_handles_for_existing_columns_without_overflow() {
+    let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+    let column_id = controller
+        .layout()
+        .nodes()
+        .find_map(|(id, node)| matches!(node, Node::Column(_)).then_some(id))
+        .expect("initial layout should have a column");
+    controller
+        .scroll_handles_mut()
+        .insert(column_id, gpui::ScrollHandle::new());
+
+    controller
+        .frame(Rect::new(Point::ZERO, Size::new(1600.0, 1000.0)))
+        .unwrap();
+
+    assert!(
+        controller.scroll_handles().contains_key(&column_id),
+        "a live column should retain its handle even when it does not currently overflow"
+    );
+}
+
