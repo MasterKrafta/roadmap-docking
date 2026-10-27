@@ -978,6 +978,163 @@
         format!("{:?}", controller.layout())
     }
 
+    fn start_active_panel_drag(
+        controller: &mut DockController,
+        viewport: Rect,
+    ) -> (dock_core::PanelId, Point) {
+        let (_, _, panel) = first_panels_by_group(controller)[0];
+        let frame = controller.frame(viewport).unwrap();
+        let tab_rect = frame
+            .rects()
+            .tab_headers
+            .iter()
+            .find(|header| header.panel == panel)
+            .map(|header| header.rect)
+            .expect("initial panel should have a visible tab header");
+        let origin = Point::new(
+            tab_rect.origin.x + tab_rect.size.width / 2.0,
+            tab_rect.origin.y + tab_rect.size.height / 2.0,
+        );
+        let threshold = controller.metrics().drag_threshold;
+
+        controller
+            .begin_drag(DragPayload::Panel { panel }, DragHandle::PanelTab, origin)
+            .unwrap();
+        assert!(
+            controller
+                .update_drag(
+                    Point::new(origin.x + threshold + 20.0, origin.y),
+                    viewport,
+                    Some(&frame),
+                )
+                .unwrap(),
+            "movement beyond threshold should activate the drag"
+        );
+
+        (panel, origin)
+    }
+
+    #[test]
+    fn stale_drag_viewport_change_cancels_session_without_mutating_layout_or_history() {
+        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+        let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
+        let (panel, origin) = start_active_panel_drag(&mut controller, viewport);
+        let layout_before = layout_debug_snapshot(&controller);
+        let version_before = controller.layout().version();
+        let smaller_viewport = Rect::new(Point::ZERO, Size::new(1000.0, 700.0));
+        let pointer = Point::new(origin.x + controller.metrics().drag_threshold + 30.0, origin.y);
+
+        assert!(matches!(
+            controller.update_drag(pointer, smaller_viewport, None),
+            Err(super::super::drag_session::DragUpdateError::StaleFrameGeometry)
+        ));
+        assert!(controller.drag_overlay().is_none());
+        assert!(!controller.cancel_drag(), "stale geometry must end the session internally");
+        assert_eq!(layout_debug_snapshot(&controller), layout_before);
+        assert_eq!(controller.layout().version(), version_before);
+        assert_eq!(controller.history.undo_len(), 0);
+        assert_eq!(controller.history.redo_len(), 0);
+
+        controller
+            .begin_drag(DragPayload::Panel { panel }, DragHandle::PanelTab, origin)
+            .unwrap();
+        assert!(controller.cancel_drag());
+    }
+
+    #[test]
+    fn stale_drag_layout_version_cancels_session_before_resolving_old_zones() {
+        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+        let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
+        let (panel, origin) = start_active_panel_drag(&mut controller, viewport);
+        let original_version = controller.layout().version();
+        let metrics = controller.metrics;
+        controller
+            .layout
+            .apply(
+                DockCommand::SetChrome {
+                    mode: dock_core::ChromeMode::DockHidden,
+                },
+                &metrics,
+            )
+            .unwrap();
+        assert_ne!(controller.layout().version(), original_version);
+        let changed_layout = layout_debug_snapshot(&controller);
+        let changed_version = controller.layout().version();
+
+        assert!(matches!(
+            controller.update_drag(
+                Point::new(origin.x + metrics.drag_threshold + 35.0, origin.y),
+                viewport,
+                None,
+            ),
+            Err(super::super::drag_session::DragUpdateError::StaleFrameGeometry)
+        ));
+        assert!(controller.drag_overlay().is_none());
+        assert!(!controller.cancel_drag());
+        assert_eq!(layout_debug_snapshot(&controller), changed_layout);
+        assert_eq!(controller.layout().version(), changed_version);
+        assert_eq!(controller.history.undo_len(), 0);
+        assert_eq!(controller.history.redo_len(), 0);
+
+        controller
+            .begin_drag(DragPayload::Panel { panel }, DragHandle::PanelTab, origin)
+            .unwrap();
+        assert!(controller.cancel_drag());
+    }
+
+    #[test]
+    fn stale_drag_metrics_cancel_session_without_mutating_layout_or_history() {
+        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+        let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
+        let (panel, origin) = start_active_panel_drag(&mut controller, viewport);
+        let layout_before = layout_debug_snapshot(&controller);
+        let version_before = controller.layout().version();
+        controller.metrics.min_column_width += 1.0;
+        let pointer = Point::new(origin.x + controller.metrics().drag_threshold + 30.0, origin.y);
+
+        assert!(matches!(
+            controller.update_drag(pointer, viewport, None),
+            Err(super::super::drag_session::DragUpdateError::StaleFrameGeometry)
+        ));
+        assert!(controller.drag_overlay().is_none());
+        assert!(!controller.cancel_drag());
+        assert_eq!(layout_debug_snapshot(&controller), layout_before);
+        assert_eq!(controller.layout().version(), version_before);
+        assert_eq!(controller.history.undo_len(), 0);
+        assert_eq!(controller.history.redo_len(), 0);
+
+        controller
+            .begin_drag(DragPayload::Panel { panel }, DragHandle::PanelTab, origin)
+            .unwrap();
+        assert!(controller.cancel_drag());
+    }
+
+    #[test]
+    fn finish_drag_with_stale_viewport_clears_session_without_emitting_request() {
+        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+        let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
+        let (panel, origin) = start_active_panel_drag(&mut controller, viewport);
+        let layout_before = layout_debug_snapshot(&controller);
+        let version_before = controller.layout().version();
+        let stale_viewport = Rect::new(Point::ZERO, Size::new(1100.0, 750.0));
+
+        assert!(matches!(
+            controller.finish_drag(origin, stale_viewport),
+            Err(super::super::drag_session::DragUpdateError::StaleFrameGeometry)
+        ));
+        assert!(controller.drag_overlay().is_none());
+        assert!(!controller.cancel_drag());
+        assert_eq!(layout_debug_snapshot(&controller), layout_before);
+        assert_eq!(controller.layout().version(), version_before);
+        assert_eq!(controller.history.undo_len(), 0);
+        assert_eq!(controller.history.redo_len(), 0);
+
+        controller
+            .begin_drag(DragPayload::Panel { panel }, DragHandle::PanelTab, origin)
+            .unwrap();
+        assert!(controller.cancel_drag());
+    }
+
     #[test]
     fn successful_drop_commits_one_command_and_one_undo_step() {
         let mut controller = DockController::new_initial(&Theme::default()).unwrap();
