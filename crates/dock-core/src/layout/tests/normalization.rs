@@ -285,6 +285,15 @@ fn normalization_eligibility_uses_typed_validation_reasons() {
     let node = NodeId::null();
     let is_normalizable = super::super::helpers::is_normalizable_validation_error;
 
+    assert_eq!(
+        ValidationError::InvalidColumn {
+            node,
+            reason: ValidationReason::RatiosMustSumToOne,
+        }
+        .to_string(),
+        format!("invalid Column node {node:?}: ratios must sum to 1.0 within 1e-4")
+    );
+
     assert!(is_normalizable(&ValidationError::InvalidSplit {
         node,
         reason: ValidationReason::SplitMustContainAtLeastTwoChildren,
