@@ -890,6 +890,29 @@ fn build_initial_layout(
             source,
         })?;
 
+    let split_column = layout
+        .nodes()
+        .find_map(|(id, node)| match node {
+            Node::Column(column) if column.groups.len() == 2 => Some(id),
+            _ => None,
+        })
+        .ok_or(DockInitializationError::UnexpectedCoreLayout {
+            reason: "initial layout did not contain a two-group column",
+        })?;
+    let upper_group_ratio = theme.metrics.default_column_split_ratio;
+    layout
+        .apply(
+            DockCommand::RestoreGroupRatios {
+                column: split_column,
+                ratios: vec![upper_group_ratio, 1.0 - upper_group_ratio],
+            },
+            &metrics,
+        )
+        .map_err(|source| DockInitializationError::CoreCommand {
+            operation: "apply the initial column group split ratio",
+            source,
+        })?;
+
     layout.validate(&metrics).map_err(|errors| {
         DockInitializationError::InvalidConstructedLayout { errors }
     })?;
