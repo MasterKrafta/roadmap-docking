@@ -176,12 +176,12 @@
 
 ### P3-01. Разделить тему: объявленные поля и реальное применение
 
-**Статус:** В работе; пользователь подтвердил тесты для типографики, hover-палитры, drop-индикаторов, начального split ratio, ширины group-кнопок, `content_padding`, `button_size` и `button_gap`. `edge_drop_zone_width` уточнён как legacy-поле без влияния на текущую геометрию.  
+**Статус:** На финальной проверке; пользователь подтвердил тесты для подключённых метрик и пояснений legacy-поля `edge_drop_zone_width`. Последнее изменение документирует `tab_drag_zone_width` и `column_tab_width` как зарезервированные/legacy-поля, не используемые текущим UI.  
 **Уверенность:** статический просмотр подтвердил неиспользование нескольких полей; применение остальных метрик требует отдельного разбора.
 
 **Где смотреть:** `crates/ui/src/theme/theme_typography.rs`, `theme_metrics.rs`, `theme_colors.rs`; `crates/dock-gpui/src/components/`; `crates/dock-gpui/src/layers/`.
 
-**Проблема:** первичный аудит выявил неиспользуемые поля типографики и метрик темы. `ThemeTypography` и hover-палитра уже подключены; `default_column_split_ratio`, `group_control_button_width`, `content_padding`, `button_size` и `button_gap` влияют на layout/отрисовку. `edge_drop_zone_width` — legacy-дубликат: текущая геометрия использует `drop_edge_zone`. `tab_drag_zone_width` зарезервирован под будущую drag-зону; `column_tab_width` остаётся на аудит.
+**Проблема:** первичный аудит выявил неиспользуемые поля типографики и метрик темы. `ThemeTypography` и hover-палитра уже подключены; `default_column_split_ratio`, `group_control_button_width`, `content_padding`, `button_size` и `button_gap` влияют на layout/отрисовку. Три поля не управляют текущим UI и теперь явно помечены как reserved/legacy: `edge_drop_zone_width` (вместо него геометрия использует `drop_edge_zone`), `tab_drag_zone_width` (будущая drag-зона) и `column_tab_width` (legacy simple-column UI; текущие вкладки распределяются по доступной ширине).
 
 **Закрыто:** `ThemeTypography` и `ThemeColors::hover` подключены в `IconButton`, `PanelTab`, `RailEntry`, `PopupMenu` и `FloatingTitle`; пользователь подтвердил прохождение локальных тестов. `drop_indicator_thickness` управляет обводкой `DropZone`, а `drop_outline_thickness` — обводкой drag-preview.
 
@@ -195,7 +195,7 @@
 
 **Уточнено:** `edge_drop_zone_width` сохранён как legacy-поле для совместимости. В runtime используется `drop_edge_zone`, который передаётся в `DockMetrics`; старое поле не удаляется, чтобы не ломать возможных внешних потребителей структуры.
 
-**Следующий шаг:** проверить назначение `column_tab_width` и либо подключить его к действующему UI, либо явно пометить как legacy/reserved.
+**Последнее изменение (требует локальной проверки):** `tab_drag_zone_width` и `column_tab_width` явно помечены как зарезервированное/legacy-поведение без влияния на текущий UI. Все неиспользуемые поля метрик теперь либо имеют явно описанную роль, либо помечены как совместимость; после проверки можно закрыть P3-01.
 
 **Критерии готовности:** изменение поддерживаемого параметра темы действительно меняет интерфейс; в публичной теме не остаются поля, которые создают ложное ожидание настройки.
 
