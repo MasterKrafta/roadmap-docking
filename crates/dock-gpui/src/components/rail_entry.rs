@@ -1,11 +1,11 @@
 use dock_core::{ColumnMode, Rect};
 use gpui::{
-    App, ClickEvent, InteractiveElement, IntoElement, ParentElement, RenderOnce,
+    App, ClickEvent, InteractiveElement, IntoElement, KeyDownEvent, ParentElement, RenderOnce,
     StatefulInteractiveElement, Styled, Window, div, px, rgb,
 };
 use ui::Theme;
 
-use crate::components::with_focus_ring;
+use crate::components::{focus_ring::is_keyboard_activation_key, with_focus_ring};
 
 /// A panel entry in a flattened dock rail.
 #[derive(IntoElement)]
@@ -26,6 +26,8 @@ pub struct RailEntry {
     pub theme: Theme,
     /// Requests opening this panel in the flyout.
     pub on_open: Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>,
+    /// Handler invoked when Enter or Space opens the focused rail entry.
+    pub on_open_key: Box<dyn Fn(&KeyDownEvent, &mut Window, &mut App) + 'static>,
 }
 
 impl RenderOnce for RailEntry {
@@ -61,6 +63,11 @@ impl RenderOnce for RailEntry {
 
         with_focus_ring(entry.id(self.id), &self.theme)
             .hover(move |style| style.bg(rgb(hover_background)))
+            .on_key_down(move |event, window, app| {
+                if is_keyboard_activation_key(&event.keystroke.key) {
+                    (self.on_open_key)(event, window, app);
+                }
+            })
             .on_click(self.on_open)
     }
 }
