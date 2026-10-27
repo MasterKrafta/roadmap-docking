@@ -1,12 +1,10 @@
 use super::*;
 use crate::{FloatingGroupRect, GroupRect};
 
-#[path = "drop_zone_floating/center_zones.rs"]
-mod center_zones;
+#[path = "drop_zone_floating/center_side_zones.rs"]
+mod center_side_zones;
 #[path = "drop_zone_floating/edge_zones.rs"]
 mod edge_zones;
-#[path = "drop_zone_floating/side_zones.rs"]
-mod side_zones;
 
 struct FloatingZoneContext<'a> {
     layout: &'a Layout,
