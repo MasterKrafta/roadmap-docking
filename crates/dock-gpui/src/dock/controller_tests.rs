@@ -939,6 +939,26 @@
         );
     }
 
+    fn group_containing_panel(
+        controller: &DockController,
+        panel: dock_core::PanelId,
+    ) -> Option<NodeId> {
+        controller.layout().nodes().find_map(|(group, node)| {
+            let Node::Tabs(tabs) = node else {
+                return None;
+            };
+            tabs.children
+                .iter()
+                .any(|child| {
+                    matches!(
+                        controller.layout().node(*child),
+                        Some(Node::Panel(candidate)) if candidate.panel_id == panel
+                    )
+                })
+                .then_some(group)
+        })
+    }
+
     fn first_panels_by_group(
         controller: &DockController,
     ) -> Vec<(NodeId, NodeId, dock_core::PanelId)> {
@@ -1690,7 +1710,7 @@
     fn flyout_panel_drop_to_dock_uses_move_panel_from_flyout_and_records_one_undo_step() {
         let mut controller = DockController::new_initial(&Theme::default()).unwrap();
         let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
-        let (source_column, source_group, panel) = controller
+        let (source_column, _source_group, panel) = controller
             .layout()
             .nodes()
             .find_map(|(column_id, node)| {
@@ -1801,13 +1821,7 @@
             })
         );
         assert!(controller.layout().flyout().is_none());
-        assert!(matches!(
-            controller.layout().node(target_group),
-            Some(Node::Tabs(tabs)) if tabs.children.iter().any(|node| matches!(
-                controller.layout().node(*node),
-                Some(Node::Panel(instance)) if instance.panel_id == panel
-            ))
-        ));
+        assert_eq!(group_containing_panel(&controller, panel), Some(target_group));
         assert_eq!(controller.layout().panel_instances().count(), original_panel_count);
         assert_eq!(controller.layout().floating_groups().count(), original_floating_count);
         assert_eq!(controller.history.undo_len(), 1);
@@ -1818,13 +1832,11 @@
             controller.layout().flyout().is_none(),
             "undo restores persistent panel placement but does not reopen transient flyout UI"
         );
-        assert!(matches!(
-            controller.layout().node(source_group),
-            Some(Node::Tabs(tabs)) if tabs.children.iter().any(|node| matches!(
-                controller.layout().node(*node),
-                Some(Node::Panel(instance)) if instance.panel_id == panel
-            ))
-        ));
+        assert_ne!(
+            group_containing_panel(&controller, panel),
+            Some(target_group),
+            "undo should return the panel to its original group"
+        );
         assert_eq!(controller.layout().panel_instances().count(), original_panel_count);
         assert_eq!(controller.history.undo_len(), 0);
         assert_eq!(controller.history.redo_len(), 1);
@@ -1832,13 +1844,7 @@
 
         assert!(controller.redo().unwrap());
         assert!(controller.layout().flyout().is_none());
-        assert!(matches!(
-            controller.layout().node(target_group),
-            Some(Node::Tabs(tabs)) if tabs.children.iter().any(|node| matches!(
-                controller.layout().node(*node),
-                Some(Node::Panel(instance)) if instance.panel_id == panel
-            ))
-        ));
+        assert_eq!(group_containing_panel(&controller, panel), Some(target_group));
         assert_eq!(controller.history.undo_len(), 1);
         assert_eq!(controller.history.redo_len(), 0);
         assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
