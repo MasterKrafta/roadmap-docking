@@ -778,8 +778,27 @@ impl Render for MainWindow {
 
 #[cfg(test)]
 mod tests {
-    use super::surface_contains_window_point;
+    use std::{
+        fs,
+        path::PathBuf,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
     use gpui::{point, px};
+    use ui::Theme;
+
+    use super::{MainWindow, surface_contains_window_point};
+
+    fn temporary_workspace_path() -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock should be after the Unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "roadmap-docking-invalid-workspace-{}-{nonce}.json",
+            std::process::id()
+        ))
+    }
 
     #[test]
     fn surface_contains_top_left_but_excludes_right_and_bottom_edges() {
@@ -794,5 +813,26 @@ mod tests {
         assert!(!contains(20.0, 23.0));
         assert!(!contains(20.0, 100.0));
     }
-}
 
+    #[test]
+    fn unsupported_workspace_is_not_overwritten_when_window_saves_on_close() {
+        let path = temporary_workspace_path();
+        let original = r#"{"format":"roadmap-docking-workspace","version":999,"layout":{}}"#;
+        fs::write(&path, original).expect("test should be able to write a workspace");
+
+        let mut window = MainWindow::new_with_workspace(Theme::default(), Some(&path))
+            .expect("the window should fall back to an initial layout");
+
+        // The close handler calls this method synchronously.
+        window.save_workspace_now();
+
+        let actual =
+            fs::read_to_string(&path).expect("the original workspace file should still exist");
+        fs::remove_file(&path).expect("test workspace should be removable");
+
+        assert_eq!(
+            actual, original,
+            "a workspace rejected at startup must not be overwritten by the fallback layout"
+        );
+    }
+}
