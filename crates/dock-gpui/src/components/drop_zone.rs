@@ -36,7 +36,7 @@ impl RenderOnce for DropZone {
             .w(px(self.rect.size.width))
             .h(px(self.rect.size.height))
             .bg(rgb(fill))
-            .border_1()
+            .border(px(self.theme.metrics.drop_indicator_thickness))
             .border_color(rgb(border))
     }
 }
