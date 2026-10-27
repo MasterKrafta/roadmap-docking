@@ -87,3 +87,140 @@ pub(super) fn initial_float_bounds(
         })?;
     Ok(bounds)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::initial_float_bounds;
+    use dock_core::{DockMetrics, Point, Rect, Size};
+
+    fn close(actual: f32, expected: f32) {
+        assert!(
+            (actual - expected).abs() < 0.001,
+            "expected {expected}, got {actual}"
+        );
+    }
+
+    #[test]
+    fn floating_bounds_preserve_grab_offset_and_account_for_title_bar() {
+        let metrics = DockMetrics {
+            header_height: 30.0,
+            tab_strip_height: 24.0,
+            ..DockMetrics::default()
+        };
+        let source = Rect::new(Point::new(100.0, 80.0), Size::new(400.0, 300.0));
+        let viewport = Rect::new(Point::ZERO, Size::new(1000.0, 800.0));
+
+        let bounds = initial_float_bounds(
+            source,
+            Point::new(80.0, 40.0),
+            Point::new(250.0, 180.0),
+            viewport,
+            &metrics,
+        )
+        .unwrap();
+
+        close(bounds.origin.x, 170.0);
+        close(bounds.origin.y, 110.0);
+        close(bounds.size.width, 400.0);
+        close(bounds.size.height, 300.0);
+    }
+
+    #[test]
+    fn floating_bounds_respect_minimum_size_and_clamp_to_viewport_edges() {
+        let metrics = DockMetrics {
+            default_column_width: 300.0,
+            min_column_width: 220.0,
+            min_group_height: 180.0,
+            ..DockMetrics::default()
+        };
+        let source = Rect::new(Point::new(10.0, 20.0), Size::new(100.0, 50.0));
+        let viewport = Rect::new(Point::new(40.0, 50.0), Size::new(300.0, 240.0));
+
+        let bounds = initial_float_bounds(
+            source,
+            Point::new(500.0, 500.0),
+            Point::new(500.0, 500.0),
+            viewport,
+            &metrics,
+        )
+        .unwrap();
+
+        close(bounds.origin.x, 120.0);
+        close(bounds.origin.y, 110.0);
+        close(bounds.size.width, 220.0);
+        close(bounds.size.height, 180.0);
+        close(bounds.origin.x + bounds.size.width, 340.0);
+        close(bounds.origin.y + bounds.size.height, 290.0);
+    }
+
+    #[test]
+    fn narrow_viewport_takes_precedence_over_minimum_floating_size() {
+        let metrics = DockMetrics::default();
+        let source = Rect::new(Point::new(10.0, 20.0), Size::new(500.0, 400.0));
+        let viewport = Rect::new(Point::new(30.0, 40.0), Size::new(120.0, 90.0));
+
+        let bounds = initial_float_bounds(
+            source,
+            Point::new(250.0, 200.0),
+            Point::new(600.0, 600.0),
+            viewport,
+            &metrics,
+        )
+        .unwrap();
+
+        assert_eq!(bounds, viewport);
+    }
+
+    #[test]
+    fn invalid_source_viewport_pointer_or_metrics_are_rejected() {
+        let metrics = DockMetrics::default();
+        let source = Rect::new(Point::ZERO, Size::new(400.0, 300.0));
+        let viewport = Rect::new(Point::ZERO, Size::new(1000.0, 800.0));
+
+        assert!(
+            initial_float_bounds(
+                Rect::new(Point::ZERO, Size::new(0.0, 300.0)),
+                Point::ZERO,
+                Point::ZERO,
+                viewport,
+                &metrics,
+            )
+            .is_err()
+        );
+        assert!(
+            initial_float_bounds(
+                source,
+                Point::ZERO,
+                Point::new(f32::NAN, 0.0),
+                viewport,
+                &metrics,
+            )
+            .is_err()
+        );
+        assert!(
+            initial_float_bounds(
+                source,
+                Point::ZERO,
+                Point::ZERO,
+                Rect::new(Point::ZERO, Size::new(0.0, 800.0)),
+                &metrics,
+            )
+            .is_err()
+        );
+        let invalid_metrics = DockMetrics {
+            min_canvas_width: f32::NAN,
+            ..metrics
+        };
+        assert!(
+            initial_float_bounds(
+                source,
+                Point::ZERO,
+                Point::ZERO,
+                viewport,
+                &invalid_metrics,
+            )
+            .is_err()
+        );
+    }
+}
+
