@@ -60,7 +60,6 @@ pub(crate) fn load_layout(path: Option<&Path>, theme: &Theme) -> Option<Layout> 
     }
 }
 
-
 static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Serializes the current persistent workspace state using Core's validated schema.
@@ -236,5 +235,4 @@ mod tests {
             .expect("registered panels should build a valid initial layout");
         assert!(!super::save_layout(None, &layout, &metrics).unwrap());
     }
-
 }

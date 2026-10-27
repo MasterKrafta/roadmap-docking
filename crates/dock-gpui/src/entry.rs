@@ -2,7 +2,6 @@ use std::path::PathBuf;
 
 use gpui::AssetSource;
 
-
 /// Returns the conventional per-user location for the workspace JSON file.
 fn default_workspace_path() -> Option<PathBuf> {
     #[cfg(windows)]

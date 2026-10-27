@@ -65,14 +65,16 @@ impl MainWindow {
         })
     }
 
-
     /// Debounces persistence only when the serialized persistent workspace changes.
     fn schedule_workspace_save(&mut self, cx: &mut Context<Self>) {
         if self.workspace_path.is_none() {
             return;
         }
 
-        let snapshot = match crate::dock::serialize_layout(self.dock.layout(), self.dock.metrics()) {
+        let snapshot = match crate::dock::serialize_layout(
+            self.dock.layout(),
+            self.dock.metrics(),
+        ) {
             Ok(snapshot) => snapshot,
             Err(error) => {
                 tracing::warn!(error = %error, "could not prepare workspace autosave");
@@ -105,7 +107,11 @@ impl MainWindow {
             return;
         };
 
-        match crate::dock::save_layout(Some(path.as_path()), self.dock.layout(), self.dock.metrics()) {
+        match crate::dock::save_layout(
+            Some(path.as_path()),
+            self.dock.layout(),
+            self.dock.metrics(),
+        ) {
             Ok(true) => {
                 self.workspace_snapshot =
                     crate::dock::serialize_layout(self.dock.layout(), self.dock.metrics()).ok();
@@ -266,7 +272,11 @@ impl MainWindow {
         cx.notify();
     }
 
-    pub(crate) fn close_floating_window(&mut self, group: FloatingGroupId, cx: &mut Context<Self>) {
+    pub(crate) fn close_floating_window(
+        &mut self,
+        group: FloatingGroupId,
+        cx: &mut Context<Self>,
+    ) {
         if let Err(error) = self.dock.close_floating(group) {
             tracing::warn!(group = ?group, error = %error, "could not close floating window");
         }
