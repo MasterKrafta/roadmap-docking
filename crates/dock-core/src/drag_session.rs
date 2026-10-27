@@ -20,7 +20,7 @@ pub struct DragSession {
 }
 
 #[cfg(test)]
-#[path = "drag_session/tests.rs"]
+#[path = "drag_session_tests.rs"]
 mod tests;
 
 impl DragSession {
