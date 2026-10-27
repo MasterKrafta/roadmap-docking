@@ -849,7 +849,7 @@ fn resolver_prefers_tab_insertion_and_blocks_click_through_a_front_float() {
     let upper_group = builder.tabs(vec![upper_node], 0, false);
     builder.floating_group(upper_group, bounds, 2);
 
-    let layout = builder.build();
+    let mut layout = builder.build();
     let rects = layout.compute_rects(viewport(), &metrics).unwrap();
     let inside = Point::new(600.0, 405.0);
     let resolved = layout
@@ -883,6 +883,19 @@ fn resolver_prefers_tab_insertion_and_blocks_click_through_a_front_float() {
             "cached drop resolution must be deterministic for identical geometry and input"
         );
     }
+
+    // The resolver owns its prepared data, so it can live in adapter state instead
+    // of borrowing the Layout/geometry across GPUI callbacks. The adapter must still
+    // invalidate it before using it against a changed live layout or viewport.
+    assert!(
+        layout
+            .update_canvas_bounds(Some(Rect::new(
+                Point::new(20.0, 20.0),
+                Size::new(800.0, 600.0),
+            )))
+            .unwrap()
+    );
+    assert_eq!(prepared.resolve(inside).unwrap(), resolved);
     assert_ne!(lower_group, upper_group);
     assert!(
         layout
