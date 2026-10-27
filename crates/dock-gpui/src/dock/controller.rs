@@ -2,11 +2,10 @@ use std::collections::{HashMap, HashSet};
 
 use dock_core::{
     create_initial_layout, CommandError, CommandOutcome, ComputeRectsError, DockCommand,
-    FloatingGroupId,
     DockMetrics, DockSide, DragDropAction, DragDropRequest, DragHandle, DragPayload,
-    DragSession as CoreDragSession, DragState,
-    DropSource, DropTarget, DropZone, Layout, Node, NodeId, PanelId, Point, Profile, Rect,
-    ResizeEdge, UndoRedoHistory,
+    DragSession as CoreDragSession, DragState, DropSource, DropTarget, DropZone,
+    FloatingGroupId, InitialLayoutError, Layout, Node, NodeId, PanelId, Point, Profile, Rect,
+    ResizeEdge, UndoRedoHistory, ValidationError,
 };
 use gpui::ScrollHandle;
 use ui::Theme;
@@ -25,6 +24,26 @@ enum Session {
     Idle,
     Resize(ResizeSession),
     Drag(DragGesture),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum DockInitializationError {
+    #[error(transparent)]
+    InitialLayout(#[from] InitialLayoutError),
+    #[error("restored workspace layout is invalid: {errors:?}")]
+    InvalidRestoredLayout { errors: Vec<ValidationError> },
+    #[error("core initial layout is inconsistent: {reason}")]
+    UnexpectedCoreLayout { reason: &'static str },
+    #[error("core layout does not contain panel '{key}'")]
+    MissingPanelKey { key: String },
+    #[error("could not {operation}: {source}")]
+    CoreCommand {
+        operation: &'static str,
+        #[source]
+        source: CommandError,
+    },
+    #[error("constructed core layout is invalid: {errors:?}")]
+    InvalidConstructedLayout { errors: Vec<ValidationError> },
 }
 
 /// Owns the live layout and the view-local state needed to render it.
@@ -46,17 +65,20 @@ impl DockController {
     ///
     /// Initial placement commands seed the layout and intentionally do not
     /// become undo steps; all subsequent commands use the history facade.
-    pub(crate) fn new_initial(theme: &Theme) -> Result<Self, String> {
+    pub(crate) fn new_initial(theme: &Theme) -> Result<Self, DockInitializationError> {
         let (layout, metrics) = build_initial_layout(theme)?;
         Ok(Self::from_layout_and_metrics(theme, layout, metrics))
     }
 
     /// Installs a restored layout after validating it against the active theme metrics.
-    pub(crate) fn new_with_layout(theme: &Theme, layout: Layout) -> Result<Self, String> {
+    pub(crate) fn new_with_layout(
+        theme: &Theme,
+        layout: Layout,
+    ) -> Result<Self, DockInitializationError> {
         let metrics = dock_metrics_from_theme(theme);
         layout
             .validate(&metrics)
-            .map_err(|errors| format!("Restored workspace layout is invalid: {errors:?}"))?;
+            .map_err(|errors| DockInitializationError::InvalidRestoredLayout { errors })?;
         Ok(Self::from_layout_and_metrics(theme, layout, metrics))
     }
 
@@ -756,21 +778,28 @@ fn filter_capture_target(
 
 /// Builds the starting arrangement inside the controller so no other module
 /// mutates a live Layout. The setup commands are deliberately outside history.
-fn build_initial_layout(theme: &Theme) -> Result<(Layout, DockMetrics), String> {
+fn build_initial_layout(
+    theme: &Theme,
+) -> Result<(Layout, DockMetrics), DockInitializationError> {
     let metrics = dock_metrics_from_theme(theme);
     let descriptors = crate::panels::descriptors(theme);
-    let mut layout = create_initial_layout(Profile::Photoshop, &descriptors, metrics)
-        .map_err(|error| error.to_string())?;
+    let mut layout = create_initial_layout(Profile::Photoshop, &descriptors, metrics)?;
 
     let (single_tab_group, multi_tab_group) = {
-        let area = layout
-            .main_area(DockSide::Right)
-            .ok_or_else(|| "Core factory did not create a right dock area".to_owned())?;
+        let area = layout.main_area(DockSide::Right).ok_or(
+            DockInitializationError::UnexpectedCoreLayout {
+                reason: "factory did not create a right dock area",
+            },
+        )?;
         let Some(Node::Column(column)) = layout.node(area.root) else {
-            return Err("Core factory right dock root is not a Column".to_owned());
+            return Err(DockInitializationError::UnexpectedCoreLayout {
+                reason: "factory right dock root is not a Column",
+            });
         };
         if column.groups.len() != 2 {
-            return Err("Core factory did not create the expected two tab groups".to_owned());
+            return Err(DockInitializationError::UnexpectedCoreLayout {
+                reason: "factory did not create the expected two tab groups",
+            });
         }
         (column.groups[0], column.groups[1])
     };
@@ -789,7 +818,10 @@ fn build_initial_layout(theme: &Theme) -> Result<(Layout, DockMetrics), String> 
             },
             &metrics,
         )
-        .map_err(|error| format!("Could not place the second tab group: {error:?}"))?;
+        .map_err(|source| DockInitializationError::CoreCommand {
+            operation: "place the second tab group",
+            source,
+        })?;
 
     // Move history to a different group first. Dock-core intentionally treats
     // moving a panel to the edge of its own group as a no-op.
@@ -804,7 +836,10 @@ fn build_initial_layout(theme: &Theme) -> Result<(Layout, DockMetrics), String> 
             },
             &metrics,
         )
-        .map_err(|error| format!("Could not stage the history panel: {error:?}"))?;
+        .map_err(|source| DockInitializationError::CoreCommand {
+            operation: "stage the history panel",
+            source,
+        })?;
 
     layout
         .apply(
@@ -817,7 +852,10 @@ fn build_initial_layout(theme: &Theme) -> Result<(Layout, DockMetrics), String> 
             },
             &metrics,
         )
-        .map_err(|error| format!("Could not create the lower group: {error:?}"))?;
+        .map_err(|source| DockInitializationError::CoreCommand {
+            operation: "create the lower group",
+            source,
+        })?;
 
     layout
         .apply(
@@ -828,20 +866,28 @@ fn build_initial_layout(theme: &Theme) -> Result<(Layout, DockMetrics), String> 
             },
             &metrics,
         )
-        .map_err(|error| format!("Could not create the adjacent right column: {error:?}"))?;
+        .map_err(|source| DockInitializationError::CoreCommand {
+            operation: "create the adjacent right column",
+            source,
+        })?;
 
-    layout
-        .validate(&metrics)
-        .map_err(|errors| format!("Constructed Core layout is invalid: {errors:?}"))?;
+    layout.validate(&metrics).map_err(|errors| {
+        DockInitializationError::InvalidConstructedLayout { errors }
+    })?;
 
     Ok((layout, metrics))
 }
 
-fn panel_id_for_key(layout: &Layout, key: &str) -> Result<PanelId, String> {
+fn panel_id_for_key(
+    layout: &Layout,
+    key: &str,
+) -> Result<PanelId, DockInitializationError> {
     layout
         .panel_instances()
         .find_map(|(id, instance)| (instance.key.as_str() == key).then_some(id))
-        .ok_or_else(|| format!("Core layout does not contain the panel '{key}'"))
+        .ok_or_else(|| DockInitializationError::MissingPanelKey {
+            key: key.to_owned(),
+        })
 }
 
 /// Corrects the origin when Core clamps a floating resize to its minimum size.

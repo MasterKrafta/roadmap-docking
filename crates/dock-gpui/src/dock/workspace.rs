@@ -5,10 +5,25 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use dock_core::{DockMetrics, Layout, WorkspaceFile, WorkspaceLoadOptions};
+use dock_core::{DockMetrics, Layout, WorkspaceFile, WorkspaceFileError, WorkspaceLoadOptions};
 use ui::Theme;
 
 use crate::{dock_metrics_from_theme, panels};
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum WorkspaceError {
+    #[error(transparent)]
+    Core(#[from] WorkspaceFileError),
+    #[error("workspace path '{path}' has no file name")]
+    MissingFileName { path: PathBuf },
+    #[error("could not {operation} '{path}': {source}")]
+    Io {
+        operation: &'static str,
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+}
 
 /// Loads a workspace if a path is configured and a valid file is present.
 ///
@@ -66,10 +81,10 @@ static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 pub(crate) fn serialize_layout(
     layout: &Layout,
     metrics: &DockMetrics,
-) -> Result<String, String> {
+) -> Result<String, WorkspaceError> {
     WorkspaceFile::from_layout(layout, metrics)
         .and_then(|file| file.to_json_pretty())
-        .map_err(|error| format!("could not serialize workspace: {error}"))
+        .map_err(WorkspaceError::from)
 }
 
 /// Saves a workspace by writing and syncing a sibling temporary file, then renaming it.
@@ -77,7 +92,7 @@ pub(crate) fn save_layout(
     path: Option<&Path>,
     layout: &Layout,
     metrics: &DockMetrics,
-) -> Result<bool, String> {
+) -> Result<bool, WorkspaceError> {
     let Some(path) = path else {
         return Ok(false);
     };
@@ -86,20 +101,21 @@ pub(crate) fn save_layout(
     Ok(true)
 }
 
-fn atomic_replace(path: &Path, contents: &[u8]) -> Result<(), String> {
+fn atomic_replace(path: &Path, contents: &[u8]) -> Result<(), WorkspaceError> {
     let parent = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
     let file_name = path
         .file_name()
-        .ok_or_else(|| format!("workspace path '{}' has no file name", path.display()))?;
+        .ok_or_else(|| WorkspaceError::MissingFileName {
+            path: path.to_path_buf(),
+        })?;
 
-    fs::create_dir_all(parent).map_err(|error| {
-        format!(
-            "could not create workspace directory '{}': {error}",
-            parent.display()
-        )
+    fs::create_dir_all(parent).map_err(|source| WorkspaceError::Io {
+        operation: "create workspace directory",
+        path: parent.to_path_buf(),
+        source,
     })?;
 
     let counter = TEMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -122,12 +138,13 @@ fn atomic_replace(path: &Path, contents: &[u8]) -> Result<(), String> {
         Ok(())
     })();
 
-    if let Err(error) = result {
+    if let Err(source) = result {
         let _ = fs::remove_file(&temporary_path);
-        return Err(format!(
-            "could not atomically save workspace '{}': {error}",
-            path.display()
-        ));
+        return Err(WorkspaceError::Io {
+            operation: "atomically save workspace",
+            path: path.to_path_buf(),
+            source,
+        });
     }
     Ok(())
 }

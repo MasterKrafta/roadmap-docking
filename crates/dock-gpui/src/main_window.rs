@@ -13,7 +13,10 @@ use ui::Theme;
 
 use crate::components::{with_focus_ring, PopupMenu, PopupMenuItem};
 use crate::host::DockHost;
-use crate::dock::{floating_group_at_point, resolve_shortcut, DockController, Shortcut, WindowHost};
+use crate::dock::{
+    floating_group_at_point, resolve_shortcut, DockController, DockInitializationError, Shortcut,
+    WindowHost,
+};
 use crate::menus::{self, MenuItemModel, MenuState};
 use crate::requests::{DockMenuRequest, ResizeHandle};
 use crate::DockSurface;
@@ -34,7 +37,7 @@ impl MainWindow {
     pub(crate) fn new_with_workspace(
         theme: Theme,
         workspace_path: Option<&Path>,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, DockInitializationError> {
         let dock = match crate::dock::load_layout(workspace_path, &theme) {
             Some(layout) => match DockController::new_with_layout(&theme, layout) {
                 Ok(dock) => dock,

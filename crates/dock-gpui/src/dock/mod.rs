@@ -9,7 +9,7 @@ mod rail_policy;
 mod resize_session;
 mod workspace;
 
-pub(crate) use workspace::{load_layout, save_layout, serialize_layout};
+pub(crate) use workspace::{load_layout, save_layout, serialize_layout, WorkspaceError};
 
 pub(crate) use commands::{activate_tab, collapse_group, cycle_column_mode, toggle_panel};
 pub(crate) use controller::DockController;
