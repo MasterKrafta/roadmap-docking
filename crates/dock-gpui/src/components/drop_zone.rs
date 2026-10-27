@@ -2,6 +2,8 @@ use dock_core::Rect;
 use gpui::{App, IntoElement, RenderOnce, Styled, Window, div, px, rgb};
 use ui::Theme;
 
+use crate::color::blend_rgb;
+
 /// A drop target highlight with distinct active and idle presentation.
 #[derive(IntoElement)]
 pub struct DropZone {
@@ -39,19 +41,6 @@ impl RenderOnce for DropZone {
     }
 }
 
-/// Keeps the component layer independent from the renderer's color utilities.
-fn blend_rgb(foreground: u32, background: u32, foreground_weight: f32) -> u32 {
-    let weight = foreground_weight.clamp(0.0, 1.0);
-    let channel = |shift: u32| {
-        let foreground = ((foreground >> shift) & 0xFF) as f32;
-        let background = ((background >> shift) & 0xFF) as f32;
-        (foreground * weight + background * (1.0 - weight))
-            .round()
-            .clamp(0.0, 255.0) as u32
-    };
-
-    (channel(16) << 16) | (channel(8) << 8) | channel(0)
-}
 
 #[cfg(test)]
 mod tests {
