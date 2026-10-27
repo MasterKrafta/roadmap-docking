@@ -80,8 +80,8 @@ impl DockHost for WindowHost<'_, '_> {
 
     fn surface_mouse_up(&self) -> SurfaceMouseUpHandler {
         Box::new(self.cx.listener::<MouseUpEvent>(
-            move |this, event, _window, cx| {
-                this.handle_surface_mouse_up(event, cx);
+            move |this, event, window, cx| {
+                this.handle_surface_mouse_up(event, window, cx);
             },
         ))
     }
