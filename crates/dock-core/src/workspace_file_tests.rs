@@ -60,7 +60,8 @@ fn generated_workspace_layout(
         for panel_count in group_sizes {
             let mut panels = Vec::with_capacity(*panel_count);
             for _ in 0..*panel_count {
-                let panel_key = key(format!("generated-workspace-panel-{panel_index}"));
+                let panel_key_name = format!("generated-workspace-panel-{panel_index}");
+                let panel_key = key(&panel_key_name);
                 let (_, panel_node) = builder.panel(panel_key.clone(), constraints());
                 descriptors.push((panel_key, constraints()));
                 panels.push(panel_node);
