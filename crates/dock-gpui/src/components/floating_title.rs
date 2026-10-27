@@ -23,8 +23,8 @@ pub struct FloatingTitle {
     pub theme: Theme,
     /// Starts moving the floating window without resolving dock targets.
     pub on_drag_start: DragStartHandler,
-    /// Starts dragging the entire floating group toward a docking target.
-    pub on_capture_drag_start: DragStartHandler,
+    /// Starts dragging the entire floating group toward a docking target, when supported.
+    pub on_capture_drag_start: Option<DragStartHandler>,
     /// Optional close command; omitted until the host provides a safe close-window operation.
     pub on_close: Option<ClickHandler>,
     /// Optional collapse command for the floating window.
@@ -33,15 +33,15 @@ pub struct FloatingTitle {
 
 impl RenderOnce for FloatingTitle {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
-        let button_count =
-            1 + self.on_close.is_some() as usize + self.on_collapse.is_some() as usize;
-        let button_width = self
-            .rect
-            .size
-            .height
-            .min(28.0)
-            .min(self.rect.size.width / button_count as f32)
-            .max(0.0);
+        let button_count = self.on_capture_drag_start.is_some() as usize
+            + self.on_close.is_some() as usize
+            + self.on_collapse.is_some() as usize;
+        let max_button_width = if button_count == 0 {
+            0.0
+        } else {
+            self.rect.size.width / button_count as f32
+        };
+        let button_width = self.rect.size.height.min(28.0).min(max_button_width).max(0.0);
         let buttons_width = button_width * button_count as f32;
         let drag_width = (self.rect.size.width - buttons_width).max(0.0);
 
@@ -99,19 +99,21 @@ impl RenderOnce for FloatingTitle {
             );
         }
 
-        button_right -= button_width;
-        let capture_area = div()
-            .absolute()
-            .left(px(button_right))
-            .top(px(0.0))
-            .w(px(button_width))
-            .h(px(self.rect.size.height))
-            .bg(rgb(self.theme.colors.toolbar_background))
-            .text_color(rgb(self.theme.colors.primary_text))
-            .child("⇲")
-            .id(format!("dock-floating-capture-{:?}", self.group))
-            .on_mouse_down(MouseButton::Left, self.on_capture_drag_start);
-        header = header.child(capture_area);
+        if let Some(on_capture_drag_start) = self.on_capture_drag_start {
+            button_right -= button_width;
+            let capture_area = div()
+                .absolute()
+                .left(px(button_right))
+                .top(px(0.0))
+                .w(px(button_width))
+                .h(px(self.rect.size.height))
+                .bg(rgb(self.theme.colors.toolbar_background))
+                .text_color(rgb(self.theme.colors.primary_text))
+                .child("⇲")
+                .id(format!("dock-floating-capture-{:?}", self.group))
+                .on_mouse_down(MouseButton::Left, on_capture_drag_start);
+            header = header.child(capture_area);
+        }
 
         header
     }
