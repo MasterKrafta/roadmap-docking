@@ -87,7 +87,6 @@ mod column_resize;
 mod column_width_management;
 mod floating_operations;
 mod floating_window;
-mod command_flyout;
 mod command_panels;
 
 mod group_operations;
