@@ -1,11 +1,32 @@
 use std::fmt;
 
 use dock_core::{
-    ComputeRectsError, DragHandle, DragPayload, DragSession as CoreDragSession,
-    DragSessionError, DropZoneResolver, Point,
+    ComputeRectsError, DockMetrics, DragHandle, DragPayload, DragSession as CoreDragSession,
+    DragSessionError, DropZoneResolver, Point, Rect,
 };
 
 use crate::requests::DragOverlay;
+
+/// Geometry contract captured when a drag resolver is prepared.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct DragGeometrySnapshot {
+    pub(super) layout_version: u64,
+    pub(super) viewport: Rect,
+    pub(super) metrics: DockMetrics,
+}
+
+impl DragGeometrySnapshot {
+    pub(super) fn matches(
+        self,
+        layout_version: u64,
+        viewport: Rect,
+        metrics: DockMetrics,
+    ) -> bool {
+        self.layout_version == layout_version
+            && self.viewport == viewport
+            && self.metrics == metrics
+    }
+}
 
 /// A pointer-down that may become a drag after the user crosses the drag threshold.
 ///
@@ -16,6 +37,7 @@ pub(crate) struct DragGesture {
     pub(super) handle: DragHandle,
     pub(super) origin: Point,
     pub(super) core: Option<CoreDragSession>,
+    pub(super) snapshot: Option<DragGeometrySnapshot>,
     pub(super) resolver: Option<DropZoneResolver>,
     pub(super) overlay: Option<DragOverlay>,
 }
@@ -28,6 +50,7 @@ impl fmt::Debug for DragGesture {
             .field("handle", &self.handle)
             .field("origin", &self.origin)
             .field("core_started", &self.core.is_some())
+            .field("snapshot", &self.snapshot)
             .field("resolver_prepared", &self.resolver.is_some())
             .field("overlay_available", &self.overlay.is_some())
             .finish()
@@ -79,6 +102,7 @@ impl DragGesture {
             handle,
             origin,
             core: None,
+            snapshot: None,
             resolver: None,
             overlay: None,
         })
@@ -114,6 +138,7 @@ mod tests {
         assert_eq!(gesture.handle, DragHandle::GroupGrip);
         assert_eq!(gesture.origin, origin);
         assert!(gesture.core.is_none());
+        assert!(gesture.snapshot.is_none());
         assert!(gesture.resolver.is_none());
     }
 
