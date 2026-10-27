@@ -577,8 +577,8 @@ fn floating_capture_source(
         Some(Node::Panel(panel)) => DropSource::Panel {
             panel: panel.panel_id,
         },
-        // Core's DockFloating transaction cannot dock Column or Split roots
-        // through this target pipeline. The UI hides capture for those shapes.
+        // In the active Photoshop profile, Core's DockFloating mapping cannot
+        // re-dock these composite roots through this target pipeline. The UI hides capture.
         Some(Node::Column(_) | Node::Split(_)) | None => {
             return Err(ComputeRectsError::InvalidLayoutState);
         }
