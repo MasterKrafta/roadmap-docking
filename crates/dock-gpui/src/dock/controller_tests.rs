@@ -3482,7 +3482,8 @@ fn restored_layout_rejects_invalid_rail_thresholds() {
 #[test]
 fn initial_group_ratios_follow_theme_default_column_split_ratio() {
     let mut theme = Theme::default();
-    theme.metrics.default_column_split_ratio = 0.7;
+    let split_ratio = 0.63;
+    theme.metrics.default_column_split_ratio = split_ratio;
 
     let controller = DockController::new_initial(&theme).unwrap();
     let ratios = controller
@@ -3496,7 +3497,17 @@ fn initial_group_ratios_follow_theme_default_column_split_ratio() {
         })
         .expect("initial layout should have a column with two tab groups");
 
-    assert_eq!(ratios, vec![0.7, 0.3]);
+    assert_eq!(ratios.len(), 2);
+    assert!(
+        (ratios[0] - split_ratio).abs() < 0.001,
+        "upper group ratio should follow ThemeMetrics::default_column_split_ratio; got {:?}",
+        ratios
+    );
+    assert!(
+        (ratios[1] - (1.0 - split_ratio)).abs() < 0.001,
+        "lower group ratio should use the remainder; got {:?}",
+        ratios
+    );
 }
 
 }
