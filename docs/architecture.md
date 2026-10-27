@@ -40,6 +40,7 @@ platform-windows ──▶ platform-api
 | Клик по вкладке или выбор скрытой вкладки из меню переполнения | `ActivateTab` | Через controller/history; no-op не создаёт checkpoint |
 | Dockers: открыть отсутствующую панель / переключить уже открытую | `OpenPanel` / `ClosePanel` | Undoable при изменении layout |
 | Меню группы: закрыть панель / закрыть группу | `ClosePanel` / `CloseGroup` | Undoable |
+| Двойной клик по вкладке, пункт меню группы или кнопка в заголовке floating-группы | `CollapseGroup` | Переключает свернутость группы; Undoable при изменении layout |
 | Перетаскивание вкладки на другую группу, край, слот колонки или рейки | `MovePanel` | Resolver выбирает команду по цели; Undoable |
 | Перетаскивание вкладки из dock на свободную область | `Float` | Отрыв панели во floating-группу; Undoable |
 | Перетаскивание панели из flyout в dock / на свободную область | `MovePanelFromFlyout` / `FloatPanelFromFlyout` | Undoable |
