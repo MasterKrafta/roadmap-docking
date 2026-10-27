@@ -176,14 +176,14 @@
 
 ### P3-01. Разделить тему: объявленные поля и реальное применение
 
-**Статус:** В работе; подключены типографика и hover-палитра в основных интерактивных компонентах, требуется локальная проверка.  
+**Статус:** В работе; типографика и hover-палитра прошли локальные тесты по подтверждению пользователя, подключены толщины drop-индикатора и outline drag-preview; новый шаг требует локальной проверки.  
 **Уверенность:** статический просмотр подтвердил неиспользование нескольких полей; применение остальных метрик требует отдельного разбора.
 
 **Где смотреть:** `crates/ui/src/theme/theme_typography.rs`, `theme_metrics.rs`, `theme_colors.rs`; `crates/dock-gpui/src/components/`; `crates/dock-gpui/src/layers/`.
 
-**Проблема:** поля ThemeTypography (семейство шрифта, размеры и line height) в просмотренных продукционных компонентах не применяются; цвет hover также не используется для состояний наведения. Ряд ThemeMetrics объявлен, но фактическое использование не обнаружено: `group_control_button_width`, `tab_drag_zone_width`, `button_size`, `button_gap`, `content_padding`, `edge_drop_zone_width`, `drop_indicator_thickness`, `drop_outline_thickness`, `default_column_split_ratio`, `column_tab_width`.
+**Проблема:** поля ThemeTypography (семейство шрифта, размеры и line height) в просмотренных продукционных компонентах не применяются; цвет hover также не используется для состояний наведения. Ряд ThemeMetrics объявлен, но фактическое использование не обнаружено: `group_control_button_width`, `tab_drag_zone_width`, `button_size`, `button_gap`, `content_padding`, `edge_drop_zone_width`, `default_column_split_ratio`, `column_tab_width`. Толщины `drop_indicator_thickness` и `drop_outline_thickness` теперь используются в обводке DropZone и drag-preview.
 
-**Первый шаг:** `ThemeTypography` и `ThemeColors::hover` подключены в `IconButton`, `PanelTab`, `RailEntry`, `PopupMenu` и `FloatingTitle`: семейство шрифта, размеры текста и высота строки берутся из темы, а интерактивные состояния используют её hover-цвет. Этот этап требует локальной проверки.
+**Сделано:** `ThemeTypography` и `ThemeColors::hover` подключены в `IconButton`, `PanelTab`, `RailEntry`, `PopupMenu` и `FloatingTitle`; пользователь подтвердил прохождение локальных тестов. `drop_indicator_thickness` управляет обводкой `DropZone`, а `drop_outline_thickness` — обводкой drag-preview. Текущий шаг требует локальной проверки.
 
 **Что сделать дальше:** для остальных полей метрик выбрать одно из двух: реально подключить его в геометрию/отрисовку или явно пометить как зарезервированное/удалить, если настройка не относится к поддерживаемому API. Сохранить единственный источник правды для размеров, которые уже задаются константами в компонентах.
 
