@@ -69,7 +69,7 @@ pub(crate) fn render(
     }) {
         let Some(Node::Tabs(tabs)) = layout.node(strip.group) else { continue; };
         let strip_bounds = area.rect(strip.rect);
-        let button_width = crate::chrome_geometry::GROUP_MENU_BUTTON_WIDTH.min(strip.rect.size.width);
+        let button_width = theme.metrics.group_control_button_width.min(strip.rect.size.width);
         let mode_button_column = layout.nodes().find_map(|(column_id, node)| match node {
             Node::Column(column)
                 if column.groups.first().copied() == Some(strip.group)
@@ -80,7 +80,9 @@ pub(crate) fn render(
             _ => None,
         });
         let mode_button_width = if mode_button_column.is_some() {
-            crate::chrome_geometry::GROUP_MENU_BUTTON_WIDTH
+            theme
+                .metrics
+                .group_control_button_width
                 .min((strip.rect.size.width - button_width).max(0.0))
         } else {
             0.0
