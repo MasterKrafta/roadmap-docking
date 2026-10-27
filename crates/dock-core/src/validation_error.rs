@@ -1,5 +1,100 @@
 use crate::{DockAreaId, DockSide, FloatingGroupId, GeometryError, NodeId, PanelId, PanelKey};
 
+/// Stable, typed reasons for invalid Split, Tabs, and Column node fields.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ValidationReason {
+    /// A Split must contain at least two child nodes.
+    SplitMustContainAtLeastTwoChildren,
+    /// The number of ratios differs from the number of children or groups.
+    RatioCountMustMatchChildGroupCount,
+    /// Each ratio must be finite and non-negative.
+    RatiosMustBeFiniteAndNonNegative,
+    /// Ratios must sum to one within the supported tolerance.
+    RatiosMustSumToOne,
+    /// A Tabs node must contain at least one child.
+    TabsMustContainAtLeastOneChild,
+    /// The active tab index points outside the child list.
+    ActiveTabIndexOutsideChildren,
+    /// Photoshop Tabs nodes may contain only Panel nodes.
+    PhotoshopTabsChildrenMustBePanelNodes,
+    /// A Column width must be finite.
+    ColumnWidthMustBeFinite,
+    /// A Column width must be positive.
+    ColumnWidthMustBePositive,
+    /// An expanded Column must not be narrower than min_column_width.
+    ExpandedWidthBelowMinimumColumnWidth,
+    /// IconsAndLabels Columns must use min_column_width.
+    IconsAndLabelsWidthMustEqualMinimumColumnWidth,
+    /// IconsOnly Columns must use rail_width.
+    IconsOnlyWidthMustEqualRailWidth,
+    /// The remembered expanded width must be finite and positive.
+    LastExpandedWidthMustBeFiniteAndPositive,
+    /// A Column must contain a group before normalization.
+    ColumnMustContainAtLeastOneGroupBeforeNormalization,
+    /// Photoshop Column groups may contain only Tabs nodes.
+    PhotoshopColumnGroupsMustBeTabsNodes,
+    /// The minimum width required by expanded contents could not be computed.
+    CannotComputeMinimumWidthRequiredByExpandedContents,
+    /// The maximum width allowed by expanded contents could not be computed.
+    CannotComputeMaximumWidthAllowedByExpandedContents,
+    /// Expanded contents require more width than the panel maximum allows.
+    MinimumWidthRequiredByExpandedContentsExceedsPanelMaximumWidth,
+    /// The expanded Column is narrower than its expanded contents require.
+    ExpandedWidthBelowMinimumWidthRequiredByContents,
+}
+
+impl std::fmt::Display for ValidationReason {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::SplitMustContainAtLeastTwoChildren => "must contain at least two children",
+            Self::RatioCountMustMatchChildGroupCount => {
+                "ratio count must match child/group count"
+            }
+            Self::RatiosMustBeFiniteAndNonNegative => {
+                "ratios must be finite and non-negative"
+            }
+            Self::RatiosMustSumToOne => "ratios must sum to 1.0 within 1e-4",
+            Self::TabsMustContainAtLeastOneChild => "must contain at least one child",
+            Self::ActiveTabIndexOutsideChildren => "active_index is outside children",
+            Self::PhotoshopTabsChildrenMustBePanelNodes => {
+                "Photoshop Tabs children must be Panel nodes"
+            }
+            Self::ColumnWidthMustBeFinite => "width must be finite",
+            Self::ColumnWidthMustBePositive => "width must be positive",
+            Self::ExpandedWidthBelowMinimumColumnWidth => {
+                "expanded width is below min_column_width"
+            }
+            Self::IconsAndLabelsWidthMustEqualMinimumColumnWidth => {
+                "IconsAndLabels width must equal min_column_width"
+            }
+            Self::IconsOnlyWidthMustEqualRailWidth => {
+                "IconsOnly width must equal rail_width"
+            }
+            Self::LastExpandedWidthMustBeFiniteAndPositive => {
+                "last_expanded_width must be finite and positive"
+            }
+            Self::ColumnMustContainAtLeastOneGroupBeforeNormalization => {
+                "must contain at least one group before normalization"
+            }
+            Self::PhotoshopColumnGroupsMustBeTabsNodes => {
+                "Photoshop Column groups must be Tabs nodes"
+            }
+            Self::CannotComputeMinimumWidthRequiredByExpandedContents => {
+                "cannot compute minimum width required by expanded contents"
+            }
+            Self::CannotComputeMaximumWidthAllowedByExpandedContents => {
+                "cannot compute maximum width allowed by expanded contents"
+            }
+            Self::MinimumWidthRequiredByExpandedContentsExceedsPanelMaximumWidth => {
+                "minimum width required by expanded contents exceeds panel maximum width"
+            }
+            Self::ExpandedWidthBelowMinimumWidthRequiredByContents => {
+                "expanded width is below minimum width required by its contents"
+            }
+        })
+    }
+}
+
 /// A diagnostic emitted when a Layout violates a core invariant.
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
 pub enum ValidationError {
@@ -56,13 +151,13 @@ pub enum ValidationError {
     },
 
     #[error("invalid Split node {node:?}: {reason}")]
-    InvalidSplit { node: NodeId, reason: &'static str },
+    InvalidSplit { node: NodeId, reason: ValidationReason },
 
     #[error("invalid Tabs node {node:?}: {reason}")]
-    InvalidTabs { node: NodeId, reason: &'static str },
+    InvalidTabs { node: NodeId, reason: ValidationReason },
 
     #[error("invalid Column node {node:?}: {reason}")]
-    InvalidColumn { node: NodeId, reason: &'static str },
+    InvalidColumn { node: NodeId, reason: ValidationReason },
 
     #[error("invalid DockArea {area:?}: {reason}")]
     InvalidDockArea {
