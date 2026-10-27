@@ -1,4 +1,6 @@
-use dock_core::{ColumnMode, DockCommand, DragHandle, DragPayload, Node, NodeId, PanelId, Point, Rect, Size};
+use dock_core::{
+    ColumnMode, DockCommand, DragHandle, DragPayload, Node, NodeId, PanelId, Point, Rect, Size,
+};
 use gpui::{AnyElement, IntoElement};
 
 use crate::components::focus_ring::{TabReorderDirection, keyboard_tab_reorder_direction};
@@ -182,4 +184,3 @@ fn reorder_tab_key_handler(
         }
     })
 }
-
