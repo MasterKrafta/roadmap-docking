@@ -1,10 +1,10 @@
 use dock_core::{DockCommand, DragHandle, DragPayload, FloatingGroupId, PanelInstance};
 use gpui::{
-    AnyElement, ClickEvent, Context, MouseDownEvent, MouseMoveEvent, MouseUpEvent, SharedString,
+    AnyElement, ClickEvent, Context, KeyDownEvent, MouseDownEvent, MouseMoveEvent, MouseUpEvent, SharedString,
 };
 
 use crate::host::{
-    CommandClickHandler, DockHost, DragStartHandler, NoopHost, ResizeStartHandler,
+    CommandClickHandler, CommandKeyHandler, DockHost, DragStartHandler, NoopHost, ResizeStartHandler,
     SurfaceMouseMoveHandler, SurfaceMouseUpHandler,
 };
 use crate::main_window::MainWindow;
@@ -42,6 +42,15 @@ impl DockHost for WindowHost<'_, '_> {
 
     fn command(&self, command: DockCommand) -> CommandClickHandler {
         Box::new(self.cx.listener::<ClickEvent>(
+            move |this, _event, _window, cx| {
+                this.apply_dock_command(command.clone(), cx);
+                cx.notify();
+            },
+        ))
+    }
+
+    fn command_key(&self, command: DockCommand) -> CommandKeyHandler {
+        Box::new(self.cx.listener::<KeyDownEvent>(
             move |this, _event, _window, cx| {
                 this.apply_dock_command(command.clone(), cx);
                 cx.notify();
