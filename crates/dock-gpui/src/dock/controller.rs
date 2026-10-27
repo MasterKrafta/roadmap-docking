@@ -240,7 +240,7 @@ impl DockController {
     /// Completes an active Core gesture at the release point and returns its semantic request.
     ///
     /// A press released below the threshold is an ordinary click and produces no request.
-    /// This method does not translate the request into a DockCommand; that belongs to Stage 11.
+    /// The returned request is resolved and committed separately by `commit_drop_request`.
     pub(crate) fn finish_drag(
         &mut self,
         pointer: Point,
@@ -289,25 +289,44 @@ impl DockController {
         mut request: DragDropRequest,
         viewport: Rect,
     ) -> Result<DragDropAction, CommandError> {
-        if request.target == Some(DropTarget::FreeArea) {
-            let frame = FrameGeometry::compute(&self.layout, viewport, &self.metrics).map_err(|_| {
-                CommandError::InvalidTarget {
-                    reason: "could not compute source geometry for floating drop",
-                }
-            })?;
-            super::drop_commit::supply_floating_bounds(
-                &self.layout,
-                frame.rects(),
-                &self.metrics,
-                viewport,
-                &mut request,
-            )?;
+        // Resolution is read-only. Treat geometry/policy failures like command
+        // failures so the controller never leaves a stale last_error behind.
+        let resolution = (|| -> Result<DragDropAction, CommandError> {
+            if request.target == Some(DropTarget::FreeArea) {
+                let frame = FrameGeometry::compute(&self.layout, viewport, &self.metrics)
+                    .map_err(|_| CommandError::InvalidTarget {
+                        reason: "could not compute source geometry for floating drop",
+                    })?;
+                super::drop_commit::supply_floating_bounds(
+                    &self.layout,
+                    frame.rects(),
+                    &self.metrics,
+                    viewport,
+                    &mut request,
+                )?;
+            }
+
+            super::drop_commit::resolve_drop(&self.layout, &request, &self.metrics)
+        })();
+
+        let action = match resolution {
+            Ok(action) => action,
+            Err(error) => return self.track_command_result(Err(error), "drop_resolve"),
+        };
+
+        match &action {
+            DragDropAction::Command(command) => {
+                // Use the one normal history entry point; Layout::apply is
+                // transactional, and history records only committed revisions.
+                self.apply(command.clone())?;
+            }
+            DragDropAction::NoOp => {
+                // A rejected previous operation must not remain visible after a
+                // successfully resolved no-op drop.
+                self.last_error = None;
+            }
         }
 
-        let action = super::drop_commit::resolve_drop(&self.layout, &request, &self.metrics)?;
-        if let DragDropAction::Command(command) = &action {
-            self.apply(command.clone())?;
-        }
         Ok(action)
     }
 
