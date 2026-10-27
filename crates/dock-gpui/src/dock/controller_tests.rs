@@ -2207,7 +2207,7 @@
                     index: 0,
                 },
                 "main" => DropTarget::MainColumn {
-                    side: DockSide::Right,
+                    side: DockSide::Left,
                     index: 0,
                 },
                 _ => unreachable!("all flyout target cases are listed above"),
