@@ -717,7 +717,8 @@ impl MainWindow {
         .absolute()
         .top_0()
         .left_0()
-        .size_full()    }
+        .size_full()
+    }
 }
 
 impl Render for MainWindow {
