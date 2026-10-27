@@ -1,12 +1,168 @@
-#[path = "hit_test/floating.rs"]
-mod hit_test_floating;
+use std::collections::HashSet;
+
+use crate::{
+    Axis, ComputeRectsError, DockMetrics, DropTarget, DropZone, FloatingGroupId,
+    FloatingGroupRect, Layout, LayoutRects, Node, NodeId, PanelId, Point, Rect, ResizeEdge,
+};
+
+/// Semantic result of hit-testing a point against a LayoutRects snapshot.
+///
+/// The result contains model handles and interaction meaning only. Pointer
+/// events, views, windows, and platform-specific objects belong to the adapter layer.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum HitResult {
+    /// The point belongs to the central application Canvas.
+    Canvas,
+    /// The point does not belong to any known interactive geometry.
+    Miss,
+    Column {
+        column: NodeId,
+    },
+    Group {
+        group: NodeId,
+    },
+    TabStrip {
+        group: NodeId,
+    },
+    TabHeader {
+        group: NodeId,
+        panel: PanelId,
+        index: usize,
+    },
+    /// Button that exposes tabs omitted from the visible tab headers.
+    TabOverflowButton {
+        group: NodeId,
+    },
+    Panel {
+        panel: PanelId,
+    },
+    /// The active panel surface inside a transient rail flyout.
+    FlyoutPanel {
+        column: NodeId,
+        group: NodeId,
+        panel: PanelId,
+    },
+    /// The flyout's resize edge facing the Canvas.
+    FlyoutResizeEdge {
+        column: NodeId,
+        panel: PanelId,
+        edge: ResizeEdge,
+    },
+    Splitter {
+        owner: NodeId,
+        boundary_index: usize,
+        axis: Axis,
+    },
+    /// The title band of a floating window, used for moving the window.
+    FloatingTitle {
+        group: FloatingGroupId,
+    },
+    /// The body/background of a floating window without a more specific hit.
+    FloatingGroup {
+        group: FloatingGroupId,
+    },
+    FloatingResizeEdge {
+        group: FloatingGroupId,
+        edge: ResizeEdge,
+    },
+    DropZone {
+        target: DropTarget,
+        zone: DropZone,
+    },
+}
+
+#[cfg(test)]
+mod hit_result_tests {
+    use slotmap::Key;
+
+    use super::HitResult;
+    #[cfg(feature = "serde")]
+    use crate::PanelId;
+    use crate::{Axis, DropTarget, DropZone, NodeId, ResizeEdge};
+
+    #[test]
+    fn hit_results_are_pure_semantic_values() {
+        let hit = HitResult::Splitter {
+            owner: NodeId::null(),
+            boundary_index: 1,
+            axis: Axis::Y,
+        };
+        assert!(matches!(
+            hit,
+            HitResult::Splitter {
+                boundary_index: 1,
+                axis: Axis::Y,
+                ..
+            }
+        ));
+
+        let hit = HitResult::DropZone {
+            target: DropTarget::Tabs {
+                group: NodeId::null(),
+                index: 2,
+            },
+            zone: DropZone::Bottom,
+        };
+        assert!(matches!(
+            hit,
+            HitResult::DropZone {
+                zone: DropZone::Bottom,
+                ..
+            }
+        ));
+
+        let hit = HitResult::TabOverflowButton {
+            group: NodeId::null(),
+        };
+        assert!(matches!(hit, HitResult::TabOverflowButton { group } if group == NodeId::null()));
+
+        let hit = HitResult::FloatingResizeEdge {
+            group: crate::FloatingGroupId::null(),
+            edge: ResizeEdge::BottomRight,
+        };
+        assert!(matches!(
+            hit,
+            HitResult::FloatingResizeEdge {
+                edge: ResizeEdge::BottomRight,
+                ..
+            }
+        ));
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn hit_result_round_trips_through_serde() {
+        let hit = HitResult::TabHeader {
+            group: NodeId::null(),
+            panel: PanelId::null(),
+            index: 3,
+        };
+        let encoded = serde_json::to_string(&hit).unwrap();
+        assert_eq!(serde_json::from_str::<HitResult>(&encoded).unwrap(), hit);
+
+        let overflow = HitResult::TabOverflowButton {
+            group: NodeId::null(),
+        };
+        let encoded = serde_json::to_string(&overflow).unwrap();
+        assert_eq!(
+            serde_json::from_str::<HitResult>(&encoded).unwrap(),
+            overflow
+        );
+    }
+}
+
 #[path = "hit_test/geometry.rs"]
 mod hit_test_geometry;
 
-use self::hit_test_floating::{all_floating_subtrees, floating_front_to_back, floating_subtree};
+#[path = "hit_test/geometry.rs"]
+mod hit_test_geometry;
 use self::hit_test_geometry::{contains, flyout_resize_hit_rect, hit_layout_geometry};
+use std::collections::HashSet;
+
 use crate::{
-    ComputeRectsError, DockMetrics, HitResult, Layout, LayoutRects, Point, Rect,
+    Axis, ComputeRectsError, DockMetrics, DropTarget, DropZone, FloatingGroupId,
+    FloatingGroupRect, Layout, LayoutRects, Node, NodeId, PanelId, Point, Rect, ResizeEdge,
 };
 
 impl Layout {
@@ -139,3 +295,82 @@ impl Layout {
 #[cfg(test)]
 #[path = "hit_test/tests.rs"]
 mod tests;
+
+
+fn floating_front_to_back(floating: &[FloatingGroupRect]) -> Vec<FloatingGroupRect> {
+    let mut ordered = floating.to_vec();
+    ordered.sort_by_key(|item| std::cmp::Reverse(item.z_order));
+    ordered
+}
+
+fn collect_subtree(
+    layout: &Layout,
+    root: NodeId,
+    nodes: &mut HashSet<NodeId>,
+    panels: &mut HashSet<PanelId>,
+) -> Result<(), ComputeRectsError> {
+    if !nodes.insert(root) {
+        return Ok(());
+    }
+    match layout.node(root).ok_or(ComputeRectsError::InvalidLayoutState)? {
+        Node::Split(split) => {
+            for child in &split.children {
+                collect_subtree(layout, *child, nodes, panels)?;
+            }
+        }
+        Node::Column(column) => {
+            for group in &column.groups {
+                collect_subtree(layout, *group, nodes, panels)?;
+            }
+        }
+        Node::Tabs(tabs) => {
+            for child in &tabs.children {
+                collect_subtree(layout, *child, nodes, panels)?;
+            }
+        }
+        Node::Panel(panel) => {
+            panels.insert(panel.panel_id);
+        }
+    }
+    Ok(())
+}
+
+type FloatingSubtree = (HashSet<NodeId>, HashSet<PanelId>);
+
+fn floating_subtree(
+    layout: &Layout,
+    id: crate::FloatingGroupId,
+) -> Result<Option<FloatingSubtree>, ComputeRectsError> {
+    let Some(floating) = layout.floating_group(id) else {
+        return Ok(None);
+    };
+    let Some(area) = layout.dock_area(floating.area) else {
+        return Ok(None);
+    };
+    let mut nodes = HashSet::new();
+    let mut panels = HashSet::new();
+    collect_subtree(layout, area.root, &mut nodes, &mut panels)?;
+    Ok(Some((nodes, panels)))
+}
+
+fn all_floating_subtrees(
+    layout: &Layout,
+    floating: &[FloatingGroupRect],
+) -> Result<(HashSet<NodeId>, HashSet<PanelId>), ComputeRectsError> {
+    let mut nodes = HashSet::new();
+    let mut panels = HashSet::new();
+    for item in floating {
+        let Some(group) = layout.floating_group(item.group) else {
+            continue;
+        };
+        let Some(area) = layout.dock_area(group.area) else {
+            continue;
+        };
+
+        // Collect directly into shared sets. Building a pair of fresh HashSets
+        // per floating window and then extending the union repeats allocation
+        // and hashing work on points outside every floating window.
+        collect_subtree(layout, area.root, &mut nodes, &mut panels)?;
+    }
+    Ok((nodes, panels))
+}
