@@ -401,6 +401,14 @@ struct FloatingDropArea {
 }
 
 impl DropZoneResolver {
+    /// Returns the legal drop zones captured when this resolver was prepared.
+    ///
+    /// UI adapters can render the same geometry used for hit resolution without
+    /// recomputing the zones for every pointer movement.
+    pub fn zones(&self) -> &[DropZoneRect] {
+        &self.zones
+    }
+
     /// Resolves a pointer position using the cached legal zones and tree index.
     ///
     /// This performs only point validation and hit resolution; layout validation,
