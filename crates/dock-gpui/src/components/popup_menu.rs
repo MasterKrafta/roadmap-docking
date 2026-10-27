@@ -40,6 +40,7 @@ impl PopupMenu {
 
 impl RenderOnce for PopupMenu {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+        let typography = self.theme.typography;
         let mut popup = div()
             .absolute()
             .left(px(self.bounds.origin.x))
@@ -48,6 +49,9 @@ impl RenderOnce for PopupMenu {
             .h(px(self.bounds.size.height))
             .bg(rgb(self.theme.colors.window_background))
             .text_color(rgb(self.theme.colors.primary_text))
+            .font_family(typography.family)
+            .text_size(px(typography.body_size))
+            .line_height(px(typography.line_height))
             .border_1()
             .border_color(rgb(self.theme.colors.border));
 
@@ -70,7 +74,12 @@ impl RenderOnce for PopupMenu {
 
             if item.enabled {
                 if let Some(on_select) = item.on_select {
-                    popup = popup.child(with_focus_ring(row, &self.theme).on_click(on_select));
+                    let hover_color = self.theme.colors.hover;
+                    popup = popup.child(
+                        with_focus_ring(row, &self.theme)
+                            .hover(move |style| style.bg(rgb(hover_color)))
+                            .on_click(on_select),
+                    );
                     continue;
                 }
             }
