@@ -1338,8 +1338,8 @@
                     index: 0,
                 },
                 "main" => DropTarget::MainColumn {
-                    side: DockSide::Left,
-                    index: 0,
+                    side: DockSide::Right,
+                    index: main_columns.len(),
                 },
                 _ => unreachable!("all group target cases are listed above"),
             };
@@ -1392,8 +1392,8 @@
                     action,
                     DragDropAction::Command(DockCommand::MoveGroupToMainColumn {
                         group: source_group,
-                        side: DockSide::Left,
-                        index: 0,
+                        side: DockSide::Right,
+                        index: main_columns.len(),
                     })
                 ),
                 _ => unreachable!("all group target cases are listed above"),
@@ -1408,11 +1408,10 @@
                 }
                 "main" => {
                     assert_ne!(owner_column(&controller, source_group), Some(source_column));
-                    assert!(!crate::tree_query::main_column_ids(
-                        controller.layout(),
-                        DockSide::Left
-                    )
-                    .is_empty());
+                    assert_eq!(
+                        crate::tree_query::main_column_ids(controller.layout(), DockSide::Right).len(),
+                        main_columns.len() + 1
+                    );
                 }
                 "edge" => assert!(owner_column(&controller, source_group).is_some()),
                 _ => unreachable!("all group target cases are listed above"),
@@ -1924,8 +1923,8 @@
                     index: 0,
                 },
                 "main" => DropTarget::MainColumn {
-                    side: DockSide::Left,
-                    index: 0,
+                    side: DockSide::Right,
+                    index: main_columns.len(),
                 },
                 _ => unreachable!("all panel target cases are listed above"),
             };
