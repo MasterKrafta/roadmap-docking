@@ -29,9 +29,64 @@ pub(crate) struct MainWindow {
     menu_state: MenuState,
     activation_subscription: Option<Subscription>,
     workspace_path: Option<PathBuf>,
-    workspace_snapshot: Option<String>,
+    workspace_save_state: WorkspaceSaveState,
     workspace_save_enabled: bool,
-    workspace_save_generation: u64,
+}
+
+#[derive(Default)]
+struct WorkspaceSaveState {
+    saved_snapshot: Option<String>,
+    pending_snapshot: Option<String>,
+    generation: u64,
+}
+
+impl WorkspaceSaveState {
+    fn with_saved_snapshot(saved_snapshot: Option<String>) -> Self {
+        Self {
+            saved_snapshot,
+            ..Self::default()
+        }
+    }
+
+    fn schedule(&mut self, snapshot: String) -> Option<u64> {
+        if self.saved_snapshot.as_deref() == Some(snapshot.as_str()) {
+            if self.pending_snapshot.take().is_some() {
+                self.generation = self.generation.wrapping_add(1);
+            }
+            return None;
+        }
+        if self.pending_snapshot.as_deref() == Some(snapshot.as_str()) {
+            return None;
+        }
+
+        self.pending_snapshot = Some(snapshot);
+        self.generation = self.generation.wrapping_add(1);
+        Some(self.generation)
+    }
+
+    fn begin_save(&mut self, generation: u64) -> bool {
+        if self.generation != generation {
+            return false;
+        }
+        self.pending_snapshot = None;
+        true
+    }
+
+    fn finish_success(&mut self, snapshot: Option<String>) {
+        if let Some(snapshot) = snapshot {
+            self.saved_snapshot = Some(snapshot);
+        }
+        self.finish_attempt();
+    }
+
+    fn finish_failed_save(&mut self) {
+        self.finish_attempt();
+    }
+
+    fn finish_attempt(&mut self) {
+        self.pending_snapshot = None;
+        self.generation = self.generation.wrapping_add(1);
+    }
 }
 
 impl MainWindow {
@@ -40,9 +95,13 @@ impl MainWindow {
         workspace_path: Option<&Path>,
     ) -> Result<Self, DockInitializationError> {
         let mut workspace_load_failed = false;
+        let mut workspace_loaded = false;
         let dock = match crate::dock::load_layout(workspace_path, &theme) {
             Ok(Some(layout)) => match DockController::new_with_layout(&theme, layout) {
-                Ok(dock) => dock,
+                Ok(dock) => {
+                    workspace_loaded = true;
+                    dock
+                }
                 Err(error) => {
                     tracing::warn!(
                         error = %error,
@@ -68,12 +127,12 @@ impl MainWindow {
         };
 
         let workspace_path = workspace_path.map(Path::to_path_buf);
-        let workspace_snapshot = if workspace_load_failed {
-            None
-        } else {
+        let saved_snapshot = if workspace_loaded {
             workspace_path.as_deref().and_then(|_| {
                 crate::dock::serialize_layout(dock.layout(), dock.metrics()).ok()
             })
+        } else {
+            None
         };
 
         Ok(Self {
@@ -82,9 +141,8 @@ impl MainWindow {
             menu_state: MenuState::Closed,
             activation_subscription: None,
             workspace_path,
-            workspace_snapshot,
+            workspace_save_state: WorkspaceSaveState::with_saved_snapshot(saved_snapshot),
             workspace_save_enabled: !workspace_load_failed,
-            workspace_save_generation: 0,
         })
     }
 
@@ -104,19 +162,16 @@ impl MainWindow {
                 return;
             }
         };
-        if self.workspace_snapshot.as_deref() == Some(snapshot.as_str()) {
+        let Some(generation) = self.workspace_save_state.schedule(snapshot) else {
             return;
-        }
-        self.workspace_snapshot = Some(snapshot);
-        self.workspace_save_generation = self.workspace_save_generation.wrapping_add(1);
-        let generation = self.workspace_save_generation;
+        };
 
         cx.spawn(async move |this, cx| {
             cx.background_executor()
                 .timer(Duration::from_millis(500))
                 .await;
             let _ = this.update(cx, |this, _cx| {
-                if this.workspace_save_generation == generation {
+                if this.workspace_save_state.begin_save(generation) {
                     this.save_workspace_now();
                 }
             });
@@ -139,11 +194,13 @@ impl MainWindow {
             self.dock.metrics(),
         ) {
             Ok(true) => {
-                self.workspace_snapshot =
+                let snapshot =
                     crate::dock::serialize_layout(self.dock.layout(), self.dock.metrics()).ok();
+                self.workspace_save_state.finish_success(snapshot);
             }
-            Ok(false) => {}
+            Ok(false) => self.workspace_save_state.finish_failed_save(),
             Err(error) => {
+                self.workspace_save_state.finish_failed_save();
                 tracing::warn!(
                     path = %path.display(),
                     error = %error,
@@ -810,7 +867,7 @@ mod tests {
     use gpui::{point, px};
     use ui::Theme;
 
-    use super::{MainWindow, surface_contains_window_point};
+    use super::{MainWindow, WorkspaceSaveState, surface_contains_window_point};
 
     fn temporary_workspace_path() -> PathBuf {
         let nonce = SystemTime::now()
@@ -835,6 +892,44 @@ mod tests {
         assert!(!contains(-1.0, 30.0));
         assert!(!contains(20.0, 23.0));
         assert!(!contains(20.0, 100.0));
+    }
+
+    #[test]
+    fn failed_workspace_save_does_not_suppress_retry_for_same_snapshot() {
+        let mut state = WorkspaceSaveState::default();
+        let generation = state
+            .schedule("changed layout".to_owned())
+            .expect("a changed layout should schedule a save");
+
+        assert!(state.begin_save(generation));
+        state.finish_failed_save();
+
+        let retry_generation = state
+            .schedule("changed layout".to_owned())
+            .expect("the same layout should be schedulable after a failed save");
+        assert_ne!(generation, retry_generation);
+    }
+
+    #[test]
+    fn successfully_saved_snapshot_does_not_schedule_again() {
+        let mut state =
+            WorkspaceSaveState::with_saved_snapshot(Some("saved layout".to_owned()));
+
+        assert!(state.schedule("saved layout".to_owned()).is_none());
+    }
+
+    #[test]
+    fn newer_snapshot_supersedes_pending_save() {
+        let mut state = WorkspaceSaveState::default();
+        let old_generation = state
+            .schedule("older layout".to_owned())
+            .expect("first layout should schedule a save");
+        let new_generation = state
+            .schedule("newer layout".to_owned())
+            .expect("different layout should replace the pending save");
+
+        assert!(!state.begin_save(old_generation));
+        assert!(state.begin_save(new_generation));
     }
 
     #[test]
