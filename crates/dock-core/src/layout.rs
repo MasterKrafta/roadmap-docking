@@ -105,7 +105,6 @@ mod initialization;
 mod normalization;
 #[cfg(feature = "serde")]
 mod workspace;
-mod workspace_repairs;
 mod group_sizing;
 mod minimum_size;
 mod tree_navigation;
