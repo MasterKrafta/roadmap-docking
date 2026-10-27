@@ -3478,4 +3478,25 @@ fn restored_layout_rejects_invalid_rail_thresholds() {
         DockController::new_with_layout(&invalid_theme, layout).is_err(),
         "restoring a layout with invalid theme metrics must fail explicitly"
     );
+
+#[test]
+fn initial_group_ratios_follow_theme_default_column_split_ratio() {
+    let mut theme = Theme::default();
+    theme.metrics.default_column_split_ratio = 0.7;
+
+    let controller = DockController::new_initial(&theme).unwrap();
+    let ratios = controller
+        .layout()
+        .nodes()
+        .find_map(|(_, node)| match node {
+            Node::Column(column) if column.groups.len() == 2 => {
+                Some(column.group_ratios.clone())
+            }
+            _ => None,
+        })
+        .expect("initial layout should have a column with two tab groups");
+
+    assert_eq!(ratios, vec![0.7, 0.3]);
+}
+
 }
