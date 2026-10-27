@@ -7,7 +7,7 @@ use dock_core::{DockCommand, DragHandle, DragPayload, FloatingGroupId, Point, Re
 use gpui::{
     Context, DispatchPhase, InteractiveElement, IntoElement, KeyDownEvent, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Render, StatefulInteractiveElement,
-    Styled, Subscription, Window, div, px, rgb,
+    Styled, Subscription, Window, canvas, div, px, rgb,
 };
 use ui::Theme;
 
@@ -583,28 +583,15 @@ impl Render for MainWindow {
         let surface_top = self.surface_top();
         let content_height = (height - surface_top).max(1.0);
 
+        // Window-level listeners must be registered during paint, not render.
         // Escape and popup navigation run in capture; global shortcuts run in bubble
         // so focused input controls can consume Tab/Undo/Redo first.
         let key_down = cx.listener::<KeyDownEvent>(|this, event, window, cx| {
             this.handle_key_down(event, window, cx);
         });
-        window.on_key_event(
-            move |event: &KeyDownEvent, phase, window, cx| {
-                if phase == DispatchPhase::Capture {
-                    key_down(event, window, cx);
-                }
-            },
-        );
         let global_shortcuts = cx.listener::<KeyDownEvent>(|this, event, window, cx| {
             this.handle_global_shortcuts(event, window, cx);
         });
-        window.on_key_event(
-            move |event: &KeyDownEvent, phase, window, cx| {
-                if phase == DispatchPhase::Bubble {
-                    global_shortcuts(event, window, cx);
-                }
-            },
-        );
 
         // Element mouse-move handlers stop receiving events once the pointer leaves
         // the surface hitbox. Keep tracking active pointer gestures at window scope
@@ -612,39 +599,9 @@ impl Render for MainWindow {
         let outside_move = cx.listener::<MouseMoveEvent>(|this, event, window, cx| {
             this.handle_surface_mouse_move(event, window, cx);
         });
-        window.on_mouse_event(
-            move |event: &MouseMoveEvent, phase, window, cx| {
-                if phase == DispatchPhase::Capture
-                    && !surface_contains_window_point(
-                        event.position,
-                        width,
-                        surface_top,
-                        content_height,
-                    )
-                {
-                    outside_move(event, window, cx);
-                }
-            },
-        );
-
         let outside_up = cx.listener::<MouseUpEvent>(|this, event, window, cx| {
             this.handle_surface_mouse_up(event, window, cx);
         });
-        window.on_mouse_event(
-            move |event: &MouseUpEvent, phase, window, cx| {
-                if phase == DispatchPhase::Capture
-                    && event.button == MouseButton::Left
-                    && !surface_contains_window_point(
-                        event.position,
-                        width,
-                        surface_top,
-                        content_height,
-                    )
-                {
-                    outside_up(event, window, cx);
-                }
-            },
-        );
 
         let viewport = Rect::new(Point::ZERO, Size::new(width, content_height));
 
@@ -672,63 +629,52 @@ impl Render for MainWindow {
             .anchor()
             .map(|anchor| menus::popup_bounds(anchor, menu_viewport, menu_items.len()));
 
-        if let Some(bounds) = menu_bounds {
-            let outside_menu_down = cx.listener::<MouseDownEvent>(
-                move |this, event, _window, cx| {
-                    if event.button == MouseButton::Left
-                        && this.menu_state.is_open()
-                        && !menus::contains(bounds, dock_pointer(event.position))
-                    {
-                        this.menu_state = MenuState::Closed;
-                        cx.notify();
-                    }
-                },
-            );
-            window.on_mouse_event(
-                move |event: &MouseDownEvent, phase, window, cx| {
-                    if phase == DispatchPhase::Capture && event.button == MouseButton::Left {
-                        outside_menu_down(event, window, cx);
-                    }
-                },
-            );
-        }
+        let outside_menu_down = cx.listener::<MouseDownEvent>(
+            move |this, event, _window, cx| {
+                if event.button != MouseButton::Left || !this.menu_state.is_open() {
+                    return;
+                }
+                if menu_bounds
+                    .is_some_and(|bounds| !menus::contains(bounds, dock_pointer(event.position)))
+                {
+                    this.menu_state = MenuState::Closed;
+                    cx.notify();
+                }
+            },
+        );
 
-        if let Some(flyout) = frame.rects().flyout {
-            let edge_padding = (self.theme.metrics.splitter_hit_zone.min(flyout.rect.size.width))
-                / 2.0;
-            let flyout_hit_bounds = Rect::new(
+        let flyout_hit_bounds = frame.rects().flyout.map(|flyout| {
+            let edge_padding =
+                (self.theme.metrics.splitter_hit_zone.min(flyout.rect.size.width)) / 2.0;
+            Rect::new(
                 Point::new(flyout.rect.origin.x - edge_padding, flyout.rect.origin.y),
                 Size::new(flyout.rect.size.width + edge_padding * 2.0, flyout.rect.size.height),
-            );
-            let menu_bounds_for_flyout = menu_bounds;
-            let outside_flyout_down = cx.listener::<MouseDownEvent>(
-                move |this, event, _window, cx| {
-                    if event.button != MouseButton::Left {
-                        return;
+            )
+        });
+        let menu_bounds_for_flyout = menu_bounds;
+        let outside_flyout_down = cx.listener::<MouseDownEvent>(
+            move |this, event, _window, cx| {
+                if event.button != MouseButton::Left {
+                    return;
+                }
+                let Some(flyout_hit_bounds) = flyout_hit_bounds else {
+                    return;
+                };
+                let pointer = dock_surface_pointer(event.position, surface_top);
+                let inside_menu = menu_bounds_for_flyout
+                    .is_some_and(|bounds| menus::contains(bounds, dock_pointer(event.position)));
+                if !inside_menu
+                    && !menus::contains(flyout_hit_bounds, pointer)
+                    && this.dock.layout().flyout().is_some()
+                    && this.dock.layout().flyout_auto_collapse_enabled()
+                {
+                    if let Err(error) = this.dock.apply(DockCommand::DismissFlyout) {
+                        tracing::debug!(error = %error, "flyout dismissal on outside click was rejected");
                     }
-                    let pointer = dock_surface_pointer(event.position, surface_top);
-                    let inside_menu = menu_bounds_for_flyout
-                        .is_some_and(|bounds| menus::contains(bounds, dock_pointer(event.position)));
-                    if !inside_menu
-                        && !menus::contains(flyout_hit_bounds, pointer)
-                        && this.dock.layout().flyout().is_some()
-                        && this.dock.layout().flyout_auto_collapse_enabled()
-                    {
-                        if let Err(error) = this.dock.apply(DockCommand::DismissFlyout) {
-                            tracing::debug!(error = %error, "flyout dismissal on outside click was rejected");
-                        }
-                        cx.notify();
-                    }
-                },
-            );
-            window.on_mouse_event(
-                move |event: &MouseDownEvent, phase, window, cx| {
-                    if phase == DispatchPhase::Capture && event.button == MouseButton::Left {
-                        outside_flyout_down(event, window, cx);
-                    }
-                },
-            );
-        }
+                    cx.notify();
+                }
+            },
+        );
 
         // Raise floating windows during capture, but do not let clicks on a menu
         // item raise an underlying floating window before the popup handles them.
@@ -760,11 +706,80 @@ impl Render for MainWindow {
                 cx.notify();
             }
         });
-        window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
-            if phase == DispatchPhase::Capture {
-                raise_floating(event, window, cx);
-            }
-        });
+
+        let global_event_handlers = canvas(
+            |_, _, _| (),
+            move |_, _, window, _cx| {
+                window.on_key_event(
+                    move |event: &KeyDownEvent, phase, window, cx| {
+                        if phase == DispatchPhase::Capture {
+                            key_down(event, window, cx);
+                        }
+                    },
+                );
+                window.on_key_event(
+                    move |event: &KeyDownEvent, phase, window, cx| {
+                        if phase == DispatchPhase::Bubble {
+                            global_shortcuts(event, window, cx);
+                        }
+                    },
+                );
+                window.on_mouse_event(
+                    move |event: &MouseMoveEvent, phase, window, cx| {
+                        if phase == DispatchPhase::Capture
+                            && !surface_contains_window_point(
+                                event.position,
+                                width,
+                                surface_top,
+                                content_height,
+                            )
+                        {
+                            outside_move(event, window, cx);
+                        }
+                    },
+                );
+                window.on_mouse_event(
+                    move |event: &MouseUpEvent, phase, window, cx| {
+                        if phase == DispatchPhase::Capture
+                            && event.button == MouseButton::Left
+                            && !surface_contains_window_point(
+                                event.position,
+                                width,
+                                surface_top,
+                                content_height,
+                            )
+                        {
+                            outside_up(event, window, cx);
+                        }
+                    },
+                );
+                window.on_mouse_event(
+                    move |event: &MouseDownEvent, phase, window, cx| {
+                        if phase == DispatchPhase::Capture && event.button == MouseButton::Left {
+                            outside_menu_down(event, window, cx);
+                        }
+                    },
+                );
+                window.on_mouse_event(
+                    move |event: &MouseDownEvent, phase, window, cx| {
+                        if phase == DispatchPhase::Capture && event.button == MouseButton::Left {
+                            outside_flyout_down(event, window, cx);
+                        }
+                    },
+                );
+                window.on_mouse_event(
+                    move |event: &MouseDownEvent, phase, window, cx| {
+                        if phase == DispatchPhase::Capture {
+                            raise_floating(event, window, cx);
+                        }
+                    },
+                );
+            },
+        )
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full();
 
         for overflow in &frame.rects().vertical_overflow {
             self.dock
@@ -837,6 +852,7 @@ impl Render for MainWindow {
                     .child(dockers_trigger),
             );
         }
+        root = root.child(global_event_handlers);
         root = root.child(
             DockSurface::new(
                 self.dock.layout(),
