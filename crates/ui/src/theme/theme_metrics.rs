@@ -8,6 +8,7 @@ pub struct ThemeMetrics {
     pub tab_drag_zone_width: f32,
     /// Maximum width of icon buttons in floating-window titles, in logical pixels.
     pub button_size: f32,
+    /// Spacing between controls in floating-window titles, in logical pixels.
     pub button_gap: f32,
     /// Uniform padding applied inside each panel's content surface, in logical pixels.
     pub content_padding: f32,
