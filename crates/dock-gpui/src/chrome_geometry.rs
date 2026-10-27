@@ -233,8 +233,19 @@ pub fn normalize_docked_group_geometry(
         }
     }
 
-    // Reserve separate horizontal areas for the mode button, overflow and group menu.
-    // This is applied to floating Tabs groups too, so controls never cover a tab.
+    normalize_tab_strip_widths(layout, metrics, rects, &rail_groups, &mode_button_groups);
+}
+
+/// Reserves horizontal space for group controls and distributes the remaining strip
+/// width equally across visible tab headers.
+fn normalize_tab_strip_widths(
+    layout: &Layout,
+    metrics: &DockMetrics,
+    rects: &mut LayoutRects,
+    rail_groups: &HashSet<NodeId>,
+    mode_button_groups: &HashSet<NodeId>,
+) {
+    // This applies to floating Tabs groups too, so controls never cover a tab.
     for group_rect in &rects.groups {
         let group_id = group_rect.group;
         if rail_groups.contains(&group_id) || !matches!(layout.node(group_id), Some(Node::Tabs(_))) {
