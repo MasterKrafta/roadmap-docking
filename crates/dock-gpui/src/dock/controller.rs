@@ -2,7 +2,8 @@ use std::collections::HashMap;
 
 use dock_core::{
     create_initial_layout, Axis, CommandError, CommandOutcome, ComputeRectsError, DockCommand,
-    DockMetrics, DockSide, DragHandle, DragPayload, DragSession as CoreDragSession, DragState,
+    DockMetrics, DockSide, DragDropRequest, DragHandle, DragPayload,
+    DragSession as CoreDragSession, DragState,
     DropSource, DropTarget, DropZone, Layout, Node, NodeId, PanelId, Point, Profile, Rect,
     ResizeEdge, UndoRedoHistory,
 };
@@ -214,6 +215,40 @@ impl DockController {
             overlay.preview = preview;
         }
         Ok(true)
+    }
+
+    /// Completes an active Core gesture at the release point and returns its semantic request.
+    ///
+    /// A press released below the threshold is an ordinary click and produces no request.
+    /// This method does not translate the request into a DockCommand; that belongs to Stage 11.
+    pub(crate) fn finish_drag(
+        &mut self,
+        pointer: Point,
+    ) -> Result<Option<DragDropRequest>, DragUpdateError> {
+        let session = std::mem::replace(&mut self.session, Session::Idle);
+        let Session::Drag(mut gesture) = session else {
+            self.session = session;
+            return Ok(None);
+        };
+
+        let Some(mut core) = gesture.core.take() else {
+            self.last_error = None;
+            return Ok(None);
+        };
+
+        // Resolve the exact release point rather than reusing the previous move's target.
+        core.pointer_move(pointer)?;
+        let target = gesture
+            .resolver
+            .as_ref()
+            .map(|resolver| resolver.resolve(pointer))
+            .transpose()?;
+        if gesture.resolver.is_some() {
+            core.set_drop_target(target)?;
+        }
+
+        self.last_error = None;
+        Ok(core.pointer_up(pointer, target)?)
     }
 
     /// Returns the current drag overlay for rendering, if this is a docking drag.
