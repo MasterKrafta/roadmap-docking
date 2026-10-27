@@ -1,5 +1,5 @@
 use dock_core::Rect;
-use gpui::{AnyElement, App, IntoElement, RenderOnce, Window};
+use gpui::{AnyElement, App, IntoElement, RenderOnce, Styled, Window, div, px};
 use ui::Theme;
 
 use crate::components::RectBox;
@@ -17,6 +17,16 @@ pub struct PanelSurface {
 
 impl RenderOnce for PanelSurface {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
-        RectBox::new(self.rect, self.theme.colors.group_background).child(self.content)
+        let content_width = self.rect.size.width;
+        let content_height = self.rect.size.height;
+        let padding = self.theme.metrics.content_padding;
+
+        RectBox::new(self.rect, self.theme.colors.group_background).child(
+            div()
+                .w(px(content_width))
+                .h(px(content_height))
+                .p(px(padding))
+                .child(self.content),
+        )
     }
 }
