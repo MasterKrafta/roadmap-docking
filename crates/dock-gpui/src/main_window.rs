@@ -25,10 +25,6 @@ pub(crate) struct MainWindow {
 }
 
 impl MainWindow {
-    pub(crate) fn new(theme: Theme) -> Result<Self, String> {
-        Self::new_with_workspace(theme, None)
-    }
-
     pub(crate) fn new_with_workspace(
         theme: Theme,
         workspace_path: Option<&Path>,
