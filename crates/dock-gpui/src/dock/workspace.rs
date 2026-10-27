@@ -235,6 +235,7 @@ mod tests {
         assert!(super::save_layout(Some(&path), &layout, &metrics).unwrap());
 
         let loaded = load_layout(Some(&path), &theme)
+            .expect("the replaced workspace should parse")
             .expect("the replaced workspace should remain loadable");
         assert_eq!(loaded.chrome(), ChromeMode::DockHidden);
         assert_eq!(loaded.validate(&metrics), Ok(()));
