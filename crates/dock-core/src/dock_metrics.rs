@@ -17,6 +17,8 @@ pub struct DockMetrics {
     pub collapsed_group_height: f32,
     pub header_height: f32,
     pub tab_strip_height: f32,
+    /// Width of group controls such as the mode switch and group menu.
+    pub group_control_button_width: f32,
     /// Minimum width retained by each visible tab before overflow is used.
     pub min_tab_width: f32,
     /// Width reserved for the implementation-specific hidden-tabs menu button.
@@ -49,6 +51,7 @@ impl DockMetrics {
             ("collapsed_group_height", self.collapsed_group_height, "collapsed_group_height must be finite", "collapsed_group_height must be positive"),
             ("header_height", self.header_height, "header_height must be finite", "header_height must be positive"),
             ("tab_strip_height", self.tab_strip_height, "tab_strip_height must be finite", "tab_strip_height must be positive"),
+            ("group_control_button_width", self.group_control_button_width, "group_control_button_width must be finite", "group_control_button_width must be positive"),
             ("min_tab_width", self.min_tab_width, "min_tab_width must be finite", "min_tab_width must be positive"),
             ("tab_overflow_button_width", self.tab_overflow_button_width, "tab_overflow_button_width must be finite", "tab_overflow_button_width must be positive"),
             ("min_canvas_width", self.min_canvas_width, "min_canvas_width must be finite", "min_canvas_width must be positive"),
@@ -107,6 +110,7 @@ impl<'de> serde::Deserialize<'de> for DockMetrics {
             collapsed_group_height: f32,
             header_height: f32,
             tab_strip_height: f32,
+            group_control_button_width: f32,
             min_tab_width: f32,
             tab_overflow_button_width: f32,
             min_canvas_width: f32,
@@ -128,6 +132,7 @@ impl<'de> serde::Deserialize<'de> for DockMetrics {
                     collapsed_group_height: metrics.collapsed_group_height,
                     header_height: metrics.header_height,
                     tab_strip_height: metrics.tab_strip_height,
+                    group_control_button_width: metrics.group_control_button_width,
                     min_tab_width: metrics.min_tab_width,
                     tab_overflow_button_width: metrics.tab_overflow_button_width,
                     min_canvas_width: metrics.min_canvas_width,
@@ -149,6 +154,7 @@ impl<'de> serde::Deserialize<'de> for DockMetrics {
             collapsed_group_height: wire.collapsed_group_height,
             header_height: wire.header_height,
             tab_strip_height: wire.tab_strip_height,
+            group_control_button_width: wire.group_control_button_width,
             min_tab_width: wire.min_tab_width,
             tab_overflow_button_width: wire.tab_overflow_button_width,
             min_canvas_width: wire.min_canvas_width,
@@ -175,6 +181,7 @@ impl Default for DockMetrics {
             // 28 px is a provisional placeholder for each.
             header_height: 28.0,
             tab_strip_height: 28.0,
+            group_control_button_width: 28.0,
             min_tab_width: 72.0,
             tab_overflow_button_width: 28.0,
             min_canvas_width: 320.0,
@@ -212,6 +219,7 @@ mod tests {
             "max_columns": 4
         }"#;
         let metrics: DockMetrics = serde_json::from_str(legacy).unwrap();
+        assert_eq!(metrics.group_control_button_width, 28.0);
         assert_eq!(metrics.min_tab_width, 72.0);
         assert_eq!(metrics.tab_overflow_button_width, 28.0);
         assert_eq!(metrics.validate(), Ok(()));
