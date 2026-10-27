@@ -2269,6 +2269,64 @@
     }
 
     #[test]
+    fn singleton_panel_drop_on_own_group_edge_is_no_op_and_preserves_redo() {
+        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+        let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
+        let (group, _, panel) = controller
+            .layout()
+            .nodes()
+            .find_map(|(group, node)| {
+                let Node::Tabs(tabs) = node else {
+                    return None;
+                };
+                if tabs.children.len() != 1 {
+                    return None;
+                }
+                let Node::Panel(panel) = controller.layout().node(tabs.children[0])? else {
+                    return None;
+                };
+                Some((group, tabs.children[0], panel.panel_id))
+            })
+            .expect("initial layout should contain a single-tab group");
+
+        controller
+            .apply(DockCommand::SetChrome {
+                mode: dock_core::ChromeMode::DockHidden,
+            })
+            .unwrap();
+        assert!(controller.undo().unwrap());
+        assert_eq!(controller.history.undo_len(), 0);
+        assert_eq!(controller.history.redo_len(), 1);
+
+        let before = layout_debug_snapshot(&controller);
+        let version_before = controller.layout().version();
+        let action = controller
+            .commit_drop_request(
+                drop_request(
+                    panel,
+                    DropTarget::GroupEdge {
+                        group,
+                        zone: dock_core::DropZone::Right,
+                    },
+                    Point::new(180.0, 120.0),
+                    Point::new(420.0, 260.0),
+                ),
+                viewport,
+            )
+            .unwrap();
+
+        assert_eq!(action, DragDropAction::NoOp);
+        assert_eq!(layout_debug_snapshot(&controller), before);
+        assert_eq!(controller.layout().version(), version_before);
+        assert_eq!(controller.history.undo_len(), 0);
+        assert_eq!(controller.history.redo_len(), 1);
+        assert!(controller.redo().unwrap());
+        assert_eq!(controller.history.undo_len(), 1);
+        assert_eq!(controller.history.redo_len(), 0);
+        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+    }
+
+    #[test]
     fn panel_reorder_and_same_group_edge_split_each_commit_one_undo_step() {
         let mut controller = DockController::new_initial(&Theme::default()).unwrap();
         let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
