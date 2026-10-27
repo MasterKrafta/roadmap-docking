@@ -1,5 +1,6 @@
 use dock_core::{
-    Axis, DockSide, DragPreview, DropZoneRect, FloatingGroupId, NodeId, PanelId, ResizeEdge,
+    Axis, DockSide, DragHandle, DragPreview, DropZoneRect, FloatingGroupId, NodeId, PanelId,
+    ResizeEdge,
 };
 
 /// Semantic resize handle emitted by the GPUI adapter.
@@ -24,6 +25,7 @@ pub enum ResizeHandle {
 #[derive(Clone, Debug)]
 pub struct DragOverlay {
     pub preview: DragPreview,
+    pub handle: DragHandle,
     pub zones: Vec<DropZoneRect>,
 }
 
