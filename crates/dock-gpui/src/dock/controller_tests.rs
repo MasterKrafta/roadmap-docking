@@ -1,7 +1,10 @@
     use super::DockController;
     use crate::dock::resize_session::StartGeometry;
     use crate::requests::ResizeHandle;
-    use dock_core::{Axis, DockCommand, DockSide, Node, NodeId, Point, Rect, Size};
+    use dock_core::{
+        Axis, ColumnMode, DockCommand, DockSide, DragDropAction, DragDropRequest, DragHandle,
+        DragPayload, DropTarget, Node, NodeId, Point, Rect, Size,
+    };
     use ui::Theme;
 
     fn horizontal_split_widths(controller: &DockController, split_id: NodeId) -> Vec<f32> {
@@ -935,3 +938,161 @@
             original
         );
     }
+
+    fn first_panels_by_group(
+        controller: &DockController,
+    ) -> Vec<(NodeId, NodeId, dock_core::PanelId)> {
+        controller
+            .layout()
+            .nodes()
+            .filter_map(|(group, node)| {
+                let Node::Tabs(tabs) = node else {
+                    return None;
+                };
+                let panel_node = *tabs.children.first()?;
+                let Some(Node::Panel(panel)) = controller.layout().node(panel_node) else {
+                    return None;
+                };
+                Some((group, panel_node, panel.panel_id))
+            })
+            .collect()
+    }
+
+    fn drop_request(
+        panel: dock_core::PanelId,
+        target: DropTarget,
+        origin: Point,
+        point: Point,
+    ) -> DragDropRequest {
+        DragDropRequest {
+            payload: DragPayload::Panel { panel },
+            handle: DragHandle::PanelTab,
+            origin,
+            point,
+            target: Some(target),
+            floating_bounds: None,
+        }
+    }
+
+    fn layout_debug_snapshot(controller: &DockController) -> String {
+        format!("{:?}", controller.layout())
+    }
+
+    #[test]
+    fn successful_drop_commits_one_command_and_one_undo_step() {
+        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+        let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
+        let samples = first_panels_by_group(&controller);
+        let (source_group, source_panel_node, panel) = samples[0];
+        let target_group = samples
+            .iter()
+            .map(|(group, _, _)| *group)
+            .find(|group| *group != source_group)
+            .expect("initial layout should contain more than one tab group");
+        let original_version = controller.layout().version();
+
+        let action = controller
+            .commit_drop_request(
+                drop_request(
+                    panel,
+                    DropTarget::Tabs {
+                        group: target_group,
+                        index: 0,
+                    },
+                    Point::new(100.0, 100.0),
+                    Point::new(240.0, 180.0),
+                ),
+                viewport,
+            )
+            .unwrap();
+
+        assert!(
+            matches!(action, DragDropAction::Command(_)),
+            "a drop into a different group should resolve to one command"
+        );
+        assert_ne!(controller.layout().version(), original_version);
+        assert_eq!(controller.history.undo_len(), 1);
+        assert_eq!(controller.history.redo_len(), 0);
+        assert!(
+            matches!(controller.layout().node(target_group), Some(Node::Tabs(tabs))
+                if tabs.children.contains(&source_panel_node)),
+            "the moved panel should belong to the destination group"
+        );
+
+        assert!(controller.undo().unwrap());
+        assert!(
+            !matches!(controller.layout().node(target_group), Some(Node::Tabs(tabs))
+                if tabs.children.contains(&source_panel_node)),
+            "undo should restore the panel to its original group"
+        );
+        assert!(!controller.undo().unwrap(), "the drop must create exactly one undo step");
+        assert_eq!(controller.history.redo_len(), 1);
+    }
+
+    #[test]
+    fn no_op_drop_does_not_change_layout_or_history() {
+        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+        let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
+        let (group, _, panel) = first_panels_by_group(&controller)[0];
+        let original_layout = layout_debug_snapshot(&controller);
+        let original_version = controller.layout().version();
+
+        let action = controller
+            .commit_drop_request(
+                drop_request(
+                    panel,
+                    DropTarget::Tabs { group, index: 0 },
+                    Point::new(100.0, 100.0),
+                    Point::new(100.0, 100.0),
+                ),
+                viewport,
+            )
+            .unwrap();
+
+        assert_eq!(action, DragDropAction::NoOp);
+        assert_eq!(layout_debug_snapshot(&controller), original_layout);
+        assert_eq!(controller.layout().version(), original_version);
+        assert_eq!(controller.history.undo_len(), 0);
+        assert_eq!(controller.history.redo_len(), 0);
+        assert!(!controller.undo().unwrap());
+        assert!(!controller.redo().unwrap());
+    }
+
+    #[test]
+    fn rejected_drop_and_rejected_command_leave_layout_and_history_unchanged() {
+        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+        let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
+        let (group, _, panel) = first_panels_by_group(&controller)[0];
+        let original_layout = layout_debug_snapshot(&controller);
+        let original_version = controller.layout().version();
+
+        let invalid_request = drop_request(
+            panel,
+            DropTarget::Tabs { group, index: 0 },
+            Point::new(f32::NAN, 100.0),
+            Point::new(100.0, 100.0),
+        );
+        assert!(controller.commit_drop_request(invalid_request, viewport).is_err());
+        assert_eq!(layout_debug_snapshot(&controller), original_layout);
+        assert_eq!(controller.layout().version(), original_version);
+        assert_eq!(controller.history.undo_len(), 0);
+        assert_eq!(controller.history.redo_len(), 0);
+        assert!(controller.last_error().is_some());
+
+        // A command rejected by dock-core must also leave the live state and
+        // history untouched; use a Tabs node where SetColumnMode requires Column.
+        assert!(
+            controller
+                .apply(DockCommand::SetColumnMode {
+                    column: group,
+                    mode: ColumnMode::IconsOnly,
+                })
+                .is_err()
+        );
+        assert_eq!(layout_debug_snapshot(&controller), original_layout);
+        assert_eq!(controller.layout().version(), original_version);
+        assert_eq!(controller.history.undo_len(), 0);
+        assert_eq!(controller.history.redo_len(), 0);
+        assert!(controller.last_error().is_some());
+    }
+
