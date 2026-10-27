@@ -1,9 +1,10 @@
-use dock_core::{ColumnMode, DragHandle, DragPayload, Node, NodeId, Point, Rect, Size};
+use dock_core::{ColumnMode, DockCommand, DragHandle, DragPayload, Node, NodeId, PanelId, Point, Rect, Size};
 use gpui::{AnyElement, IntoElement};
 
+use crate::components::focus_ring::{TabReorderDirection, keyboard_tab_reorder_direction};
 use crate::components::{ColumnModeButton, GroupMenuButton, PanelTab, TabOverflowButton};
 use crate::dock::{activate_tab, collapse_group, cycle_column_mode};
-use crate::host::DockHost;
+use crate::host::{CommandKeyHandler, DockHost};
 use crate::labels::tab_header_label;
 use crate::requests::DockMenuRequest;
 use crate::surface::RenderData;
@@ -35,6 +36,10 @@ pub(crate) fn render(
             layout.node(header.group),
             Some(Node::Tabs(tabs)) if active_panel(layout, tabs) == Some(header.panel)
         );
+        let tab_count = match layout.node(header.group) {
+            Some(Node::Tabs(tabs)) => tabs.children.len(),
+            _ => 0,
+        };
 
         elements.push(
             PanelTab {
@@ -45,6 +50,13 @@ pub(crate) fn render(
                 theme: *theme,
                 on_activate: host.command(activate_tab(header.group, header.panel)),
                 on_activate_key: host.command_key(activate_tab(header.group, header.panel)),
+                on_reorder_key: reorder_tab_key_handler(
+                    host,
+                    header.group,
+                    header.panel,
+                    header.index,
+                    tab_count,
+                ),
                 on_collapse_toggle: host.command(collapse_group(header.group, !collapsed)),
                 on_drag_start: host.drag_start(
                     DragPayload::Panel { panel: header.panel },
@@ -127,3 +139,47 @@ pub(crate) fn render(
 
     elements
 }
+
+fn reorder_tab_key_handler(
+    host: &dyn DockHost,
+    group: NodeId,
+    panel: PanelId,
+    index: usize,
+    tab_count: usize,
+) -> CommandKeyHandler {
+    let move_previous = if index > 0 {
+        Some(host.command_key(DockCommand::ReorderTab {
+            group,
+            panel,
+            to_index: index - 1,
+        }))
+    } else {
+        None
+    };
+    let move_next = if index + 1 < tab_count {
+        Some(host.command_key(DockCommand::ReorderTab {
+            group,
+            panel,
+            to_index: index + 1,
+        }))
+    } else {
+        None
+    };
+
+    Box::new(move |event, window, app| {
+        match keyboard_tab_reorder_direction(&event.keystroke) {
+            Some(TabReorderDirection::Previous) => {
+                if let Some(handler) = &move_previous {
+                    handler(event, window, app);
+                }
+            }
+            Some(TabReorderDirection::Next) => {
+                if let Some(handler) = &move_next {
+                    handler(event, window, app);
+                }
+            }
+            None => {}
+        }
+    })
+}
+
