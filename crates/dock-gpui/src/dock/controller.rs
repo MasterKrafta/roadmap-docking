@@ -13,7 +13,9 @@ use ui::Theme;
 use crate::{dock_metrics_from_theme, FrameGeometry};
 use crate::requests::{DragOverlay, ResizeHandle};
 
-use super::drag_session::{DragGesture, DragStartError, DragUpdateError};
+use super::drag_session::{
+    DragGeometrySnapshot, DragGesture, DragStartError, DragUpdateError,
+};
 use super::resize_session::{ResizeSession, ResizeStartError, ResizeUpdateError, StartGeometry};
 
 #[derive(Debug)]
@@ -138,6 +140,7 @@ impl DockController {
     pub(crate) fn update_drag(
         &mut self,
         pointer: Point,
+        viewport: Rect,
         frame: Option<&FrameGeometry>,
     ) -> Result<bool, DragUpdateError> {
         let start = match &self.session {
@@ -151,15 +154,30 @@ impl DockController {
                 }
                 Some((gesture.payload, gesture.handle, gesture.origin))
             }
-            Session::Drag(_) => None,
+            Session::Drag(gesture) => {
+                let snapshot = gesture
+                    .snapshot
+                    .ok_or(DragUpdateError::StaleFrameGeometry)?;
+                if !snapshot.matches(self.layout.version(), viewport, self.metrics) {
+                    return Err(DragUpdateError::StaleFrameGeometry);
+                }
+                None
+            }
             Session::Idle | Session::Resize(_) => return Ok(false),
         };
 
         if let Some((payload, handle, origin)) = start {
             let frame = frame.ok_or(DragUpdateError::MissingFrameGeometry)?;
-            if frame.layout_version() != self.layout.version() {
+            if frame.layout_version() != self.layout.version()
+                || frame.rects().viewport != Some(viewport)
+            {
                 return Err(DragUpdateError::StaleFrameGeometry);
             }
+            let snapshot = DragGeometrySnapshot {
+                layout_version: frame.layout_version(),
+                viewport,
+                metrics: self.metrics,
+            };
 
             let mut core = CoreDragSession::new(&self.metrics)?;
             core.pointer_down_with_handle(payload, handle, origin)?;
@@ -196,6 +214,7 @@ impl DockController {
                 return Ok(false);
             };
             gesture.core = Some(core);
+            gesture.snapshot = Some(snapshot);
             gesture.resolver = resolver;
             gesture.overlay = overlay;
             return Ok(true);
@@ -224,6 +243,7 @@ impl DockController {
     pub(crate) fn finish_drag(
         &mut self,
         pointer: Point,
+        viewport: Rect,
     ) -> Result<Option<DragDropRequest>, DragUpdateError> {
         let session = std::mem::replace(&mut self.session, Session::Idle);
         let mut gesture = match session {
@@ -238,6 +258,12 @@ impl DockController {
             self.last_error = None;
             return Ok(None);
         };
+        let snapshot = gesture
+            .snapshot
+            .ok_or(DragUpdateError::StaleFrameGeometry)?;
+        if !snapshot.matches(self.layout.version(), viewport, self.metrics) {
+            return Err(DragUpdateError::StaleFrameGeometry);
+        }
 
         // Resolve the exact release point rather than reusing the previous move's target.
         core.pointer_move(pointer)?;
