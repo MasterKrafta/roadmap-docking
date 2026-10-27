@@ -5,7 +5,10 @@ use gpui::{
 };
 use ui::Theme;
 
-use crate::components::{focus_ring::is_keyboard_activation_key, with_focus_ring};
+use crate::components::{
+    focus_ring::{is_keyboard_activation_key, keyboard_tab_reorder_direction},
+    with_focus_ring,
+};
 
 /// A single tab header that delegates all dock actions to caller-provided handlers.
 #[derive(IntoElement)]
@@ -24,6 +27,8 @@ pub struct PanelTab {
     pub on_activate: Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>,
     /// Handler invoked when Enter or Space activates the focused tab.
     pub on_activate_key: Box<dyn Fn(&KeyDownEvent, &mut Window, &mut App) + 'static>,
+    /// Handler invoked when the focused tab is reordered with the keyboard.
+    pub on_reorder_key: Box<dyn Fn(&KeyDownEvent, &mut Window, &mut App) + 'static>,
     /// Handler invoked when the tab is double-clicked.
     pub on_collapse_toggle: Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>,
     /// Handler invoked on left mouse-down to start a panel drag.
@@ -60,12 +65,15 @@ impl RenderOnce for PanelTab {
         let on_activate = self.on_activate;
         let on_collapse_toggle = self.on_collapse_toggle;
         let on_activate_key = self.on_activate_key;
+        let on_reorder_key = self.on_reorder_key;
 
         with_focus_ring(tab.id(self.id), &self.theme)
             .hover(move |style| style.bg(rgb(hover_background)))
             .on_key_down(move |event, window, app| {
                 if is_keyboard_activation_key(&event.keystroke.key) {
                     on_activate_key(event, window, app);
+                } else if keyboard_tab_reorder_direction(&event.keystroke).is_some() {
+                    on_reorder_key(event, window, app);
                 }
             })
             .on_mouse_down(MouseButton::Left, self.on_drag_start)
