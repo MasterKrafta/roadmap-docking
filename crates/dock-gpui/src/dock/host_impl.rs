@@ -72,8 +72,8 @@ impl DockHost for WindowHost<'_, '_> {
 
     fn surface_mouse_move(&self) -> SurfaceMouseMoveHandler {
         Box::new(self.cx.listener::<MouseMoveEvent>(
-            move |this, event, _window, cx| {
-                this.handle_surface_mouse_move(event, cx);
+            move |this, event, window, cx| {
+                this.handle_surface_mouse_move(event, window, cx);
             },
         ))
     }
