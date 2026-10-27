@@ -98,7 +98,7 @@ pub(crate) fn render(
                 theme.colors.group_background,
                 0.6,
             )))
-            .border_1()
+            .border(px(theme.metrics.drop_outline_thickness))
             .border_color(rgb(theme.colors.focus))
             .text_color(rgb(theme.colors.primary_text))
             .child(label)
