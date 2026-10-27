@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-dock-core = { path = "../dock-core" }
+dock-core = { path = "../dock-core", features = ["serde"] }
 gpui.workspace = true
 tracing.workspace = true
 ui = { path = "../ui" }
