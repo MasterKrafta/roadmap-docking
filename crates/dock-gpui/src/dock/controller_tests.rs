@@ -3478,6 +3478,7 @@ fn restored_layout_rejects_invalid_rail_thresholds() {
         DockController::new_with_layout(&invalid_theme, layout).is_err(),
         "restoring a layout with invalid theme metrics must fail explicitly"
     );
+}
 
 #[test]
 fn initial_group_ratios_follow_theme_default_column_split_ratio() {
@@ -3510,4 +3511,3 @@ fn initial_group_ratios_follow_theme_default_column_split_ratio() {
     );
 }
 
-}
