@@ -147,9 +147,9 @@ impl DockController {
         // its resolver. Cancel here so callers cannot accidentally keep using
         // stale zones after handling the returned error.
         let stale_snapshot = match &self.session {
-            Session::Drag(gesture) if gesture.core.is_some() => gesture
-                .snapshot
-                .is_none_or(|snapshot| !snapshot.matches(self.layout.version(), viewport, self.metrics)),
+            Session::Drag(gesture) if gesture.core.is_some() => gesture.snapshot.is_none_or(
+                |snapshot| !snapshot.matches(self.layout.version(), viewport, self.metrics),
+            ),
             Session::Idle | Session::Resize(_) | Session::Drag(_) => false,
         };
         if stale_snapshot {
