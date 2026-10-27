@@ -3060,3 +3060,71 @@
         assert_eq!(controller.history.redo_len(), 0);
     }
 
+    #[test]
+    fn raising_floating_window_does_not_add_undo_or_clear_redo() {
+        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+        let groups: Vec<_> = controller
+            .layout()
+            .nodes()
+            .filter_map(|(id, node)| matches!(node, Node::Tabs(_)).then_some(id))
+            .take(2)
+            .collect();
+        assert_eq!(groups.len(), 2, "the initial layout should contain two tab groups");
+
+        for (index, group) in groups.into_iter().enumerate() {
+            controller
+                .apply(DockCommand::Float {
+                    node: group,
+                    bounds: Rect::new(
+                        Point::new(80.0 + index as f32 * 40.0, 60.0),
+                        Size::new(400.0, 300.0),
+                    ),
+                })
+                .unwrap();
+        }
+        assert_eq!(controller.layout().floating_groups().count(), 2);
+        assert_eq!(controller.history.undo_len(), 2);
+
+        controller
+            .apply(DockCommand::SetChrome {
+                mode: dock_core::ChromeMode::DockHidden,
+            })
+            .unwrap();
+        assert!(controller.undo().unwrap());
+        assert_eq!(controller.history.undo_len(), 2);
+        assert_eq!(controller.history.redo_len(), 1);
+
+        let order_before: Vec<_> = controller
+            .layout()
+            .floating_groups_in_hit_test_order()
+            .into_iter()
+            .map(|(group, _)| group)
+            .collect();
+        assert_eq!(order_before.len(), 2);
+        let group_to_raise = *order_before
+            .last()
+            .expect("there should be a backmost floating window");
+        let version_before = controller.layout().version();
+
+        controller
+            .apply(DockCommand::RaiseFloating {
+                group: group_to_raise,
+            })
+            .unwrap();
+
+        let order_after: Vec<_> = controller
+            .layout()
+            .floating_groups_in_hit_test_order()
+            .into_iter()
+            .map(|(group, _)| group)
+            .collect();
+        assert_eq!(order_after.first(), Some(&group_to_raise));
+        assert_eq!(controller.layout().version(), version_before + 1);
+        assert_eq!(controller.history.undo_len(), 2);
+        assert_eq!(controller.history.redo_len(), 1);
+        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+
+        assert!(controller.redo().unwrap(), "raising must preserve the redo branch");
+        assert_eq!(controller.history.redo_len(), 0);
+    }
+

@@ -1,6 +1,6 @@
 //! Geometry policy for detaching dock items into floating windows.
 
-use dock_core::{CommandError, DockMetrics, Point, Rect, Size};
+use dock_core::{CommandError, DockMetrics, FloatingGroupId, Point, Rect, Size};
 
 /// Builds floating bounds while preserving the pointer's grab offset.
 ///
@@ -88,10 +88,40 @@ pub(super) fn initial_float_bounds(
     Ok(bounds)
 }
 
+/// Finds the frontmost floating window containing the pointer.
+///
+/// The caller supplies targets in Core's hit-test order, with the frontmost
+/// window first. Right and bottom edges are exclusive, matching UI hit regions.
+pub(crate) fn floating_group_at_point(
+    hit_targets: &[(FloatingGroupId, Rect)],
+    pointer: Point,
+) -> Option<FloatingGroupId> {
+    if !pointer.is_finite() {
+        return None;
+    }
+
+    hit_targets.iter().find_map(|(group, bounds)| {
+        let right = bounds.origin.x + bounds.size.width;
+        let bottom = bounds.origin.y + bounds.size.height;
+        let contains_pointer = bounds.origin.is_finite()
+            && bounds.size.is_finite()
+            && bounds.size.width > 0.0
+            && bounds.size.height > 0.0
+            && right.is_finite()
+            && bottom.is_finite()
+            && pointer.x >= bounds.origin.x
+            && pointer.x < right
+            && pointer.y >= bounds.origin.y
+            && pointer.y < bottom;
+        contains_pointer.then_some(*group)
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    use super::initial_float_bounds;
-    use dock_core::{DockMetrics, Point, Rect, Size};
+    use super::{floating_group_at_point, initial_float_bounds};
+    use dock_core::{DockMetrics, FloatingGroupId, Point, Rect, Size};
+    use slotmap::SlotMap;
 
     fn close(actual: f32, expected: f32) {
         assert!(
@@ -222,5 +252,51 @@ mod tests {
             .is_err()
         );
     }
+
+    #[test]
+    fn floating_hit_test_prefers_the_first_matching_window_in_hit_test_order() {
+        let mut groups = SlotMap::<FloatingGroupId, ()>::with_key();
+        let back = groups.insert(());
+        let front = groups.insert(());
+        let back_bounds = Rect::new(Point::new(20.0, 20.0), Size::new(120.0, 100.0));
+        let front_bounds = Rect::new(Point::new(60.0, 50.0), Size::new(120.0, 100.0));
+        let hit_targets = [(front, front_bounds), (back, back_bounds)];
+
+        assert_eq!(
+            floating_group_at_point(&hit_targets, Point::new(80.0, 70.0)),
+            Some(front),
+            "overlapping windows must choose the frontmost hit target"
+        );
+        assert_eq!(
+            floating_group_at_point(&hit_targets, Point::new(30.0, 30.0)),
+            Some(back)
+        );
+    }
+
+    #[test]
+    fn floating_hit_test_uses_half_open_bounds_and_rejects_non_finite_pointers() {
+        let mut groups = SlotMap::<FloatingGroupId, ()>::with_key();
+        let group = groups.insert(());
+        let bounds = Rect::new(Point::new(10.0, 20.0), Size::new(100.0, 80.0));
+        let hit_targets = [(group, bounds)];
+
+        assert_eq!(
+            floating_group_at_point(&hit_targets, Point::new(10.0, 20.0)),
+            Some(group)
+        );
+        assert_eq!(
+            floating_group_at_point(&hit_targets, Point::new(110.0, 60.0)),
+            None
+        );
+        assert_eq!(
+            floating_group_at_point(&hit_targets, Point::new(50.0, 100.0)),
+            None
+        );
+        assert_eq!(
+            floating_group_at_point(&hit_targets, Point::new(f32::NAN, 20.0)),
+            None
+        );
+    }
+
 }
 

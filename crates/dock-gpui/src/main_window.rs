@@ -1,11 +1,12 @@
 use dock_core::{DockCommand, DragHandle, DragPayload, Point, Rect, Size};
 use gpui::{
-    Context, DispatchPhase, IntoElement, KeyDownEvent, MouseButton, MouseMoveEvent, MouseUpEvent,
+    Context, DispatchPhase, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent,
     ParentElement, Render, Styled, Subscription, Window, div, px, rgb,
 };
 use ui::Theme;
 
-use crate::dock::{DockController, WindowHost};
+use crate::dock::{floating_group_at_point, DockController, WindowHost};
 use crate::requests::ResizeHandle;
 use crate::DockSurface;
 
@@ -314,6 +315,38 @@ impl Render for MainWindow {
                     .child(format!("Could not compute dock geometry: {error:?}"));
             }
         };
+        // Raise floating windows during capture so any click within the window
+        // updates its stacking order without consuming the event before child controls.
+        let floating_hit_targets = self
+            .dock
+            .layout()
+            .floating_groups_in_hit_test_order()
+            .into_iter()
+            .filter_map(|(group, _)| {
+                frame
+                    .rects()
+                    .floating_groups
+                    .iter()
+                    .find(|floating| floating.group == group)
+                    .map(|floating| (group, floating.rect))
+            })
+            .collect::<Vec<_>>();
+        let raise_floating = cx.listener::<MouseDownEvent>(move |this, event, window, cx| {
+            if event.button != MouseButton::Left {
+                return;
+            }
+            let pointer = dock_surface_pointer(event.position, menu_height);
+            if let Some(group) = floating_group_at_point(&floating_hit_targets, pointer) {
+                this.apply_dock_command(DockCommand::RaiseFloating { group });
+                cx.notify();
+            }
+        });
+        window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
+            if phase == DispatchPhase::Capture {
+                raise_floating(event, window, cx);
+            }
+        });
+
         for overflow in &frame.rects().vertical_overflow {
             self.dock
                 .scroll_handles_mut()

@@ -27,8 +27,8 @@ enum Session {
 
 /// Owns the live layout and the view-local state needed to render it.
 ///
-/// All post-initialization layout commands are applied through the history
-/// facade, keeping command execution and undo checkpoints on one path.
+/// Persistent post-initialization commands use the history facade. Raising a
+/// floating window updates visual stacking without creating an undo checkpoint.
 pub(crate) struct DockController {
     layout: Layout,
     metrics: DockMetrics,
@@ -55,7 +55,7 @@ impl DockController {
         })
     }
 
-    /// Applies a layout command and records persistent changes for undo/redo.
+    /// Applies a layout command, recording it unless it only changes floating z-order.
     pub(crate) fn apply(
         &mut self,
         command: DockCommand,
@@ -64,9 +64,15 @@ impl DockController {
         // older layout snapshot. Roll the gesture back before mutating history.
         self.cancel_resize();
         self.cancel_drag();
-        let result = self
-            .history
-            .apply(&mut self.layout, command, &self.metrics);
+        let result = if matches!(&command, DockCommand::RaiseFloating { .. }) {
+            // Stacking order is interaction state, not a user-editable layout step.
+            // Core still performs the command transaction and advances the layout
+            // version when z-order changes, invalidating geometry snapshots safely.
+            self.layout.apply(command, &self.metrics)
+        } else {
+            self.history
+                .apply(&mut self.layout, command, &self.metrics)
+        };
         self.track_command_result(result, "apply")
     }
 
