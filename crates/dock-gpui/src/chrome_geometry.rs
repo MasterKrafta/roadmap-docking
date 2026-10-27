@@ -6,7 +6,6 @@ use dock_core::{
     VerticalOverflow,
 };
 
-pub(crate) const GROUP_MENU_BUTTON_WIDTH: f32 = 28.0;
 pub(crate) const GROUP_DRAG_GRIP_HEIGHT: f32 = 4.0;
 
 /// Height of the pinned control row placed above rail items.
@@ -278,9 +277,9 @@ pub fn normalize_docked_group_geometry(
             continue;
         }
         let width = group_rect.rect.size.width.max(0.0);
-        let menu_width = GROUP_MENU_BUTTON_WIDTH.min(width);
+        let menu_width = metrics.group_control_button_width.min(width);
         let mode_width = if mode_button_groups.contains(&group_id) {
-            GROUP_MENU_BUTTON_WIDTH.min((width - menu_width).max(0.0))
+            metrics.group_control_button_width.min((width - menu_width).max(0.0))
         } else {
             0.0
         };
@@ -334,7 +333,6 @@ pub fn normalize_docked_group_geometry(
 mod tests {
     use super::{
         normalize_docked_group_geometry, rail_control_row_height, GROUP_DRAG_GRIP_HEIGHT,
-        GROUP_MENU_BUTTON_WIDTH,
     };
     use dock_core::{
         create_initial_layout, ColumnMode, DockCommand, DockMetrics, DockSide, DropTarget,
@@ -444,7 +442,7 @@ mod tests {
             assert_eq!(headers.len(), tab_count);
 
             let tabs_width =
-                (group_rect.size.width - GROUP_MENU_BUTTON_WIDTH * 2.0).max(0.0);
+                (group_rect.size.width - metrics.group_control_button_width * 2.0).max(0.0);
             let expected_tab_width = tabs_width / tab_count as f32;
             let mut expected_left = group_rect.origin.x;
             for header in headers {
@@ -634,14 +632,14 @@ mod tests {
             .iter()
             .map(|header| header.rect.origin.x + header.rect.size.width)
             .fold(group_rect.origin.x, f32::max);
-        let menu_left = group_rect.origin.x + group_rect.size.width - GROUP_MENU_BUTTON_WIDTH;
-        let mode_button_left = menu_left - GROUP_MENU_BUTTON_WIDTH;
+        let menu_left = group_rect.origin.x + group_rect.size.width - metrics.group_control_button_width;
+        let mode_button_left = menu_left - metrics.group_control_button_width;
         assert!(
             (mode_button_left - tab_right).abs() < 0.001,
             "the mode button should sit directly after the tabs, without sharing their hit area"
         );
         assert!(
-            (mode_button_left + GROUP_MENU_BUTTON_WIDTH - menu_left).abs() < 0.001,
+            (mode_button_left + metrics.group_control_button_width - menu_left).abs() < 0.001,
             "the mode button and group menu should have adjacent, distinct hit areas"
         );
     }
