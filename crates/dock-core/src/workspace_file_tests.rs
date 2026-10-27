@@ -458,6 +458,22 @@ fn from_layout_rejects_programmatic_tree_depth_before_recursive_export() {
 }
 
 #[test]
+fn maximum_workspace_depth_can_be_serialized_and_parsed() {
+    let metrics = DockMetrics::default();
+    let (layout, _) = sample_layout();
+    let mut file = WorkspaceFile::from_layout(&layout, &metrics).unwrap();
+    file.layout.left = None;
+    file.layout.right = Some(deeply_nested_workspace_node(256));
+    file.layout.floating_groups.clear();
+
+    let json = file
+        .to_json_pretty()
+        .expect("a workspace at the configured maximum depth should serialize");
+    WorkspaceFile::from_json(&json)
+        .expect("a workspace at the configured maximum depth should parse again");
+}
+
+#[test]
 fn workspace_json_size_limit_is_checked_before_parsing() {
     let oversized = " ".repeat(16 * 1024 * 1024 + 1);
     assert!(matches!(
