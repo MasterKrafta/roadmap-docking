@@ -121,7 +121,7 @@ impl MainWindow {
         }
     }
 
-    fn apply_dock_command(&mut self, command: DockCommand, cx: &mut Context<Self>) {
+    pub(crate) fn apply_dock_command(&mut self, command: DockCommand, cx: &mut Context<Self>) {
         if let Err(error) = self.dock.apply(command) {
             tracing::debug!(error = %error, "dock command was rejected");
         }
