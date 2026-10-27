@@ -54,7 +54,10 @@ impl fmt::Debug for DragGesture {
             .field("core_started", &self.core.is_some())
             .field("snapshot", &self.snapshot)
             .field("resolver_prepared", &self.resolver.is_some())
-            .field("capture_root_nodes", &self.capture_root_nodes.as_ref().map(HashSet::len))
+            .field(
+                "capture_root_node_count",
+                &self.capture_root_nodes.as_ref().map(|nodes| nodes.len()),
+            )
             .field("overlay_available", &self.overlay.is_some())
             .finish()
     }
