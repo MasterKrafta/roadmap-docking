@@ -562,7 +562,6 @@ fn surface_contains_window_point(
 impl MainWindow {
     /// Registers window-level pointer and keyboard listeners during paint.
     fn window_event_handlers(
-        &mut self,
         cx: &mut Context<Self>,
         width: f32,
         surface_top: f32,
@@ -570,7 +569,7 @@ impl MainWindow {
         menu_bounds: Option<Rect>,
         flyout_hit_bounds: Option<Rect>,
         floating_hit_targets: Vec<(FloatingGroupId, Rect)>,
-    ) -> impl IntoElement {
+    ) -> impl IntoElement + use<> {
         // Window-level listeners must be registered during paint, not render.
         // Escape and popup navigation run in capture; global shortcuts run in bubble
         // so focused input controls can consume Tab/Undo/Redo first.
@@ -795,7 +794,7 @@ impl Render for MainWindow {
                     .map(|floating| (group, floating.rect))
             })
             .collect::<Vec<_>>();
-        let global_event_handlers = self.window_event_handlers(
+        let global_event_handlers = Self::window_event_handlers(
             cx,
             width,
             surface_top,
