@@ -1,6 +1,6 @@
 use dock_core::{DockCommand, DragHandle, DragPayload, FloatingGroupId, PanelInstance};
 use gpui::{
-    AnyElement, App, ClickEvent, MouseDownEvent, MouseMoveEvent, MouseUpEvent, SharedString,
+    AnyElement, App, ClickEvent, KeyDownEvent, MouseDownEvent, MouseMoveEvent, MouseUpEvent, SharedString,
     Window,
 };
 
@@ -8,6 +8,9 @@ use crate::requests::{DockMenuRequest, ResizeHandle};
 
 /// A GPUI click handler created by the host for a command or a menu request.
 pub type CommandClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
+
+/// A keyboard-triggered dock command handler.
+pub type CommandKeyHandler = Box<dyn Fn(&KeyDownEvent, &mut Window, &mut App) + 'static>;
 
 /// Begins a Core drag session from a UI interaction surface.
 pub type DragStartHandler = Box<dyn Fn(&MouseDownEvent, &mut Window, &mut App) + 'static>;
@@ -32,6 +35,8 @@ pub trait DockHost {
     fn render_panel(&mut self, instance: &PanelInstance) -> AnyElement;
 
     fn command(&self, command: DockCommand) -> CommandClickHandler;
+
+    fn command_key(&self, command: DockCommand) -> CommandKeyHandler;
 
     fn close_floating(&self, group: FloatingGroupId) -> CommandClickHandler;
 
@@ -72,6 +77,10 @@ impl DockHost for NoopHost {
     }
 
     fn command(&self, _command: DockCommand) -> CommandClickHandler {
+        Box::new(|_, _, _| {})
+    }
+
+    fn command_key(&self, _command: DockCommand) -> CommandKeyHandler {
         Box::new(|_, _, _| {})
     }
 
