@@ -1,6 +1,7 @@
     use super::DockController;
     use crate::dock::resize_session::StartGeometry;
     use crate::requests::ResizeHandle;
+    use slotmap::Key;
     use dock_core::{
         Axis, ColumnMode, DockCommand, DockSide, DragDropAction, DragDropRequest, DragHandle,
         DragPayload, DropTarget, Node, NodeId, Point, Rect, Size,
