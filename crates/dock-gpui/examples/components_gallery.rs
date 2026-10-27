@@ -323,7 +323,7 @@ impl Render for Gallery {
                     title: "Floating window — long title preview".to_owned(),
                     theme,
                     on_drag_start: noop_mouse_down(),
-                    on_capture_drag_start: noop_mouse_down(),
+                    on_capture_drag_start: Some(noop_mouse_down()),
                     on_close: Some(noop_click()),
                     on_collapse: Some(noop_click()),
                 }),
