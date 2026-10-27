@@ -398,16 +398,12 @@ impl Layout {
             .ok_or(CommandError::MissingPanel { panel: *panel })?;
         self.validate_drop_target(*target, metrics)?;
         if let DropTarget::GroupEdge { group: target_group, .. } = *target
-            && let Some((source_group, _)) = self.tab_parent_index(panel_node)
-            && source_group == target_group
-            && matches!(
-                self.nodes.get(source_group),
-                Some(Node::Tabs(tabs)) if tabs.children.len() <= 1
-            )
+            && self
+                .tab_parent_index(panel_node)
+                .is_some_and(|(source_group, _)| source_group == target_group)
         {
-            // A single-tab group cannot be split without leaving an empty source
-            // group. With multiple tabs, dropping one tab on the group's edge
-            // intentionally detaches it into a new adjacent group.
+            // Dropping a panel on the edge of its own group is intentionally a
+            // no-op. Use a different group's edge to detach the panel into a new group.
             return Ok(CommandApplication::persistent());
         }
         self.validate_panel_ids_allowed_for_target(&[*panel], *target)?;
