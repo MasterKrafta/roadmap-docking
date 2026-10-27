@@ -2,16 +2,17 @@ use std::collections::HashMap;
 
 use dock_core::{
     create_initial_layout, Axis, CommandError, CommandOutcome, ComputeRectsError, DockCommand,
-    DockMetrics, DockSide, DragHandle, DragPayload, DropTarget, DropZone, Layout, Node, NodeId,
-    PanelId, Point, Profile, Rect, ResizeEdge, UndoRedoHistory,
+    DockMetrics, DockSide, DragHandle, DragPayload, DragSession as CoreDragSession, DragState,
+    DropSource, DropTarget, DropZone, Layout, Node, NodeId, PanelId, Point, Profile, Rect,
+    ResizeEdge, UndoRedoHistory,
 };
 use gpui::ScrollHandle;
 use ui::Theme;
 
 use crate::{dock_metrics_from_theme, FrameGeometry};
-use crate::requests::ResizeHandle;
+use crate::requests::{DragOverlay, ResizeHandle};
 
-use super::drag_session::{DragGesture, DragStartError};
+use super::drag_session::{DragGesture, DragStartError, DragUpdateError};
 use super::resize_session::{ResizeSession, ResizeStartError, ResizeUpdateError, StartGeometry};
 
 #[derive(Debug)]
@@ -100,8 +101,7 @@ impl DockController {
         Ok(())
     }
 
-    /// Clears a pending drag press. The active drag movement is implemented in the
-    /// next step; for now this keeps short clicks from leaving the controller busy.
+    /// Clears a pending press or an active drag without changing the layout.
     pub(crate) fn cancel_drag(&mut self) -> bool {
         let Session::Drag(gesture) = &self.session else {
             return false;
@@ -110,11 +110,118 @@ impl DockController {
             payload = ?gesture.payload,
             handle = ?gesture.handle,
             origin = ?gesture.origin,
-            "cancelled pending dock drag press"
+            core_started = gesture.core.is_some(),
+            "cancelled dock drag gesture"
         );
         self.session = Session::Idle;
         self.last_error = None;
         true
+    }
+
+    /// Reports whether this pointer move crosses the threshold and needs a fresh frame.
+    pub(crate) fn drag_needs_start(&self, pointer: Point) -> bool {
+        match &self.session {
+            Session::Drag(gesture) if gesture.core.is_none() => DragGesture::threshold_reached(
+                gesture.origin,
+                pointer,
+                self.metrics.drag_threshold,
+            ),
+            Session::Idle | Session::Resize(_) | Session::Drag(_) => false,
+        }
+    }
+
+    /// Starts Core drag tracking after the threshold, then reuses one resolver for the gesture.
+    ///
+    /// The frame is required only when a pending press first crosses the threshold. Later
+    /// movements use the already prepared resolver and update the preview target in place.
+    pub(crate) fn update_drag(
+        &mut self,
+        pointer: Point,
+        frame: Option<&FrameGeometry>,
+    ) -> Result<bool, DragUpdateError> {
+        let start = match &self.session {
+            Session::Drag(gesture) if gesture.core.is_none() => {
+                if !DragGesture::threshold_reached(
+                    gesture.origin,
+                    pointer,
+                    self.metrics.drag_threshold,
+                ) {
+                    return Ok(false);
+                }
+                Some((gesture.payload, gesture.handle, gesture.origin))
+            }
+            Session::Drag(_) => None,
+            Session::Idle | Session::Resize(_) => return Ok(false),
+        };
+
+        if let Some((payload, handle, origin)) = start {
+            let frame = frame.ok_or(DragUpdateError::MissingFrameGeometry)?;
+            if frame.layout_version() != self.layout.version() {
+                return Err(DragUpdateError::StaleFrameGeometry);
+            }
+
+            let mut core = CoreDragSession::new(&self.metrics)?;
+            core.pointer_down_with_handle(payload, handle, origin)?;
+            core.pointer_move(pointer)?;
+            if !matches!(core.state(), DragState::Dragging { .. }) {
+                return Ok(false);
+            }
+
+            // A floating title drag moves its window; it does not resolve a docking target.
+            let resolver = match payload {
+                DragPayload::Panel { panel } => Some(frame.prepare_drop_resolver(
+                    &self.layout,
+                    DropSource::Panel { panel },
+                    &self.metrics,
+                )?),
+                DragPayload::Group { group } => Some(frame.prepare_drop_resolver(
+                    &self.layout,
+                    DropSource::Group { group },
+                    &self.metrics,
+                )?),
+                DragPayload::FloatingGroup { .. } => None,
+            };
+            if let Some(resolver) = resolver.as_ref() {
+                core.set_drop_target(resolver.resolve(pointer)?)?;
+            }
+            let overlay = resolver.as_ref().and_then(|resolver| {
+                core.preview().map(|preview| DragOverlay {
+                    preview,
+                    zones: resolver.zones().to_vec(),
+                })
+            });
+
+            let Session::Drag(gesture) = &mut self.session else {
+                return Ok(false);
+            };
+            gesture.core = Some(core);
+            gesture.resolver = resolver;
+            gesture.overlay = overlay;
+            return Ok(true);
+        }
+
+        let Session::Drag(gesture) = &mut self.session else {
+            return Ok(false);
+        };
+        let Some(core) = gesture.core.as_mut() else {
+            return Ok(false);
+        };
+        core.pointer_move(pointer)?;
+        if let Some(resolver) = gesture.resolver.as_ref() {
+            core.set_drop_target(resolver.resolve(pointer)?)?;
+        }
+        if let (Some(overlay), Some(preview)) = (&mut gesture.overlay, core.preview()) {
+            overlay.preview = preview;
+        }
+        Ok(true)
+    }
+
+    /// Returns the current drag overlay for rendering, if this is a docking drag.
+    pub(crate) fn drag_overlay(&self) -> Option<&DragOverlay> {
+        match &self.session {
+            Session::Drag(gesture) => gesture.overlay.as_ref(),
+            Session::Idle | Session::Resize(_) => None,
+        }
     }
 
     /// Begins a resize only when no other pointer session is active.
