@@ -2223,6 +2223,7 @@
                 flyout_rect.origin.x + flyout_rect.size.width / 2.0,
                 flyout_rect.origin.y + flyout_rect.size.height / 2.0,
             );
+            let original_panel_count = controller.layout().panel_instances().count();
 
             let action = controller
                 .commit_drop_request(
@@ -2242,6 +2243,7 @@
                 DragDropAction::Command(DockCommand::MovePanelFromFlyout { panel, target })
             );
             assert!(controller.layout().flyout().is_none());
+            assert_eq!(controller.layout().panel_instances().count(), original_panel_count);
             assert_ne!(group_containing_panel(&controller, panel), Some(source_group));
             assert_eq!(controller.history.undo_len(), 1);
             assert_eq!(controller.history.redo_len(), 0);
@@ -2249,11 +2251,13 @@
 
             assert!(controller.undo().unwrap());
             assert!(controller.layout().flyout().is_none());
+            let restored_group = group_containing_panel(&controller, panel)
+                .expect("undo must restore the panel to a tab group");
             assert_ne!(
-                group_containing_panel(&controller, panel),
-                Some(target_group),
+                restored_group, target_group,
                 "undo must restore the panel outside the drop target; its source NodeId may be recreated"
             );
+            assert_eq!(controller.layout().panel_instances().count(), original_panel_count);
             assert_eq!(controller.layout().floating_groups().count(), 0);
             assert_eq!(controller.history.undo_len(), 0);
             assert_eq!(controller.history.redo_len(), 1);
@@ -2261,6 +2265,7 @@
 
             assert!(controller.redo().unwrap());
             assert!(controller.layout().flyout().is_none());
+            assert_eq!(controller.layout().panel_instances().count(), original_panel_count);
             assert_ne!(group_containing_panel(&controller, panel), Some(source_group));
             assert_eq!(controller.history.undo_len(), 1);
             assert_eq!(controller.history.redo_len(), 0);
