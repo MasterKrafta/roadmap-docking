@@ -77,7 +77,7 @@ pub fn run(options: RunOptions) {
     #[cfg(not(windows))]
     {
         let _ = options;
-        eprintln!("The dock application currently targets Windows 10 x64 (MSVC).");
+        tracing::error!("The dock application currently targets Windows 10 x64 (MSVC).");
     }
 }
 
@@ -119,7 +119,7 @@ fn run_windows(options: RunOptions) {
         ) {
             Ok(window) => window,
             Err(error) => {
-                eprintln!("Could not initialize the dock window: {error}");
+                tracing::error!(error = %error, "Could not initialize the dock window");
                 return;
             }
         };
@@ -151,7 +151,7 @@ fn run_windows(options: RunOptions) {
             });
             main_window
         }) {
-            eprintln!("Could not open the dock window: {error}");
+            tracing::error!(error = %error, "Could not open the dock window");
             return;
         }
 
