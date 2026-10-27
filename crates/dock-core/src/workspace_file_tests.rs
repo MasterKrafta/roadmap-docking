@@ -69,7 +69,8 @@ fn generated_workspace_layout(
 
             let active_index =
                 usize::from(active_choices[group_index % active_choices.len()]) % panels.len();
-            let collapsed = collapsed_choices[group_index % collapsed_choices.len()];
+            let collapsed = *panel_count > 1
+                && collapsed_choices[group_index % collapsed_choices.len()];
             groups.push(builder.tabs(panels, active_index, collapsed));
             group_index += 1;
         }
