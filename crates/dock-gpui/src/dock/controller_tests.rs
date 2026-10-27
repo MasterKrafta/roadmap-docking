@@ -1687,6 +1687,164 @@
     }
 
     #[test]
+    fn flyout_panel_drop_to_dock_uses_move_panel_from_flyout_and_records_one_undo_step() {
+        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+        let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
+        let (source_column, source_group, panel) = controller
+            .layout()
+            .nodes()
+            .find_map(|(column_id, node)| {
+                let Node::Column(column) = node else {
+                    return None;
+                };
+                column.groups.iter().find_map(|group_id| {
+                    let Node::Tabs(tabs) = controller.layout().node(*group_id)? else {
+                        return None;
+                    };
+                    let panel_node = *tabs.children.get(tabs.active_index)?;
+                    let Node::Panel(panel) = controller.layout().node(panel_node)? else {
+                        return None;
+                    };
+                    Some((column_id, *group_id, panel.panel_id))
+                })
+            })
+            .expect("an initial dock column should contain an active tab panel");
+
+        controller
+            .apply(DockCommand::SetColumnMode {
+                column: source_column,
+                mode: ColumnMode::IconsOnly,
+            })
+            .unwrap();
+        // Keep only the drop under test in undo history.
+        controller.history.clear();
+        controller
+            .apply(DockCommand::OpenFlyout {
+                column: source_column,
+                panel,
+            })
+            .unwrap();
+        assert!(controller.layout().flyout().is_some());
+        assert_eq!(controller.history.undo_len(), 0);
+
+        let target_group = controller
+            .layout()
+            .nodes()
+            .find_map(|(column_id, node)| {
+                let Node::Column(column) = node else {
+                    return None;
+                };
+                if column_id == source_column {
+                    return None;
+                }
+                column
+                    .groups
+                    .iter()
+                    .copied()
+                    .find(|group| matches!(controller.layout().node(*group), Some(Node::Tabs(_))))
+            })
+            .expect("a different main-dock column should provide a docking target");
+        let target_index = match controller.layout().node(target_group) {
+            Some(Node::Tabs(tabs)) => tabs.children.len(),
+            _ => unreachable!("target_group was selected from a Tabs child"),
+        };
+        let frame = controller.frame(viewport).unwrap();
+        let flyout_rect = frame
+            .rects()
+            .flyout
+            .filter(|flyout| flyout.panel == panel)
+            .expect("the current flyout should have geometry")
+            .rect;
+        let origin = Point::new(
+            flyout_rect.origin.x + 24.0,
+            flyout_rect.origin.y + 40.0,
+        );
+        let target_rect = frame
+            .rects()
+            .groups
+            .iter()
+            .find(|group| group.group == target_group)
+            .expect("target group should have geometry")
+            .rect;
+        let pointer = Point::new(
+            target_rect.origin.x + target_rect.size.width / 2.0,
+            target_rect.origin.y + target_rect.size.height / 2.0,
+        );
+        let original_panel_count = controller.layout().panel_instances().count();
+        let original_floating_count = controller.layout().floating_groups().count();
+
+        let action = controller
+            .commit_drop_request(
+                DragDropRequest {
+                    payload: DragPayload::Panel { panel },
+                    handle: DragHandle::FlyoutPanel,
+                    origin,
+                    point: pointer,
+                    target: Some(DropTarget::Tabs {
+                        group: target_group,
+                        index: target_index,
+                    }),
+                    floating_bounds: None,
+                },
+                viewport,
+            )
+            .unwrap();
+
+        assert_eq!(
+            action,
+            DragDropAction::Command(DockCommand::MovePanelFromFlyout {
+                panel,
+                target: DropTarget::Tabs {
+                    group: target_group,
+                    index: target_index,
+                },
+            })
+        );
+        assert!(controller.layout().flyout().is_none());
+        assert!(matches!(
+            controller.layout().node(target_group),
+            Some(Node::Tabs(tabs)) if tabs.children.iter().any(|node| matches!(
+                controller.layout().node(*node),
+                Some(Node::Panel(instance)) if instance.panel_id == panel
+            ))
+        ));
+        assert_eq!(controller.layout().panel_instances().count(), original_panel_count);
+        assert_eq!(controller.layout().floating_groups().count(), original_floating_count);
+        assert_eq!(controller.history.undo_len(), 1);
+        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+
+        assert!(controller.undo().unwrap());
+        assert!(
+            controller.layout().flyout().is_none(),
+            "undo restores persistent panel placement but does not reopen transient flyout UI"
+        );
+        assert!(matches!(
+            controller.layout().node(source_group),
+            Some(Node::Tabs(tabs)) if tabs.children.iter().any(|node| matches!(
+                controller.layout().node(*node),
+                Some(Node::Panel(instance)) if instance.panel_id == panel
+            ))
+        ));
+        assert_eq!(controller.layout().panel_instances().count(), original_panel_count);
+        assert_eq!(controller.history.undo_len(), 0);
+        assert_eq!(controller.history.redo_len(), 1);
+        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+
+        assert!(controller.redo().unwrap());
+        assert!(controller.layout().flyout().is_none());
+        assert!(matches!(
+            controller.layout().node(target_group),
+            Some(Node::Tabs(tabs)) if tabs.children.iter().any(|node| matches!(
+                controller.layout().node(*node),
+                Some(Node::Panel(instance)) if instance.panel_id == panel
+            ))
+        ));
+        assert_eq!(controller.history.undo_len(), 1);
+        assert_eq!(controller.history.redo_len(), 0);
+        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+    }
+
+    #[test]
     fn free_area_drop_from_flyout_uses_flyout_command_closes_flyout_and_undo_restores_panel() {
         let mut controller = DockController::new_initial(&Theme::default()).unwrap();
         let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
