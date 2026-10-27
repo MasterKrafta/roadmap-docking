@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use dock_core::{
     create_initial_layout, Axis, CommandError, CommandOutcome, ComputeRectsError, DockCommand,
-    DockMetrics, DockSide, DragDropRequest, DragHandle, DragPayload,
+    DockMetrics, DockSide, DragDropAction, DragDropRequest, DragHandle, DragPayload,
     DragSession as CoreDragSession, DragState,
     DropSource, DropTarget, DropZone, Layout, Node, NodeId, PanelId, Point, Profile, Rect,
     ResizeEdge, UndoRedoHistory,
@@ -278,6 +278,21 @@ impl DockController {
 
         self.last_error = None;
         Ok(core.pointer_up(pointer, target)?)
+    }
+
+    /// Resolves a released drag through Core and commits its command through history.
+    ///
+    /// A no-op is intentionally not entered in history. Core remains the single source
+    /// of truth for validating drop targets and selecting the semantic DockCommand.
+    pub(crate) fn commit_drop_request(
+        &mut self,
+        request: DragDropRequest,
+    ) -> Result<DragDropAction, CommandError> {
+        let action = super::drop_commit::resolve_drop(&self.layout, &request, &self.metrics)?;
+        if let DragDropAction::Command(command) = &action {
+            self.apply(command.clone())?;
+        }
+        Ok(action)
     }
 
     /// Returns the current drag overlay for rendering, if this is a docking drag.
