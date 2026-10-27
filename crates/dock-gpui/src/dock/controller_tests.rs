@@ -978,6 +978,13 @@
             .collect()
     }
 
+    fn owner_column(controller: &DockController, group: NodeId) -> Option<NodeId> {
+        controller.layout().nodes().find_map(|(column_id, node)| match node {
+            Node::Column(column) if column.groups.contains(&group) => Some(column_id),
+            _ => None,
+        })
+    }
+
     fn make_initial_floating_group(
         controller: &mut DockController,
     ) -> (dock_core::FloatingGroupId, Rect) {
@@ -1262,6 +1269,174 @@
             .begin_drag(DragPayload::Panel { panel }, DragHandle::PanelTab, origin)
             .unwrap();
         assert!(controller.cancel_drag());
+    }
+
+    #[test]
+    fn group_grip_drop_target_matrix_maps_to_one_reversible_command() {
+        let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
+
+        for target_kind in ["edge", "column", "rail", "main"] {
+            let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+            let main_columns =
+                crate::tree_query::main_column_ids(controller.layout(), DockSide::Right);
+            let source_column = main_columns
+                .iter()
+                .copied()
+                .find(|column_id| {
+                    matches!(
+                        controller.layout().node(*column_id),
+                        Some(Node::Column(column)) if column.groups.len() > 1 && !column.mode.is_rail()
+                    )
+                })
+                .expect("the right main dock should contain a column with multiple groups");
+            let source_group = match controller.layout().node(source_column) {
+                Some(Node::Column(column)) => column.groups[0],
+                _ => unreachable!("source_column was selected from main columns"),
+            };
+            let target_column = main_columns
+                .iter()
+                .copied()
+                .find(|column_id| {
+                    *column_id != source_column
+                        && matches!(
+                            controller.layout().node(*column_id),
+                            Some(Node::Column(column)) if !column.mode.is_rail() && !column.groups.is_empty()
+                        )
+                })
+                .expect("a second main-dock column should provide a group target");
+            let target_group = match controller.layout().node(target_column) {
+                Some(Node::Column(column)) => column.groups[0],
+                _ => unreachable!("target_column was selected from main columns"),
+            };
+            let target_column_len = match controller.layout().node(target_column) {
+                Some(Node::Column(column)) => column.groups.len(),
+                _ => unreachable!("target_column was selected from main columns"),
+            };
+
+            if target_kind == "rail" {
+                controller
+                    .apply(DockCommand::SetColumnMode {
+                        column: target_column,
+                        mode: ColumnMode::IconsOnly,
+                    })
+                    .unwrap();
+                // The rail mode is fixture setup; isolate history to the drop under test.
+                controller.history.clear();
+            }
+
+            let target = match target_kind {
+                "edge" => DropTarget::GroupEdge {
+                    group: target_group,
+                    zone: dock_core::DropZone::Right,
+                },
+                "column" => DropTarget::ColumnSlot {
+                    column: target_column,
+                    index: target_column_len,
+                },
+                "rail" => DropTarget::RailSlot {
+                    column: target_column,
+                    index: 0,
+                },
+                "main" => DropTarget::MainColumn {
+                    side: DockSide::Left,
+                    index: 0,
+                },
+                _ => unreachable!("all group target cases are listed above"),
+            };
+
+            let action = controller
+                .commit_drop_request(
+                    DragDropRequest {
+                        payload: DragPayload::Group { group: source_group },
+                        handle: DragHandle::GroupGrip,
+                        origin: Point::new(180.0, 120.0),
+                        point: Point::new(420.0, 260.0),
+                        target: Some(target),
+                        floating_bounds: None,
+                    },
+                    viewport,
+                )
+                .unwrap();
+
+            match target_kind {
+                "edge" => assert_eq!(
+                    action,
+                    DragDropAction::Command(DockCommand::SplitGroup {
+                        group: source_group,
+                        target_group,
+                        zone: dock_core::DropZone::Right,
+                        ratio: 0.5,
+                    })
+                ),
+                "column" => assert_eq!(
+                    action,
+                    DragDropAction::Command(DockCommand::MoveGroup {
+                        group: source_group,
+                        column: target_column,
+                        index: target_column_len,
+                    })
+                ),
+                "rail" => match action {
+                    DragDropAction::Command(DockCommand::MoveGroup {
+                        group,
+                        column,
+                        index,
+                    }) => {
+                        assert_eq!(group, source_group);
+                        assert_eq!(column, target_column);
+                        assert!(index <= target_column_len);
+                    }
+                    other => panic!("rail-slot group drop should resolve to MoveGroup, got {other:?}"),
+                },
+                "main" => assert_eq!(
+                    action,
+                    DragDropAction::Command(DockCommand::MoveGroupToMainColumn {
+                        group: source_group,
+                        side: DockSide::Left,
+                        index: 0,
+                    })
+                ),
+                _ => unreachable!("all group target cases are listed above"),
+            }
+
+            assert_eq!(controller.history.undo_len(), 1, "one drop must be one undo step");
+            assert_eq!(controller.history.redo_len(), 0);
+            assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+            match target_kind {
+                "column" | "rail" => {
+                    assert_eq!(owner_column(&controller, source_group), Some(target_column));
+                }
+                "main" => {
+                    assert_ne!(owner_column(&controller, source_group), Some(source_column));
+                    assert!(!crate::tree_query::main_column_ids(
+                        controller.layout(),
+                        DockSide::Left
+                    )
+                    .is_empty());
+                }
+                "edge" => assert!(owner_column(&controller, source_group).is_some()),
+                _ => unreachable!("all group target cases are listed above"),
+            }
+
+            assert!(controller.undo().unwrap());
+            assert_eq!(owner_column(&controller, source_group), Some(source_column));
+            assert_eq!(controller.history.undo_len(), 0);
+            assert_eq!(controller.history.redo_len(), 1);
+            assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+
+            assert!(controller.redo().unwrap());
+            assert_eq!(controller.history.undo_len(), 1);
+            assert_eq!(controller.history.redo_len(), 0);
+            assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+            match target_kind {
+                "column" | "rail" => {
+                    assert_eq!(owner_column(&controller, source_group), Some(target_column));
+                }
+                "main" => assert_ne!(owner_column(&controller, source_group), Some(source_column)),
+                "edge" => assert!(owner_column(&controller, source_group).is_some()),
+                _ => unreachable!("all group target cases are listed above"),
+            }
+        }
     }
 
     #[test]
@@ -1686,6 +1861,267 @@
         assert!(bounds.origin.y >= viewport.origin.y);
         assert!(bounds.origin.x + bounds.size.width <= viewport.origin.x + viewport.size.width);
         assert!(bounds.origin.y + bounds.size.height <= viewport.origin.y + viewport.size.height);
+    }
+
+    #[test]
+    fn panel_drop_target_matrix_maps_dock_targets_to_move_panel() {
+        let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
+
+        for target_kind in ["edge", "column", "rail", "main"] {
+            let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+            let main_columns =
+                crate::tree_query::main_column_ids(controller.layout(), DockSide::Right);
+            let source_column = main_columns
+                .first()
+                .copied()
+                .expect("initial layout should expose a right main column");
+            let source_group = match controller.layout().node(source_column) {
+                Some(Node::Column(column)) => column.groups[0],
+                _ => unreachable!("source_column was selected from main columns"),
+            };
+            let panel = match controller.layout().node(source_group) {
+                Some(Node::Tabs(tabs)) => match controller.layout().node(tabs.children[0]) {
+                    Some(Node::Panel(panel)) => panel.panel_id,
+                    _ => unreachable!("tab child should be a panel"),
+                },
+                _ => unreachable!("source_group should be a Tabs node"),
+            };
+            let target_column = main_columns
+                .iter()
+                .copied()
+                .find(|column_id| *column_id != source_column)
+                .expect("a second main-dock column should provide a target");
+            let target_group = match controller.layout().node(target_column) {
+                Some(Node::Column(column)) => column.groups[0],
+                _ => unreachable!("target_column was selected from main columns"),
+            };
+            let target_column_len = match controller.layout().node(target_column) {
+                Some(Node::Column(column)) => column.groups.len(),
+                _ => unreachable!("target_column was selected from main columns"),
+            };
+
+            if target_kind == "rail" {
+                controller
+                    .apply(DockCommand::SetColumnMode {
+                        column: target_column,
+                        mode: ColumnMode::IconsOnly,
+                    })
+                    .unwrap();
+                controller.history.clear();
+            }
+
+            let target = match target_kind {
+                "edge" => DropTarget::GroupEdge {
+                    group: target_group,
+                    zone: dock_core::DropZone::Right,
+                },
+                "column" => DropTarget::ColumnSlot {
+                    column: target_column,
+                    index: target_column_len,
+                },
+                "rail" => DropTarget::RailSlot {
+                    column: target_column,
+                    index: 0,
+                },
+                "main" => DropTarget::MainColumn {
+                    side: DockSide::Left,
+                    index: 0,
+                },
+                _ => unreachable!("all panel target cases are listed above"),
+            };
+
+            let action = controller
+                .commit_drop_request(
+                    drop_request(
+                        panel,
+                        target,
+                        Point::new(180.0, 120.0),
+                        Point::new(420.0, 260.0),
+                    ),
+                    viewport,
+                )
+                .unwrap();
+            assert_eq!(
+                action,
+                DragDropAction::Command(DockCommand::MovePanel { panel, target }),
+                "panel-to-{target_kind} must remain a single MovePanel command"
+            );
+            assert_ne!(group_containing_panel(&controller, panel), Some(source_group));
+            assert_eq!(controller.history.undo_len(), 1);
+            assert_eq!(controller.history.redo_len(), 0);
+            assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+
+            assert!(controller.undo().unwrap());
+            assert_eq!(group_containing_panel(&controller, panel), Some(source_group));
+            assert_eq!(controller.history.undo_len(), 0);
+            assert_eq!(controller.history.redo_len(), 1);
+            assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+
+            assert!(controller.redo().unwrap());
+            assert_ne!(group_containing_panel(&controller, panel), Some(source_group));
+            assert_eq!(controller.history.undo_len(), 1);
+            assert_eq!(controller.history.redo_len(), 0);
+            assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+        }
+    }
+
+    #[test]
+    fn panel_reorder_and_same_group_edge_split_each_commit_one_undo_step() {
+        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+        let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
+        let (group, original_order, moving_node, panel) = controller
+            .layout()
+            .nodes()
+            .find_map(|(group, node)| {
+                let Node::Tabs(tabs) = node else {
+                    return None;
+                };
+                if tabs.children.len() < 2 {
+                    return None;
+                }
+                let original_order = tabs.children.clone();
+                let moving_node = *original_order.last()?;
+                let Node::Panel(panel) = controller.layout().node(moving_node)? else {
+                    return None;
+                };
+                Some((group, original_order, moving_node, panel.panel_id))
+            })
+            .expect("initial layout should contain a tab group with at least two panels");
+        let mut reordered = original_order.clone();
+        reordered.pop();
+        reordered.insert(0, moving_node);
+        let reorder_target = DropTarget::Tabs { group, index: 0 };
+
+        let action = controller
+            .commit_drop_request(
+                drop_request(
+                    panel,
+                    reorder_target,
+                    Point::new(180.0, 120.0),
+                    Point::new(240.0, 180.0),
+                ),
+                viewport,
+            )
+            .unwrap();
+        assert_eq!(
+            action,
+            DragDropAction::Command(DockCommand::MovePanel {
+                panel,
+                target: reorder_target,
+            })
+        );
+        match controller.layout().node(group) {
+            Some(Node::Tabs(tabs)) => assert_eq!(tabs.children, reordered),
+            other => panic!("source group should remain a Tabs node, got {other:?}"),
+        }
+        assert_eq!(controller.history.undo_len(), 1);
+        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+
+        assert!(controller.undo().unwrap());
+        match controller.layout().node(group) {
+            Some(Node::Tabs(tabs)) => assert_eq!(tabs.children, original_order),
+            other => panic!("undo should restore the original Tabs node, got {other:?}"),
+        }
+        assert!(controller.redo().unwrap());
+        match controller.layout().node(group) {
+            Some(Node::Tabs(tabs)) => assert_eq!(tabs.children, reordered),
+            other => panic!("redo should restore the reordered Tabs node, got {other:?}"),
+        }
+        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+
+        // Start an independent history assertion for the edge-split operation.
+        controller.history.clear();
+        let split_target = DropTarget::GroupEdge {
+            group,
+            zone: dock_core::DropZone::Right,
+        };
+        let action = controller
+            .commit_drop_request(
+                drop_request(
+                    panel,
+                    split_target,
+                    Point::new(180.0, 120.0),
+                    Point::new(420.0, 260.0),
+                ),
+                viewport,
+            )
+            .unwrap();
+        assert_eq!(
+            action,
+            DragDropAction::Command(DockCommand::MovePanel {
+                panel,
+                target: split_target,
+            })
+        );
+        assert_ne!(group_containing_panel(&controller, panel), Some(group));
+        assert_eq!(controller.history.undo_len(), 1);
+        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+
+        assert!(controller.undo().unwrap());
+        assert_eq!(group_containing_panel(&controller, panel), Some(group));
+        assert_eq!(controller.history.undo_len(), 0);
+        assert_eq!(controller.history.redo_len(), 1);
+        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+
+        assert!(controller.redo().unwrap());
+        assert_ne!(group_containing_panel(&controller, panel), Some(group));
+        assert_eq!(controller.history.undo_len(), 1);
+        assert_eq!(controller.history.redo_len(), 0);
+        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+    }
+
+    #[test]
+    fn incompatible_drag_targets_are_rejected_without_mutating_layout_or_history() {
+        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+        let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
+        let samples = first_panels_by_group(&controller);
+        let (source_group, _, panel) = samples[0];
+        let target_group = samples
+            .iter()
+            .map(|(group, _, _)| *group)
+            .find(|group| *group != source_group)
+            .expect("initial layout should contain a distinct target group");
+        let initial_layout = layout_debug_snapshot(&controller);
+        let initial_version = controller.layout().version();
+
+        let panel_to_group_tabs = controller.commit_drop_request(
+            drop_request(
+                panel,
+                DropTarget::GroupTabs {
+                    group: target_group,
+                    index: 0,
+                },
+                Point::new(180.0, 120.0),
+                Point::new(420.0, 260.0),
+            ),
+            viewport,
+        );
+        assert!(panel_to_group_tabs.is_err());
+        assert_eq!(layout_debug_snapshot(&controller), initial_layout);
+        assert_eq!(controller.layout().version(), initial_version);
+        assert_eq!(controller.history.undo_len(), 0);
+        assert_eq!(controller.history.redo_len(), 0);
+
+        let group_to_tabs = controller.commit_drop_request(
+            DragDropRequest {
+                payload: DragPayload::Group { group: source_group },
+                handle: DragHandle::GroupGrip,
+                origin: Point::new(180.0, 120.0),
+                point: Point::new(420.0, 260.0),
+                target: Some(DropTarget::Tabs {
+                    group: target_group,
+                    index: 0,
+                }),
+                floating_bounds: None,
+            },
+            viewport,
+        );
+        assert!(group_to_tabs.is_err());
+        assert_eq!(layout_debug_snapshot(&controller), initial_layout);
+        assert_eq!(controller.layout().version(), initial_version);
+        assert_eq!(controller.history.undo_len(), 0);
+        assert_eq!(controller.history.redo_len(), 0);
+        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
     }
 
     #[test]
