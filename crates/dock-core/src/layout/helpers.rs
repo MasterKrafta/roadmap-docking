@@ -17,10 +17,7 @@ pub(super) fn geometry_error_reason(error: GeometryError) -> &'static str {
     }
 }
 
-pub(super) fn ratio_issues(
-    ratios: &[f32],
-    expected_len: usize,
-) -> Vec<ValidationReason> {
+pub(super) fn ratio_issues(ratios: &[f32], expected_len: usize) -> Vec<ValidationReason> {
     let mut issues = Vec::new();
     if ratios.len() != expected_len {
         issues.push(ValidationReason::RatioCountMustMatchChildGroupCount);
