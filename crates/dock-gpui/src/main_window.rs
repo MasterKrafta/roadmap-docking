@@ -663,7 +663,7 @@ impl Render for MainWindow {
             }
             let pointer = dock_surface_pointer(event.position, surface_top);
             if let Some(group) = floating_group_at_point(&floating_hit_targets, pointer) {
-                this.apply_dock_command(DockCommand::RaiseFloating { group });
+                this.apply_dock_command(DockCommand::RaiseFloating { group }, cx);
                 cx.notify();
             }
         });
