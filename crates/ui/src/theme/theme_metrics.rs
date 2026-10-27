@@ -6,6 +6,7 @@ pub struct ThemeMetrics {
     pub group_control_button_width: f32,
     /// Width reserved at the end of the tab strip for a future drag target.
     pub tab_drag_zone_width: f32,
+    /// Maximum width of icon buttons in floating-window titles, in logical pixels.
     pub button_size: f32,
     pub button_gap: f32,
     /// Uniform padding applied inside each panel's content surface, in logical pixels.
