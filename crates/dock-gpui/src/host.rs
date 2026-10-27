@@ -1,7 +1,7 @@
 use dock_core::{DockCommand, DragHandle, DragPayload, FloatingGroupId, PanelInstance};
 use gpui::{
-    AnyElement, App, ClickEvent, KeyDownEvent, MouseDownEvent, MouseMoveEvent, MouseUpEvent, SharedString,
-    Window,
+    AnyElement, App, ClickEvent, KeyDownEvent, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+    SharedString, Window,
 };
 
 use crate::requests::{DockMenuRequest, ResizeHandle};
@@ -36,7 +36,12 @@ pub trait DockHost {
 
     fn command(&self, command: DockCommand) -> CommandClickHandler;
 
-    fn command_key(&self, command: DockCommand) -> CommandKeyHandler;
+    /// Handles keyboard activation for hosts that support dock commands.
+    ///
+    /// Preview hosts may keep the default no-op implementation.
+    fn command_key(&self, _command: DockCommand) -> CommandKeyHandler {
+        Box::new(|_, _, _| {})
+    }
 
     fn close_floating(&self, group: FloatingGroupId) -> CommandClickHandler;
 
