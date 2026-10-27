@@ -1347,11 +1347,17 @@
         assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
 
         assert!(controller.undo().unwrap());
-        assert!(controller.layout().floating_group(floating_id).is_some());
+        // Restored arena entries may receive fresh runtime IDs after docking removed them.
+        let restored_floating = controller
+            .layout()
+            .floating_groups()
+            .next()
+            .map(|(id, floating)| (id, floating.bounds))
+            .expect("undo should restore one floating group");
         assert_eq!(controller.layout().floating_groups().count(), 1);
+        assert_eq!(restored_floating.1, bounds);
         assert_eq!(controller.history.undo_len(), 0);
         assert!(controller.redo().unwrap());
-        assert!(controller.layout().floating_group(floating_id).is_none());
         assert_eq!(controller.layout().floating_groups().count(), 0);
         assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
     }
