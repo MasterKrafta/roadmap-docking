@@ -7,6 +7,7 @@ use gpui::{
 use ui::Theme;
 
 use crate::components::{with_focus_ring, PopupMenu, PopupMenuItem};
+use crate::host::DockHost;
 use crate::dock::{floating_group_at_point, DockController, WindowHost};
 use crate::menus::{self, MenuItemModel, MenuState};
 use crate::requests::{DockMenuRequest, ResizeHandle};

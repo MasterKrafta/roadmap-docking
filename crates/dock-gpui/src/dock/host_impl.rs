@@ -62,7 +62,7 @@ impl DockHost for WindowHost<'_, '_> {
     fn menu(&self, request: DockMenuRequest) -> CommandClickHandler {
         Box::new(self.cx.listener::<ClickEvent>(
             move |this, event, _window, cx| {
-                this.open_menu(request, event.position);
+                this.open_menu(request, event.position());
                 cx.notify();
             },
         ))

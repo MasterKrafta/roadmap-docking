@@ -17,7 +17,7 @@ pub(super) fn items(layout: &Layout, frame: &FrameGeometry, group: NodeId) -> Ve
         .filter_map(|panel| {
             let title = layout.panel_instance(panel).map(crate::panels::panel_title)?;
             Some(MenuItemModel {
-                id: format!("overflow-{}-{:?}", group, panel),
+                id: format!("overflow-{:?}-{:?}", group, panel),
                 label: title,
                 checked: matches!(
                     layout.node(group),
