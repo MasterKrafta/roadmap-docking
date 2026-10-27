@@ -30,11 +30,7 @@ pub struct RailEntry {
 
 impl RenderOnce for RailEntry {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
-        let label = match self.mode {
-            ColumnMode::IconsOnly => self.icon,
-            ColumnMode::IconsAndLabels => format!("{}  {}", self.icon, self.title),
-            ColumnMode::Expanded => self.title,
-        };
+        let label = crate::labels::rail_entry_label(self.mode, &self.icon, &self.title);
         let background = if self.active {
             self.theme.colors.active_tab
         } else {
