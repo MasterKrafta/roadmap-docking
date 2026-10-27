@@ -61,13 +61,16 @@ impl RenderOnce for RailEntry {
             entry.flex().items_center().child(label)
         };
 
+        let on_open = self.on_open;
+        let on_open_key = self.on_open_key;
+
         with_focus_ring(entry.id(self.id), &self.theme)
             .hover(move |style| style.bg(rgb(hover_background)))
             .on_key_down(move |event, window, app| {
                 if is_keyboard_activation_key(&event.keystroke.key) {
-                    (self.on_open_key)(event, window, app);
+                    on_open_key(event, window, app);
                 }
             })
-            .on_click(self.on_open)
+            .on_click(on_open)
     }
 }
