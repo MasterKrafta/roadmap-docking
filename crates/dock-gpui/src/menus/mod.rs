@@ -114,7 +114,7 @@ pub(crate) fn items(
             overflow_menu::items(layout, frame, *group)
         }
         MenuState::PanelGroup { group, panel, .. } => {
-            group_menu::items(layout, theme, metrics, frame, *group, *panel)
+            group_menu::items(layout, metrics, frame, *group, *panel)
         }
     }
 }

@@ -1,13 +1,10 @@
 use dock_core::{ColumnMode, DockCommand, DockMetrics, Layout, Node, NodeId, PanelId, Point};
-use ui::Theme;
-
 use crate::{dock::initial_float_bounds, frame::FrameGeometry};
 
 use super::MenuItemModel;
 
 pub(super) fn items(
     layout: &Layout,
-    theme: &Theme,
     metrics: &DockMetrics,
     frame: &FrameGeometry,
     group: NodeId,
