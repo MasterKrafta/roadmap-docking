@@ -168,15 +168,8 @@ impl DockController {
                 }
                 Some((gesture.payload, gesture.handle, gesture.origin))
             }
-            Session::Drag(gesture) => {
-                let snapshot = gesture
-                    .snapshot
-                    .ok_or(DragUpdateError::StaleFrameGeometry)?;
-                if !snapshot.matches(self.layout.version(), viewport, self.metrics) {
-                    return Err(DragUpdateError::StaleFrameGeometry);
-                }
-                None
-            }
+            // The active-Core branch was checked against its snapshot above.
+            Session::Drag(_) => None,
             Session::Idle | Session::Resize(_) => return Ok(false),
         };
 
