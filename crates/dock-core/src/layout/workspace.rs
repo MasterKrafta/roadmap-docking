@@ -633,7 +633,7 @@ impl Layout {
                 .map_err(|_| {
                     vec![ValidationError::InvalidColumn {
                         node: node_id,
-                        reason: "cannot compute minimum width required by expanded contents",
+                        reason: ValidationReason::CannotComputeMinimumWidthRequiredByExpandedContents,
                     }]
                 })?;
             let maximum = self
@@ -641,13 +641,13 @@ impl Layout {
                 .map_err(|_| {
                     vec![ValidationError::InvalidColumn {
                         node: node_id,
-                        reason: "cannot compute maximum width allowed by expanded contents",
+                        reason: ValidationReason::CannotComputeMaximumWidthAllowedByExpandedContents,
                     }]
                 })?;
             if maximum.is_some_and(|maximum| maximum < minimum) {
                 return Err(vec![ValidationError::InvalidColumn {
                     node: node_id,
-                    reason: "minimum width required by expanded contents exceeds panel maximum width",
+                    reason: ValidationReason::MinimumWidthRequiredByExpandedContentsExceedsPanelMaximumWidth,
                 }]);
             }
             let upper = maximum.unwrap_or(f32::MAX);
