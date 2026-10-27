@@ -46,6 +46,7 @@ fn sample_layout() -> (Layout, Vec<(PanelKey, PanelConstraints)>) {
 
 fn generated_workspace_layout(
     column_specs: &[(Vec<usize>, f32)],
+    floating_specs: &[Vec<usize>],
     active_choices: &[u16],
     collapsed_choices: &[bool],
 ) -> (Layout, Vec<(PanelKey, PanelConstraints)>) {
@@ -93,6 +94,42 @@ fn generated_workspace_layout(
     };
     builder.main_area(DockSide::Right, root);
 
+    for (floating_index, group_sizes) in floating_specs.iter().enumerate() {
+        let mut groups = Vec::with_capacity(group_sizes.len());
+        for panel_count in group_sizes {
+            let mut panels = Vec::with_capacity(*panel_count);
+            for _ in 0..*panel_count {
+                let panel_key_name = format!("generated-workspace-panel-{panel_index}");
+                let panel_key = key(&panel_key_name);
+                let (_, panel_node) = builder.panel(panel_key.clone(), constraints());
+                descriptors.push((panel_key, constraints()));
+                panels.push(panel_node);
+                panel_index += 1;
+            }
+
+            let active_index =
+                usize::from(active_choices[group_index % active_choices.len()]) % panels.len();
+            let collapsed = *panel_count > 1
+                && collapsed_choices[group_index % collapsed_choices.len()];
+            groups.push(builder.tabs(panels, active_index, collapsed));
+            group_index += 1;
+        }
+
+        let group_ratios = vec![1.0 / groups.len() as f32; groups.len()];
+        let floating_root = builder.column(
+            DockMetrics::default().default_column_width,
+            ColumnMode::Expanded,
+            groups,
+            group_ratios,
+        );
+        let offset = floating_index as f32 * 24.0;
+        builder.floating_group(
+            floating_root,
+            Rect::new(Point::new(44.0 + offset, 55.0 + offset), Size::new(420.0, 320.0)),
+            7 + floating_index as i32,
+        );
+    }
+
     (builder.build(), descriptors)
 }
 
@@ -131,12 +168,20 @@ proptest! {
             ),
             1..=4,
         ),
+        floating_specs in prop::collection::vec(
+            prop::collection::vec(1usize..=3, 1..=3),
+            0..=3,
+        ),
         active_choices in prop::collection::vec(any::<u16>(), 1..=12),
         collapsed_choices in prop::collection::vec(any::<bool>(), 1..=12),
     ) {
         let metrics = DockMetrics::default();
-        let (layout, descriptors) =
-            generated_workspace_layout(&column_specs, &active_choices, &collapsed_choices);
+        let (layout, descriptors) = generated_workspace_layout(
+            &column_specs,
+            &floating_specs,
+            &active_choices,
+            &collapsed_choices,
+        );
         prop_assert_eq!(layout.validate(&metrics), Ok(()));
 
         let original = WorkspaceFile::from_layout(&layout, &metrics)
