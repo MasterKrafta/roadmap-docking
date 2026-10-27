@@ -1164,19 +1164,25 @@
     fn free_area_drop_from_flyout_uses_flyout_command_closes_flyout_and_undo_restores_panel() {
         let mut controller = DockController::new_initial(&Theme::default()).unwrap();
         let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
-        let samples = first_panels_by_group(&controller);
-
-        let (column_id, panel) = samples
-            .iter()
-            .find_map(|(group, _, panel)| {
-                controller.layout().nodes().find_map(|(node_id, node)| match node {
-                    Node::Column(column) if column.groups.contains(group) => {
-                        Some((node_id, *panel))
-                    }
-                    _ => None,
+        let (column_id, panel) = controller
+            .layout()
+            .nodes()
+            .find_map(|(column_id, node)| {
+                let Node::Column(column) = node else {
+                    return None;
+                };
+                column.groups.iter().find_map(|group_id| {
+                    let Node::Tabs(tabs) = controller.layout().node(*group_id)? else {
+                        return None;
+                    };
+                    let panel_node = *tabs.children.get(tabs.active_index)?;
+                    let Node::Panel(panel) = controller.layout().node(panel_node)? else {
+                        return None;
+                    };
+                    Some((column_id, panel.panel_id))
                 })
             })
-            .expect("an initial dock group should belong to a main column");
+            .expect("an initial dock column should contain an active tab panel");
 
         controller
             .apply(DockCommand::SetColumnMode {
