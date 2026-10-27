@@ -146,9 +146,22 @@ impl MainWindow {
         }
 
         if self.dock.resize_session().is_none() {
-            if self.dock.cancel_drag() {
-                cx.notify();
+            let pointer = dock_surface_pointer(
+                event.position,
+                self.theme.metrics.column_header_height.max(1.0),
+            );
+            match self.dock.finish_drag(pointer) {
+                Ok(Some(request)) => {
+                    // Stage 11 will translate this semantic request into one DockCommand.
+                    tracing::debug!(request = ?request, "dock drag request is ready for drop commit");
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    tracing::warn!(error = ?error, "could not finish dock drag");
+                }
             }
+            // Also clears the active overlay when a drag ends without a valid target.
+            cx.notify();
             return;
         }
 
