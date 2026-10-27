@@ -204,7 +204,7 @@ fn panel_self_and_same_tab_position_resolve_to_noop() {
 }
 
 #[test]
-fn panel_tab_may_split_from_its_own_group_edge() {
+fn panel_tab_drop_on_its_own_group_edge_is_no_op() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
     let (panel, p0) = builder.panel(key("own-edge-panel"), constraints());
@@ -232,13 +232,7 @@ fn panel_tab_may_split_from_its_own_group_edge() {
 
     assert_eq!(
         layout.resolve_drag_drop(&request, &metrics).unwrap(),
-        DragDropAction::Command(DockCommand::MovePanel {
-            panel,
-            target: DropTarget::GroupEdge {
-                group,
-                zone: crate::DropZone::Bottom
-            },
-        })
+        DragDropAction::NoOp
     );
 }
 
