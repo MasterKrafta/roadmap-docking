@@ -6,8 +6,8 @@ Oct 24, 2026 · @master
 
 - **Активный этап:** 11 — завершение перетаскивания: `DragDropRequest` → `DockCommand`.
 - **Этап 10:** основные обработчики `mouse down/move/up`, reusable resolver, target/preview и базовый drag ghost внесены; проверки отложены по договорённости до завершения этапа 11.
-- **Первая строка этапа 11:** проверено по исходникам ядра, что `Layout::resolve_drag_drop(&DragDropRequest, &DockMetrics)` уже возвращает `DragDropAction::Command(DockCommand)` либо `NoOp`. Добавлен тонкий адаптер `dock-gpui/src/dock/drop_commit.rs`; контроллер применяет полученную команду через историю, а `NoOp` не записывает шаг Undo.
-- **Ограничение, оставленное для следующей строки:** запросы с `DropTarget::FreeArea` пока приходят с `floating_bounds: None`, поэтому ядро корректно отклоняет их; на отдельном следующем шаге нужно сформировать bounds для detach перед разрешением запроса.
+- **Преобразование запроса:** `Layout::resolve_drag_drop(&DragDropRequest, &DockMetrics)` возвращает `DragDropAction::Command(DockCommand)` либо `NoOp`. Тонкий адаптер находится в `dock-gpui/src/dock/drop_commit.rs`; контроллер применяет команду через историю, а `NoOp` не создаёт шаг Undo.
+- **Текущий шаг:** при `DropTarget::FreeArea` адаптер получает прямоугольник источника из актуальной геометрии, вычисляет границы плавающего окна с сохранением смещения захвата, сдвигом под title bar и ограничением viewport; заполненный `floating_bounds` передаётся в `Layout::resolve_drag_drop`. Политика находится в `dock-gpui/src/dock/floating_policy.rs`.
 - **Текущие изменения ещё не проверены Cargo.** Запускаем общий набор проверок после завершения этапа 11; до этого продолжаем по одной логической части.
 
 
