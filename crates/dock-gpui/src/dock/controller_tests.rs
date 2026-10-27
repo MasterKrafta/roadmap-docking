@@ -1988,7 +1988,8 @@
             })
             .expect("initial layout should contain a tab group with at least two panels");
         let mut reordered = original_order.clone();
-        reordered.pop();
+        let last_node = reordered.pop().expect("the selected group has at least two tabs");
+        assert_eq!(last_node, moving_node);
         reordered.insert(0, moving_node);
         let reorder_target = DropTarget::Tabs { group, index: 0 };
 
