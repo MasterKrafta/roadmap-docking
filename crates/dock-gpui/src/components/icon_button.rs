@@ -46,6 +46,8 @@ impl IconButton {
 
 impl RenderOnce for IconButton {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+        let hover_color = self.theme.colors.hover;
+        let typography = self.theme.typography;
         let mut button = div()
             .absolute()
             .left(px(self.rect.origin.x))
@@ -54,6 +56,10 @@ impl RenderOnce for IconButton {
             .h(px(self.rect.size.height))
             .bg(rgb(self.theme.colors.toolbar_background))
             .text_color(rgb(self.theme.colors.primary_text))
+            .font_family(typography.family)
+            .text_size(px(typography.body_size))
+            .line_height(px(typography.line_height))
+            .hover(move |style| style.bg(rgb(hover_color)))
             .child(self.glyph);
 
         if self.border {
