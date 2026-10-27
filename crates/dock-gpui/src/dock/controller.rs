@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use dock_core::{
     create_initial_layout, Axis, CommandError, CommandOutcome, ComputeRectsError, DockCommand,
@@ -194,28 +194,56 @@ impl DockController {
                 return Ok(false);
             }
 
-            // A floating title drag moves its window; it does not resolve a docking target.
-            let resolver = match payload {
-                DragPayload::Panel { panel } => Some(frame.prepare_drop_resolver(
-                    &self.layout,
-                    DropSource::Panel { panel },
-                    &self.metrics,
-                )?),
-                DragPayload::Group { group } => Some(frame.prepare_drop_resolver(
-                    &self.layout,
-                    DropSource::Group { group },
-                    &self.metrics,
-                )?),
-                DragPayload::FloatingGroup { .. } => None,
+            // FloatingTitle moves the existing window and must not resolve dock targets.
+            // FloatingCapture instead resolves docking zones for the full floating root.
+            let mut capture_root_nodes = None;
+            let resolver = match (payload, handle) {
+                (DragPayload::Panel { panel }, DragHandle::PanelTab | DragHandle::FlyoutPanel) => {
+                    Some(frame.prepare_drop_resolver(
+                        &self.layout,
+                        DropSource::Panel { panel },
+                        &self.metrics,
+                    )?)
+                }
+                (DragPayload::Group { group }, DragHandle::GroupGrip) => {
+                    Some(frame.prepare_drop_resolver(
+                        &self.layout,
+                        DropSource::Group { group },
+                        &self.metrics,
+                    )?)
+                }
+                (DragPayload::FloatingGroup { group }, DragHandle::FloatingCapture) => {
+                    let (source, nodes) = floating_capture_source(&self.layout, group)?;
+                    capture_root_nodes = Some(nodes);
+                    Some(frame.prepare_drop_resolver(&self.layout, source, &self.metrics)?)
+                }
+                (DragPayload::FloatingGroup { .. }, DragHandle::FloatingTitle) => None,
+                _ => None,
             };
             if let Some(resolver) = resolver.as_ref() {
-                core.set_drop_target(resolver.resolve(pointer)?)?;
+                let target = filter_capture_target(
+                    handle,
+                    capture_root_nodes.as_ref(),
+                    resolver.resolve(pointer)?,
+                );
+                core.set_drop_target(target)?;
             }
             let overlay = resolver.as_ref().and_then(|resolver| {
                 core.preview().map(|preview| DragOverlay {
                     preview,
                     handle,
-                    zones: resolver.zones().to_vec(),
+                    zones: resolver
+                        .zones()
+                        .iter()
+                        .copied()
+                        .filter(|zone| {
+                            capture_target_is_actionable(
+                                handle,
+                                capture_root_nodes.as_ref(),
+                                zone.target,
+                            )
+                        })
+                        .collect(),
                 })
             });
 
@@ -225,6 +253,7 @@ impl DockController {
             gesture.core = Some(core);
             gesture.snapshot = Some(snapshot);
             gesture.resolver = resolver;
+            gesture.capture_root_nodes = capture_root_nodes;
             gesture.overlay = overlay;
             return Ok(true);
         }
@@ -237,7 +266,12 @@ impl DockController {
         };
         core.pointer_move(pointer)?;
         if let Some(resolver) = gesture.resolver.as_ref() {
-            core.set_drop_target(resolver.resolve(pointer)?)?;
+            let target = filter_capture_target(
+                gesture.handle,
+                gesture.capture_root_nodes.as_ref(),
+                resolver.resolve(pointer)?,
+            );
+            core.set_drop_target(target)?;
         }
         if let (Some(overlay), Some(preview)) = (&mut gesture.overlay, core.preview()) {
             overlay.preview = preview;
@@ -277,7 +311,11 @@ impl DockController {
         // Resolve the exact release point rather than reusing the previous move's target.
         core.pointer_move(pointer)?;
         let target = match gesture.resolver.as_ref() {
-            Some(resolver) => resolver.resolve(pointer)?,
+            Some(resolver) => filter_capture_target(
+                gesture.handle,
+                gesture.capture_root_nodes.as_ref(),
+                resolver.resolve(pointer)?,
+            ),
             None => None,
         };
         if gesture.resolver.is_some() {
@@ -522,6 +560,63 @@ impl DockController {
     pub(crate) fn scroll_handles_mut(&mut self) -> &mut HashMap<NodeId, ScrollHandle> {
         &mut self.scroll_handles
     }
+}
+
+fn floating_capture_source(
+    layout: &Layout,
+    group: dock_core::FloatingGroupId,
+) -> Result<(DropSource, HashSet<NodeId>), ComputeRectsError> {
+    let root = layout
+        .floating_group(group)
+        .and_then(|floating| layout.dock_area(floating.area))
+        .map(|area| area.root)
+        .ok_or(ComputeRectsError::InvalidLayoutState)?;
+
+    let source = match layout.node(root) {
+        Some(Node::Tabs(_)) => DropSource::Group { group: root },
+        Some(Node::Panel(panel)) => DropSource::Panel {
+            panel: panel.panel_id,
+        },
+        Some(Node::Column(_) | Node::Split(_)) => crate::tree_query::floating_title_groups_in_tree(
+            layout,
+            root,
+        )
+        .first()
+        .copied()
+        .map(|group| DropSource::Group { group })
+        .or_else(|| {
+            crate::tree_query::first_panel_in_subtree(layout, root)
+                .map(|panel| DropSource::Panel { panel })
+        })
+        .ok_or(ComputeRectsError::InvalidLayoutState)?,
+        None => return Err(ComputeRectsError::InvalidLayoutState),
+    };
+
+    Ok((source, crate::tree_query::subtree_nodes(layout, root)))
+}
+
+fn capture_target_is_actionable(
+    handle: DragHandle,
+    capture_root_nodes: Option<&HashSet<NodeId>>,
+    target: DropTarget,
+) -> bool {
+    if handle != DragHandle::FloatingCapture {
+        return true;
+    }
+    if target == DropTarget::FreeArea {
+        return false;
+    }
+
+    !crate::tree_query::drop_target_node(target)
+        .is_some_and(|node| capture_root_nodes.is_some_and(|nodes| nodes.contains(&node)))
+}
+
+fn filter_capture_target(
+    handle: DragHandle,
+    capture_root_nodes: Option<&HashSet<NodeId>>,
+    target: Option<DropTarget>,
+) -> Option<DropTarget> {
+    target.filter(|target| capture_target_is_actionable(handle, capture_root_nodes, *target))
 }
 
 /// Builds the starting arrangement inside the controller so no other module
