@@ -559,30 +559,18 @@ fn surface_contains_window_point(
     x >= 0.0 && x < width && y >= top && y < top + height
 }
 
-impl Render for MainWindow {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        if self.activation_subscription.is_none() {
-            self.activation_subscription = Some(cx.observe_window_activation(
-                window,
-                |this, window, cx| {
-                    if !window.is_window_active()
-                        && (this.dock.cancel_resize() || this.dock.cancel_drag())
-                    {
-                        cx.notify();
-                    }
-                },
-            ));
-        }
-
-        let window_size = window.viewport_size();
-        let width = window_size.width.as_f32().max(1.0);
-        let height = window_size.height.as_f32().max(1.0);
-        let menu_height = self.theme.metrics.column_header_height.max(1.0);
-        let chrome_mode = self.dock.layout().chrome();
-        let toolbar_visible = chrome_mode.toolbar_visible();
-        let surface_top = self.surface_top();
-        let content_height = (height - surface_top).max(1.0);
-
+impl MainWindow {
+    /// Registers window-level pointer and keyboard listeners during paint.
+    fn window_event_handlers(
+        &mut self,
+        cx: &mut Context<Self>,
+        width: f32,
+        surface_top: f32,
+        content_height: f32,
+        menu_bounds: Option<Rect>,
+        flyout_hit_bounds: Option<Rect>,
+        floating_hit_targets: Vec<(FloatingGroupId, Rect)>,
+    ) -> impl IntoElement {
         // Window-level listeners must be registered during paint, not render.
         // Escape and popup navigation run in capture; global shortcuts run in bubble
         // so focused input controls can consume Tab/Undo/Redo first.
@@ -603,32 +591,6 @@ impl Render for MainWindow {
             this.handle_surface_mouse_up(event, window, cx);
         });
 
-        let viewport = Rect::new(Point::ZERO, Size::new(width, content_height));
-
-        let frame = match self.dock.frame(viewport) {
-            Ok(frame) => frame,
-            Err(error) => {
-                return div()
-                    .w(px(width))
-                    .h(px(height))
-                    .bg(rgb(self.theme.colors.window_background))
-                    .text_color(rgb(self.theme.colors.primary_text))
-                    .child(format!("Could not compute dock geometry: {error:?}"));
-            }
-        };
-        let menu_state_snapshot = self.menu_state.clone();
-        let menu_items = menus::items(
-            self.dock.layout(),
-            &self.theme,
-            self.dock.metrics(),
-            &frame,
-            &menu_state_snapshot,
-        );
-        let menu_viewport = Rect::new(Point::ZERO, Size::new(width, height));
-        let menu_bounds = menu_state_snapshot
-            .anchor()
-            .map(|anchor| menus::popup_bounds(anchor, menu_viewport, menu_items.len()));
-
         let outside_menu_down = cx.listener::<MouseDownEvent>(
             move |this, event, _window, cx| {
                 if event.button != MouseButton::Left || !this.menu_state.is_open() {
@@ -643,14 +605,6 @@ impl Render for MainWindow {
             },
         );
 
-        let flyout_hit_bounds = frame.rects().flyout.map(|flyout| {
-            let edge_padding =
-                (self.theme.metrics.splitter_hit_zone.min(flyout.rect.size.width)) / 2.0;
-            Rect::new(
-                Point::new(flyout.rect.origin.x - edge_padding, flyout.rect.origin.y),
-                Size::new(flyout.rect.size.width + edge_padding * 2.0, flyout.rect.size.height),
-            )
-        });
         let menu_bounds_for_flyout = menu_bounds;
         let outside_flyout_down = cx.listener::<MouseDownEvent>(
             move |this, event, _window, cx| {
@@ -676,22 +630,6 @@ impl Render for MainWindow {
             },
         );
 
-        // Raise floating windows during capture, but do not let clicks on a menu
-        // item raise an underlying floating window before the popup handles them.
-        let floating_hit_targets = self
-            .dock
-            .layout()
-            .floating_groups_in_hit_test_order()
-            .into_iter()
-            .filter_map(|(group, _)| {
-                frame
-                    .rects()
-                    .floating_groups
-                    .iter()
-                    .find(|floating| floating.group == group)
-                    .map(|floating| (group, floating.rect))
-            })
-            .collect::<Vec<_>>();
         let menu_bounds_for_raise = menu_bounds;
         let raise_floating = cx.listener::<MouseDownEvent>(move |this, event, _window, cx| {
             if event.button != MouseButton::Left
@@ -707,7 +645,7 @@ impl Render for MainWindow {
             }
         });
 
-        let global_event_handlers = canvas(
+        canvas(
             |_, _, _| (),
             move |_, _, window, _cx| {
                 window.on_key_event(
@@ -779,7 +717,94 @@ impl Render for MainWindow {
         .absolute()
         .top_0()
         .left_0()
-        .size_full();
+        .size_full()    }
+}
+
+impl Render for MainWindow {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.activation_subscription.is_none() {
+            self.activation_subscription = Some(cx.observe_window_activation(
+                window,
+                |this, window, cx| {
+                    if !window.is_window_active()
+                        && (this.dock.cancel_resize() || this.dock.cancel_drag())
+                    {
+                        cx.notify();
+                    }
+                },
+            ));
+        }
+
+        let window_size = window.viewport_size();
+        let width = window_size.width.as_f32().max(1.0);
+        let height = window_size.height.as_f32().max(1.0);
+        let menu_height = self.theme.metrics.column_header_height.max(1.0);
+        let chrome_mode = self.dock.layout().chrome();
+        let toolbar_visible = chrome_mode.toolbar_visible();
+        let surface_top = self.surface_top();
+        let content_height = (height - surface_top).max(1.0);
+
+        let viewport = Rect::new(Point::ZERO, Size::new(width, content_height));
+
+        let frame = match self.dock.frame(viewport) {
+            Ok(frame) => frame,
+            Err(error) => {
+                return div()
+                    .w(px(width))
+                    .h(px(height))
+                    .bg(rgb(self.theme.colors.window_background))
+                    .text_color(rgb(self.theme.colors.primary_text))
+                    .child(format!("Could not compute dock geometry: {error:?}"));
+            }
+        };
+        let menu_state_snapshot = self.menu_state.clone();
+        let menu_items = menus::items(
+            self.dock.layout(),
+            &self.theme,
+            self.dock.metrics(),
+            &frame,
+            &menu_state_snapshot,
+        );
+        let menu_viewport = Rect::new(Point::ZERO, Size::new(width, height));
+        let menu_bounds = menu_state_snapshot
+            .anchor()
+            .map(|anchor| menus::popup_bounds(anchor, menu_viewport, menu_items.len()));
+
+        let flyout_hit_bounds = frame.rects().flyout.map(|flyout| {
+            let edge_padding =
+                (self.theme.metrics.splitter_hit_zone.min(flyout.rect.size.width)) / 2.0;
+            Rect::new(
+                Point::new(flyout.rect.origin.x - edge_padding, flyout.rect.origin.y),
+                Size::new(flyout.rect.size.width + edge_padding * 2.0, flyout.rect.size.height),
+            )
+        });
+        // Raise floating windows during capture, but do not let clicks on a menu
+        // item raise an underlying floating window before the popup handles them.
+        let floating_hit_targets = self
+            .dock
+            .layout()
+            .floating_groups_in_hit_test_order()
+            .into_iter()
+            .filter_map(|(group, _)| {
+                frame
+                    .rects()
+                    .floating_groups
+                    .iter()
+                    .find(|floating| floating.group == group)
+                    .map(|floating| (group, floating.rect))
+            })
+            .collect::<Vec<_>>();
+        let global_event_handlers = self.window_event_handlers(
+            cx,
+            width,
+            surface_top,
+            content_height,
+            menu_bounds,
+            flyout_hit_bounds,
+            floating_hit_targets,
+        );
+
+
 
         for overflow in &frame.rects().vertical_overflow {
             self.dock
