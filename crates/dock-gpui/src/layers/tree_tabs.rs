@@ -44,6 +44,7 @@ pub(crate) fn render(
                 active,
                 theme: *theme,
                 on_activate: host.command(activate_tab(header.group, header.panel)),
+                on_activate_key: host.command_key(activate_tab(header.group, header.panel)),
                 on_collapse_toggle: host.command(collapse_group(header.group, !collapsed)),
                 on_drag_start: host.drag_start(
                     DragPayload::Panel { panel: header.panel },
