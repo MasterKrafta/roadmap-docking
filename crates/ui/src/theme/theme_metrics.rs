@@ -14,6 +14,8 @@ pub struct ThemeMetrics {
     pub content_padding: f32,
     pub splitter_thickness: f32,
     pub splitter_hit_zone: f32,
+    /// Legacy compatibility metric. Dock hit-zone geometry uses `drop_edge_zone`;
+    /// changing this field alone does not affect the current UI.
     pub edge_drop_zone_width: f32,
     /// Logical-pixel hit-zone width for group and column docking edges.
     pub drop_edge_zone: f32,
