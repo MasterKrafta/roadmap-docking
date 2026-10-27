@@ -4,16 +4,17 @@ Oct 24, 2026 · @master
 
 ## Текущая точка продолжения
 
-- **Активный этап:** 11 — завершение перетаскивания: `DragDropRequest` → `DockCommand`.
-- **Этап 10:** основные обработчики `mouse down/move/up`, reusable resolver, target/preview и базовый drag ghost внесены; проверки отложены по договорённости до завершения этапа 11.
-- **Преобразование запроса:** `Layout::resolve_drag_drop(&DragDropRequest, &DockMetrics)` возвращает `DragDropAction::Command(DockCommand)` либо `NoOp`. Тонкий адаптер находится в `dock-gpui/src/dock/drop_commit.rs`; контроллер применяет команду через историю, а `NoOp` не создаёт шаг Undo.
-- **FreeArea / floating bounds:** при `DropTarget::FreeArea` адаптер получает прямоугольник источника из актуальной геометрии, вычисляет границы плавающего окна с сохранением смещения захвата, поправкой под title bar и ограничением viewport; заполненный `floating_bounds` передаётся в `Layout::resolve_drag_drop`. Политика находится в `dock-gpui/src/dock/floating_policy.rs`.
-- **Контракт коммита:** `Command` применяется один раз через `DockController::apply` и историю; `NoOp` не меняет дерево, версию или историю. Ошибки подготовки/разрешения записываются в `last_error`; успешный `NoOp` очищает старую ошибку. `Layout::apply` транзакционен: рабочее дерево заменяется только после успешной нормализации и валидации.
-- **Контракт устаревшей геометрии:** если в активном drag поменялись версия `Layout`, viewport или `DockMetrics`, `DockController::update_drag` отменяет жест и возвращает `StaleFrameGeometry`, не используя прежний resolver. На начальном пересечении порога устаревший frame тоже отменяет pending-жест. `MainWindow` всегда перерисовывает поверхность после ошибки обновления drag, даже если контроллер уже сбросил overlay.
-- **FloatingTitle vs FloatingCapture:** перетаскивание основной области заголовка создаёт `MoveFloating` без drop-зон. Отдельная захватная кнопка в заголовке использует `DragHandle::FloatingCapture`: для плавающего корня `Tabs` или `Panel` контроллер подготавливает resolver, скрывает `FreeArea` и цели внутри собственного дерева, а Core повторно проверяет target и формирует `DockFloating`. В рабочем Photoshop-профиле захватная кнопка скрыта для корней `Column`/`Split`, для которых текущий Core mapping не обеспечивает обратную стыковку; адаптер не подменяет это несколькими командами.
-- **Тесты добавлены, но ещё не запущены:** проверяют одну запись Undo для успешного drop, сохранение ветки Redo на `NoOp`, отсутствие частичных изменений при ошибке, политику floating bounds, полный путь `FreeArea` для панели и группы, перенос группы за `GroupGrip` через `MergeGroup` с Undo/Redo, detach из открытого flyout, drop панели из открытого flyout в другую dock-группу через `MovePanelFromFlyout` с Undo/Redo (flyout не открывается повторно после Undo), отпускание drag вне всех зон, явную отмену активного drag, устаревший frame до создания resolver и устаревание snapshot по версии layout/viewport/метрикам. Также проверяются `FloatingTitle` (перемещение без drop-target, Undo/Redo, stale snapshot) и `FloatingCapture` (отдельная захватная кнопка, resolver, исключение собственных/FreeArea целей, отклонение прямого `FreeArea` запроса без мутации layout/history, `DockFloating`, Undo/Redo).
-- **Очистка warning из последнего лога:** причины `DragUpdateError::Core/Geometry` теперь читаются через реализацию `Display` (тип также реализует `Error`); accessor `ResizeSession::pointer_start` оставлен только под `cfg(test)`, чтобы поддерживать проверку снимка pointer-down без production warning; удалён неиспользуемый `localize_tree_rects`; `RailEntry` использует общий `rail_entry_label`; неиспользуемые привязки `id` и `side` в тестах устранены.
-- **Текущие изменения ещё не проверены Cargo.** Cargo не запускался в рамках договорённости, поэтому очистка этих предупреждений проверена по исходникам, но не подтверждена компилятором. В присланном фрагменте упомянуто 15 warning, однако не все сообщения из этого набора показаны; здесь отмечены только предупреждения, которые были приведены целиком.
+- **Активная точка:** этап 11 — завершена реализация маршрутизации drop-запросов и внесена матрица интеграционных тестов; осталось подтвердить её Cargo-прогоном перед переходом к следующему этапу.
+- **Этап 10:** обработчики `mouse down/move/up`, reusable resolver, target/preview и drag ghost внесены.
+- **Преобразование запроса:** `Layout::resolve_drag_drop(&DragDropRequest, &DockMetrics)` возвращает готовый `DragDropAction::Command(DockCommand)` либо `NoOp`. `dock-gpui/src/dock/drop_commit.rs` остаётся тонким адаптером; историю и единственный коммит изменения контролирует `DockController`.
+- **Матрица этапа 11:** проверяются `MovePanel` для `GroupEdge`/`ColumnSlot`/`RailSlot`/`MainColumn`, перестановка вкладки и отделение вкладки в группу по краю; `SplitGroup`, `MergeGroup`, `MoveGroup` для обычного и rail-слота, `MoveGroupToMainColumn`; отрыв панели/группы в `FreeArea`; перенос из flyout. Для успешных перемещений проверяются одна запись Undo и циклы Undo/Redo, а для несовместимых комбинаций целей — отсутствие изменений дерева и истории.
+- **FreeArea / floating bounds:** адаптер получает прямоугольник источника из актуальной геометрии, сохраняет смещение захвата, учитывает title bar и ограничивает границы viewport; затем заполняет `floating_bounds` до вызова Core. Политика находится в `dock-gpui/src/dock/floating_policy.rs`.
+- **Контракт коммита:** `Command` применяется один раз через историю; `NoOp` не меняет дерево, версию или историю и сохраняет ветку Redo. Ошибки подготовки/разрешения пишутся в `last_error`; успешный `NoOp` очищает старую ошибку. `Layout::apply` транзакционен: рабочее дерево заменяется только после успешной нормализации и валидации.
+- **Контракт устаревшей геометрии:** если в активном drag меняются версия `Layout`, viewport или `DockMetrics`, контроллер отменяет жест и возвращает `StaleFrameGeometry`, не используя прежний resolver. Устаревший frame на момент пересечения порога тоже отменяет pending-жест; `MainWindow` перерисовывает поверхность после ошибки обновления.
+- **FloatingTitle vs FloatingCapture:** `FloatingTitle` формирует `MoveFloating` без drop-target. Отдельный `FloatingCapture` исключает `FreeArea` и собственное дерево, а Core повторно проверяет цель и формирует `DockFloating`. Захватная кнопка скрыта для корневых `Column`/`Split` в Photoshop-профиле, поскольку текущий mapping не стыкует эти корни одной командой.
+- **Проверки добавлены, Cargo ещё не запускался:** кроме предыдущего покрытия добавлены матрицы GroupGrip и PanelTab для типов целей, проверка точного `SplitGroup` на краю, `MoveGroupToMainColumn`, `MoveGroup` на ColumnSlot/RailSlot, `MovePanel` на GroupEdge/ColumnSlot/RailSlot/MainColumn, перестановка вкладки, отделение вкладки на край собственной группы и отклонение несовместимых сочетаний `Panel → GroupTabs` / `Group → Tabs`.
+- **Очистка warning из последнего лога:** `DragUpdateError::Core/Geometry` реализует `Display` и `Error`; `ResizeSession::pointer_start` оставлен только под `cfg(test)`; удалён `localize_tree_rects); `RailEntry` использует `rail_entry_label`; неиспользуемые привязки `id` и `side` устранены.
+- **Статус компиляции:** новый и прежний тестовый код не подтверждён компилятором. По договорённости Cargo не запускался; до реального прогона не считать тесты зелёными.
 
 
 ## 1. Что такое render.rs и почему он главный
@@ -420,29 +421,31 @@ gpui      = { workspace = true }
 
 ### Этап 11. Завершение жеста: от `DropTarget` к `DockCommand`
 
-- **Файл:** `dock-gpui/src/dock/drop_commit.rs` (NEW) — одна чистая функция `commands_for_drop(payload, handle, target, pointer, context) -> Vec<DockCommand>`; без GPUI, полностью покрывается тестами.
-- **Если `DragDropAction` в ядре уже возвращает готовую `DockCommand`** — берём её как есть и этот файл сводится к тонкому адаптеру. Таблица ниже — контрольный список ожидаемого поведения по справочнику.
+- **Файл:** `dock-gpui/src/dock/drop_commit.rs` — намеренно тонкий адаптер: Core уже реализует `Layout::resolve_drag_drop(&DragDropRequest, &DockMetrics)` и возвращает готовый `DragDropAction::Command(DockCommand)` или `NoOp`. Не дублировать таблицу разрешения целей в GPUI.
+- **Таблица фактического поведения** сверена с `crates/dock-core/src/layout/drop_handling.rs`:
 
-| Что тащим (`DragPayload`) | Куда отпустили (`DropTarget`) | Команда |
+| Источник и ручка | Цель | Результат Core |
 | --- | --- | --- |
-| `Panel` | `Tabs`/`GroupTabs` той же группы | `ReorderTab { group, panel, to_index }` |
-| `Panel` | `Tabs`/`GroupTabs` другой группы | `MovePanel { panel, target }` |
-| `Panel` | `GroupEdge`, `ColumnSlot`, `RailSlot`, `MainColumn` | `MovePanel { panel, target }` (ядро создаст группу/колонку) |
-| `Panel` | `FreeArea`, группа с ≥ 2 вкладками | `FloatPanelAsGroup { panel, bounds }` |
-| `Panel` | `FreeArea`, группа из 1 вкладки | `FloatGroupAsColumn { group, bounds }` если в колонке есть другие группы, иначе `Float { node: column, bounds }` (тот же разбор, что был в `docked_tab_float_command`) |
-| `Panel` из flyout (`DragHandle::FlyoutPanel`) | любая цель dock | `MovePanelFromFlyout { panel, target }` |
-| `Panel` из flyout | `FreeArea` | `FloatPanelFromFlyout { panel, bounds }` |
-| `Group` | `Tabs`/`GroupTabs` другой группы | `MergeGroup { group, target_group, index }` |
-| `Group` | `GroupEdge { zone }` | `SplitGroup { group, target_group, zone, ratio: 0.5 }` |
-| `Group` | `ColumnSlot`, `RailSlot` | `MoveGroup { group, column, index }` |
-| `Group` | `MainColumn { side, index }` | `MoveGroupToMainColumn { group, side, index }` |
-| `Group` | `FreeArea` | `FloatGroupAsColumn` / `Float` (по тому же правилу) |
-| `FloatingGroup` | любая цель dock | `DockFloating { group, target }` |
-| `FloatingGroup` | `FreeArea` | `MoveFloating { group, origin }` |
+| `PanelTab` / `Panel` | слот в `Tabs` своей группы | `NoOp` на текущем слоте; иначе `MovePanel { panel, target }` (перестановка вкладки) |
+| `PanelTab` / `Panel` | `Tabs` другой группы | `MovePanel { panel, target }` |
+| `PanelTab` / `Panel` | `GroupEdge`, `ColumnSlot`, `RailSlot`, `MainColumn` | `MovePanel { panel, target }` |
+| `PanelTab` / `Panel` | `FreeArea` с рассчитанными границами | `Float { node: panel_node, bounds }` |
+| `FlyoutPanel` / `Panel` | любая допустимая цель dock | `MovePanelFromFlyout { panel, target }` |
+| `FlyoutPanel` / `Panel` | `FreeArea` | `FloatPanelFromFlyout { panel, bounds }` |
+| `GroupGrip` / `Group` | `GroupTabs` другой группы | `MergeGroup { group, target_group, index }` |
+| `GroupGrip` / `Group` | `GroupEdge { zone }` | `SplitGroup { group, target_group, zone, ratio: 0.5 }` |
+| `GroupGrip` / `Group` | `ColumnSlot`, `RailSlot` | `MoveGroup { group, column, index }`; для рейки Core переводит slot index в индекс групп |
+| `GroupGrip` / `Group` | `MainColumn { side, index }` | `MoveGroupToMainColumn { group, side, index }` |
+| `GroupGrip` / `Group` | `FreeArea` с рассчитанными границами | `Float { node: group, bounds }` |
+| `FloatingTitle` / `FloatingGroup` | target отсутствует | `MoveFloating { group, origin }` без overlay |
+| `FloatingCapture` / `FloatingGroup` | цель dock вне собственного дерева | `DockFloating { group, target }` (подготовка для этапа 12 внесена ранее) |
 
-- **Важное:** коммит — одна запись в `UndoRedoHistory` (если команд несколько — пакетная запись или просьба к ядру). Отклонённая команда не меняет дерево — показать ненавязчивый toast с причиной.
-- **`bounds` для «отрыва»:** функция `initial_float_bounds(source_rect, grab_offset, pointer, metrics) -> Rect` в `floating_policy.rs`: ширина — как у источника, высота — не меньше минимума ядра, не больше окна; оригин — курсор минус смещение захвата (чтобы курсор оставался над той же вкладкой), сдвиг на `header_height`, ограничение вьюпортом. Это заменяет `floating_size_for_detach`, `floating_drag_bounds`, `group_drag_bounds` и все их тесты переносятся сюда.
-- **Приёмка:** таблица выше покрыта юнит-тестами `commands_for_drop`; после каждой вариации `Layout::validate` — `Ok`; ручной проход: переставить вкладку, перенести группу в другую колонку, разделить группу по краю, отрыв в плавающее окно и возврат обратно, стыковка в рейку, Ctrl+Z после каждого.
+- **Недопустимые сочетания:** `Panel → GroupTabs` и `Group → Tabs` отклоняются; `FloatingCapture → FreeArea` отклоняется. Цель внутри собственного floating tree для `FloatingCapture` даёт `NoOp`.
+- **FreeArea / bounds:** `drop_commit.rs` находит прямоугольник источника из актуального `LayoutRects` (с fallback для flyout), затем `floating_policy::initial_float_bounds` сохраняет смещение захвата, учитывает title bar и ограничивает окно viewport. Bounds передаются в Core до resolve.
+- **История:** один успешный drop коммитит одну команду и одну запись Undo; `NoOp` не меняет дерево/версию/историю и сохраняет Redo-ветку. Отклонённая команда не оставляет частично изменённого layout.
+- **Покрытие:** тесты проверяют `MovePanel` для четырёх основных типов целей, перестановку вкладки и отделение по краю той же группы; `SplitGroup`, `MergeGroup`, `MoveGroup` для ColumnSlot/RailSlot, `MoveGroupToMainColumn`; `FreeArea` для панели/группы/flyout; перенос панели из flyout в dock; стыковку floating capture; stale snapshot, отмену и отпускание вне зон; Undo/Redo и ошибки разрешения.
+- **Приёмка:** код и матрица тестов внесены. Cargo-прогон ещё не выполнен; этап формально не считать прошедшим компиляцию/тесты до отдельной проверки.
+
 
 ### Этап 12. Плавающие окна
 
@@ -522,14 +525,13 @@ gpui      = { workspace = true }
 | `ClosePanel` | ☰ → «Закрыть», Dockers | `menus/group_menu.rs` | 8, 13 | да |
 | `CloseGroup` | ☰ → «Закрыть группу» | `menus/group_menu.rs` | 13 | да |
 | `ActivateTab` | click по вкладке, выбор в меню ⋯ | `PanelTab`, `overflow_menu.rs` | 8, 13 | да (уточнить в ядре) |
-| `ReorderTab` | перетаскивание вкладки внутри группы | `drop_commit.rs` | 11 | да |
-| `MovePanel` | drag вкладки на цель dock | `drop_commit.rs` | 11 | да |
-| `MovePanelFromFlyout` | drag панели из flyout на цель dock | `drop_commit.rs` | 11, 14 | да |
-| `FloatPanelFromFlyout` | drag панели из flyout в свободную область | `drop_commit.rs` | 11, 14 | да |
-| `MoveGroup` | drag группы на `ColumnSlot` / `RailSlot` | `drop_commit.rs` | 11 | да |
-| `MoveGroupToMainColumn` | drag группы на `MainColumn` | `drop_commit.rs` | 11 | да |
-| `MergeGroup` | drag группы на зону вкладок другой группы | `drop_commit.rs` | 11 | да |
-| `SplitGroup` | drag группы на край другой | `drop_commit.rs` | 11 | да |
+| `MovePanel` | drag вкладки: перестановка или перенос в dock | `drop_commit.rs` / Core resolver | 11 | да |
+| `MovePanelFromFlyout` | drag панели из flyout на допустимую цель dock | `drop_commit.rs` / Core resolver | 11, 14 | да |
+| `FloatPanelFromFlyout` | drag панели из flyout в свободную область | `drop_commit.rs` / Core resolver | 11, 14 | да |
+| `MoveGroup` | drag группы на `ColumnSlot` / `RailSlot` | `drop_commit.rs` / Core resolver | 11 | да |
+| `MoveGroupToMainColumn` | drag группы на `MainColumn` | `drop_commit.rs` / Core resolver | 11 | да |
+| `MergeGroup` | drag группы за grip в `GroupTabs` другой группы | `drop_commit.rs` / Core resolver | 11 | да |
+| `SplitGroup` | drag группы за grip на `GroupEdge` | `drop_commit.rs` / Core resolver | 11 | да |
 | `ResizeGroups` | сплиттер Y | `resize_session.rs` | 9 | да, одна запись на жест |
 | `ResizeColumn` | внешняя ручка колонки | `resize_session.rs` | 9 | да |
 | `ResizeColumnBoundary` | сплиттер X главной области | `resize_session.rs` | 9 | да |
@@ -537,14 +539,14 @@ gpui      = { workspace = true }
 | `ResetColumnRatios` | ☰ → «Вернуть пропорции», double-click по сплиттеру Y | `group_menu.rs`, `resize_session.rs` | 9, 13 | да |
 | `ResetMainColumnRatios` | double-click по сплиттеру X | `resize_session.rs` | 9 | да |
 | `RestoreGroupRatios` | только внутри ядра/истории; из UI **не вызывать** | — | — | — |
-| `Float` | отрыв группы/колонки на `FreeArea` | `drop_commit.rs` | 11 | да |
-| `FloatGroupAsColumn` | отрыв группы; «Отделить» в меню | `drop_commit.rs`, `group_menu.rs` | 11, 13 | да |
-| `FloatPanelAsGroup` | отрыв одной вкладки из многовкладочной группы | `drop_commit.rs` | 11 | да |
+| `Float` | отрыв вкладки/группы на `FreeArea` по текущему Core resolver | `drop_commit.rs` / Core resolver | 11 | да |
+| `FloatGroupAsColumn` | отдельная команда ядра; не формируется текущим drag resolver | `group_menu.rs` (если используется) | 13 | да |
+| `FloatPanelAsGroup` | отдельная команда ядра; не формируется текущим drag resolver | UI-команда, если используется | — | да |
 | `MoveFloating` | тяга `FloatingTitle`, тяга одновкладочного плавающего окна | `floating_policy.rs` | 12 | да, одна запись |
 | `ResizeFloatingBounds` | ручки края/угла окна | `resize_session.rs` | 9 | да |
 | `ResizeFloating` | резерв: только размер (программно) | `commands.rs` | 8 | да |
 | `RaiseFloating` | mouse down по окну | `layers/floating.rs` | 12 | проверить в ядре |
-| `DockFloating` | drag окна на цель dock | `drop_commit.rs` | 12 | да |
+| `DockFloating` | drag за отдельную захватную ручку `FloatingCapture` на цель dock | `drop_commit.rs` / Core resolver | 11–12 | да |
 | `CollapseGroup` | двойной click по вкладке, ☰, кнопка в `FloatingTitle` | `PanelTab`, `group_menu.rs` | 8, 13 | да |
 | `SetColumnMode` | `>>` / `<<`, ☰, пороги ширины | `column_mode_button.rs`, `rail_policy.rs` | 8, 14 | да |
 | `OpenFlyout` | click по `RailEntry` | `RailEntry` | 14 | **нет** (временное) |
