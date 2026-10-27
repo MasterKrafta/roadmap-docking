@@ -277,3 +277,45 @@ fn normalize_removes_empty_floating_root_group_and_area() {
     assert_eq!(layout.floating_groups().count(), 0);
     assert_eq!(layout.validate(&DockMetrics::default()), Ok(()));
 }
+
+#[test]
+fn normalization_eligibility_uses_typed_validation_reasons() {
+    use crate::ValidationReason;
+
+    let node = NodeId::null();
+    let is_normalizable = super::super::helpers::is_normalizable_validation_error;
+
+    assert!(is_normalizable(&ValidationError::InvalidSplit {
+        node,
+        reason: ValidationReason::SplitMustContainAtLeastTwoChildren,
+    }));
+    assert!(is_normalizable(&ValidationError::InvalidSplit {
+        node,
+        reason: ValidationReason::RatiosMustSumToOne,
+    }));
+    assert!(is_normalizable(&ValidationError::InvalidTabs {
+        node,
+        reason: ValidationReason::TabsMustContainAtLeastOneChild,
+    }));
+    assert!(is_normalizable(&ValidationError::InvalidTabs {
+        node,
+        reason: ValidationReason::ActiveTabIndexOutsideChildren,
+    }));
+    assert!(is_normalizable(&ValidationError::InvalidColumn {
+        node,
+        reason: ValidationReason::ColumnMustContainAtLeastOneGroupBeforeNormalization,
+    }));
+    assert!(is_normalizable(&ValidationError::InvalidColumn {
+        node,
+        reason: ValidationReason::RatioCountMustMatchChildGroupCount,
+    }));
+
+    assert!(!is_normalizable(&ValidationError::InvalidTabs {
+        node,
+        reason: ValidationReason::PhotoshopTabsChildrenMustBePanelNodes,
+    }));
+    assert!(!is_normalizable(&ValidationError::InvalidColumn {
+        node,
+        reason: ValidationReason::ColumnWidthMustBeFinite,
+    }));
+}
