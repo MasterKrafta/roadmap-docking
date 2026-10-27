@@ -154,13 +154,6 @@ mod hit_result_tests {
 }
 
 
-use std::collections::HashSet;
-
-use crate::{
-    Axis, ComputeRectsError, DockMetrics, DropTarget, DropZone, FloatingGroupId,
-    FloatingGroupRect, Layout, LayoutRects, Node, NodeId, PanelId, Point, Rect, ResizeEdge,
-};
-
 impl Layout {
     /// Hit-tests a logical-pixel point against a geometry snapshot previously
     /// produced for this same Layout.
