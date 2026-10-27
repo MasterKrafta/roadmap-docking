@@ -1439,6 +1439,55 @@
     }
 
     #[test]
+    fn group_grip_no_op_preserves_existing_redo_branch() {
+        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+        let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
+        let group = first_panels_by_group(&controller)[0].0;
+        let group_len = match controller.layout().node(group) {
+            Some(Node::Tabs(tabs)) => tabs.children.len(),
+            _ => unreachable!("source group should be a Tabs node"),
+        };
+
+        controller
+            .apply(DockCommand::SetChrome {
+                mode: dock_core::ChromeMode::DockHidden,
+            })
+            .unwrap();
+        assert!(controller.undo().unwrap());
+        assert_eq!(controller.history.undo_len(), 0);
+        assert_eq!(controller.history.redo_len(), 1);
+
+        let before = layout_debug_snapshot(&controller);
+        let version_before = controller.layout().version();
+        let action = controller
+            .commit_drop_request(
+                DragDropRequest {
+                    payload: DragPayload::Group { group },
+                    handle: DragHandle::GroupGrip,
+                    origin: Point::new(180.0, 120.0),
+                    point: Point::new(240.0, 180.0),
+                    target: Some(DropTarget::GroupTabs {
+                        group,
+                        index: group_len,
+                    }),
+                    floating_bounds: None,
+                },
+                viewport,
+            )
+            .unwrap();
+
+        assert_eq!(action, DragDropAction::NoOp);
+        assert_eq!(layout_debug_snapshot(&controller), before);
+        assert_eq!(controller.layout().version(), version_before);
+        assert_eq!(controller.history.undo_len(), 0);
+        assert_eq!(controller.history.redo_len(), 1);
+        assert!(controller.redo().unwrap());
+        assert_eq!(controller.history.undo_len(), 1);
+        assert_eq!(controller.history.redo_len(), 0);
+        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+    }
+
+    #[test]
     fn group_grip_drop_merges_whole_group_and_records_one_undo_step() {
         let mut controller = DockController::new_initial(&Theme::default()).unwrap();
         let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
@@ -1714,6 +1763,47 @@
         assert_eq!(controller.layout().floating_groups().count(), 0);
         assert_eq!(group_containing_panel(&controller, panel), Some(target_group));
         assert_eq!(controller.history.undo_len(), 1);
+        assert_eq!(controller.history.redo_len(), 0);
+        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+    }
+
+    #[test]
+    fn floating_capture_drop_into_its_own_tree_is_no_op() {
+        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+        let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
+        let (floating_id, bounds) = make_initial_floating_group(&mut controller);
+        let root = controller
+            .layout()
+            .floating_group(floating_id)
+            .and_then(|floating| controller.layout().dock_area(floating.area))
+            .map(|area| area.root)
+            .expect("floating window should expose a root node");
+        let index = match controller.layout().node(root) {
+            Some(Node::Tabs(tabs)) => tabs.children.len(),
+            _ => panic!("the setup floating root should be a Tabs node"),
+        };
+        let before = layout_debug_snapshot(&controller);
+        let version_before = controller.layout().version();
+
+        let action = controller
+            .commit_drop_request(
+                DragDropRequest {
+                    payload: DragPayload::FloatingGroup { group: floating_id },
+                    handle: DragHandle::FloatingCapture,
+                    origin: Point::new(bounds.origin.x + 16.0, bounds.origin.y + 16.0),
+                    point: Point::new(bounds.origin.x + 140.0, bounds.origin.y + 90.0),
+                    target: Some(DropTarget::GroupTabs { group: root, index }),
+                    floating_bounds: None,
+                },
+                viewport,
+            )
+            .unwrap();
+
+        assert_eq!(action, DragDropAction::NoOp);
+        assert_eq!(layout_debug_snapshot(&controller), before);
+        assert_eq!(controller.layout().version(), version_before);
+        assert_eq!(controller.layout().floating_groups().count(), 1);
+        assert_eq!(controller.history.undo_len(), 0);
         assert_eq!(controller.history.redo_len(), 0);
         assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
     }
