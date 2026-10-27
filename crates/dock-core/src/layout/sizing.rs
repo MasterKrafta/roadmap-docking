@@ -264,7 +264,7 @@ impl Layout {
         if let Some(reason) = ratio_issues(ratios, count).first() {
             return Err(CommandError::InvalidValue {
                 field: "ratios",
-                reason,
+                reason: reason.as_str(),
             });
         }
         if current == *ratios {
