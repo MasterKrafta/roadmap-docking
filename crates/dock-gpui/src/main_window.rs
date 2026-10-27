@@ -29,7 +29,7 @@ impl MainWindow {
         theme: Theme,
         workspace_path: Option<&Path>,
     ) -> Result<Self, String> {
-        let dock = match crate::dock::workspace::load_layout(workspace_path, &theme) {
+        let dock = match crate::dock::load_layout(workspace_path, &theme) {
             Some(layout) => match DockController::new_with_layout(&theme, layout) {
                 Ok(dock) => dock,
                 Err(error) => {
