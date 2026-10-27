@@ -3464,3 +3464,18 @@ fn initial_layout_rejects_invalid_rail_thresholds() {
         "invalid rail hysteresis thresholds should be rejected, not silently disable rail transitions"
     );
 }
+
+#[test]
+fn restored_layout_rejects_invalid_rail_thresholds() {
+    let valid_theme = Theme::default();
+    let controller = DockController::new_initial(&valid_theme).unwrap();
+    let layout = controller.layout().clone();
+
+    let mut invalid_theme = Theme::default();
+    invalid_theme.metrics.rail_expand_width = invalid_theme.metrics.rail_collapse_width;
+
+    assert!(
+        DockController::new_with_layout(&invalid_theme, layout).is_err(),
+        "restoring a layout with invalid theme metrics must fail explicitly"
+    );
+}
