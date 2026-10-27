@@ -1965,6 +1965,139 @@
     }
 
     #[test]
+    fn flyout_panel_drop_target_matrix_uses_move_panel_from_flyout() {
+        let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
+
+        for target_kind in ["edge", "column", "rail", "main"] {
+            let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+            let main_columns =
+                crate::tree_query::main_column_ids(controller.layout(), DockSide::Right);
+            let source_column = *main_columns
+                .first()
+                .expect("initial layout should expose a right main column");
+            let source_group = match controller.layout().node(source_column) {
+                Some(Node::Column(column)) => column.groups[0],
+                _ => unreachable!("source_column was selected from main columns"),
+            };
+            let panel = match controller.layout().node(source_group) {
+                Some(Node::Tabs(tabs)) => {
+                    let active = tabs.children[tabs.active_index];
+                    match controller.layout().node(active) {
+                        Some(Node::Panel(panel)) => panel.panel_id,
+                        _ => unreachable!("active tab should be a panel"),
+                    }
+                }
+                _ => unreachable!("source_group should be a Tabs node"),
+            };
+            let target_column = *main_columns
+                .iter()
+                .find(|column_id| **column_id != source_column)
+                .expect("a second main-dock column should provide a target");
+            let target_group = match controller.layout().node(target_column) {
+                Some(Node::Column(column)) => column.groups[0],
+                _ => unreachable!("target_column was selected from main columns"),
+            };
+            let target_column_len = match controller.layout().node(target_column) {
+                Some(Node::Column(column)) => column.groups.len(),
+                _ => unreachable!("target_column was selected from main columns"),
+            };
+
+            controller
+                .apply(DockCommand::SetColumnMode {
+                    column: source_column,
+                    mode: ColumnMode::IconsOnly,
+                })
+                .unwrap();
+            if target_kind == "rail" {
+                controller
+                    .apply(DockCommand::SetColumnMode {
+                        column: target_column,
+                        mode: ColumnMode::IconsOnly,
+                    })
+                    .unwrap();
+            }
+            // Keep the gesture under test as the only persistent history entry.
+            controller.history.clear();
+            controller
+                .apply(DockCommand::OpenFlyout {
+                    column: source_column,
+                    panel,
+                })
+                .unwrap();
+            assert!(controller.layout().flyout().is_some());
+            assert_eq!(controller.history.undo_len(), 0);
+
+            let target = match target_kind {
+                "edge" => DropTarget::GroupEdge {
+                    group: target_group,
+                    zone: dock_core::DropZone::Right,
+                },
+                "column" => DropTarget::ColumnSlot {
+                    column: target_column,
+                    index: target_column_len,
+                },
+                "rail" => DropTarget::RailSlot {
+                    column: target_column,
+                    index: 0,
+                },
+                "main" => DropTarget::MainColumn {
+                    side: DockSide::Right,
+                    index: main_columns.len(),
+                },
+                _ => unreachable!("all flyout target cases are listed above"),
+            };
+            let frame = controller.frame(viewport).unwrap();
+            let flyout_rect = frame
+                .rects()
+                .flyout
+                .filter(|flyout| flyout.panel == panel)
+                .expect("open flyout should have current-frame geometry")
+                .rect;
+            let origin = Point::new(
+                flyout_rect.origin.x + flyout_rect.size.width / 2.0,
+                flyout_rect.origin.y + flyout_rect.size.height / 2.0,
+            );
+
+            let action = controller
+                .commit_drop_request(
+                    DragDropRequest {
+                        payload: DragPayload::Panel { panel },
+                        handle: DragHandle::FlyoutPanel,
+                        origin,
+                        point: Point::new(420.0, 260.0),
+                        target: Some(target),
+                        floating_bounds: None,
+                    },
+                    viewport,
+                )
+                .unwrap();
+            assert_eq!(
+                action,
+                DragDropAction::Command(DockCommand::MovePanelFromFlyout { panel, target })
+            );
+            assert!(controller.layout().flyout().is_none());
+            assert_ne!(group_containing_panel(&controller, panel), Some(source_group));
+            assert_eq!(controller.history.undo_len(), 1);
+            assert_eq!(controller.history.redo_len(), 0);
+            assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+
+            assert!(controller.undo().unwrap());
+            assert!(controller.layout().flyout().is_none());
+            assert_eq!(group_containing_panel(&controller, panel), Some(source_group));
+            assert_eq!(controller.history.undo_len(), 0);
+            assert_eq!(controller.history.redo_len(), 1);
+            assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+
+            assert!(controller.redo().unwrap());
+            assert!(controller.layout().flyout().is_none());
+            assert_ne!(group_containing_panel(&controller, panel), Some(source_group));
+            assert_eq!(controller.history.undo_len(), 1);
+            assert_eq!(controller.history.redo_len(), 0);
+            assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+        }
+    }
+
+    #[test]
     fn panel_reorder_and_same_group_edge_split_each_commit_one_undo_step() {
         let mut controller = DockController::new_initial(&Theme::default()).unwrap();
         let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
