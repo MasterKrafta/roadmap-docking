@@ -43,7 +43,7 @@ impl DockHost for WindowHost<'_, '_> {
     fn command(&self, command: DockCommand) -> CommandClickHandler {
         Box::new(self.cx.listener::<ClickEvent>(
             move |this, _event, _window, cx| {
-                this.apply_dock_command(command.clone());
+                this.apply_dock_command(command.clone(), cx);
                 cx.notify();
             },
         ))
@@ -52,7 +52,7 @@ impl DockHost for WindowHost<'_, '_> {
     fn close_floating(&self, group: FloatingGroupId) -> CommandClickHandler {
         Box::new(self.cx.listener::<ClickEvent>(
             move |this, _event, _window, cx| {
-                this.close_floating_window(group);
+                this.close_floating_window(group, cx);
                 cx.notify();
             },
         ))

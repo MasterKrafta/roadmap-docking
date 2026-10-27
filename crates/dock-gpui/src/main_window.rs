@@ -1,4 +1,7 @@
-use std::path::Path;
+use std::{
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use dock_core::{DockCommand, DragHandle, DragPayload, FloatingGroupId, Point, Rect, Size};
 use gpui::{
@@ -22,6 +25,9 @@ pub(crate) struct MainWindow {
     dock: DockController,
     menu_state: MenuState,
     activation_subscription: Option<Subscription>,
+    workspace_path: Option<PathBuf>,
+    workspace_snapshot: Option<String>,
+    workspace_save_generation: u64,
 }
 
 impl MainWindow {
@@ -43,16 +49,83 @@ impl MainWindow {
             None => DockController::new_initial(&theme)?,
         };
 
+        let workspace_path = workspace_path.map(Path::to_path_buf);
+        let workspace_snapshot = workspace_path.as_deref().and_then(|_| {
+            crate::dock::serialize_layout(dock.layout(), dock.metrics()).ok()
+        });
+
         Ok(Self {
             dock,
             theme,
             menu_state: MenuState::Closed,
             activation_subscription: None,
+            workspace_path,
+            workspace_snapshot,
+            workspace_save_generation: 0,
         })
     }
 
-    pub(crate) fn apply_dock_command(&mut self, command: DockCommand) {
-        let _ = self.dock.apply(command);
+
+    /// Debounces persistence only when the serialized persistent workspace changes.
+    fn schedule_workspace_save(&mut self, cx: &mut Context<Self>) {
+        if self.workspace_path.is_none() {
+            return;
+        }
+
+        let snapshot = match crate::dock::serialize_layout(self.dock.layout(), self.dock.metrics()) {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                tracing::warn!(error = %error, "could not prepare workspace autosave");
+                return;
+            }
+        };
+        if self.workspace_snapshot.as_deref() == Some(snapshot.as_str()) {
+            return;
+        }
+        self.workspace_snapshot = Some(snapshot);
+        self.workspace_save_generation = self.workspace_save_generation.wrapping_add(1);
+        let generation = self.workspace_save_generation;
+
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(500))
+                .await;
+            let _ = this.update(cx, |this, _cx| {
+                if this.workspace_save_generation == generation {
+                    this.save_workspace_now();
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// Writes the latest persistent state synchronously, used by debounce and close.
+    pub(crate) fn save_workspace_now(&mut self) {
+        let Some(path) = self.workspace_path.clone() else {
+            return;
+        };
+
+        match crate::dock::save_layout(Some(path.as_path()), self.dock.layout(), self.dock.metrics()) {
+            Ok(true) => {
+                self.workspace_snapshot =
+                    crate::dock::serialize_layout(self.dock.layout(), self.dock.metrics()).ok();
+            }
+            Ok(false) => {}
+            Err(error) => {
+                tracing::warn!(
+                    path = %path.display(),
+                    error = %error,
+                    "workspace save failed"
+                );
+            }
+        }
+    }
+
+    fn apply_dock_command(&mut self, command: DockCommand, cx: &mut Context<Self>) {
+        if let Err(error) = self.dock.apply(command) {
+            tracing::debug!(error = %error, "dock command was rejected");
+        }
+        self.schedule_workspace_save(cx);
     }
 
     pub(crate) fn open_menu(
@@ -88,7 +161,7 @@ impl MainWindow {
         }
     }
 
-    fn activate_menu_item(&mut self, index: usize, window: &Window) {
+    fn activate_menu_item(&mut self, index: usize, window: &Window, cx: &mut Context<Self>) {
         let command = self
             .current_menu_items(window)
             .get(index)
@@ -100,6 +173,7 @@ impl MainWindow {
             if let Err(error) = self.dock.apply(command) {
                 tracing::warn!(error = %error, "popup menu command was rejected");
             }
+            self.schedule_workspace_save(cx);
         }
     }
 
@@ -130,6 +204,7 @@ impl MainWindow {
                     if let Err(error) = self.dock.apply(DockCommand::DismissFlyout) {
                         tracing::debug!(error = %error, "flyout dismissal on Escape was rejected");
                     }
+                    self.schedule_workspace_save(cx);
                     cx.stop_propagation();
                     cx.notify();
                 }
@@ -152,7 +227,7 @@ impl MainWindow {
             }
             "enter" => {
                 if let Some(index) = self.menu_state.selected_index() {
-                    self.activate_menu_item(index, window);
+                    self.activate_menu_item(index, window, cx);
                     cx.stop_propagation();
                     cx.notify();
                 }
@@ -186,14 +261,16 @@ impl MainWindow {
         if let Err(error) = result {
             tracing::debug!(error = %error, shortcut = ?shortcut, "dock keyboard shortcut was rejected");
         }
+        self.schedule_workspace_save(cx);
         cx.stop_propagation();
         cx.notify();
     }
 
-    pub(crate) fn close_floating_window(&mut self, group: FloatingGroupId) {
+    pub(crate) fn close_floating_window(&mut self, group: FloatingGroupId, cx: &mut Context<Self>) {
         if let Err(error) = self.dock.close_floating(group) {
             tracing::warn!(group = ?group, error = %error, "could not close floating window");
         }
+        self.schedule_workspace_save(cx);
     }
 
     pub(crate) fn begin_drag(
@@ -245,6 +322,7 @@ impl MainWindow {
                 if let Err(error) = self.dock.commit_resize(pointer) {
                     tracing::debug!(error = ?error, "dock resize commit after lost mouse-up was rejected");
                 }
+                self.schedule_workspace_save(cx);
                 cx.notify();
                 return;
             }
@@ -331,6 +409,7 @@ impl MainWindow {
                     tracing::warn!(error = ?error, "could not finish dock drag");
                 }
             }
+            self.schedule_workspace_save(cx);
             // Also clears the active overlay when a drag ends without a valid target.
             if changed {
                 cx.notify();
@@ -341,6 +420,7 @@ impl MainWindow {
         if let Err(error) = self.dock.commit_resize(dock_pointer(event.position)) {
             tracing::debug!(error = ?error, "dock resize commit was rejected");
         }
+        self.schedule_workspace_save(cx);
 
         cx.notify();
     }
@@ -623,7 +703,7 @@ impl Render for MainWindow {
                     let on_select = if item.enabled {
                         Some(Box::new(cx.listener(
                             move |this, _event, window, cx| {
-                                this.activate_menu_item(index, window);
+                                this.activate_menu_item(index, window, cx);
                                 cx.notify();
                             },
                         )) as Box<dyn Fn(&gpui::ClickEvent, &mut Window, &mut gpui::App) + 'static>)

@@ -139,8 +139,18 @@ fn run_windows(options: RunOptions) {
             ..Default::default()
         };
 
-        if let Err(error) = cx.open_window(window_options, move |_window, cx| {
-            cx.new(|_| main_window)
+        if let Err(error) = cx.open_window(window_options, move |window, cx| {
+            let main_window = cx.new(|_| main_window);
+            let weak_window_entity = main_window.downgrade();
+            window.on_window_should_close(cx, move |_window, app| {
+                if let Err(error) = weak_window_entity.update(app, |this, _cx| {
+                    this.save_workspace_now();
+                }) {
+                    tracing::warn!(error = ?error, "could not access dock window to save workspace on close");
+                }
+                true
+            });
+            main_window
         }) {
             eprintln!("Could not open the dock window: {error}");
             return;

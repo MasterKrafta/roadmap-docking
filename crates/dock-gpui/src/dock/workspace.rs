@@ -1,4 +1,9 @@
-use std::{fs, path::Path};
+use std::{
+    fs::{self, OpenOptions},
+    io::Write,
+    path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 use dock_core::{DockMetrics, Layout, WorkspaceFile, WorkspaceLoadOptions};
 use ui::Theme;
@@ -53,6 +58,79 @@ pub(crate) fn load_layout(path: Option<&Path>, theme: &Theme) -> Option<Layout> 
             None
         }
     }
+}
+
+
+static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Serializes the current persistent workspace state using Core's validated schema.
+pub(crate) fn serialize_layout(
+    layout: &Layout,
+    metrics: &DockMetrics,
+) -> Result<String, String> {
+    WorkspaceFile::from_layout(layout, metrics)
+        .and_then(|file| file.to_json_pretty())
+        .map_err(|error| format!("could not serialize workspace: {error}"))
+}
+
+/// Saves a workspace by writing and syncing a sibling temporary file, then renaming it.
+pub(crate) fn save_layout(
+    path: Option<&Path>,
+    layout: &Layout,
+    metrics: &DockMetrics,
+) -> Result<bool, String> {
+    let Some(path) = path else {
+        return Ok(false);
+    };
+    let json = serialize_layout(layout, metrics)?;
+    atomic_replace(path, json.as_bytes())?;
+    Ok(true)
+}
+
+fn atomic_replace(path: &Path, contents: &[u8]) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| format!("workspace path '{}' has no file name", path.display()))?;
+
+    fs::create_dir_all(parent).map_err(|error| {
+        format!(
+            "could not create workspace directory '{}': {error}",
+            parent.display()
+        )
+    })?;
+
+    let counter = TEMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temporary_path: PathBuf = parent.join(format!(
+        ".{}.{}.{}.tmp",
+        file_name.to_string_lossy(),
+        std::process::id(),
+        counter
+    ));
+
+    let result = (|| -> std::io::Result<()> {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary_path)?;
+        file.write_all(contents)?;
+        file.sync_all()?;
+        drop(file);
+        fs::rename(&temporary_path, path)?;
+        Ok(())
+    })();
+
+    if let Err(error) = result {
+        let _ = fs::remove_file(&temporary_path);
+        return Err(format!(
+            "could not atomically save workspace '{}': {error}",
+            path.display()
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -116,4 +194,47 @@ mod tests {
         assert_eq!(loaded.panel_instances().count(), layout.panel_instances().count());
         fs::remove_file(path).expect("test workspace should be removable");
     }
+
+    #[test]
+    fn save_layout_atomically_replaces_existing_workspace_file() {
+        use dock_core::{ChromeMode, DockCommand};
+
+        let theme = Theme::default();
+        let descriptors = panels::descriptors(&theme);
+        let metrics = dock_metrics_from_theme(&theme);
+        let mut layout = create_initial_layout(Profile::Photoshop, &descriptors, metrics)
+            .expect("registered panels should build a valid initial layout");
+
+        let root = temporary_path("atomic-save-root").with_extension("dir");
+        let path = root.join("nested").join("workspace.json");
+        assert!(super::save_layout(Some(&path), &layout, &metrics).unwrap());
+
+        layout
+            .apply(
+                DockCommand::SetChrome {
+                    mode: ChromeMode::DockHidden,
+                },
+                &metrics,
+            )
+            .expect("test should be able to change persisted workspace state");
+        assert!(super::save_layout(Some(&path), &layout, &metrics).unwrap());
+
+        let loaded = load_layout(Some(&path), &theme)
+            .expect("the replaced workspace should remain loadable");
+        assert_eq!(loaded.chrome(), ChromeMode::DockHidden);
+        assert_eq!(loaded.validate(&metrics), Ok(()));
+
+        fs::remove_dir_all(root).expect("test workspace directory should be removable");
+    }
+
+    #[test]
+    fn save_layout_without_a_path_is_a_no_op() {
+        let theme = Theme::default();
+        let descriptors = panels::descriptors(&theme);
+        let metrics = dock_metrics_from_theme(&theme);
+        let layout = create_initial_layout(Profile::Photoshop, &descriptors, metrics)
+            .expect("registered panels should build a valid initial layout");
+        assert!(!super::save_layout(None, &layout, &metrics).unwrap());
+    }
+
 }
