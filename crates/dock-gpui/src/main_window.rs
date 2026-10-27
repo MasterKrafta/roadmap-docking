@@ -9,8 +9,8 @@ use crate::dock::{DockController, WindowHost};
 use crate::requests::ResizeHandle;
 use crate::DockSurface;
 
-/// Host window for the dock surface. Commands and resize gestures dispatch through
-/// the controller; menu and drag handling are connected in their later roadmap stages.
+/// Host window for the dock surface. Commands and pointer gestures dispatch through
+/// the controller; menu state remains for a later roadmap stage.
 pub(crate) struct MainWindow {
     theme: Theme,
     dock: DockController,
@@ -176,10 +176,7 @@ fn dock_pointer(position: gpui::Point<gpui::Pixels>) -> Point {
 }
 
 /// Converts window coordinates to the DockSurface's local geometry coordinates.
-fn dock_surface_pointer(
-    position: gpui::Point<gpui::Pixels>,
-    surface_top: f32,
-) -> Point {
+fn dock_surface_pointer(position: gpui::Point<gpui::Pixels>, surface_top: f32) -> Point {
     let pointer = dock_pointer(position);
     Point::new(pointer.x, pointer.y - surface_top)
 }
@@ -236,8 +233,8 @@ impl Render for MainWindow {
         );
 
         // Element mouse-move handlers stop receiving events once the pointer leaves
-        // the surface hitbox. Keep tracking the same resize gesture at window scope
-        // only while the pointer is outside the surface.
+        // the surface hitbox. Keep tracking active pointer gestures at window scope
+        // while the pointer is outside the surface.
         let outside_move = cx.listener::<MouseMoveEvent>(|this, event, window, cx| {
             this.handle_surface_mouse_move(event, window, cx);
         });
