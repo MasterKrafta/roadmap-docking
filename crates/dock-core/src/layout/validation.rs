@@ -233,7 +233,7 @@ impl Layout {
                     if split.children.len() < 2 {
                         errors.push(ValidationError::InvalidSplit {
                             node: node_id,
-                            reason: "must contain at least two children",
+                            reason: ValidationReason::SplitMustContainAtLeastTwoChildren,
                         });
                     }
                     for reason in ratio_issues(&split.ratios, split.children.len()) {
@@ -247,13 +247,13 @@ impl Layout {
                     if tabs.children.is_empty() {
                         errors.push(ValidationError::InvalidTabs {
                             node: node_id,
-                            reason: "must contain at least one child",
+                            reason: ValidationReason::TabsMustContainAtLeastOneChild,
                         });
                     }
                     if tabs.active_index >= tabs.children.len() {
                         errors.push(ValidationError::InvalidTabs {
                             node: node_id,
-                            reason: "active_index is outside children",
+                            reason: ValidationReason::ActiveTabIndexOutsideChildren,
                         });
                     }
                     if self.profile == Profile::Photoshop {
@@ -264,7 +264,7 @@ impl Layout {
                             if self.nodes.contains_key(*child) {
                                 errors.push(ValidationError::InvalidTabs {
                                     node: node_id,
-                                    reason: "Photoshop Tabs children must be Panel nodes",
+                                    reason: ValidationReason::PhotoshopTabsChildrenMustBePanelNodes,
                                 });
                             }
                         }
@@ -291,12 +291,12 @@ impl Layout {
                     if !column.width.is_finite() {
                         errors.push(ValidationError::InvalidColumn {
                             node: node_id,
-                            reason: "width must be finite",
+                            reason: ValidationReason::ColumnWidthMustBeFinite,
                         });
                     } else if column.width <= 0.0 {
                         errors.push(ValidationError::InvalidColumn {
                             node: node_id,
-                            reason: "width must be positive",
+                            reason: ValidationReason::ColumnWidthMustBePositive,
                         });
                     } else if metrics_are_valid {
                         match column.mode {
@@ -305,7 +305,7 @@ impl Layout {
                             {
                                 errors.push(ValidationError::InvalidColumn {
                                     node: node_id,
-                                    reason: "expanded width is below min_column_width",
+                                    reason: ValidationReason::ExpandedWidthBelowMinimumColumnWidth,
                                 });
                             }
                             ColumnMode::IconsAndLabels
@@ -314,7 +314,7 @@ impl Layout {
                             {
                                 errors.push(ValidationError::InvalidColumn {
                                     node: node_id,
-                                    reason: "IconsAndLabels width must equal min_column_width",
+                                    reason: ValidationReason::IconsAndLabelsWidthMustEqualMinimumColumnWidth,
                                 });
                             }
                             ColumnMode::IconsOnly
@@ -322,7 +322,7 @@ impl Layout {
                             {
                                 errors.push(ValidationError::InvalidColumn {
                                     node: node_id,
-                                    reason: "IconsOnly width must equal rail_width",
+                                    reason: ValidationReason::IconsOnlyWidthMustEqualRailWidth,
                                 });
                             }
                             _ => {}
@@ -334,14 +334,14 @@ impl Layout {
                     {
                         errors.push(ValidationError::InvalidColumn {
                             node: node_id,
-                            reason: "last_expanded_width must be finite and positive",
+                            reason: ValidationReason::LastExpandedWidthMustBeFiniteAndPositive,
                         });
                     }
 
                     if column.groups.is_empty() {
                         errors.push(ValidationError::InvalidColumn {
                             node: node_id,
-                            reason: "must contain at least one group before normalization",
+                            reason: ValidationReason::ColumnMustContainAtLeastOneGroupBeforeNormalization,
                         });
                     }
                     for reason in ratio_issues(&column.group_ratios, column.groups.len()) {
@@ -358,7 +358,7 @@ impl Layout {
                             if self.nodes.contains_key(*group) {
                                 errors.push(ValidationError::InvalidColumn {
                                     node: node_id,
-                                    reason: "Photoshop Column groups must be Tabs nodes",
+                                    reason: ValidationReason::PhotoshopColumnGroupsMustBeTabsNodes,
                                 });
                             }
                         }
@@ -741,7 +741,7 @@ impl Layout {
                     Err(_) => {
                         errors.push(ValidationError::InvalidColumn {
                             node: node_id,
-                            reason: "cannot compute minimum width required by expanded contents",
+                            reason: ValidationReason::CannotComputeMinimumWidthRequiredByExpandedContents,
                         });
                         continue;
                     }
@@ -751,7 +751,7 @@ impl Layout {
                     Err(_) => {
                         errors.push(ValidationError::InvalidColumn {
                             node: node_id,
-                            reason: "cannot compute maximum width allowed by expanded contents",
+                            reason: ValidationReason::CannotComputeMaximumWidthAllowedByExpandedContents,
                         });
                         continue;
                     }
@@ -759,12 +759,12 @@ impl Layout {
                 if maximum.is_some_and(|maximum| maximum < minimum) {
                     errors.push(ValidationError::InvalidColumn {
                         node: node_id,
-                        reason: "minimum width required by expanded contents exceeds panel maximum width",
+                        reason: ValidationReason::MinimumWidthRequiredByExpandedContentsExceedsPanelMaximumWidth,
                     });
                 } else if column.width < minimum {
                     errors.push(ValidationError::InvalidColumn {
                         node: node_id,
-                        reason: "expanded width is below minimum width required by its contents",
+                        reason: ValidationReason::ExpandedWidthBelowMinimumWidthRequiredByContents,
                     });
                 }
             }
