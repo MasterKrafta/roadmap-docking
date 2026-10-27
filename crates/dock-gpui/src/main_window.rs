@@ -154,10 +154,11 @@ impl MainWindow {
                 self.theme.metrics.column_header_height.max(1.0),
             );
             let mut changed = had_overlay;
-            match self.dock.finish_drag(pointer, self.dock_viewport(window)) {
+            let viewport = self.dock_viewport(window);
+            match self.dock.finish_drag(pointer, viewport) {
                 Ok(Some(request)) => {
                     changed = true;
-                    match self.dock.commit_drop_request(request) {
+                    match self.dock.commit_drop_request(request, viewport) {
                         Ok(action) => {
                             tracing::debug!(action = ?action, "dock drag request resolved and committed");
                         }
