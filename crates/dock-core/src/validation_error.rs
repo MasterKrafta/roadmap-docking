@@ -100,6 +100,7 @@ impl std::fmt::Display for ValidationReason {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(self.as_str())
     }
+}
 
 /// A diagnostic emitted when a Layout violates a core invariant.
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
