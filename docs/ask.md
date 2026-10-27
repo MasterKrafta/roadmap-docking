@@ -81,7 +81,7 @@
 **Статус:** Код изменён; ожидается локальная проверка.  
 **Уверенность:** технический долг подтверждён; непосредственная поломка не обнаружена.
 
-**Где смотреть:** `crates/dock-core/src/layout/helpers.rs` — `is_normalizable_validation_error`, `is_ratio_error`; `crates/dock-core/src/validation_error.rs`; `crates/dock-core/src/layout/validation.rs`.
+**Где смотреть:** `crates/dock-core/src/layout/helpers.rs` — `ratio_issues`, `is_normalizable_validation_error`; `crates/dock-core/src/validation_error.rs`; `crates/dock-core/src/layout/validation.rs`.
 
 **Проблема:** восстановление распознаёт часть ошибок сравнением строк `reason`. Изменение текста сообщения в валидаторе может незаметно изменить поведение нормализации.
 
