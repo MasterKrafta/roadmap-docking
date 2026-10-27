@@ -230,16 +230,11 @@ pub(super) fn resolve_panel_drag(
                 }
             }
         }
-        // A multi-tab group can be split by dropping one of its tabs on
-        // its own edge. A single-tab group has nothing to split, so make that
-        // gesture a true NoOp (a flyout release still needs to close the flyout).
+        // Dropping a panel on its own group's edge leaves the layout unchanged.
+        // A flyout release still uses the flyout command so the transient flyout closes.
         if let (Some((source_group, _)), DropTarget::GroupEdge { group: target_group, .. }) =
             (self.tab_parent_index(panel_node), target)
             && source_group == target_group
-            && matches!(
-                self.node(source_group),
-                Some(Node::Tabs(tabs)) if tabs.children.len() <= 1
-            )
         {
             return Ok(if request.handle == DragHandle::FlyoutPanel {
                 DragDropAction::Command(DockCommand::MovePanelFromFlyout { panel, target })
