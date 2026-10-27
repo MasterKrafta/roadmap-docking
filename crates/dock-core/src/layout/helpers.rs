@@ -17,37 +17,48 @@ pub(super) fn geometry_error_reason(error: GeometryError) -> &'static str {
     }
 }
 
-pub(super) fn ratio_issues(ratios: &[f32], expected_len: usize) -> Vec<&'static str> {
+pub(super) fn ratio_issues(
+    ratios: &[f32],
+    expected_len: usize,
+) -> Vec<ValidationReason> {
     let mut issues = Vec::new();
     if ratios.len() != expected_len {
-        issues.push("ratio count must match child/group count");
+        issues.push(ValidationReason::RatioCountMustMatchChildGroupCount);
     }
     if ratios
         .iter()
         .any(|ratio| !ratio.is_finite() || *ratio < 0.0)
     {
-        issues.push("ratios must be finite and non-negative");
+        issues.push(ValidationReason::RatiosMustBeFiniteAndNonNegative);
     }
     let sum: f32 = ratios.iter().copied().sum();
     if !sum.is_finite() || (sum - 1.0).abs() > RATIO_TOLERANCE {
-        issues.push("ratios must sum to 1.0 within 1e-4");
+        issues.push(ValidationReason::RatiosMustSumToOne);
     }
     issues
 }
 
 pub(super) fn is_normalizable_validation_error(error: &ValidationError) -> bool {
     match error {
-        ValidationError::InvalidSplit { reason, .. } => {
-            *reason == "must contain at least two children" || is_ratio_error(reason)
-        }
-        ValidationError::InvalidTabs { reason, .. } => {
-            *reason == "must contain at least one child"
-                || *reason == "active_index is outside children"
-        }
-        ValidationError::InvalidColumn { reason, .. } => {
-            *reason == "must contain at least one group before normalization"
-                || is_ratio_error(reason)
-        }
+        ValidationError::InvalidSplit { reason, .. } => matches!(
+            reason,
+            ValidationReason::SplitMustContainAtLeastTwoChildren
+                | ValidationReason::RatioCountMustMatchChildGroupCount
+                | ValidationReason::RatiosMustBeFiniteAndNonNegative
+                | ValidationReason::RatiosMustSumToOne
+        ),
+        ValidationError::InvalidTabs { reason, .. } => matches!(
+            reason,
+            ValidationReason::TabsMustContainAtLeastOneChild
+                | ValidationReason::ActiveTabIndexOutsideChildren
+        ),
+        ValidationError::InvalidColumn { reason, .. } => matches!(
+            reason,
+            ValidationReason::ColumnMustContainAtLeastOneGroupBeforeNormalization
+                | ValidationReason::RatioCountMustMatchChildGroupCount
+                | ValidationReason::RatiosMustBeFiniteAndNonNegative
+                | ValidationReason::RatiosMustSumToOne
+        ),
         // In a candidate transaction a move may temporarily create an empty
         // source Column while the destination creates another Column. Allow
         // normalization to remove empty columns first; final validation still
@@ -59,15 +70,6 @@ pub(super) fn is_normalizable_validation_error(error: &ValidationError) -> bool 
         // profile constraints that normalization must not guess how to repair.
         _ => false,
     }
-}
-
-pub(super) fn is_ratio_error(reason: &str) -> bool {
-    matches!(
-        reason,
-        "ratio count must match child/group count"
-            | "ratios must be finite and non-negative"
-            | "ratios must sum to 1.0 within 1e-4"
-    )
 }
 
 pub(super) fn normalized_ratios(ratios: Vec<Option<f32>>) -> Vec<f32> {
