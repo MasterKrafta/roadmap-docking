@@ -30,6 +30,7 @@ pub(crate) struct MainWindow {
     activation_subscription: Option<Subscription>,
     workspace_path: Option<PathBuf>,
     workspace_snapshot: Option<String>,
+    workspace_save_enabled: bool,
     workspace_save_generation: u64,
 }
 
@@ -38,24 +39,42 @@ impl MainWindow {
         theme: Theme,
         workspace_path: Option<&Path>,
     ) -> Result<Self, DockInitializationError> {
+        let mut workspace_load_failed = false;
         let dock = match crate::dock::load_layout(workspace_path, &theme) {
-            Some(layout) => match DockController::new_with_layout(&theme, layout) {
+            Ok(Some(layout)) => match DockController::new_with_layout(&theme, layout) {
                 Ok(dock) => dock,
                 Err(error) => {
                     tracing::warn!(
                         error = %error,
                         "restored workspace could not be installed; using initial layout"
                     );
+                    workspace_load_failed = true;
                     DockController::new_initial(&theme)?
                 }
             },
-            None => DockController::new_initial(&theme)?,
+            Ok(None) => DockController::new_initial(&theme)?,
+            Err(error) => {
+                tracing::warn!(
+                    path = workspace_path.map_or_else(
+                        || "<disabled>".to_owned(),
+                        |path| path.display().to_string()
+                    ),
+                    error = %error,
+                    "workspace could not be loaded; using initial layout without enabling saves"
+                );
+                workspace_load_failed = true;
+                DockController::new_initial(&theme)?
+            }
         };
 
         let workspace_path = workspace_path.map(Path::to_path_buf);
-        let workspace_snapshot = workspace_path.as_deref().and_then(|_| {
-            crate::dock::serialize_layout(dock.layout(), dock.metrics()).ok()
-        });
+        let workspace_snapshot = if workspace_load_failed {
+            None
+        } else {
+            workspace_path.as_deref().and_then(|_| {
+                crate::dock::serialize_layout(dock.layout(), dock.metrics()).ok()
+            })
+        };
 
         Ok(Self {
             dock,
@@ -64,13 +83,14 @@ impl MainWindow {
             activation_subscription: None,
             workspace_path,
             workspace_snapshot,
+            workspace_save_enabled: !workspace_load_failed,
             workspace_save_generation: 0,
         })
     }
 
     /// Debounces persistence only when the serialized persistent workspace changes.
     fn schedule_workspace_save(&mut self, cx: &mut Context<Self>) {
-        if self.workspace_path.is_none() {
+        if !self.workspace_save_enabled || self.workspace_path.is_none() {
             return;
         }
 
@@ -106,6 +126,9 @@ impl MainWindow {
 
     /// Writes the latest persistent state synchronously, used by debounce and close.
     pub(crate) fn save_workspace_now(&mut self) {
+        if !self.workspace_save_enabled {
+            return;
+        }
         let Some(path) = self.workspace_path.clone() else {
             return;
         };
@@ -812,6 +835,23 @@ mod tests {
         assert!(!contains(-1.0, 30.0));
         assert!(!contains(20.0, 23.0));
         assert!(!contains(20.0, 100.0));
+    }
+
+    #[test]
+    fn missing_workspace_can_be_created_when_window_saves() {
+        let path = temporary_workspace_path();
+        let mut window = MainWindow::new_with_workspace(Theme::default(), Some(&path))
+            .expect("the window should open with an initial layout");
+
+        window.save_workspace_now();
+
+        let actual =
+            fs::read_to_string(&path).expect("first-run workspace should be created");
+        fs::remove_file(&path).expect("test workspace should be removable");
+        assert!(
+            actual.contains("\"version\": 2"),
+            "a first-run save should write the current workspace schema"
+        );
     }
 
     #[test]

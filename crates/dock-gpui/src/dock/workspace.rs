@@ -25,24 +25,28 @@ pub(crate) enum WorkspaceError {
     },
 }
 
-/// Loads a workspace if a path is configured and a valid file is present.
+/// Loads a workspace when the configured file exists and is valid.
 ///
-/// Missing files mean a first launch and quietly select the baseline layout.
-/// Read, parse, migration, and validation failures are logged and also select
-/// the baseline layout; they never prevent the application window from opening.
-pub(crate) fn load_layout(path: Option<&Path>, theme: &Theme) -> Option<Layout> {
-    let path = path?;
+/// A missing file is a normal first-launch case. Read, parse, and validation
+/// errors are returned so the caller can avoid overwriting a workspace that
+/// could not be restored.
+pub(crate) fn load_layout(
+    path: Option<&Path>,
+    theme: &Theme,
+) -> Result<Option<Layout>, WorkspaceError> {
+    let Some(path) = path else {
+        return Ok(None);
+    };
 
     let json = match fs::read_to_string(path) {
         Ok(json) => json,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
-        Err(error) => {
-            tracing::warn!(
-                path = %path.display(),
-                error = %error,
-                "could not read workspace; using initial layout"
-            );
-            return None;
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => {
+            return Err(WorkspaceError::Io {
+                operation: "read workspace",
+                path: path.to_path_buf(),
+                source,
+            });
         }
     };
 
@@ -62,16 +66,9 @@ pub(crate) fn load_layout(path: Option<&Path>, theme: &Theme) -> Option<Layout> 
                     "workspace loaded with recovery diagnostics"
                 );
             }
-            Some(report.layout)
+            Ok(Some(report.layout))
         }
-        Err(error) => {
-            tracing::warn!(
-                path = %path.display(),
-                error = %error,
-                "workspace is invalid; using initial layout"
-            );
-            None
-        }
+        Err(error) => Err(WorkspaceError::Core(error)),
     }
 }
 
@@ -179,16 +176,16 @@ mod tests {
     fn absent_workspace_selects_initial_layout_without_error() {
         let theme = Theme::default();
         let path = temporary_path("missing");
-        assert!(load_layout(Some(&path), &theme).is_none());
+        assert_eq!(load_layout(Some(&path), &theme).unwrap(), None);
     }
 
     #[test]
-    fn malformed_workspace_is_rejected_without_panicking() {
+    fn malformed_workspace_is_returned_as_an_error_without_panicking() {
         let theme = Theme::default();
         let path = temporary_path("invalid");
         fs::write(&path, "{not valid json")
             .expect("test should be able to write a malformed workspace");
-        assert!(load_layout(Some(&path), &theme).is_none());
+        assert!(load_layout(Some(&path), &theme).is_err());
         fs::remove_file(path).expect("test workspace should be removable");
     }
 
@@ -205,7 +202,9 @@ mod tests {
         let path = temporary_path("valid");
         fs::write(&path, json).expect("test should be able to write a workspace");
 
-        let loaded = load_layout(Some(&path), &theme).expect("valid workspace should load");
+        let loaded = load_layout(Some(&path), &theme)
+            .expect("valid workspace should parse")
+            .expect("valid workspace should load");
         assert_eq!(loaded.validate(&metrics), Ok(()));
         assert_eq!(loaded.panel_instances().count(), layout.panel_instances().count());
         fs::remove_file(path).expect("test workspace should be removable");
