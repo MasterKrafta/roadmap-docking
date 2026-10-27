@@ -36,7 +36,11 @@ impl MainWindow {
         handle: DragHandle,
         position: gpui::Point<gpui::Pixels>,
     ) {
-        if let Err(error) = self.dock.begin_drag(payload, handle, dock_pointer(position)) {
+        let pointer = dock_surface_pointer(
+            position,
+            self.theme.metrics.column_header_height.max(1.0),
+        );
+        if let Err(error) = self.dock.begin_drag(payload, handle, pointer) {
             tracing::debug!(error = ?error, "could not record dock drag pointer-down");
         }
     }
@@ -67,28 +71,69 @@ impl MainWindow {
     pub(crate) fn handle_surface_mouse_move(
         &mut self,
         event: &MouseMoveEvent,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.dock.resize_session().is_none() {
-            return;
-        }
-
-        let pointer = dock_pointer(event.position);
-        if event.pressed_button != Some(MouseButton::Left) {
-            // A move without the left button means the release event was lost.
-            // Finish the gesture here so the resize session cannot remain stuck.
-            if let Err(error) = self.dock.commit_resize(pointer) {
-                tracing::debug!(error = ?error, "dock resize commit after lost mouse-up was rejected");
+        if self.dock.resize_session().is_some() {
+            let pointer = dock_pointer(event.position);
+            if event.pressed_button != Some(MouseButton::Left) {
+                // A move without the left button means the release event was lost.
+                // Finish the gesture here so the resize session cannot remain stuck.
+                if let Err(error) = self.dock.commit_resize(pointer) {
+                    tracing::debug!(error = ?error, "dock resize commit after lost mouse-up was rejected");
+                }
+                cx.notify();
+                return;
             }
+
+            if let Err(error) = self.dock.update_resize(pointer) {
+                tracing::debug!(error = ?error, "dock resize preview was rejected");
+            }
+
             cx.notify();
             return;
         }
 
-        if let Err(error) = self.dock.update_resize(pointer) {
-            tracing::debug!(error = ?error, "dock resize preview was rejected");
+        let pointer = dock_surface_pointer(
+            event.position,
+            self.theme.metrics.column_header_height.max(1.0),
+        );
+        if event.pressed_button != Some(MouseButton::Left) {
+            // The release event may have been lost while a drag was active.
+            if self.dock.cancel_drag() {
+                cx.notify();
+            }
+            return;
         }
 
-        cx.notify();
+        let frame = if self.dock.drag_needs_start(pointer) {
+            match self.dock.frame(self.dock_viewport(window)) {
+                Ok(frame) => Some(frame),
+                Err(error) => {
+                    tracing::warn!(error = ?error, "could not compute geometry to start dock drag");
+                    if self.dock.cancel_drag() {
+                        cx.notify();
+                    }
+                    return;
+                }
+            }
+        } else {
+            None
+        };
+
+        match self.dock.update_drag(pointer, frame.as_ref()) {
+            Ok(changed) => {
+                if changed {
+                    cx.notify();
+                }
+            }
+            Err(error) => {
+                tracing::warn!(error = ?error, "dock drag pointer update failed");
+                if self.dock.cancel_drag() {
+                    cx.notify();
+                }
+            }
+        }
     }
 
     pub(crate) fn handle_surface_mouse_up(
@@ -128,6 +173,15 @@ impl MainWindow {
 
 fn dock_pointer(position: gpui::Point<gpui::Pixels>) -> Point {
     Point::new(position.x.as_f32(), position.y.as_f32())
+}
+
+/// Converts window coordinates to the DockSurface's local geometry coordinates.
+fn dock_surface_pointer(
+    position: gpui::Point<gpui::Pixels>,
+    surface_top: f32,
+) -> Point {
+    let pointer = dock_pointer(position);
+    Point::new(pointer.x, pointer.y - surface_top)
 }
 
 fn surface_contains_window_point(
@@ -184,8 +238,8 @@ impl Render for MainWindow {
         // Element mouse-move handlers stop receiving events once the pointer leaves
         // the surface hitbox. Keep tracking the same resize gesture at window scope
         // only while the pointer is outside the surface.
-        let outside_move = cx.listener::<MouseMoveEvent>(|this, event, _window, cx| {
-            this.handle_surface_mouse_move(event, cx);
+        let outside_move = cx.listener::<MouseMoveEvent>(|this, event, window, cx| {
+            this.handle_surface_mouse_move(event, window, cx);
         });
         window.on_mouse_event(
             move |event: &MouseMoveEvent, phase, window, cx| {
@@ -266,7 +320,7 @@ impl Render for MainWindow {
                     &frame,
                     self.dock.scroll_handles(),
                     &self.theme,
-                    None,
+                    self.dock.drag_overlay(),
                 )
                 .build(&mut host),
             )
