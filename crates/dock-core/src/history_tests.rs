@@ -291,6 +291,78 @@ fn assert_round_trip(
 ///
 /// Layout creation and history pre-filling are excluded from timed sections.
 #[test]
+fn command_sequence_is_atomic_and_uses_one_undo_checkpoint() {
+    let metrics = DockMetrics::default();
+    let mut fixture = fixture();
+    let mut history = UndoRedoHistory::new();
+    let before = persistent_shape(&fixture.layout);
+
+    let outcomes = history
+        .apply_sequence(
+            &mut fixture.layout,
+            [
+                DockCommand::ResizeColumn {
+                    column: fixture.column,
+                    width: 219.0,
+                },
+                DockCommand::SetColumnMode {
+                    column: fixture.column,
+                    mode: ColumnMode::IconsOnly,
+                },
+            ],
+            &metrics,
+        )
+        .unwrap();
+
+    assert_eq!(outcomes.len(), 2);
+    assert_eq!(history.undo_len(), 1);
+    assert!(matches!(
+        fixture.layout.node(fixture.column),
+        Some(Node::Column(column))
+            if column.mode == ColumnMode::IconsOnly
+                && (column.last_expanded_width.unwrap() - 219.0).abs() < 0.01
+    ));
+
+    let after = persistent_shape(&fixture.layout);
+    assert!(history.undo(&mut fixture.layout, &metrics).unwrap());
+    assert_eq!(persistent_shape(&fixture.layout), before);
+    assert!(!history.can_undo());
+
+    assert!(history.redo(&mut fixture.layout, &metrics).unwrap());
+    assert_eq!(persistent_shape(&fixture.layout), after);
+    assert_eq!(history.undo_len(), 1);
+}
+
+#[test]
+fn failed_command_sequence_leaves_layout_and_history_unchanged() {
+    let metrics = DockMetrics::default();
+    let mut fixture = fixture();
+    let mut history = UndoRedoHistory::new();
+    let before = persistent_shape(&fixture.layout);
+    let before_version = fixture.layout.version();
+
+    let result = history.apply_sequence(
+        &mut fixture.layout,
+        [
+            DockCommand::ResizeColumn {
+                column: fixture.column,
+                width: 320.0,
+            },
+            DockCommand::CloseGroup {
+                group: fixture.column,
+            },
+        ],
+        &metrics,
+    );
+
+    assert!(result.is_err());
+    assert_eq!(persistent_shape(&fixture.layout), before);
+    assert_eq!(fixture.layout.version(), before_version);
+    assert_eq!(history.undo_len(), 0);
+    assert_eq!(history.redo_len(), 0);
+}
+
+#[test]
 #[ignore = "manual performance probe; run the documented release-mode command"]
 fn benchmark_history_snapshot_and_bounded_history() {
     let metrics = DockMetrics::default();

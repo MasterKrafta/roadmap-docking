@@ -1,12 +1,12 @@
-use dock_core::{DockCommand, DragHandle, DragPayload, Point, Rect, Size};
+use dock_core::{DockCommand, DragHandle, DragPayload, Point, Rect, ResizeEdge, Size};
 use gpui::{
     AnyElement, InteractiveElement, IntoElement, MouseButton, ParentElement,
     StatefulInteractiveElement, Styled, rgb,
 };
 
-use crate::components::FlyoutHeader;
+use crate::components::{FlyoutHeader, ResizeEdgeHandle, ResizeEdgeKind};
 use crate::host::DockHost;
-use crate::requests::DockMenuRequest;
+use crate::requests::{DockMenuRequest, ResizeHandle};
 use crate::surface::RenderData;
 
 use super::rect_element;
@@ -61,6 +61,35 @@ pub(crate) fn render(
             .child(header.into_any_element())
             .child(content.into_any_element());
         elements.push(overlay_element.into_any_element());
+
+        let edge_width = theme.metrics.splitter_hit_zone.min(flyout.rect.size.width);
+        let edge_x = match flyout.resize_edge {
+            ResizeEdge::Left => Some(flyout.rect.origin.x - edge_width / 2.0),
+            ResizeEdge::Right => Some(
+                flyout.rect.origin.x + flyout.rect.size.width - edge_width / 2.0,
+            ),
+            _ => None,
+        };
+        if edge_width > 0.0
+            && flyout.rect.size.height > 0.0
+            && let Some(edge_x) = edge_x
+        {
+            elements.push(
+                ResizeEdgeHandle {
+                    id: format!("dock-flyout-resize-{:?}", flyout.panel),
+                    rect: Rect::new(
+                        Point::new(edge_x, flyout.rect.origin.y),
+                        Size::new(edge_width, flyout.rect.size.height),
+                    ),
+                    edge: ResizeEdgeKind::Flyout,
+                    theme: *theme,
+                    on_resize_start: host.resize_start(ResizeHandle::Flyout {
+                        panel: flyout.panel,
+                    }),
+                }
+                .into_any_element(),
+            );
+        }
     }
 
     elements

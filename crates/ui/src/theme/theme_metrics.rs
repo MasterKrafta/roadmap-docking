@@ -26,6 +26,10 @@ pub struct ThemeMetrics {
     /// Width of each tab in the main window's simple column.
     pub column_tab_width: f32,
     pub rail_width: f32,
+    /// Width at which resizing an expanded column automatically enters icon-rail mode.
+    pub rail_collapse_width: f32,
+    /// Width at which dragging an icon rail's outer edge restores expanded mode.
+    pub rail_expand_width: f32,
     pub min_group_height: f32,
     pub collapsed_group_height: f32,
     pub min_document_width: f32,
@@ -53,6 +57,8 @@ impl Default for ThemeMetrics {
             default_column_split_ratio: 0.5,
             column_tab_width: 104.0,
             rail_width: 36.0,
+            rail_collapse_width: 220.0,
+            rail_expand_width: 240.0,
             min_group_height: 80.0,
             collapsed_group_height: 28.0,
             min_document_width: 320.0,
@@ -70,6 +76,8 @@ mod tests {
         assert!((m.default_column_width - 280.0).abs() < 1e-3);
         assert!((m.min_column_width - 200.0).abs() < 1e-3);
         assert!((m.rail_width - 36.0).abs() < 1e-3);
+        assert!((m.rail_collapse_width - 220.0).abs() < 1e-3);
+        assert!((m.rail_expand_width - 240.0).abs() < 1e-3);
         assert_eq!(m.max_columns, 4);
     }
 

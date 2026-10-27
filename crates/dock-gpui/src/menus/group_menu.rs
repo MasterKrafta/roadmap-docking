@@ -39,6 +39,16 @@ pub(super) fn items(
         ));
     }
 
+    let auto_collapse = layout.flyout_auto_collapse_enabled();
+    items.push(item(
+        "flyout-auto-collapse",
+        "Автосворачивание flyout",
+        auto_collapse,
+        Some(DockCommand::SetFlyoutAutoCollapse {
+            enabled: !auto_collapse,
+        }),
+    ));
+
     let parent_column = layout.nodes().find_map(|(column_id, node)| match node {
         Node::Column(column) if column.groups.contains(&group) => {
             Some((column_id, column.mode, column.groups.len()))

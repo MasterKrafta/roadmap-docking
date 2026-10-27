@@ -18,6 +18,7 @@ use super::drag_session::{
     DragGeometrySnapshot, DragGesture, DragStartError, DragUpdateError,
 };
 use super::resize_session::{ResizeSession, ResizeStartError, ResizeUpdateError, StartGeometry};
+use super::rail_policy::RailPolicy;
 
 #[derive(Debug)]
 enum Session {
@@ -33,6 +34,7 @@ enum Session {
 pub(crate) struct DockController {
     layout: Layout,
     metrics: DockMetrics,
+    rail_policy: Option<RailPolicy>,
     history: UndoRedoHistory,
     scroll_handles: HashMap<NodeId, ScrollHandle>,
     session: Session,
@@ -49,6 +51,10 @@ impl DockController {
         Ok(Self {
             layout,
             metrics,
+            rail_policy: RailPolicy::new(
+                theme.metrics.rail_collapse_width,
+                theme.metrics.rail_expand_width,
+            ),
             history: UndoRedoHistory::new(),
             scroll_handles: HashMap::new(),
             session: Session::Idle,
@@ -511,30 +517,50 @@ impl DockController {
         &mut self,
         pointer: Point,
     ) -> Result<CommandOutcome, ResizeUpdateError> {
-        let (mut candidate, command) = match &self.session {
-            Session::Idle | Session::Drag(_) => {
-                return Err(ResizeUpdateError::NoActiveSession);
-            }
-            Session::Resize(session) => {
-                let command = session.command_for_pointer(pointer)?;
-                let command =
-                    preserve_floating_resize_anchor(session, command, &self.metrics);
-                (session.baseline().clone(), command)
+        let mut command_error = None;
+        let prepared = match &self.session {
+            Session::Idle | Session::Drag(_) => Err(ResizeUpdateError::NoActiveSession),
+            Session::Resize(session) => match session.command_for_pointer(pointer) {
+                Err(error) => Err(error),
+                Ok(command) => {
+                    let command =
+                        preserve_floating_resize_anchor(session, command, &self.metrics);
+                    if let Some(policy) = self.rail_policy {
+                        match policy.preview(session.baseline(), &self.layout, &command, &self.metrics) {
+                            Ok((candidate, _, outcome)) => Ok((candidate, outcome)),
+                            Err(error) => {
+                                command_error = Some(error);
+                                Err(ResizeUpdateError::Command)
+                            }
+                        }
+                    } else {
+                        let mut candidate = session.baseline().clone();
+                        match candidate.apply(command, &self.metrics) {
+                            Ok(outcome) => Ok((candidate, outcome)),
+                            Err(error) => {
+                                command_error = Some(error);
+                                Err(ResizeUpdateError::Command)
+                            }
+                        }
+                    }
+                }
+            },
+        };
+
+        let (candidate, outcome) = match prepared {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                if let Some(command_error) = command_error {
+                    tracing::warn!(error = %command_error, "dock resize preview was rejected");
+                    self.last_error = Some(command_error);
+                }
+                return Err(error);
             }
         };
 
-        match candidate.apply(command, &self.metrics) {
-            Ok(outcome) => {
-                self.layout = candidate;
-                self.last_error = None;
-                Ok(outcome)
-            }
-            Err(error) => {
-                tracing::warn!(error = %error, "dock resize preview was rejected");
-                self.last_error = Some(error.clone());
-                Err(ResizeUpdateError::Command)
-            }
-        }
+        self.layout = candidate;
+        self.last_error = None;
+        Ok(outcome)
     }
 
     /// Commits the final pointer position as a single persistent history entry.
@@ -556,14 +582,35 @@ impl DockController {
                 return Err(ResizeUpdateError::NoActiveSession);
             }
         };
-        let command = session
+        let mut policy_error = None;
+        let commands = session
             .command_for_pointer(pointer)
-            .map(|command| preserve_floating_resize_anchor(&session, command, &self.metrics));
+            .map(|command| preserve_floating_resize_anchor(&session, command, &self.metrics))
+            .and_then(|command| {
+                if let Some(policy) = self.rail_policy {
+                    match policy.preview(session.baseline(), &self.layout, &command, &self.metrics) {
+                        Ok((_, commands, _)) => Ok(commands),
+                        Err(error) => {
+                            policy_error = Some(error);
+                            Err(ResizeUpdateError::Command)
+                        }
+                    }
+                } else {
+                    Ok(vec![command])
+                }
+            });
         self.layout = session.into_baseline();
-        self.last_error = None;
+        self.last_error = policy_error;
 
-        let command = command?;
-        let result = self.history.apply(&mut self.layout, command, &self.metrics);
+        let commands = commands?;
+        let result = self
+            .history
+            .apply_sequence(&mut self.layout, commands, &self.metrics)
+            .and_then(|mut outcomes| {
+                outcomes.pop().ok_or(CommandError::InvalidTarget {
+                    reason: "resize command sequence returned no outcome",
+                })
+            });
         self.track_command_result(result, "resize_commit")
             .map_err(|_| ResizeUpdateError::Command)
     }

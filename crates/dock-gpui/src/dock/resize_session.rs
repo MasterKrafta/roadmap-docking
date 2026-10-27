@@ -10,6 +10,7 @@ pub(super) enum StartGeometry {
     HorizontalSplit,
     OuterColumn { start_width: f32 },
     FloatingEdge { bounds: Rect },
+    FlyoutWidth { start_width: f32, expands_left: bool },
 }
 
 /// Failure to begin a resize from an invalid handle or incomplete frame snapshot.
@@ -21,6 +22,7 @@ pub(crate) enum ResizeStartError {
     MissingColumnGeometry,
     MissingFloatingGeometry,
     MissingFloatingEdge,
+    MissingFlyoutGeometry,
     SessionAlreadyActive,
 }
 
@@ -212,6 +214,23 @@ impl ResizeSession {
                 }
                 Ok(DockCommand::ResizeFloatingBounds { group, bounds })
             }
+            (
+                ResizeHandle::Flyout { panel },
+                StartGeometry::FlyoutWidth { start_width, expands_left },
+            ) => {
+                if !delta_x.is_finite() {
+                    return Err(ResizeUpdateError::InvalidDelta);
+                }
+                let width = if expands_left {
+                    start_width - delta_x
+                } else {
+                    start_width + delta_x
+                };
+                if !width.is_finite() || width <= 0.0 {
+                    return Err(ResizeUpdateError::InvalidBounds);
+                }
+                Ok(DockCommand::ResizeFlyout { panel, width })
+            }
             _ => Err(ResizeUpdateError::InvalidStartGeometry),
         }
     }
@@ -320,13 +339,9 @@ fn capture_start_geometry(
                 return Err(ResizeStartError::InvalidHandle);
             }
 
-            let Some(Node::Column(value)) = layout.node(column) else {
+            let Some(Node::Column(_)) = layout.node(column) else {
                 return Err(ResizeStartError::InvalidHandle);
             };
-            if value.mode.is_rail() {
-                return Err(ResizeStartError::InvalidHandle);
-            }
-
             let Some(column_rect) = rects.columns.iter().find(|entry| entry.column == column) else {
                 return Err(ResizeStartError::MissingColumnGeometry);
             };
@@ -365,6 +380,21 @@ fn capture_start_geometry(
                 bounds: floating.rect,
             })
         }
+        ResizeHandle::Flyout { panel } => {
+            if layout.flyout().is_none_or(|flyout| flyout.panel != panel) {
+                return Err(ResizeStartError::MissingFlyoutGeometry);
+            }
+            let Some(flyout) = rects.flyout.filter(|entry| entry.panel == panel) else {
+                return Err(ResizeStartError::MissingFlyoutGeometry);
+            };
+            if flyout.rect.validate_non_empty().is_err() {
+                return Err(ResizeStartError::MissingFlyoutGeometry);
+            }
+            Ok(StartGeometry::FlyoutWidth {
+                start_width: flyout.rect.size.width,
+                expands_left: flyout.resize_edge == ResizeEdge::Left,
+            })
+        }
     }
 }
 
@@ -389,6 +419,39 @@ mod tests {
             pointer_start: Point::new(100.0, 100.0),
             start_geometry,
         }
+    }
+
+    #[test]
+    fn flyout_resize_uses_absolute_x_delta_and_correct_edge_direction() {
+        use dock_core::PanelId;
+
+        let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
+        let handle = ResizeHandle::Flyout { panel: PanelId::null() };
+        let right_edge = session(
+            &layout,
+            handle,
+            StartGeometry::FlyoutWidth {
+                start_width: 300.0,
+                expands_left: false,
+            },
+        );
+        assert_eq!(
+            right_edge.command_for_pointer(Point::new(120.0, 100.0)).unwrap(),
+            DockCommand::ResizeFlyout { panel: PanelId::null(), width: 320.0 }
+        );
+
+        let left_edge = session(
+            &layout,
+            handle,
+            StartGeometry::FlyoutWidth {
+                start_width: 300.0,
+                expands_left: true,
+            },
+        );
+        assert_eq!(
+            left_edge.command_for_pointer(Point::new(120.0, 100.0)).unwrap(),
+            DockCommand::ResizeFlyout { panel: PanelId::null(), width: 280.0 }
+        );
     }
 
     #[test]

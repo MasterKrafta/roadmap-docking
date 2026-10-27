@@ -26,7 +26,7 @@ pub(crate) fn render(
         let Some(column_id) = column_id else {
             continue;
         };
-        if !matches!(layout.node(column_id), Some(Node::Column(column)) if !column.mode.is_rail()) {
+        if !matches!(layout.node(column_id), Some(Node::Column(_))) {
             continue;
         }
         let Some(column_rect) = rects.columns.iter().find(|entry| entry.column == column_id) else {

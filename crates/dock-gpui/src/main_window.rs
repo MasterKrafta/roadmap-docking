@@ -8,7 +8,7 @@ use ui::Theme;
 
 use crate::components::{with_focus_ring, PopupMenu, PopupMenuItem};
 use crate::host::DockHost;
-use crate::dock::{floating_group_at_point, DockController, WindowHost};
+use crate::dock::{floating_group_at_point, resolve_shortcut, DockController, Shortcut, WindowHost};
 use crate::menus::{self, MenuItemModel, MenuState};
 use crate::requests::{DockMenuRequest, ResizeHandle};
 use crate::DockSurface;
@@ -93,11 +93,24 @@ impl MainWindow {
         let key = event.keystroke.key.to_ascii_lowercase();
         match key.as_str() {
             "escape" => {
+                // Cancel an active gesture first, then close a popup, then dismiss flyout.
+                if self.dock.cancel_resize() || self.dock.cancel_drag() {
+                    cx.stop_propagation();
+                    cx.notify();
+                    return;
+                }
                 if self.menu_state.is_open() {
                     self.menu_state = MenuState::Closed;
                     cx.stop_propagation();
                     cx.notify();
-                } else if self.dock.cancel_resize() || self.dock.cancel_drag() {
+                    return;
+                }
+                if self.dock.layout().flyout().is_some()
+                    && self.dock.layout().flyout_auto_collapse_enabled()
+                {
+                    if let Err(error) = self.dock.apply(DockCommand::DismissFlyout) {
+                        tracing::debug!(error = %error, "flyout dismissal on Escape was rejected");
+                    }
                     cx.stop_propagation();
                     cx.notify();
                 }
@@ -129,6 +142,35 @@ impl MainWindow {
         }
     }
 
+    fn handle_global_shortcuts(
+        &mut self,
+        event: &KeyDownEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(shortcut) = resolve_shortcut(&event.keystroke, self.menu_state.is_open()) else {
+            return;
+        };
+
+        let result = match shortcut {
+            Shortcut::Undo => self.dock.undo().map(|_| ()),
+            Shortcut::Redo => self.dock.redo().map(|_| ()),
+            Shortcut::ToggleChrome => {
+                let mode = self.dock.layout().chrome().after_tab_shortcut();
+                self.dock.apply(DockCommand::SetChrome { mode }).map(|_| ())
+            }
+            Shortcut::ToggleDockChrome => {
+                let mode = self.dock.layout().chrome().after_shift_tab_shortcut();
+                self.dock.apply(DockCommand::SetChrome { mode }).map(|_| ())
+            }
+        };
+        if let Err(error) = result {
+            tracing::debug!(error = %error, shortcut = ?shortcut, "dock keyboard shortcut was rejected");
+        }
+        cx.stop_propagation();
+        cx.notify();
+    }
+
     pub(crate) fn close_floating_window(&mut self, group: FloatingGroupId) {
         if let Err(error) = self.dock.close_floating(group) {
             tracing::warn!(group = ?group, error = %error, "could not close floating window");
@@ -141,10 +183,7 @@ impl MainWindow {
         handle: DragHandle,
         position: gpui::Point<gpui::Pixels>,
     ) {
-        let pointer = dock_surface_pointer(
-            position,
-            self.theme.metrics.column_header_height.max(1.0),
-        );
+        let pointer = dock_surface_pointer(position, self.surface_top());
         if let Err(error) = self.dock.begin_drag(payload, handle, pointer) {
             tracing::debug!(error = ?error, "could not record dock drag pointer-down");
         }
@@ -199,10 +238,7 @@ impl MainWindow {
             return;
         }
 
-        let pointer = dock_surface_pointer(
-            event.position,
-            self.theme.metrics.column_header_height.max(1.0),
-        );
+        let pointer = dock_surface_pointer(event.position, self.surface_top());
         if event.pressed_button != Some(MouseButton::Left) {
             // The release event may have been lost while a drag was active.
             if self.dock.cancel_drag() {
@@ -255,10 +291,7 @@ impl MainWindow {
 
         if self.dock.resize_session().is_none() {
             let had_overlay = self.dock.drag_overlay().is_some();
-            let pointer = dock_surface_pointer(
-                event.position,
-                self.theme.metrics.column_header_height.max(1.0),
-            );
+            let pointer = dock_surface_pointer(event.position, self.surface_top());
             let mut changed = had_overlay;
             let viewport = self.dock_viewport(window);
             match self.dock.finish_drag(pointer, viewport) {
@@ -293,14 +326,22 @@ impl MainWindow {
         cx.notify();
     }
 
+    fn surface_top(&self) -> f32 {
+        if self.dock.layout().chrome().toolbar_visible() {
+            self.theme.metrics.column_header_height.max(1.0)
+        } else {
+            0.0
+        }
+    }
+
     fn dock_viewport(&self, window: &Window) -> Rect {
         let window_size = window.viewport_size();
         let width = window_size.width.as_f32().max(1.0);
         let height = window_size.height.as_f32().max(1.0);
-        let menu_height = self.theme.metrics.column_header_height.max(1.0);
+        let surface_top = self.surface_top();
         Rect::new(
             Point::ZERO,
-            Size::new(width, (height - menu_height).max(1.0)),
+            Size::new(width, (height - surface_top).max(1.0)),
         )
     }
 }
@@ -345,9 +386,13 @@ impl Render for MainWindow {
         let width = window_size.width.as_f32().max(1.0);
         let height = window_size.height.as_f32().max(1.0);
         let menu_height = self.theme.metrics.column_header_height.max(1.0);
-        let content_height = (height - menu_height).max(1.0);
+        let chrome_mode = self.dock.layout().chrome();
+        let toolbar_visible = chrome_mode.toolbar_visible();
+        let surface_top = self.surface_top();
+        let content_height = (height - surface_top).max(1.0);
 
-        // Menu navigation and Escape handling are centralized at window capture.
+        // Escape and popup navigation run in capture; global shortcuts run in bubble
+        // so focused input controls can consume Tab/Undo/Redo first.
         let key_down = cx.listener::<KeyDownEvent>(|this, event, window, cx| {
             this.handle_key_down(event, window, cx);
         });
@@ -355,6 +400,16 @@ impl Render for MainWindow {
             move |event: &KeyDownEvent, phase, window, cx| {
                 if phase == DispatchPhase::Capture {
                     key_down(event, window, cx);
+                }
+            },
+        );
+        let global_shortcuts = cx.listener::<KeyDownEvent>(|this, event, window, cx| {
+            this.handle_global_shortcuts(event, window, cx);
+        });
+        window.on_key_event(
+            move |event: &KeyDownEvent, phase, window, cx| {
+                if phase == DispatchPhase::Bubble {
+                    global_shortcuts(event, window, cx);
                 }
             },
         );
@@ -371,7 +426,7 @@ impl Render for MainWindow {
                     && !surface_contains_window_point(
                         event.position,
                         width,
-                        menu_height,
+                        surface_top,
                         content_height,
                     )
                 {
@@ -390,7 +445,7 @@ impl Render for MainWindow {
                     && !surface_contains_window_point(
                         event.position,
                         width,
-                        menu_height,
+                        surface_top,
                         content_height,
                     )
                 {
@@ -446,6 +501,43 @@ impl Render for MainWindow {
             );
         }
 
+        if let Some(flyout) = frame.rects().flyout {
+            let edge_padding = (self.theme.metrics.splitter_hit_zone.min(flyout.rect.size.width))
+                / 2.0;
+            let flyout_hit_bounds = Rect::new(
+                Point::new(flyout.rect.origin.x - edge_padding, flyout.rect.origin.y),
+                Size::new(flyout.rect.size.width + edge_padding * 2.0, flyout.rect.size.height),
+            );
+            let menu_bounds_for_flyout = menu_bounds;
+            let outside_flyout_down = cx.listener::<MouseDownEvent>(
+                move |this, event, _window, cx| {
+                    if event.button != MouseButton::Left {
+                        return;
+                    }
+                    let pointer = dock_surface_pointer(event.position, surface_top);
+                    let inside_menu = menu_bounds_for_flyout
+                        .is_some_and(|bounds| menus::contains(bounds, dock_pointer(event.position)));
+                    if !inside_menu
+                        && !menus::contains(flyout_hit_bounds, pointer)
+                        && this.dock.layout().flyout().is_some()
+                        && this.dock.layout().flyout_auto_collapse_enabled()
+                    {
+                        if let Err(error) = this.dock.apply(DockCommand::DismissFlyout) {
+                            tracing::debug!(error = %error, "flyout dismissal on outside click was rejected");
+                        }
+                        cx.notify();
+                    }
+                },
+            );
+            window.on_mouse_event(
+                move |event: &MouseDownEvent, phase, window, cx| {
+                    if phase == DispatchPhase::Capture && event.button == MouseButton::Left {
+                        outside_flyout_down(event, window, cx);
+                    }
+                },
+            );
+        }
+
         // Raise floating windows during capture, but do not let clicks on a menu
         // item raise an underlying floating window before the popup handles them.
         let floating_hit_targets = self
@@ -470,7 +562,7 @@ impl Render for MainWindow {
             {
                 return;
             }
-            let pointer = dock_surface_pointer(event.position, menu_height);
+            let pointer = dock_surface_pointer(event.position, surface_top);
             if let Some(group) = floating_group_at_point(&floating_hit_targets, pointer) {
                 this.apply_dock_command(DockCommand::RaiseFloating { group });
                 cx.notify();
@@ -532,13 +624,15 @@ impl Render for MainWindow {
             PopupMenu::new(bounds, &self.theme, popup_items)
         });
 
-        let root = div()
+        let mut root = div()
             .flex()
             .flex_col()
             .w(px(width))
             .h(px(height))
-            .bg(rgb(self.theme.colors.window_background))
-            .child(
+            .bg(rgb(self.theme.colors.window_background));
+
+        if toolbar_visible {
+            root = root.child(
                 div()
                     .flex()
                     .items_center()
@@ -549,17 +643,18 @@ impl Render for MainWindow {
                     .border_color(rgb(self.theme.colors.border))
                     .text_color(rgb(self.theme.colors.primary_text))
                     .child(dockers_trigger),
-            )
-            .child(
-                DockSurface::new(
-                    self.dock.layout(),
-                    &frame,
-                    self.dock.scroll_handles(),
-                    &self.theme,
-                    self.dock.drag_overlay(),
-                )
-                .build(&mut host),
             );
+        }
+        root = root.child(
+            DockSurface::new(
+                self.dock.layout(),
+                &frame,
+                self.dock.scroll_handles(),
+                &self.theme,
+                self.dock.drag_overlay(),
+            )
+            .build(&mut host),
+        );
 
         if let Some(popup_menu) = popup_menu {
             root.child(popup_menu)

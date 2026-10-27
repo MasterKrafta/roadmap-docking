@@ -3317,3 +3317,63 @@
         assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
     }
 
+#[test]
+fn rail_threshold_resize_is_one_undoable_action() {
+    let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+    let viewport = Rect::new(Point::ZERO, Size::new(1600.0, 900.0));
+    let frame = controller.frame(viewport).unwrap();
+    let column = crate::tree_query::main_column_ids(controller.layout(), DockSide::Right)
+        .first()
+        .copied()
+        .expect("initial right dock should contain a column");
+    let rect = frame
+        .rects()
+        .columns
+        .iter()
+        .find(|entry| entry.column == column)
+        .expect("outer column should have frame geometry")
+        .rect;
+    assert!(rect.size.width > 220.0);
+
+    let original_width = match controller.layout().node(column) {
+        Some(Node::Column(value)) => value.width,
+        other => panic!("expected a Column, got {other:?}"),
+    };
+    let start = Point::new(rect.origin.x, rect.origin.y + rect.size.height / 2.0);
+    let end = Point::new(start.x + rect.size.width - 219.0, start.y);
+    let handle = ResizeHandle::OuterColumn {
+        column,
+        side: DockSide::Right,
+    };
+
+    controller.begin_resize(handle, start, &frame).unwrap();
+    controller.update_resize(end).unwrap();
+    assert!(matches!(
+        controller.layout().node(column),
+        Some(Node::Column(value)) if value.mode == ColumnMode::IconsOnly
+    ));
+    controller.commit_resize(end).unwrap();
+    assert!(matches!(
+        controller.layout().node(column),
+        Some(Node::Column(value))
+            if value.mode == ColumnMode::IconsOnly
+                && (value.last_expanded_width.unwrap() - 219.0).abs() < 0.01
+    ));
+
+    assert!(controller.undo().unwrap());
+    assert!(matches!(
+        controller.layout().node(column),
+        Some(Node::Column(value))
+            if value.mode == ColumnMode::Expanded
+                && (value.width - original_width).abs() < 0.01
+    ));
+    assert!(!controller.undo().unwrap());
+    assert!(controller.redo().unwrap());
+    assert!(matches!(
+        controller.layout().node(column),
+        Some(Node::Column(value))
+            if value.mode == ColumnMode::IconsOnly
+                && (value.last_expanded_width.unwrap() - 219.0).abs() < 0.01
+    ));
+}
+

@@ -99,6 +99,44 @@ impl UndoRedoHistory {
         Ok(outcome)
     }
 
+    /// Applies several commands as one atomic history step.
+    ///
+    /// Every command executes against a candidate layout. If any command fails, neither
+    /// the caller's layout nor the undo/redo stacks are changed. Successful persistent
+    /// sequences produce one checkpoint regardless of how many commands they contain;
+    /// transient-only sequences do not enter history.
+    pub fn apply_sequence(
+        &mut self,
+        layout: &mut Layout,
+        commands: impl IntoIterator<Item = DockCommand>,
+        metrics: &DockMetrics,
+    ) -> Result<Vec<CommandOutcome>, CommandError> {
+        let commands: Vec<_> = commands.into_iter().collect();
+        if commands.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let prior_version = layout.version();
+        let checkpoint = (self.limit > 0).then(|| layout.history_snapshot());
+        let mut candidate = layout.clone();
+        let mut outcomes = Vec::with_capacity(commands.len());
+
+        for command in commands {
+            outcomes.push(candidate.apply(command, metrics)?);
+        }
+
+        let changed_persistently = candidate.version() != prior_version;
+        self.synchronize_owner(layout);
+        *layout = candidate;
+
+        if changed_persistently && let Some(checkpoint) = checkpoint {
+            Self::push_bounded(&mut self.undo, checkpoint, self.limit);
+            self.redo.clear();
+        }
+
+        Ok(outcomes)
+    }
+
     /// Restores the previous persistent checkpoint. Returns false when empty.
     ///
     /// Restoring advances Layout::version rather than rewinding the revision

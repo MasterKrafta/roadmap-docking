@@ -12,6 +12,7 @@ pub type ResizeStartHandler = Box<dyn Fn(&MouseDownEvent, &mut Window, &mut App)
 pub enum ResizeEdgeKind {
     OuterColumn,
     Floating(ResizeEdge),
+    Flyout,
 }
 
 /// A resize hit zone that delegates the actual resize gesture to its caller.
@@ -32,7 +33,7 @@ pub struct ResizeEdgeHandle {
 impl RenderOnce for ResizeEdgeHandle {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
         let id = match self.edge {
-            ResizeEdgeKind::OuterColumn => self.id,
+            ResizeEdgeKind::OuterColumn | ResizeEdgeKind::Flyout => self.id,
             ResizeEdgeKind::Floating(edge) => format!("{}-{:?}", self.id, edge),
         };
 
