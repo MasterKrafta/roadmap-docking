@@ -10,7 +10,7 @@ use crate::{
     DockArea, DockAreaId, DockAreaKind, DockCommand, DockMetrics, DockSide, DropTarget, DropZone,
     FloatingGroup, FloatingGroupId, FlyoutState, GeometryError, LastDockLocation, Node, NodeId,
     Panel, PanelId, PanelInstance, PanelKey, Point, Profile, Rect, Size, Split, Tabs,
-    ValidationError, command_application::CommandApplication,
+    ValidationError, ValidationReason, command_application::CommandApplication,
 };
 
 const RATIO_TOLERANCE: f32 = 1.0e-4;
