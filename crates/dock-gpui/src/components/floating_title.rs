@@ -10,7 +10,7 @@ use crate::components::IconButton;
 pub type ClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 pub type DragStartHandler = Box<dyn Fn(&MouseDownEvent, &mut Window, &mut App) + 'static>;
 
-/// Header of a floating dock window; optional controls are rendered when their handlers are supplied.
+/// Header of a floating dock window with separate move and dock-capture surfaces.
 #[derive(IntoElement)]
 pub struct FloatingTitle {
     /// Floating-window identity for the stable element ID.
@@ -33,9 +33,15 @@ pub struct FloatingTitle {
 
 impl RenderOnce for FloatingTitle {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
-        let button_width = self.rect.size.height.min(28.0).max(0.0);
         let button_count =
             1 + self.on_close.is_some() as usize + self.on_collapse.is_some() as usize;
+        let button_width = self
+            .rect
+            .size
+            .height
+            .min(28.0)
+            .min(self.rect.size.width / button_count as f32)
+            .max(0.0);
         let buttons_width = button_width * button_count as f32;
         let drag_width = (self.rect.size.width - buttons_width).max(0.0);
 
@@ -65,7 +71,10 @@ impl RenderOnce for FloatingTitle {
             header = header.child(
                 IconButton::new(
                     format!("dock-floating-close-{:?}", self.group),
-                    Rect::new(Point::new(button_right, 0.0), Size::new(button_width, self.rect.size.height)),
+                    Rect::new(
+                        Point::new(button_right, 0.0),
+                        Size::new(button_width, self.rect.size.height),
+                    ),
                     "×",
                     &self.theme,
                     on_close,
@@ -78,7 +87,10 @@ impl RenderOnce for FloatingTitle {
             header = header.child(
                 IconButton::new(
                     format!("dock-floating-collapse-{:?}", self.group),
-                    Rect::new(Point::new(button_right, 0.0), Size::new(button_width, self.rect.size.height)),
+                    Rect::new(
+                        Point::new(button_right, 0.0),
+                        Size::new(button_width, self.rect.size.height),
+                    ),
                     "−",
                     &self.theme,
                     on_collapse,
