@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{collections::HashSet, fmt};
 
 use dock_core::{
     ComputeRectsError, DockMetrics, DragHandle, DragPayload, DragSession as CoreDragSession,
@@ -39,6 +39,8 @@ pub(crate) struct DragGesture {
     pub(super) core: Option<CoreDragSession>,
     pub(super) snapshot: Option<DragGeometrySnapshot>,
     pub(super) resolver: Option<DropZoneResolver>,
+    /// Nodes belonging to the floating window being captured; targets inside it are not docking targets.
+    pub(super) capture_root_nodes: Option<HashSet<dock_core::NodeId>>,
     pub(super) overlay: Option<DragOverlay>,
 }
 
@@ -52,6 +54,7 @@ impl fmt::Debug for DragGesture {
             .field("core_started", &self.core.is_some())
             .field("snapshot", &self.snapshot)
             .field("resolver_prepared", &self.resolver.is_some())
+            .field("capture_root_nodes", &self.capture_root_nodes.as_ref().map(HashSet::len))
             .field("overlay_available", &self.overlay.is_some())
             .finish()
     }
@@ -104,6 +107,7 @@ impl DragGesture {
             core: None,
             snapshot: None,
             resolver: None,
+            capture_root_nodes: None,
             overlay: None,
         })
     }
