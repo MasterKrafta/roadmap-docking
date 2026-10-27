@@ -206,6 +206,7 @@ impl DockController {
             let overlay = resolver.as_ref().and_then(|resolver| {
                 core.preview().map(|preview| DragOverlay {
                     preview,
+                    handle,
                     zones: resolver.zones().to_vec(),
                 })
             });
