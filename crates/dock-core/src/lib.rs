@@ -25,10 +25,7 @@ mod dock_metrics;
 mod dock_side;
 mod drag_types;
 mod drag_session;
-mod drop_source;
-mod drop_target;
-mod drop_zone;
-mod drop_zone_rect;
+mod drop_types;
 mod floating_group;
 mod floating_group_id;
 mod floating_group_rect;
@@ -90,10 +87,7 @@ pub use drag_types::{
     DragSessionError, DragState,
 };
 pub use drag_session::DragSession;
-pub use drop_source::DropSource;
-pub use drop_target::DropTarget;
-pub use drop_zone::DropZone;
-pub use drop_zone_rect::DropZoneRect;
+pub use drop_types::{DropSource, DropTarget, DropZone, DropZoneRect};
 pub use compute_drop_zones::DropZoneResolver;
 pub use floating_group::FloatingGroup;
 pub use floating_group_id::FloatingGroupId;

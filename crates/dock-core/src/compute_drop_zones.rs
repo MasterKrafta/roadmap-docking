@@ -10,16 +10,10 @@ pub(super) use drop_zone_tree::{
     DropZoneTreeIndex,
 };
 
-#[path = "compute_drop_zones/drop_zone_resolver.rs"]
-mod drop_zone_resolver;
-pub use drop_zone_resolver::DropZoneResolver;
-
 #[path = "compute_drop_zones/drop_zone_main.rs"]
 mod drop_zone_main;
 #[path = "compute_drop_zones/drop_zone_floating.rs"]
 mod drop_zone_floating;
-#[path = "compute_drop_zones/drop_zone_canvas.rs"]
-mod drop_zone_canvas;
 
 use crate::{
     AllowedArea, ComputeRectsError, DockMetrics, DockSide, DropSource, DropTarget, DropZone,
@@ -295,4 +289,192 @@ pub(super) fn floating_edge_rect(
     );
     result.validate().map_err(ComputeRectsError::Geometry)?;
     Ok(result)
+}
+
+impl Layout {
+    fn append_canvas_edge_zones(
+        &self,
+        context: &DropZoneBuildContext<'_>,
+        zones: &mut Vec<DropZoneRect>,
+    ) -> Result<(), ComputeRectsError> {
+        let DropZoneBuildContext {
+            source,
+            source_root,
+            source_panels,
+            tree_index,
+            rects,
+            metrics,
+            viewport,
+            left_columns,
+            right_columns,
+            may_add_column,
+        } = *context;
+        // The two outside viewport edges open/extend a dock. A whole group uses
+        // its edge operation when a neighbouring column exists; panels use an exact slot.
+        if source_allows(self, source_panels, AllowedArea::MAIN_DOCK) && may_add_column {
+            let edge_width = metrics.edge_drop_width.min(viewport.size.width / 3.0);
+            for (side, columns, zone, is_left) in [
+                (DockSide::Left, left_columns, DropZone::DockEdge, true),
+                (DockSide::Right, right_columns, DropZone::DockEdge, false),
+            ] {
+                let rect = if is_left {
+                    Rect::new(viewport.origin, Size::new(edge_width, viewport.size.height))
+                } else {
+                    Rect::new(
+                        Point::new(
+                            viewport.origin.x + viewport.size.width - edge_width,
+                            viewport.origin.y,
+                        ),
+                        Size::new(edge_width, viewport.size.height),
+                    )
+                };
+                let target = match source {
+                    DropSource::Panel { .. } => Some(DropTarget::MainColumn {
+                        side,
+                        index: if is_left { 0 } else { columns.len() },
+                    }),
+                    DropSource::Group { .. } => edge_group_for_dock_edge(self, columns, is_left)
+                        .map(|group| DropTarget::GroupEdge {
+                            group,
+                            zone: if is_left {
+                                DropZone::Left
+                            } else {
+                                DropZone::Right
+                            },
+                        }),
+                };
+                if let Some(target) = target {
+                    let is_noop = match target {
+                        DropTarget::GroupEdge { group, zone } => {
+                            group_edge_is_noop(self, tree_index, source, group, zone)
+                        }
+                        _ => false,
+                    };
+                    if !is_noop {
+                        push_zone(zones, target, zone, rect)?;
+                    }
+                }
+            }
+        }
+
+        // A free Canvas is a Float command hint, never a fake tab/column destination.
+        if source_allows(self, source_panels, AllowedArea::FLOATING)
+            && !source_is_floating_root(self, source_root)
+            && let Some(canvas) = rects.canvas
+        {
+            push_zone(zones, DropTarget::FreeArea, DropZone::FreeArea, canvas)?;
+        }
+        Ok(())
+    }
+}
+
+/// Reusable drop-resolution snapshot for a single drag gesture.
+///
+/// Preparing a resolver validates the layout and geometry, then builds the tree index
+/// and legal drop-zone list once. Keeping this value alive borrows the layout, geometry,
+/// and metrics immutably, preventing the cached snapshot from being used while any of
+/// those inputs are changed. Create a new resolver after a layout or viewport update.
+pub struct DropZoneResolver<'a> {
+    layout: &'a Layout,
+    rects: &'a LayoutRects,
+    _metrics: &'a DockMetrics,
+    tree_index: DropZoneTreeIndex,
+    zones: Vec<DropZoneRect>,
+}
+
+impl DropZoneResolver<'_> {
+    /// Resolves a pointer position using the cached legal zones and tree index.
+    ///
+    /// This performs only point validation and hit resolution; layout validation,
+    /// target enumeration, and zone construction were done when the resolver was prepared.
+    pub fn resolve(&self, point: Point) -> Result<Option<DropTarget>, ComputeRectsError> {
+        point.validate().map_err(ComputeRectsError::Geometry)?;
+        self.resolve_validated(point)
+    }
+
+    fn resolve_validated(
+        &self,
+        point: Point,
+    ) -> Result<Option<DropTarget>, ComputeRectsError> {
+        let mut topmost_floating: Option<(FloatingGroupId, Rect, i32)> = None;
+        for floating in &self.rects.floating_groups {
+            if floating
+                .rect
+                .contains(point)
+                .map_err(ComputeRectsError::Geometry)?
+            {
+                let replace = topmost_floating
+                    .as_ref()
+                    .map(|(_, _, z)| floating.z_order > *z)
+                    .unwrap_or(true);
+                if replace {
+                    topmost_floating = Some((floating.group, floating.rect, floating.z_order));
+                }
+            }
+        }
+        if let Some((floating_id, _bounds, _z_order)) = topmost_floating {
+            let Some(floating) = self.layout.floating_group(floating_id) else {
+                return Ok(None);
+            };
+            let Some(area) = self.layout.dock_area(floating.area) else {
+                return Ok(None);
+            };
+            return best_containing_zone(&self.zones, point, |zone| {
+                matches!(
+                    zone.zone,
+                    DropZone::FloatingCenter
+                        | DropZone::FloatingTop
+                        | DropZone::FloatingBottom
+                        | DropZone::TabInsertion
+                        | DropZone::Left
+                        | DropZone::Right
+                ) && zone.target.referenced_node_id()
+                    .map(|node| contains_node(&self.tree_index, area.root, node))
+                    .unwrap_or(false)
+            });
+        }
+        best_containing_zone(&self.zones, point, |_| true)
+    }
+}
+
+fn best_containing_zone(
+    zones: &[DropZoneRect],
+    point: Point,
+    include: impl Fn(&DropZoneRect) -> bool,
+) -> Result<Option<DropTarget>, ComputeRectsError> {
+    let mut best: Option<(u8, usize, DropTarget)> = None;
+    for (index, zone) in zones.iter().enumerate() {
+        if !include(zone)
+            || !zone
+                .rect
+                .contains(point)
+                .map_err(ComputeRectsError::Geometry)?
+        {
+            continue;
+        }
+        let priority = zone_priority(zone.zone);
+        if best
+            .map(|(best_priority, _, _)| priority < best_priority)
+            .unwrap_or(true)
+        {
+            best = Some((priority, index, zone.target));
+        }
+    }
+    Ok(best.map(|(_, _, target)| target))
+}
+
+fn zone_priority(zone: DropZone) -> u8 {
+    match zone {
+        DropZone::RailInsertion => 0,
+        DropZone::TabInsertion => 1,
+        DropZone::DockEdge => 2,
+        DropZone::ColumnLeft | DropZone::ColumnRight => 3,
+        DropZone::ColumnEnd => 4,
+        DropZone::FloatingTop | DropZone::FloatingBottom => 5,
+        DropZone::Top | DropZone::Bottom => 6,
+        DropZone::Left | DropZone::Right => 7,
+        DropZone::FloatingCenter => 8,
+        DropZone::Center => 9,
+        DropZone::FreeArea => 10,
+    }
 }
