@@ -286,8 +286,24 @@ impl DockController {
     /// of truth for validating drop targets and selecting the semantic DockCommand.
     pub(crate) fn commit_drop_request(
         &mut self,
-        request: DragDropRequest,
+        mut request: DragDropRequest,
+        viewport: Rect,
     ) -> Result<DragDropAction, CommandError> {
+        if request.target == Some(DropTarget::FreeArea) {
+            let frame = FrameGeometry::compute(&self.layout, viewport, &self.metrics).map_err(|_| {
+                CommandError::InvalidTarget {
+                    reason: "could not compute source geometry for floating drop",
+                }
+            })?;
+            super::drop_commit::supply_floating_bounds(
+                &self.layout,
+                frame.rects(),
+                &self.metrics,
+                viewport,
+                &mut request,
+            )?;
+        }
+
         let action = super::drop_commit::resolve_drop(&self.layout, &request, &self.metrics)?;
         if let DragDropAction::Command(command) = &action {
             self.apply(command.clone())?;
