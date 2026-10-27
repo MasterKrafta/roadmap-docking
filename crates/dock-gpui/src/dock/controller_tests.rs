@@ -1245,6 +1245,118 @@
     }
 
     #[test]
+    fn floating_capture_drag_resolves_dock_target_and_docks_entire_window() {
+        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+        let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
+        let (floating_id, bounds) = make_initial_floating_group(&mut controller);
+        let frame = controller.frame(viewport).unwrap();
+        let floating_root = controller
+            .layout()
+            .floating_group(floating_id)
+            .and_then(|floating| controller.layout().dock_area(floating.area))
+            .map(|area| area.root)
+            .expect("floating group should have a root");
+        let source_nodes = crate::tree_query::subtree_nodes(controller.layout(), floating_root);
+        let capture_width = controller.metrics().header_height.min(28.0);
+        let origin = Point::new(
+            bounds.origin.x + bounds.size.width - capture_width / 2.0,
+            bounds.origin.y + controller.metrics().header_height / 2.0,
+        );
+        let threshold = controller.metrics().drag_threshold;
+
+        controller
+            .begin_drag(
+                DragPayload::FloatingGroup { group: floating_id },
+                DragHandle::FloatingCapture,
+                origin,
+            )
+            .unwrap();
+        assert!(
+            controller
+                .update_drag(
+                    Point::new(origin.x - threshold - 20.0, origin.y + 8.0),
+                    viewport,
+                    Some(&frame),
+                )
+                .unwrap(),
+            "capture movement should activate a drag with a resolver"
+        );
+
+        let overlay = controller
+            .drag_overlay()
+            .expect("floating capture must show docking zones");
+        assert_eq!(overlay.handle, DragHandle::FloatingCapture);
+        assert!(
+            overlay.zones.iter().all(|zone| zone.target != DropTarget::FreeArea),
+            "an already floating window must not offer FreeArea as a capture target"
+        );
+        assert!(
+            overlay.zones.iter().all(|zone| {
+                crate::tree_query::drop_target_node(zone.target)
+                    .is_none_or(|target| !source_nodes.contains(&target))
+            }),
+            "the capture overlay must not offer targets inside its own floating tree"
+        );
+
+        let target_group = first_panels_by_group(&controller)
+            .into_iter()
+            .map(|(group, _, _)| group)
+            .find(|group| !source_nodes.contains(group))
+            .expect("a main-dock group should remain as a docking destination");
+        let zone = overlay
+            .zones
+            .iter()
+            .find(|zone| {
+                zone.zone == dock_core::DropZone::Center
+                    && matches!(
+                        zone.target,
+                        DropTarget::GroupTabs { group, .. } if group == target_group
+                    )
+            })
+            .copied()
+            .expect("capture resolver should offer merging into a main-dock group");
+        let release = Point::new(
+            zone.rect.origin.x + zone.rect.size.width / 2.0,
+            zone.rect.origin.y + zone.rect.size.height / 2.0,
+        );
+
+        controller.update_drag(release, viewport, None).unwrap();
+        assert_eq!(
+            controller.drag_overlay().unwrap().preview.target,
+            Some(zone.target)
+        );
+        let request = controller
+            .finish_drag(release, viewport)
+            .unwrap()
+            .expect("capture release over a docking zone should emit a request");
+        assert_eq!(request.handle, DragHandle::FloatingCapture);
+        assert_eq!(request.payload, DragPayload::FloatingGroup { group: floating_id });
+        assert_eq!(request.target, Some(zone.target));
+
+        let action = controller.commit_drop_request(request, viewport).unwrap();
+        assert_eq!(
+            action,
+            DragDropAction::Command(DockCommand::DockFloating {
+                group: floating_id,
+                target: zone.target,
+            })
+        );
+        assert!(controller.layout().floating_group(floating_id).is_none());
+        assert_eq!(controller.layout().floating_groups().count(), 0);
+        assert_eq!(controller.history.undo_len(), 1);
+        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+
+        assert!(controller.undo().unwrap());
+        assert!(controller.layout().floating_group(floating_id).is_some());
+        assert_eq!(controller.layout().floating_groups().count(), 1);
+        assert_eq!(controller.history.undo_len(), 0);
+        assert!(controller.redo().unwrap());
+        assert!(controller.layout().floating_group(floating_id).is_none());
+        assert_eq!(controller.layout().floating_groups().count(), 0);
+        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+    }
+
+    #[test]
     fn floating_title_drag_moves_window_without_resolving_dock_targets() {
         let mut controller = DockController::new_initial(&Theme::default()).unwrap();
         let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
