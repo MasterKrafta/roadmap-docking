@@ -48,24 +48,50 @@ impl ValidationReason {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::SplitMustContainAtLeastTwoChildren => "must contain at least two children",
-            Self::RatioCountMustMatchChildGroupCount => "ratio count must match child/group count",
-            Self::RatiosMustBeFiniteAndNonNegative => "ratios must be finite and non-negative",
+            Self::RatioCountMustMatchChildGroupCount => {
+                "ratio count must match child/group count"
+            }
+            Self::RatiosMustBeFiniteAndNonNegative => {
+                "ratios must be finite and non-negative"
+            }
             Self::RatiosMustSumToOne => "ratios must sum to 1.0 within 1e-4",
             Self::TabsMustContainAtLeastOneChild => "must contain at least one child",
             Self::ActiveTabIndexOutsideChildren => "active_index is outside children",
-            Self::PhotoshopTabsChildrenMustBePanelNodes => "Photoshop Tabs children must be Panel nodes",
+            Self::PhotoshopTabsChildrenMustBePanelNodes => {
+                "Photoshop Tabs children must be Panel nodes"
+            }
             Self::ColumnWidthMustBeFinite => "width must be finite",
             Self::ColumnWidthMustBePositive => "width must be positive",
-            Self::ExpandedWidthBelowMinimumColumnWidth => "expanded width is below min_column_width",
-            Self::IconsAndLabelsWidthMustEqualMinimumColumnWidth => "IconsAndLabels width must equal min_column_width",
-            Self::IconsOnlyWidthMustEqualRailWidth => "IconsOnly width must equal rail_width",
-            Self::LastExpandedWidthMustBeFiniteAndPositive => "last_expanded_width must be finite and positive",
-            Self::ColumnMustContainAtLeastOneGroupBeforeNormalization => "must contain at least one group before normalization",
-            Self::PhotoshopColumnGroupsMustBeTabsNodes => "Photoshop Column groups must be Tabs nodes",
-            Self::CannotComputeMinimumWidthRequiredByExpandedContents => "cannot compute minimum width required by expanded contents",
-            Self::CannotComputeMaximumWidthAllowedByExpandedContents => "cannot compute maximum width allowed by expanded contents",
-            Self::MinimumWidthRequiredByExpandedContentsExceedsPanelMaximumWidth => "minimum width required by expanded contents exceeds panel maximum width",
-            Self::ExpandedWidthBelowMinimumWidthRequiredByContents => "expanded width is below minimum width required by its contents",
+            Self::ExpandedWidthBelowMinimumColumnWidth => {
+                "expanded width is below min_column_width"
+            }
+            Self::IconsAndLabelsWidthMustEqualMinimumColumnWidth => {
+                "IconsAndLabels width must equal min_column_width"
+            }
+            Self::IconsOnlyWidthMustEqualRailWidth => {
+                "IconsOnly width must equal rail_width"
+            }
+            Self::LastExpandedWidthMustBeFiniteAndPositive => {
+                "last_expanded_width must be finite and positive"
+            }
+            Self::ColumnMustContainAtLeastOneGroupBeforeNormalization => {
+                "must contain at least one group before normalization"
+            }
+            Self::PhotoshopColumnGroupsMustBeTabsNodes => {
+                "Photoshop Column groups must be Tabs nodes"
+            }
+            Self::CannotComputeMinimumWidthRequiredByExpandedContents => {
+                "cannot compute minimum width required by expanded contents"
+            }
+            Self::CannotComputeMaximumWidthAllowedByExpandedContents => {
+                "cannot compute maximum width allowed by expanded contents"
+            }
+            Self::MinimumWidthRequiredByExpandedContentsExceedsPanelMaximumWidth => {
+                "minimum width required by expanded contents exceeds panel maximum width"
+            }
+            Self::ExpandedWidthBelowMinimumWidthRequiredByContents => {
+                "expanded width is below minimum width required by its contents"
+            }
         }
     }
 }
