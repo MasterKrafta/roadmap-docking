@@ -9,6 +9,7 @@ use crate::{
     WorkspaceLayout, WorkspaceLoadOptions, WorkspaceLoadResult, WorkspaceNode,
     layout::WorkspaceLayoutParts,
 };
+
 /// Marker identifying this file as a Roadmap Docking workspace.
 pub const WORKSPACE_FORMAT: &str = "roadmap-docking-workspace";
 
