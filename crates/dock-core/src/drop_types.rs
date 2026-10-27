@@ -142,7 +142,7 @@ mod drop_zone_tests {
 #[cfg(test)]
 mod drop_target_tests {
     use super::DropTarget;
-    use super::{DropTarget, DropZone};
+    use super::DropZone;
     use crate::{DockSide, NodeId};
     use slotmap::Key;
 
