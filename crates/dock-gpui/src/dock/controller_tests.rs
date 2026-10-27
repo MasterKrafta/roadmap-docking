@@ -276,7 +276,7 @@
     #[test]
     fn floating_edge_resize_commits_and_undoes_as_one_gesture() {
         let mut controller = DockController::new_initial(&Theme::default()).unwrap();
-        let group = controller.layout().nodes().find_map(|(id, node)| match node {
+        let group = controller.layout().nodes().find_map(|(_, node)| match node {
             Node::Column(column) if column.groups.len() > 1 => column.groups.first().copied(),
             _ => None,
         }).expect("initial layout should contain a column with multiple groups");
