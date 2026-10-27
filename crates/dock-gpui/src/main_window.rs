@@ -130,9 +130,10 @@ impl MainWindow {
             }
             Err(error) => {
                 tracing::warn!(error = ?error, "dock drag pointer update failed");
-                if self.dock.cancel_drag() {
-                    cx.notify();
-                }
+                self.dock.cancel_drag();
+                // update_drag may already have cancelled a stale session internally.
+                // Always redraw so a removed overlay cannot remain on screen.
+                cx.notify();
             }
         }
     }
