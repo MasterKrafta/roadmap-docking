@@ -23,8 +23,8 @@ const MAX_WORKSPACE_NODES: usize = 100_000;
 /// Maximum nesting depth accepted by workspace import/export, counting the root as level 1.
 ///
 /// With the internally tagged workspace-node format, a worst-case tree of 62
-/// levels uses 127 nested JSON containers including the file envelope and panel
-/// state. serde_json 1.0.154 rejects the 128th nested container.
+/// levels with a remembered panel size uses 127 nested JSON containers, including
+/// the file envelope. serde_json 1.0.154 rejects the 128th nested container.
 const MAX_WORKSPACE_TREE_DEPTH: usize = 62;
 
 /// Versioned, JSON-encoded persistent workspace boundary.
