@@ -44,6 +44,8 @@ pub(crate) enum DockInitializationError {
     },
     #[error("constructed core layout is invalid: {errors:?}")]
     InvalidConstructedLayout { errors: Vec<ValidationError> },
+    #[error("theme is invalid: {reason}")]
+    InvalidTheme { reason: &'static str },
 }
 
 /// Owns the live layout and the view-local state needed to render it.
@@ -66,6 +68,9 @@ impl DockController {
     /// Initial placement commands seed the layout and intentionally do not
     /// become undo steps; all subsequent commands use the history facade.
     pub(crate) fn new_initial(theme: &Theme) -> Result<Self, DockInitializationError> {
+        theme
+            .validate()
+            .map_err(|reason| DockInitializationError::InvalidTheme { reason })?;
         let (layout, metrics) = build_initial_layout(theme)?;
         Ok(Self::from_layout_and_metrics(theme, layout, metrics))
     }
@@ -75,6 +80,9 @@ impl DockController {
         theme: &Theme,
         layout: Layout,
     ) -> Result<Self, DockInitializationError> {
+        theme
+            .validate()
+            .map_err(|reason| DockInitializationError::InvalidTheme { reason })?;
         let metrics = dock_metrics_from_theme(theme);
         layout
             .validate(&metrics)
