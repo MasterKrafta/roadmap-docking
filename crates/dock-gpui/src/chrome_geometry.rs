@@ -473,6 +473,47 @@ mod tests {
     }
 
     #[test]
+    fn group_control_width_metric_controls_reserved_tab_strip_space() {
+        let metrics = DockMetrics {
+            header_height: 32.0,
+            tab_strip_height: 24.0,
+            group_control_button_width: 40.0,
+            ..DockMetrics::default()
+        };
+        let (layout, group_id) = layout_with_tab_count(2, metrics);
+        let viewport = Rect::new(Point::ZERO, Size::new(1600.0, 900.0));
+        let mut rects = layout.compute_rects(viewport, &metrics).unwrap();
+        let group_width = rects
+            .groups
+            .iter()
+            .find(|entry| entry.group == group_id)
+            .unwrap()
+            .rect
+            .size
+            .width;
+
+        assert!(
+            !rects.tab_overflows.iter().any(|entry| entry.group == group_id),
+            "the two-tab fixture should not overflow"
+        );
+
+        normalize_docked_group_geometry(&layout, &metrics, &mut rects);
+
+        let visible_tab_width: f32 = rects
+            .tab_headers
+            .iter()
+            .filter(|header| header.group == group_id)
+            .map(|header| header.rect.size.width)
+            .sum();
+        let expected_tab_width = (group_width - 2.0 * metrics.group_control_button_width).max(0.0);
+
+        assert!(
+            (visible_tab_width - expected_tab_width).abs() < 0.001,
+            "the menu and mode button widths should come from DockMetrics: expected total tab width {expected_tab_width}, got {visible_tab_width}"
+        );
+    }
+
+    #[test]
     fn collapsed_floating_root_tabs_are_positioned_below_the_window_title() {
         use dock_core::DockCommand;
 
