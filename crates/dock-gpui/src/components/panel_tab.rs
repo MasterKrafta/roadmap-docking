@@ -35,6 +35,12 @@ impl RenderOnce for PanelTab {
         } else {
             self.theme.colors.toolbar_background
         };
+        let hover_background = if self.active {
+            background
+        } else {
+            self.theme.colors.hover
+        };
+        let typography = self.theme.typography;
 
         let tab = div()
             .absolute()
@@ -44,12 +50,16 @@ impl RenderOnce for PanelTab {
             .h(px(self.rect.size.height))
             .bg(rgb(background))
             .text_color(rgb(self.theme.colors.primary_text))
+            .font_family(typography.family)
+            .text_size(px(typography.tab_size))
+            .line_height(px(typography.line_height))
             .child(self.label);
 
         let on_activate = self.on_activate;
         let on_collapse_toggle = self.on_collapse_toggle;
 
         with_focus_ring(tab.id(self.id), &self.theme)
+            .hover(move |style| style.bg(rgb(hover_background)))
             .on_mouse_down(MouseButton::Left, self.on_drag_start)
             .on_click(move |event, window, app| {
                 if event.click_count() >= 2 {
