@@ -118,14 +118,14 @@ fn validation_collects_ratio_and_tabs_errors() {
     assert!(errors.iter().any(|error| matches!(
         error,
         ValidationError::InvalidColumn {
-            reason: "ratios must sum to 1.0 within 1e-4",
+            reason: crate::ValidationReason::RatiosMustSumToOne,
             ..
         }
     )));
     assert!(errors.iter().any(|error| matches!(
         error,
         ValidationError::InvalidTabs {
-            reason: "active_index is outside children",
+            reason: crate::ValidationReason::ActiveTabIndexOutsideChildren,
             ..
         }
     )));
@@ -340,7 +340,7 @@ fn compute_rects_preserves_layout_validation_errors() {
     assert!(errors.iter().any(|error| matches!(
         error,
         ValidationError::InvalidColumn {
-            reason: "ratios must sum to 1.0 within 1e-4",
+            reason: crate::ValidationReason::RatiosMustSumToOne,
             ..
         }
     )));
