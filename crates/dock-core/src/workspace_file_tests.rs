@@ -1051,7 +1051,7 @@ fn floating_bounds_clamped_diagnostic_keeps_json_index_after_earlier_group_is_re
     // dock, so normalization removes it before floating bounds get clamped.
     file.layout.floating_groups.insert(
         0,
-        crate::workspace_floating_group::WorkspaceFloatingGroup {
+        crate::WorkspaceFloatingGroup {
             root: WorkspaceNode::Panel {
                 key: key("layers"),
                 state: PanelState::default(),
