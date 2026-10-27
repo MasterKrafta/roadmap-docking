@@ -1015,6 +1015,52 @@
     }
 
     #[test]
+    fn stale_frame_before_drag_activation_cancels_pending_session() {
+        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+        let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
+        let frame = controller.frame(viewport).unwrap();
+        let (_, _, panel) = first_panels_by_group(&controller)[0];
+        let tab_rect = frame
+            .rects()
+            .tab_headers
+            .iter()
+            .find(|header| header.panel == panel)
+            .map(|header| header.rect)
+            .expect("initial panel should have a visible tab header");
+        let origin = Point::new(
+            tab_rect.origin.x + tab_rect.size.width / 2.0,
+            tab_rect.origin.y + tab_rect.size.height / 2.0,
+        );
+        let layout_before = layout_debug_snapshot(&controller);
+        let version_before = controller.layout().version();
+        let threshold = controller.metrics().drag_threshold;
+        let changed_viewport = Rect::new(Point::ZERO, Size::new(1100.0, 750.0));
+
+        controller
+            .begin_drag(DragPayload::Panel { panel }, DragHandle::PanelTab, origin)
+            .unwrap();
+        assert!(matches!(
+            controller.update_drag(
+                Point::new(origin.x + threshold + 20.0, origin.y),
+                changed_viewport,
+                Some(&frame),
+            ),
+            Err(super::super::drag_session::DragUpdateError::StaleFrameGeometry)
+        ));
+        assert!(controller.drag_overlay().is_none());
+        assert!(!controller.cancel_drag());
+        assert_eq!(layout_debug_snapshot(&controller), layout_before);
+        assert_eq!(controller.layout().version(), version_before);
+        assert_eq!(controller.history.undo_len(), 0);
+        assert_eq!(controller.history.redo_len(), 0);
+
+        controller
+            .begin_drag(DragPayload::Panel { panel }, DragHandle::PanelTab, origin)
+            .unwrap();
+        assert!(controller.cancel_drag());
+    }
+
+    #[test]
     fn stale_drag_viewport_change_cancels_session_without_mutating_layout_or_history() {
         let mut controller = DockController::new_initial(&Theme::default()).unwrap();
         let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
