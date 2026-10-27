@@ -143,6 +143,20 @@ impl DockController {
         viewport: Rect,
         frame: Option<&FrameGeometry>,
     ) -> Result<bool, DragUpdateError> {
+        // Once a Core drag owns a geometry snapshot, any mismatch invalidates
+        // its resolver. Cancel here so callers cannot accidentally keep using
+        // stale zones after handling the returned error.
+        let stale_snapshot = match &self.session {
+            Session::Drag(gesture) if gesture.core.is_some() => gesture
+                .snapshot
+                .is_none_or(|snapshot| !snapshot.matches(self.layout.version(), viewport, self.metrics)),
+            Session::Idle | Session::Resize(_) | Session::Drag(_) => false,
+        };
+        if stale_snapshot {
+            self.cancel_drag();
+            return Err(DragUpdateError::StaleFrameGeometry);
+        }
+
         let start = match &self.session {
             Session::Drag(gesture) if gesture.core.is_none() => {
                 if !DragGesture::threshold_reached(
@@ -171,6 +185,7 @@ impl DockController {
             if frame.layout_version() != self.layout.version()
                 || frame.rects().viewport != Some(viewport)
             {
+                self.cancel_drag();
                 return Err(DragUpdateError::StaleFrameGeometry);
             }
             let snapshot = DragGeometrySnapshot {
