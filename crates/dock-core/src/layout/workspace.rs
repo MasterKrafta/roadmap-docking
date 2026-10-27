@@ -173,13 +173,34 @@ impl Layout {
             return Vec::new();
         }
 
+        let Some(columns_by_side) = self.photoshop_main_columns_by_side() else {
+            return Vec::new();
+        };
+        let total_columns: usize = columns_by_side.iter().map(Vec::len).sum();
+        if total_columns <= max_columns {
+            return Vec::new();
+        }
+
+        let retained = Self::select_photoshop_columns_to_keep(&columns_by_side, max_columns);
+        let merges = Self::plan_photoshop_column_merges(&columns_by_side, &retained);
+        let (notes, removed_columns) = self.merge_photoshop_column_groups(&merges, max_columns);
+        if removed_columns.is_empty() {
+            return notes;
+        }
+
+        self.remove_photoshop_column_wrappers(&removed_columns);
+        notes
+    }
+
+    /// Collects populated main-dock columns in stable left-to-right, then right-side order.
+    fn photoshop_main_columns_by_side(&self) -> Option<[Vec<NodeId>; 2]> {
         let mut columns_by_side = [Vec::<NodeId>::new(), Vec::<NodeId>::new()];
         for (side_index, columns_for_side) in columns_by_side.iter_mut().enumerate() {
             let Some(area_id) = self.main_areas[side_index] else {
                 continue;
             };
             let Some(area) = self.dock_areas.get(area_id).copied() else {
-                return Vec::new();
+                return None;
             };
 
             let columns = match self.nodes.get(area.root) {
@@ -193,38 +214,37 @@ impl Layout {
                 {
                     split.children.clone()
                 }
-                _ => return Vec::new(),
+                _ => return None,
             };
 
-            // Completely empty columns will be removed by normal normalization.
-            // Do not spend the available column budget on data that has no panel.
+            // Empty columns are removed by normal normalization and do not consume the budget.
             *columns_for_side = columns
                 .into_iter()
                 .filter(|column| self.subtree_contains_panel(*column))
                 .collect();
         }
+        Some(columns_by_side)
+    }
 
-        let total_columns: usize = columns_by_side.iter().map(Vec::len).sum();
-        if total_columns <= max_columns {
-            return Vec::new();
-        }
-
+    /// Selects columns to preserve, keeping one per populated side when the limit permits.
+    fn select_photoshop_columns_to_keep(
+        columns_by_side: &[Vec<NodeId>; 2],
+        max_columns: usize,
+    ) -> HashSet<NodeId> {
         let active_sides = columns_by_side
             .iter()
             .filter(|columns| !columns.is_empty())
             .count();
         let mut retained = HashSet::<NodeId>::new();
 
-        // Preserve a column on each populated side whenever the new limit allows
-        // it, then use any remaining slots in stable left-to-right order.
         if max_columns >= active_sides {
-            for columns in &columns_by_side {
+            for columns in columns_by_side {
                 if let Some(first) = columns.first() {
                     retained.insert(*first);
                 }
             }
             let mut remaining = max_columns - active_sides;
-            for columns in &columns_by_side {
+            for columns in columns_by_side {
                 for column in columns.iter().skip(1) {
                     if remaining == 0 {
                         break;
@@ -237,7 +257,7 @@ impl Layout {
                 }
             }
         } else {
-            for columns in &columns_by_side {
+            for columns in columns_by_side {
                 for column in columns {
                     if retained.len() >= max_columns {
                         break;
@@ -250,6 +270,14 @@ impl Layout {
             }
         }
 
+        retained
+    }
+
+    /// Plans which retained column receives each removed column, preserving side affinity.
+    fn plan_photoshop_column_merges(
+        columns_by_side: &[Vec<NodeId>; 2],
+        retained: &HashSet<NodeId>,
+    ) -> Vec<(NodeId, Vec<NodeId>)> {
         let ordered_columns: Vec<_> = columns_by_side
             .iter()
             .flat_map(|columns| columns.iter().copied())
@@ -264,7 +292,7 @@ impl Layout {
         };
 
         let mut merges: Vec<(NodeId, Vec<NodeId>)> = Vec::new();
-        for columns in &columns_by_side {
+        for columns in columns_by_side {
             let side_retained: Vec<_> = columns
                 .iter()
                 .copied()
@@ -287,9 +315,18 @@ impl Layout {
             }
         }
 
+        merges
+    }
+
+    /// Merges groups into the selected destination columns without dropping panels.
+    fn merge_photoshop_column_groups(
+        &mut self,
+        merges: &[(NodeId, Vec<NodeId>)],
+        max_columns: usize,
+    ) -> (Vec<String>, HashSet<NodeId>) {
         let mut notes = Vec::new();
         let mut removed_columns = HashSet::<NodeId>::new();
-        for (target, sources) in &merges {
+        for (target, sources) in merges {
             // Each source column contributes one equal-height block. Its own
             // group ratios are retained within that block, so no panel is lost.
             let members: Vec<_> = std::iter::once(*target)
@@ -330,12 +367,11 @@ impl Layout {
             }
         }
 
-        if removed_columns.is_empty() {
-            return notes;
-        }
+        (notes, removed_columns)
+    }
 
-        // Remove the old column wrappers from their main roots after their groups
-        // have been adopted by the retained columns.
+    /// Removes obsolete column nodes from main roots after their groups have been adopted.
+    fn remove_photoshop_column_wrappers(&mut self, removed_columns: &HashSet<NodeId>) {
         for side_index in 0..2 {
             let Some(area_id) = self.main_areas[side_index] else {
                 continue;
@@ -393,14 +429,11 @@ impl Layout {
             }
         }
 
-        for source in removed_columns {
+        for source in removed_columns.iter().copied() {
             self.nodes.remove(source);
         }
-
-        notes
     }
 
-    #[cfg(feature = "serde")]
     pub(super) fn repair_duplicate_singleton_panels(&mut self) -> Vec<String> {
         let mut first_by_key = HashMap::<PanelKey, (PanelId, bool)>::new();
         let mut notes = Vec::new();
