@@ -805,8 +805,6 @@ impl Render for MainWindow {
             floating_hit_targets,
         );
 
-
-
         for overflow in &frame.rects().vertical_overflow {
             self.dock
                 .scroll_handles_mut()
