@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use dock_core::{
-    ComputeRectsError, DockAreaId, DockMetrics, DropSource, DropZoneRect, Layout, LayoutRects, Node,
-    NodeId, PanelId, Rect,
+    ComputeRectsError, DockAreaId, DockMetrics, DropSource, DropZoneRect, DropZoneResolver, Layout,
+    LayoutRects, Node, NodeId, PanelId, Rect,
 };
 
 use crate::chrome_geometry::normalize_docked_group_geometry;
@@ -123,6 +123,19 @@ impl FrameGeometry {
         metrics: &DockMetrics,
     ) -> Result<Vec<DropZoneRect>, ComputeRectsError> {
         layout.compute_drop_zones(source, &self.rects, metrics)
+    }
+
+    /// Prepares an owned resolver from this frame's normalized geometry snapshot.
+    ///
+    /// The returned resolver can be stored in drag-session state across GPUI callbacks.
+    /// Callers must discard it if the layout, frame geometry, or metrics change.
+    pub fn prepare_drop_resolver(
+        &self,
+        layout: &Layout,
+        source: DropSource,
+        metrics: &DockMetrics,
+    ) -> Result<DropZoneResolver, ComputeRectsError> {
+        layout.prepare_drop_resolver(source, &self.rects, metrics)
     }
 }
 
