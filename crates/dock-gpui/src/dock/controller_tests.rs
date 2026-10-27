@@ -1363,6 +1363,40 @@
     }
 
     #[test]
+    fn floating_capture_rejects_free_area_without_mutating_layout_or_history() {
+        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+        let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
+        let (floating_id, bounds) = make_initial_floating_group(&mut controller);
+        let before = layout_debug_snapshot(&controller);
+        let version_before = controller.layout().version();
+
+        let result = controller.commit_drop_request(
+            DragDropRequest {
+                payload: DragPayload::FloatingGroup { group: floating_id },
+                handle: DragHandle::FloatingCapture,
+                origin: Point::new(bounds.origin.x + 16.0, bounds.origin.y + 16.0),
+                point: Point::new(bounds.origin.x + 140.0, bounds.origin.y + 90.0),
+                target: Some(DropTarget::FreeArea),
+                floating_bounds: None,
+            },
+            viewport,
+        );
+
+        assert!(result.is_err(), "capture drag may only finish on a dock target");
+        assert_eq!(layout_debug_snapshot(&controller), before);
+        assert_eq!(controller.layout().version(), version_before);
+        assert_eq!(controller.layout().floating_groups().count(), 1);
+        assert_eq!(
+            controller.layout().floating_group(floating_id).unwrap().bounds,
+            bounds
+        );
+        assert_eq!(controller.history.undo_len(), 0);
+        assert_eq!(controller.history.redo_len(), 0);
+        assert!(controller.last_error().is_some());
+        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+    }
+
+    #[test]
     fn floating_title_drag_moves_window_without_resolving_dock_targets() {
         let mut controller = DockController::new_initial(&Theme::default()).unwrap();
         let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
