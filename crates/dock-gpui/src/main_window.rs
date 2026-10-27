@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use dock_core::{DockCommand, DragHandle, DragPayload, FloatingGroupId, Point, Rect, Size};
 use gpui::{
     Context, DispatchPhase, InteractiveElement, IntoElement, KeyDownEvent, MouseButton,
@@ -24,8 +26,29 @@ pub(crate) struct MainWindow {
 
 impl MainWindow {
     pub(crate) fn new(theme: Theme) -> Result<Self, String> {
+        Self::new_with_workspace(theme, None)
+    }
+
+    pub(crate) fn new_with_workspace(
+        theme: Theme,
+        workspace_path: Option<&Path>,
+    ) -> Result<Self, String> {
+        let dock = match crate::dock::workspace::load_layout(workspace_path, &theme) {
+            Some(layout) => match DockController::new_with_layout(&theme, layout) {
+                Ok(dock) => dock,
+                Err(error) => {
+                    tracing::warn!(
+                        error = %error,
+                        "restored workspace could not be installed; using initial layout"
+                    );
+                    DockController::new_initial(&theme)?
+                }
+            },
+            None => DockController::new_initial(&theme)?,
+        };
+
         Ok(Self {
-            dock: DockController::new_initial(&theme)?,
+            dock,
             theme,
             menu_state: MenuState::Closed,
             activation_subscription: None,

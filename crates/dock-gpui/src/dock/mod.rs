@@ -7,6 +7,7 @@ mod host_impl;
 mod keyboard;
 mod rail_policy;
 mod resize_session;
+mod workspace;
 
 pub(crate) use commands::{activate_tab, collapse_group, cycle_column_mode, toggle_panel};
 pub(crate) use controller::DockController;

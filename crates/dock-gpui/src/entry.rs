@@ -2,6 +2,48 @@ use std::path::PathBuf;
 
 use gpui::AssetSource;
 
+
+/// Returns the conventional per-user location for the workspace JSON file.
+fn default_workspace_path() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        std::env::var_os("APPDATA")
+            .or_else(|| std::env::var_os("LOCALAPPDATA"))
+            .map(|root| PathBuf::from(root).join("RoadmapDocking").join("workspace.json"))
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::env::var_os("HOME").map(|home| {
+            PathBuf::from(home)
+                .join("Library")
+                .join("Application Support")
+                .join("RoadmapDocking")
+                .join("workspace.json")
+        })
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        if let Some(data_home) = std::env::var_os("XDG_DATA_HOME") {
+            Some(PathBuf::from(data_home).join("roadmap-docking").join("workspace.json"))
+        } else {
+            std::env::var_os("HOME").map(|home| {
+                PathBuf::from(home)
+                    .join(".local")
+                    .join("share")
+                    .join("roadmap-docking")
+                    .join("workspace.json")
+            })
+        }
+    }
+
+    #[cfg(not(any(windows, unix)))]
+    {
+        None
+    }
+}
+
 /// Options for starting the dock application.
 pub struct RunOptions {
     /// Native window title.
@@ -12,7 +54,7 @@ pub struct RunOptions {
     pub height: f32,
     /// Optional source for application assets (icons, fonts and other packaged resources).
     pub assets: Option<Box<dyn AssetSource>>,
-    /// Reserved for workspace persistence, wired in Stage 15.
+    /// Workspace file to restore at startup. `None` disables workspace loading.
     pub workspace_path: Option<PathBuf>,
 }
 
@@ -23,7 +65,7 @@ impl Default for RunOptions {
             width: 1200.0,
             height: 800.0,
             assets: None,
-            workspace_path: None,
+            workspace_path: default_workspace_path(),
         }
     }
 }
@@ -67,12 +109,15 @@ fn run_windows(options: RunOptions) {
         width,
         height,
         assets,
-        workspace_path: _,
+        workspace_path,
     } = options;
 
     let run_application = move |cx: &mut App| {
         let theme = ui::Theme::default();
-        let main_window = match crate::main_window::MainWindow::new(theme) {
+        let main_window = match crate::main_window::MainWindow::new_with_workspace(
+            theme,
+            workspace_path.as_deref(),
+        ) {
             Ok(window) => window,
             Err(error) => {
                 eprintln!("Could not initialize the dock window: {error}");

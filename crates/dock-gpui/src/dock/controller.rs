@@ -48,7 +48,20 @@ impl DockController {
     /// become undo steps; all subsequent commands use the history facade.
     pub(crate) fn new_initial(theme: &Theme) -> Result<Self, String> {
         let (layout, metrics) = build_initial_layout(theme)?;
-        Ok(Self {
+        Ok(Self::from_layout_and_metrics(theme, layout, metrics))
+    }
+
+    /// Installs a restored layout after validating it against the active theme metrics.
+    pub(crate) fn new_with_layout(theme: &Theme, layout: Layout) -> Result<Self, String> {
+        let metrics = dock_metrics_from_theme(theme);
+        layout
+            .validate(&metrics)
+            .map_err(|errors| format!("Restored workspace layout is invalid: {errors:?}"))?;
+        Ok(Self::from_layout_and_metrics(theme, layout, metrics))
+    }
+
+    fn from_layout_and_metrics(theme: &Theme, layout: Layout, metrics: DockMetrics) -> Self {
+        Self {
             layout,
             metrics,
             rail_policy: RailPolicy::new(
@@ -59,7 +72,7 @@ impl DockController {
             scroll_handles: HashMap::new(),
             session: Session::Idle,
             last_error: None,
-        })
+        }
     }
 
     /// Applies a layout command, recording it unless it only changes floating z-order.
