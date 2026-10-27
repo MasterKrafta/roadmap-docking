@@ -1,20 +1,23 @@
 use dock_core::{DockCommand, DragHandle, DragPayload, FloatingGroupId, Point, Rect, Size};
 use gpui::{
-    Context, DispatchPhase, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent,
-    ParentElement, Render, Styled, Subscription, Window, div, px, rgb,
+    Context, DispatchPhase, InteractiveElement, IntoElement, KeyDownEvent, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Render, StatefulInteractiveElement,
+    Styled, Subscription, Window, div, px, rgb,
 };
 use ui::Theme;
 
+use crate::components::{with_focus_ring, PopupMenu, PopupMenuItem};
 use crate::dock::{floating_group_at_point, DockController, WindowHost};
-use crate::requests::ResizeHandle;
+use crate::menus::{self, MenuItemModel, MenuState};
+use crate::requests::{DockMenuRequest, ResizeHandle};
 use crate::DockSurface;
 
 /// Host window for the dock surface. Commands and pointer gestures dispatch through
-/// the controller; menu state remains for a later roadmap stage.
+/// the controller; popup state is transient and owned by the window.
 pub(crate) struct MainWindow {
     theme: Theme,
     dock: DockController,
+    menu_state: MenuState,
     activation_subscription: Option<Subscription>,
 }
 
@@ -23,12 +26,106 @@ impl MainWindow {
         Ok(Self {
             dock: DockController::new_initial(&theme)?,
             theme,
+            menu_state: MenuState::Closed,
             activation_subscription: None,
         })
     }
 
     pub(crate) fn apply_dock_command(&mut self, command: DockCommand) {
         let _ = self.dock.apply(command);
+    }
+
+    pub(crate) fn open_menu(
+        &mut self,
+        request: DockMenuRequest,
+        position: gpui::Point<gpui::Pixels>,
+    ) {
+        self.menu_state = MenuState::open(
+            request,
+            Point::new(position.x.as_f32(), position.y.as_f32()),
+        );
+    }
+
+    fn current_menu_items(&mut self, window: &Window) -> Vec<MenuItemModel> {
+        let state = self.menu_state.clone();
+        if !state.is_open() {
+            return Vec::new();
+        }
+
+        let viewport = self.dock_viewport(window);
+        match self.dock.frame(viewport) {
+            Ok(frame) => menus::items(
+                self.dock.layout(),
+                &self.theme,
+                self.dock.metrics(),
+                &frame,
+                &state,
+            ),
+            Err(error) => {
+                tracing::warn!(error = ?error, "could not prepare popup menu items");
+                Vec::new()
+            }
+        }
+    }
+
+    fn activate_menu_item(&mut self, index: usize, window: &Window) {
+        let command = self
+            .current_menu_items(window)
+            .get(index)
+            .filter(|item| item.enabled)
+            .and_then(|item| item.command.clone());
+        self.menu_state = MenuState::Closed;
+
+        if let Some(command) = command {
+            if let Err(error) = self.dock.apply(command) {
+                tracing::warn!(error = %error, "popup menu command was rejected");
+            }
+        }
+    }
+
+    fn handle_key_down(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let key = event.keystroke.key.to_ascii_lowercase();
+        match key.as_str() {
+            "escape" => {
+                if self.menu_state.is_open() {
+                    self.menu_state = MenuState::Closed;
+                    cx.stop_propagation();
+                    cx.notify();
+                } else if self.dock.cancel_resize() || self.dock.cancel_drag() {
+                    cx.stop_propagation();
+                    cx.notify();
+                }
+            }
+            "down" | "arrowdown" => {
+                if self.menu_state.is_open() {
+                    let item_count = self.current_menu_items(window).len();
+                    self.menu_state.move_selection(1, item_count);
+                    cx.stop_propagation();
+                    cx.notify();
+                }
+            }
+            "up" | "arrowup" => {
+                if self.menu_state.is_open() {
+                    let item_count = self.current_menu_items(window).len();
+                    self.menu_state.move_selection(-1, item_count);
+                    cx.stop_propagation();
+                    cx.notify();
+                }
+            }
+            "enter" => {
+                if let Some(index) = self.menu_state.selected_index() {
+                    self.activate_menu_item(index, window);
+                    cx.stop_propagation();
+                    cx.notify();
+                }
+            }
+            _ => {}
+        }
     }
 
     pub(crate) fn close_floating_window(&mut self, group: FloatingGroupId) {
@@ -249,21 +346,14 @@ impl Render for MainWindow {
         let menu_height = self.theme.metrics.column_header_height.max(1.0);
         let content_height = (height - menu_height).max(1.0);
 
-        // Escape cancels an active pointer gesture before it can leave stale state.
-        let escape_key = cx.listener::<KeyDownEvent>(|this, event, _window, cx| {
-            if event.keystroke.key.eq_ignore_ascii_case("escape")
-                && (this.dock.cancel_resize() || this.dock.cancel_drag())
-            {
-                cx.stop_propagation();
-                cx.notify();
-            }
+        // Menu navigation and Escape handling are centralized at window capture.
+        let key_down = cx.listener::<KeyDownEvent>(|this, event, window, cx| {
+            this.handle_key_down(event, window, cx);
         });
         window.on_key_event(
             move |event: &KeyDownEvent, phase, window, cx| {
-                if phase == DispatchPhase::Capture
-                    && event.keystroke.key.eq_ignore_ascii_case("escape")
-                {
-                    escape_key(event, window, cx);
+                if phase == DispatchPhase::Capture {
+                    key_down(event, window, cx);
                 }
             },
         );
@@ -321,8 +411,42 @@ impl Render for MainWindow {
                     .child(format!("Could not compute dock geometry: {error:?}"));
             }
         };
-        // Raise floating windows during capture so any click within the window
-        // updates its stacking order without consuming the event before child controls.
+        let menu_state_snapshot = self.menu_state.clone();
+        let menu_items = menus::items(
+            self.dock.layout(),
+            &self.theme,
+            self.dock.metrics(),
+            &frame,
+            &menu_state_snapshot,
+        );
+        let menu_viewport = Rect::new(Point::ZERO, Size::new(width, height));
+        let menu_bounds = menu_state_snapshot
+            .anchor()
+            .map(|anchor| menus::popup_bounds(anchor, menu_viewport, menu_items.len()));
+
+        if let Some(bounds) = menu_bounds {
+            let outside_menu_down = cx.listener::<MouseDownEvent>(
+                move |this, event, _window, cx| {
+                    if event.button == MouseButton::Left
+                        && this.menu_state.is_open()
+                        && !menus::contains(bounds, dock_pointer(event.position))
+                    {
+                        this.menu_state = MenuState::Closed;
+                        cx.notify();
+                    }
+                },
+            );
+            window.on_mouse_event(
+                move |event: &MouseDownEvent, phase, window, cx| {
+                    if phase == DispatchPhase::Capture && event.button == MouseButton::Left {
+                        outside_menu_down(event, window, cx);
+                    }
+                },
+            );
+        }
+
+        // Raise floating windows during capture, but do not let clicks on a menu
+        // item raise an underlying floating window before the popup handles them.
         let floating_hit_targets = self
             .dock
             .layout()
@@ -337,8 +461,12 @@ impl Render for MainWindow {
                     .map(|floating| (group, floating.rect))
             })
             .collect::<Vec<_>>();
+        let menu_bounds_for_raise = menu_bounds;
         let raise_floating = cx.listener::<MouseDownEvent>(move |this, event, window, cx| {
-            if event.button != MouseButton::Left {
+            if event.button != MouseButton::Left
+                || menu_bounds_for_raise
+                    .is_some_and(|bounds| menus::contains(bounds, dock_pointer(event.position)))
+            {
                 return;
             }
             let pointer = dock_surface_pointer(event.position, menu_height);
@@ -361,7 +489,49 @@ impl Render for MainWindow {
         }
 
         let mut host = WindowHost::new(cx);
-        div()
+        let dockers_trigger = with_focus_ring(
+            div()
+                .id("dockers-menu-trigger")
+                .flex()
+                .items_center()
+                .h(px(menu_height))
+                .px(px(10.0))
+                .text_color(rgb(self.theme.colors.primary_text))
+                .child("Dockers ▾"),
+            &self.theme,
+        )
+        .on_click(host.menu(DockMenuRequest::Dockers));
+
+        let popup_menu = menu_bounds.map(|bounds| {
+            let selected_index = menu_state_snapshot.selected_index().unwrap_or(0);
+            let popup_items = menu_items
+                .into_iter()
+                .enumerate()
+                .map(|(index, item)| {
+                    let on_select = if item.enabled {
+                        Some(Box::new(cx.listener(
+                            move |this, _event, window, cx| {
+                                this.activate_menu_item(index, window);
+                                cx.notify();
+                            },
+                        )) as Box<dyn Fn(&gpui::ClickEvent, &mut Window, &mut gpui::App) + 'static>)
+                    } else {
+                        None
+                    };
+                    PopupMenuItem {
+                        id: item.id,
+                        label: item.label,
+                        checked: item.checked,
+                        enabled: item.enabled,
+                        selected: index == selected_index,
+                        on_select,
+                    }
+                })
+                .collect();
+            PopupMenu::new(bounds, &self.theme, popup_items)
+        });
+
+        let root = div()
             .flex()
             .flex_col()
             .w(px(width))
@@ -377,7 +547,7 @@ impl Render for MainWindow {
                     .border_1()
                     .border_color(rgb(self.theme.colors.border))
                     .text_color(rgb(self.theme.colors.primary_text))
-                    .child("Dockers ▾"),
+                    .child(dockers_trigger),
             )
             .child(
                 DockSurface::new(
@@ -388,7 +558,13 @@ impl Render for MainWindow {
                     self.dock.drag_overlay(),
                 )
                 .build(&mut host),
-            )
+            );
+
+        if let Some(popup_menu) = popup_menu {
+            root.child(popup_menu)
+        } else {
+            root
+        }
     }
 }
 

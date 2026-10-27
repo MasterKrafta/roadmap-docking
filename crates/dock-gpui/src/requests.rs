@@ -32,6 +32,8 @@ pub struct DragOverlay {
 /// Requests app-owned menu state without transferring ownership of the layout to the adapter.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DockMenuRequest {
+    /// Opens the application-level list of registered panels.
+    Dockers,
     TabOverflow {
         group: NodeId,
     },

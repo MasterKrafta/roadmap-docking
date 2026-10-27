@@ -11,6 +11,7 @@ mod geometry;
 mod labels;
 mod layers;
 mod main_window;
+mod menus;
 mod metrics;
 mod render;
 mod tree_query;

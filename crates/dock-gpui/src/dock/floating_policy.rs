@@ -6,7 +6,7 @@ use dock_core::{CommandError, DockMetrics, FloatingGroupId, Point, Rect, Size};
 ///
 /// The source supplies the preferred size. The configured column/group minima are
 /// respected when possible, but a narrow viewport always takes precedence.
-pub(super) fn initial_float_bounds(
+pub(crate) fn initial_float_bounds(
     source_rect: Rect,
     grab_offset: Point,
     pointer: Point,

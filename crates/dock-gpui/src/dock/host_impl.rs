@@ -13,7 +13,7 @@ use crate::requests::{DockMenuRequest, ResizeHandle};
 
 /// Routes command clicks and pointer gesture starts through the owning window's controller.
 ///
-/// Menu state still uses NoopHost until its roadmap stage.
+/// Menu requests update the root window's transient menu state.
 pub(crate) struct WindowHost<'a, 'cx> {
     cx: &'a Context<'cx, MainWindow>,
 }
@@ -60,7 +60,12 @@ impl DockHost for WindowHost<'_, '_> {
     }
 
     fn menu(&self, request: DockMenuRequest) -> CommandClickHandler {
-        self.noop().menu(request)
+        Box::new(self.cx.listener::<ClickEvent>(
+            move |this, event, _window, cx| {
+                this.open_menu(request, event.position);
+                cx.notify();
+            },
+        ))
     }
 
     fn drag_start(&self, payload: DragPayload, handle: DragHandle) -> DragStartHandler {
