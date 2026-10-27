@@ -178,7 +178,7 @@ fn normalize_rail_overflow_extents(
     rects: &mut LayoutRects,
     rail_column_reservations: &HashMap<NodeId, f32>,
 ) {
-    for (column_id, reserved) in &rail_column_reservations {
+    for (column_id, reserved) in rail_column_reservations {
         let Some(column_rect) = rects.columns.iter().find(|entry| entry.column == *column_id) else {
             continue;
         };
