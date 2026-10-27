@@ -19,6 +19,7 @@ pub fn dock_metrics_from_theme(theme: &Theme) -> DockMetrics {
         collapsed_group_height: source.collapsed_group_height,
         header_height: source.column_header_height,
         tab_strip_height: source.tab_strip_height,
+        group_control_button_width: source.group_control_button_width,
         min_canvas_width: source.min_document_width,
         max_columns: source.max_columns,
         ..DockMetrics::default()
@@ -37,12 +38,14 @@ mod tests {
         theme.metrics.default_column_width = 320.0;
         theme.metrics.drop_edge_zone = 26.0;
         theme.metrics.column_header_height = 34.0;
+        theme.metrics.group_control_button_width = 40.0;
         theme.metrics.min_document_width = 360.0;
 
         let metrics = dock_metrics_from_theme(&theme);
         assert_eq!(metrics.default_column_width, 320.0);
         assert_eq!(metrics.edge_drop_width, 26.0);
         assert_eq!(metrics.header_height, 34.0);
+        assert_eq!(metrics.group_control_button_width, 40.0);
         assert_eq!(metrics.min_canvas_width, 360.0);
         assert_eq!(
             metrics.min_tab_width,
