@@ -415,77 +415,12 @@ impl DockController {
         mut request: DragDropRequest,
         viewport: Rect,
     ) -> Result<DragDropAction, CommandError> {
-        // Resolution is read-only. Treat geometry/policy failures like command
-        // failures so the controller never leaves a stale last_error behind.
-        let resolution = (|| -> Result<DragDropAction, CommandError> {
-            if request.target == Some(DropTarget::FreeArea) {
-                let frame = FrameGeometry::compute(&self.layout, viewport, &self.metrics)
-                    .map_err(|_| CommandError::InvalidTarget {
-                        reason: "could not compute source geometry for floating drop",
-                    })?;
-                super::drop_commit::supply_floating_bounds(
-                    &self.layout,
-                    frame.rects(),
-                    &self.metrics,
-                    viewport,
-                    &mut request,
-                )?;
-            }
-
-            super::drop_commit::resolve_drop(&self.layout, &request, &self.metrics)
-        })();
-
-        let action = match resolution {
+        let action = match self.resolve_drop_request(&mut request, viewport) {
             Ok(action) => action,
             Err(error) => return self.track_command_result(Err(error), "drop_resolve"),
         };
 
-        let action = match (|| -> Result<DragDropAction, CommandError> {
-            match action {
-                DragDropAction::Command(DockCommand::MoveFloating { group, origin }) => {
-                    let stored_origin = self
-                        .layout
-                        .floating_group(group)
-                        .ok_or(CommandError::MissingFloatingGroup { group })?
-                        .bounds
-                        .origin;
-                    let frame = FrameGeometry::compute(&self.layout, viewport, &self.metrics)
-                        .map_err(|_| CommandError::InvalidTarget {
-                            reason: "could not compute current floating geometry for move",
-                        })?;
-                    let visible_bounds = frame
-                        .rects()
-                        .floating_groups
-                        .iter()
-                        .find(|floating| floating.group == group)
-                        .map(|floating| floating.rect)
-                        .ok_or(CommandError::InvalidTarget {
-                            reason: "floating window has no visible geometry in the current viewport",
-                        })?;
-
-                    // Keep the pointer's absolute displacement relative to the
-                    // displayed rectangle if older saved coordinates were offscreen.
-                    let delta = Point::new(
-                        origin.x - stored_origin.x,
-                        origin.y - stored_origin.y,
-                    );
-                    let requested_origin = Point::new(
-                        visible_bounds.origin.x + delta.x,
-                        visible_bounds.origin.y + delta.y,
-                    );
-                    let origin = super::floating_policy::clamp_floating_origin(
-                        requested_origin,
-                        visible_bounds,
-                        viewport,
-                    )?;
-                    Ok(DragDropAction::Command(DockCommand::MoveFloating {
-                        group,
-                        origin,
-                    }))
-                }
-                other => Ok(other),
-            }
-        })() {
+        let action = match self.apply_floating_move_policy(action, viewport) {
             Ok(action) => action,
             Err(error) => {
                 return self.track_command_result(Err(error), "floating_move_policy");
@@ -506,6 +441,78 @@ impl DockController {
         }
 
         Ok(action)
+    }
+
+    /// Adds explicit bounds for free-area drops before asking Core to resolve the request.
+    fn resolve_drop_request(
+        &self,
+        request: &mut DragDropRequest,
+        viewport: Rect,
+    ) -> Result<DragDropAction, CommandError> {
+        if request.target == Some(DropTarget::FreeArea) {
+            let frame = FrameGeometry::compute(&self.layout, viewport, &self.metrics)
+                .map_err(|_| CommandError::InvalidTarget {
+                    reason: "could not compute source geometry for floating drop",
+                })?;
+            super::drop_commit::supply_floating_bounds(
+                &self.layout,
+                frame.rects(),
+                &self.metrics,
+                viewport,
+                request,
+            )?;
+        }
+
+        super::drop_commit::resolve_drop(&self.layout, request, &self.metrics)
+    }
+
+    /// Clamps floating-window moves against the currently visible rectangle.
+    fn apply_floating_move_policy(
+        &self,
+        action: DragDropAction,
+        viewport: Rect,
+    ) -> Result<DragDropAction, CommandError> {
+        match action {
+            DragDropAction::Command(DockCommand::MoveFloating { group, origin }) => {
+                let stored_origin = self
+                    .layout
+                    .floating_group(group)
+                    .ok_or(CommandError::MissingFloatingGroup { group })?
+                    .bounds
+                    .origin;
+                let frame = FrameGeometry::compute(&self.layout, viewport, &self.metrics)
+                    .map_err(|_| CommandError::InvalidTarget {
+                        reason: "could not compute current floating geometry for move",
+                    })?;
+                let visible_bounds = frame
+                    .rects()
+                    .floating_groups
+                    .iter()
+                    .find(|floating| floating.group == group)
+                    .map(|floating| floating.rect)
+                    .ok_or(CommandError::InvalidTarget {
+                        reason: "floating window has no visible geometry in the current viewport",
+                    })?;
+
+                // Keep the pointer's absolute displacement relative to the
+                // displayed rectangle if older saved coordinates were offscreen.
+                let delta = Point::new(origin.x - stored_origin.x, origin.y - stored_origin.y);
+                let requested_origin = Point::new(
+                    visible_bounds.origin.x + delta.x,
+                    visible_bounds.origin.y + delta.y,
+                );
+                let origin = super::floating_policy::clamp_floating_origin(
+                    requested_origin,
+                    visible_bounds,
+                    viewport,
+                )?;
+                Ok(DragDropAction::Command(DockCommand::MoveFloating {
+                    group,
+                    origin,
+                }))
+            }
+            other => Ok(other),
+        }
     }
 
     /// Returns the current drag overlay for rendering, if this is a docking drag.
