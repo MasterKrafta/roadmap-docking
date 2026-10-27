@@ -1,4 +1,4 @@
-use dock_core::{LayoutRects, Point, Rect, Size};
+use dock_core::{Point, Rect, Size};
 
 /// Translates a rectangle from window coordinates into a container's local coordinates.
 pub(crate) fn translate_rect_to_local(rect: Rect, origin: Point) -> Rect {
@@ -6,38 +6,6 @@ pub(crate) fn translate_rect_to_local(rect: Rect, origin: Point) -> Rect {
         Point::new(rect.origin.x - origin.x, rect.origin.y - origin.y),
         rect.size,
     )
-}
-
-/// Produces tree geometry relative to a floating-container origin. Floating bounds, Canvas,
-/// and drop-zone geometry stay in window coordinates and are intentionally left untouched.
-pub(crate) fn localize_tree_rects(rects: &LayoutRects, origin: Point) -> LayoutRects {
-    let mut local = rects.clone();
-    for entry in &mut local.columns {
-        entry.rect = translate_rect_to_local(entry.rect, origin);
-    }
-    for entry in &mut local.groups {
-        entry.rect = translate_rect_to_local(entry.rect, origin);
-    }
-    for entry in &mut local.tab_strips {
-        entry.rect = translate_rect_to_local(entry.rect, origin);
-    }
-    for entry in &mut local.tab_headers {
-        entry.rect = translate_rect_to_local(entry.rect, origin);
-    }
-    for entry in &mut local.tab_overflows {
-        entry.button_rect = translate_rect_to_local(entry.button_rect, origin);
-    }
-    for entry in &mut local.panels {
-        entry.rect = translate_rect_to_local(entry.rect, origin);
-    }
-    for entry in &mut local.splitters {
-        entry.rect = translate_rect_to_local(entry.rect, origin);
-    }
-    for entry in &mut local.vertical_overflow {
-        entry.viewport = translate_rect_to_local(entry.viewport, origin);
-        entry.content_extent = translate_rect_to_local(entry.content_extent, origin);
-    }
-    local
 }
 
 /// Translates a Core drop zone by the GPUI scroll offset and clips it to the viewport.
