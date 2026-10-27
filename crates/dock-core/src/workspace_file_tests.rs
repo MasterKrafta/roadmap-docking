@@ -436,7 +436,6 @@ fn programmatic_workspace_depth_is_rejected_before_migration_and_restore() {
     }
 }
 
-#[test]
 fn layout_with_nested_splits(depth: usize) -> Layout {
     assert!(depth >= 1);
 
