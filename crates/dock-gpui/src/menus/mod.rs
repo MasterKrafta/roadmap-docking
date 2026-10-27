@@ -7,6 +7,7 @@ mod overflow_menu;
 use dock_core::{DockCommand, DockMetrics, Layout, Point, Rect, Size};
 use ui::Theme;
 
+use crate::components::popup_menu::POPUP_MENU_ROW_HEIGHT;
 use crate::{frame::FrameGeometry, requests::DockMenuRequest};
 
 /// A menu item before it is adapted to GPUI handlers.
@@ -122,10 +123,9 @@ pub(crate) fn items(
 /// Computes the popup's screen-space bounds, clamped to the window viewport.
 pub(crate) fn popup_bounds(anchor: Point, viewport: Rect, item_count: usize) -> Rect {
     const MENU_WIDTH: f32 = 232.0;
-    const ROW_HEIGHT: f32 = 30.0;
 
     let width = MENU_WIDTH.min(viewport.size.width.max(1.0));
-    let height = ((item_count.max(1) as f32) * ROW_HEIGHT)
+    let height = ((item_count.max(1) as f32) * POPUP_MENU_ROW_HEIGHT)
         .min(viewport.size.height.max(1.0));
     let max_x = (viewport.origin.x + viewport.size.width - width).max(viewport.origin.x);
     let max_y = (viewport.origin.y + viewport.size.height - height).max(viewport.origin.y);
@@ -158,6 +158,7 @@ pub(crate) fn contains(bounds: Rect, point: Point) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{MenuState, contains, popup_bounds};
+    use crate::components::popup_menu::POPUP_MENU_ROW_HEIGHT;
     use crate::requests::DockMenuRequest;
     use dock_core::{NodeId, Point, Rect, Size};
     use slotmap::Key;
@@ -188,7 +189,7 @@ mod tests {
         let viewport = Rect::new(Point::ZERO, Size::new(320.0, 180.0));
         let bounds = popup_bounds(Point::new(310.0, 170.0), viewport, 5);
         assert_eq!(bounds.origin, Point::new(88.0, 30.0));
-        assert_eq!(bounds.size, Size::new(232.0, 150.0));
+        assert_eq!(bounds.size, Size::new(232.0, 5.0 * POPUP_MENU_ROW_HEIGHT));
         assert!(contains(bounds, Point::new(100.0, 40.0)));
         assert!(!contains(bounds, Point::new(320.0, 40.0)));
         assert!(!contains(bounds, Point::new(100.0, 180.0)));
