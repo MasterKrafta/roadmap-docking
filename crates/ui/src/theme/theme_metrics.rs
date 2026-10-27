@@ -4,7 +4,8 @@ pub struct ThemeMetrics {
     pub tab_strip_height: f32,
     /// Width of the collapse/close/menu buttons in a Tabs group.
     pub group_control_button_width: f32,
-    /// Width reserved at the end of the tab strip for a future drag target.
+    /// Reserved compatibility metric for a possible future tab-strip drag target.
+    /// The current UI does not consume this field.
     pub tab_drag_zone_width: f32,
     /// Maximum width of icon buttons in floating-window titles, in logical pixels.
     pub button_size: f32,
@@ -28,7 +29,9 @@ pub struct ThemeMetrics {
     pub min_column_width: f32,
     /// Initial fraction of the column's content area allocated to the upper panel.
     pub default_column_split_ratio: f32,
-    /// Width of each tab in the main window's simple column.
+    /// Legacy compatibility metric for the former simple-column tab UI.
+    /// Current tabs size themselves from the available strip width and tab count;
+    /// changing this field alone does not affect the current UI.
     pub column_tab_width: f32,
     pub rail_width: f32,
     /// Width at which resizing an expanded column automatically enters icon-rail mode.
