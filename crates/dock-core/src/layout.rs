@@ -96,7 +96,6 @@ mod drop_resolution;
 mod commands;
 mod helpers;
 mod layout_api;
-mod history;
 mod normalization;
 #[cfg(feature = "serde")]
 mod workspace;
