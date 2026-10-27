@@ -1,30 +1,23 @@
 use std::collections::HashMap;
 
-#[path = "compute_rects/floating_bounds.rs"]
-mod floating_bounds;
+#[path = "compute_rects/sizing.rs"]
+mod sizing;
 #[cfg(any(test, feature = "serde"))]
-pub(crate) use floating_bounds::clamp_floating_bounds;
-use floating_bounds::clamp_floating_bounds_with_cache;
+pub(crate) use sizing::clamp_floating_bounds;
+use sizing::{clamp_floating_bounds_with_cache, minimum_node_size, preferred_width};
 
 #[path = "compute_rects/stack_allocation.rs"]
 mod stack_allocation;
 use stack_allocation::{allocate_stack_heights, push_vertical_overflow, weighted_sizes};
 
-#[path = "compute_rects/floating_geometry.rs"]
-mod floating_geometry;
-use floating_geometry::{append_floating_geometry, push_resize_edges};
-
-#[path = "compute_rects/flyout_geometry.rs"]
-mod flyout_geometry;
-use flyout_geometry::compute_flyout_rect;
+#[path = "compute_rects/overlay_geometry.rs"]
+mod overlay_geometry;
+use overlay_geometry::{append_floating_geometry, compute_flyout_rect, push_resize_edges};
 
 #[path = "compute_rects/node_layout.rs"]
 mod node_layout;
 use node_layout::layout_node;
 
-#[path = "compute_rects/node_size.rs"]
-mod node_size;
-use node_size::{minimum_node_size, preferred_width};
 
 #[path = "compute_rects/split_layout.rs"]
 mod split_layout;
