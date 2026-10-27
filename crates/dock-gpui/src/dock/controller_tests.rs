@@ -958,6 +958,69 @@
             .collect()
     }
 
+    fn make_initial_floating_group(
+        controller: &mut DockController,
+    ) -> (dock_core::FloatingGroupId, Rect) {
+        let group = controller
+            .layout()
+            .nodes()
+            .find_map(|(_, node)| match node {
+                Node::Column(column) if column.groups.len() > 1 => {
+                    column.groups.first().copied()
+                }
+                _ => None,
+            })
+            .expect("initial layout should have a column with multiple groups");
+        let initial_bounds = Rect::new(Point::new(80.0, 60.0), Size::new(500.0, 400.0));
+        controller
+            .apply(DockCommand::Float {
+                node: group,
+                bounds: initial_bounds,
+            })
+            .unwrap();
+        let (floating_id, bounds) = controller
+            .layout()
+            .floating_groups()
+            .next()
+            .map(|(id, floating)| (id, floating.bounds))
+            .expect("Float should create a floating window");
+
+        // Setup is outside the drag's history assertion.
+        controller.history.clear();
+        (floating_id, bounds)
+    }
+
+    fn start_active_floating_title_drag(
+        controller: &mut DockController,
+        viewport: Rect,
+    ) -> (dock_core::FloatingGroupId, Rect, Point) {
+        let (floating_id, bounds) = make_initial_floating_group(controller);
+        let frame = controller.frame(viewport).unwrap();
+        let origin = Point::new(
+            bounds.origin.x + 48.0,
+            bounds.origin.y + controller.metrics().header_height / 2.0,
+        );
+        let threshold = controller.metrics().drag_threshold;
+        controller
+            .begin_drag(
+                DragPayload::FloatingGroup { group: floating_id },
+                DragHandle::FloatingTitle,
+                origin,
+            )
+            .unwrap();
+        assert!(
+            controller
+                .update_drag(
+                    Point::new(origin.x + threshold + 20.0, origin.y + 12.0),
+                    viewport,
+                    Some(&frame),
+                )
+                .unwrap(),
+            "moving beyond the threshold should activate the floating title drag"
+        );
+        (floating_id, bounds, origin)
+    }
+
     fn drop_request(
         panel: dock_core::PanelId,
         target: DropTarget,
@@ -1177,6 +1240,114 @@
 
         controller
             .begin_drag(DragPayload::Panel { panel }, DragHandle::PanelTab, origin)
+            .unwrap();
+        assert!(controller.cancel_drag());
+    }
+
+    #[test]
+    fn floating_title_drag_moves_window_without_resolving_dock_targets() {
+        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+        let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
+        let (floating_id, original_bounds, origin) =
+            start_active_floating_title_drag(&mut controller, viewport);
+        let original_version = controller.layout().version();
+        assert!(
+            controller.drag_overlay().is_none(),
+            "a title-bar move must not display a docking overlay"
+        );
+
+        let release = Point::new(origin.x + 75.0, origin.y + 34.0);
+        let request = controller.finish_drag(release, viewport).unwrap()
+            .expect("floating title release should produce a move request");
+        assert_eq!(request.handle, DragHandle::FloatingTitle);
+        assert_eq!(request.payload, DragPayload::FloatingGroup { group: floating_id });
+        assert_eq!(request.target, None, "title dragging never resolves a dock target");
+
+        let action = controller.commit_drop_request(request, viewport).unwrap();
+        let expected_origin = Point::new(
+            original_bounds.origin.x + release.x - origin.x,
+            original_bounds.origin.y + release.y - origin.y,
+        );
+        assert_eq!(
+            action,
+            DragDropAction::Command(DockCommand::MoveFloating {
+                group: floating_id,
+                origin: expected_origin,
+            })
+        );
+        let actual_bounds = controller
+            .layout()
+            .floating_group(floating_id)
+            .expect("floating window should remain floating")
+            .bounds;
+        assert_eq!(actual_bounds.origin, expected_origin);
+        assert_eq!(actual_bounds.size, original_bounds.size);
+        assert_eq!(controller.layout().floating_groups().count(), 1);
+        assert!(controller.layout().version() > original_version);
+        assert_eq!(controller.history.undo_len(), 1);
+        assert!(controller.layout().validate(controller.metrics()).is_ok());
+
+        assert!(controller.undo().unwrap());
+        assert_eq!(
+            controller.layout().floating_group(floating_id).unwrap().bounds,
+            original_bounds
+        );
+        assert_eq!(controller.history.undo_len(), 0);
+        assert!(controller.redo().unwrap());
+        assert_eq!(
+            controller.layout().floating_group(floating_id).unwrap().bounds.origin,
+            expected_origin
+        );
+        assert_eq!(controller.layout().floating_groups().count(), 1);
+        assert!(controller.layout().validate(controller.metrics()).is_ok());
+    }
+
+    #[test]
+    fn floating_title_drag_with_stale_layout_snapshot_is_cancelled_before_commit() {
+        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+        let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
+        let (floating_id, original_bounds, origin) =
+            start_active_floating_title_drag(&mut controller, viewport);
+        let original_version = controller.layout().version();
+        let metrics = controller.metrics;
+        controller
+            .layout
+            .apply(
+                DockCommand::SetChrome {
+                    mode: dock_core::ChromeMode::DockHidden,
+                },
+                &metrics,
+            )
+            .unwrap();
+        assert_ne!(controller.layout().version(), original_version);
+        let state_after_external_change = layout_debug_snapshot(&controller);
+        let version_after_external_change = controller.layout().version();
+
+        assert!(matches!(
+            controller.finish_drag(
+                Point::new(origin.x + 80.0, origin.y + 40.0),
+                viewport,
+            ),
+            Err(super::super::drag_session::DragUpdateError::StaleFrameGeometry)
+        ));
+        assert!(controller.drag_overlay().is_none());
+        assert!(!controller.cancel_drag(), "finish_drag should clear the stale session");
+        assert_eq!(layout_debug_snapshot(&controller), state_after_external_change);
+        assert_eq!(controller.layout().version(), version_after_external_change);
+        assert_eq!(
+            controller.layout().floating_group(floating_id).unwrap().bounds,
+            original_bounds,
+            "the rejected title drag must not move or dock the floating window"
+        );
+        assert_eq!(controller.history.undo_len(), 0);
+        assert_eq!(controller.history.redo_len(), 0);
+
+        controller
+            .begin_drag(
+                DragPayload::FloatingGroup { group: floating_id },
+                DragHandle::FloatingTitle,
+                origin,
+            )
             .unwrap();
         assert!(controller.cancel_drag());
     }
