@@ -1033,6 +1033,18 @@
     fn no_op_drop_does_not_change_layout_or_history() {
         let mut controller = DockController::new_initial(&Theme::default()).unwrap();
         let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
+
+        // Keep a redo branch to prove that a no-op preserves existing history.
+        controller
+            .apply(DockCommand::SetChrome {
+                mode: dock_core::ChromeMode::DockHidden,
+            })
+            .unwrap();
+        assert_eq!(controller.history.undo_len(), 1);
+        assert!(controller.undo().unwrap());
+        assert_eq!(controller.history.undo_len(), 0);
+        assert_eq!(controller.history.redo_len(), 1);
+
         let (group, _, panel) = first_panels_by_group(&controller)[0];
         let original_layout = layout_debug_snapshot(&controller);
         let original_version = controller.layout().version();
@@ -1053,9 +1065,12 @@
         assert_eq!(layout_debug_snapshot(&controller), original_layout);
         assert_eq!(controller.layout().version(), original_version);
         assert_eq!(controller.history.undo_len(), 0);
-        assert_eq!(controller.history.redo_len(), 0);
+        assert_eq!(controller.history.redo_len(), 1);
         assert!(!controller.undo().unwrap());
-        assert!(!controller.redo().unwrap());
+        assert_eq!(controller.history.redo_len(), 1);
+        assert!(controller.redo().unwrap());
+        assert_eq!(controller.history.undo_len(), 1);
+        assert_eq!(controller.history.redo_len(), 0);
     }
 
     #[test]
@@ -1094,5 +1109,24 @@
         assert_eq!(controller.history.undo_len(), 0);
         assert_eq!(controller.history.redo_len(), 0);
         assert!(controller.last_error().is_some());
+
+        // A successful no-op clears the stale error without touching layout/history.
+        let action = controller
+            .commit_drop_request(
+                drop_request(
+                    panel,
+                    DropTarget::Tabs { group, index: 0 },
+                    Point::new(100.0, 100.0),
+                    Point::new(100.0, 100.0),
+                ),
+                viewport,
+            )
+            .unwrap();
+        assert_eq!(action, DragDropAction::NoOp);
+        assert!(controller.last_error().is_none());
+        assert_eq!(layout_debug_snapshot(&controller), original_layout);
+        assert_eq!(controller.layout().version(), original_version);
+        assert_eq!(controller.history.undo_len(), 0);
+        assert_eq!(controller.history.redo_len(), 0);
     }
 
