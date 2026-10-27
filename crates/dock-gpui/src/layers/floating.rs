@@ -68,6 +68,10 @@ pub(crate) fn render(
                     DragPayload::FloatingGroup { group: floating_id },
                     DragHandle::FloatingTitle,
                 ),
+                on_capture_drag_start: host.drag_start(
+                    DragPayload::FloatingGroup { group: floating_id },
+                    DragHandle::FloatingCapture,
+                ),
                 on_close: None,
                 on_collapse: None,
             }
