@@ -176,7 +176,7 @@ mod tests {
     fn absent_workspace_selects_initial_layout_without_error() {
         let theme = Theme::default();
         let path = temporary_path("missing");
-        assert_eq!(load_layout(Some(&path), &theme).unwrap(), None);
+        assert!(load_layout(Some(&path), &theme).unwrap().is_none());
     }
 
     #[test]
