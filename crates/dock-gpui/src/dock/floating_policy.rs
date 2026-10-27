@@ -88,7 +88,6 @@ pub(super) fn initial_float_bounds(
     Ok(bounds)
 }
 
-
 /// Keeps a moved floating window inside the same viewport used by Core geometry.
 ///
 /// Core clamps floating rectangles for rendering without rewriting the persistent

@@ -1960,6 +1960,76 @@
     }
 
     #[test]
+    fn floating_title_drag_uses_visible_position_when_saved_origin_is_offscreen() {
+        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+        let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
+        let (floating_id, original_bounds) = make_initial_floating_group(&mut controller);
+        let legacy_origin = Point::new(-500.0, 80.0);
+        let metrics = *controller.metrics();
+        controller
+            .layout
+            .apply(
+                DockCommand::MoveFloating {
+                    group: floating_id,
+                    origin: legacy_origin,
+                },
+                &metrics,
+            )
+            .unwrap();
+        controller.history.clear();
+
+        let frame = controller.frame(viewport).unwrap();
+        let visible_bounds = frame
+            .rects()
+            .floating_groups
+            .iter()
+            .find(|floating| floating.group == floating_id)
+            .unwrap()
+            .rect;
+        assert_eq!(visible_bounds.origin, Point::new(0.0, legacy_origin.y));
+
+        let origin = Point::new(
+            visible_bounds.origin.x + 48.0,
+            visible_bounds.origin.y + controller.metrics().header_height / 2.0,
+        );
+        let threshold = controller.metrics().drag_threshold;
+        controller
+            .begin_drag(
+                DragPayload::FloatingGroup { group: floating_id },
+                DragHandle::FloatingTitle,
+                origin,
+            )
+            .unwrap();
+        assert!(
+            controller
+                .update_drag(
+                    Point::new(origin.x + threshold + 20.0, origin.y + 12.0),
+                    viewport,
+                    Some(&frame),
+                )
+                .unwrap()
+        );
+
+        let release = Point::new(origin.x + 40.0, origin.y + 20.0);
+        let request = controller.finish_drag(release, viewport).unwrap().unwrap();
+        let action = controller.commit_drop_request(request, viewport).unwrap();
+        let expected_origin = Point::new(40.0, legacy_origin.y + 20.0);
+        assert_eq!(
+            action,
+            DragDropAction::Command(DockCommand::MoveFloating {
+                group: floating_id,
+                origin: expected_origin,
+            })
+        );
+        assert_eq!(
+            controller.layout().floating_group(floating_id).unwrap().bounds,
+            Rect::new(expected_origin, original_bounds.size)
+        );
+        assert_eq!(controller.history.undo_len(), 1);
+        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+    }
+
+    #[test]
     fn floating_title_drag_with_stale_layout_snapshot_is_cancelled_before_commit() {
         let mut controller = DockController::new_initial(&Theme::default()).unwrap();
         let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
