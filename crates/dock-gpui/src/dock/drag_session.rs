@@ -90,6 +90,25 @@ impl From<ComputeRectsError> for DragUpdateError {
     }
 }
 
+impl fmt::Display for DragUpdateError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Core(error) => write!(formatter, "core drag update failed: {error:?}"),
+            Self::Geometry(error) => {
+                write!(formatter, "drop-zone geometry preparation failed: {error:?}")
+            }
+            Self::MissingFrameGeometry => {
+                formatter.write_str("drag activation requires current frame geometry")
+            }
+            Self::StaleFrameGeometry => {
+                formatter.write_str("drag frame geometry is stale")
+            }
+        }
+    }
+}
+
+impl std::error::Error for DragUpdateError {}
+
 impl DragGesture {
     pub(super) fn begin(
         payload: DragPayload,
