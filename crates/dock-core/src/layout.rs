@@ -83,13 +83,11 @@ pub struct Layout {
     validation_cache: ValidationCache,
 }
 
-mod column_resize;
 mod column_width_management;
 mod floating_operations;
 mod command_panels;
 
 mod group_operations;
-mod command_group_transfer;
 mod command_target_validation;
 mod command_target_operations;
 mod drop_resolution;
