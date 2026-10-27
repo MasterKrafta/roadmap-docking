@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use dock_core::{
     create_initial_layout, Axis, CommandError, CommandOutcome, ComputeRectsError, DockCommand,
+    FloatingGroupId,
     DockMetrics, DockSide, DragDropAction, DragDropRequest, DragHandle, DragPayload,
     DragSession as CoreDragSession, DragState,
     DropSource, DropTarget, DropZone, Layout, Node, NodeId, PanelId, Point, Profile, Rect,
@@ -74,6 +75,30 @@ impl DockController {
                 .apply(&mut self.layout, command, &self.metrics)
         };
         self.track_command_result(result, "apply")
+    }
+
+    /// Closes every tab group contained in a floating window.
+    ///
+    /// Core has no atomic CloseFloating command, so every group is closed through
+    /// the standard history path and can be restored with one Undo per group.
+    pub(crate) fn close_floating(
+        &mut self,
+        group: FloatingGroupId,
+    ) -> Result<(), CommandError> {
+        let commands = super::commands::close_floating(&self.layout, group).ok_or_else(|| {
+            if self.layout.floating_group(group).is_some() {
+                CommandError::InvalidTarget {
+                    reason: "floating group contains an unsupported node type",
+                }
+            } else {
+                CommandError::MissingFloatingGroup { group }
+            }
+        })?;
+
+        for command in commands {
+            self.apply(command)?;
+        }
+        Ok(())
     }
 
     /// Restores the preceding recorded layout revision, if one exists.

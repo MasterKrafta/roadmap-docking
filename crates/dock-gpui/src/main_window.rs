@@ -1,4 +1,4 @@
-use dock_core::{DockCommand, DragHandle, DragPayload, Point, Rect, Size};
+use dock_core::{DockCommand, DragHandle, DragPayload, FloatingGroupId, Point, Rect, Size};
 use gpui::{
     Context, DispatchPhase, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
     MouseUpEvent,
@@ -29,6 +29,12 @@ impl MainWindow {
 
     pub(crate) fn apply_dock_command(&mut self, command: DockCommand) {
         let _ = self.dock.apply(command);
+    }
+
+    pub(crate) fn close_floating_window(&mut self, group: FloatingGroupId) {
+        if let Err(error) = self.dock.close_floating(group) {
+            tracing::warn!(group = ?group, error = %error, "could not close floating window");
+        }
     }
 
     pub(crate) fn begin_drag(

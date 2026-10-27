@@ -1,4 +1,4 @@
-use dock_core::{DockCommand, DragHandle, DragPayload, PanelInstance};
+use dock_core::{DockCommand, DragHandle, DragPayload, FloatingGroupId, PanelInstance};
 use gpui::{
     AnyElement, App, ClickEvent, MouseDownEvent, MouseMoveEvent, MouseUpEvent, SharedString,
     Window,
@@ -32,6 +32,8 @@ pub trait DockHost {
     fn render_panel(&mut self, instance: &PanelInstance) -> AnyElement;
 
     fn command(&self, command: DockCommand) -> CommandClickHandler;
+
+    fn close_floating(&self, group: FloatingGroupId) -> CommandClickHandler;
 
     fn menu(&self, request: DockMenuRequest) -> CommandClickHandler;
 
@@ -70,6 +72,10 @@ impl DockHost for NoopHost {
     }
 
     fn command(&self, _command: DockCommand) -> CommandClickHandler {
+        Box::new(|_, _, _| {})
+    }
+
+    fn close_floating(&self, _group: FloatingGroupId) -> CommandClickHandler {
         Box::new(|_, _, _| {})
     }
 

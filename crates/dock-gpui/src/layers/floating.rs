@@ -1,4 +1,4 @@
-use dock_core::{DragHandle, DragPayload, Node, Point, Rect, Size};
+use dock_core::{DockCommand, DragHandle, DragPayload, Node, Point, Rect, Size};
 use gpui::{AnyElement, IntoElement, ParentElement, Styled, rgb};
 
 use crate::components::{FloatingTitle, ResizeEdgeHandle, ResizeEdgeKind};
@@ -56,6 +56,27 @@ pub(crate) fn render(
             .and_then(|panel| layout.panel_instance(panel))
             .map(|instance| host.panel_title(instance).to_string())
             .unwrap_or_else(|| "Floating group".to_owned());
+        let collapse_target = match layout.node(area.root) {
+            Some(Node::Tabs(tabs)) => Some((area.root, tabs.collapsed)),
+            Some(Node::Column(column)) if column.groups.len() == 1 => {
+                let group = column.groups[0];
+                match layout.node(group) {
+                    Some(Node::Tabs(tabs)) => Some((group, tabs.collapsed)),
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
+        let collapse_label = collapse_target
+            .map(|(_, collapsed)| if collapsed { "+" } else { "−" })
+            .unwrap_or("−");
+        let on_collapse = collapse_target.map(|(group, collapsed)| {
+            host.command(DockCommand::CollapseGroup {
+                group,
+                collapsed: !collapsed,
+            })
+        });
+
         let title_height = theme.metrics.column_header_height.min(bounds.size.height);
         let title_rect = Rect::new(Point::ZERO, Size::new(bounds.size.width, title_height));
         container = container.child(
@@ -78,8 +99,9 @@ pub(crate) fn render(
                         DragHandle::FloatingCapture,
                     )
                 }),
-                on_close: None,
-                on_collapse: None,
+                on_close: Some(host.close_floating(floating_id)),
+                on_collapse,
+                collapse_label,
             }
             .into_any_element(),
         );

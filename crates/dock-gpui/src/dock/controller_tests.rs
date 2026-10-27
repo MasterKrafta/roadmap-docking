@@ -3128,3 +3128,63 @@
         assert_eq!(controller.history.redo_len(), 0);
     }
 
+    #[test]
+    fn closing_floating_column_closes_each_group_and_keeps_each_close_undoable() {
+        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+        let (column_id, group_count) = controller
+            .layout()
+            .nodes()
+            .find_map(|(id, node)| match node {
+                Node::Column(column) if column.groups.len() > 1 => {
+                    Some((id, column.groups.len()))
+                }
+                _ => None,
+            })
+            .expect("initial layout should contain a multi-group column");
+        let original_panel_count = controller.layout().panel_instances().count();
+        controller
+            .apply(DockCommand::Float {
+                node: column_id,
+                bounds: Rect::new(Point::new(60.0, 40.0), Size::new(560.0, 440.0)),
+            })
+            .unwrap();
+        let (floating_id, root) = controller
+            .layout()
+            .floating_groups()
+            .next()
+            .map(|(id, floating)| {
+                let root = controller.layout().dock_area(floating.area).unwrap().root;
+                (id, root)
+            })
+            .expect("floating a column should create a floating group");
+        let Node::Column(column) = controller.layout().node(root).unwrap() else {
+            panic!("floating column should remain a Column root");
+        };
+        assert_eq!(column.groups.len(), group_count);
+
+        // Exclude setup from the close-history assertions.
+        controller.history.clear();
+        controller.close_floating(floating_id).unwrap();
+
+        assert!(controller.layout().floating_groups().next().is_none());
+        assert!(controller.layout().panel_instances().count() < original_panel_count);
+        assert_eq!(controller.history.undo_len(), group_count);
+        assert_eq!(controller.history.redo_len(), 0);
+        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+
+        for _ in 0..group_count {
+            assert!(controller.undo().unwrap());
+        }
+        assert_eq!(controller.history.undo_len(), 0);
+        assert_eq!(controller.history.redo_len(), group_count);
+        assert_eq!(controller.layout().floating_groups().count(), 1);
+        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+
+        for _ in 0..group_count {
+            assert!(controller.redo().unwrap());
+        }
+        assert_eq!(controller.layout().floating_groups().count(), 0);
+        assert_eq!(controller.history.redo_len(), 0);
+        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+    }
+

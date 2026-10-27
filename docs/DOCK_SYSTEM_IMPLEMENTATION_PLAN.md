@@ -4,7 +4,7 @@ Oct 24, 2026 · @master
 
 ## Текущая точка продолжения
 
-- **Активная точка:** этап 12, пункт 1 — поднятие плавающего окна по `mouse down` в любой его точке без отдельной записи `RaiseFloating` в Undo. Этап 11 и матрица интеграционных тестов завершены; пользователь подтвердил успешный Cargo-прогон после исправления ожидания own-group edge. Реализация первого пункта этапа 12 внесена и ожидает локальной проверки.
+- **Активная точка:** этап 12, пункт 3 — кнопки закрытия и сворачивания/разворачивания в `FloatingTitle`. Пункты 12.1 (`RaiseFloating`) и 12.2 (перемещение заголовком с одной записью Undo) реализованы и прошли Cargo-проверки, подтверждённые пользователем. Кнопки подключены; текущий логический шаг ожидает локальной проверки.
 - **Этап 10:** обработчики `mouse down/move/up`, reusable resolver, target/preview и drag ghost внесены.
 - **Преобразование запроса:** `Layout::resolve_drag_drop(&DragDropRequest, &DockMetrics)` возвращает готовый `DragDropAction::Command(DockCommand)` либо `NoOp`. `dock-gpui/src/dock/drop_commit.rs` остаётся тонким адаптером; историю и единственный коммит изменения контролирует `DockController`.
 - **Матрица этапа 11:** проверяются `MovePanel` для `GroupEdge` другой группы/`ColumnSlot`/`RailSlot`/`MainColumn`, перестановка вкладки и `NoOp` при drop на край собственной группы; `SplitGroup`, `MergeGroup`, `MoveGroup` для обычного и rail-слота, `MoveGroupToMainColumn`; отрыв панели/группы в `FreeArea`; перенос из flyout. Для успешных перемещений проверяются одна запись Undo и циклы Undo/Redo, а для `NoOp` и несовместимых комбинаций целей — отсутствие изменений persistent layout/history.
@@ -14,7 +14,7 @@ Oct 24, 2026 · @master
 - **FloatingTitle vs FloatingCapture:** `FloatingTitle` формирует `MoveFloating` без drop-target. Отдельный `FloatingCapture` исключает `FreeArea` и собственное дерево, а Core повторно проверяет цель и формирует `DockFloating`. Захватная кнопка скрыта для корневых `Column`/`Split` в Photoshop-профиле, поскольку текущий mapping не стыкует эти корни одной командой.
 - **Этап 11 — проверки подтверждены:** матрицы GroupGrip, PanelTab и FlyoutPanel покрывают GroupEdge/ColumnSlot/RailSlot/MainColumn; проверяются точные команды Core, перестановка вкладки и `NoOp` на собственном краю группы, свободная область, стыковка плавающего окна, несовместимые цели, отмена, устаревшая геометрия и Undo/Redo. Пользователь подтвердил успешный Cargo-прогон после согласования контракта `NoOp` для own-group edge.
 - **Очистка warning из последнего лога:** `DragUpdateError::Core/Geometry` реализует `Display` и `Error`; `ResizeSession::pointer_start` оставлен только под `cfg(test)`; удалён `localize_tree_rects`; `RailEntry` использует `rail_entry_label`; неиспользуемые привязки `id` и `side` устранены.
-- **Статус этапа 12, пункт 1:** обработчик capture и исключение `RaiseFloating` из Undo внесены; локальный Cargo-прогон этого изменения ещё не предоставлен.
+- **Статус этапов 12.1–12.2:** пользователь подтвердил зелёный Cargo-прогон. `RaiseFloating` не пишет в Undo и сохраняет Redo; `floating_title_drag_moves_window_without_resolving_dock_targets` проверяет перенос абсолютной дельтой, отсутствие drop-зон, одну запись Undo и Undo/Redo.
 
 
 ## 1. Что такое render.rs и почему он главный
@@ -453,8 +453,8 @@ gpui      = { workspace = true }
 - **Файл:** `dock-gpui/src/dock/floating_policy.rs` (NEW).
 - **Работы:**
   1. **Raise.** mouse down любой точки плавающего окна → `RaiseFloating { group }` (контейнер окна ловит событие в фазе capture, не съедая дальнейшие обработчики). Старый код этого не делал. Применять без записи в Undo (проверить, что записывает ли её `UndoRedoHistory` — если да, просить ядро исключить).
-  2. **Перемещение окна** по `FloatingTitle`: снимок + абсолютная дельта, на отпускании одна запись `MoveFloating { group, origin }`; эта область заголовка не показывает drop-зоны. Для стыковки используется отдельная ручка `FloatingCapture` и `DockFloating`. В Photoshop-профиле текущий resolver поддерживает обратную стыковку корневых `Tabs`/`Panel`; для корней `Column`/`Split` захватная ручка скрыта, пока Core не предложит единый корректный mapping.
-  3. **Кнопки в `FloatingTitle`:** закрыть (этап 8, пункт 3) и свернуть (`CollapseGroup` для корневой группы окна).
+  2. **Перемещение окна** по `FloatingTitle`: реализовано и покрыто `floating_title_drag_moves_window_without_resolving_dock_targets`; снимок + абсолютная дельта, на отпускании одна запись `MoveFloating { group, origin }`. Эта область не показывает drop-зоны. Для стыковки используется отдельная ручка `FloatingCapture` и `DockFloating`.
+  3. **Кнопки в `FloatingTitle`:** × закрывает все группы плавающего дерева через `close_floating` и штатный контроллер; пока у Core нет атомарной `CloseFloating`, каждое закрытие группы даёт отдельный шаг Undo. Сворачивание/разворачивание подключено для корня `Tabs` или `Column` с единственной группой; для составной колонки/`Split` кнопка сворачивания скрыта, поскольку единственной корневой группы нет.
   4. **Политика позиции:** не давать заголовку уйти за верхний край окна и меню-бар (кламп `origin.y ≥ 0` и хотя бы N px заголовка видно по горизонтали); сверить, что уже делает ядро (в старом коде есть упоминание клампа видимого прямоугольника в `compute_rects`).
 - **Удалить после этапа:** весь старый код жестов из `main_window.rs` (`TabDragPayload`, `GroupDragPayload`, `TabDragPreviewState`, `GroupDragPreviewState`, `SplitterDragState`, `update_*_from_drag`, `finish_*_drag`, `*_drag_bounds`, `docked_*_float_command`).
 - **Приёмка:** окно поднимается по клику по любой его части; два окна с перекрытием не путают ручки ресайза; `grep` по удалённым именам пуст.

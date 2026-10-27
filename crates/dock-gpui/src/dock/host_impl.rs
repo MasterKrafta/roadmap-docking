@@ -1,4 +1,4 @@
-use dock_core::{DockCommand, DragHandle, DragPayload, PanelInstance};
+use dock_core::{DockCommand, DragHandle, DragPayload, FloatingGroupId, PanelInstance};
 use gpui::{
     AnyElement, ClickEvent, Context, MouseDownEvent, MouseMoveEvent, MouseUpEvent, SharedString,
     Window,
@@ -45,6 +45,15 @@ impl DockHost for WindowHost<'_, '_> {
         Box::new(self.cx.listener::<ClickEvent>(
             move |this, _event, _window, cx| {
                 this.apply_dock_command(command.clone());
+                cx.notify();
+            },
+        ))
+    }
+
+    fn close_floating(&self, group: FloatingGroupId) -> CommandClickHandler {
+        Box::new(self.cx.listener::<ClickEvent>(
+            move |this, _event, _window, cx| {
+                this.close_floating_window(group);
                 cx.notify();
             },
         ))

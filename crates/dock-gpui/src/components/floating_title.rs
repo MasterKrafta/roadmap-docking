@@ -27,8 +27,10 @@ pub struct FloatingTitle {
     pub on_capture_drag_start: Option<DragStartHandler>,
     /// Optional close command; omitted until the host provides a safe close-window operation.
     pub on_close: Option<ClickHandler>,
-    /// Optional collapse command for the floating window.
+    /// Optional collapse/expand command for the floating window's single tab group.
     pub on_collapse: Option<ClickHandler>,
+    /// Displays '+' for a collapsed group and '−' for an expanded group.
+    pub collapse_label: &'static str,
 }
 
 impl RenderOnce for FloatingTitle {
@@ -91,7 +93,7 @@ impl RenderOnce for FloatingTitle {
                         Point::new(button_right, 0.0),
                         Size::new(button_width, self.rect.size.height),
                     ),
-                    "−",
+                    self.collapse_label,
                     &self.theme,
                     on_collapse,
                 )
