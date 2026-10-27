@@ -94,10 +94,9 @@ mod command_target_validation;
 mod command_target_operations;
 mod drop_resolution;
 mod commands;
-mod accessors;
 mod helpers;
+mod layout_api;
 mod history;
-mod initialization;
 mod normalization;
 #[cfg(feature = "serde")]
 mod workspace;
