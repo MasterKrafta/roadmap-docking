@@ -113,6 +113,39 @@ pub fn normalize_docked_group_geometry(
         }
     }
 
+    apply_group_chrome_shifts(
+        rects,
+        &groups,
+        &active_panel_shifts,
+        &floating_collapsed_shifts,
+    );
+
+    // Reserve the pinned rail row in both group and tab-header geometry. Grow
+    // existing scroll extents, or create an overflow record if this row alone
+    // pushes rail content beyond its viewport.
+    for group in &mut rects.groups {
+        if let Some(shift) = rail_group_shifts.get(&group.group) {
+            group.rect.origin.y += *shift;
+        }
+    }
+    for header in &mut rects.tab_headers {
+        if let Some(shift) = rail_group_shifts.get(&header.group) {
+            header.rect.origin.y += *shift;
+        }
+    }
+
+    normalize_rail_overflow_extents(layout, rects, &rail_column_reservations);
+
+    normalize_tab_strip_widths(layout, metrics, rects, &rail_groups, &mode_button_groups);
+}
+
+/// Applies vertical shifts consistently to group surfaces, tab hit targets, and active content.
+fn apply_group_chrome_shifts(
+    rects: &mut LayoutRects,
+    groups: &HashMap<NodeId, GroupChromeGeometry>,
+    active_panel_shifts: &HashMap<PanelId, f32>,
+    floating_collapsed_shifts: &HashMap<NodeId, f32>,
+) {
     // Keep collapsed floating tabs below the independent window title row.
     // Shift the group rectangle and hit targets together so the visual surface
     // and the Core drop geometry continue to describe the same area.
@@ -152,24 +185,6 @@ pub fn normalize_docked_group_geometry(
             panel.rect.size.height += *shift;
         }
     }
-
-    // Reserve the pinned rail row in both group and tab-header geometry. Grow
-    // existing scroll extents, or create an overflow record if this row alone
-    // pushes rail content beyond its viewport.
-    for group in &mut rects.groups {
-        if let Some(shift) = rail_group_shifts.get(&group.group) {
-            group.rect.origin.y += *shift;
-        }
-    }
-    for header in &mut rects.tab_headers {
-        if let Some(shift) = rail_group_shifts.get(&header.group) {
-            header.rect.origin.y += *shift;
-        }
-    }
-
-    normalize_rail_overflow_extents(layout, rects, &rail_column_reservations);
-
-    normalize_tab_strip_widths(layout, metrics, rects, &rail_groups, &mode_button_groups);
 }
 
 /// Extends rail-column scroll extents to account for the pinned control-row reservation.
