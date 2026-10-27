@@ -10,7 +10,7 @@ use crate::{WorkspaceFile, WorkspaceFileError};
 
 impl Layout {
 
-#[cfg(feature = "serde")]
+    #[cfg(feature = "serde")]
     pub(crate) fn from_workspace_parts(parts: WorkspaceLayoutParts) -> Self {
         let WorkspaceLayoutParts {
             nodes,
@@ -143,7 +143,7 @@ impl Layout {
         WorkspaceFile::from_layout(self, metrics)
     }
 
-#[cfg(feature = "serde")]
+    #[cfg(feature = "serde")]
     fn subtree_contains_panel(&self, root: NodeId) -> bool {
         fn contains_panel(
             layout: &Layout,
