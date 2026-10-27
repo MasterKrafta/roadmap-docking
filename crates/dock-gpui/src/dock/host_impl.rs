@@ -12,8 +12,8 @@ use crate::main_window::MainWindow;
 use crate::requests::{DockMenuRequest, ResizeHandle};
 
 /// Routes command clicks and pointer gesture starts through the owning window's controller.
- ///
- /// Menu state still uses NoopHost until its roadmap stage.
+///
+/// Menu state still uses NoopHost until its roadmap stage.
 pub(crate) struct WindowHost<'a, 'cx> {
     cx: &'a Context<'cx, MainWindow>,
 }
