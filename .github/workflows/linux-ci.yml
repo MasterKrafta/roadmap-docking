@@ -1,0 +1,39 @@
+name: Linux CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Linux build and tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache Cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Test dock-core
+        run: cargo test -p dock-core
+
+      - name: Test dock-gpui on Linux
+        run: cargo test -p dock-gpui
+
+      - name: Check all workspace targets
+        run: cargo check --workspace --all-targets
+
+      - name: Run Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
