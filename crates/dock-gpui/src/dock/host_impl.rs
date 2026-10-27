@@ -1,7 +1,6 @@
 use dock_core::{DockCommand, DragHandle, DragPayload, FloatingGroupId, PanelInstance};
 use gpui::{
     AnyElement, ClickEvent, Context, MouseDownEvent, MouseMoveEvent, MouseUpEvent, SharedString,
-    Window,
 };
 
 use crate::host::{

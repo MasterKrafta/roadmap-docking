@@ -555,7 +555,7 @@ impl Render for MainWindow {
             })
             .collect::<Vec<_>>();
         let menu_bounds_for_raise = menu_bounds;
-        let raise_floating = cx.listener::<MouseDownEvent>(move |this, event, window, cx| {
+        let raise_floating = cx.listener::<MouseDownEvent>(move |this, event, _window, cx| {
             if event.button != MouseButton::Left
                 || menu_bounds_for_raise
                     .is_some_and(|bounds| menus::contains(bounds, dock_pointer(event.position)))

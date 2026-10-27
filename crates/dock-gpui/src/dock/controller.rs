@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use dock_core::{
-    create_initial_layout, Axis, CommandError, CommandOutcome, ComputeRectsError, DockCommand,
+    create_initial_layout, CommandError, CommandOutcome, ComputeRectsError, DockCommand,
     FloatingGroupId,
     DockMetrics, DockSide, DragDropAction, DragDropRequest, DragHandle, DragPayload,
     DragSession as CoreDragSession, DragState,

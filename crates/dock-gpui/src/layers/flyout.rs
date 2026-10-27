@@ -1,7 +1,6 @@
 use dock_core::{DockCommand, DragHandle, DragPayload, Point, Rect, ResizeEdge, Size};
 use gpui::{
-    AnyElement, InteractiveElement, IntoElement, MouseButton, ParentElement,
-    StatefulInteractiveElement, Styled, rgb,
+    AnyElement, InteractiveElement, IntoElement, MouseButton, ParentElement, Styled, rgb,
 };
 
 use crate::components::{FlyoutHeader, ResizeEdgeHandle, ResizeEdgeKind};
