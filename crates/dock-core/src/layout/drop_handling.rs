@@ -230,9 +230,23 @@ pub(super) fn resolve_panel_drag(
                 }
             }
         }
-        // Moving a tab to its own group's edge can be a valid split:
-        // the panel leaves its Tabs node and becomes a new adjacent group.
-        // Only an insertion at the current tab slot is a no-op.
+        // A multi-tab group can be split by dropping one of its tabs on
+        // its own edge. A single-tab group has nothing to split, so make that
+        // gesture a true NoOp (a flyout release still needs to close the flyout).
+        if let (Some((source_group, _)), DropTarget::GroupEdge { group: target_group, .. }) =
+            (self.tab_parent_index(panel_node), target)
+            && source_group == target_group
+            && matches!(
+                self.node(source_group),
+                Some(Node::Tabs(tabs)) if tabs.children.len() <= 1
+            )
+        {
+            return Ok(if request.handle == DragHandle::FlyoutPanel {
+                DragDropAction::Command(DockCommand::MovePanelFromFlyout { panel, target })
+            } else {
+                DragDropAction::NoOp
+            });
+        }
 
         // A panel tab remains a panel payload; GroupTabs is reserved for
         // a group-grip gesture and may never absorb only one dragged tab.
