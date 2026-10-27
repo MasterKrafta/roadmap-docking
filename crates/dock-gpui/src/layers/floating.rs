@@ -1,4 +1,4 @@
-use dock_core::{DragHandle, DragPayload, Point, Rect, Size};
+use dock_core::{DragHandle, DragPayload, Node, Point, Rect, Size};
 use gpui::{AnyElement, IntoElement, ParentElement, Styled, rgb};
 
 use crate::components::{FloatingTitle, ResizeEdgeHandle, ResizeEdgeKind};
@@ -68,10 +68,16 @@ pub(crate) fn render(
                     DragPayload::FloatingGroup { group: floating_id },
                     DragHandle::FloatingTitle,
                 ),
-                on_capture_drag_start: host.drag_start(
-                    DragPayload::FloatingGroup { group: floating_id },
-                    DragHandle::FloatingCapture,
-                ),
+                on_capture_drag_start: matches!(
+                    layout.node(area.root),
+                    Some(Node::Tabs(_) | Node::Panel(_))
+                )
+                .then(|| {
+                    host.drag_start(
+                        DragPayload::FloatingGroup { group: floating_id },
+                        DragHandle::FloatingCapture,
+                    )
+                }),
                 on_close: None,
                 on_collapse: None,
             }
