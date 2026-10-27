@@ -1,11 +1,12 @@
 use dock_core::{DockCommand, DragHandle, DragPayload, FloatingGroupId, PanelInstance};
 use gpui::{
-    AnyElement, ClickEvent, Context, KeyDownEvent, MouseDownEvent, MouseMoveEvent, MouseUpEvent, SharedString,
+    AnyElement, ClickEvent, Context, KeyDownEvent, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+    SharedString,
 };
 
 use crate::host::{
-    CommandClickHandler, CommandKeyHandler, DockHost, DragStartHandler, NoopHost, ResizeStartHandler,
-    SurfaceMouseMoveHandler, SurfaceMouseUpHandler,
+    CommandClickHandler, CommandKeyHandler, DockHost, DragStartHandler, NoopHost,
+    ResizeStartHandler, SurfaceMouseMoveHandler, SurfaceMouseUpHandler,
 };
 use crate::main_window::MainWindow;
 use crate::requests::{DockMenuRequest, ResizeHandle};
