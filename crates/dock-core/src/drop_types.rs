@@ -1,4 +1,4 @@
-use crate::{DockSide, NodeId, PanelId, Rect};
+use crate::{DockSide, NodeId, Rect};
 
 /// The semantic item currently being dragged, used to compute legal drop targets.
 ///
