@@ -386,20 +386,23 @@ gpui      = { workspace = true }
 
 ## 7. Этапы 10–12: drag and drop и плавающие окна
 
-Самая сложная часть. В старом коде всё было самописным: свои `*DragPayload`, свои превью, своя геометрия плавающего окна, и выходом было только `Float`. Теперь мы строим на ядре: `DragSession`, `DragPayload`, `DragHandle`, `DragPreview`, `compute_drop_zones`, `DropTarget`, `DragDropRequest`, `DragDropAction`. **Точных сигнатур этих типов у меня нет** (в справочнике только перечислены имена), поэтому этап 10 начинается с чтения исходников ядра (см. раздел 11).
+Самая сложная часть. В старом коде всё было самописным: свои `*DragPayload`, свои превью, своя геометрия плавающего окна, и выходом было только `Float`. Теперь используем существующий API ядра: `DragSession`, `DragPayload`, `DragHandle`, `DragPreview`, `Layout::prepare_drop_resolver`, `DropZoneResolver::resolve`, `DropTarget`, `DragDropRequest`, `DragDropAction`. Сигнатуры сверены с исходниками `dock-core`; интеграция должна опираться на этот API, а не дублировать правила разрешения целей в GPUI.
 
 ### Этап 10. Сессия перетаскивания
 
-- **Файлы:** `dock-gpui/src/dock/drag_session.rs` (NEW), `dock-gpui/src/components/drag_ghost.rs` (NEW), правка `layers/drop_overlay.rs` и `layers/tree.rs`.
-- **Состояние `DragState`:** `{ payload, handle, pressed_at: Point, started: bool, core: Option<dock_core::DragSession>, zones: Vec<DropZoneRect>, preview: Option<DragPreview> }`.
-- **Цикл:**
-  1. **mouse down** на `PanelTab` / `GroupGrip` / `FloatingTitle` / `FlyoutPanel` → `host.drag_start(payload, handle)` → `controller.begin_drag(...)`: в сессии только `pressed_at`, `started = false`. Ядровую `DragSession` не создаём — иначе обычный click по вкладке станет «перетаскиванием» без движения (в `render.rs` старт жеста и click вешаются на один элемент).
-  2. **mouse move**: если расстояние от `pressed_at` ≥ 4 px (порог — константа `DRAG_SLOP_PX`) → `started = true`: создать `DragSession`, один раз посчитать `zones = compute_drop_zones(...)` на `FrameGeometry` (на той же нормализованной геометрии, что и рендер). Далее на каждый move — `core.update(pointer)` → `DragPreview { target, point }` → `DragOverlay { preview, zones }` → `cx.notify()`.
-  3. **Дерево во время жеста не меняется** (исключение — перемещение плавающего окна, этап 12). Зоны считаются один раз за жест.
-  4. **Визуальная обратная связь:** `DockSurface` получает `dragging: Option<DragSource>` — исходная вкладка/группа рисуются приглушённо; под курсором — `DragGhost { title, pointer }` (компонент с подписью панели/группы, без прозрачных кликов). В старом коде для этого были плейсхолдеры и копии дерева — больше не нужны.
-  5. **Завершение:** mouse up → этап 11. Esc, потеря фокуса окна, «потерянный» mouse up (пришло движение без нажатой кнопки) → `cancel`.
-- **Автопрокрутка:** при драге у края scroll-колонки (`vertical_overflow`) — сдвиг `ScrollHandle` на каждый тик таймера; нужна после основной машины (отметить как отложенную).
-- **Приёмка:** click по вкладке без движения активирует её, драг начинается только после порога; зоны и маркер рисуются; Esc возвращает всё как было; `Layout::version` до и после отмены одинаков.
+- **Файлы:** `dock-gpui/src/dock/drag_session.rs` (NEW), правки `dock-gpui/src/dock/controller.rs`, `dock-gpui/src/dock/host_impl.rs`, `dock-gpui/src/main_window.rs`, `dock-gpui/src/surface.rs`, `dock-gpui/src/layers/drop_overlay.rs` и `dock-gpui/src/layers/tree.rs`; при необходимости — узкая корректировка API resolver в `dock-core`.
+- **Состояние адаптера:** хранить источник и handle, исходную позицию, признак превышения drag threshold, ядровую `DragSession`, текущий preview и reusable resolver. Обычный click по вкладке до превышения порога должен оставаться обычным click.
+- **Подготовка resolver:** после превышения порога один раз подготовить resolver от того же `FrameGeometry`, который использовался для рендера. На каждом движении вызывать `DropZoneResolver::resolve(pointer)`; не строить список зон и индекс дерева повторно при каждом mouse move.
+- **Ограничение текущего API:** нынешний `DropZoneResolver<'a>` заимствует `Layout`, `LayoutRects` и `DockMetrics`. Такую ссылку нельзя безопасно хранить в долгоживущем `DockController` рядом с владельцем этих же данных. Если потребуется хранить resolver между GPUI-событиями, сделать его владеющим неизменяемым снимком данных, необходимых для разрешения цели, либо применить эквивалентный безопасный API. Не использовать `unsafe`, самоссылочные структуры или пересоздание зон на каждом движении в качестве обходного решения.
+- **Инвалидация:** resolver действителен только для исходного снимка `Layout`, нормализованной геометрии и метрик. Если версия layout, viewport или метрики изменились до завершения жеста, отменить сессию либо безопасно пересоздать resolver от нового согласованного снимка до следующего разрешения цели.
+- **Цикл жеста:**
+  1. **mouse down** на поддерживаемой поверхности → `host.drag_start(payload, handle)` → `controller.begin_drag(...)`; сохранить исходную позицию, но не начинать drag до порога.
+  2. **mouse move**: после достижения порога создать ядровую `DragSession`, подготовить reusable resolver и разрешить текущую цель. Далее на каждом move обновлять ядровую сессию, цель, `DragPreview` и `DragOverlay`, затем вызывать `cx.notify()`.
+  3. **Дерево во время preview не меняется**. Команда применяется только на этапе 11. Resolver не переживает изменение layout, геометрии или метрик.
+  4. **Визуальная обратная связь:** `DockSurface` отображает актуальные зоны и активную подсветку через `DragOverlay`; призрак `DragGhost` добавлять в рамках этого этапа, если он нужен для завершённого сценария preview, не дублируя дерево.
+  5. **Завершение:** mouse up передаёт актуальную точку этапу 11. Esc, потеря фокуса окна и потерянный mouse up (движение пришло без нажатой кнопки) отменяют или корректно завершают жест по единому правилу.
+- **Автопрокрутка:** при драге у края scroll-колонки (`vertical_overflow`) — отдельная отложенная задача после основной машины.
+- **Приёмка:** click без движения не запускает drag; после порога зоны и маркер обновляются при движении; цель разрешается через один и тот же resolver; Esc и потеря фокуса очищают preview; при отмене `Layout::version` и состояние layout не меняются.
 
 ### Этап 11. Завершение жеста: от `DropTarget` к `DockCommand`
 
