@@ -1,3 +1,5 @@
+use proptest::prelude::*;
+
 use crate::layout_builder::LayoutBuilder;
 use crate::{
     Axis, CanvasState, ChromeMode, ColumnMode, DockMetrics, DockSide, GeometryError, Layout,
@@ -42,6 +44,56 @@ fn sample_layout() -> (Layout, Vec<(PanelKey, PanelConstraints)>) {
     (builder.build(), descriptors)
 }
 
+fn generated_workspace_layout(
+    column_specs: &[(Vec<usize>, f32)],
+    active_choices: &[u16],
+    collapsed_choices: &[bool],
+) -> (Layout, Vec<(PanelKey, PanelConstraints)>) {
+    let mut builder = LayoutBuilder::new(Profile::Generic);
+    let mut column_nodes = Vec::with_capacity(column_specs.len());
+    let mut descriptors = Vec::new();
+    let mut panel_index = 0usize;
+    let mut group_index = 0usize;
+
+    for (group_sizes, width) in column_specs {
+        let mut groups = Vec::with_capacity(group_sizes.len());
+        for panel_count in group_sizes {
+            let mut panels = Vec::with_capacity(*panel_count);
+            for _ in 0..*panel_count {
+                let panel_key = key(format!("generated-workspace-panel-{panel_index}"));
+                let (_, panel_node) = builder.panel(panel_key.clone(), constraints());
+                descriptors.push((panel_key, constraints()));
+                panels.push(panel_node);
+                panel_index += 1;
+            }
+
+            let active_index =
+                usize::from(active_choices[group_index % active_choices.len()]) % panels.len();
+            let collapsed = collapsed_choices[group_index % collapsed_choices.len()];
+            groups.push(builder.tabs(panels, active_index, collapsed));
+            group_index += 1;
+        }
+
+        let group_ratios = vec![1.0 / groups.len() as f32; groups.len()];
+        column_nodes.push(builder.column(
+            *width,
+            ColumnMode::Expanded,
+            groups,
+            group_ratios,
+        ));
+    }
+
+    let root = if column_nodes.len() == 1 {
+        column_nodes[0]
+    } else {
+        let split_ratios = vec![1.0 / column_nodes.len() as f32; column_nodes.len()];
+        builder.split(Axis::X, column_nodes, split_ratios)
+    };
+    builder.main_area(DockSide::Right, root);
+
+    (builder.build(), descriptors)
+}
+
 fn find_column_mut(node: &mut WorkspaceNode) -> Option<&mut Vec<f32>> {
     match node {
         WorkspaceNode::Column { group_ratios, .. } => Some(group_ratios),
@@ -65,6 +117,49 @@ fn deeply_nested_workspace_node(depth: usize) -> WorkspaceNode {
         };
     }
     node
+}
+
+proptest! {
+    #[test]
+    fn generated_valid_layouts_round_trip_through_workspace_json(
+        column_specs in prop::collection::vec(
+            (
+                prop::collection::vec(1usize..=3, 1..=3),
+                220.0f32..600.0,
+            ),
+            1..=4,
+        ),
+        active_choices in prop::collection::vec(any::<u16>(), 1..=12),
+        collapsed_choices in prop::collection::vec(any::<bool>(), 1..=12),
+    ) {
+        let metrics = DockMetrics::default();
+        let (layout, descriptors) =
+            generated_workspace_layout(&column_specs, &active_choices, &collapsed_choices);
+        prop_assert_eq!(layout.validate(&metrics), Ok(()));
+
+        let original = WorkspaceFile::from_layout(&layout, &metrics)
+            .expect("generated valid layout should export to a workspace");
+        let json = original
+            .to_json_pretty()
+            .expect("generated workspace should serialize to JSON");
+        let loaded = WorkspaceFile::load_json(
+            &json,
+            &descriptors,
+            &metrics,
+            WorkspaceLoadOptions::default(),
+        )
+        .expect("generated valid workspace should load");
+        prop_assert!(
+            loaded.diagnostics.is_empty(),
+            "valid generated workspace should not need normalization: {:?}",
+            loaded.diagnostics
+        );
+        prop_assert_eq!(loaded.layout.validate(&metrics), Ok(()));
+
+        let restored = WorkspaceFile::from_layout(&loaded.layout, &metrics)
+            .expect("restored generated layout should export to a workspace");
+        prop_assert_eq!(restored, original);
+    }
 }
 
 #[test]
