@@ -577,19 +577,11 @@ fn floating_capture_source(
         Some(Node::Panel(panel)) => DropSource::Panel {
             panel: panel.panel_id,
         },
-        Some(Node::Column(_) | Node::Split(_)) => crate::tree_query::floating_title_groups_in_tree(
-            layout,
-            root,
-        )
-        .first()
-        .copied()
-        .map(|group| DropSource::Group { group })
-        .or_else(|| {
-            crate::tree_query::first_panel_in_subtree(layout, root)
-                .map(|panel| DropSource::Panel { panel })
-        })
-        .ok_or(ComputeRectsError::InvalidLayoutState)?,
-        None => return Err(ComputeRectsError::InvalidLayoutState),
+        // Core's DockFloating transaction cannot dock Column or Split roots
+        // through this target pipeline. The UI hides capture for those shapes.
+        Some(Node::Column(_) | Node::Split(_)) | None => {
+            return Err(ComputeRectsError::InvalidLayoutState);
+        }
     };
 
     Ok((source, crate::tree_query::subtree_nodes(layout, root)))
