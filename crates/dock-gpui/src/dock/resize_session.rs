@@ -83,6 +83,11 @@ impl ResizeSession {
         self.baseline
     }
 
+    #[cfg(test)]
+    pub(super) fn pointer_start(&self) -> Point {
+        self.pointer_start
+    }
+
     pub(super) fn start_geometry(&self) -> StartGeometry {
         self.start_geometry
     }
