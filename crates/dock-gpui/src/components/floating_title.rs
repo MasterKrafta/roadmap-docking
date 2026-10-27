@@ -21,8 +21,10 @@ pub struct FloatingTitle {
     pub title: String,
     /// Shared application theme.
     pub theme: Theme,
-    /// Starts dragging the floating window.
+    /// Starts moving the floating window without resolving dock targets.
     pub on_drag_start: DragStartHandler,
+    /// Starts dragging the entire floating group toward a docking target.
+    pub on_capture_drag_start: DragStartHandler,
     /// Optional close command; omitted until the host provides a safe close-window operation.
     pub on_close: Option<ClickHandler>,
     /// Optional collapse command for the floating window.
@@ -33,7 +35,7 @@ impl RenderOnce for FloatingTitle {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
         let button_width = self.rect.size.height.min(28.0).max(0.0);
         let button_count =
-            self.on_close.is_some() as usize + self.on_collapse.is_some() as usize;
+            1 + self.on_close.is_some() as usize + self.on_collapse.is_some() as usize;
         let buttons_width = button_width * button_count as f32;
         let drag_width = (self.rect.size.width - buttons_width).max(0.0);
 
@@ -84,6 +86,20 @@ impl RenderOnce for FloatingTitle {
                 .into_any_element(),
             );
         }
+
+        button_right -= button_width;
+        let capture_area = div()
+            .absolute()
+            .left(px(button_right))
+            .top(px(0.0))
+            .w(px(button_width))
+            .h(px(self.rect.size.height))
+            .bg(rgb(self.theme.colors.toolbar_background))
+            .text_color(rgb(self.theme.colors.primary_text))
+            .child("⇲")
+            .id(format!("dock-floating-capture-{:?}", self.group))
+            .on_mouse_down(MouseButton::Left, self.on_capture_drag_start);
+        header = header.child(capture_area);
 
         header
     }
