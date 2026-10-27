@@ -176,18 +176,20 @@
 
 ### P3-01. Разделить тему: объявленные поля и реальное применение
 
-**Статус:** В работе; пользователь подтвердил тесты для типографики, hover-палитры, drop-индикаторов, начального split ratio и ширины group-кнопок. Подключение `content_padding` требует локальной проверки.  
+**Статус:** В работе; пользователь подтвердил тесты для типографики, hover-палитры, drop-индикаторов, начального split ratio, ширины group-кнопок и `content_padding`. Подключение `button_size` в заголовке плавающего окна требует локальной проверки.  
 **Уверенность:** статический просмотр подтвердил неиспользование нескольких полей; применение остальных метрик требует отдельного разбора.
 
 **Где смотреть:** `crates/ui/src/theme/theme_typography.rs`, `theme_metrics.rs`, `theme_colors.rs`; `crates/dock-gpui/src/components/`; `crates/dock-gpui/src/layers/`.
 
-**Проблема:** первичный аудит выявил неиспользуемые поля типографики и метрик темы. `ThemeTypography` и hover-палитра уже подключены; `default_column_split_ratio` и `group_control_button_width` также включены в расчёт layout/отрисовку. Для дальнейшего разбора остаются `tab_drag_zone_width`, `button_size`, `button_gap`, `edge_drop_zone_width` и `column_tab_width`. `tab_drag_zone_width` объявлен как резерв для будущей drag-зоны. Толщины `drop_indicator_thickness` и `drop_outline_thickness` используются в обводке DropZone и drag-preview.
+**Проблема:** первичный аудит выявил неиспользуемые поля типографики и метрик темы. `ThemeTypography` и hover-палитра уже подключены; `default_column_split_ratio`, `group_control_button_width` и `content_padding` также реально влияют на layout/отрисовку. Для дальнейшего разбора остаются `tab_drag_zone_width`, `button_size`, `button_gap`, `edge_drop_zone_width` и `column_tab_width`. `tab_drag_zone_width` объявлен как резерв для будущей drag-зоны. Толщины `drop_indicator_thickness` и `drop_outline_thickness` используются в обводке DropZone и drag-preview.
 
 **Сделано:** `ThemeTypography` и `ThemeColors::hover` подключены в `IconButton`, `PanelTab`, `RailEntry`, `PopupMenu` и `FloatingTitle`; пользователь подтвердил прохождение локальных тестов. `drop_indicator_thickness` управляет обводкой `DropZone`, а `drop_outline_thickness` — обводкой drag-preview. Текущий шаг требует локальной проверки.
 
 **Сделано:** `build_initial_layout` применяет `ThemeMetrics::default_column_split_ratio` к начальному столбцу с двумя группами; пользователь подтвердил прохождение тестов. `group_control_button_width` протянут в `DockMetrics` и адаптер темы; теперь им пользуются и `normalize_docked_group_geometry`, и отрисовка кнопок в `tree_tabs.rs`, вместо отдельной константы `28 px`. Пользователь подтвердил прохождение тестов.
 
-**Сделано (требует локальной проверки):** `content_padding` теперь применяется в `PanelSurface` как равномерный внутренний отступ вокруг содержимого панели. После проверки продолжить аудит оставшихся полей: подключить `button_size` и `button_gap`, а также решить судьбу `edge_drop_zone_width` и `column_tab_width`, не удаляя публичные поля без необходимости.
+**Закрыто:** `content_padding` применяется в `PanelSurface` как равномерный внутренний отступ вокруг содержимого панели; пользователь подтвердил успешное прохождение `cargo test -p ui` и `cargo test -p dock-gpui`.
+
+**Следующий шаг (требует локальной проверки):** `button_size` теперь задаёт максимальную ширину кнопок в заголовке плавающего окна вместо отдельного значения `28 px`; добавлены unit-тесты на применение размера и ограничение доступной геометрией. После проверки разобрать `button_gap`, а затем решить судьбу `edge_drop_zone_width` и `column_tab_width`, не удаляя публичные поля без необходимости.
 
 **Критерии готовности:** изменение поддерживаемого параметра темы действительно меняет интерфейс; в публичной теме не остаются поля, которые создают ложное ожидание настройки.
 
