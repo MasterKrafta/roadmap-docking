@@ -313,7 +313,7 @@ impl Render for Gallery {
                 }),
             ))
             .child(card(
-                "FloatingTitle — drag + close/collapse",
+                "FloatingTitle — move + dock capture + close/collapse",
                 16.0,
                 648.0,
                 theme,
