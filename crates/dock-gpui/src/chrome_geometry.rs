@@ -55,36 +55,9 @@ pub fn normalize_docked_group_geometry(
 
     let floating_title_groups = floating_title_geometry_by_group(layout, metrics, rects);
 
-    // A rail keeps its mode switch pinned at the top. Shift the rail items
-    // together so rendering, hit targets, and later drop zones share geometry.
-    let mut rail_column_reservations = HashMap::<NodeId, f32>::new();
-    let mut rail_group_shifts = HashMap::<NodeId, f32>::new();
-    for column_rect in &rects.columns {
-        let Some(Node::Column(column)) = layout.node(column_rect.column) else {
-            continue;
-        };
-        if !column.mode.is_rail() {
-            continue;
-        }
-        let reserved = rail_control_row_height(
-            metrics.tab_strip_height,
-            metrics.collapsed_group_height,
-            column_rect.rect.size.height,
-        );
-        if reserved <= 0.0 {
-            continue;
-        }
-        rail_column_reservations.insert(column_rect.column, reserved);
-        if let Ok(items) = layout.column_display_order(column_rect.column) {
-            for item in items {
-                rail_group_shifts.entry(item.group).or_insert(reserved);
-            }
-        } else {
-            for group in &column.groups {
-                rail_group_shifts.entry(*group).or_insert(reserved);
-            }
-        }
-    }
+    // Rail mode switches stay pinned; all affected group geometry is shifted together.
+    let (rail_column_reservations, rail_group_shifts) =
+        rail_reservations_by_column(layout, metrics, rects);
 
     let mode_button_groups = rects
         .columns
@@ -234,6 +207,48 @@ pub fn normalize_docked_group_geometry(
     }
 
     normalize_tab_strip_widths(layout, metrics, rects, &rail_groups, &mode_button_groups);
+}
+
+/// Computes the pinned control-row reservation for each rail column and the
+/// corresponding vertical shift for every group displayed inside those columns.
+fn rail_reservations_by_column(
+    layout: &Layout,
+    metrics: &DockMetrics,
+    rects: &LayoutRects,
+) -> (HashMap<NodeId, f32>, HashMap<NodeId, f32>) {
+    let mut rail_column_reservations = HashMap::<NodeId, f32>::new();
+    let mut rail_group_shifts = HashMap::<NodeId, f32>::new();
+
+    for column_rect in &rects.columns {
+        let Some(Node::Column(column)) = layout.node(column_rect.column) else {
+            continue;
+        };
+        if !column.mode.is_rail() {
+            continue;
+        }
+
+        let reserved = rail_control_row_height(
+            metrics.tab_strip_height,
+            metrics.collapsed_group_height,
+            column_rect.rect.size.height,
+        );
+        if reserved <= 0.0 {
+            continue;
+        }
+
+        rail_column_reservations.insert(column_rect.column, reserved);
+        if let Ok(items) = layout.column_display_order(column_rect.column) {
+            for item in items {
+                rail_group_shifts.entry(item.group).or_insert(reserved);
+            }
+        } else {
+            for group in &column.groups {
+                rail_group_shifts.entry(*group).or_insert(reserved);
+            }
+        }
+    }
+
+    (rail_column_reservations, rail_group_shifts)
 }
 
 /// Reserves horizontal space for group controls and distributes the remaining strip
