@@ -23,15 +23,8 @@ mod dock_area_kind;
 mod dock_command;
 mod dock_metrics;
 mod dock_side;
-mod drag_cancel_reason;
-mod drag_drop_action;
-mod drag_drop_request;
-mod drag_handle;
-mod drag_payload;
-mod drag_preview;
+mod drag_types;
 mod drag_session;
-mod drag_session_error;
-mod drag_state;
 mod drop_source;
 mod drop_target;
 mod drop_zone;
@@ -96,15 +89,11 @@ pub use dock_area_kind::DockAreaKind;
 pub use dock_command::DockCommand;
 pub use dock_metrics::DockMetrics;
 pub use dock_side::DockSide;
-pub use drag_cancel_reason::DragCancelReason;
-pub use drag_drop_action::DragDropAction;
-pub use drag_drop_request::DragDropRequest;
-pub use drag_handle::DragHandle;
-pub use drag_payload::DragPayload;
-pub use drag_preview::DragPreview;
+pub use drag_types::{
+    DragCancelReason, DragDropAction, DragDropRequest, DragHandle, DragPayload, DragPreview,
+    DragSessionError, DragState,
+};
 pub use drag_session::DragSession;
-pub use drag_session_error::DragSessionError;
-pub use drag_state::DragState;
 pub use drop_source::DropSource;
 pub use drop_target::DropTarget;
 pub use drop_zone::DropZone;
