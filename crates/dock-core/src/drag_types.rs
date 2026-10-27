@@ -1,9 +1,6 @@
 //! Semantic types and outcomes used by the drag interaction state machine.
 
-use crate::{
-    Axis, CanvasState, ChromeMode, ColumnMode, DockCommand, FloatingGroupId, GeometryError,
-    Layout, NodeId, PanelId, PanelKey, PanelState, Point, Profile, Rect, ValidationError,
-};
+use crate::{DockCommand, DropTarget, FloatingGroupId, NodeId, PanelId, Point, Rect};
 
 /// Why a drag gesture ended without a drop request.
 ///
