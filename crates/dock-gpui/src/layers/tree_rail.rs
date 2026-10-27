@@ -83,6 +83,10 @@ pub(crate) fn render(
                         column: column_rect.column,
                         panel: item.panel,
                     }),
+                    on_open_key: host.command_key(dock_core::DockCommand::OpenFlyout {
+                        column: column_rect.column,
+                        panel: item.panel,
+                    }),
                 }.into_any_element(),
             );
         }
