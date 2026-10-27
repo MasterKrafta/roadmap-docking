@@ -155,8 +155,6 @@ mod hit_result_tests {
 #[path = "hit_test/geometry.rs"]
 mod hit_test_geometry;
 
-#[path = "hit_test/geometry.rs"]
-mod hit_test_geometry;
 use self::hit_test_geometry::{contains, flyout_resize_hit_rect, hit_layout_geometry};
 use std::collections::HashSet;
 
