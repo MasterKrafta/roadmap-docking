@@ -167,6 +167,17 @@ pub fn normalize_docked_group_geometry(
         }
     }
 
+    normalize_rail_overflow_extents(layout, rects, &rail_column_reservations);
+
+    normalize_tab_strip_widths(layout, metrics, rects, &rail_groups, &mode_button_groups);
+}
+
+/// Extends rail-column scroll extents to account for the pinned control-row reservation.
+fn normalize_rail_overflow_extents(
+    layout: &Layout,
+    rects: &mut LayoutRects,
+    rail_column_reservations: &HashMap<NodeId, f32>,
+) {
     for (column_id, reserved) in &rail_column_reservations {
         let Some(column_rect) = rects.columns.iter().find(|entry| entry.column == *column_id) else {
             continue;
@@ -205,8 +216,6 @@ pub fn normalize_docked_group_geometry(
             ));
         }
     }
-
-    normalize_tab_strip_widths(layout, metrics, rects, &rail_groups, &mode_button_groups);
 }
 
 /// Computes the pinned control-row reservation for each rail column and the
