@@ -112,7 +112,7 @@ pub use tab_overflow_rect::TabOverflowRect;
 pub use tab_strip_rect::TabStripRect;
 pub use tabs::Tabs;
 pub use undo_redo_history::{DEFAULT_UNDO_LIMIT, UndoRedoHistory};
-pub use validation_error::ValidationError;
+pub use validation_error::{ValidationError, ValidationReason};
 pub use vertical_overflow::VerticalOverflow;
 #[cfg(feature = "serde")]
 pub use workspace_file::{WORKSPACE_FORMAT, WORKSPACE_VERSION, WorkspaceFile};
