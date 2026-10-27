@@ -1,5 +1,6 @@
 mod commands;
 mod controller;
+mod drag_session;
 mod host_impl;
 mod resize_session;
 

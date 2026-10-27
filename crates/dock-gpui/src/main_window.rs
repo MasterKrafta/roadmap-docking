@@ -1,4 +1,4 @@
-use dock_core::{DockCommand, Point, Rect, Size};
+use dock_core::{DockCommand, DragHandle, DragPayload, Point, Rect, Size};
 use gpui::{
     Context, DispatchPhase, IntoElement, KeyDownEvent, MouseButton, MouseMoveEvent, MouseUpEvent,
     ParentElement, Render, Styled, Subscription, Window, div, px, rgb,
@@ -28,6 +28,17 @@ impl MainWindow {
 
     pub(crate) fn apply_dock_command(&mut self, command: DockCommand) {
         let _ = self.dock.apply(command);
+    }
+
+    pub(crate) fn begin_drag(
+        &mut self,
+        payload: DragPayload,
+        handle: DragHandle,
+        position: gpui::Point<gpui::Pixels>,
+    ) {
+        if let Err(error) = self.dock.begin_drag(payload, handle, dock_pointer(position)) {
+            tracing::debug!(error = ?error, "could not record dock drag pointer-down");
+        }
     }
 
     pub(crate) fn begin_resize(
@@ -85,7 +96,14 @@ impl MainWindow {
         event: &MouseUpEvent,
         cx: &mut Context<Self>,
     ) {
-        if event.button != MouseButton::Left || self.dock.resize_session().is_none() {
+        if event.button != MouseButton::Left {
+            return;
+        }
+
+        if self.dock.resize_session().is_none() {
+            if self.dock.cancel_drag() {
+                cx.notify();
+            }
             return;
         }
 
@@ -129,7 +147,9 @@ impl Render for MainWindow {
             self.activation_subscription = Some(cx.observe_window_activation(
                 window,
                 |this, window, cx| {
-                    if !window.is_window_active() && this.dock.cancel_resize() {
+                    if !window.is_window_active()
+                        && (this.dock.cancel_resize() || this.dock.cancel_drag())
+                    {
                         cx.notify();
                     }
                 },
@@ -142,9 +162,11 @@ impl Render for MainWindow {
         let menu_height = self.theme.metrics.column_header_height.max(1.0);
         let content_height = (height - menu_height).max(1.0);
 
-        // Escape cancels an active resize and restores its pointer-down snapshot.
+        // Escape cancels an active pointer gesture before it can leave stale state.
         let escape_key = cx.listener::<KeyDownEvent>(|this, event, _window, cx| {
-            if event.keystroke.key.eq_ignore_ascii_case("escape") && this.dock.cancel_resize() {
+            if event.keystroke.key.eq_ignore_ascii_case("escape")
+                && (this.dock.cancel_resize() || this.dock.cancel_drag())
+            {
                 cx.stop_propagation();
                 cx.notify();
             }

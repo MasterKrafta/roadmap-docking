@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use dock_core::{
     create_initial_layout, Axis, CommandError, CommandOutcome, ComputeRectsError, DockCommand,
-    DockMetrics, DockSide, DropTarget, DropZone, Layout, Node, NodeId, PanelId, Point, Profile,
-    Rect, ResizeEdge, UndoRedoHistory,
+    DockMetrics, DockSide, DragHandle, DragPayload, DropTarget, DropZone, Layout, Node, NodeId,
+    PanelId, Point, Profile, Rect, ResizeEdge, UndoRedoHistory,
 };
 use gpui::ScrollHandle;
 use ui::Theme;
@@ -11,12 +11,14 @@ use ui::Theme;
 use crate::{dock_metrics_from_theme, FrameGeometry};
 use crate::requests::ResizeHandle;
 
+use super::drag_session::{DragGesture, DragStartError};
 use super::resize_session::{ResizeSession, ResizeStartError, ResizeUpdateError, StartGeometry};
 
 #[derive(Debug)]
 enum Session {
     Idle,
     Resize(ResizeSession),
+    Drag(DragGesture),
 }
 
 /// Owns the live layout and the view-local state needed to render it.
@@ -57,6 +59,7 @@ impl DockController {
         // A persistent command must not race an uncommitted preview based on an
         // older layout snapshot. Roll the gesture back before mutating history.
         self.cancel_resize();
+        self.cancel_drag();
         let result = self
             .history
             .apply(&mut self.layout, command, &self.metrics);
@@ -66,6 +69,7 @@ impl DockController {
     /// Restores the preceding recorded layout revision, if one exists.
     pub(crate) fn undo(&mut self) -> Result<bool, CommandError> {
         self.cancel_resize();
+        self.cancel_drag();
         let result = self.history.undo(&mut self.layout, &self.metrics);
         self.track_command_result(result, "undo")
     }
@@ -73,8 +77,44 @@ impl DockController {
     /// Reapplies the next recorded layout revision, if one exists.
     pub(crate) fn redo(&mut self) -> Result<bool, CommandError> {
         self.cancel_resize();
+        self.cancel_drag();
         let result = self.history.redo(&mut self.layout, &self.metrics);
         self.track_command_result(result, "redo")
+    }
+
+    /// Records a potential drag on pointer-down without starting a Core drag yet.
+    ///
+    /// The Core state machine starts only after pointer movement crosses its threshold,
+    /// preserving ordinary click behavior for tabs.
+    pub(crate) fn begin_drag(
+        &mut self,
+        payload: DragPayload,
+        handle: DragHandle,
+        pointer_start: Point,
+    ) -> Result<(), DragStartError> {
+        if !matches!(&self.session, Session::Idle) {
+            return Err(DragStartError::SessionAlreadyActive);
+        }
+
+        self.session = Session::Drag(DragGesture::begin(payload, handle, pointer_start)?);
+        Ok(())
+    }
+
+    /// Clears a pending drag press. The active drag movement is implemented in the
+    /// next step; for now this keeps short clicks from leaving the controller busy.
+    pub(crate) fn cancel_drag(&mut self) -> bool {
+        let Session::Drag(gesture) = &self.session else {
+            return false;
+        };
+        tracing::debug!(
+            payload = ?gesture.payload,
+            handle = ?gesture.handle,
+            origin = ?gesture.origin,
+            "cancelled pending dock drag press"
+        );
+        self.session = Session::Idle;
+        self.last_error = None;
+        true
     }
 
     /// Begins a resize only when no other pointer session is active.
@@ -109,7 +149,7 @@ impl DockController {
     pub(crate) fn resize_session(&self) -> Option<&ResizeSession> {
         match &self.session {
             Session::Resize(session) => Some(session),
-            Session::Idle => None,
+            Session::Idle | Session::Drag(_) => None,
         }
     }
 
@@ -122,7 +162,9 @@ impl DockController {
         pointer: Point,
     ) -> Result<CommandOutcome, ResizeUpdateError> {
         let (mut candidate, command) = match &self.session {
-            Session::Idle => return Err(ResizeUpdateError::NoActiveSession),
+            Session::Idle | Session::Drag(_) => {
+                return Err(ResizeUpdateError::NoActiveSession);
+            }
             Session::Resize(session) => {
                 let command = session.command_for_pointer(pointer)?;
                 let command =
@@ -153,9 +195,16 @@ impl DockController {
         &mut self,
         pointer: Point,
     ) -> Result<CommandOutcome, ResizeUpdateError> {
+        if !matches!(&self.session, Session::Resize(_)) {
+            return Err(ResizeUpdateError::NoActiveSession);
+        }
         let session = match std::mem::replace(&mut self.session, Session::Idle) {
             Session::Resize(session) => session,
             Session::Idle => return Err(ResizeUpdateError::NoActiveSession),
+            Session::Drag(gesture) => {
+                self.session = Session::Drag(gesture);
+                return Err(ResizeUpdateError::NoActiveSession);
+            }
         };
         let command = session
             .command_for_pointer(pointer)
@@ -173,14 +222,20 @@ impl DockController {
     ///
     /// Returns false when there is no resize session to cancel.
     pub(crate) fn cancel_resize(&mut self) -> bool {
-        match std::mem::replace(&mut self.session, Session::Idle) {
-            Session::Resize(session) => {
-                self.layout = session.into_baseline();
-                self.last_error = None;
-                true
-            }
-            Session::Idle => false,
+        if !matches!(&self.session, Session::Resize(_)) {
+            return false;
         }
+        let session = match std::mem::replace(&mut self.session, Session::Idle) {
+            Session::Resize(session) => session,
+            Session::Idle => return false,
+            Session::Drag(gesture) => {
+                self.session = Session::Drag(gesture);
+                return false;
+            }
+        };
+        self.layout = session.into_baseline();
+        self.last_error = None;
+        true
     }
 
     /// Computes frame geometry and synchronizes the measured canvas remainder.
