@@ -226,9 +226,12 @@ impl DockController {
         pointer: Point,
     ) -> Result<Option<DragDropRequest>, DragUpdateError> {
         let session = std::mem::replace(&mut self.session, Session::Idle);
-        let Session::Drag(mut gesture) = session else {
-            self.session = session;
-            return Ok(None);
+        let mut gesture = match session {
+            Session::Drag(gesture) => gesture,
+            other => {
+                self.session = other;
+                return Ok(None);
+            }
         };
 
         let Some(mut core) = gesture.core.take() else {
@@ -238,11 +241,10 @@ impl DockController {
 
         // Resolve the exact release point rather than reusing the previous move's target.
         core.pointer_move(pointer)?;
-        let target = gesture
-            .resolver
-            .as_ref()
-            .map(|resolver| resolver.resolve(pointer))
-            .transpose()?;
+        let target = match gesture.resolver.as_ref() {
+            Some(resolver) => resolver.resolve(pointer)?,
+            None => None,
+        };
         if gesture.resolver.is_some() {
             core.set_drop_target(target)?;
         }
