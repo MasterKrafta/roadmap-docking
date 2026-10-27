@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use dock_core::{DragPayload, Node, NodeId, Point, Rect, Size};
+use dock_core::{DragHandle, DragPayload, Node, NodeId, Point, Rect, Size};
 use gpui::{
     AnyElement, IntoElement, ParentElement, Styled, div, px, rgb, ScrollHandle,
 };
@@ -26,9 +26,14 @@ pub(crate) fn render(
     let mut elements = Vec::new();
 
     // Dim the source before painting drop targets so target feedback remains prominent.
-    if let Some(source_rect) = drag_source_rect(data, overlay.preview.payload)
-        && let Some(source_rect) =
-            visible_source_rect(data, overlay.preview.payload, source_rect, overflows, scroll_handles)
+    if let Some(source_rect) = drag_source_rect(data, overlay.preview.payload, overlay.handle)
+        && let Some(source_rect) = visible_source_rect(
+            data,
+            overlay.preview.payload,
+            source_rect,
+            overflows,
+            scroll_handles,
+        )
     {
         elements.push(
             rect_element(
@@ -101,8 +106,25 @@ pub(crate) fn render(
     elements
 }
 
-fn drag_source_rect(data: &RenderData<'_>, payload: DragPayload) -> Option<Rect> {
+fn drag_source_rect(
+    data: &RenderData<'_>,
+    payload: DragPayload,
+    handle: DragHandle,
+) -> Option<Rect> {
     match payload {
+        DragPayload::Panel { panel } if handle == DragHandle::FlyoutPanel => data
+            .rects
+            .panels
+            .iter()
+            .find(|panel_rect| panel_rect.panel == panel)
+            .map(|panel_rect| panel_rect.rect)
+            .or_else(|| {
+                data.rects
+                    .tab_headers
+                    .iter()
+                    .find(|header| header.panel == panel)
+                    .map(|header| header.rect)
+            }),
         DragPayload::Panel { panel } => data
             .rects
             .tab_headers
