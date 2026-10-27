@@ -35,6 +35,135 @@ pub struct ThemeMetrics {
     pub min_document_width: f32,
     pub max_columns: usize,
 }
+
+impl ThemeMetrics {
+    /// Validates finite, positive layout metrics and their required relationships.
+    pub fn validate(self) -> Result<(), &'static str> {
+        let positive = [
+            ("column_header_height", self.column_header_height),
+            ("tab_strip_height", self.tab_strip_height),
+            ("group_control_button_width", self.group_control_button_width),
+            ("tab_drag_zone_width", self.tab_drag_zone_width),
+            ("button_size", self.button_size),
+            ("splitter_thickness", self.splitter_thickness),
+            ("splitter_hit_zone", self.splitter_hit_zone),
+            ("edge_drop_zone_width", self.edge_drop_zone_width),
+            ("drop_edge_zone", self.drop_edge_zone),
+            ("drop_indicator_thickness", self.drop_indicator_thickness),
+            ("drop_outline_thickness", self.drop_outline_thickness),
+            ("drag_start_threshold", self.drag_start_threshold),
+            ("default_column_width", self.default_column_width),
+            ("min_column_width", self.min_column_width),
+            ("column_tab_width", self.column_tab_width),
+            ("rail_width", self.rail_width),
+            ("rail_collapse_width", self.rail_collapse_width),
+            ("rail_expand_width", self.rail_expand_width),
+            ("min_group_height", self.min_group_height),
+            ("collapsed_group_height", self.collapsed_group_height),
+            ("min_document_width", self.min_document_width),
+        ];
+
+        for (name, value) in positive {
+            if !value.is_finite() {
+                return Err(match name {
+                    "column_header_height" => "column_header_height must be finite",
+                    "tab_strip_height" => "tab_strip_height must be finite",
+                    "group_control_button_width" => "group_control_button_width must be finite",
+                    "tab_drag_zone_width" => "tab_drag_zone_width must be finite",
+                    "button_size" => "button_size must be finite",
+                    "splitter_thickness" => "splitter_thickness must be finite",
+                    "splitter_hit_zone" => "splitter_hit_zone must be finite",
+                    "edge_drop_zone_width" => "edge_drop_zone_width must be finite",
+                    "drop_edge_zone" => "drop_edge_zone must be finite",
+                    "drop_indicator_thickness" => "drop_indicator_thickness must be finite",
+                    "drop_outline_thickness" => "drop_outline_thickness must be finite",
+                    "drag_start_threshold" => "drag_start_threshold must be finite",
+                    "default_column_width" => "default_column_width must be finite",
+                    "min_column_width" => "min_column_width must be finite",
+                    "column_tab_width" => "column_tab_width must be finite",
+                    "rail_width" => "rail_width must be finite",
+                    "rail_collapse_width" => "rail_collapse_width must be finite",
+                    "rail_expand_width" => "rail_expand_width must be finite",
+                    "min_group_height" => "min_group_height must be finite",
+                    "collapsed_group_height" => "collapsed_group_height must be finite",
+                    "min_document_width" => "min_document_width must be finite",
+                    _ => "theme metric must be finite",
+                });
+            }
+            if value <= 0.0 {
+                return Err(match name {
+                    "column_header_height" => "column_header_height must be positive",
+                    "tab_strip_height" => "tab_strip_height must be positive",
+                    "group_control_button_width" => "group_control_button_width must be positive",
+                    "tab_drag_zone_width" => "tab_drag_zone_width must be positive",
+                    "button_size" => "button_size must be positive",
+                    "splitter_thickness" => "splitter_thickness must be positive",
+                    "splitter_hit_zone" => "splitter_hit_zone must be positive",
+                    "edge_drop_zone_width" => "edge_drop_zone_width must be positive",
+                    "drop_edge_zone" => "drop_edge_zone must be positive",
+                    "drop_indicator_thickness" => "drop_indicator_thickness must be positive",
+                    "drop_outline_thickness" => "drop_outline_thickness must be positive",
+                    "drag_start_threshold" => "drag_start_threshold must be positive",
+                    "default_column_width" => "default_column_width must be positive",
+                    "min_column_width" => "min_column_width must be positive",
+                    "column_tab_width" => "column_tab_width must be positive",
+                    "rail_width" => "rail_width must be positive",
+                    "rail_collapse_width" => "rail_collapse_width must be positive",
+                    "rail_expand_width" => "rail_expand_width must be positive",
+                    "min_group_height" => "min_group_height must be positive",
+                    "collapsed_group_height" => "collapsed_group_height must be positive",
+                    "min_document_width" => "min_document_width must be positive",
+                    _ => "theme metric must be positive",
+                });
+            }
+        }
+
+        for (name, value) in [
+            ("button_gap", self.button_gap),
+            ("content_padding", self.content_padding),
+        ] {
+            if !value.is_finite() || value < 0.0 {
+                return Err(if name == "button_gap" {
+                    "button_gap must be finite and non-negative"
+                } else {
+                    "content_padding must be finite and non-negative"
+                });
+            }
+        }
+
+        if !self.default_column_split_ratio.is_finite()
+            || !(0.0..=1.0).contains(&self.default_column_split_ratio)
+            || self.default_column_split_ratio == 0.0
+            || self.default_column_split_ratio == 1.0
+        {
+            return Err("default_column_split_ratio must be finite and strictly between 0 and 1");
+        }
+        if self.min_column_width > self.default_column_width {
+            return Err("min_column_width must not exceed default_column_width");
+        }
+        if self.rail_width > self.min_column_width {
+            return Err("rail_width must not exceed min_column_width");
+        }
+        if self.splitter_thickness > self.splitter_hit_zone {
+            return Err("splitter_thickness must not exceed splitter_hit_zone");
+        }
+        if self.rail_expand_width <= self.rail_collapse_width {
+            return Err("rail_expand_width must exceed rail_collapse_width");
+        }
+        if self.collapsed_group_height > self.min_group_height {
+            return Err("collapsed_group_height must not exceed min_group_height");
+        }
+        if self.column_header_height + self.tab_strip_height > self.min_group_height {
+            return Err("column_header_height + tab_strip_height must not exceed min_group_height");
+        }
+        if self.max_columns == 0 {
+            return Err("max_columns must be positive");
+        }
+
+        Ok(())
+    }
+}
+
 impl Default for ThemeMetrics {
     fn default() -> Self {
         Self {
