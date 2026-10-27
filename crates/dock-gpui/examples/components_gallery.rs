@@ -326,6 +326,7 @@ impl Render for Gallery {
                     on_capture_drag_start: Some(noop_mouse_down()),
                     on_close: Some(noop_click()),
                     on_collapse: Some(noop_click()),
+                    collapse_label: "−",
                 }),
             ))
             .child(card(

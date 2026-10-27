@@ -25,7 +25,7 @@ pub struct FloatingTitle {
     pub on_drag_start: DragStartHandler,
     /// Starts dragging the entire floating group toward a docking target, when supported.
     pub on_capture_drag_start: Option<DragStartHandler>,
-    /// Optional close command; omitted until the host provides a safe close-window operation.
+    /// Optional action that closes all tab groups contained in this floating window.
     pub on_close: Option<ClickHandler>,
     /// Optional collapse/expand command for the floating window's single tab group.
     pub on_collapse: Option<ClickHandler>,
