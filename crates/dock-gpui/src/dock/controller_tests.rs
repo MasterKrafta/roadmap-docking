@@ -2337,7 +2337,7 @@
     }
 
     #[test]
-    fn panel_reorder_and_same_group_edge_split_each_commit_one_undo_step() {
+    fn panel_reorder_commits_once_and_own_group_edge_drop_is_no_op() {
         let mut controller = DockController::new_initial(&Theme::default()).unwrap();
         let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
         let (group, original_order, moving_node, panel) = controller
@@ -2401,12 +2401,15 @@
         }
         assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
 
-        // Start an independent history assertion for the edge-split operation.
+        // A panel dropped on its own group's edge is a no-op, even when
+        // the group contains multiple tabs; detaching requires a different target group.
         controller.history.clear();
         let split_target = DropTarget::GroupEdge {
             group,
             zone: dock_core::DropZone::Right,
         };
+        let before_edge_drop = layout_debug_snapshot(&controller);
+        let version_before_edge_drop = controller.layout().version();
         let action = controller
             .commit_drop_request(
                 drop_request(
@@ -2418,26 +2421,12 @@
                 viewport,
             )
             .unwrap();
-        assert_eq!(
-            action,
-            DragDropAction::Command(DockCommand::MovePanel {
-                panel,
-                target: split_target,
-            })
-        );
-        assert_ne!(group_containing_panel(&controller, panel), Some(group));
-        assert_eq!(controller.history.undo_len(), 1);
-        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
 
-        assert!(controller.undo().unwrap());
+        assert_eq!(action, DragDropAction::NoOp);
+        assert_eq!(layout_debug_snapshot(&controller), before_edge_drop);
+        assert_eq!(controller.layout().version(), version_before_edge_drop);
         assert_eq!(group_containing_panel(&controller, panel), Some(group));
         assert_eq!(controller.history.undo_len(), 0);
-        assert_eq!(controller.history.redo_len(), 1);
-        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
-
-        assert!(controller.redo().unwrap());
-        assert_ne!(group_containing_panel(&controller, panel), Some(group));
-        assert_eq!(controller.history.undo_len(), 1);
         assert_eq!(controller.history.redo_len(), 0);
         assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
     }
