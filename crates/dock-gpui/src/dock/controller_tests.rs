@@ -1339,7 +1339,7 @@
                 },
                 "main" => DropTarget::MainColumn {
                     side: DockSide::Right,
-                    index: main_columns.len(),
+                    index: 0,
                 },
                 _ => unreachable!("all group target cases are listed above"),
             };
@@ -1393,7 +1393,7 @@
                     DragDropAction::Command(DockCommand::MoveGroupToMainColumn {
                         group: source_group,
                         side: DockSide::Right,
-                        index: main_columns.len(),
+                        index: 0,
                     })
                 ),
                 _ => unreachable!("all group target cases are listed above"),
@@ -1924,7 +1924,7 @@
                 },
                 "main" => DropTarget::MainColumn {
                     side: DockSide::Right,
-                    index: main_columns.len(),
+                    index: 0,
                 },
                 _ => unreachable!("all panel target cases are listed above"),
             };
@@ -2042,7 +2042,7 @@
                 },
                 "main" => DropTarget::MainColumn {
                     side: DockSide::Right,
-                    index: main_columns.len(),
+                    index: 0,
                 },
                 _ => unreachable!("all flyout target cases are listed above"),
             };
