@@ -1647,6 +1647,78 @@
     }
 
     #[test]
+    fn floating_capture_docks_a_panel_root_and_records_one_undo_step() {
+        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+        let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
+        let (_, panel_node, panel) = first_panels_by_group(&controller)[0];
+        controller
+            .apply(DockCommand::Float {
+                node: panel_node,
+                bounds: Rect::new(Point::new(80.0, 60.0), Size::new(500.0, 400.0)),
+            })
+            .unwrap();
+        controller.history.clear();
+
+        let floating_id = controller
+            .layout()
+            .floating_groups()
+            .next()
+            .map(|(id, _)| id)
+            .expect("floating a panel root should create a floating window");
+        let (target_group, target_index) = first_panels_by_group(&controller)
+            .into_iter()
+            .find_map(|(group, _, _)| match controller.layout().node(group) {
+                Some(Node::Tabs(tabs)) => Some((group, tabs.children.len())),
+                _ => None,
+            })
+            .expect("a docked Tabs group should remain as a capture target");
+        let target = DropTarget::GroupTabs {
+            group: target_group,
+            index: target_index,
+        };
+
+        let action = controller
+            .commit_drop_request(
+                DragDropRequest {
+                    payload: DragPayload::FloatingGroup { group: floating_id },
+                    handle: DragHandle::FloatingCapture,
+                    origin: Point::new(120.0, 80.0),
+                    point: Point::new(420.0, 260.0),
+                    target: Some(target),
+                    floating_bounds: None,
+                },
+                viewport,
+            )
+            .unwrap();
+        assert_eq!(
+            action,
+            DragDropAction::Command(DockCommand::DockFloating {
+                group: floating_id,
+                target,
+            })
+        );
+        assert_eq!(controller.layout().floating_groups().count(), 0);
+        assert_eq!(group_containing_panel(&controller, panel), Some(target_group));
+        assert_eq!(controller.history.undo_len(), 1);
+        assert_eq!(controller.history.redo_len(), 0);
+        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+
+        assert!(controller.undo().unwrap());
+        assert_eq!(controller.layout().floating_groups().count(), 1);
+        assert_ne!(group_containing_panel(&controller, panel), Some(target_group));
+        assert_eq!(controller.history.undo_len(), 0);
+        assert_eq!(controller.history.redo_len(), 1);
+        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+
+        assert!(controller.redo().unwrap());
+        assert_eq!(controller.layout().floating_groups().count(), 0);
+        assert_eq!(group_containing_panel(&controller, panel), Some(target_group));
+        assert_eq!(controller.history.undo_len(), 1);
+        assert_eq!(controller.history.redo_len(), 0);
+        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+    }
+
+    #[test]
     fn floating_capture_rejects_free_area_without_mutating_layout_or_history() {
         let mut controller = DockController::new_initial(&Theme::default()).unwrap();
         let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
