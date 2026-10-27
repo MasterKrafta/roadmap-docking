@@ -3452,3 +3452,15 @@ fn frame_preserves_scroll_handles_for_existing_columns_without_overflow() {
     );
 }
 
+
+
+#[test]
+fn initial_layout_rejects_invalid_rail_thresholds() {
+    let mut theme = Theme::default();
+    theme.metrics.rail_expand_width = theme.metrics.rail_collapse_width;
+
+    assert!(
+        DockController::new_initial(&theme).is_err(),
+        "invalid rail hysteresis thresholds should be rejected, not silently disable rail transitions"
+    );
+}
