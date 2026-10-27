@@ -1,5 +1,5 @@
 use dock_core::{
-    create_initial_layout, DockMetrics, Profile, WorkspaceFile, WorkspaceLoadOptions,
+    create_initial_layout, Profile, WorkspaceFile, WorkspaceLoadOptions,
 };
 use dock_gpui::{dock_metrics_from_theme, panels};
 use ui::Theme;
