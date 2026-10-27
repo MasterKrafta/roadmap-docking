@@ -36,6 +36,12 @@ impl RenderOnce for RailEntry {
         } else {
             self.theme.colors.toolbar_background
         };
+        let hover_background = if self.active {
+            background
+        } else {
+            self.theme.colors.hover
+        };
+        let typography = self.theme.typography;
         let entry = div()
             .absolute()
             .left(px(self.rect.origin.x))
@@ -43,13 +49,18 @@ impl RenderOnce for RailEntry {
             .w(px(self.rect.size.width))
             .h(px(self.rect.size.height))
             .bg(rgb(background))
-            .text_color(rgb(self.theme.colors.primary_text));
+            .text_color(rgb(self.theme.colors.primary_text))
+            .font_family(typography.family)
+            .text_size(px(typography.tab_size))
+            .line_height(px(typography.line_height));
         let entry = if self.mode == ColumnMode::IconsOnly {
             entry.flex().items_center().justify_center().child(label)
         } else {
             entry.flex().items_center().child(label)
         };
 
-        with_focus_ring(entry.id(self.id), &self.theme).on_click(self.on_open)
+        with_focus_ring(entry.id(self.id), &self.theme)
+            .hover(move |style| style.bg(rgb(hover_background)))
+            .on_click(self.on_open)
     }
 }
