@@ -1161,6 +1161,102 @@
     }
 
     #[test]
+    fn free_area_drop_from_flyout_uses_flyout_command_closes_flyout_and_undo_restores_panel() {
+        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+        let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
+        let samples = first_panels_by_group(&controller);
+
+        let (column_id, panel) = samples
+            .iter()
+            .find_map(|(group, _, panel)| {
+                controller.layout().nodes().find_map(|(node_id, node)| match node {
+                    Node::Column(column) if column.groups.contains(group) => {
+                        Some((node_id, *panel))
+                    }
+                    _ => None,
+                })
+            })
+            .expect("an initial dock group should belong to a main column");
+
+        controller
+            .apply(DockCommand::SetColumnMode {
+                column: column_id,
+                mode: ColumnMode::IconsOnly,
+            })
+            .unwrap();
+
+        // The rail mode is setup for this scenario, not part of the drop's undo step.
+        controller.history.clear();
+        controller
+            .apply(DockCommand::OpenFlyout {
+                column: column_id,
+                panel,
+            })
+            .unwrap();
+        assert!(controller.layout().flyout().is_some());
+        assert_eq!(controller.history.undo_len(), 0);
+
+        let frame = controller.frame(viewport).unwrap();
+        let flyout_rect = frame
+            .rects()
+            .flyout
+            .filter(|flyout| flyout.panel == panel)
+            .expect("open flyout should have geometry")
+            .rect;
+        let origin = Point::new(
+            flyout_rect.origin.x + 24.0,
+            flyout_rect.origin.y + 40.0,
+        );
+        let pointer = Point::new(650.0, 420.0);
+        let original_floating_count = controller.layout().floating_groups().count();
+        let original_panel_count = controller.layout().panel_instances().count();
+
+        let action = controller
+            .commit_drop_request(
+                free_area_request(
+                    DragPayload::Panel { panel },
+                    DragHandle::FlyoutPanel,
+                    origin,
+                    pointer,
+                ),
+                viewport,
+            )
+            .unwrap();
+
+        let bounds = match action {
+            DragDropAction::Command(DockCommand::FloatPanelFromFlyout {
+                panel: command_panel,
+                bounds,
+            }) => {
+                assert_eq!(command_panel, panel);
+                bounds
+            }
+            other => panic!("expected FloatPanelFromFlyout for a flyout detach, got {other:?}"),
+        };
+        assert_bounds_inside(bounds, viewport);
+        assert!(controller.layout().flyout().is_none());
+        assert_eq!(controller.layout().floating_groups().count(), original_floating_count + 1);
+        assert_eq!(controller.layout().panel_instances().count(), original_panel_count);
+        assert_eq!(controller.history.undo_len(), 1);
+        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+
+        assert!(controller.undo().unwrap());
+        assert!(
+            controller.layout().flyout().is_none(),
+            "undo restores persistent placement, while transient flyout visibility stays closed"
+        );
+        assert_eq!(controller.layout().floating_groups().count(), original_floating_count);
+        assert_eq!(controller.layout().panel_instances().count(), original_panel_count);
+        assert_eq!(controller.history.undo_len(), 0);
+        assert_eq!(controller.history.redo_len(), 1);
+        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+
+        assert!(controller.redo().unwrap());
+        assert_eq!(controller.layout().floating_groups().count(), original_floating_count + 1);
+        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+    }
+
+    #[test]
     fn no_op_drop_does_not_change_layout_or_history() {
         let mut controller = DockController::new_initial(&Theme::default()).unwrap();
         let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
