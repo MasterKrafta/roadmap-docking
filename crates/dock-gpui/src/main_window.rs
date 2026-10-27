@@ -106,8 +106,9 @@ impl MainWindow {
             return;
         }
 
+        let viewport = self.dock_viewport(window);
         let frame = if self.dock.drag_needs_start(pointer) {
-            match self.dock.frame(self.dock_viewport(window)) {
+            match self.dock.frame(viewport) {
                 Ok(frame) => Some(frame),
                 Err(error) => {
                     tracing::warn!(error = ?error, "could not compute geometry to start dock drag");
@@ -121,7 +122,7 @@ impl MainWindow {
             None
         };
 
-        match self.dock.update_drag(pointer, frame.as_ref()) {
+        match self.dock.update_drag(pointer, viewport, frame.as_ref()) {
             Ok(changed) => {
                 if changed {
                     cx.notify();
@@ -139,6 +140,7 @@ impl MainWindow {
     pub(crate) fn handle_surface_mouse_up(
         &mut self,
         event: &MouseUpEvent,
+        window: &Window,
         cx: &mut Context<Self>,
     ) {
         if event.button != MouseButton::Left {
@@ -152,7 +154,7 @@ impl MainWindow {
                 self.theme.metrics.column_header_height.max(1.0),
             );
             let mut changed = had_overlay;
-            match self.dock.finish_drag(pointer) {
+            match self.dock.finish_drag(pointer, self.dock_viewport(window)) {
                 Ok(Some(request)) => {
                     changed = true;
                     // Stage 11 will translate this semantic request into one DockCommand.
@@ -272,8 +274,8 @@ impl Render for MainWindow {
             },
         );
 
-        let outside_up = cx.listener::<MouseUpEvent>(|this, event, _window, cx| {
-            this.handle_surface_mouse_up(event, cx);
+        let outside_up = cx.listener::<MouseUpEvent>(|this, event, window, cx| {
+            this.handle_surface_mouse_up(event, window, cx);
         });
         window.on_mouse_event(
             move |event: &MouseUpEvent, phase, window, cx| {
