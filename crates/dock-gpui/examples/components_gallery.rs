@@ -12,7 +12,7 @@ use dock_core::{
     Axis, ColumnMode, FloatingGroupId, NodeId, PanelId, Point, Rect, ResizeEdge, Size,
 };
 use gpui::{
-    App, ClickEvent, Context, IntoElement, InteractiveElement, MouseDownEvent, ParentElement,
+    App, ClickEvent, Context, IntoElement, InteractiveElement, KeyDownEvent, MouseDownEvent, ParentElement,
     Render, StatefulInteractiveElement, Styled, Window, div, px, rgb,
 };
 use slotmap::SlotMap;
@@ -30,6 +30,7 @@ const CARD_WIDTH: f32 = 420.0;
 const CARD_HEIGHT: f32 = 138.0;
 
 type ClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
+type KeyDownHandler = Box<dyn Fn(&KeyDownEvent, &mut Window, &mut App) + 'static>;
 type MouseDownHandler = Box<dyn Fn(&MouseDownEvent, &mut Window, &mut App) + 'static>;
 
 struct Gallery {
@@ -146,6 +147,7 @@ impl Render for Gallery {
                             active: true,
                             theme,
                             on_activate: noop_click(),
+                            on_activate_key: noop_key_down(),
                             on_collapse_toggle: noop_click(),
                             on_drag_start: noop_mouse_down(),
                         })
@@ -156,6 +158,7 @@ impl Render for Gallery {
                             active: false,
                             theme,
                             on_activate: noop_click(),
+                            on_activate_key: noop_key_down(),
                             on_collapse_toggle: noop_click(),
                             on_drag_start: noop_mouse_down(),
                         }),
@@ -179,6 +182,7 @@ impl Render for Gallery {
                             active: true,
                             theme,
                             on_activate: noop_click(),
+                            on_activate_key: noop_key_down(),
                             on_collapse_toggle: noop_click(),
                             on_drag_start: noop_mouse_down(),
                         })
@@ -189,6 +193,7 @@ impl Render for Gallery {
                             active: false,
                             theme,
                             on_activate: noop_click(),
+                            on_activate_key: noop_key_down(),
                             on_collapse_toggle: noop_click(),
                             on_drag_start: noop_mouse_down(),
                         })
@@ -345,6 +350,7 @@ impl Render for Gallery {
                             active: true,
                             theme,
                             on_open: noop_click(),
+                            on_open_key: noop_key_down(),
                         })
                         .child(RailEntry {
                             id: "gallery-rail-icons".to_owned(),
@@ -355,6 +361,7 @@ impl Render for Gallery {
                             active: false,
                             theme,
                             on_open: noop_click(),
+                            on_open_key: noop_key_down(),
                         }),
                 ),
             ))
@@ -453,6 +460,10 @@ fn rect(x: f32, y: f32, width: f32, height: f32) -> Rect {
 }
 
 fn noop_click() -> ClickHandler {
+    Box::new(|_, _, _| {})
+}
+
+fn noop_key_down() -> KeyDownHandler {
     Box::new(|_, _, _| {})
 }
 
