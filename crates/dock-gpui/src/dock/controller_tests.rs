@@ -1282,6 +1282,7 @@
         let layout_before = layout_debug_snapshot(&controller);
         let version_before = controller.layout().version();
 
+        let drag_threshold = controller.metrics().drag_threshold;
         controller
             .begin_drag(
                 DragPayload::Panel { panel },
@@ -1292,7 +1293,7 @@
         assert!(
             controller
                 .update_drag(
-                    Point::new(origin.x + controller.metrics().drag_threshold + 20.0, origin.y),
+                    Point::new(origin.x + drag_threshold + 20.0, origin.y),
                     viewport,
                     Some(&frame),
                 )
@@ -1340,6 +1341,7 @@
         let layout_before = layout_debug_snapshot(&controller);
         let version_before = controller.layout().version();
 
+        let drag_threshold = controller.metrics().drag_threshold;
         controller
             .begin_drag(
                 DragPayload::Panel { panel },
@@ -1350,7 +1352,7 @@
         assert!(
             controller
                 .update_drag(
-                    Point::new(origin.x + controller.metrics().drag_threshold + 20.0, origin.y),
+                    Point::new(origin.x + drag_threshold + 20.0, origin.y),
                     viewport,
                     Some(&frame),
                 )
