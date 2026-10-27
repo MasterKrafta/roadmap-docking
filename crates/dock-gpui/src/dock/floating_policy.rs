@@ -88,6 +88,67 @@ pub(super) fn initial_float_bounds(
     Ok(bounds)
 }
 
+
+/// Keeps a moved floating window inside the same viewport used by Core geometry.
+///
+/// Core clamps floating rectangles for rendering without rewriting the persistent
+/// model. Applying this policy to MoveFloating prevents the saved origin from
+/// drifting away from the visible rectangle after a drag.
+pub(super) fn clamp_floating_origin(
+    requested_origin: Point,
+    visible_bounds: Rect,
+    viewport: Rect,
+) -> Result<Point, CommandError> {
+    if !requested_origin.is_finite() {
+        return Err(CommandError::InvalidValue {
+            field: "origin",
+            reason: "floating window origin must be finite",
+        });
+    }
+    visible_bounds
+        .validate_non_empty()
+        .map_err(|_| CommandError::InvalidValue {
+            field: "bounds",
+            reason: "visible floating bounds must be finite and positive",
+        })?;
+    viewport
+        .validate_non_empty()
+        .map_err(|_| CommandError::InvalidValue {
+            field: "viewport",
+            reason: "floating window viewport must be finite and positive",
+        })?;
+
+    if visible_bounds.size.width > viewport.size.width
+        || visible_bounds.size.height > viewport.size.height
+    {
+        return Err(CommandError::InvalidValue {
+            field: "bounds",
+            reason: "visible floating window must fit within the viewport",
+        });
+    }
+
+    let max_x = viewport.origin.x + (viewport.size.width - visible_bounds.size.width);
+    let max_y = viewport.origin.y + (viewport.size.height - visible_bounds.size.height);
+    if !max_x.is_finite() || !max_y.is_finite() {
+        return Err(CommandError::InvalidValue {
+            field: "viewport",
+            reason: "floating window clamp edges are not finite",
+        });
+    }
+
+    let origin = Point::new(
+        requested_origin.x.clamp(viewport.origin.x, max_x),
+        requested_origin.y.clamp(viewport.origin.y, max_y),
+    );
+    if !origin.is_finite() {
+        return Err(CommandError::InvalidValue {
+            field: "origin",
+            reason: "clamped floating window origin is not finite",
+        });
+    }
+    Ok(origin)
+}
+
 /// Finds the frontmost floating window containing the pointer.
 ///
 /// The caller supplies targets in Core's hit-test order, with the frontmost
@@ -250,6 +311,30 @@ mod tests {
                 &invalid_metrics,
             )
             .is_err()
+        );
+    }
+
+    #[test]
+    fn floating_move_origin_clamps_to_viewport_edges_without_changing_window_size() {
+        use super::clamp_floating_origin;
+
+        let viewport = Rect::new(Point::new(10.0, 20.0), Size::new(1000.0, 700.0));
+        let visible_bounds = Rect::new(Point::new(40.0, 60.0), Size::new(420.0, 300.0));
+
+        assert_eq!(
+            clamp_floating_origin(Point::new(-500.0, -90.0), visible_bounds, viewport).unwrap(),
+            Point::new(10.0, 20.0),
+            "the window must not move above the client area or beyond its left edge"
+        );
+        assert_eq!(
+            clamp_floating_origin(Point::new(900.0, 900.0), visible_bounds, viewport).unwrap(),
+            Point::new(590.0, 420.0),
+            "the full rectangle must remain inside the viewport"
+        );
+        assert_eq!(
+            clamp_floating_origin(Point::new(120.0, 140.0), visible_bounds, viewport).unwrap(),
+            Point::new(120.0, 140.0),
+            "an in-range position must remain unchanged"
         );
     }
 

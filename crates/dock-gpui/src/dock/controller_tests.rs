@@ -1901,6 +1901,65 @@
     }
 
     #[test]
+    fn floating_title_drag_clamps_position_to_viewport_and_remains_undoable() {
+        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+        let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
+        let (floating_id, original_bounds, origin) =
+            start_active_floating_title_drag(&mut controller, viewport);
+
+        let release = Point::new(-1000.0, -1000.0);
+        let request = controller
+            .finish_drag(release, viewport)
+            .unwrap()
+            .expect("floating title release should produce a move request");
+        let action = controller.commit_drop_request(request, viewport).unwrap();
+
+        assert_eq!(
+            action,
+            DragDropAction::Command(DockCommand::MoveFloating {
+                group: floating_id,
+                origin: Point::ZERO,
+            })
+        );
+        assert_eq!(
+            controller.layout().floating_group(floating_id).unwrap().bounds,
+            Rect::new(Point::ZERO, original_bounds.size)
+        );
+        let frame = controller.frame(viewport).unwrap();
+        assert_eq!(
+            frame
+                .rects()
+                .floating_groups
+                .iter()
+                .find(|floating| floating.group == floating_id)
+                .unwrap()
+                .rect,
+            Rect::new(Point::ZERO, original_bounds.size),
+            "persistent and rendered positions should agree after clamping"
+        );
+        assert_eq!(controller.history.undo_len(), 1);
+        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+
+        assert!(controller.undo().unwrap());
+        assert_eq!(
+            controller.layout().floating_group(floating_id).unwrap().bounds,
+            original_bounds
+        );
+        assert!(controller.redo().unwrap());
+        assert_eq!(
+            controller.layout().floating_group(floating_id).unwrap().bounds,
+            Rect::new(Point::ZERO, original_bounds.size)
+        );
+        assert_eq!(controller.history.undo_len(), 1);
+        assert_eq!(controller.history.redo_len(), 0);
+        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+
+        // The drag's original pointer is still the actual title-bar grab point;
+        // clamping affects only the committed origin, not pointer-session state.
+        assert!(origin.is_finite());
+    }
+
+    #[test]
     fn floating_title_drag_with_stale_layout_snapshot_is_cancelled_before_commit() {
         let mut controller = DockController::new_initial(&Theme::default()).unwrap();
         let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
