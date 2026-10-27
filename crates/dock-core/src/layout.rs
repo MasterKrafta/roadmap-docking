@@ -85,7 +85,6 @@ pub struct Layout {
 
 mod column_resize;
 mod column_width_management;
-mod floating_docking;
 mod floating_operations;
 mod floating_window;
 mod command_flyout;
