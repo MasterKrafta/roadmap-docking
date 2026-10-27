@@ -44,7 +44,7 @@ impl RenderOnce for DropZone {
 
 #[cfg(test)]
 mod tests {
-    use super::blend_rgb;
+    use crate::color::blend_rgb;
 
     #[test]
     fn active_and_idle_drop_zones_use_distinct_blends() {
