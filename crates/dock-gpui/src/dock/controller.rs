@@ -680,6 +680,17 @@ impl DockController {
         self.layout
             .update_canvas_bounds(frame.rects().canvas)
             .map_err(ComputeRectsError::Geometry)?;
+
+        // Keep handles for live columns even when the viewport currently has no overflow,
+        // but discard handles whose column was removed from the layout.
+        let live_columns: HashSet<NodeId> = self
+            .layout
+            .nodes()
+            .filter_map(|(id, node)| matches!(node, Node::Column(_)).then_some(id))
+            .collect();
+        self.scroll_handles
+            .retain(|column_id, _| live_columns.contains(column_id));
+
         Ok(frame)
     }
 
