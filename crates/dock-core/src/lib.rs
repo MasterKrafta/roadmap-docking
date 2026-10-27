@@ -74,21 +74,9 @@ mod undo_redo_history;
 mod validation_error;
 mod vertical_overflow;
 #[cfg(feature = "serde")]
-mod workspace_diagnostic;
+mod workspace_types;
 #[cfg(feature = "serde")]
 mod workspace_file;
-#[cfg(feature = "serde")]
-mod workspace_file_error;
-#[cfg(feature = "serde")]
-mod workspace_floating_group;
-#[cfg(feature = "serde")]
-mod workspace_layout;
-#[cfg(feature = "serde")]
-mod workspace_load_options;
-#[cfg(feature = "serde")]
-mod workspace_load_result;
-#[cfg(feature = "serde")]
-mod workspace_node;
 
 pub use allowed_area::AllowedArea;
 pub use axis::Axis;
@@ -159,21 +147,12 @@ pub use undo_redo_history::{DEFAULT_UNDO_LIMIT, UndoRedoHistory};
 pub use validation_error::ValidationError;
 pub use vertical_overflow::VerticalOverflow;
 #[cfg(feature = "serde")]
-pub use workspace_diagnostic::WorkspaceDiagnostic;
-#[cfg(feature = "serde")]
 pub use workspace_file::{WORKSPACE_FORMAT, WORKSPACE_VERSION, WorkspaceFile};
 #[cfg(feature = "serde")]
-pub use workspace_file_error::WorkspaceFileError;
-#[cfg(feature = "serde")]
-pub use workspace_floating_group::WorkspaceFloatingGroup;
-#[cfg(feature = "serde")]
-pub use workspace_layout::WorkspaceLayout;
-#[cfg(feature = "serde")]
-pub use workspace_load_options::WorkspaceLoadOptions;
-#[cfg(feature = "serde")]
-pub use workspace_load_result::WorkspaceLoadResult;
-#[cfg(feature = "serde")]
-pub use workspace_node::WorkspaceNode;
+pub use workspace_types::{
+    WorkspaceDiagnostic, WorkspaceFileError, WorkspaceFloatingGroup, WorkspaceLayout,
+    WorkspaceLoadOptions, WorkspaceLoadResult, WorkspaceNode,
+};
 
 #[cfg(test)]
 mod chrome_tests;
