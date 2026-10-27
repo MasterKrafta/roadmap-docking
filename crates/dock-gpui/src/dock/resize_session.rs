@@ -83,10 +83,6 @@ impl ResizeSession {
         self.baseline
     }
 
-    pub(super) fn pointer_start(&self) -> Point {
-        self.pointer_start
-    }
-
     pub(super) fn start_geometry(&self) -> StartGeometry {
         self.start_geometry
     }
@@ -464,7 +460,7 @@ mod tests {
     #[test]
     fn horizontal_splitter_rejects_overflowing_used_x_delta() {
         let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
-        let (side, owner) = [DockSide::Left, DockSide::Right]
+        let (_, owner) = [DockSide::Left, DockSide::Right]
             .into_iter()
             .find_map(|side| {
                 let owner = layout.main_area(side)?.root;
