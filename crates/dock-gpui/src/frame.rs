@@ -168,9 +168,17 @@ mod tests {
             create_initial_layout(Profile::Photoshop, &descriptors, metrics).unwrap();
         let viewport = Rect::new(Point::ZERO, Size::new(1000.0, 700.0));
 
+        let mut normalized_once = layout.compute_rects(viewport, &metrics).unwrap();
+        super::normalize_docked_group_geometry(&layout, &metrics, &mut normalized_once);
+
         let first = FrameGeometry::compute(&layout, viewport, &metrics).unwrap();
         let second = FrameGeometry::compute(&layout, viewport, &metrics).unwrap();
 
+        assert_eq!(
+            first.rects(),
+            &normalized_once,
+            "FrameGeometry should normalize a fresh Core snapshot exactly once"
+        );
         assert_eq!(first, second);
         assert_eq!(first.rects().viewport, Some(viewport));
         let right_area = layout
