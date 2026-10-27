@@ -30,7 +30,11 @@ struct GroupChromeGeometry {
 /// any additional Tabs group header is removed. The same adjusted snapshot is
 /// used by rendering and drop resolution so their hit targets remain aligned.
 ///
-/// Call exactly once on a fresh LayoutRects snapshot.
+/// Pass only a fresh snapshot returned by `Layout::compute_rects`; this
+/// function mutates rectangles and is not idempotent. Never apply it to the
+/// rectangles exposed by `FrameGeometry`, which are already normalized.
+/// Application code should prefer `FrameGeometry::compute` so layout and drop
+/// hit testing share the same once-normalized snapshot.
 pub fn normalize_docked_group_geometry(
     layout: &Layout,
     metrics: &DockMetrics,
