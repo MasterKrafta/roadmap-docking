@@ -2,6 +2,8 @@ use dock_core::Rect;
 use gpui::{AnyElement, App, IntoElement, ParentElement, RenderOnce, Styled, Window, div, px};
 use ui::Theme;
 
+use crate::components::RectBox;
+
 /// The visible content surface for an active panel.
 #[derive(IntoElement)]
 pub struct PanelSurface {
