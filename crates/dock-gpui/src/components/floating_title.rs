@@ -47,13 +47,17 @@ impl RenderOnce for FloatingTitle {
         let buttons_width = button_width * button_count as f32;
         let drag_width = (self.rect.size.width - buttons_width).max(0.0);
 
+        let typography = self.theme.typography;
         let mut header = div()
             .absolute()
             .left(px(self.rect.origin.x))
             .top(px(self.rect.origin.y))
             .w(px(self.rect.size.width))
             .h(px(self.rect.size.height))
-            .bg(rgb(self.theme.colors.toolbar_background));
+            .bg(rgb(self.theme.colors.toolbar_background))
+            .font_family(typography.family)
+            .text_size(px(typography.title_size))
+            .line_height(px(typography.line_height));
 
         let drag_area = div()
             .absolute()
