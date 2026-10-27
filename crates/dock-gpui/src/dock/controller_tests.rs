@@ -1265,6 +1265,96 @@
     }
 
     #[test]
+    fn group_grip_drop_merges_whole_group_and_records_one_undo_step() {
+        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+        let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
+        let source_group = controller
+            .layout()
+            .nodes()
+            .find_map(|(_, node)| match node {
+                Node::Column(column) if column.groups.len() > 1 => column.groups.first().copied(),
+                _ => None,
+            })
+            .expect("initial layout should have a column with multiple groups");
+        let target_group = first_panels_by_group(&controller)
+            .into_iter()
+            .map(|(group, _, _)| group)
+            .find(|group| *group != source_group)
+            .expect("initial layout should contain a different target group");
+        let source_panel_ids: Vec<_> = match controller.layout().node(source_group) {
+            Some(Node::Tabs(tabs)) => tabs
+                .children
+                .iter()
+                .filter_map(|node| match controller.layout().node(*node) {
+                    Some(Node::Panel(panel)) => Some(panel.panel_id),
+                    _ => None,
+                })
+                .collect(),
+            _ => panic!("group-grip source should be a Tabs node"),
+        };
+        assert!(!source_panel_ids.is_empty());
+        let target_index = match controller.layout().node(target_group) {
+            Some(Node::Tabs(tabs)) => tabs.children.len(),
+            _ => panic!("target group should be a Tabs node"),
+        };
+        let original_version = controller.layout().version();
+        let original_floating_count = controller.layout().floating_groups().count();
+
+        let action = controller
+            .commit_drop_request(
+                DragDropRequest {
+                    payload: DragPayload::Group { group: source_group },
+                    handle: DragHandle::GroupGrip,
+                    origin: Point::new(180.0, 120.0),
+                    point: Point::new(420.0, 260.0),
+                    target: Some(DropTarget::GroupTabs {
+                        group: target_group,
+                        index: target_index,
+                    }),
+                    floating_bounds: None,
+                },
+                viewport,
+            )
+            .unwrap();
+
+        assert_eq!(
+            action,
+            DragDropAction::Command(DockCommand::MergeGroup {
+                group: source_group,
+                target_group,
+                index: target_index,
+            })
+        );
+        assert_ne!(controller.layout().version(), original_version);
+        assert_eq!(controller.layout().floating_groups().count(), original_floating_count);
+        assert_eq!(controller.history.undo_len(), 1);
+        for panel in &source_panel_ids {
+            assert_eq!(group_containing_panel(&controller, *panel), Some(target_group));
+        }
+        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+
+        assert!(controller.undo().unwrap());
+        assert_eq!(controller.history.undo_len(), 0);
+        assert_eq!(controller.history.redo_len(), 1);
+        for panel in &source_panel_ids {
+            assert_ne!(
+                group_containing_panel(&controller, *panel),
+                Some(target_group),
+                "undo must restore each source panel outside the merged target"
+            );
+        }
+        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+
+        assert!(controller.redo().unwrap());
+        assert_eq!(controller.history.undo_len(), 1);
+        assert_eq!(controller.history.redo_len(), 0);
+        for panel in &source_panel_ids {
+            assert_eq!(group_containing_panel(&controller, *panel), Some(target_group));
+        }
+        assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+    }
+
+    #[test]
     fn floating_capture_drag_resolves_dock_target_and_docks_entire_window() {
         let mut controller = DockController::new_initial(&Theme::default()).unwrap();
         let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
