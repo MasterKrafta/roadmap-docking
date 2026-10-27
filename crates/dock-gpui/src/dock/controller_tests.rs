@@ -1942,26 +1942,30 @@
             let mut controller = DockController::new_initial(&Theme::default()).unwrap();
             let main_columns =
                 crate::tree_query::main_column_ids(controller.layout(), DockSide::Right);
-            let source_column = main_columns
-                .first()
-                .copied()
-                .expect("initial layout should expose a right main column");
-            let source_group = match controller.layout().node(source_column) {
-                Some(Node::Column(column)) => column.groups[0],
-                _ => unreachable!("source_column was selected from main columns"),
-            };
-            let panel = match controller.layout().node(source_group) {
-                Some(Node::Tabs(tabs)) => match controller.layout().node(tabs.children[0]) {
-                    Some(Node::Panel(panel)) => panel.panel_id,
-                    _ => unreachable!("tab child should be a panel"),
-                },
-                _ => unreachable!("source_group should be a Tabs node"),
-            };
+            let (source_group, panel) = controller
+                .layout()
+                .nodes()
+                .find_map(|(group, node)| {
+                    let Node::Tabs(tabs) = node else {
+                        return None;
+                    };
+                    if tabs.children.len() < 2 {
+                        return None;
+                    }
+                    let panel_node = *tabs.children.first()?;
+                    let Node::Panel(panel) = controller.layout().node(panel_node)? else {
+                        return None;
+                    };
+                    Some((group, panel.panel_id))
+                })
+                .expect("initial layout should contain a multi-tab source group");
+            let source_column = owner_column(&controller, source_group)
+                .expect("multi-tab source group should belong to a column");
             let target_column = main_columns
                 .iter()
                 .copied()
                 .find(|column_id| *column_id != source_column)
-                .expect("a second main-dock column should provide a target");
+                .expect("a different main-dock column should provide a target");
             let target_group = match controller.layout().node(target_column) {
                 Some(Node::Column(column)) => column.groups[0],
                 _ => unreachable!("target_column was selected from main columns"),
