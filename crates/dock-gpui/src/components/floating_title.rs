@@ -38,12 +38,12 @@ impl RenderOnce for FloatingTitle {
         let button_count = self.on_capture_drag_start.is_some() as usize
             + self.on_close.is_some() as usize
             + self.on_collapse.is_some() as usize;
-        let max_button_width = if button_count == 0 {
-            0.0
-        } else {
-            self.rect.size.width / button_count as f32
-        };
-        let button_width = self.rect.size.height.min(28.0).min(max_button_width).max(0.0);
+        let button_width = floating_title_button_width(
+            self.rect.size.height,
+            self.theme.metrics.button_size,
+            self.rect.size.width,
+            button_count,
+        );
         let buttons_width = button_width * button_count as f32;
         let drag_width = (self.rect.size.width - buttons_width).max(0.0);
 
@@ -122,5 +122,40 @@ impl RenderOnce for FloatingTitle {
         }
 
         header
+    }
+}
+
+
+fn floating_title_button_width(
+    header_height: f32,
+    button_size: f32,
+    header_width: f32,
+    button_count: usize,
+) -> f32 {
+    let max_button_width = if button_count == 0 {
+        0.0
+    } else {
+        header_width / button_count as f32
+    };
+    header_height.min(button_size).min(max_button_width).max(0.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::floating_title_button_width;
+
+    #[test]
+    fn floating_title_button_width_uses_the_theme_button_size() {
+        assert_eq!(floating_title_button_width(36.0, 24.0, 200.0, 2), 24.0);
+    }
+
+    #[test]
+    fn floating_title_button_width_respects_available_header_space() {
+        assert_eq!(floating_title_button_width(36.0, 24.0, 30.0, 2), 15.0);
+    }
+
+    #[test]
+    fn floating_title_button_width_is_zero_without_controls() {
+        assert_eq!(floating_title_button_width(36.0, 24.0, 200.0, 0), 0.0);
     }
 }
