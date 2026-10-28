@@ -1,7 +1,7 @@
 use dock_core::{NodeId, Rect};
 use gpui::{
-    App, IntoElement, InteractiveElement, KeyDownEvent, MouseButton, MouseDownEvent, RenderOnce, Styled, Window,
-    div, px, rgb,
+    App, IntoElement, InteractiveElement, KeyDownEvent, MouseButton, MouseDownEvent, RenderOnce,
+    Styled, Window, div, px, rgb,
 };
 use ui::Theme;
 
