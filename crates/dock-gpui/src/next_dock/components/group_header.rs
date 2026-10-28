@@ -30,10 +30,6 @@ impl RenderOnce for GroupHeader {
         let width = rect.size.width.max(0.0);
         let height = rect.size.height.max(0.0);
 
-        let menu_width = theme.metrics.group_control_button_width.max(0.0).min(width);
-
-        // The menu never participates in tab-width calculations.
-        let tab_area_width = (width - menu_width).max(0.0);
         let panel_count = self.group.panels.len();
 
         let active_index = self.group.active.min(panel_count.saturating_sub(1));
@@ -134,41 +130,6 @@ impl RenderOnce for GroupHeader {
     }
 }
 
-/// Maximum number of tabs that can fit while respecting the width constraints.
-fn max_tab_count(width: f32, theme: &Theme) -> usize {
-    let menu_width = theme
-        .metrics
-        .group_control_button_width
-        .max(0.0)
-        .min(width.max(0.0));
-
-    let tab_area_width = (width - menu_width).max(0.0);
-
-    if tab_area_width <= 0.0 {
-        return 0;
-    }
-
-    let drag_reserve = if tab_area_width >= PREFERRED_TAB_WIDTH + MIN_DRAG_ZONE_WIDTH {
-        MIN_DRAG_ZONE_WIDTH
-    } else {
-        0.0
-    };
-
-    let active_width = PREFERRED_TAB_WIDTH.min((tab_area_width - drag_reserve).max(0.0));
-
-    if active_width <= 0.0 {
-        return 0;
-    }
-
-    if active_width < PREFERRED_TAB_WIDTH {
-        return 1;
-    }
-
-    let space_for_inactive = (tab_area_width - active_width - drag_reserve).max(0.0);
-
-    1 + (space_for_inactive / MIN_INACTIVE_TAB_WIDTH).floor() as usize
-}
-
 pub(in crate::next_dock) fn minimum_width_for_group(
     group: &TabGroup,
     window: &Window,
@@ -190,15 +151,6 @@ pub(in crate::next_dock) fn minimum_width_for_group(
         + active_width
         + panel_count.saturating_sub(1) as f32 * MIN_INACTIVE_TAB_WIDTH
         + MIN_DRAG_ZONE_WIDTH
-}
-
-/// Whether another panel can be added without exceeding the width-based limit.
-pub(super) fn can_accept_panel(
-    group_width: f32,
-    current_panel_count: usize,
-    theme: &Theme,
-) -> bool {
-    current_panel_count < max_tab_count(group_width, theme)
 }
 
 fn shrink_inactive_widths(widths: &mut [f32], active_index: usize, available_width: f32) {
