@@ -2,6 +2,33 @@ use dock_core::{Axis, ResizeEdge};
 use gpui::{Keystroke, StatefulInteractiveElement, Styled, rgb};
 use ui::Theme;
 
+/// Direction requested when moving a focused group within its owning column.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum GroupMoveDirection {
+    Previous,
+    Next,
+}
+
+/// Recognizes the platform command modifier + Shift + Up/Down group-move shortcut.
+pub(crate) fn keyboard_group_move_direction(
+    keystroke: &Keystroke,
+) -> Option<GroupMoveDirection> {
+    let modifiers = keystroke.modifiers;
+    if !(modifiers.control || modifiers.platform)
+        || !modifiers.shift
+        || modifiers.alt
+        || modifiers.function
+    {
+        return None;
+    }
+
+    match keystroke.key.to_ascii_lowercase().as_str() {
+        "up" | "arrowup" => Some(GroupMoveDirection::Previous),
+        "down" | "arrowdown" => Some(GroupMoveDirection::Next),
+        _ => None,
+    }
+}
+
 /// Direction requested when reordering a focused tab with the keyboard.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum TabReorderDirection {
@@ -100,7 +127,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        TabReorderDirection, is_keyboard_activation_key, keyboard_resize_axis_for_floating_edge,
+        GroupMoveDirection, TabReorderDirection, is_keyboard_activation_key,
+        keyboard_group_move_direction, keyboard_resize_axis_for_floating_edge,
         keyboard_resize_delta,
         keyboard_tab_reorder_direction,
     };
@@ -113,6 +141,57 @@ mod tests {
             modifiers,
             key_char: None,
         }
+    }
+
+    #[test]
+    fn keyboard_group_move_uses_command_shift_up_and_down() {
+        let control_shift = Modifiers {
+            control: true,
+            shift: true,
+            ..Modifiers::default()
+        };
+        assert_eq!(
+            keyboard_group_move_direction(&key("up", control_shift)),
+            Some(GroupMoveDirection::Previous)
+        );
+        assert_eq!(
+            keyboard_group_move_direction(&key("ArrowDown", control_shift)),
+            Some(GroupMoveDirection::Next)
+        );
+
+        let platform_shift = Modifiers {
+            platform: true,
+            shift: true,
+            ..Modifiers::default()
+        };
+        assert_eq!(
+            keyboard_group_move_direction(&key("arrowup", platform_shift)),
+            Some(GroupMoveDirection::Previous)
+        );
+    }
+
+    #[test]
+    fn keyboard_group_move_requires_modifiers_and_ignores_other_keys() {
+        assert_eq!(
+            keyboard_group_move_direction(&key("up", Modifiers::default())),
+            None
+        );
+        assert_eq!(
+            keyboard_group_move_direction(
+                &key("down", Modifiers { shift: true, ..Modifiers::default() })
+            ),
+            None
+        );
+        for modifiers in [
+            Modifiers { control: true, shift: true, alt: true, ..Modifiers::default() },
+            Modifiers { control: true, shift: true, function: true, ..Modifiers::default() },
+        ] {
+            assert_eq!(keyboard_group_move_direction(&key("down", modifiers)), None);
+        }
+        assert_eq!(
+            keyboard_group_move_direction(&key("escape", Modifiers::default())),
+            None
+        );
     }
 
     #[test]
