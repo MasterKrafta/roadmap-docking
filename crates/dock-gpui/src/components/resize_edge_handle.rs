@@ -1,9 +1,11 @@
 use dock_core::{Rect, ResizeEdge};
 use gpui::{
-    App, InteractiveElement, IntoElement, MouseButton, MouseDownEvent, RenderOnce, Styled, Window,
-    div, px, rgb,
+    App, InteractiveElement, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, RenderOnce,
+    Styled, Window, div, px, rgb,
 };
 use ui::Theme;
+
+use crate::components::with_focus_ring;
 
 pub type ResizeStartHandler = Box<dyn Fn(&MouseDownEvent, &mut Window, &mut App) + 'static>;
 
@@ -28,6 +30,8 @@ pub struct ResizeEdgeHandle {
     pub theme: Theme,
     /// Begins the resize gesture.
     pub on_resize_start: ResizeStartHandler,
+    /// Handles keyboard resizing when this edge is supported for keyboard input.
+    pub on_resize_key: Option<Box<dyn Fn(&KeyDownEvent, &mut Window, &mut App) + 'static>>,
 }
 
 impl RenderOnce for ResizeEdgeHandle {
@@ -37,14 +41,21 @@ impl RenderOnce for ResizeEdgeHandle {
             ResizeEdgeKind::Floating(edge) => format!("{}-{:?}", self.id, edge),
         };
 
-        div()
+        let element = div()
             .absolute()
             .left(px(self.rect.origin.x))
             .top(px(self.rect.origin.y))
             .w(px(self.rect.size.width))
             .h(px(self.rect.size.height))
             .bg(rgb(self.theme.colors.splitter))
-            .id(id)
-            .on_mouse_down(MouseButton::Left, self.on_resize_start)
+            .id(id);
+
+        if let Some(on_resize_key) = self.on_resize_key {
+            with_focus_ring(element, &self.theme)
+                .on_key_down(on_resize_key)
+                .on_mouse_down(MouseButton::Left, self.on_resize_start)
+        } else {
+            element.on_mouse_down(MouseButton::Left, self.on_resize_start)
+        }
     }
 }
