@@ -5,7 +5,7 @@ use gpui::{
 };
 use ui::Theme;
 
-use crate::dock::floating_window::FloatingGroupRenderMode;
+use crate::layers::floating::FloatingGroupRenderMode;
 use crate::host::{
     CommandClickHandler, CommandKeyHandler, DockHost, DragStartHandler, NoopHost,
     ResizeStartHandler, SurfaceMouseMoveHandler, SurfaceMouseUpHandler,
@@ -84,7 +84,7 @@ impl FloatingWindow {
             }
         });
 
-        if let Some(bounds) = updated_bounds.flatten() {
+        if let Some(bounds) = updated_bounds {
             self.layout_bounds = bounds;
         }
     }
