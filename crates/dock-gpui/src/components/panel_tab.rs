@@ -1,7 +1,7 @@
 use dock_core::Rect;
 use gpui::{
-    App, ClickEvent, InteractiveElement, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent,
-    ParentElement, RenderOnce, StatefulInteractiveElement, Styled, Window, div, px, rgb,
+    App, InteractiveElement, IntoElement, MouseButton, ParentElement, RenderOnce,
+    StatefulInteractiveElement, Styled, Window, div, px, rgb,
 };
 use ui::Theme;
 
@@ -12,7 +12,7 @@ use crate::components::{
         keyboard_panel_rail_move, keyboard_panel_float_move,
         keyboard_tab_reorder_direction,
     },
-    with_focus_ring,
+    with_focus_ring, ClickHandler, KeyDownHandler, MouseDownHandler,
 };
 
 /// A single tab header that delegates all dock actions to caller-provided handlers.
@@ -29,17 +29,17 @@ pub struct PanelTab {
     /// A copy of the shared theme palette and metrics.
     pub theme: Theme,
     /// Handler invoked when the tab is clicked once.
-    pub on_activate: Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>,
+    pub on_activate: ClickHandler,
     /// Handler invoked when Enter or Space activates the focused tab.
-    pub on_activate_key: Box<dyn Fn(&KeyDownEvent, &mut Window, &mut App) + 'static>,
+    pub on_activate_key: KeyDownHandler,
     /// Handler invoked when the focused tab is reordered with the keyboard.
-    pub on_reorder_key: Box<dyn Fn(&KeyDownEvent, &mut Window, &mut App) + 'static>,
+    pub on_reorder_key: KeyDownHandler,
     /// Moves this panel to an adjacent group or main-dock column with the keyboard.
-    pub on_move_panel_key: Option<Box<dyn Fn(&KeyDownEvent, &mut Window, &mut App) + 'static>>,
+    pub on_move_panel_key: Option<KeyDownHandler>,
     /// Handler invoked when the tab is double-clicked.
-    pub on_collapse_toggle: Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>,
+    pub on_collapse_toggle: ClickHandler,
     /// Handler invoked on left mouse-down to start a panel drag.
-    pub on_drag_start: Box<dyn Fn(&MouseDownEvent, &mut Window, &mut App) + 'static>,
+    pub on_drag_start: MouseDownHandler,
 }
 
 impl RenderOnce for PanelTab {
