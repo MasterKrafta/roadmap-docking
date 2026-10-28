@@ -123,6 +123,7 @@ pub(crate) fn render(
                         group: handle.group,
                         edge: handle.edge,
                     }),
+                    on_resize_key: None,
                 }
                 .into_any_element(),
             );
