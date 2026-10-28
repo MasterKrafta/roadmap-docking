@@ -1,8 +1,8 @@
 use dock_core::{NodeId, PanelId, Rect};
-use gpui::{App, ClickEvent, IntoElement, RenderOnce, Window};
+use gpui::{App, IntoElement, RenderOnce, Window};
 use ui::Theme;
 
-use crate::components::IconButton;
+use crate::components::{ClickHandler, IconButton};
 
 /// The group menu button, positioned at the trailing edge of the tab strip.
 #[derive(IntoElement)]
@@ -16,7 +16,7 @@ pub struct GroupMenuButton {
     /// Shared application theme.
     pub theme: Theme,
     /// Opens the menu associated with this group and panel.
-    pub on_open: Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>,
+    pub on_open: ClickHandler,
 }
 
 impl RenderOnce for GroupMenuButton {
