@@ -320,7 +320,7 @@ impl Render for Gallery {
                     edge: ResizeEdgeKind::Floating(ResizeEdge::Left),
                     theme,
                     on_resize_start: noop_mouse_down(),
-                    on_resize_key: None,
+                    on_resize_key: Some(noop_key_down()),
                 }),
             ))
             .child(card(
