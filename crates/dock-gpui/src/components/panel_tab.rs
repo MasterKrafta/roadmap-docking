@@ -82,15 +82,14 @@ impl RenderOnce for PanelTab {
                     on_activate_key(event, window, app);
                 } else if keyboard_tab_reorder_direction(&event.keystroke).is_some() {
                     on_reorder_key(event, window, app);
-                } else if keyboard_panel_move_direction(&event.keystroke).is_some()
+                } else if (keyboard_panel_move_direction(&event.keystroke).is_some()
                     || keyboard_panel_column_move_direction(&event.keystroke).is_some()
                     || keyboard_panel_other_side_move(&event.keystroke)
                     || keyboard_panel_rail_move(&event.keystroke)
-                    || keyboard_panel_float_move(&event.keystroke)
+                    || keyboard_panel_float_move(&event.keystroke))
+                    && let Some(handler) = &on_move_panel_key
                 {
-                    if let Some(handler) = &on_move_panel_key {
-                        handler(event, window, app);
-                    }
+                    handler(event, window, app);
                 }
             })
             .on_mouse_down(MouseButton::Left, self.on_drag_start)
