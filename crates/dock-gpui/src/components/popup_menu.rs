@@ -7,9 +7,6 @@ use ui::Theme;
 
 use crate::components::with_focus_ring;
 
-/// Logical height of one popup row, shared with popup bounds calculation.
-pub(crate) const POPUP_MENU_ROW_HEIGHT: f32 = 30.0;
-
 /// One rendered row in the popup menu.
 pub struct PopupMenuItem {
     pub id: String,
@@ -61,8 +58,8 @@ impl RenderOnce for PopupMenu {
                 .flex()
                 .items_center()
                 .w(px(self.bounds.size.width))
-                .h(px(POPUP_MENU_ROW_HEIGHT))
-                .px(px(8.0))
+                .h(px(self.theme.metrics.popup_menu_row_height))
+                .px(px(self.theme.metrics.popup_menu_horizontal_padding))
                 .text_color(rgb(self.theme.colors.primary_text));
 
             if item.selected {

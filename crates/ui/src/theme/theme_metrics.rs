@@ -11,6 +11,12 @@ pub struct ThemeMetrics {
     pub button_size: f32,
     /// Spacing between controls in floating-window titles, in logical pixels.
     pub button_gap: f32,
+    /// Default width of popup menus before clamping to the window viewport, in logical pixels.
+    pub popup_menu_width: f32,
+    /// Height of each popup-menu row, in logical pixels.
+    pub popup_menu_row_height: f32,
+    /// Horizontal padding inside popup-menu rows, in logical pixels.
+    pub popup_menu_horizontal_padding: f32,
     /// Uniform padding applied inside each panel's content surface, in logical pixels.
     pub content_padding: f32,
     pub splitter_thickness: f32,
@@ -53,6 +59,8 @@ impl ThemeMetrics {
             ("group_control_button_width", self.group_control_button_width),
             ("tab_drag_zone_width", self.tab_drag_zone_width),
             ("button_size", self.button_size),
+            ("popup_menu_width", self.popup_menu_width),
+            ("popup_menu_row_height", self.popup_menu_row_height),
             ("splitter_thickness", self.splitter_thickness),
             ("splitter_hit_zone", self.splitter_hit_zone),
             ("edge_drop_zone_width", self.edge_drop_zone_width),
@@ -79,6 +87,8 @@ impl ThemeMetrics {
                     "group_control_button_width" => "group_control_button_width must be finite",
                     "tab_drag_zone_width" => "tab_drag_zone_width must be finite",
                     "button_size" => "button_size must be finite",
+                    "popup_menu_width" => "popup_menu_width must be finite",
+                    "popup_menu_row_height" => "popup_menu_row_height must be finite",
                     "splitter_thickness" => "splitter_thickness must be finite",
                     "splitter_hit_zone" => "splitter_hit_zone must be finite",
                     "edge_drop_zone_width" => "edge_drop_zone_width must be finite",
@@ -105,6 +115,8 @@ impl ThemeMetrics {
                     "group_control_button_width" => "group_control_button_width must be positive",
                     "tab_drag_zone_width" => "tab_drag_zone_width must be positive",
                     "button_size" => "button_size must be positive",
+                    "popup_menu_width" => "popup_menu_width must be positive",
+                    "popup_menu_row_height" => "popup_menu_row_height must be positive",
                     "splitter_thickness" => "splitter_thickness must be positive",
                     "splitter_hit_zone" => "splitter_hit_zone must be positive",
                     "edge_drop_zone_width" => "edge_drop_zone_width must be positive",
@@ -129,12 +141,16 @@ impl ThemeMetrics {
         for (name, value) in [
             ("button_gap", self.button_gap),
             ("content_padding", self.content_padding),
+            ("popup_menu_horizontal_padding", self.popup_menu_horizontal_padding),
         ] {
             if !value.is_finite() || value < 0.0 {
-                return Err(if name == "button_gap" {
-                    "button_gap must be finite and non-negative"
-                } else {
-                    "content_padding must be finite and non-negative"
+                return Err(match name {
+                    "button_gap" => "button_gap must be finite and non-negative",
+                    "content_padding" => "content_padding must be finite and non-negative",
+                    "popup_menu_horizontal_padding" => {
+                        "popup_menu_horizontal_padding must be finite and non-negative"
+                    }
+                    _ => "theme spacing metric must be finite and non-negative",
                 });
             }
         }
@@ -181,6 +197,9 @@ impl Default for ThemeMetrics {
             tab_drag_zone_width: 28.0,
             button_size: 24.0,
             button_gap: 4.0,
+            popup_menu_width: 232.0,
+            popup_menu_row_height: 30.0,
+            popup_menu_horizontal_padding: 8.0,
             content_padding: 8.0,
             splitter_thickness: 4.0,
             splitter_hit_zone: 8.0,
@@ -216,6 +235,35 @@ mod tests {
         assert!((m.rail_collapse_width - 220.0).abs() < 1e-3);
         assert!((m.rail_expand_width - 240.0).abs() < 1e-3);
         assert_eq!(m.max_columns, 4);
+    }
+
+    #[test]
+    fn includes_popup_menu_metrics_and_validates_their_ranges() {
+        let defaults = ThemeMetrics::default();
+        assert!((defaults.popup_menu_width - 232.0).abs() < 1e-3);
+        assert!((defaults.popup_menu_row_height - 30.0).abs() < 1e-3);
+        assert!((defaults.popup_menu_horizontal_padding - 8.0).abs() < 1e-3);
+
+        let invalid_width = ThemeMetrics {
+            popup_menu_width: 0.0,
+            ..defaults
+        };
+        assert_eq!(invalid_width.validate(), Err("popup_menu_width must be positive"));
+
+        let invalid_row_height = ThemeMetrics {
+            popup_menu_row_height: f32::INFINITY,
+            ..defaults
+        };
+        assert_eq!(invalid_row_height.validate(), Err("popup_menu_row_height must be finite"));
+
+        let invalid_padding = ThemeMetrics {
+            popup_menu_horizontal_padding: -1.0,
+            ..defaults
+        };
+        assert_eq!(
+            invalid_padding.validate(),
+            Err("popup_menu_horizontal_padding must be finite and non-negative")
+        );
     }
 
     #[test]

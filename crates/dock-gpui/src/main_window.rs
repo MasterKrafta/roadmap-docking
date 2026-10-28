@@ -834,7 +834,7 @@ impl Render for MainWindow {
         let menu_viewport = Rect::new(Point::ZERO, Size::new(width, height));
         let menu_bounds = menu_state_snapshot
             .anchor()
-            .map(|anchor| menus::popup_bounds(anchor, menu_viewport, menu_items.len()));
+            .map(|anchor| menus::popup_bounds(anchor, menu_viewport, menu_items.len(), &self.theme));
 
         let flyout_hit_bounds = frame.rects().flyout.map(|flyout| {
             let edge_padding =
