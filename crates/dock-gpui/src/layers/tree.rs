@@ -1,10 +1,11 @@
 use std::collections::HashSet;
 
-use dock_core::{Layout, LayoutRects, Node, NodeId, Point, Rect, Size};
+use dock_core::{DockCommand, Layout, LayoutRects, Node, NodeId, Point, Rect, Size};
 use gpui::{AnyElement, IntoElement};
 
 use crate::components::{GroupFrame, GroupGrip, RectBox, TabStrip};
-use crate::host::DockHost;
+use crate::components::focus_ring::{GroupMoveDirection, keyboard_group_move_direction};
+use crate::host::{CommandKeyHandler, DockHost};
 use crate::surface::RenderData;
 use crate::tree_query::subtree_nodes;
 
@@ -100,6 +101,7 @@ pub(crate) fn elements(
                             dock_core::DragPayload::Group { group: group.group },
                             dock_core::DragHandle::GroupGrip,
                         ),
+                        on_move_key: group_move_key_handler(layout, host, group.group),
                     }.into_any_element(),
                 );
             }
@@ -117,3 +119,60 @@ pub(crate) fn elements(
     elements.extend(super::tree_rail::render(data, host, area));
     elements
 }
+
+fn group_move_key_handler(
+    layout: &Layout,
+    host: &dyn DockHost,
+    group: NodeId,
+) -> Option<CommandKeyHandler> {
+    let (column_id, index, group_count) = layout.nodes().find_map(|(column_id, node)| {
+        let Node::Column(column) = node else {
+            return None;
+        };
+        if column.mode.is_rail() {
+            return None;
+        }
+        column
+            .groups
+            .iter()
+            .position(|candidate| *candidate == group)
+            .map(|index| (column_id, index, column.groups.len()))
+    })?;
+    if group_count < 2 {
+        return None;
+    }
+
+    let move_previous = (index > 0).then(|| {
+        host.command_key(DockCommand::MoveGroup {
+            group,
+            column: column_id,
+            index: index - 1,
+        })
+    });
+    // MoveGroup takes an insertion slot before source removal, so moving down
+    // past the next group uses the slot after that group's original position.
+    let move_next = (index + 1 < group_count).then(|| {
+        host.command_key(DockCommand::MoveGroup {
+            group,
+            column: column_id,
+            index: index + 2,
+        })
+    });
+
+    Some(Box::new(move |event, window, app| {
+        match keyboard_group_move_direction(&event.keystroke) {
+            Some(GroupMoveDirection::Previous) => {
+                if let Some(handler) = &move_previous {
+                    handler(event, window, app);
+                }
+            }
+            Some(GroupMoveDirection::Next) => {
+                if let Some(handler) = &move_next {
+                    handler(event, window, app);
+                }
+            }
+            None => {}
+        }
+    }))
+}
+
