@@ -633,9 +633,7 @@ impl DockController {
                 if let Some(policy) = self.rail_policy {
                     match policy.preview(session.baseline(), &self.layout, &command, &self.metrics) {
                         Ok((_, commands, _)) => Ok(commands),
-                        Err(error) => {
-                            Err(ResizeUpdateError::Command)
-                        }
+                        Err(_) => Err(ResizeUpdateError::Command),
                     }
                 } else {
                     Ok(vec![command])
