@@ -1835,6 +1835,151 @@ fn floating_capture_drag_resolves_dock_target_and_docks_entire_window() {
 }
 
 #[test]
+fn floating_capture_docks_multigroup_column_as_one_main_column() {
+    let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+    let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
+    let (column_id, groups_before, ratios_before) = controller
+        .layout()
+        .nodes()
+        .find_map(|(id, node)| match node {
+            Node::Column(column) if column.groups.len() > 1 => {
+                Some((id, column.groups.clone(), column.group_ratios.clone()))
+            }
+            _ => None,
+        })
+        .expect("initial layout should contain a multi-group column");
+    let bounds = Rect::new(Point::new(80.0, 60.0), Size::new(500.0, 400.0));
+
+    controller
+        .apply(DockCommand::Float {
+            node: column_id,
+            bounds,
+        })
+        .unwrap();
+    controller.workspace.history.clear();
+
+    let (floating_id, floating_root) = controller
+        .layout()
+        .floating_groups()
+        .next()
+        .map(|(id, floating)| {
+            (
+                id,
+                controller
+                    .layout()
+                    .dock_area(floating.area)
+                    .expect("floating column should own a dock area")
+                    .root,
+            )
+        })
+        .expect("floating the column should create one floating group");
+    assert_eq!(floating_root, column_id);
+
+    let source_nodes = crate::tree_query::subtree_nodes(controller.layout(), floating_root);
+    let frame = controller.frame(viewport).unwrap();
+    let origin = Point::new(
+        bounds.origin.x + bounds.size.width - 14.0,
+        bounds.origin.y + 14.0,
+    );
+    let threshold = controller.metrics().drag_threshold;
+    controller
+        .begin_drag(
+            DragPayload::FloatingGroup { group: floating_id },
+            DragHandle::FloatingCapture,
+            origin,
+        )
+        .unwrap();
+    assert!(
+        controller
+            .update_drag(
+                Point::new(origin.x - threshold - 20.0, origin.y + 8.0),
+                viewport,
+                Some(&frame),
+            )
+            .unwrap(),
+        "capturing a floating column should create a docking resolver"
+    );
+
+    let overlay = controller
+        .drag_overlay()
+        .expect("floating column capture should show main-column targets");
+    assert!(
+        !overlay.zones.is_empty(),
+        "at least one main-column insertion target should be available"
+    );
+    assert!(
+        overlay
+            .zones
+            .iter()
+            .all(|zone| matches!(zone.target, DropTarget::MainColumn { .. })),
+        "whole-column capture must not offer group merge or nested-column targets"
+    );
+    assert!(
+        overlay.zones.iter().all(|zone| {
+            crate::tree_query::drop_target_node(zone.target)
+                .is_none_or(|target| !source_nodes.contains(&target))
+        }),
+        "the capture overlay must not offer targets inside its own floating tree"
+    );
+
+    let zone = overlay
+        .zones
+        .first()
+        .copied()
+        .expect("the overlay should offer a main-column destination");
+    let release = Point::new(
+        zone.rect.origin.x + zone.rect.size.width / 2.0,
+        zone.rect.origin.y + zone.rect.size.height / 2.0,
+    );
+    controller.update_drag(release, viewport, None).unwrap();
+    let request = controller
+        .finish_drag(release, viewport)
+        .unwrap()
+        .expect("releasing over a main-column target should produce a drop request");
+    assert_eq!(request.target, Some(zone.target));
+
+    let action = controller.commit_drop_request(request, viewport).unwrap();
+    assert_eq!(
+        action,
+        DragDropAction::Command(DockCommand::DockFloating {
+            group: floating_id,
+            target: zone.target,
+        })
+    );
+    assert!(controller.layout().floating_group(floating_id).is_none());
+    let Node::Column(column_after) = controller
+        .layout()
+        .node(column_id)
+        .expect("the docked column should retain its original node")
+    else {
+        panic!("dock-back must preserve the whole Column root");
+    };
+    assert_eq!(column_after.groups, groups_before);
+    assert_eq!(column_after.group_ratios, ratios_before);
+    assert!(
+        [DockSide::Left, DockSide::Right].into_iter().any(|side| {
+            controller
+                .layout()
+                .main_area(side)
+                .is_some_and(|area| {
+                    crate::tree_query::subtree_nodes(controller.layout(), area.root)
+                        .contains(&column_id)
+                })
+        }),
+        "the original column should now belong to a main dock"
+    );
+    assert_eq!(controller.workspace.history.undo_len(), 1);
+    assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+
+    assert!(controller.undo().unwrap());
+    assert_eq!(controller.layout().floating_groups().count(), 1);
+    assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+    assert!(controller.redo().unwrap());
+    assert_eq!(controller.layout().floating_groups().count(), 0);
+    assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+}
+
+#[test]
 fn floating_capture_docks_a_panel_root_and_records_one_undo_step() {
     let mut controller = DockController::new_initial(&Theme::default()).unwrap();
     let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
