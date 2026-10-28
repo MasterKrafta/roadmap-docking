@@ -152,8 +152,34 @@ impl FrameGeometry {
         metrics: &DockMetrics,
     ) -> Result<DropZoneResolver, ComputeRectsError> {
         let mut rects = self.rects.clone();
+        let mut floating_nodes = HashSet::new();
+        for (_, floating) in layout.floating_groups() {
+            if let Some(area) = layout.dock_area(floating.area) {
+                floating_nodes.extend(subtree_nodes(layout, area.root));
+            }
+        }
+        let floating_panels = floating_nodes
+            .iter()
+            .filter_map(|node| match layout.node(*node) {
+                Some(Node::Panel(panel)) => Some(panel.panel_id),
+                _ => None,
+            })
+            .collect::<HashSet<_>>();
+
+        // Clear every rectangle tied to a floating subtree, not just its outer
+        // window rectangle. Tab-insertion and splitter geometry must not leave
+        // invisible targets over the main surface during an external drag.
+        rects.columns.retain(|entry| !floating_nodes.contains(&entry.column));
+        rects.groups.retain(|entry| !floating_nodes.contains(&entry.group));
+        rects.tab_strips.retain(|entry| !floating_nodes.contains(&entry.group));
+        rects.tab_headers.retain(|entry| !floating_nodes.contains(&entry.group));
+        rects.tab_overflows.retain(|entry| !floating_nodes.contains(&entry.group));
+        rects.panels.retain(|entry| !floating_panels.contains(&entry.panel));
+        rects.splitters.retain(|entry| !floating_nodes.contains(&entry.owner));
+        rects.vertical_overflow.retain(|entry| !floating_nodes.contains(&entry.owner));
         rects.floating_groups.clear();
         rects.floating_resize_edges.clear();
+        rects.drop_zones.clear();
         layout.prepare_drop_resolver(source, &rects, metrics)
     }
 }
@@ -162,7 +188,7 @@ impl FrameGeometry {
 mod tests {
     use super::FrameGeometry;
     use dock_core::{
-        ColumnMode, DockMetrics, DockSide, DropSource, DropZone, LayoutBuilder,
+        ColumnMode, DockMetrics, DockSide, DropSource, DropTarget, DropZone, LayoutBuilder,
         PanelConstraints, PanelKey, Point, Profile, Rect, Size, create_initial_layout,
     };
 
@@ -195,7 +221,7 @@ mod tests {
         let (_, floating_b) =
             builder.panel(PanelKey::new("external-floating-b").unwrap(), constraints);
         let floating_group = builder.tabs(vec![floating_a, floating_b], 0, false);
-        builder.floating_group(
+        let floating_id = builder.floating_group(
             floating_group,
             Rect::new(Point::new(650.0, 120.0), Size::new(320.0, 300.0)),
             1,
@@ -231,7 +257,20 @@ mod tests {
                 zone.zone,
                 DropZone::FloatingCenter | DropZone::FloatingTop | DropZone::FloatingBottom
             )),
-            "external drags must not target hidden geometry underneath native windows"
+            "external drags must not emit floating-window drop zones"
+        );
+        assert!(
+            !main_dock_only.zones().iter().any(|zone| match zone.target {
+                DropTarget::Tabs { group, .. }
+                | DropTarget::GroupTabs { group, .. }
+                | DropTarget::GroupEdge { group, .. } => group == floating_group,
+                _ => false,
+            }),
+            "external drags must not leave tab insertion or group-edge targets from hidden floating geometry"
+        );
+        assert!(
+            layout.floating_group(floating_id).is_some(),
+            "building a main-only resolver must not mutate the canonical layout"
         );
     }
 
