@@ -345,7 +345,7 @@ impl MainWindow {
     }
 }
 
-fn synchronize_floating_windows(
+pub(super) fn synchronize_floating_windows(
     owner: gpui::WeakEntity<MainWindow>,
     app: &mut App,
 ) {
