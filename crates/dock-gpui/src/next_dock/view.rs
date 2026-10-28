@@ -7,7 +7,7 @@ use gpui::{
 use ui::Theme;
 
 use crate::components::splitter_handle::ResizeStartHandler;
-use crate::components::{GroupFrame, PanelSurface, SplitterHandle};
+use crate::components::{GroupFrame, MouseDownHandler, PanelSurface, SplitterHandle};
 
 use super::components::{ColumnHeader, GroupHeader};
 use super::geometry::{self, GeometryKind, NodeGeometry};
@@ -32,12 +32,17 @@ pub(super) fn render(
     window: &Window,
     theme: &Theme,
     owner: WeakEntity<NextDockWindow>,
+    floating: Option<Rect>,
 ) -> Div {
     let width = width.max(1.0);
     let height = height.max(1.0);
     let content_height = (height - geometry::HEADER_HEIGHT).max(1.0);
 
-    let root_geometry = geometry::compute(&layout.root, width, content_height, window, theme);
+    let (tree_width, tree_height) = floating.map_or((width, content_height), |bounds| {
+        (bounds.size.width, bounds.size.height)
+    });
+
+    let root_geometry = geometry::compute(&layout.root, tree_width, tree_height, window, theme);
 
     let content = render_node(
         &layout.root,
@@ -47,7 +52,30 @@ pub(super) fn render(
         &[],
         window,
         &owner,
+        Size::new(width, content_height),
     );
+
+    let mut body = div()
+        .relative()
+        .w(px(width))
+        .h(px(content_height))
+        .bg(rgb(theme.colors.window_background));
+
+    body = if let Some(bounds) = floating {
+        body.child(
+            div()
+                .absolute()
+                .left(px(bounds.origin.x))
+                .top(px(bounds.origin.y))
+                .w(px(bounds.size.width))
+                .h(px(bounds.size.height))
+                .border_1()
+                .border_color(rgb(theme.colors.border))
+                .child(content),
+        )
+    } else {
+        body.child(content)
+    };
 
     let root = div()
         .flex()
@@ -68,7 +96,7 @@ pub(super) fn render(
                 .border_color(rgb(theme.colors.border))
                 .child("NEXT DOCK  /  independent model prototype"),
         )
-        .child(content);
+        .child(body);
 
     let move_owner = owner.clone();
     let up_owner = owner.clone();
@@ -79,6 +107,7 @@ pub(super) fn render(
             if let Some(owner) = move_owner.upgrade() {
                 owner.update(app, |this, cx| {
                     this.update_resize(event, cx);
+                    this.update_composition_move(event, cx);
                 });
             }
         },
@@ -89,6 +118,7 @@ pub(super) fn render(
             if let Some(owner) = up_owner.upgrade() {
                 owner.update(app, |this, cx| {
                     this.end_resize(cx);
+                    this.end_composition_move(cx);
                 });
             }
         },
@@ -99,6 +129,7 @@ pub(super) fn render(
             if let Some(owner) = up_out_owner.upgrade() {
                 owner.update(app, |this, cx| {
                     this.end_resize(cx);
+                    this.end_composition_move(cx);
                 });
             }
         },
@@ -112,6 +143,7 @@ fn render_node(
     path: &[NodePathStep],
     window: &Window,
     owner: &WeakEntity<NextDockWindow>,
+    viewport_size: Size,
 ) -> Div {
     match (&geometry.kind, node) {
         (
@@ -158,7 +190,24 @@ fn render_node(
                     &content_path,
                     window,
                     owner,
+                    viewport_size,
                 ));
+
+            let drag_owner = owner.clone();
+            let viewport_size = viewport_size;
+
+            let on_drag_start: MouseDownHandler =
+                Box::new(move |event: &MouseDownEvent, _window, app| {
+                    if let Some(owner) = drag_owner.upgrade() {
+                        owner.update(app, |this, _cx| {
+                            this.begin_composition_move(
+                                event.position,
+                                viewport_size.width,
+                                viewport_size.height,
+                            );
+                        });
+                    }
+                });
 
             div()
                 .relative()
@@ -168,6 +217,7 @@ fn render_node(
                     rect: header_rect,
                     theme: *theme,
                     key: key.to_owned(),
+                    on_drag_start,
                 })
                 .child(content_view)
         }
@@ -299,6 +349,7 @@ fn render_node(
                     &child_path,
                     window,
                     owner,
+                    viewport_size,
                 ));
             }
 

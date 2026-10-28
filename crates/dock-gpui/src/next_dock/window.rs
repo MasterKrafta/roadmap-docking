@@ -1,8 +1,10 @@
 //! Native window for the independent dock prototype.
 
+use dock_core::{Point, Rect, Size};
 use gpui::{Context, IntoElement, MouseButton, MouseMoveEvent, Render, Window};
 use ui::Theme;
 
+use super::geometry;
 use super::model::{DockLayout, SplitAxis};
 use super::view::{self, SplitResizeSpec};
 
@@ -11,6 +13,9 @@ pub(super) struct NextDockWindow {
     theme: Theme,
     layout: DockLayout,
     active_resize: Option<ActiveResize>,
+    floating_composition: Option<Rect>,
+    pending_move: Option<PendingCompositionMove>,
+    active_move: Option<ActiveCompositionMove>,
 }
 
 #[derive(Clone)]
@@ -19,12 +24,28 @@ struct ActiveResize {
     start_position: f32,
 }
 
+#[derive(Clone)]
+struct PendingCompositionMove {
+    start_position: Point,
+    viewport_size: Size,
+}
+
+#[derive(Clone)]
+struct ActiveCompositionMove {
+    start_position: Point,
+    start_origin: Point,
+    viewport_size: Size,
+}
+
 impl NextDockWindow {
     pub(super) fn new(theme: Theme) -> Self {
         Self {
             theme,
             layout: DockLayout::initial(),
             active_resize: None,
+            floating_composition: None,
+            pending_move: None,
+            active_move: None,
         }
     }
     pub(super) fn begin_resize(
@@ -33,6 +54,9 @@ impl NextDockWindow {
         position: gpui::Point<gpui::Pixels>,
         cx: &mut Context<Self>,
     ) {
+        self.pending_move = None;
+        self.active_move = None;
+
         if spec.available_extent <= f32::EPSILON
             || spec.boundary_index + 1 >= spec.initial_extents.len()
         {
@@ -117,6 +141,120 @@ impl NextDockWindow {
             cx.notify();
         }
     }
+
+    pub(super) fn begin_composition_move(
+        &mut self,
+        position: gpui::Point<gpui::Pixels>,
+        viewport_width: f32,
+        viewport_height: f32,
+    ) {
+        if self.active_resize.is_some() {
+            return;
+        }
+
+        self.pending_move = Some(PendingCompositionMove {
+            start_position: Point::new(
+                position.x.as_f32(),
+                (position.y.as_f32() - geometry::HEADER_HEIGHT).max(0.0),
+            ),
+            viewport_size: Size::new(viewport_width.max(1.0), viewport_height.max(1.0)),
+        });
+
+        self.active_move = None;
+    }
+
+    pub(super) fn update_composition_move(
+        &mut self,
+        event: &MouseMoveEvent,
+        cx: &mut Context<Self>,
+    ) {
+        if self.active_resize.is_some() {
+            return;
+        }
+
+        if event.pressed_button != Some(MouseButton::Left) {
+            self.pending_move = None;
+            self.active_move = None;
+            return;
+        }
+
+        let pointer = Point::new(
+            event.position.x.as_f32(),
+            (event.position.y.as_f32() - geometry::HEADER_HEIGHT).max(0.0),
+        );
+
+        if let Some(active) = self.active_move.clone() {
+            let Some(bounds) = self.floating_composition else {
+                self.active_move = None;
+                return;
+            };
+
+            let max_x = (active.viewport_size.width - bounds.size.width).max(0.0);
+            let max_y = (active.viewport_size.height - bounds.size.height).max(0.0);
+
+            let origin = Point::new(
+                (active.start_origin.x + pointer.x - active.start_position.x).clamp(0.0, max_x),
+                (active.start_origin.y + pointer.y - active.start_position.y).clamp(0.0, max_y),
+            );
+
+            self.floating_composition = Some(Rect::new(origin, bounds.size));
+            cx.notify();
+            return;
+        }
+
+        let Some(pending) = self.pending_move.clone() else {
+            return;
+        };
+
+        let dx = pointer.x - pending.start_position.x;
+        let dy = pointer.y - pending.start_position.y;
+
+        // A click alone must not detach the composition.
+        if dx * dx + dy * dy < 25.0 {
+            return;
+        }
+
+        let viewport_width = pending.viewport_size.width;
+        let viewport_height = pending.viewport_size.height;
+
+        let bounds = self.floating_composition.unwrap_or_else(|| {
+            let width = (viewport_width * 0.82).clamp(1.0, viewport_width);
+            let height = (viewport_height * 0.82).clamp(1.0, viewport_height);
+
+            let origin_x = (pending.start_position.x / viewport_width * (viewport_width - width))
+                .clamp(0.0, viewport_width - width);
+
+            Rect::new(Point::new(origin_x, 0.0), Size::new(width, height))
+        });
+
+        self.floating_composition = Some(bounds);
+        self.active_move = Some(ActiveCompositionMove {
+            start_position: pending.start_position,
+            start_origin: bounds.origin,
+            viewport_size: pending.viewport_size,
+        });
+        self.pending_move = None;
+
+        let max_x = (viewport_width - bounds.size.width).max(0.0);
+        let max_y = (viewport_height - bounds.size.height).max(0.0);
+
+        let origin = Point::new(
+            (bounds.origin.x + dx).clamp(0.0, max_x),
+            (bounds.origin.y + dy).clamp(0.0, max_y),
+        );
+
+        self.floating_composition = Some(Rect::new(origin, bounds.size));
+        cx.notify();
+    }
+
+    pub(super) fn end_composition_move(&mut self, cx: &mut Context<Self>) {
+        let had_pending = self.pending_move.take().is_some();
+        let had_active = self.active_move.take().is_some();
+
+        if had_pending || had_active {
+            cx.notify();
+        }
+    }
 }
 
 impl Render for NextDockWindow {
@@ -132,6 +270,7 @@ impl Render for NextDockWindow {
             window,
             &self.theme,
             cx.entity().downgrade(),
+            self.floating_composition,
         )
     }
 }

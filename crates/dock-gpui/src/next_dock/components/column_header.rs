@@ -1,16 +1,20 @@
 //! Empty drag area and controls for a dock column.
 
 use dock_core::{Point, Rect, Size};
-use gpui::{App, IntoElement, ParentElement, RenderOnce, Styled, Window, div, px, rgb};
+use gpui::{
+    App, InteractiveElement, IntoElement, MouseButton, ParentElement, RenderOnce, Styled, Window,
+    div, px, rgb,
+};
 use ui::Theme;
 
-use crate::components::{ClickHandler, IconButton};
+use crate::components::{ClickHandler, IconButton, MouseDownHandler};
 
 #[derive(IntoElement)]
 pub(in crate::next_dock) struct ColumnHeader {
     pub(in crate::next_dock) rect: Rect,
     pub(in crate::next_dock) theme: Theme,
     pub(in crate::next_dock) key: String,
+    pub(in crate::next_dock) on_drag_start: MouseDownHandler,
 }
 
 impl RenderOnce for ColumnHeader {
@@ -48,7 +52,42 @@ impl RenderOnce for ColumnHeader {
             .border_1()
             .border_color(rgb(theme.colors.border));
 
+        let drag_area = div()
+            .absolute()
+            .left(px(0.0))
+            .top(px(0.0))
+            .w(px(collapse_x.max(0.0)))
+            .h(px(height))
+            .on_mouse_down(MouseButton::Left, self.on_drag_start);
+
         header
+            .child(drag_area)
+            .child(
+                IconButton::new(
+                    format!("next-dock-column-collapse-{}", self.key),
+                    collapse_rect,
+                    ">>",
+                    &theme,
+                    noop_click(),
+                )
+                .with_colors(background, hover_background)
+                .with_border()
+                .with_centered_glyph()
+                .into_any_element(),
+            )
+            .child(
+                IconButton::new(
+                    format!("next-dock-column-close-{}", self.key),
+                    close_rect,
+                    "×",
+                    &theme,
+                    noop_click(),
+                )
+                .with_colors(background, hover_background)
+                .with_border()
+                .with_centered_glyph()
+                .into_any_element(),
+            )
             .child(
                 IconButton::new(
                     format!("next-dock-column-collapse-{}", self.key),
