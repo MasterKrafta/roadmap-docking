@@ -155,7 +155,7 @@ pub(crate) fn contains(bounds: Rect, point: Point) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{MenuState, contains, popup_bounds};
-        use crate::requests::DockMenuRequest;
+    use crate::requests::DockMenuRequest;
     use ui::Theme;
     use dock_core::{NodeId, Point, Rect, Size};
     use slotmap::Key;
@@ -199,7 +199,10 @@ mod tests {
         let theme = Theme::default();
         let bounds = popup_bounds(Point::new(310.0, 170.0), viewport, 5, &theme);
         assert_eq!(bounds.origin, Point::new(88.0, 30.0));
-        assert_eq!(bounds.size, Size::new(theme.metrics.popup_menu_width, 5.0 * theme.metrics.popup_menu_row_height));
+        assert_eq!(
+            bounds.size,
+            Size::new(theme.metrics.popup_menu_width, 5.0 * theme.metrics.popup_menu_row_height)
+        );
         assert!(contains(bounds, Point::new(100.0, 40.0)));
         assert!(!contains(bounds, Point::new(320.0, 40.0)));
         assert!(!contains(bounds, Point::new(100.0, 180.0)));
