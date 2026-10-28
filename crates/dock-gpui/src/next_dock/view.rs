@@ -11,7 +11,7 @@ use crate::components::{GroupFrame, MouseDownHandler, PanelSurface, SplitterHand
 
 use super::components::{ColumnHeader, GroupHeader};
 use super::geometry::{self, GeometryKind, NodeGeometry};
-use super::model::{CompositionContainer, DockLayout, DockNode, NodePathStep, SplitAxis, TabGroup};
+use super::model::{CompositionContainer, DockNode, NodePathStep, SplitAxis, TabGroup};
 use super::window::{CompositionDropZone, FloatingComposition, NextDockWindow};
 
 #[derive(Clone)]
@@ -28,7 +28,6 @@ pub(super) struct SplitResizeSpec {
 
 pub(super) fn render(
     container: &CompositionContainer,
-    layout: &DockLayout,
     width: f32,
     height: f32,
     window: &Window,
@@ -40,10 +39,6 @@ pub(super) fn render(
     let width = width.max(1.0);
     let height = height.max(1.0);
     let content_height = (height - geometry::HEADER_HEIGHT).max(1.0);
-
-    let (tree_width, tree_height) = floating.map_or((width, content_height), |bounds| {
-        (bounds.size.width, bounds.size.height)
-    });
 
     let floating_index = floating.map(|item| item.composition_index);
 

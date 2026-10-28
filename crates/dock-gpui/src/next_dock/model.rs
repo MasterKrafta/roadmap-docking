@@ -180,4 +180,40 @@ impl CompositionContainer {
     pub(super) fn layout_mut(&mut self, index: usize) -> Option<&mut DockLayout> {
         self.slots.get_mut(index)?.layout.as_mut()
     }
+
+    pub(super) fn reserve_empty_neighbor(
+        &mut self,
+        composition_index: usize,
+        empty_before: bool,
+    ) -> bool {
+        // This step supports the initial single-composition workspace.
+        if self.slots.len() != 1 || composition_index != 0 {
+            return false;
+        }
+
+        if self.slots[0].layout.is_none() {
+            return false;
+        }
+
+        let Some(mut composition) = self.slots.pop() else {
+            return false;
+        };
+
+        composition.weight = 0.5;
+
+        let empty_slot = CompositionSlot {
+            layout: None,
+            weight: 0.5,
+        };
+
+        if empty_before {
+            self.slots.push(empty_slot);
+            self.slots.push(composition);
+        } else {
+            self.slots.push(composition);
+            self.slots.push(empty_slot);
+        }
+
+        true
+    }
 }

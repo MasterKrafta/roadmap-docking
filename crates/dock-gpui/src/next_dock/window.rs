@@ -210,10 +210,15 @@ impl NextDockWindow {
         );
 
         if let Some(active) = self.active_move.clone() {
-            let Some(bounds) = self.floating_composition else {
+            let Some(floating) = self
+                .floating_composition
+                .filter(|floating| floating.composition_index == active.composition_index)
+            else {
                 self.active_move = None;
                 return;
             };
+
+            let bounds = floating.bounds;
 
             let max_x = (active.viewport_size.width - bounds.size.width).max(0.0);
             let max_y = (active.viewport_size.height - bounds.size.height).max(0.0);
@@ -225,7 +230,11 @@ impl NextDockWindow {
 
             let moved_bounds = Rect::new(origin, bounds.size);
 
-            self.floating_composition = Some(moved_bounds);
+            self.floating_composition = Some(FloatingComposition {
+                composition_index: active.composition_index,
+                bounds: moved_bounds,
+            });
+
             self.composition_drop_zone =
                 detect_composition_drop_zone(moved_bounds, active.viewport_size.width);
 
@@ -248,22 +257,33 @@ impl NextDockWindow {
         let viewport_width = pending.viewport_size.width;
         let viewport_height = pending.viewport_size.height;
 
-        let bounds = self.floating_composition.unwrap_or_else(|| {
-            let width = (viewport_width * 0.82).clamp(1.0, viewport_width);
-            let height = (viewport_height * 0.82).clamp(1.0, viewport_height);
+        let bounds = self
+            .floating_composition
+            .filter(|floating| floating.composition_index == pending.composition_index)
+            .map(|floating| floating.bounds)
+            .unwrap_or_else(|| {
+                let width = (viewport_width * 0.82).clamp(1.0, viewport_width);
+                let height = (viewport_height * 0.82).clamp(1.0, viewport_height);
 
-            let origin_x = (pending.start_position.x / viewport_width * (viewport_width - width))
-                .clamp(0.0, viewport_width - width);
+                let origin_x = (pending.start_position.x / viewport_width
+                    * (viewport_width - width))
+                    .clamp(0.0, viewport_width - width);
 
-            Rect::new(Point::new(origin_x, 0.0), Size::new(width, height))
+                Rect::new(Point::new(origin_x, 0.0), Size::new(width, height))
+            });
+
+        self.floating_composition = Some(FloatingComposition {
+            composition_index: pending.composition_index,
+            bounds,
         });
 
-        self.floating_composition = Some(bounds);
         self.active_move = Some(ActiveCompositionMove {
+            composition_index: pending.composition_index,
             start_position: pending.start_position,
             start_origin: bounds.origin,
             viewport_size: pending.viewport_size,
         });
+
         self.pending_move = None;
 
         let max_x = (viewport_width - bounds.size.width).max(0.0);
@@ -277,9 +297,10 @@ impl NextDockWindow {
         let moved_bounds = Rect::new(origin, bounds.size);
 
         self.floating_composition = Some(FloatingComposition {
-            composition_index: active.composition_index,
+            composition_index: pending.composition_index,
             bounds: moved_bounds,
         });
+
         self.composition_drop_zone = detect_composition_drop_zone(moved_bounds, viewport_width);
 
         cx.notify();
@@ -287,15 +308,21 @@ impl NextDockWindow {
 
     pub(super) fn end_composition_move(&mut self, cx: &mut Context<Self>) {
         let had_pending = self.pending_move.take().is_some();
-        let had_active = self.active_move.take().is_some();
+        let active_move = self.active_move.take();
+        let had_active = active_move.is_some();
+        let drop_zone = self.composition_drop_zone.take();
 
-        if had_active && self.composition_drop_zone.is_some() {
-            // With only one composition, dropping at either window edge
-            // restores it to the full dock area.
-            self.floating_composition = None;
+        if let (Some(active), Some(drop_zone)) = (active_move, drop_zone) {
+            // Dropping at the right edge places the empty slot before the composition.
+            let empty_before = matches!(drop_zone, CompositionDropZone::RightEdge);
+
+            if self
+                .container
+                .reserve_empty_neighbor(active.composition_index, empty_before)
+            {
+                self.floating_composition = None;
+            }
         }
-
-        self.composition_drop_zone = None;
 
         if had_pending || had_active {
             cx.notify();
