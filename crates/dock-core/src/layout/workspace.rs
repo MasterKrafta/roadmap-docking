@@ -199,9 +199,7 @@ impl Layout {
             let Some(area_id) = self.main_areas[side_index] else {
                 continue;
             };
-            let Some(area) = self.dock_areas.get(area_id).copied() else {
-                return None;
-            };
+            let area = self.dock_areas.get(area_id).copied()?;
 
             let columns = match self.nodes.get(area.root) {
                 Some(Node::Column(_)) => vec![area.root],
