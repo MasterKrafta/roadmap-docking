@@ -59,7 +59,6 @@ pub(crate) struct DockController {
     history: UndoRedoHistory,
     scroll_handles: HashMap<NodeId, ScrollHandle>,
     session: Session,
-    last_error: Option<CommandError>,
 }
 
 impl DockController {
@@ -101,7 +100,6 @@ impl DockController {
             history: UndoRedoHistory::new(),
             scroll_handles: HashMap::new(),
             session: Session::Idle,
-            last_error: None,
         }
     }
 
@@ -197,7 +195,6 @@ impl DockController {
             "cancelled dock drag gesture"
         );
         self.session = Session::Idle;
-        self.last_error = None;
         true
     }
 
@@ -378,7 +375,6 @@ impl DockController {
         };
 
         let Some(mut core) = gesture.core.take() else {
-            self.last_error = None;
             return Ok(None);
         };
         let snapshot = gesture
@@ -402,7 +398,6 @@ impl DockController {
             core.set_drop_target(target)?;
         }
 
-        self.last_error = None;
         Ok(core.pointer_up(pointer, target)?)
     }
 
@@ -436,7 +431,6 @@ impl DockController {
             DragDropAction::NoOp => {
                 // A rejected previous operation must not remain visible after a
                 // successfully resolved no-op drop.
-                self.last_error = None;
             }
         }
 
@@ -602,14 +596,12 @@ impl DockController {
             Err(error) => {
                 if let Some(command_error) = command_error {
                     tracing::warn!(error = %command_error, "dock resize preview was rejected");
-                    self.last_error = Some(command_error);
                 }
                 return Err(error);
             }
         };
 
         self.layout = candidate;
-        self.last_error = None;
         Ok(outcome)
     }
 
@@ -634,7 +626,6 @@ impl DockController {
                 return Err(ResizeUpdateError::NoActiveSession);
             }
         };
-        let mut policy_error = None;
         let commands = session
             .command_for_pointer(pointer)
             .map(|command| preserve_floating_resize_anchor(&session, command, &self.metrics))
@@ -643,7 +634,6 @@ impl DockController {
                     match policy.preview(session.baseline(), &self.layout, &command, &self.metrics) {
                         Ok((_, commands, _)) => Ok(commands),
                         Err(error) => {
-                            policy_error = Some(error);
                             Err(ResizeUpdateError::Command)
                         }
                     }
@@ -652,7 +642,6 @@ impl DockController {
                 }
             });
         self.layout = session.into_baseline();
-        self.last_error = policy_error;
 
         let commands = commands?;
         let result = self
@@ -683,7 +672,6 @@ impl DockController {
             }
         };
         self.layout = session.into_baseline();
-        self.last_error = None;
         true
     }
 
@@ -718,7 +706,6 @@ impl DockController {
     ) -> Result<T, CommandError> {
         match result {
             Ok(value) => {
-                self.last_error = None;
                 Ok(value)
             }
             Err(error) => {
@@ -727,7 +714,6 @@ impl DockController {
                     error = %error,
                     "dock controller operation failed"
                 );
-                self.last_error = Some(error.clone());
                 Err(error)
             }
         }
