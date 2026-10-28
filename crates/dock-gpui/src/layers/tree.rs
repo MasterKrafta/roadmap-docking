@@ -189,9 +189,7 @@ fn group_move_target_index(
         GroupMoveDirection::Previous if current_index > 0 && current_index < group_count => {
             Some(current_index - 1)
         }
-        GroupMoveDirection::Next
-            if current_index + 1 < group_count =>
-        {
+        GroupMoveDirection::Next if current_index < group_count.saturating_sub(1) => {
             // MoveGroup takes an insertion slot before source removal; skip over
             // the next group's original slot so the moved group ends up after it.
             Some(current_index + 2)
@@ -207,15 +205,41 @@ mod keyboard_group_move_tests {
 
     #[test]
     fn group_move_insertion_slots_respect_column_boundaries() {
-        assert_eq!(group_move_target_index(0, 3, GroupMoveDirection::Previous), None);
-        assert_eq!(group_move_target_index(0, 3, GroupMoveDirection::Next), Some(2));
-        assert_eq!(group_move_target_index(1, 3, GroupMoveDirection::Previous), Some(0));
-        assert_eq!(group_move_target_index(1, 3, GroupMoveDirection::Next), Some(3));
-        assert_eq!(group_move_target_index(2, 3, GroupMoveDirection::Previous), Some(1));
-        assert_eq!(group_move_target_index(2, 3, GroupMoveDirection::Next), None);
-        assert_eq!(group_move_target_index(0, 1, GroupMoveDirection::Previous), None);
-        assert_eq!(group_move_target_index(0, 1, GroupMoveDirection::Next), None);
-        assert_eq!(group_move_target_index(0, 0, GroupMoveDirection::Previous), None);
+        assert_eq!(
+            group_move_target_index(0, 3, GroupMoveDirection::Previous),
+            None
+        );
+        assert_eq!(
+            group_move_target_index(0, 3, GroupMoveDirection::Next),
+            Some(2)
+        );
+        assert_eq!(
+            group_move_target_index(1, 3, GroupMoveDirection::Previous),
+            Some(0)
+        );
+        assert_eq!(
+            group_move_target_index(1, 3, GroupMoveDirection::Next),
+            Some(3)
+        );
+        assert_eq!(
+            group_move_target_index(2, 3, GroupMoveDirection::Previous),
+            Some(1)
+        );
+        assert_eq!(
+            group_move_target_index(2, 3, GroupMoveDirection::Next),
+            None
+        );
+        assert_eq!(
+            group_move_target_index(0, 1, GroupMoveDirection::Previous),
+            None
+        );
+        assert_eq!(
+            group_move_target_index(0, 1, GroupMoveDirection::Next),
+            None
+        );
+        assert_eq!(
+            group_move_target_index(0, 0, GroupMoveDirection::Previous),
+            None
+        );
     }
 }
-
