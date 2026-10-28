@@ -3,8 +3,8 @@ use std::collections::HashSet;
 use dock_core::{DockCommand, Layout, LayoutRects, Node, NodeId, Point, Rect, Size};
 use gpui::{AnyElement, IntoElement};
 
-use crate::components::{GroupFrame, GroupGrip, RectBox, TabStrip};
 use crate::components::focus_ring::{GroupMoveDirection, keyboard_group_move_direction};
+use crate::components::{GroupFrame, GroupGrip, RectBox, TabStrip};
 use crate::host::{CommandKeyHandler, DockHost};
 use crate::surface::RenderData;
 use crate::tree_query::subtree_nodes;
