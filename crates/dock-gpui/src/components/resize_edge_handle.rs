@@ -1,11 +1,11 @@
 use dock_core::{Rect, ResizeEdge};
 use gpui::{
-    App, InteractiveElement, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, RenderOnce,
+    App, InteractiveElement, IntoElement, MouseButton, MouseDownEvent, RenderOnce,
     Styled, Window, div, px, rgb,
 };
 use ui::Theme;
 
-use crate::components::with_focus_ring;
+use crate::components::{with_focus_ring, KeyDownHandler};
 
 pub type ResizeStartHandler = Box<dyn Fn(&MouseDownEvent, &mut Window, &mut App) + 'static>;
 
@@ -31,7 +31,7 @@ pub struct ResizeEdgeHandle {
     /// Begins the resize gesture.
     pub on_resize_start: ResizeStartHandler,
     /// Handles keyboard resizing when this edge is supported for keyboard input.
-    pub on_resize_key: Option<Box<dyn Fn(&KeyDownEvent, &mut Window, &mut App) + 'static>>,
+    pub on_resize_key: Option<KeyDownHandler>,
 }
 
 impl RenderOnce for ResizeEdgeHandle {
