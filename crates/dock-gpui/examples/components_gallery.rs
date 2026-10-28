@@ -246,6 +246,7 @@ impl Render for Gallery {
                             rect: rect(12.0, 44.0, 396.0, 4.0),
                             theme,
                             on_drag_start: noop_mouse_down(),
+                            on_move_key: Some(noop_key_down()),
                         })
                         .child(
                             div()
