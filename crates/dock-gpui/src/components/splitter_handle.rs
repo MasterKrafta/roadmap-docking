@@ -1,11 +1,11 @@
 use dock_core::{Axis, Rect};
 use gpui::{
-    App, InteractiveElement, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, RenderOnce,
+    App, InteractiveElement, IntoElement, MouseButton, MouseDownEvent, RenderOnce,
     Styled, Window, div, px, rgb,
 };
 use ui::Theme;
 
-use crate::components::with_focus_ring;
+use crate::components::{with_focus_ring, KeyDownHandler};
 
 pub type ResizeStartHandler = Box<dyn Fn(&MouseDownEvent, &mut Window, &mut App) + 'static>;
 
@@ -23,7 +23,7 @@ pub struct SplitterHandle {
     /// Missing when this splitter is visible but not a supported resize boundary.
     pub on_resize_start: Option<ResizeStartHandler>,
     /// Handles arrow-key resizing when this is a supported splitter.
-    pub on_resize_key: Option<Box<dyn Fn(&KeyDownEvent, &mut Window, &mut App) + 'static>>,
+    pub on_resize_key: Option<KeyDownHandler>,
 }
 
 impl RenderOnce for SplitterHandle {
