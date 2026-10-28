@@ -25,7 +25,7 @@ impl IconButton {
         rect: Rect,
         glyph: impl Into<String>,
         theme: &Theme,
-        on_click: Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>,
+        on_click: ClickHandler,
     ) -> Self {
         Self {
             id: id.into(),
