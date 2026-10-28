@@ -1,7 +1,8 @@
 use dock_core::{DockCommand, DragHandle, DragPayload, FloatingGroupId, PanelInstance, Rect};
 use gpui::{
-    AnyElement, App, ClickEvent, Context, KeyDownEvent, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    ParentElement, Render, SharedString, Styled, Subscription, WeakEntity, Window, div, px, rgb,
+    AnyElement, App, ClickEvent, Context, InteractiveElement, KeyDownEvent, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Render, SharedString, Styled,
+    Subscription, WeakEntity, Window, div, px, rgb,
 };
 use ui::Theme;
 
@@ -118,6 +119,9 @@ impl Render for FloatingWindow {
             root = root.child(element);
         }
         root
+            .on_mouse_move(host.surface_mouse_move())
+            .on_mouse_up(MouseButton::Left, host.surface_mouse_up())
+            .on_mouse_up_out(MouseButton::Left, host.surface_mouse_up())
     }
 }
 
@@ -198,8 +202,24 @@ impl DockHost for FloatingWindowHost {
         })
     }
 
-    fn drag_start(&self, _payload: DragPayload, _handle: DragHandle) -> DragStartHandler {
-        Box::new(|_, _, _| {})
+    fn drag_start(&self, payload: DragPayload, handle: DragHandle) -> DragStartHandler {
+        let owner = self.owner.clone();
+        Box::new(move |event: &MouseDownEvent, window, app| {
+            let Some(owner) = owner.upgrade() else {
+                return;
+            };
+            let source_bounds = window.window_bounds().get_bounds();
+            let source_viewport = window.viewport_size();
+            owner.update(app, |main, _cx| {
+                main.begin_external_drag(
+                    payload,
+                    handle,
+                    source_bounds,
+                    source_viewport,
+                    event.position,
+                );
+            });
+        })
     }
 
     fn resize_start(&self, _handle: ResizeHandle) -> ResizeStartHandler {
@@ -211,11 +231,41 @@ impl DockHost for FloatingWindowHost {
     }
 
     fn surface_mouse_move(&self) -> SurfaceMouseMoveHandler {
-        Box::new(|_: &MouseMoveEvent, _, _| {})
+        let owner = self.owner.clone();
+        Box::new(move |event: &MouseMoveEvent, window, app| {
+            let Some(owner) = owner.upgrade() else {
+                return;
+            };
+            let source_bounds = window.window_bounds().get_bounds();
+            let source_viewport = window.viewport_size();
+            owner.update(app, |main, cx| {
+                main.handle_external_surface_mouse_move(
+                    event,
+                    source_bounds,
+                    source_viewport,
+                    cx,
+                );
+            });
+        })
     }
 
     fn surface_mouse_up(&self) -> SurfaceMouseUpHandler {
-        Box::new(|_: &MouseUpEvent, _, _| {})
+        let owner = self.owner.clone();
+        Box::new(move |event: &MouseUpEvent, window, app| {
+            let Some(owner) = owner.upgrade() else {
+                return;
+            };
+            let source_bounds = window.window_bounds().get_bounds();
+            let source_viewport = window.viewport_size();
+            owner.update(app, |main, cx| {
+                main.handle_external_surface_mouse_up(
+                    event,
+                    source_bounds,
+                    source_viewport,
+                    cx,
+                );
+            });
+        })
     }
 }
 
