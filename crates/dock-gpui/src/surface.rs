@@ -62,11 +62,13 @@ impl<'a> DockSurface<'a> {
 
     pub fn build(self, host: &mut dyn DockHost) -> Div {
         render_layout_excluding(
-            self.layout,
-            self.frame.rects(),
-            Some(self.frame),
+            RenderData {
+                layout: self.layout,
+                rects: self.frame.rects(),
+                frame: Some(self.frame),
+                theme: self.theme,
+            },
             self.scroll_handles,
-            self.theme,
             host,
             self.overlay,
             self.excluded_floating_groups,
@@ -85,11 +87,13 @@ pub(crate) fn render_layout(
     overlay: Option<&DragOverlay>,
 ) -> Div {
     render_layout_excluding(
-        layout,
-        rects,
-        frame,
+        RenderData {
+            layout,
+            rects,
+            frame,
+            theme,
+        },
         scroll_handles,
-        theme,
         host,
         overlay,
         None,
@@ -98,21 +102,18 @@ pub(crate) fn render_layout(
 
 /// Shared composition for regular and native-window-backed floating groups.
 pub(crate) fn render_layout_excluding(
-    layout: &Layout,
-    rects: &LayoutRects,
-    frame: Option<&FrameGeometry>,
+    data: RenderData<'_>,
     scroll_handles: &HashMap<NodeId, ScrollHandle>,
-    theme: &Theme,
     host: &mut dyn DockHost,
     overlay: Option<&DragOverlay>,
     excluded_floating_groups: Option<&HashSet<FloatingGroupId>>,
 ) -> Div {
-    let data = RenderData {
+    let RenderData {
         layout,
         rects,
         frame,
         theme,
-    };
+    } = data;
     let mut root = div()
         .relative()
         .w(px(rects.viewport.map_or(1.0, |value| value.size.width)))
