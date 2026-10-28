@@ -297,6 +297,7 @@ impl Render for Gallery {
                             axis: Axis::X,
                             theme,
                             on_resize_start: Some(noop_mouse_down()),
+                            on_resize_key: Some(noop_key_down()),
                         })
                         .child(
                             div()
