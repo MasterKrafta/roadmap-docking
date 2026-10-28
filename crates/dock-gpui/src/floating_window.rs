@@ -1,11 +1,9 @@
 use dock_core::{DockCommand, DragHandle, DragPayload, FloatingGroupId, PanelInstance, Rect};
 use gpui::{
-    AnyElement, App, ClickEvent, Context, InteractiveElement, KeyDownEvent, MouseButton,
+    AnyElement, ClickEvent, Context, InteractiveElement, KeyDownEvent, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Render, SharedString, Styled,
     Subscription, WeakEntity, Window, div, px, rgb,
 };
-use ui::Theme;
-
 use crate::layers::floating::FloatingGroupRenderMode;
 use crate::host::{
     CommandClickHandler, CommandKeyHandler, DockHost, DragStartHandler, NoopHost,
@@ -269,11 +267,3 @@ impl DockHost for FloatingWindowHost {
     }
 }
 
-fn rectangles_approximately_equal(left: Rect, right: Rect) -> bool {
-    const EPSILON: f32 = 1.0;
-
-    (left.origin.x - right.origin.x).abs() < EPSILON
-        && (left.origin.y - right.origin.y).abs() < EPSILON
-        && (left.size.width - right.size.width).abs() < EPSILON
-        && (left.size.height - right.size.height).abs() < EPSILON
-}
