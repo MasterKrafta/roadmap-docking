@@ -48,6 +48,67 @@ fn frame_syncs_computed_canvas_bounds_without_advancing_layout_version() {
 }
 
 #[test]
+fn frame_recovers_oversized_main_dock_by_collapsing_columns_to_rails() {
+    let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+    let viewport = Rect::new(Point::ZERO, Size::new(480.0, 800.0));
+
+    let frame = controller
+        .frame(viewport)
+        .expect("a narrow viewport should recover by collapsing main columns");
+
+    assert!(
+        frame.rects().canvas.unwrap().size.width >= controller.metrics().min_canvas_width,
+        "recovered layout should keep the canvas at or above its minimum width"
+    );
+    assert!(
+        controller
+            .layout()
+            .nodes()
+            .any(|(_, node)| matches!(node, Node::Column(column) if column.mode == ColumnMode::IconsOnly)),
+        "recovery should preserve the panel tree and make an outer column an icon rail"
+    );
+    assert_eq!(controller.layout().panel_instances().count(), 4);
+    assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+}
+
+#[test]
+fn command_that_would_overflow_viewport_is_rejected_without_mutating_layout() {
+    let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+    let viewport = Rect::new(Point::ZERO, Size::new(480.0, 800.0));
+    controller.frame(viewport).unwrap();
+
+    let area = controller
+        .layout()
+        .main_area(DockSide::Right)
+        .expect("initial layout should have a right main area");
+    let column_count = match controller.layout().node(area.root) {
+        Some(Node::Column(_)) => 1,
+        Some(Node::Split(split)) => split.children.len(),
+        other => panic!("right main area should contain columns, got {other:?}"),
+    };
+    let group = controller
+        .layout()
+        .nodes()
+        .find_map(|(_, node)| match node {
+            Node::Column(column) if column.groups.len() > 1 => column.groups.first().copied(),
+            _ => None,
+        })
+        .expect("initial layout should contain a column with multiple groups");
+    let before = layout_debug_snapshot(&controller);
+
+    let result = controller.apply(DockCommand::MoveGroupToMainColumn {
+        group,
+        side: DockSide::Right,
+        index: column_count,
+    });
+
+    assert!(result.is_err(), "an extra column must not make the canvas too narrow");
+    assert_eq!(layout_debug_snapshot(&controller), before);
+    assert_eq!(controller.history.undo_len(), 0);
+    assert_eq!(controller.history.redo_len(), 0);
+}
+
+#[test]
 fn history_mutations_cancel_active_resize_session() {
     let mut controller = DockController::new_initial(&Theme::default()).unwrap();
     let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
