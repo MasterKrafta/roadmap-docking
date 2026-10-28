@@ -397,7 +397,6 @@ mod tests {
             Modifiers {
                 control: true,
                 shift: true,
-                alt: true,
                 ..Modifiers::default()
             },
             Modifiers {
