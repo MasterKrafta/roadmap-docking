@@ -1,7 +1,7 @@
 use dock_core::{Axis, Rect};
 use gpui::{
-    App, InteractiveElement, IntoElement, MouseButton, MouseDownEvent, RenderOnce, Styled, Window,
-    div, px, rgb,
+    App, CursorStyle, InteractiveElement, IntoElement, MouseButton, MouseDownEvent, RenderOnce,
+    Styled, Window, div, px, rgb,
 };
 use ui::Theme;
 
@@ -28,7 +28,11 @@ pub struct SplitterHandle {
 
 impl RenderOnce for SplitterHandle {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
-        let _axis = self.axis;
+        let cursor = match self.axis {
+            Axis::X => CursorStyle::ResizeLeftRight,
+            Axis::Y => CursorStyle::ResizeUpDown,
+        };
+
         let element = div()
             .absolute()
             .left(px(self.rect.origin.x))
@@ -39,12 +43,13 @@ impl RenderOnce for SplitterHandle {
 
         match (self.on_resize_start, self.on_resize_key) {
             (Some(on_resize_start), Some(on_resize_key)) => {
-                with_focus_ring(element.id(self.id), &self.theme)
+                with_focus_ring(element.cursor(cursor).id(self.id), &self.theme)
                     .on_key_down(on_resize_key)
                     .on_mouse_down(MouseButton::Left, on_resize_start)
                     .into_any_element()
             }
             (Some(on_resize_start), None) => element
+                .cursor(cursor)
                 .id(self.id)
                 .on_mouse_down(MouseButton::Left, on_resize_start)
                 .into_any_element(),

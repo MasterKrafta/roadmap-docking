@@ -1,10 +1,109 @@
 //! Rendering for the independent dock tree.
+use dock_core::{Axis, Point, Rect, Size};
+use gpui::{
+    AnyElement, App, Div, InteractiveElement, IntoElement, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, ParentElement, Styled, WeakEntity, Window, div, px, rgb,
+};
+use ui::Theme;
 
-use super::model::NodePathStep;
-use super::window::NextDockWindow;
-use crate::components::SplitterHandle;
 use crate::components::splitter_handle::ResizeStartHandler;
-use dock_core::Axis;
+use crate::components::{GroupFrame, PanelSurface, SplitterHandle};
+
+use super::components::{ColumnHeader, GroupHeader};
+use super::geometry::{self, GeometryKind, NodeGeometry};
+use super::model::{DockLayout, DockNode, NodePathStep, SplitAxis, TabGroup};
+use super::window::NextDockWindow;
+
+#[derive(Clone)]
+pub(super) struct SplitResizeSpec {
+    pub(super) path: Vec<NodePathStep>,
+    pub(super) boundary_index: usize,
+    pub(super) axis: SplitAxis,
+    pub(super) available_extent: f32,
+    pub(super) initial_extents: Vec<f32>,
+    pub(super) min_first: f32,
+    pub(super) min_second: f32,
+}
+
+pub(super) fn render(
+    layout: &DockLayout,
+    width: f32,
+    height: f32,
+    window: &Window,
+    theme: &Theme,
+    owner: WeakEntity<NextDockWindow>,
+) -> Div {
+    let width = width.max(1.0);
+    let height = height.max(1.0);
+    let content_height = (height - geometry::HEADER_HEIGHT).max(1.0);
+
+    let root_geometry = geometry::compute(&layout.root, width, content_height, window, theme);
+
+    let content = render_node(
+        &layout.root,
+        &root_geometry,
+        theme,
+        "root",
+        &[],
+        window,
+        &owner,
+    );
+
+    let root = div()
+        .flex()
+        .flex_col()
+        .w(px(width))
+        .h(px(height))
+        .bg(rgb(theme.colors.window_background))
+        .text_color(rgb(theme.colors.primary_text))
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .w(px(width))
+                .h(px(geometry::HEADER_HEIGHT))
+                .px(px(14.0))
+                .bg(rgb(theme.colors.toolbar_background))
+                .border_1()
+                .border_color(rgb(theme.colors.border))
+                .child("NEXT DOCK  /  independent model prototype"),
+        )
+        .child(content);
+
+    let move_owner = owner.clone();
+    let up_owner = owner.clone();
+    let up_out_owner = owner;
+
+    root.on_mouse_move(
+        move |event: &MouseMoveEvent, _window: &mut Window, app: &mut App| {
+            if let Some(owner) = move_owner.upgrade() {
+                owner.update(app, |this, cx| {
+                    this.update_resize(event, cx);
+                });
+            }
+        },
+    )
+    .on_mouse_up(
+        MouseButton::Left,
+        move |_event: &MouseUpEvent, _window: &mut Window, app: &mut App| {
+            if let Some(owner) = up_owner.upgrade() {
+                owner.update(app, |this, cx| {
+                    this.end_resize(cx);
+                });
+            }
+        },
+    )
+    .on_mouse_up_out(
+        MouseButton::Left,
+        move |_event: &MouseUpEvent, _window: &mut Window, app: &mut App| {
+            if let Some(owner) = up_out_owner.upgrade() {
+                owner.update(app, |this, cx| {
+                    this.end_resize(cx);
+                });
+            }
+        },
+    )
+}
 fn render_node(
     node: &DockNode,
     geometry: &NodeGeometry,
