@@ -215,7 +215,7 @@ impl MainWindow {
         ) else {
             return Vec::new();
         };
-        let Ok(frame) = FrameGeometry::compute(self.dock.layout(), viewport, self.dock.metrics())
+        let Ok(_frame) = FrameGeometry::compute(self.dock.layout(), viewport, self.dock.metrics())
         else {
             return Vec::new();
         };
@@ -229,15 +229,12 @@ impl MainWindow {
         let mut specs = Vec::new();
 
         for (group, _) in layout.floating_groups_in_paint_order() {
-            let Some(bounds) = frame
-                .rects()
-                .floating_groups
-                .iter()
-                .find(|candidate| candidate.group == group)
-                .map(|candidate| candidate.rect)
-            else {
+            let Some(floating) = layout.floating_group(group) else {
                 continue;
             };
+            // Native bounds follow the model, not the frame's viewport-clamped
+            // rectangle: a floating window must be allowed to leave the main window.
+            let bounds = floating.bounds;
             let title = layout
                 .floating_group(group)
                 .and_then(|floating| layout.dock_area(floating.area))
@@ -249,7 +246,12 @@ impl MainWindow {
             let native_bounds = Bounds::new(
                 point(
                     px(parent_bounds.origin.x.as_f32() + bounds.origin.x),
-                    px(parent_bounds.origin.y.as_f32() + surface_top + bounds.origin.y),
+                    px(
+                        parent_bounds.origin.y.as_f32()
+                            + chrome_height
+                            + surface_top
+                            + bounds.origin.y,
+                    ),
                 ),
                 size(
                     px(bounds.size.width + chrome_width),
@@ -276,10 +278,14 @@ impl MainWindow {
         cx: &mut Context<Self>,
     ) -> Option<Rect> {
         let parent_bounds = self.last_window_bounds?;
+        let parent_viewport = self.last_viewport_size?;
+        let parent_chrome_height =
+            (parent_bounds.size.height.as_f32() - parent_viewport.height.as_f32()).max(0.0);
         let origin = Point::new(
             native_bounds.origin.x.as_f32() - parent_bounds.origin.x.as_f32(),
             native_bounds.origin.y.as_f32()
                 - parent_bounds.origin.y.as_f32()
+                - parent_chrome_height
                 - self.last_surface_top,
         );
         let bounds = Rect::new(
