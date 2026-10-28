@@ -276,20 +276,20 @@ fn move_panel_key_handler(
             }
             None => {}
         }
-        if keyboard_panel_other_side_move(&event.keystroke) {
-            if let Some(handler) = &move_other_side {
-                handler(event, window, app);
-            }
+        if keyboard_panel_other_side_move(&event.keystroke)
+            && let Some(handler) = &move_other_side
+        {
+            handler(event, window, app);
         }
-        if keyboard_panel_rail_move(&event.keystroke) {
-            if let Some(handler) = &move_to_rail {
-                handler(event, window, app);
-            }
+        if keyboard_panel_rail_move(&event.keystroke)
+            && let Some(handler) = &move_to_rail
+        {
+            handler(event, window, app);
         }
-        if keyboard_panel_float_move(&event.keystroke) {
-            if let Some(handler) = &move_to_floating {
-                handler(event, window, app);
-            }
+        if keyboard_panel_float_move(&event.keystroke)
+            && let Some(handler) = &move_to_floating
+        {
+            handler(event, window, app);
         }
     }))
 }
