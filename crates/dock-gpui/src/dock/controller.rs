@@ -484,6 +484,7 @@ impl DockController {
         match action {
             DragDropAction::Command(DockCommand::MoveFloating { group, origin }) => {
                 let stored_origin = self
+                    .workspace
                     .layout
                     .floating_group(group)
                     .ok_or(CommandError::MissingFloatingGroup { group })?
@@ -664,6 +665,7 @@ impl DockController {
 
         let commands = commands?;
         let result = self
+            .workspace
             .history
             .apply_sequence(&mut self.workspace.layout, commands, &self.workspace.metrics)
             .and_then(|mut outcomes| {
@@ -715,6 +717,7 @@ impl DockController {
         // Keep handles for live columns even when the viewport currently has no overflow,
         // but discard handles whose column was removed from the layout.
         let live_columns: HashSet<NodeId> = self
+            .workspace
             .layout
             .nodes()
             .filter_map(|(id, node)| matches!(node, Node::Column(_)).then_some(id))
