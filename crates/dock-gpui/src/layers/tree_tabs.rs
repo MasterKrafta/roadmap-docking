@@ -7,7 +7,7 @@ use gpui::{AnyElement, IntoElement};
 use crate::components::focus_ring::{
     PanelColumnMoveDirection, PanelMoveDirection, TabReorderDirection,
     keyboard_panel_column_move_direction, keyboard_panel_move_direction,
-    keyboard_panel_other_side_move, keyboard_tab_reorder_direction,
+    keyboard_panel_other_side_move, keyboard_panel_rail_move, keyboard_tab_reorder_direction,
 };
 use crate::components::{ColumnModeButton, GroupMenuButton, PanelTab, TabOverflowButton};
 use crate::dock::{activate_tab, collapse_group, cycle_column_mode};
@@ -237,6 +237,12 @@ fn move_panel_key_handler(
     let move_previous_column = previous_column_group.and_then(move_to_group);
     let move_next_column = next_column_group.and_then(move_to_group);
     let move_other_side = opposite_main_dock_group(layout, source_group).and_then(move_to_group);
+    let move_to_rail = main_rail_target_for_group(layout, source_group).map(|(column, index)| {
+        host.command_key(DockCommand::MovePanel {
+            panel,
+            target: DropTarget::RailSlot { column, index },
+        })
+    });
 
     Some(Box::new(move |event, window, app| {
         match keyboard_panel_move_direction(&event.keystroke) {
@@ -267,6 +273,11 @@ fn move_panel_key_handler(
         }
         if keyboard_panel_other_side_move(&event.keystroke) {
             if let Some(handler) = &move_other_side {
+                handler(event, window, app);
+            }
+        }
+        if keyboard_panel_rail_move(&event.keystroke) {
+            if let Some(handler) = &move_to_rail {
                 handler(event, window, app);
             }
         }
@@ -371,6 +382,27 @@ fn opposite_main_dock_group(layout: &Layout, source_group: NodeId) -> Option<Nod
     matches!(layout.node(target_group), Some(Node::Tabs(_))).then_some(target_group)
 }
 
+/// Returns the append slot of the first icon-rail column on the side owning this main-dock group.
+fn main_rail_target_for_group(layout: &Layout, source_group: NodeId) -> Option<(NodeId, usize)> {
+    let columns = [DockSide::Left, DockSide::Right].into_iter().find_map(|side| {
+        let columns = main_column_ids(layout, side)?;
+        let source_is_expanded = columns.iter().any(|column_id| {
+            matches!(
+                layout.node(*column_id),
+                Some(Node::Column(column))
+                    if !column.mode.is_rail() && column.groups.contains(&source_group)
+            )
+        });
+        source_is_expanded.then_some(columns)
+    })?;
+
+    let rail_column = columns.into_iter().find(|column_id| {
+        matches!(layout.node(*column_id), Some(Node::Column(column)) if column.mode.is_rail())
+    })?;
+    let index = layout.column_display_order(rail_column).ok()?.len();
+    Some((rail_column, index))
+}
+
 fn corresponding_group_index(source_index: usize, target_group_count: usize) -> Option<usize> {
     if target_group_count == 0 {
         None
@@ -395,11 +427,100 @@ fn adjacent_indices(
 #[cfg(test)]
 mod keyboard_panel_move_tests {
     use super::{
-        adjacent_indices, corresponding_group_index, main_column_ids, opposite_main_dock_group,
+        adjacent_indices, corresponding_group_index, main_column_ids, main_rail_target_for_group,
+        opposite_main_dock_group,
     };
     use crate::dock::DockController;
-    use dock_core::{DockCommand, DockSide, Node};
+    use dock_core::{ColumnMode, DockCommand, DockSide, DropTarget, Node};
     use ui::Theme;
+
+    #[test]
+    fn panel_move_targets_append_slot_in_same_side_icon_rail() {
+        let mut controller = DockController::new_initial(&Theme::default())
+            .expect("initial layout should be valid");
+        let initial_columns = main_column_ids(controller.layout(), DockSide::Right)
+            .expect("initial layout should have a right dock");
+        let initial_group = match controller.layout().node(initial_columns[0]) {
+            Some(Node::Column(column)) => *column.groups.first().expect("column should have a group"),
+            _ => panic!("main dock root should be a column"),
+        };
+        assert!(main_rail_target_for_group(controller.layout(), initial_group).is_none());
+
+        controller
+            .apply(DockCommand::MoveGroupToMainColumn {
+                group: initial_group,
+                side: DockSide::Right,
+                index: 1,
+            })
+            .expect("splitting the group into a second main column should work");
+        let columns = main_column_ids(controller.layout(), DockSide::Right)
+            .expect("right dock should support ordered columns");
+        assert_eq!(columns.len(), 2);
+
+        let rail_column = columns[0];
+        controller
+            .apply(DockCommand::SetColumnMode {
+                column: rail_column,
+                mode: ColumnMode::IconsOnly,
+            })
+            .expect("first column should become an icon rail");
+
+        let source_column = columns
+            .iter()
+            .copied()
+            .find(|column_id| {
+                *column_id != rail_column
+                    && matches!(
+                        controller.layout().node(*column_id),
+                        Some(Node::Column(column)) if !column.mode.is_rail()
+                    )
+            })
+            .expect("right dock should retain an expanded source column");
+        let source_group = match controller.layout().node(source_column) {
+            Some(Node::Column(column)) => *column.groups.first().expect("source column has a group"),
+            _ => panic!("source column should be a column"),
+        };
+        let source_panel = match controller.layout().node(source_group) {
+            Some(Node::Tabs(tabs)) => match controller.layout().node(
+                *tabs.children.first().expect("source group should contain a panel"),
+            ) {
+                Some(Node::Panel(panel)) => panel.panel_id,
+                _ => panic!("tab group child should be a panel"),
+            },
+            _ => panic!("source group should be a tab group"),
+        };
+
+        let (target_column, target_index) =
+            main_rail_target_for_group(controller.layout(), source_group)
+                .expect("expanded group should target the rail on its dock side");
+        assert_eq!(target_column, rail_column);
+        assert_eq!(
+            target_index,
+            controller
+                .layout()
+                .column_display_order(rail_column)
+                .expect("rail display order should be available")
+                .len()
+        );
+
+        controller
+            .apply(DockCommand::MovePanel {
+                panel: source_panel,
+                target: DropTarget::RailSlot {
+                    column: target_column,
+                    index: target_index,
+                },
+            })
+            .expect("moving a panel to the rail should work");
+        assert!(
+            controller
+                .layout()
+                .column_display_order(rail_column)
+                .expect("rail display order should remain available")
+                .iter()
+                .any(|item| item.panel == source_panel)
+        );
+    }
 
     #[test]
     fn panel_move_only_targets_adjacent_items() {

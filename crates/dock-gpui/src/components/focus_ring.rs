@@ -95,6 +95,18 @@ pub(crate) fn keyboard_panel_other_side_move(keystroke: &Keystroke) -> bool {
         && keystroke.key.eq_ignore_ascii_case("home")
 }
 
+/// Returns true for the shortcut that transfers a focused panel into the icon rail on its dock side.
+///
+/// Ctrl/Cmd + Alt + Shift + R appends the panel to the side's rail when one exists.
+pub(crate) fn keyboard_panel_rail_move(keystroke: &Keystroke) -> bool {
+    let modifiers = keystroke.modifiers;
+    (modifiers.control || modifiers.platform)
+        && modifiers.alt
+        && modifiers.shift
+        && !modifiers.function
+        && keystroke.key.eq_ignore_ascii_case("r")
+}
+
 /// Direction requested when reordering a focused tab with the keyboard.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum TabReorderDirection {
@@ -196,6 +208,7 @@ mod tests {
         GroupMoveDirection, PanelColumnMoveDirection, PanelMoveDirection, TabReorderDirection,
         is_keyboard_activation_key, keyboard_group_move_direction, keyboard_panel_column_move_direction,
         keyboard_panel_move_direction, keyboard_panel_other_side_move,
+        keyboard_panel_rail_move,
         keyboard_resize_axis_for_floating_edge,
         keyboard_resize_delta, keyboard_tab_reorder_direction,
     };
@@ -476,6 +489,62 @@ mod tests {
                 ..Modifiers::default()
             }
         )));
+    }
+
+    #[test]
+    fn keyboard_panel_rail_move_accepts_command_alt_shift_r() {
+        let control_alt_shift = Modifiers {
+            control: true,
+            alt: true,
+            shift: true,
+            ..Modifiers::default()
+        };
+        assert!(keyboard_panel_rail_move(&key("r", control_alt_shift)));
+        assert!(keyboard_panel_rail_move(&key("R", control_alt_shift)));
+
+        let platform_alt_shift = Modifiers {
+            platform: true,
+            alt: true,
+            shift: true,
+            ..Modifiers::default()
+        };
+        assert!(keyboard_panel_rail_move(&key("r", platform_alt_shift)));
+    }
+
+    #[test]
+    fn keyboard_panel_rail_move_rejects_other_keys_and_missing_modifiers() {
+        assert!(!keyboard_panel_rail_move(&key("r", Modifiers::default())));
+        assert!(!keyboard_panel_rail_move(&key(
+            "home",
+            Modifiers {
+                control: true,
+                alt: true,
+                shift: true,
+                ..Modifiers::default()
+            }
+        )));
+
+        for modifiers in [
+            Modifiers {
+                control: true,
+                alt: true,
+                ..Modifiers::default()
+            },
+            Modifiers {
+                control: true,
+                shift: true,
+                ..Modifiers::default()
+            },
+            Modifiers {
+                control: true,
+                alt: true,
+                shift: true,
+                function: true,
+                ..Modifiers::default()
+            },
+        ] {
+            assert!(!keyboard_panel_rail_move(&key("r", modifiers)));
+        }
     }
 
     #[test]
