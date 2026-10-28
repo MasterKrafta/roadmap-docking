@@ -1,4 +1,4 @@
-use dock_core::{DockCommand, DragHandle, DragPayload, FloatingGroupId, Point, Rect, Size};
+use dock_core::{DragHandle, DragPayload, FloatingGroupId, Point, Rect, Size};
 use gpui::{
     App, AppContext, Bounds, Context, MouseButton, MouseMoveEvent, MouseUpEvent, Pixels,
     TitlebarOptions, Window, WindowBounds, WindowHandle, WindowOptions, point, px, size,
@@ -9,7 +9,7 @@ use crate::FrameGeometry;
 
 use super::MainWindow;
 
-pub(crate) struct FloatingWindowSnapshot {
+/// Immutable render snapshot shared by a native floating-window view.\npub(crate) struct FloatingWindowSnapshot {
     pub(crate) layout: dock_core::Layout,
     pub(crate) frame: FrameGeometry,
     pub(crate) theme: Theme,
