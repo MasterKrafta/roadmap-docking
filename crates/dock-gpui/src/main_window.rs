@@ -1,13 +1,15 @@
 use std::{
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     time::Duration,
 };
 
 use dock_core::{Axis, DockCommand, DragHandle, DragPayload, FloatingGroupId, Point, Rect, Size};
 use gpui::{
-    Context, DispatchPhase, InteractiveElement, IntoElement, KeyDownEvent, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Render,
-    StatefulInteractiveElement, Styled, Subscription, Window, canvas, div, px, rgb,
+    App, AppContext, Bounds, Context, DispatchPhase, InteractiveElement, IntoElement,
+    KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels,
+    Render, StatefulInteractiveElement, Styled, Subscription, TitlebarOptions, Window, WindowBounds,
+    WindowHandle, WindowOptions, canvas, div, point, px, rgb, size,
 };
 use ui::Theme;
 
@@ -33,9 +35,31 @@ pub(crate) struct MainWindow {
     dock: DockController,
     menu_state: MenuState,
     activation_subscription: Option<Subscription>,
+    floating_windows: HashMap<FloatingGroupId, WindowHandle<crate::floating_window::FloatingWindow>>,
+    last_dock_viewport: Option<Rect>,
+    last_window_bounds: Option<Bounds<Pixels>>,
+    last_viewport_size: Option<gpui::Size<Pixels>>,
+    last_surface_top: f32,
+    last_floating_sync_version: Option<u64>,
     workspace_path: Option<PathBuf>,
     workspace_save_state: WorkspaceSaveState,
     workspace_save_enabled: bool,
+}
+
+
+pub(crate) struct FloatingWindowSnapshot {
+    pub(crate) layout: dock_core::Layout,
+    pub(crate) frame: FrameGeometry,
+    pub(crate) theme: Theme,
+    pub(crate) area: dock_core::DockAreaId,
+    pub(crate) bounds: Rect,
+}
+
+struct FloatingWindowSpec {
+    group: FloatingGroupId,
+    title: String,
+    bounds: Rect,
+    native_bounds: Bounds<Pixels>,
 }
 
 #[derive(Default)]
@@ -145,10 +169,125 @@ impl MainWindow {
             theme,
             menu_state: MenuState::Closed,
             activation_subscription: None,
+            floating_windows: HashMap::new(),
+            last_dock_viewport: None,
+            last_window_bounds: None,
+            last_viewport_size: None,
+            last_surface_top: 0.0,
+            last_floating_sync_version: None,
             workspace_path,
             workspace_save_state: WorkspaceSaveState::with_saved_snapshot(saved_snapshot),
             workspace_save_enabled: !workspace_load_failed,
         })
+    }
+
+
+    pub(crate) fn floating_window_snapshot(
+        &self,
+        group: FloatingGroupId,
+    ) -> Option<FloatingWindowSnapshot> {
+        let viewport = self.last_dock_viewport?;
+        let layout = self.dock.layout().clone();
+        let metrics = *self.dock.metrics();
+        let floating = layout.floating_group(group)?;
+        let frame = FrameGeometry::compute(&layout, viewport, &metrics).ok()?;
+        let bounds = frame
+            .rects()
+            .floating_groups
+            .iter()
+            .find(|candidate| candidate.group == group)?
+            .rect;
+
+        Some(FloatingWindowSnapshot {
+            layout,
+            frame,
+            theme: self.theme,
+            area: floating.area,
+            bounds,
+        })
+    }
+
+    fn floating_window_specs(&self) -> Vec<FloatingWindowSpec> {
+        let (Some(viewport), Some(parent_bounds), Some(parent_viewport)) = (
+            self.last_dock_viewport,
+            self.last_window_bounds,
+            self.last_viewport_size,
+        ) else {
+            return Vec::new();
+        };
+        let Ok(frame) = FrameGeometry::compute(self.dock.layout(), viewport, self.dock.metrics())
+        else {
+            return Vec::new();
+        };
+
+        let chrome_width =
+            (parent_bounds.size.width.as_f32() - parent_viewport.width.as_f32()).max(0.0);
+        let chrome_height =
+            (parent_bounds.size.height.as_f32() - parent_viewport.height.as_f32()).max(0.0);
+        let surface_top = self.last_surface_top;
+        let layout = self.dock.layout();
+        let mut specs = Vec::new();
+
+        for (group, _) in layout.floating_groups_in_paint_order() {
+            if self.floating_windows.contains_key(&group) {
+                continue;
+            }
+            let Some(bounds) = frame
+                .rects()
+                .floating_groups
+                .iter()
+                .find(|candidate| candidate.group == group)
+                .map(|candidate| candidate.rect)
+            else {
+                continue;
+            };
+            let title = layout
+                .floating_group(group)
+                .and_then(|floating| layout.dock_area(floating.area))
+                .and_then(|area| crate::tree_query::first_panel_in_subtree(layout, area.root))
+                .and_then(|panel| layout.panel_instance(panel))
+                .map(|instance| crate::panels::panel_title(instance).to_owned())
+                .unwrap_or_else(|| "Floating panel".to_owned());
+
+            let native_bounds = Bounds::new(
+                point(
+                    px(parent_bounds.origin.x.as_f32() + bounds.origin.x),
+                    px(parent_bounds.origin.y.as_f32() + surface_top + bounds.origin.y),
+                ),
+                size(
+                    px(bounds.size.width + chrome_width),
+                    px(bounds.size.height + chrome_height),
+                ),
+            );
+            specs.push(FloatingWindowSpec {
+                group,
+                title,
+                bounds,
+                native_bounds,
+            });
+        }
+
+        specs
+    }
+
+    fn floating_bounds_from_native_window(
+        &self,
+        native_bounds: Bounds<Pixels>,
+        viewport_size: gpui::Size<Pixels>,
+    ) -> Option<Rect> {
+        let parent_bounds = self.last_window_bounds?;
+        let origin = Point::new(
+            native_bounds.origin.x.as_f32() - parent_bounds.origin.x.as_f32(),
+            native_bounds.origin.y.as_f32()
+                - parent_bounds.origin.y.as_f32()
+                - self.last_surface_top,
+        );
+        let bounds = Rect::new(
+            origin,
+            Size::new(viewport_size.width.as_f32(), viewport_size.height.as_f32()),
+        );
+        bounds.validate_non_empty().ok()?;
+        Some(bounds)
     }
 
     /// Debounces persistence only when the serialized persistent workspace changes.
@@ -790,6 +929,10 @@ impl Render for MainWindow {
         let content_height = (height - surface_top).max(1.0);
 
         let viewport = Rect::new(Point::ZERO, Size::new(width, content_height));
+        self.last_dock_viewport = Some(viewport);
+        self.last_window_bounds = Some(window.window_bounds().get_bounds());
+        self.last_viewport_size = Some(window_size);
+        self.last_surface_top = surface_top;
 
         let frame = match self.dock.frame(viewport) {
             Ok(frame) => frame,
@@ -838,6 +981,9 @@ impl Render for MainWindow {
             .floating_groups_in_hit_test_order()
             .into_iter()
             .filter_map(|(group, _)| {
+                if self.floating_windows.contains_key(&group) {
+                    return None;
+                }
                 frame
                     .rects()
                     .floating_groups
@@ -937,8 +1083,20 @@ impl Render for MainWindow {
                 &self.theme,
                 self.dock.drag_overlay(),
             )
+            .exclude_floating_groups(
+                &self.floating_windows.keys().copied().collect::<HashSet<_>>(),
+            )
             .build(&mut host),
         );
+
+        let layout_version = self.dock.layout().version();
+        if self.last_floating_sync_version != Some(layout_version) {
+            self.last_floating_sync_version = Some(layout_version);
+            let owner = cx.entity().downgrade();
+            window.defer(cx, move |_, app| {
+                synchronize_floating_windows(owner, app);
+            });
+        }
 
         if let Some(popup_menu) = popup_menu {
             root.child(popup_menu)
@@ -946,6 +1104,139 @@ impl Render for MainWindow {
             root
         }
     }
+}
+
+
+fn synchronize_floating_windows(
+    owner: gpui::WeakEntity<MainWindow>,
+    app: &mut App,
+) {
+    let Some(owner_entity) = owner.upgrade() else {
+        return;
+    };
+    let (specs, existing) = owner_entity.update(app, |main, _cx| {
+        (
+            main.floating_window_specs(),
+            main.floating_windows
+                .iter()
+                .map(|(group, handle)| (*group, *handle))
+                .collect::<Vec<_>>(),
+        )
+    });
+
+    for (group, handle) in existing {
+        let target_bounds = specs
+            .iter()
+            .find(|spec| spec.group == group)
+            .map(|spec| spec.bounds);
+        let current_bounds = handle.read(app).ok().map(|view| view.layout_bounds());
+        let keep_window = target_bounds
+            .zip(current_bounds)
+            .is_some_and(|(target, current)| floating_bounds_match(target, current));
+        if keep_window {
+            continue;
+        }
+
+        if let Err(error) = handle.update(app, |_, window, _cx| window.remove_window()) {
+            tracing::debug!(
+                group = ?group,
+                error = %error,
+                "could not retire stale native floating window"
+            );
+        }
+        owner_entity.update(app, |main, cx| {
+            if main.floating_windows.remove(&group).is_some() {
+                cx.notify();
+            }
+        });
+    }
+
+    for spec in specs {
+        if owner_entity
+            .read(app)
+            .floating_windows
+            .contains_key(&spec.group)
+        {
+            continue;
+        }
+
+        let group = spec.group;
+        let initial_bounds = spec.bounds;
+        let title = spec.title.clone();
+        let native_bounds = spec.native_bounds;
+        let owner_for_view = owner.clone();
+        let owner_for_close = owner.clone();
+        let options = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(native_bounds)),
+            titlebar: Some(TitlebarOptions {
+                title: Some(title.into()),
+                ..Default::default()
+            }),
+            window_min_size: Some(size(px(180.0), px(120.0))),
+            ..Default::default()
+        };
+        match app.open_window(options, move |window, cx| {
+            let view = cx.new(|_| {
+                crate::floating_window::FloatingWindow::new(
+                    owner_for_view.clone(),
+                    group,
+                    initial_bounds,
+                )
+            });
+            view.update(cx, |_, view_cx| {
+                window.on_window_should_close(view_cx, move |_window, app| {
+                    if let Some(owner) = owner_for_close.upgrade() {
+                        owner.update(app, |main, cx| {
+                            main.close_floating_window(group, cx);
+                            cx.notify();
+                        });
+                    }
+                    true
+                });
+            });
+            view
+        }) {
+            Ok(handle) => {
+                let still_exists = owner_entity
+                    .read(app)
+                    .dock
+                    .layout()
+                    .floating_group(group)
+                    .is_some();
+                if still_exists {
+                    owner_entity.update(app, |main, cx| {
+                        if !main.floating_windows.contains_key(&group) {
+                            main.floating_windows.insert(group, handle);
+                            cx.notify();
+                        }
+                    });
+                } else if let Err(error) =
+                    handle.update(app, |_, window, _cx| window.remove_window())
+                {
+                    tracing::debug!(
+                        group = ?group,
+                        error = %error,
+                        "could not close native window for a removed floating group"
+                    );
+                }
+            }
+            Err(error) => {
+                tracing::warn!(
+                    group = ?group,
+                    error = %error,
+                    "could not open native floating window"
+                );
+            }
+        }
+    }
+}
+
+fn floating_bounds_match(left: Rect, right: Rect) -> bool {
+    const EPSILON: f32 = 1.0;
+    (left.origin.x - right.origin.x).abs() < EPSILON
+        && (left.origin.y - right.origin.y).abs() < EPSILON
+        && (left.size.width - right.size.width).abs() < EPSILON
+        && (left.size.height - right.size.height).abs() < EPSILON
 }
 
 #[cfg(test)]
