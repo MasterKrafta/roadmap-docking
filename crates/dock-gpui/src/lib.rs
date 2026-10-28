@@ -15,6 +15,7 @@ pub mod host;
 mod labels;
 mod layers;
 mod main_window;
+mod next_dock;
 mod menus;
 mod metrics;
 pub mod panels;
@@ -25,6 +26,7 @@ mod tree_query;
 
 pub use chrome_geometry::normalize_docked_group_geometry;
 pub use entry::{RunOptions, run};
+pub use next_dock::run as run_next_dock;
 pub use frame::FrameGeometry;
 pub use geometry::union_rects;
 pub use host::{CommandClickHandler, DockHost, DragStartHandler, NoopHost, ResizeStartHandler};
