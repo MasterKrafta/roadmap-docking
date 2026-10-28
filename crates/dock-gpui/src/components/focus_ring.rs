@@ -129,8 +129,7 @@ mod tests {
     use super::{
         GroupMoveDirection, TabReorderDirection, is_keyboard_activation_key,
         keyboard_group_move_direction, keyboard_resize_axis_for_floating_edge,
-        keyboard_resize_delta,
-        keyboard_tab_reorder_direction,
+        keyboard_resize_delta, keyboard_tab_reorder_direction,
     };
     use dock_core::{Axis, ResizeEdge};
     use gpui::{Keystroke, Modifiers};
@@ -177,14 +176,28 @@ mod tests {
             None
         );
         assert_eq!(
-            keyboard_group_move_direction(
-                &key("down", Modifiers { shift: true, ..Modifiers::default() })
-            ),
+            keyboard_group_move_direction(&key(
+                "down",
+                Modifiers {
+                    shift: true,
+                    ..Modifiers::default()
+                },
+            )),
             None
         );
         for modifiers in [
-            Modifiers { control: true, shift: true, alt: true, ..Modifiers::default() },
-            Modifiers { control: true, shift: true, function: true, ..Modifiers::default() },
+            Modifiers {
+                control: true,
+                shift: true,
+                alt: true,
+                ..Modifiers::default()
+            },
+            Modifiers {
+                control: true,
+                shift: true,
+                function: true,
+                ..Modifiers::default()
+            },
         ] {
             assert_eq!(keyboard_group_move_direction(&key("down", modifiers)), None);
         }
