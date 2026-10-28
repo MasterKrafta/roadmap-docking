@@ -3,7 +3,9 @@ use std::{
     time::Duration,
 };
 
-use dock_core::{Axis, DockCommand, DragHandle, DragPayload, FloatingGroupId, Point, Rect, Size};
+use dock_core::{
+    Axis, DockCommand, DragHandle, DragPayload, FloatingGroupId, Point, Rect, ResizeEdge, Size,
+};
 use gpui::{
     Context, DispatchPhase, InteractiveElement, IntoElement, KeyDownEvent, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Render, StatefulInteractiveElement,
@@ -414,8 +416,23 @@ impl MainWindow {
     ) {
         let axis = match handle {
             ResizeHandle::Splitter { axis, .. } => axis,
-            ResizeHandle::OuterColumn { .. } => Axis::X,
-            ResizeHandle::FloatingEdge { .. } | ResizeHandle::Flyout { .. } => return,
+            ResizeHandle::OuterColumn { .. } | ResizeHandle::Flyout { .. } => Axis::X,
+            ResizeHandle::FloatingEdge { edge, .. } => match edge {
+                ResizeEdge::Left | ResizeEdge::Right => Axis::X,
+                ResizeEdge::Top | ResizeEdge::Bottom => Axis::Y,
+                ResizeEdge::TopLeft
+                | ResizeEdge::TopRight
+                | ResizeEdge::BottomLeft
+                | ResizeEdge::BottomRight => {
+                    if keyboard_resize_delta(&event.keystroke, Axis::X).is_some() {
+                        Axis::X
+                    } else if keyboard_resize_delta(&event.keystroke, Axis::Y).is_some() {
+                        Axis::Y
+                    } else {
+                        return;
+                    }
+                }
+            },
         };
         let Some(delta) = keyboard_resize_delta(&event.keystroke, axis) else {
             return;
@@ -425,13 +442,13 @@ impl MainWindow {
         let frame = match self.dock.frame(self.dock_viewport(window)) {
             Ok(frame) => frame,
             Err(error) => {
-                tracing::debug!(error = ?error, "could not compute frame for keyboard splitter resize");
+                tracing::debug!(error = ?error, "could not compute frame for keyboard resize");
                 return;
             }
         };
 
         if let Err(error) = self.dock.begin_resize(handle, Point::ZERO, &frame) {
-            tracing::debug!(error = ?error, "could not begin keyboard splitter resize");
+            tracing::debug!(error = ?error, "could not begin keyboard resize");
             return;
         }
 
@@ -441,13 +458,13 @@ impl MainWindow {
         };
         if let Err(error) = self.dock.update_resize(pointer) {
             self.dock.cancel_resize();
-            tracing::debug!(error = ?error, "keyboard splitter resize preview was rejected");
+            tracing::debug!(error = ?error, "keyboard resize preview was rejected");
             cx.notify();
             return;
         }
 
         if let Err(error) = self.dock.commit_resize(pointer) {
-            tracing::debug!(error = ?error, "keyboard splitter resize commit was rejected");
+            tracing::debug!(error = ?error, "keyboard resize commit was rejected");
             cx.notify();
             return;
         }
