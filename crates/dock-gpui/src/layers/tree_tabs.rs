@@ -1,9 +1,13 @@
 use dock_core::{
-    ColumnMode, DockCommand, DragHandle, DragPayload, Node, NodeId, PanelId, Point, Rect, Size,
+    ColumnMode, DockCommand, DragHandle, DragPayload, DropTarget, Layout, Node, NodeId, PanelId,
+    Point, Rect, Size,
 };
 use gpui::{AnyElement, IntoElement};
 
-use crate::components::focus_ring::{TabReorderDirection, keyboard_tab_reorder_direction};
+use crate::components::focus_ring::{
+    PanelMoveDirection, TabReorderDirection, keyboard_panel_move_direction,
+    keyboard_tab_reorder_direction,
+};
 use crate::components::{ColumnModeButton, GroupMenuButton, PanelTab, TabOverflowButton};
 use crate::dock::{activate_tab, collapse_group, cycle_column_mode};
 use crate::host::{CommandKeyHandler, DockHost};
@@ -58,6 +62,12 @@ pub(crate) fn render(
                     header.panel,
                     header.index,
                     tab_count,
+                ),
+                on_move_panel_key: move_panel_key_handler(
+                    layout,
+                    host,
+                    header.group,
+                    header.panel,
                 ),
                 on_collapse_toggle: host.command(collapse_group(header.group, !collapsed)),
                 on_drag_start: host.drag_start(
@@ -184,3 +194,86 @@ fn reorder_tab_key_handler(
         }
     })
 }
+
+fn move_panel_key_handler(
+    layout: &Layout,
+    host: &dyn DockHost,
+    source_group: NodeId,
+    panel: PanelId,
+) -> Option<CommandKeyHandler> {
+    let (previous_group, next_group) = layout.nodes().find_map(|(_, node)| {
+        let Node::Column(column) = node else {
+            return None;
+        };
+        if column.mode.is_rail() {
+            return None;
+        }
+        let source_index = column.groups.iter().position(|group| *group == source_group)?;
+        let (previous_index, next_index) =
+            adjacent_group_indices(source_index, column.groups.len());
+        Some((
+            previous_index.and_then(|index| column.groups.get(index).copied()),
+            next_index.and_then(|index| column.groups.get(index).copied()),
+        ))
+    })?;
+
+    let move_to_group = |target_group: NodeId| {
+        let Node::Tabs(tabs) = layout.node(target_group)? else {
+            return None;
+        };
+        Some(host.command_key(DockCommand::MovePanel {
+            panel,
+            target: DropTarget::Tabs {
+                group: target_group,
+                index: tabs.children.len(),
+            },
+        }))
+    };
+    let move_previous = previous_group.and_then(move_to_group);
+    let move_next = next_group.and_then(move_to_group);
+
+    Some(Box::new(move |event, window, app| {
+        match keyboard_panel_move_direction(&event.keystroke) {
+            Some(PanelMoveDirection::Previous) => {
+                if let Some(handler) = &move_previous {
+                    handler(event, window, app);
+                }
+            }
+            Some(PanelMoveDirection::Next) => {
+                if let Some(handler) = &move_next {
+                    handler(event, window, app);
+                }
+            }
+            None => {}
+        }
+    }))
+}
+
+fn adjacent_group_indices(
+    source_index: usize,
+    group_count: usize,
+) -> (Option<usize>, Option<usize>) {
+    if source_index >= group_count {
+        return (None, None);
+    }
+    (
+        source_index.checked_sub(1),
+        (source_index + 1 < group_count).then_some(source_index + 1),
+    )
+}
+
+#[cfg(test)]
+mod keyboard_panel_move_tests {
+    use super::adjacent_group_indices;
+
+    #[test]
+    fn panel_move_only_targets_adjacent_groups_within_column() {
+        assert_eq!(adjacent_group_indices(0, 3), (None, Some(1)));
+        assert_eq!(adjacent_group_indices(1, 3), (Some(0), Some(2)));
+        assert_eq!(adjacent_group_indices(2, 3), (Some(1), None));
+        assert_eq!(adjacent_group_indices(0, 1), (None, None));
+        assert_eq!(adjacent_group_indices(3, 3), (None, None));
+        assert_eq!(adjacent_group_indices(0, 0), (None, None));
+    }
+}
+
