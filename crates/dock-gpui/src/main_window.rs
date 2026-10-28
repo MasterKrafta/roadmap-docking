@@ -875,7 +875,7 @@ impl Render for MainWindow {
             self.dock
                 .scroll_handles_mut()
                 .entry(overflow.owner)
-                .or_insert_with(gpui::ScrollHandle::new);
+                .or_default();
         }
 
         let mut host = WindowHost::new(cx);
