@@ -140,6 +140,22 @@ impl FrameGeometry {
     ) -> Result<DropZoneResolver, ComputeRectsError> {
         layout.prepare_drop_resolver(source, &self.rects, metrics)
     }
+
+    /// Prepares drop targets for a drag that originated in a separate native floating window.
+    ///
+    /// Native floating windows are not painted on the main surface, so their viewport-clamped
+    /// rectangles must not shadow visible main-dock targets during hit testing.
+    pub(crate) fn prepare_main_dock_resolver(
+        &self,
+        layout: &Layout,
+        source: DropSource,
+        metrics: &DockMetrics,
+    ) -> Result<DropZoneResolver, ComputeRectsError> {
+        let mut rects = self.rects.clone();
+        rects.floating_groups.clear();
+        rects.floating_resize_edges.clear();
+        layout.prepare_drop_resolver(source, &rects, metrics)
+    }
 }
 
 #[cfg(test)]
