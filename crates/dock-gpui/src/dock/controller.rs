@@ -711,11 +711,6 @@ impl DockController {
         Ok(frame)
     }
 
-    /// Returns the most recent command/history error, if the last operation failed.
-    pub(crate) fn last_error(&self) -> Option<&CommandError> {
-        self.last_error.as_ref()
-    }
-
     fn track_command_result<T>(
         &mut self,
         result: Result<T, CommandError>,
