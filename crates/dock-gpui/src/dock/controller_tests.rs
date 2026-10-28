@@ -1858,21 +1858,17 @@ fn floating_capture_docks_multigroup_column_as_one_main_column() {
         .unwrap();
     controller.workspace.history.clear();
 
-    let (floating_id, floating_root) = controller
+    let (floating_id, floating) = controller
         .layout()
         .floating_groups()
         .next()
-        .map(|(id, floating)| {
-            (
-                id,
-                controller
-                    .layout()
-                    .dock_area(floating.area)
-                    .expect("floating column should own a dock area")
-                    .root,
-            )
-        })
+        .map(|(id, floating)| (id, *floating))
         .expect("floating the column should create one floating group");
+    let floating_root = controller
+        .layout()
+        .dock_area(floating.area)
+        .expect("floating column should own a dock area")
+        .root;
     assert_eq!(floating_root, column_id);
 
     let source_nodes = crate::tree_query::subtree_nodes(controller.layout(), floating_root);
