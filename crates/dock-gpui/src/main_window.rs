@@ -605,6 +605,11 @@ impl MainWindow {
             }
             return;
         }
+        // While the pointer is still over the source native window, don't let the
+        // hidden main-surface geometry beneath it become a drop target.
+        if native_window_contains_pointer(source_bounds, source_viewport, event.position) {
+            return;
+        }
 
         let Some(viewport) = self.last_dock_viewport else {
             self.dock.cancel_drag();
@@ -662,6 +667,12 @@ impl MainWindow {
             cx.notify();
             return;
         };
+        if native_window_contains_pointer(source_bounds, source_viewport, event.position) {
+            if self.dock.cancel_drag() {
+                cx.notify();
+            }
+            return;
+        }
         let Some(viewport) = self.last_dock_viewport else {
             self.dock.cancel_drag();
             cx.notify();
@@ -1428,6 +1439,26 @@ fn synchronize_floating_windows(
             }
         }
     }
+}
+
+fn native_window_contains_pointer(
+    window_bounds: Bounds<Pixels>,
+    viewport: gpui::Size<Pixels>,
+    position: gpui::Point<Pixels>,
+) -> bool {
+    let chrome_width =
+        (window_bounds.size.width.as_f32() - viewport.width.as_f32()).max(0.0);
+    let chrome_height =
+        (window_bounds.size.height.as_f32() - viewport.height.as_f32()).max(0.0);
+    let screen_x = window_bounds.origin.x.as_f32() + chrome_width + position.x.as_f32();
+    let screen_y = window_bounds.origin.y.as_f32() + chrome_height + position.y.as_f32();
+    let right = window_bounds.origin.x.as_f32() + window_bounds.size.width.as_f32();
+    let bottom = window_bounds.origin.y.as_f32() + window_bounds.size.height.as_f32();
+
+    screen_x >= window_bounds.origin.x.as_f32()
+        && screen_x < right
+        && screen_y >= window_bounds.origin.y.as_f32()
+        && screen_y < bottom
 }
 
 fn native_pointer_in_dock_surface(
