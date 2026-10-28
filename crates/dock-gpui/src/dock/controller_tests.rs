@@ -61,10 +61,9 @@ fn frame_recovers_oversized_main_dock_by_collapsing_columns_to_rails() {
         "recovered layout should keep the canvas at or above its minimum width"
     );
     assert!(
-        controller
-            .layout()
-            .nodes()
-            .any(|(_, node)| matches!(node, Node::Column(column) if column.mode == ColumnMode::IconsOnly)),
+        controller.layout().nodes().any(
+            |(_, node)| matches!(node, Node::Column(column) if column.mode == ColumnMode::IconsOnly)
+        ),
         "recovery should preserve the panel tree and make an outer column an icon rail"
     );
     assert_eq!(controller.layout().panel_instances().count(), 4);
@@ -102,7 +101,10 @@ fn command_that_would_overflow_viewport_is_rejected_without_mutating_layout() {
         index: column_count,
     });
 
-    assert!(result.is_err(), "an extra column must not make the canvas too narrow");
+    assert!(
+        result.is_err(),
+        "an extra column must not make the canvas too narrow"
+    );
     assert_eq!(layout_debug_snapshot(&controller), before);
     assert_eq!(controller.history.undo_len(), 0);
     assert_eq!(controller.history.redo_len(), 0);

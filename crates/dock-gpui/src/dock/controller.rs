@@ -860,7 +860,6 @@ impl DockController {
     }
 }
 
-
 fn main_column_ids_for_viewport_recovery(layout: &Layout, side: DockSide) -> Vec<NodeId> {
     let Some(area) = layout.main_area(side) else {
         return Vec::new();
