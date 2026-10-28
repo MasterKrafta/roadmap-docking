@@ -108,12 +108,8 @@ pub(crate) fn render_layout_excluding(
     overlay: Option<&DragOverlay>,
     excluded_floating_groups: Option<&HashSet<FloatingGroupId>>,
 ) -> Div {
-    let RenderData {
-        layout,
-        rects,
-        frame,
-        theme,
-    } = data;
+    let rects = data.rects;
+    let theme = data.theme;
     let mut root = div()
         .relative()
         .w(px(rects.viewport.map_or(1.0, |value| value.size.width)))
