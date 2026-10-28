@@ -1,11 +1,11 @@
 use dock_core::Rect;
 use gpui::{
-    App, ClickEvent, InteractiveElement, IntoElement, ParentElement, RenderOnce,
+    App, InteractiveElement, IntoElement, ParentElement, RenderOnce,
     StatefulInteractiveElement, Styled, Window, div, px, rgb,
 };
 use ui::Theme;
 
-use crate::components::with_focus_ring;
+use crate::components::{with_focus_ring, ClickHandler};
 
 /// One rendered row in the popup menu.
 pub struct PopupMenuItem {
@@ -14,7 +14,7 @@ pub struct PopupMenuItem {
     pub checked: bool,
     pub enabled: bool,
     pub selected: bool,
-    pub on_select: Option<Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>>,
+    pub on_select: Option<ClickHandler>,
 }
 
 /// A bounded popup rendered above the dock surface.
@@ -69,16 +69,14 @@ impl RenderOnce for PopupMenu {
             row = row.child(if item.checked { "✓" } else { " " });
             row = row.child(item.label);
 
-            if item.enabled {
-                if let Some(on_select) = item.on_select {
-                    let hover_color = self.theme.colors.hover;
-                    popup = popup.child(
-                        with_focus_ring(row, &self.theme)
-                            .hover(move |style| style.bg(rgb(hover_color)))
-                            .on_click(on_select),
-                    );
-                    continue;
-                }
+            if item.enabled && let Some(on_select) = item.on_select {
+                let hover_color = self.theme.colors.hover;
+                popup = popup.child(
+                    with_focus_ring(row, &self.theme)
+                        .hover(move |style| style.bg(rgb(hover_color)))
+                        .on_click(on_select),
+                );
+                continue;
             }
             popup = popup.child(row);
         }
