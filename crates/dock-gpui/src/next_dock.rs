@@ -3,6 +3,7 @@
 //! This module deliberately does not use `dock-core`. It is developed alongside
 //! the existing implementation so its model and behavior can be evaluated separately.
 
+mod geometry;
 mod model;
 mod view;
 mod window;
