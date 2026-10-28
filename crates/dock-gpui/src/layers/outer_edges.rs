@@ -52,6 +52,10 @@ pub(crate) fn render(
                     column: column_id,
                     side,
                 }),
+                on_resize_key: Some(host.resize_key(ResizeHandle::OuterColumn {
+                    column: column_id,
+                    side,
+                })),
             }
             .into_any_element(),
         );
