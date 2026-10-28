@@ -153,6 +153,7 @@ fn report_history_benchmark(
     label: &str,
     nodes: usize,
     panels: usize,
+    dock_areas: usize,
     floating_windows: usize,
     iterations: usize,
     mut operation: impl FnMut(),
@@ -163,7 +164,7 @@ fn report_history_benchmark(
     }
     let elapsed = start.elapsed();
     eprintln!(
-        "history benchmark [{label}]: nodes={nodes}, panel_instances={panels}, floating_windows={floating_windows}, iterations={iterations}, elapsed_ms={:.3}, us/call={:.3}",
+        "history benchmark [{label}]: nodes={nodes}, panel_instances={panels}, dock_areas={dock_areas}, floating_windows={floating_windows}, iterations={iterations}, elapsed_ms={:.3}, us/call={:.3}",
         elapsed.as_secs_f64() * 1000.0,
         elapsed.as_secs_f64() * 1_000_000.0 / iterations as f64,
     );
@@ -284,12 +285,13 @@ fn assert_round_trip(
     assert_eq!(persistent_shape(layout), before);
 }
 
-/// Manual release-mode benchmark for history snapshot and bounded-history costs.
+/// Manual release-mode probe for Layout copies, resize candidates, and bounded-history costs.
 ///
 /// Run with:
 /// cargo test -p dock-core --release benchmark_history_snapshot_and_bounded_history -- --ignored --nocapture --test-threads=1
 ///
-/// Layout creation and history pre-filling are excluded from timed sections.
+/// Layout creation and history pre-filling are excluded from timed sections. Reported layout
+/// counts describe structure; they are not estimates of allocated bytes.
 #[test]
 fn command_sequence_is_atomic_and_uses_one_undo_checkpoint() {
     let metrics = DockMetrics::default();
@@ -374,7 +376,7 @@ fn benchmark_history_snapshot_and_bounded_history() {
 
     for (name, columns, groups, panels_per_group, floats, panels_per_float, iterations) in scenarios
     {
-        let (layout, _) = history_benchmark_layout(
+        let (layout, resize_column) = history_benchmark_layout(
             columns,
             groups,
             panels_per_group,
@@ -386,12 +388,14 @@ fn benchmark_history_snapshot_and_bounded_history() {
             .expect("benchmark layout must satisfy normal layout invariants");
         let nodes = layout.nodes().count();
         let panels = layout.panel_instances().count();
+        let dock_areas = layout.dock_areas().count();
         let floating_windows = layout.floating_groups().count();
 
         report_history_benchmark(
             &format!("{name}/Layout::clone"),
             nodes,
             panels,
+            dock_areas,
             floating_windows,
             iterations,
             || {
@@ -402,10 +406,35 @@ fn benchmark_history_snapshot_and_bounded_history() {
             &format!("{name}/Layout::history_snapshot"),
             nodes,
             panels,
+            dock_areas,
             floating_windows,
             iterations,
             || {
                 std::hint::black_box(layout.history_snapshot());
+            },
+        );
+
+        let mut alternate_preview_width = false;
+        report_history_benchmark(
+            &format!("{name}/clone+ResizeColumn candidate"),
+            nodes,
+            panels,
+            dock_areas,
+            floating_windows,
+            iterations,
+            || {
+                alternate_preview_width = !alternate_preview_width;
+                let mut candidate = layout.clone();
+                candidate
+                    .apply(
+                        DockCommand::ResizeColumn {
+                            column: resize_column,
+                            width: if alternate_preview_width { 279.0 } else { 281.0 },
+                        },
+                        &metrics,
+                    )
+                    .expect("benchmark resize candidate must be valid");
+                std::hint::black_box(candidate);
             },
         );
     }
@@ -420,6 +449,7 @@ fn benchmark_history_snapshot_and_bounded_history() {
             .expect("history benchmark layout must be valid");
         let nodes = layout.nodes().count();
         let panels = layout.panel_instances().count();
+        let dock_areas = layout.dock_areas().count();
         let floating_windows = layout.floating_groups().count();
         let mut history = UndoRedoHistory::with_limit(limit);
 
@@ -441,6 +471,7 @@ fn benchmark_history_snapshot_and_bounded_history() {
             &format!("medium/saturated-history-limit-{limit}"),
             nodes,
             panels,
+            dock_areas,
             floating_windows,
             iterations,
             || {
