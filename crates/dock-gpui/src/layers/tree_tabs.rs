@@ -1,5 +1,5 @@
 use dock_core::{
-    Axis, ColumnMode, DockCommand, DockSide, DragHandle, DragPayload, DropTarget, GroupRect,
+    Axis, ColumnMode, DockCommand, DockSide, DragHandle, DragPayload, DropTarget,
     Layout, LayoutRects, Node, NodeId, PanelId, Point, Profile, Rect, Size,
 };
 use gpui::{AnyElement, IntoElement};
