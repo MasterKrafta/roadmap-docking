@@ -207,7 +207,7 @@ mod tests {
             .collect::<Vec<_>>();
         let mut layout =
             create_initial_layout(Profile::Photoshop, &descriptors, metrics).unwrap();
-        let panel_id_for = |key: &str| {
+        let panel_id_for = |layout: &dock_core::Layout, key: &str| {
             layout
                 .panel_instances()
                 .find_map(|(panel_id, panel)| {
@@ -215,8 +215,8 @@ mod tests {
                 })
                 .expect("baseline layout should contain the requested panel")
         };
-        let source_panel = panel_id_for("color");
-        let floating_panel = panel_id_for("layers");
+        let source_panel = panel_id_for(&layout, "color");
+        let floating_panel = panel_id_for(&layout, "layers");
 
         layout
             .apply(
