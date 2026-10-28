@@ -5,7 +5,7 @@ use gpui::{Context, IntoElement, MouseButton, MouseMoveEvent, Render, Window};
 use ui::Theme;
 
 use super::geometry;
-use super::model::{CompositionContainer, NodePathStep, SplitAxis};
+use super::model::{CompositionContainer, SplitAxis};
 use super::view::{self, SplitResizeSpec};
 
 /// Owns the prototype layout and renders it in a regular GPUI window.
