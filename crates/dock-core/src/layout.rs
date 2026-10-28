@@ -21,13 +21,14 @@ const MAX_REMEMBERED_DOCK_LOCATIONS: usize = 256;
  * Internal validation memoization is not part of the logical Layout state.
  * Keep Debug snapshots stable when read-only operations warm the cache.
  */
-#[derive(Clone, Default)]
 /// Per-value memoization for read-path validation.
 ///
 /// This `Cell` intentionally makes `Layout` `!Sync`: cache updates can occur
 /// through shared references, so the same value is not meant to be concurrently
 /// shared by reference across threads. Revisit this choice only if the API gains
 /// a concrete concurrent-shared-layout requirement.
+#[derive(Clone, Default)]
+struct ValidationCache(Cell<Option<(u64, DockMetrics)>>);
 
 impl ValidationCache {
     fn get(&self) -> Option<(u64, DockMetrics)> {
