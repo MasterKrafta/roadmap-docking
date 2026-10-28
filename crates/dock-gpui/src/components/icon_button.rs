@@ -78,9 +78,7 @@ impl RenderOnce for IconButton {
             .child(self.glyph);
 
         if self.border {
-            button = button
-                .border_1()
-                .border_color(rgb(border_color));
+            button = button.border_1().border_color(rgb(border_color));
         }
 
         with_focus_ring(button.id(self.id), &self.theme).on_click(self.on_click)

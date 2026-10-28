@@ -37,7 +37,8 @@ pub(crate) struct MainWindow {
     dock: DockController,
     menu_state: MenuState,
     activation_subscription: Option<Subscription>,
-    floating_windows: HashMap<FloatingGroupId, WindowHandle<crate::floating_window::FloatingWindow>>,
+    floating_windows:
+        HashMap<FloatingGroupId, WindowHandle<crate::floating_window::FloatingWindow>>,
     last_dock_viewport: Option<Rect>,
     last_window_bounds: Option<Bounds<Pixels>>,
     last_viewport_size: Option<gpui::Size<Pixels>>,
@@ -47,7 +48,6 @@ pub(crate) struct MainWindow {
     workspace_save_state: WorkspaceSaveState,
     workspace_save_enabled: bool,
 }
-
 
 #[derive(Default)]
 struct WorkspaceSaveState {
@@ -167,7 +167,6 @@ impl MainWindow {
             workspace_save_enabled: !workspace_load_failed,
         })
     }
-
 
     /// Debounces persistence only when the serialized persistent workspace changes.
     fn schedule_workspace_save(&mut self, cx: &mut Context<Self>) {
@@ -963,7 +962,11 @@ impl Render for MainWindow {
                 self.dock.drag_overlay(),
             )
             .exclude_floating_groups(
-                &self.floating_windows.keys().copied().collect::<HashSet<_>>(),
+                &self
+                    .floating_windows
+                    .keys()
+                    .copied()
+                    .collect::<HashSet<_>>(),
             )
             .build(&mut host),
         );
@@ -984,7 +987,6 @@ impl Render for MainWindow {
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {

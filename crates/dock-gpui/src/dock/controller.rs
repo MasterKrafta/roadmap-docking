@@ -4,8 +4,7 @@ use dock_core::{
     CommandError, CommandOutcome, ComputeRectsError, DockCommand, DockMetrics, DockSide,
     DragDropAction, DragDropRequest, DragHandle, DragPayload, DragSession as CoreDragSession,
     DragState, DropSource, DropTarget, DropZone, FloatingGroupId, InitialLayoutError, Layout, Node,
-    NodeId, PanelId, Point, Profile, Rect, ResizeEdge, ValidationError,
-    create_initial_layout,
+    NodeId, PanelId, Point, Profile, Rect, ResizeEdge, ValidationError, create_initial_layout,
 };
 use gpui::ScrollHandle;
 use ui::Theme;
@@ -14,8 +13,8 @@ use crate::requests::{DragOverlay, ResizeHandle};
 use crate::{FrameGeometry, dock_metrics_from_theme};
 
 use super::drag_session::{DragGeometrySnapshot, DragGesture, DragStartError, DragUpdateError};
-use super::workspace_model::WorkspaceModel;
 use super::resize_session::{ResizeSession, ResizeStartError, ResizeUpdateError, StartGeometry};
+use super::workspace_model::WorkspaceModel;
 
 #[derive(Debug)]
 enum Session {
@@ -108,8 +107,11 @@ impl DockController {
 
         if let Some(viewport) = self.last_viewport {
             let mut candidate = self.workspace.layout.clone();
-            if candidate.apply(command.clone(), &self.workspace.metrics).is_ok()
-                && let Err(error) = FrameGeometry::compute(&candidate, viewport, &self.workspace.metrics)
+            if candidate
+                .apply(command.clone(), &self.workspace.metrics)
+                .is_ok()
+                && let Err(error) =
+                    FrameGeometry::compute(&candidate, viewport, &self.workspace.metrics)
             {
                 tracing::warn!(
                     error = %error,
@@ -129,9 +131,15 @@ impl DockController {
             // Stacking order is interaction state, not a user-editable layout step.
             // Core still performs the command transaction and advances the layout
             // version when z-order changes, invalidating geometry snapshots safely.
-            self.workspace.layout.apply(command, &self.workspace.metrics)
+            self.workspace
+                .layout
+                .apply(command, &self.workspace.metrics)
         } else {
-            self.workspace.history.apply(&mut self.workspace.layout, command, &self.workspace.metrics)
+            self.workspace.history.apply(
+                &mut self.workspace.layout,
+                command,
+                &self.workspace.metrics,
+            )
         };
         self.track_command_result(result, "apply")
     }
@@ -141,15 +149,16 @@ impl DockController {
     /// Core has no atomic CloseFloating command, so every group is closed through
     /// the standard history path and can be restored with one Undo per group.
     pub(crate) fn close_floating(&mut self, group: FloatingGroupId) -> Result<(), CommandError> {
-        let commands = super::commands::close_floating(&self.workspace.layout, group).ok_or_else(|| {
-            if self.workspace.layout.floating_group(group).is_some() {
-                CommandError::InvalidTarget {
-                    reason: "floating group contains an unsupported node type",
+        let commands =
+            super::commands::close_floating(&self.workspace.layout, group).ok_or_else(|| {
+                if self.workspace.layout.floating_group(group).is_some() {
+                    CommandError::InvalidTarget {
+                        reason: "floating group contains an unsupported node type",
+                    }
+                } else {
+                    CommandError::MissingFloatingGroup { group }
                 }
-            } else {
-                CommandError::MissingFloatingGroup { group }
-            }
-        })?;
+            })?;
 
         for command in commands {
             self.apply(command)?;
@@ -182,7 +191,10 @@ impl DockController {
     pub(crate) fn undo(&mut self) -> Result<bool, CommandError> {
         self.cancel_resize();
         self.cancel_drag();
-        let result = self.workspace.history.undo(&mut self.workspace.layout, &self.workspace.metrics);
+        let result = self
+            .workspace
+            .history
+            .undo(&mut self.workspace.layout, &self.workspace.metrics);
         self.track_command_result(result, "undo")
     }
 
@@ -190,7 +202,10 @@ impl DockController {
     pub(crate) fn redo(&mut self) -> Result<bool, CommandError> {
         self.cancel_resize();
         self.cancel_drag();
-        let result = self.workspace.history.redo(&mut self.workspace.layout, &self.workspace.metrics);
+        let result = self
+            .workspace
+            .history
+            .redo(&mut self.workspace.layout, &self.workspace.metrics);
         self.track_command_result(result, "redo")
     }
 
@@ -245,9 +260,11 @@ impl DockController {
     /// Reports whether this pointer move crosses the threshold and needs a fresh frame.
     pub(crate) fn drag_needs_start(&self, pointer: Point) -> bool {
         match &self.session {
-            Session::Drag(gesture) if gesture.core.is_none() => {
-                DragGesture::threshold_reached(gesture.origin, pointer, self.workspace.metrics.drag_threshold)
-            }
+            Session::Drag(gesture) if gesture.core.is_none() => DragGesture::threshold_reached(
+                gesture.origin,
+                pointer,
+                self.workspace.metrics.drag_threshold,
+            ),
             Session::Idle | Session::Resize(_) | Session::Drag(_) => false,
         }
     }
@@ -268,7 +285,11 @@ impl DockController {
         let stale_snapshot = match &self.session {
             Session::Drag(gesture) if gesture.core.is_some() => {
                 gesture.snapshot.is_none_or(|snapshot| {
-                    !snapshot.matches(self.workspace.layout.version(), viewport, self.workspace.metrics)
+                    !snapshot.matches(
+                        self.workspace.layout.version(),
+                        viewport,
+                        self.workspace.metrics,
+                    )
                 })
             }
             Session::Idle | Session::Resize(_) | Session::Drag(_) => false,
@@ -457,7 +478,11 @@ impl DockController {
         let snapshot = gesture
             .snapshot
             .ok_or(DragUpdateError::StaleFrameGeometry)?;
-        if !snapshot.matches(self.workspace.layout.version(), viewport, self.workspace.metrics) {
+        if !snapshot.matches(
+            self.workspace.layout.version(),
+            viewport,
+            self.workspace.metrics,
+        ) {
             return Err(DragUpdateError::StaleFrameGeometry);
         }
 
@@ -526,10 +551,9 @@ impl DockController {
     ) -> Result<DragDropAction, CommandError> {
         if request.target == Some(DropTarget::FreeArea) {
             let frame =
-                FrameGeometry::compute(&self.workspace.layout, viewport, &self.workspace.metrics).map_err(|_| {
-                    CommandError::InvalidTarget {
-                        reason: "could not compute source geometry for floating drop",
-                    }
+                FrameGeometry::compute(&self.workspace.layout, viewport, &self.workspace.metrics)
+                    .map_err(|_| CommandError::InvalidTarget {
+                    reason: "could not compute source geometry for floating drop",
                 })?;
             super::drop_commit::supply_floating_bounds(
                 &self.workspace.layout,
@@ -558,11 +582,14 @@ impl DockController {
                     .ok_or(CommandError::MissingFloatingGroup { group })?
                     .bounds
                     .origin;
-                let frame = FrameGeometry::compute(&self.workspace.layout, viewport, &self.workspace.metrics).map_err(
-                    |_| CommandError::InvalidTarget {
-                        reason: "could not compute current floating geometry for move",
-                    },
-                )?;
+                let frame = FrameGeometry::compute(
+                    &self.workspace.layout,
+                    viewport,
+                    &self.workspace.metrics,
+                )
+                .map_err(|_| CommandError::InvalidTarget {
+                    reason: "could not compute current floating geometry for move",
+                })?;
                 let visible_bounds = frame
                     .rects()
                     .floating_groups
@@ -652,7 +679,8 @@ impl DockController {
             Session::Resize(session) => match session.command_for_pointer(pointer) {
                 Err(error) => Err(error),
                 Ok(command) => {
-                    let command = preserve_floating_resize_anchor(session, command, &self.workspace.metrics);
+                    let command =
+                        preserve_floating_resize_anchor(session, command, &self.workspace.metrics);
                     if let Some(policy) = self.workspace.rail_policy {
                         match policy.preview(
                             session.baseline(),
@@ -717,11 +745,17 @@ impl DockController {
         };
         let commands = session
             .command_for_pointer(pointer)
-            .map(|command| preserve_floating_resize_anchor(&session, command, &self.workspace.metrics))
+            .map(|command| {
+                preserve_floating_resize_anchor(&session, command, &self.workspace.metrics)
+            })
             .and_then(|command| {
                 if let Some(policy) = self.workspace.rail_policy {
-                    match policy.preview(session.baseline(), &self.workspace.layout, &command, &self.workspace.metrics)
-                    {
+                    match policy.preview(
+                        session.baseline(),
+                        &self.workspace.layout,
+                        &command,
+                        &self.workspace.metrics,
+                    ) {
                         Ok((_, commands, _)) => Ok(commands),
                         Err(_) => Err(ResizeUpdateError::Command),
                     }
@@ -735,7 +769,11 @@ impl DockController {
         let result = self
             .workspace
             .history
-            .apply_sequence(&mut self.workspace.layout, commands, &self.workspace.metrics)
+            .apply_sequence(
+                &mut self.workspace.layout,
+                commands,
+                &self.workspace.metrics,
+            )
             .and_then(|mut outcomes| {
                 outcomes.pop().ok_or(CommandError::InvalidTarget {
                     reason: "resize command sequence returned no outcome",
@@ -771,14 +809,17 @@ impl DockController {
     /// use the current window size rather than a stale saved measurement.
     pub(crate) fn frame(&mut self, viewport: Rect) -> Result<FrameGeometry, ComputeRectsError> {
         self.last_viewport = Some(viewport);
-        let frame = match FrameGeometry::compute(&self.workspace.layout, viewport, &self.workspace.metrics) {
-            Ok(frame) => frame,
-            Err(error @ ComputeRectsError::InsufficientCanvasWidth { .. }) => {
-                self.recover_main_columns_for_viewport(viewport, error)?
-            }
-            Err(error) => return Err(error),
-        };
-        self.workspace.layout
+        let frame =
+            match FrameGeometry::compute(&self.workspace.layout, viewport, &self.workspace.metrics)
+            {
+                Ok(frame) => frame,
+                Err(error @ ComputeRectsError::InsufficientCanvasWidth { .. }) => {
+                    self.recover_main_columns_for_viewport(viewport, error)?
+                }
+                Err(error) => return Err(error),
+            };
+        self.workspace
+            .layout
             .update_canvas_bounds(frame.rects().canvas)
             .map_err(ComputeRectsError::Geometry)?;
 
@@ -809,8 +850,10 @@ impl DockController {
             return Err(original_error);
         }
 
-        let left_columns = main_column_ids_for_viewport_recovery(&self.workspace.layout, DockSide::Left);
-        let right_columns = main_column_ids_for_viewport_recovery(&self.workspace.layout, DockSide::Right);
+        let left_columns =
+            main_column_ids_for_viewport_recovery(&self.workspace.layout, DockSide::Left);
+        let right_columns =
+            main_column_ids_for_viewport_recovery(&self.workspace.layout, DockSide::Right);
         let mut collapse_order = Vec::new();
 
         // Preserve the columns nearest the canvas while shrinking outer columns first.
@@ -854,7 +897,8 @@ impl DockController {
             }
             collapsed_columns.push(column_id);
 
-            if let Ok(frame) = FrameGeometry::compute(&candidate, viewport, &self.workspace.metrics) {
+            if let Ok(frame) = FrameGeometry::compute(&candidate, viewport, &self.workspace.metrics)
+            {
                 self.workspace.layout = candidate;
                 // Viewport recovery is an automatic presentation change, not a
                 // user action that should leave undo snapshots which no longer fit.

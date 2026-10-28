@@ -424,7 +424,9 @@ fn outer_column_resize_commits_and_undoes_on_both_sides() {
             }
             .expect("source right column should contain a group");
 
-            controller.workspace.layout
+            controller
+                .workspace
+                .layout
                 .apply(
                     DockCommand::MoveGroupToMainColumn {
                         group,
@@ -1299,7 +1301,9 @@ fn stale_drag_layout_version_cancels_session_before_resolving_old_zones() {
     let (panel, origin) = start_active_panel_drag(&mut controller, viewport);
     let original_version = controller.layout().version();
     let metrics = controller.workspace.metrics;
-    controller.workspace.layout
+    controller
+        .workspace
+        .layout
         .apply(
             DockCommand::SetChrome {
                 mode: dock_core::ChromeMode::DockHidden,
@@ -2150,7 +2154,9 @@ fn floating_title_drag_uses_visible_position_when_saved_origin_is_offscreen() {
     let (floating_id, original_bounds) = make_initial_floating_group(&mut controller);
     let legacy_origin = Point::new(-500.0, 80.0);
     let metrics = *controller.metrics();
-    controller.workspace.layout
+    controller
+        .workspace
+        .layout
         .apply(
             DockCommand::MoveFloating {
                 group: floating_id,
@@ -2224,7 +2230,9 @@ fn floating_title_drag_with_stale_layout_snapshot_is_cancelled_before_commit() {
         start_active_floating_title_drag(&mut controller, viewport);
     let original_version = controller.layout().version();
     let metrics = controller.workspace.metrics;
-    controller.workspace.layout
+    controller
+        .workspace
+        .layout
         .apply(
             DockCommand::SetChrome {
                 mode: dock_core::ChromeMode::DockHidden,

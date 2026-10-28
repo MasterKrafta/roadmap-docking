@@ -1,17 +1,17 @@
-use dock_core::{DockCommand, DragHandle, DragPayload, FloatingGroupId, PanelInstance, Rect};
-use gpui::{
-    AnyElement, ClickEvent, Context, InteractiveElement, KeyDownEvent, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Render, SharedString, Styled,
-    Subscription, WeakEntity, Window, div, px, rgb,
-};
-use crate::layers::floating::FloatingGroupRenderMode;
 use crate::host::{
     CommandClickHandler, CommandKeyHandler, DockHost, DragStartHandler, NoopHost,
     ResizeStartHandler, SurfaceMouseMoveHandler, SurfaceMouseUpHandler,
 };
+use crate::layers::floating::FloatingGroupRenderMode;
 use crate::main_window::MainWindow;
 use crate::requests::{DockMenuRequest, ResizeHandle};
 use crate::surface::RenderData;
+use dock_core::{DockCommand, DragHandle, DragPayload, FloatingGroupId, PanelInstance, Rect};
+use gpui::{
+    AnyElement, ClickEvent, Context, InteractiveElement, KeyDownEvent, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, ParentElement, Render, SharedString, Styled, Subscription,
+    WeakEntity, Window, div, px, rgb,
+};
 
 /// A native window which presents one floating group from the main workspace.
 ///
@@ -74,10 +74,10 @@ impl Render for FloatingWindow {
         }
 
         if self.bounds_subscription.is_none() {
-            self.bounds_subscription = Some(cx.observe_window_bounds(
-                window,
-                |this, window, cx| this.sync_native_bounds(window, cx),
-            ));
+            self.bounds_subscription =
+                Some(cx.observe_window_bounds(window, |this, window, cx| {
+                    this.sync_native_bounds(window, cx)
+                }));
         }
 
         let Some(owner) = self.owner.upgrade() else {
@@ -116,8 +116,7 @@ impl Render for FloatingWindow {
         for element in elements {
             root = root.child(element);
         }
-        root
-            .on_mouse_move(host.surface_mouse_move())
+        root.on_mouse_move(host.surface_mouse_move())
             .on_mouse_up(MouseButton::Left, host.surface_mouse_up())
             .on_mouse_up_out(MouseButton::Left, host.surface_mouse_up())
     }
@@ -237,12 +236,7 @@ impl DockHost for FloatingWindowHost {
             let source_bounds = window.window_bounds().get_bounds();
             let source_viewport = window.viewport_size();
             owner.update(app, |main, cx| {
-                main.handle_external_surface_mouse_move(
-                    event,
-                    source_bounds,
-                    source_viewport,
-                    cx,
-                );
+                main.handle_external_surface_mouse_move(event, source_bounds, source_viewport, cx);
             });
         })
     }
@@ -256,14 +250,8 @@ impl DockHost for FloatingWindowHost {
             let source_bounds = window.window_bounds().get_bounds();
             let source_viewport = window.viewport_size();
             owner.update(app, |main, cx| {
-                main.handle_external_surface_mouse_up(
-                    event,
-                    source_bounds,
-                    source_viewport,
-                    cx,
-                );
+                main.handle_external_surface_mouse_up(event, source_bounds, source_viewport, cx);
             });
         })
     }
 }
-

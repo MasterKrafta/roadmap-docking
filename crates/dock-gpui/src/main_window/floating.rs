@@ -37,7 +37,10 @@ impl MainWindow {
         let area = layout.floating_group(group)?.area;
         // Use a geometry viewport large enough to contain the actual native window.
         // This avoids clamping its local panel geometry to the main window's viewport.
-        let right = viewport.checked_right().ok()?.max(floating_bounds.checked_right().ok()?);
+        let right = viewport
+            .checked_right()
+            .ok()?
+            .max(floating_bounds.checked_right().ok()?);
         let bottom = viewport
             .checked_bottom()
             .ok()?
@@ -46,10 +49,7 @@ impl MainWindow {
             viewport.origin.x.min(floating_bounds.origin.x),
             viewport.origin.y.min(floating_bounds.origin.y),
         );
-        let geometry_viewport = Rect::new(
-            origin,
-            Size::new(right - origin.x, bottom - origin.y),
-        );
+        let geometry_viewport = Rect::new(origin, Size::new(right - origin.x, bottom - origin.y));
         let frame = FrameGeometry::compute(&layout, geometry_viewport, &metrics).ok()?;
         let bounds = frame
             .rects()
@@ -106,12 +106,10 @@ impl MainWindow {
             let native_bounds = Bounds::new(
                 point(
                     px(parent_bounds.origin.x.as_f32() + bounds.origin.x),
-                    px(
-                        parent_bounds.origin.y.as_f32()
-                            + chrome_height
-                            + surface_top
-                            + bounds.origin.y,
-                    ),
+                    px(parent_bounds.origin.y.as_f32()
+                        + chrome_height
+                        + surface_top
+                        + bounds.origin.y),
                 ),
                 size(
                     px(bounds.size.width + chrome_width),
@@ -187,11 +185,8 @@ impl MainWindow {
         source_viewport: gpui::Size<Pixels>,
         position: gpui::Point<Pixels>,
     ) {
-        let Some(pointer) = self.external_surface_pointer(
-            source_bounds,
-            source_viewport,
-            position,
-        ) else {
+        let Some(pointer) = self.external_surface_pointer(source_bounds, source_viewport, position)
+        else {
             return;
         };
         if let Err(error) = self.dock.begin_external_drag(payload, handle, pointer) {
@@ -210,11 +205,9 @@ impl MainWindow {
         if self.dock.resize_session().is_some() {
             return;
         }
-        let Some(pointer) = self.external_surface_pointer(
-            source_bounds,
-            source_viewport,
-            event.position,
-        ) else {
+        let Some(pointer) =
+            self.external_surface_pointer(source_bounds, source_viewport, event.position)
+        else {
             return;
         };
         if event.pressed_button != Some(MouseButton::Left) {
@@ -276,11 +269,9 @@ impl MainWindow {
         if event.button != MouseButton::Left || self.dock.resize_session().is_some() {
             return;
         }
-        let Some(pointer) = self.external_surface_pointer(
-            source_bounds,
-            source_viewport,
-            event.position,
-        ) else {
+        let Some(pointer) =
+            self.external_surface_pointer(source_bounds, source_viewport, event.position)
+        else {
             self.dock.cancel_drag();
             cx.notify();
             return;
@@ -345,10 +336,7 @@ impl MainWindow {
     }
 }
 
-pub(super) fn synchronize_floating_windows(
-    owner: gpui::WeakEntity<MainWindow>,
-    app: &mut App,
-) {
+pub(super) fn synchronize_floating_windows(owner: gpui::WeakEntity<MainWindow>, app: &mut App) {
     let Some(owner_entity) = owner.upgrade() else {
         return;
     };
@@ -476,10 +464,8 @@ fn native_window_contains_pointer(
     viewport: gpui::Size<Pixels>,
     position: gpui::Point<Pixels>,
 ) -> bool {
-    let chrome_width =
-        (window_bounds.size.width.as_f32() - viewport.width.as_f32()).max(0.0);
-    let chrome_height =
-        (window_bounds.size.height.as_f32() - viewport.height.as_f32()).max(0.0);
+    let chrome_width = (window_bounds.size.width.as_f32() - viewport.width.as_f32()).max(0.0);
+    let chrome_height = (window_bounds.size.height.as_f32() - viewport.height.as_f32()).max(0.0);
     let screen_x = window_bounds.origin.x.as_f32() + chrome_width + position.x.as_f32();
     let screen_y = window_bounds.origin.y.as_f32() + chrome_height + position.y.as_f32();
     let right = window_bounds.origin.x.as_f32() + window_bounds.size.width.as_f32();
@@ -509,8 +495,7 @@ fn native_pointer_in_dock_surface(
         (main_bounds.size.height.as_f32() - main_viewport.height.as_f32()).max(0.0);
 
     let screen_x = source_bounds.origin.x.as_f32() + source_chrome_width + position.x.as_f32();
-    let screen_y =
-        source_bounds.origin.y.as_f32() + source_chrome_height + position.y.as_f32();
+    let screen_y = source_bounds.origin.y.as_f32() + source_chrome_height + position.y.as_f32();
     Point::new(
         screen_x - main_bounds.origin.x.as_f32() - main_chrome_width,
         screen_y - main_bounds.origin.y.as_f32() - main_chrome_height - surface_top,
@@ -525,7 +510,6 @@ fn floating_bounds_match(left: Rect, right: Rect) -> bool {
         && (left.size.height - right.size.height).abs() < EPSILON
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::{native_pointer_in_dock_surface, native_window_contains_pointer};
@@ -534,14 +518,8 @@ mod tests {
 
     #[test]
     fn external_pointer_is_translated_from_window_to_main_dock_coordinates() {
-        let main_bounds = Bounds::new(
-            point(px(100.0), px(200.0)),
-            size(px(820.0), px(640.0)),
-        );
-        let source_bounds = Bounds::new(
-            point(px(450.0), px(520.0)),
-            size(px(420.0), px(340.0)),
-        );
+        let main_bounds = Bounds::new(point(px(100.0), px(200.0)), size(px(820.0), px(640.0)));
+        let source_bounds = Bounds::new(point(px(450.0), px(520.0)), size(px(420.0), px(340.0)));
 
         let pointer = native_pointer_in_dock_surface(
             source_bounds,
@@ -557,10 +535,7 @@ mod tests {
 
     #[test]
     fn external_drag_does_not_target_the_main_surface_while_over_source_window() {
-        let bounds = Bounds::new(
-            point(px(450.0), px(520.0)),
-            size(px(420.0), px(340.0)),
-        );
+        let bounds = Bounds::new(point(px(450.0), px(520.0)), size(px(420.0), px(340.0)));
         let viewport = size(px(400.0), px(300.0));
 
         assert!(native_window_contains_pointer(

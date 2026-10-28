@@ -169,14 +169,30 @@ impl FrameGeometry {
         // Clear every rectangle tied to a floating subtree, not just its outer
         // window rectangle. Tab-insertion and splitter geometry must not leave
         // invisible targets over the main surface during an external drag.
-        rects.columns.retain(|entry| !floating_nodes.contains(&entry.column));
-        rects.groups.retain(|entry| !floating_nodes.contains(&entry.group));
-        rects.tab_strips.retain(|entry| !floating_nodes.contains(&entry.group));
-        rects.tab_headers.retain(|entry| !floating_nodes.contains(&entry.group));
-        rects.tab_overflows.retain(|entry| !floating_nodes.contains(&entry.group));
-        rects.panels.retain(|entry| !floating_panels.contains(&entry.panel));
-        rects.splitters.retain(|entry| !floating_nodes.contains(&entry.owner));
-        rects.vertical_overflow.retain(|entry| !floating_nodes.contains(&entry.owner));
+        rects
+            .columns
+            .retain(|entry| !floating_nodes.contains(&entry.column));
+        rects
+            .groups
+            .retain(|entry| !floating_nodes.contains(&entry.group));
+        rects
+            .tab_strips
+            .retain(|entry| !floating_nodes.contains(&entry.group));
+        rects
+            .tab_headers
+            .retain(|entry| !floating_nodes.contains(&entry.group));
+        rects
+            .tab_overflows
+            .retain(|entry| !floating_nodes.contains(&entry.group));
+        rects
+            .panels
+            .retain(|entry| !floating_panels.contains(&entry.panel));
+        rects
+            .splitters
+            .retain(|entry| !floating_nodes.contains(&entry.owner));
+        rects
+            .vertical_overflow
+            .retain(|entry| !floating_nodes.contains(&entry.owner));
         rects.floating_groups.clear();
         rects.floating_resize_edges.clear();
         rects.drop_zones.clear();
@@ -195,18 +211,13 @@ mod tests {
     #[test]
     fn main_dock_resolver_ignores_native_floating_window_targets() {
         let metrics = DockMetrics::default();
-        let constraints = PanelConstraints::new(
-            Size::new(80.0, 60.0),
-            Size::new(180.0, 140.0),
-            None,
-            false,
-        );
+        let constraints =
+            PanelConstraints::new(Size::new(80.0, 60.0), Size::new(180.0, 140.0), None, false);
         let descriptors = ["layers", "color", "properties", "history"]
             .into_iter()
             .map(|key| (PanelKey::new(key).unwrap(), constraints))
             .collect::<Vec<_>>();
-        let mut layout =
-            create_initial_layout(Profile::Photoshop, &descriptors, metrics).unwrap();
+        let mut layout = create_initial_layout(Profile::Photoshop, &descriptors, metrics).unwrap();
         let panel_id_for = |layout: &dock_core::Layout, key: &str| {
             layout
                 .panel_instances()

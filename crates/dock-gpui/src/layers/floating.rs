@@ -88,9 +88,7 @@ pub(crate) fn render_group(
 
     let container_bounds = match mode {
         FloatingGroupRenderMode::DockSurface => bounds,
-        FloatingGroupRenderMode::NativeWindow => {
-            Rect::new(Point::ZERO, bounds.size)
-        }
+        FloatingGroupRenderMode::NativeWindow => Rect::new(Point::ZERO, bounds.size),
     };
     let nodes = tree::nodes_for_root(layout, area.root, data.frame);
     let mut container = rect_element(container_bounds, theme.colors.dock_background)

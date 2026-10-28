@@ -52,10 +52,7 @@ impl<'a> DockSurface<'a> {
     }
 
     /// Omits floating groups that are rendered in independent native windows.
-    pub(crate) fn exclude_floating_groups(
-        mut self,
-        groups: &'a HashSet<FloatingGroupId>,
-    ) -> Self {
+    pub(crate) fn exclude_floating_groups(mut self, groups: &'a HashSet<FloatingGroupId>) -> Self {
         self.excluded_floating_groups = Some(groups);
         self
     }

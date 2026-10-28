@@ -29,20 +29,35 @@ impl Theme {
             ("drop_target", self.colors.drop_target),
             ("toolbar_background", self.colors.toolbar_background),
             ("column_mode_button", self.colors.column_mode_button),
-            ("column_mode_button_hover", self.colors.column_mode_button_hover),
+            (
+                "column_mode_button_hover",
+                self.colors.column_mode_button_hover,
+            ),
             ("drop_zone", self.colors.drop_zone),
             ("drop_zone_border", self.colors.drop_zone_border),
-            ("floating_title_background", self.colors.floating_title_background),
-            ("flyout_header_background", self.colors.flyout_header_background),
+            (
+                "floating_title_background",
+                self.colors.floating_title_background,
+            ),
+            (
+                "flyout_header_background",
+                self.colors.flyout_header_background,
+            ),
             ("group_frame_background", self.colors.group_frame_background),
             ("group_frame_border", self.colors.group_frame_border),
             ("group_grip_background", self.colors.group_grip_background),
             ("group_menu_button", self.colors.group_menu_button),
-            ("group_menu_button_hover", self.colors.group_menu_button_hover),
+            (
+                "group_menu_button_hover",
+                self.colors.group_menu_button_hover,
+            ),
             ("icon_button_background", self.colors.icon_button_background),
             ("icon_button_hover", self.colors.icon_button_hover),
             ("icon_button_border", self.colors.icon_button_border),
-            ("panel_surface_background", self.colors.panel_surface_background),
+            (
+                "panel_surface_background",
+                self.colors.panel_surface_background,
+            ),
             ("panel_tab_active", self.colors.panel_tab_active),
             ("panel_tab_inactive", self.colors.panel_tab_inactive),
             ("panel_tab_hover", self.colors.panel_tab_hover),
@@ -56,7 +71,10 @@ impl Theme {
             ("resize_edge_handle", self.colors.resize_edge_handle),
             ("splitter_handle", self.colors.splitter_handle),
             ("tab_overflow_button", self.colors.tab_overflow_button),
-            ("tab_overflow_button_hover", self.colors.tab_overflow_button_hover),
+            (
+                "tab_overflow_button_hover",
+                self.colors.tab_overflow_button_hover,
+            ),
             ("tab_strip_background", self.colors.tab_strip_background),
         ] {
             if color > 0xFF_FFFF {

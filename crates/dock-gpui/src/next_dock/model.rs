@@ -80,10 +80,7 @@ fn tabs(panels: &[(&'static str, &'static str)]) -> DockNode {
     DockNode::Tabs(TabGroup {
         panels: panels
             .iter()
-            .map(|(title, description)| Panel {
-                title,
-                description,
-            })
+            .map(|(title, description)| Panel { title, description })
             .collect(),
         active: 0,
     })

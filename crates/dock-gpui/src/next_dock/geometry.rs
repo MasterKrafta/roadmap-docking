@@ -1,12 +1,11 @@
 //! Geometry calculation for the independent dock tree.
 
+use ui::Theme;
+
 use super::model::{DockNode, SplitAxis};
 
 pub(super) const HEADER_HEIGHT: f32 = 36.0;
-pub(super) const TAB_HEIGHT: f32 = 32.0;
-pub(super) const SPLITTER_SIZE: f32 = 6.0;
 
-/// Geometry for one node in the dock tree.
 #[derive(Clone, Debug)]
 pub(super) struct NodeGeometry {
     pub(super) width: f32,
@@ -14,7 +13,6 @@ pub(super) struct NodeGeometry {
     pub(super) kind: GeometryKind,
 }
 
-/// Geometry details for a tab group or a split.
 #[derive(Clone, Debug)]
 pub(super) enum GeometryKind {
     Tabs {
@@ -28,27 +26,39 @@ pub(super) enum GeometryKind {
     },
 }
 
-/// Calculates geometry for the complete tree using the available area.
-pub(super) fn compute(
-    root: &DockNode,
-    width: f32,
-    height: f32,
-) -> NodeGeometry {
-    compute_node(root, width.max(1.0), height.max(1.0))
+/// Calculates the tree geometry using the current theme.
+pub(super) fn compute(root: &DockNode, width: f32, height: f32, theme: &Theme) -> NodeGeometry {
+    let grip_height =
+        (theme.metrics.column_header_height - theme.metrics.tab_strip_height).max(0.0);
+    let tab_height = theme.metrics.tab_strip_height.max(0.0);
+    let splitter_thickness = theme.metrics.splitter_thickness.max(0.0);
+
+    compute_node(
+        root,
+        width.max(1.0),
+        height.max(1.0),
+        grip_height,
+        tab_height,
+        splitter_thickness,
+    )
 }
 
 fn compute_node(
     node: &DockNode,
     width: f32,
     height: f32,
+    grip_height: f32,
+    tab_height: f32,
+    splitter_thickness: f32,
 ) -> NodeGeometry {
     let kind = match node {
         DockNode::Tabs(_) => {
-            let tab_height = TAB_HEIGHT.min(height);
+            let grip_height = grip_height.min(height);
+            let tab_height = tab_height.min((height - grip_height).max(0.0));
 
             GeometryKind::Tabs {
                 tab_height,
-                content_height: (height - tab_height).max(0.0),
+                content_height: (height - grip_height - tab_height).max(0.0),
             }
         }
         DockNode::Split {
@@ -58,8 +68,8 @@ fn compute_node(
             second,
         } => {
             let splitter_extent = match axis {
-                SplitAxis::Horizontal => SPLITTER_SIZE.min(width),
-                SplitAxis::Vertical => SPLITTER_SIZE.min(height),
+                SplitAxis::Horizontal => splitter_thickness.min(width),
+                SplitAxis::Vertical => splitter_thickness.min(height),
             };
 
             let available = match axis {
@@ -70,21 +80,10 @@ fn compute_node(
             let first_extent = (available * ratio).clamp(0.0, available);
             let second_extent = available - first_extent;
 
-            let (first_width, first_height, second_width, second_height) =
-                match axis {
-                    SplitAxis::Horizontal => (
-                        first_extent,
-                        height,
-                        second_extent,
-                        height,
-                    ),
-                    SplitAxis::Vertical => (
-                        width,
-                        first_extent,
-                        width,
-                        second_extent,
-                    ),
-                };
+            let (first_width, first_height, second_width, second_height) = match axis {
+                SplitAxis::Horizontal => (first_extent, height, second_extent, height),
+                SplitAxis::Vertical => (width, first_extent, width, second_extent),
+            };
 
             GeometryKind::Split {
                 splitter_extent,
@@ -92,11 +91,17 @@ fn compute_node(
                     first,
                     first_width,
                     first_height,
+                    grip_height,
+                    tab_height,
+                    splitter_thickness,
                 )),
                 second: Box::new(compute_node(
                     second,
                     second_width,
                     second_height,
+                    grip_height,
+                    tab_height,
+                    splitter_thickness,
                 )),
             }
         }

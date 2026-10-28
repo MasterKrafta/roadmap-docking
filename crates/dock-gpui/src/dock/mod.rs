@@ -7,8 +7,8 @@ mod host_impl;
 mod keyboard;
 mod rail_policy;
 mod resize_session;
-mod workspace_model;
 mod workspace;
+mod workspace_model;
 
 pub(crate) use workspace::{load_layout, save_layout, serialize_layout};
 
