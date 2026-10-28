@@ -96,7 +96,7 @@ impl DockHost for WindowHost<'_, '_> {
     fn resize_key(&self, handle: ResizeHandle) -> CommandKeyHandler {
         Box::new(self.cx.listener::<KeyDownEvent>(
             move |this, event, window, cx| {
-                this.resize_splitter_by_keyboard(handle, event, window, cx);
+                this.resize_by_keyboard(handle, event, window, cx);
             },
         ))
     }
