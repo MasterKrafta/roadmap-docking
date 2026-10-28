@@ -5,7 +5,8 @@ use dock_core::{
 use gpui::{AnyElement, IntoElement};
 
 use crate::components::focus_ring::{
-    PanelMoveDirection, TabReorderDirection, keyboard_panel_move_direction,
+    PanelColumnMoveDirection, PanelMoveDirection, TabReorderDirection,
+    keyboard_panel_column_move_direction, keyboard_panel_move_direction,
     keyboard_tab_reorder_direction,
 };
 use crate::components::{ColumnModeButton, GroupMenuButton, PanelTab, TabOverflowButton};
@@ -210,7 +211,7 @@ fn move_panel_key_handler(
         }
         let source_index = column.groups.iter().position(|group| *group == source_group)?;
         let (previous_index, next_index) =
-            adjacent_group_indices(source_index, column.groups.len());
+            adjacent_indices(source_index, column.groups.len());
         Some((
             previous_index.and_then(|index| column.groups.get(index).copied()),
             next_index.and_then(|index| column.groups.get(index).copied()),
@@ -231,6 +232,10 @@ fn move_panel_key_handler(
     };
     let move_previous = previous_group.and_then(move_to_group);
     let move_next = next_group.and_then(move_to_group);
+    let (previous_column_group, next_column_group) =
+        adjacent_main_column_groups(layout, source_group);
+    let move_previous_column = previous_column_group.and_then(move_to_group);
+    let move_next_column = next_column_group.and_then(move_to_group);
 
     Some(Box::new(move |event, window, app| {
         match keyboard_panel_move_direction(&event.keystroke) {
@@ -246,34 +251,125 @@ fn move_panel_key_handler(
             }
             None => {}
         }
+        match keyboard_panel_column_move_direction(&event.keystroke) {
+            Some(PanelColumnMoveDirection::Previous) => {
+                if let Some(handler) = &move_previous_column {
+                    handler(event, window, app);
+                }
+            }
+            Some(PanelColumnMoveDirection::Next) => {
+                if let Some(handler) = &move_next_column {
+                    handler(event, window, app);
+                }
+            }
+            None => {}
+        }
     }))
 }
 
-fn adjacent_group_indices(
+/// Returns the adjacent main-dock tab groups on the same side as the source group.
+/// The target column follows the source group's vertical index, clamped when the
+/// destination column contains fewer groups. Rail and empty columns are not targets.
+fn adjacent_main_column_groups(
+    layout: &Layout,
+    source_group: NodeId,
+) -> (Option<NodeId>, Option<NodeId>) {
+    let source = layout.nodes().find_map(|(column_id, node)| match node {
+        Node::Column(column) if !column.mode.is_rail() => column
+            .groups
+            .iter()
+            .position(|group| *group == source_group)
+            .map(|group_index| (column_id, group_index)),
+        _ => None,
+    });
+    let Some((source_column, source_group_index)) = source else {
+        return (None, None);
+    };
+
+    for side in [DockSide::Left, DockSide::Right] {
+        let Some(area) = layout.main_area(side) else {
+            continue;
+        };
+        let columns = match layout.node(area.root) {
+            Some(Node::Column(_)) => vec![area.root],
+            Some(Node::Split(split))
+                if split.axis == Axis::X
+                    && split
+                        .children
+                        .iter()
+                        .all(|child| matches!(layout.node(*child), Some(Node::Column(_)))) =>
+            {
+                split.children.clone()
+            }
+            _ => continue,
+        };
+        let Some(source_column_index) = columns.iter().position(|id| *id == source_column) else {
+            continue;
+        };
+        let (previous_index, next_index) = adjacent_indices(source_column_index, columns.len());
+
+        let group_at = |column_index: Option<usize>| {
+            let column_id = *columns.get(column_index?)?;
+            let Node::Column(column) = layout.node(column_id)? else {
+                return None;
+            };
+            if column.mode.is_rail() {
+                return None;
+            }
+            let group_index = corresponding_group_index(source_group_index, column.groups.len())?;
+            let group = column.groups.get(group_index).copied()?;
+            matches!(layout.node(group), Some(Node::Tabs(_))).then_some(group)
+        };
+
+        return (group_at(previous_index), group_at(next_index));
+    }
+
+    (None, None)
+}
+
+fn corresponding_group_index(source_index: usize, target_group_count: usize) -> Option<usize> {
+    if target_group_count == 0 {
+        None
+    } else {
+        Some(source_index.min(target_group_count - 1))
+    }
+}
+
+fn adjacent_indices(
     source_index: usize,
-    group_count: usize,
+    item_count: usize,
 ) -> (Option<usize>, Option<usize>) {
-    if source_index >= group_count {
+    if source_index >= item_count {
         return (None, None);
     }
     (
         source_index.checked_sub(1),
-        (source_index + 1 < group_count).then_some(source_index + 1),
+        (source_index + 1 < item_count).then_some(source_index + 1),
     )
 }
 
 #[cfg(test)]
 mod keyboard_panel_move_tests {
-    use super::adjacent_group_indices;
+    use super::{adjacent_indices, corresponding_group_index};
 
     #[test]
-    fn panel_move_only_targets_adjacent_groups_within_column() {
-        assert_eq!(adjacent_group_indices(0, 3), (None, Some(1)));
-        assert_eq!(adjacent_group_indices(1, 3), (Some(0), Some(2)));
-        assert_eq!(adjacent_group_indices(2, 3), (Some(1), None));
-        assert_eq!(adjacent_group_indices(0, 1), (None, None));
-        assert_eq!(adjacent_group_indices(3, 3), (None, None));
-        assert_eq!(adjacent_group_indices(0, 0), (None, None));
+    fn panel_move_only_targets_adjacent_items() {
+        assert_eq!(adjacent_indices(0, 3), (None, Some(1)));
+        assert_eq!(adjacent_indices(1, 3), (Some(0), Some(2)));
+        assert_eq!(adjacent_indices(2, 3), (Some(1), None));
+        assert_eq!(adjacent_indices(0, 1), (None, None));
+        assert_eq!(adjacent_indices(3, 3), (None, None));
+        assert_eq!(adjacent_indices(0, 0), (None, None));
+    }
+
+    #[test]
+    fn column_move_preserves_vertical_group_position_when_possible() {
+        assert_eq!(corresponding_group_index(0, 3), Some(0));
+        assert_eq!(corresponding_group_index(1, 3), Some(1));
+        assert_eq!(corresponding_group_index(2, 3), Some(2));
+        assert_eq!(corresponding_group_index(2, 1), Some(0));
+        assert_eq!(corresponding_group_index(4, 2), Some(1));
+        assert_eq!(corresponding_group_index(0, 0), None);
     }
 }
 

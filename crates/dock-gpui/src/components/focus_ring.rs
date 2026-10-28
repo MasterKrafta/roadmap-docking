@@ -56,6 +56,33 @@ pub(crate) fn keyboard_panel_move_direction(
     }
 }
 
+/// Direction requested when moving a focused panel to an adjacent main-dock column.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum PanelColumnMoveDirection {
+    Previous,
+    Next,
+}
+
+/// Recognizes command/control + Alt + Shift + Left/Right for moving a panel between columns.
+pub(crate) fn keyboard_panel_column_move_direction(
+    keystroke: &Keystroke,
+) -> Option<PanelColumnMoveDirection> {
+    let modifiers = keystroke.modifiers;
+    if !(modifiers.control || modifiers.platform)
+        || !modifiers.alt
+        || !modifiers.shift
+        || modifiers.function
+    {
+        return None;
+    }
+
+    match keystroke.key.to_ascii_lowercase().as_str() {
+        "left" | "arrowleft" => Some(PanelColumnMoveDirection::Previous),
+        "right" | "arrowright" => Some(PanelColumnMoveDirection::Next),
+        _ => None,
+    }
+}
+
 /// Direction requested when reordering a focused tab with the keyboard.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum TabReorderDirection {
@@ -154,9 +181,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        GroupMoveDirection, PanelMoveDirection, TabReorderDirection,
-        is_keyboard_activation_key, keyboard_group_move_direction, keyboard_panel_move_direction,
-        keyboard_resize_axis_for_floating_edge,
+        GroupMoveDirection, PanelColumnMoveDirection, PanelMoveDirection, TabReorderDirection,
+        is_keyboard_activation_key, keyboard_group_move_direction, keyboard_panel_column_move_direction,
+        keyboard_panel_move_direction, keyboard_resize_axis_for_floating_edge,
         keyboard_resize_delta, keyboard_tab_reorder_direction,
     };
     use dock_core::{Axis, ResizeEdge};
@@ -316,6 +343,76 @@ mod tests {
             )),
             None
         );
+    }
+
+    #[test]
+    fn keyboard_panel_column_move_uses_command_alt_shift_left_and_right() {
+        let control_alt_shift = Modifiers {
+            control: true,
+            alt: true,
+            shift: true,
+            ..Modifiers::default()
+        };
+        assert_eq!(
+            keyboard_panel_column_move_direction(&key("left", control_alt_shift)),
+            Some(PanelColumnMoveDirection::Previous)
+        );
+        assert_eq!(
+            keyboard_panel_column_move_direction(&key("ArrowRight", control_alt_shift)),
+            Some(PanelColumnMoveDirection::Next)
+        );
+
+        let platform_alt_shift = Modifiers {
+            platform: true,
+            alt: true,
+            shift: true,
+            ..Modifiers::default()
+        };
+        assert_eq!(
+            keyboard_panel_column_move_direction(&key("arrowleft", platform_alt_shift)),
+            Some(PanelColumnMoveDirection::Previous)
+        );
+    }
+
+    #[test]
+    fn keyboard_panel_column_move_rejects_other_keys_and_missing_modifiers() {
+        assert_eq!(
+            keyboard_panel_column_move_direction(&key(
+                "up",
+                Modifiers {
+                    control: true,
+                    alt: true,
+                    shift: true,
+                    ..Modifiers::default()
+                },
+            )),
+            None
+        );
+        for modifiers in [
+            Modifiers::default(),
+            Modifiers {
+                shift: true,
+                ..Modifiers::default()
+            },
+            Modifiers {
+                control: true,
+                shift: true,
+                alt: true,
+                ..Modifiers::default()
+            },
+            Modifiers {
+                control: true,
+                alt: true,
+                shift: true,
+                function: true,
+                ..Modifiers::default()
+            },
+        ] {
+            assert_eq!(
+                keyboard_panel_column_move_direction(&key("right", modifiers)),
+                None
+            );
+        }
     }
 
     #[test]
