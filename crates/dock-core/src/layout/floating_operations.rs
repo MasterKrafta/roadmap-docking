@@ -355,6 +355,12 @@ impl Layout {
                     index,
                 },
             ) => self.dock_floating_tabs_to_tabs(root, tabs, target_group, index),
+            (Some(Node::Column(_)), DropTarget::MainColumn { side, index }) => {
+                // Preserve an entire floating column, including its group order and
+                // ratios, when the user docks it beside the main dock.
+                self.detach_node(root)?;
+                self.insert_existing_column_at(side, index, root, None, metrics)
+            }
             (Some(Node::Split(_)), _) => Err(CommandError::InvalidTarget {
                 reason: "floating split stacks can only be docked into a main column or icon rail",
             }),
