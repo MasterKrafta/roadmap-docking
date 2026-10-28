@@ -405,15 +405,17 @@ impl MainWindow {
     ///
     /// Reuses the normal resize session so Core constraints, preview policy,
     /// and undo history remain identical to pointer-driven resizing.
-    pub(crate) fn resize_splitter_by_keyboard(
+    pub(crate) fn resize_by_keyboard(
         &mut self,
         handle: ResizeHandle,
         event: &KeyDownEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let ResizeHandle::Splitter { axis, .. } = handle else {
-            return;
+        let axis = match handle {
+            ResizeHandle::Splitter { axis, .. } => axis,
+            ResizeHandle::OuterColumn { .. } => Axis::X,
+            ResizeHandle::FloatingEdge { .. } | ResizeHandle::Flyout { .. } => return,
         };
         let Some(delta) = keyboard_resize_delta(&event.keystroke, axis) else {
             return;
