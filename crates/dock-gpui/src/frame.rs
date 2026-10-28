@@ -207,17 +207,21 @@ mod tests {
             .collect::<Vec<_>>();
         let mut layout =
             create_initial_layout(Profile::Photoshop, &descriptors, metrics).unwrap();
-        let source_panel = layout
-            .panel_instances()
-            .find_map(|(panel_id, panel)| {
-                (panel.key.as_str() == "layers").then_some(panel_id)
-            })
-            .expect("baseline layout should contain the layers panel");
+        let panel_id_for = |key: &str| {
+            layout
+                .panel_instances()
+                .find_map(|(panel_id, panel)| {
+                    (panel.key.as_str() == key).then_some(panel_id)
+                })
+                .expect("baseline layout should contain the requested panel")
+        };
+        let source_panel = panel_id_for("color");
+        let floating_panel = panel_id_for("layers");
 
         layout
             .apply(
                 DockCommand::FloatPanelAsGroup {
-                    panel: source_panel,
+                    panel: floating_panel,
                     bounds: Rect::new(Point::new(650.0, 120.0), Size::new(320.0, 300.0)),
                 },
                 &metrics,
