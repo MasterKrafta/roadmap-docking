@@ -57,31 +57,7 @@ impl FloatingWindow {
         };
 
         let updated_bounds = owner_entity.update(cx, |main, main_cx| {
-            let Some(bounds) = main.floating_bounds_from_native_window(native_bounds, viewport_size)
-            else {
-                return None;
-            };
-            if rectangles_approximately_equal(
-                main.dock.layout().floating_group(group)?.bounds,
-                bounds,
-            ) {
-                return Some(bounds);
-            }
-            match main.dock.sync_floating_bounds(group, bounds) {
-                Ok(()) => {
-                    main.schedule_workspace_save(main_cx);
-                    main_cx.notify();
-                    Some(bounds)
-                }
-                Err(error) => {
-                    tracing::debug!(
-                        group = ?group,
-                        error = %error,
-                        "native floating window geometry was rejected"
-                    );
-                    None
-                }
-            }
+            main.sync_floating_native_bounds(group, native_bounds, viewport_size, main_cx)
         });
 
         if let Some(bounds) = updated_bounds {
