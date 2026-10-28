@@ -188,7 +188,7 @@ impl FrameGeometry {
 mod tests {
     use super::FrameGeometry;
     use dock_core::{
-        ColumnMode, DockMetrics, DockSide, DropSource, DropTarget, DropZone, LayoutBuilder,
+        DockCommand, DockMetrics, DockSide, DropSource, DropTarget, DropZone, Node,
         PanelConstraints, PanelKey, Point, Profile, Rect, Size, create_initial_layout,
     };
 
@@ -201,36 +201,50 @@ mod tests {
             None,
             false,
         );
-        let mut builder = LayoutBuilder::new(Profile::Photoshop);
-        let (source_panel, source_node) =
-            builder.panel(PanelKey::new("external-source").unwrap(), constraints);
-        let source_group = builder.tabs(vec![source_node], 0, false);
-        let (_, target_node) =
-            builder.panel(PanelKey::new("external-main-target").unwrap(), constraints);
-        let target_group = builder.tabs(vec![target_node], 0, false);
-        let main_column = builder.column(
-            metrics.default_column_width,
-            ColumnMode::Expanded,
-            vec![source_group, target_group],
-            vec![0.5, 0.5],
-        );
-        builder.main_area(DockSide::Left, main_column);
+        let descriptors = ["layers", "color", "properties", "history"]
+            .into_iter()
+            .map(|key| (PanelKey::new(key).unwrap(), constraints))
+            .collect::<Vec<_>>();
+        let mut layout =
+            create_initial_layout(Profile::Photoshop, &descriptors, metrics).unwrap();
+        let source_panel = layout
+            .panel_instances()
+            .find_map(|(panel_id, panel)| {
+                (panel.key.as_str() == "layers").then_some(panel_id)
+            })
+            .expect("baseline layout should contain the layers panel");
 
-        let (_, floating_a) =
-            builder.panel(PanelKey::new("external-floating-a").unwrap(), constraints);
-        let (_, floating_b) =
-            builder.panel(PanelKey::new("external-floating-b").unwrap(), constraints);
-        let floating_group = builder.tabs(vec![floating_a, floating_b], 0, false);
-        let floating_id = builder.floating_group(
-            floating_group,
-            Rect::new(Point::new(650.0, 120.0), Size::new(320.0, 300.0)),
-            1,
-        );
+        layout
+            .apply(
+                DockCommand::FloatPanelAsGroup {
+                    panel: source_panel,
+                    bounds: Rect::new(Point::new(650.0, 120.0), Size::new(320.0, 300.0)),
+                },
+                &metrics,
+            )
+            .expect("a tab can be detached into a native floating group");
 
-        let layout = builder.build();
+        let (floating_id, floating) = layout
+            .floating_groups()
+            .next()
+            .expect("detached panel should create a floating group");
+        let floating_root = layout
+            .dock_area(floating.area)
+            .expect("floating group should own a dock area")
+            .root;
+        let Node::Column(floating_column) = layout
+            .node(floating_root)
+            .expect("floating dock area should have a root")
+        else {
+            panic!("detached Photoshop panel should have a single-column floating root");
+        };
+        let floating_tabs_group = floating_column.groups[0];
+
         let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
         let frame = FrameGeometry::compute(&layout, viewport, &metrics).unwrap();
-        let source = DropSource::Panel { panel: source_panel };
+        let source = DropSource::Panel {
+            panel: source_panel,
+        };
         let all_windows = frame
             .prepare_drop_resolver(&layout, source, &metrics)
             .unwrap();
@@ -263,7 +277,7 @@ mod tests {
             !main_dock_only.zones().iter().any(|zone| match zone.target {
                 DropTarget::Tabs { group, .. }
                 | DropTarget::GroupTabs { group, .. }
-                | DropTarget::GroupEdge { group, .. } => group == floating_group,
+                | DropTarget::GroupEdge { group, .. } => group == floating_tabs_group,
                 _ => false,
             }),
             "external drags must not leave tab insertion or group-edge targets from hidden floating geometry"
