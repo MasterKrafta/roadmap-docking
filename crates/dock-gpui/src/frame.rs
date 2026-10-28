@@ -210,9 +210,7 @@ mod tests {
         let panel_id_for = |layout: &dock_core::Layout, key: &str| {
             layout
                 .panel_instances()
-                .find_map(|(panel_id, panel)| {
-                    (panel.key.as_str() == key).then_some(panel_id)
-                })
+                .find_map(|(panel_id, panel)| (panel.key.as_str() == key).then_some(panel_id))
                 .expect("baseline layout should contain the requested panel")
         };
         let source_panel = panel_id_for(&layout, "color");
