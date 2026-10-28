@@ -1,10 +1,10 @@
 use dock_core::{NodeId, PanelId, Point, Rect, Size};
 use gpui::{
-    App, ClickEvent, IntoElement, ParentElement, RenderOnce, Styled, Window, div, px, rgb,
+    App, IntoElement, ParentElement, RenderOnce, Styled, Window, div, px, rgb,
 };
 use ui::Theme;
 
-use crate::components::IconButton;
+use crate::components::{ClickHandler, IconButton};
 
 /// Header bar for a flyout, including its menu and close controls.
 #[derive(IntoElement)]
@@ -20,9 +20,9 @@ pub struct FlyoutHeader {
     /// Shared application theme.
     pub theme: Theme,
     /// Requests the group/panel menu.
-    pub on_menu: Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>,
+    pub on_menu: ClickHandler,
     /// Closes the currently displayed flyout.
-    pub on_close: Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>,
+    pub on_close: ClickHandler,
 }
 
 impl RenderOnce for FlyoutHeader {
