@@ -1,5 +1,6 @@
 //! Geometry calculation for the independent dock tree.
 
+use gpui::Window;
 use ui::Theme;
 
 use super::components::minimum_width_for_group;
@@ -51,7 +52,7 @@ pub(super) fn compute(
 /// Computes the minimum width required to display every tab in a subtree.
 fn minimum_width(node: &DockNode, splitter_thickness: f32, window: &Window, theme: &Theme) -> f32 {
     match node {
-        DockNode::Tabs(group) => minimum_width_for_group(group.panels.len(), theme),
+        DockNode::Tabs(group) => minimum_width_for_group(group, window, theme),
         DockNode::Split {
             axis,
             first,
