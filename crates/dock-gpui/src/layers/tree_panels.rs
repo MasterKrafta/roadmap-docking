@@ -57,6 +57,7 @@ pub(crate) fn render(
                 axis: splitter.axis,
                 theme: *data.theme,
                 on_resize_start: handle.map(|handle| host.resize_start(handle)),
+                on_resize_key: handle.map(|handle| host.resize_key(handle)),
             }.into_any_element(),
         );
     }
