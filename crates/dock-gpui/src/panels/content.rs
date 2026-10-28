@@ -1,10 +1,11 @@
 use dock_core::PanelInstance;
 use gpui::{AnyElement, Div, IntoElement, ParentElement, Styled, div, px, rgb};
 
-/// Renders placeholder content for a panel selected by the Core layout.
+/// Renders intentionally generic placeholder content for the bundled reference window.
 ///
-/// This is the registry callback. The enclosing dock element owns its bounds
-/// and background, so this function only supplies the panel's inner content.
+/// This is the sample registry callback, not an application data renderer. The enclosing dock
+/// element owns the bounds and background; embedded applications should return their own inner
+/// content from [`crate::host::DockHost::render_panel`].
 pub fn render_registered(instance: &PanelInstance) -> AnyElement {
     let selected_tab = super::panel_title(instance);
 

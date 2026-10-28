@@ -1,3 +1,8 @@
+//! Reusable GPUI docking surface, host integration contract, and a reference window entrypoint.
+//! 
+//! Embedded applications provide their own [`host::DockHost`] to render domain-specific
+//! panel content. The bundled [`run`] window is a reference/demo integration; its panel
+//! bodies intentionally use the placeholder content in [`panels`]. See `docs/panel-rendering.md`.
 pub mod components;
 pub mod host;
 pub mod requests;

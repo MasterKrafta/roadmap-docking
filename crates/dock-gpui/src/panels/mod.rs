@@ -1,4 +1,7 @@
-//! Central registry of panel metadata and content renderers.
+//! Built-in panel metadata and placeholder content registry used by the bundled reference window.
+//!
+//! Consumers embedding the dock can own their panel registry and render domain content through
+//! [`crate::host::DockHost`]; they do not need to extend this sample registry.
 
 use dock_core::{PanelConstraints, PanelInstance, PanelKey, Size};
 use gpui::{AnyElement, SharedString};
@@ -16,7 +19,7 @@ pub struct PanelDef {
     pub content: fn(&PanelInstance) -> AnyElement,
 }
 
-/// Built-in panels in the order used by the panel menu and initial layout.
+/// Built-in sample panels in the order used by the reference window's panel menu and initial layout.
 pub const PANELS: &[PanelDef] = &[
     PanelDef {
         key: "layers",

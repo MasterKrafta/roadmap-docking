@@ -24,9 +24,12 @@ pub type SurfaceMouseMoveHandler = Box<dyn Fn(&MouseMoveEvent, &mut Window, &mut
 /// Finishes the active pointer gesture when the left mouse button is released.
 pub type SurfaceMouseUpHandler = Box<dyn Fn(&MouseUpEvent, &mut Window, &mut App) + 'static>;
 
-/// Supplies panel presentation and converts UI interactions into host-owned requests.
+/// Supplies application-specific panel presentation and converts UI interactions into host-owned requests.
 ///
-/// The adapter only asks for handlers; it does not own the layout or apply commands.
+/// Implement this trait to render domain content for your app's `PanelInstance` values and to
+/// connect dock interactions to the application's controller. The adapter only asks for handlers;
+/// it does not own the layout or apply commands. See `docs/panel-rendering.md` for the distinction
+/// between a custom host and the bundled reference window.
 pub trait DockHost {
     fn panel_title(&self, instance: &PanelInstance) -> SharedString;
 
@@ -69,9 +72,11 @@ pub trait DockHost {
     }
 }
 
-/// A host with the standard panel registry and no-op event handlers.
+/// A preview host with the bundled placeholder panel registry and no-op interaction handlers.
 ///
-/// This is suitable for preview windows and component/layout examples.
+/// Panel bodies are intentionally demonstrative rather than application content. Use this for
+/// previews and component/layout examples; interactive applications should implement [`DockHost`]
+/// with their own panel renderers and event handlers. See `docs/panel-rendering.md`.
 #[derive(Default)]
 pub struct NoopHost;
 
