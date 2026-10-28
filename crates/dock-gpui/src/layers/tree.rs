@@ -142,22 +142,26 @@ fn group_move_key_handler(
         return None;
     }
 
-    let move_previous = (index > 0).then(|| {
+    let move_previous = group_move_target_index(
+        index,
+        group_count,
+        GroupMoveDirection::Previous,
+    )
+    .map(|target_index| {
         host.command_key(DockCommand::MoveGroup {
             group,
             column: column_id,
-            index: index - 1,
+            index: target_index,
         })
     });
-    // MoveGroup takes an insertion slot before source removal, so moving down
-    // past the next group uses the slot after that group's original position.
-    let move_next = (index + 1 < group_count).then(|| {
-        host.command_key(DockCommand::MoveGroup {
-            group,
-            column: column_id,
-            index: index + 2,
-        })
-    });
+    let move_next = group_move_target_index(index, group_count, GroupMoveDirection::Next)
+        .map(|target_index| {
+            host.command_key(DockCommand::MoveGroup {
+                group,
+                column: column_id,
+                index: target_index,
+            })
+        });
 
     Some(Box::new(move |event, window, app| {
         match keyboard_group_move_direction(&event.keystroke) {
@@ -174,5 +178,44 @@ fn group_move_key_handler(
             None => {}
         }
     }))
+}
+
+fn group_move_target_index(
+    current_index: usize,
+    group_count: usize,
+    direction: GroupMoveDirection,
+) -> Option<usize> {
+    match direction {
+        GroupMoveDirection::Previous if current_index > 0 && current_index < group_count => {
+            Some(current_index - 1)
+        }
+        GroupMoveDirection::Next
+            if current_index + 1 < group_count =>
+        {
+            // MoveGroup takes an insertion slot before source removal; skip over
+            // the next group's original slot so the moved group ends up after it.
+            Some(current_index + 2)
+        }
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod keyboard_group_move_tests {
+    use super::group_move_target_index;
+    use crate::components::focus_ring::GroupMoveDirection;
+
+    #[test]
+    fn group_move_insertion_slots_respect_column_boundaries() {
+        assert_eq!(group_move_target_index(0, 3, GroupMoveDirection::Previous), None);
+        assert_eq!(group_move_target_index(0, 3, GroupMoveDirection::Next), Some(2));
+        assert_eq!(group_move_target_index(1, 3, GroupMoveDirection::Previous), Some(0));
+        assert_eq!(group_move_target_index(1, 3, GroupMoveDirection::Next), Some(3));
+        assert_eq!(group_move_target_index(2, 3, GroupMoveDirection::Previous), Some(1));
+        assert_eq!(group_move_target_index(2, 3, GroupMoveDirection::Next), None);
+        assert_eq!(group_move_target_index(0, 1, GroupMoveDirection::Previous), None);
+        assert_eq!(group_move_target_index(0, 1, GroupMoveDirection::Next), None);
+        assert_eq!(group_move_target_index(0, 0, GroupMoveDirection::Previous), None);
+    }
 }
 
