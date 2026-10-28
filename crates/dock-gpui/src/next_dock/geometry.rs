@@ -27,7 +27,13 @@ pub(super) enum GeometryKind {
     },
 }
 
-pub(super) fn compute(root: &DockNode, width: f32, height: f32, theme: &Theme) -> NodeGeometry {
+pub(super) fn compute(
+    root: &DockNode,
+    width: f32,
+    height: f32,
+    window: &Window,
+    theme: &Theme,
+) -> NodeGeometry {
     let tab_height = theme.metrics.tab_strip_height.max(0.0);
     let splitter_thickness = theme.metrics.splitter_thickness.max(0.0);
 
@@ -37,12 +43,13 @@ pub(super) fn compute(root: &DockNode, width: f32, height: f32, theme: &Theme) -
         height.max(1.0),
         tab_height,
         splitter_thickness,
+        window,
         theme,
     )
 }
 
 /// Computes the minimum width required to display every tab in a subtree.
-fn minimum_width(node: &DockNode, splitter_thickness: f32, theme: &Theme) -> f32 {
+fn minimum_width(node: &DockNode, splitter_thickness: f32, window: &Window, theme: &Theme) -> f32 {
     match node {
         DockNode::Tabs(group) => minimum_width_for_group(group.panels.len(), theme),
         DockNode::Split {
@@ -51,8 +58,8 @@ fn minimum_width(node: &DockNode, splitter_thickness: f32, theme: &Theme) -> f32
             second,
             ..
         } => {
-            let first_width = minimum_width(first, splitter_thickness, theme);
-            let second_width = minimum_width(second, splitter_thickness, theme);
+            let first_width = minimum_width(first, splitter_thickness, window, theme);
+            let second_width = minimum_width(second, splitter_thickness, window, theme);
 
             match axis {
                 SplitAxis::Horizontal => first_width + splitter_thickness + second_width,
@@ -68,6 +75,7 @@ fn compute_node(
     height: f32,
     tab_height: f32,
     splitter_thickness: f32,
+    window: &Window,
     theme: &Theme,
 ) -> NodeGeometry {
     let kind = match node {
@@ -98,8 +106,8 @@ fn compute_node(
 
             let first_extent = match axis {
                 SplitAxis::Horizontal => {
-                    let min_first = minimum_width(first, splitter_thickness, theme);
-                    let min_second = minimum_width(second, splitter_thickness, theme);
+                    let min_first = minimum_width(first, splitter_thickness, window, theme);
+                    let min_second = minimum_width(second, splitter_thickness, window, theme);
 
                     if available >= min_first + min_second {
                         (available * ratio).clamp(min_first, available - min_second)
@@ -128,6 +136,7 @@ fn compute_node(
                     first_height,
                     tab_height,
                     splitter_thickness,
+                    window,
                     theme,
                 )),
                 second: Box::new(compute_node(
@@ -136,6 +145,7 @@ fn compute_node(
                     second_height,
                     tab_height,
                     splitter_thickness,
+                    window,
                     theme,
                 )),
             }

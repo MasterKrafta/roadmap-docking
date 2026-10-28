@@ -11,7 +11,7 @@ use super::super::model::TabGroup;
 use super::group_menu_button::GroupMenuButton;
 use super::panel_tab::PanelTab;
 
-const PREFERRED_TAB_WIDTH: f32 = 100.0;
+const TAB_HORIZONTAL_PADDING: f32 = 8.0;
 const MIN_INACTIVE_TAB_WIDTH: f32 = 32.0;
 const MIN_DRAG_ZONE_WIDTH: f32 = 40.0;
 
@@ -24,7 +24,7 @@ pub(in crate::next_dock) struct GroupHeader {
 }
 
 impl RenderOnce for GroupHeader {
-    fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, _cx: &mut App) -> impl IntoElement {
         let rect = self.rect;
         let theme = self.theme;
         let width = rect.size.width.max(0.0);
@@ -38,52 +38,38 @@ impl RenderOnce for GroupHeader {
 
         let active_index = self.group.active.min(panel_count.saturating_sub(1));
 
-        let capacity = max_tab_count(width, &theme);
+        let natural_widths: Vec<f32> = self
+            .group
+            .panels
+            .iter()
+            .map(|panel| {
+                measure_text_width(window, panel.title, &theme) + TAB_HORIZONTAL_PADDING * 2.0
+            })
+            .collect();
 
-        // Defensive fallback if the window becomes narrower after the tabs
-        // were created. In normal operation, the insertion rule prevents
-        // the group from exceeding this capacity.
-        let visible_count = if panel_count == 0 {
-            0
-        } else if can_accept_panel(width, panel_count.saturating_sub(1), &theme) {
-            panel_count
-        } else {
-            capacity.min(panel_count)
-        };
+        let menu_width = theme.metrics.group_control_button_width.max(0.0).min(width);
+        let tab_area_width = (width - menu_width).max(0.0);
 
-        // Keep the active tab visible when the viewport is narrowed.
-        let start_index = if visible_count == 0 {
-            0
-        } else {
-            active_index
-                .saturating_sub(visible_count.saturating_sub(1))
-                .min(panel_count.saturating_sub(visible_count))
-        };
+        let active_width = natural_widths.get(active_index).copied().unwrap_or(0.0);
 
-        // Preserve the preferred active width and reserve drag space when
-        // the group is wide enough to do so.
-        let drag_reserve = if tab_area_width > MIN_DRAG_ZONE_WIDTH {
+        let inactive_count = panel_count.saturating_sub(1);
+
+        let minimum_tabs_width = active_width + inactive_count as f32 * MIN_INACTIVE_TAB_WIDTH;
+
+        // Оставляем место под drag-зону, если группа может вместить
+        // активную вкладку, минимальные неактивные и саму drag-зону.
+        let drag_reserve = if tab_area_width >= minimum_tabs_width + MIN_DRAG_ZONE_WIDTH {
             MIN_DRAG_ZONE_WIDTH
         } else {
             0.0
         };
 
-        let active_width = if visible_count > 0 {
-            PREFERRED_TAB_WIDTH.min((tab_area_width - drag_reserve).max(0.0))
-        } else {
-            0.0
-        };
+        let tab_budget = (tab_area_width - drag_reserve).max(0.0);
+        let inactive_budget = (tab_budget - active_width).max(0.0);
 
-        let inactive_count = visible_count.saturating_sub(1);
-        let inactive_space = (tab_area_width - active_width - drag_reserve).max(0.0);
+        let mut tab_widths = natural_widths.clone();
 
-        let inactive_width = if inactive_count > 0 {
-            (inactive_space / inactive_count as f32)
-                .min(PREFERRED_TAB_WIDTH)
-                .max(MIN_INACTIVE_TAB_WIDTH)
-        } else {
-            0.0
-        };
+        shrink_inactive_widths(&mut tab_widths, active_index, inactive_budget);
 
         let mut result = div()
             .relative()
@@ -93,21 +79,24 @@ impl RenderOnce for GroupHeader {
 
         let mut x = 0.0;
 
-        for index in start_index..(start_index + visible_count) {
-            let is_active = index == active_index;
-            let tab_width = if is_active {
-                active_width
-            } else {
-                inactive_width
-            };
+        let mut tabs_viewport = div()
+            .absolute()
+            .left(px(0.0))
+            .top(px(0.0))
+            .w(px(tab_area_width))
+            .h(px(height))
+            .overflow_hidden();
+
+        for (index, panel) in self.group.panels.iter().enumerate() {
+            let tab_width = tab_widths[index];
 
             let tab_rect = Rect::new(Point::new(x, 0.0), Size::new(tab_width, height));
 
-            result = result.child(PanelTab {
+            tabs_viewport = tabs_viewport.child(PanelTab {
                 id: format!("next-dock-tab-{}-{index}", self.key),
                 rect: tab_rect,
-                label: self.group.panels[index].title.to_owned(),
-                active: is_active,
+                label: panel.title.to_owned(),
+                active: index == active_index,
                 theme,
                 on_activate: noop_click(),
             });
@@ -115,7 +104,8 @@ impl RenderOnce for GroupHeader {
             x += tab_width;
         }
 
-        // Everything left between the last tab and the menu is the drag zone.
+        result = result.child(tabs_viewport);
+
         let drag_width = (tab_area_width - x).max(0.0);
 
         if drag_width > 0.0 {
@@ -179,16 +169,27 @@ fn max_tab_count(width: f32, theme: &Theme) -> usize {
     1 + (space_for_inactive / MIN_INACTIVE_TAB_WIDTH).floor() as usize
 }
 
-pub(in crate::next_dock) fn minimum_width_for_group(panel_count: usize, theme: &Theme) -> f32 {
+pub(in crate::next_dock) fn minimum_width_for_group(
+    group: &TabGroup,
+    window: &Window,
+    theme: &Theme,
+) -> f32 {
+    let panel_count = group.panels.len();
     let menu_width = theme.metrics.group_control_button_width.max(0.0);
 
-    let tabs_width = if panel_count == 0 {
-        0.0
-    } else {
-        PREFERRED_TAB_WIDTH + panel_count.saturating_sub(1) as f32 * MIN_INACTIVE_TAB_WIDTH
-    };
+    if panel_count == 0 {
+        return menu_width + MIN_DRAG_ZONE_WIDTH;
+    }
 
-    menu_width + tabs_width + MIN_DRAG_ZONE_WIDTH
+    let active_index = group.active.min(panel_count - 1);
+
+    let active_width = measure_text_width(window, group.panels[active_index].title, theme)
+        + TAB_HORIZONTAL_PADDING * 2.0;
+
+    menu_width
+        + active_width
+        + panel_count.saturating_sub(1) as f32 * MIN_INACTIVE_TAB_WIDTH
+        + MIN_DRAG_ZONE_WIDTH
 }
 
 /// Whether another panel can be added without exceeding the width-based limit.
@@ -198,6 +199,66 @@ pub(super) fn can_accept_panel(
     theme: &Theme,
 ) -> bool {
     current_panel_count < max_tab_count(group_width, theme)
+}
+
+fn shrink_inactive_widths(widths: &mut [f32], active_index: usize, available_width: f32) {
+    loop {
+        let current_width: f32 = widths
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| *index != active_index)
+            .map(|(_, width)| *width)
+            .sum();
+
+        let overflow = current_width - available_width;
+        if overflow <= 0.01 {
+            break;
+        }
+
+        let candidates: Vec<usize> = (0..widths.len())
+            .filter(|index| {
+                *index != active_index && widths[*index] > MIN_INACTIVE_TAB_WIDTH + 0.01
+            })
+            .collect();
+
+        if candidates.is_empty() {
+            break;
+        }
+
+        let reduction_per_tab = overflow / candidates.len() as f32;
+        let mut total_reduced = 0.0;
+
+        for index in candidates {
+            let reducible = widths[index] - MIN_INACTIVE_TAB_WIDTH;
+            let reduction = reducible.min(reduction_per_tab);
+
+            widths[index] -= reduction;
+            total_reduced += reduction;
+        }
+
+        if total_reduced <= 0.001 {
+            break;
+        }
+    }
+}
+
+fn measure_text_width(window: &Window, text: &str, theme: &Theme) -> f32 {
+    let typography = theme.typography;
+
+    window
+        .text_system()
+        .shape_line(
+            text.to_owned().into(),
+            px(typography.tab_size),
+            &[gpui::TextRun {
+                len: text.len(),
+                font: gpui::font(typography.family),
+                ..Default::default()
+            }],
+            None,
+        )
+        .width()
+        .as_f32()
 }
 
 fn noop_click() -> ClickHandler {

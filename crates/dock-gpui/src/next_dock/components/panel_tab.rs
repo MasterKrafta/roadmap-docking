@@ -44,12 +44,14 @@ impl RenderOnce for PanelTab {
             .h(px(self.rect.size.height))
             .flex()
             .items_center()
-            .justify_center()
+            .justify_start()
+            .px(px(8.0))
+            .whitespace_nowrap()
             .overflow_hidden()
             .bg(rgb(background))
             .text_color(rgb(theme.colors.primary_text))
             .font_family(typography.family)
-            .text_size(px(typography.body_size))
+            .text_size(px(typography.tab_size))
             .line_height(px(typography.line_height))
             .child(self.label);
 

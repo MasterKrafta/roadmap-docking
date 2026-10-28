@@ -1,7 +1,7 @@
 //! Rendering for the independent dock tree.
 
 use dock_core::{Point, Rect, Size};
-use gpui::{AnyElement, Div, IntoElement, ParentElement, Styled, div, px, rgb};
+use gpui::{AnyElement, Div, IntoElement, ParentElement, Styled, Window, div, px, rgb};
 use ui::Theme;
 
 use crate::components::{GroupFrame, PanelSurface};
@@ -10,12 +10,18 @@ use super::components::GroupHeader;
 use super::geometry::{self, GeometryKind, NodeGeometry};
 use super::model::{DockLayout, DockNode, SplitAxis, TabGroup};
 
-pub(super) fn render(layout: &DockLayout, width: f32, height: f32, theme: &Theme) -> Div {
+pub(super) fn render(
+    layout: &DockLayout,
+    width: f32,
+    height: f32,
+    window: &Window,
+    theme: &Theme,
+) -> Div {
     let width = width.max(1.0);
     let height = height.max(1.0);
     let content_height = (height - geometry::HEADER_HEIGHT).max(1.0);
 
-    let root_geometry = geometry::compute(&layout.root, width, content_height, theme);
+    let root_geometry = geometry::compute(&layout.root, width, content_height, window, theme);
 
     div()
         .flex()
