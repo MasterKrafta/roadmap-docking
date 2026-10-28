@@ -38,8 +38,10 @@ entry → MainWindow / DockController → FrameGeometry → surface / layers →
 | `src/host.rs` | Контракт DockHost: приложение сообщает заголовки и значки панелей, рисует их содержимое и получает callback-обработчики команд, drag и resize. |
 | `src/labels.rs` | Централизованные подписи встроенного окна и правила текста для вкладок и записей боковой rail-панели. |
 | `src/lib.rs` | Корневой модуль библиотеки: объявляет внутренние модули и экспортирует публичный API dock-gpui. |
-| `src/main_window/floating.rs` | Сопоставляет `FloatingGroupId` с native window, синхронизирует системные bounds, преобразует экранные координаты и обрабатывает внешний drag/drop. |\n| `src/main_window.rs` | Состояние и рендер основной dock-поверхности: события мыши/клавиатуры, меню, команды, undo/redo и автосохранение. Нативные floating-окна вынесены в подмодуль `src/main_window/floating.rs`. |
-| `src/floating_window.rs` | GPUI view отдельного нативного плавающего окна: читает актуальный workspace, рисует группу и передаёт команды/drag-события главному окну. |\n| `src/metrics.rs` | Переводит ThemeMetrics UI в DockMetrics, которые использует dock-core при расчёте геометрии и ограничений. |
+| `src/main_window/floating.rs` | Сопоставляет `FloatingGroupId` с native window, синхронизирует системные bounds, преобразует экранные координаты и обрабатывает внешний drag/drop. |
+| `src/main_window.rs` | Состояние и рендер основной dock-поверхности: события мыши/клавиатуры, меню, команды, undo/redo и автосохранение. Нативные floating-окна вынесены в подмодуль `src/main_window/floating.rs`. |
+| `src/floating_window.rs` | GPUI view отдельного нативного плавающего окна: читает актуальный workspace, рисует группу и передаёт команды/drag-события главному окну. |
+| `src/metrics.rs` | Переводит ThemeMetrics UI в DockMetrics, которые использует dock-core при расчёте геометрии и ограничений. |
 | `src/render.rs` | Публичные функции рендера: строят поверхность из Layout/прямоугольников либо из готового FrameGeometry через DockHost. |
 | `src/requests.rs` | Семантические типы UI-запросов: какой handle меняют при resize, какое меню открыть и какие данные нужны для overlay перетаскивания. |
 | `src/surface.rs` | Собирает поверхность dock в фиксированном порядке слоёв; поддерживает исключение floating-групп, отрисовываемых в отдельных системных окнах. |
