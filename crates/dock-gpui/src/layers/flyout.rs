@@ -85,7 +85,9 @@ pub(crate) fn render(
                     on_resize_start: host.resize_start(ResizeHandle::Flyout {
                         panel: flyout.panel,
                     }),
-                    on_resize_key: None,
+                    on_resize_key: Some(host.resize_key(ResizeHandle::Flyout {
+                        panel: flyout.panel,
+                    })),
                 }
                 .into_any_element(),
             );
