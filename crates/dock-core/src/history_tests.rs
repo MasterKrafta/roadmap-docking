@@ -285,13 +285,6 @@ fn assert_round_trip(
     assert_eq!(persistent_shape(layout), before);
 }
 
-/// Manual release-mode probe for Layout copies, resize candidates, and bounded-history costs.
-///
-/// Run with:
-/// cargo test -p dock-core --release benchmark_history_snapshot_and_bounded_history -- --ignored --nocapture --test-threads=1
-///
-/// Layout creation and history pre-filling are excluded from timed sections. Reported layout
-/// counts describe structure; they are not estimates of allocated bytes.
 #[test]
 fn command_sequence_is_atomic_and_uses_one_undo_checkpoint() {
     let metrics = DockMetrics::default();
@@ -364,6 +357,13 @@ fn failed_command_sequence_leaves_layout_and_history_unchanged() {
     assert_eq!(history.redo_len(), 0);
 }
 
+/// Manual release-mode probe for Layout copies, resize candidates, and bounded-history costs.
+///
+/// Run with:
+/// cargo test -p dock-core --release benchmark_history_snapshot_and_bounded_history -- --ignored --nocapture --test-threads=1
+///
+/// Layout creation and history pre-filling are excluded from timed sections. Reported layout
+/// counts describe structure; they are not estimates of allocated bytes.
 #[test]
 #[ignore = "manual performance probe; run the documented release-mode command"]
 fn benchmark_history_snapshot_and_bounded_history() {
