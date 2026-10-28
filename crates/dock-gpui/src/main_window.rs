@@ -189,7 +189,7 @@ impl MainWindow {
         let viewport = self.last_dock_viewport?;
         let layout = self.dock.layout().clone();
         let metrics = *self.dock.metrics();
-        let floating = layout.floating_group(group)?;
+        let area = layout.floating_group(group)?.area;
         let frame = FrameGeometry::compute(&layout, viewport, &metrics).ok()?;
         let bounds = frame
             .rects()
@@ -202,7 +202,7 @@ impl MainWindow {
             layout,
             frame,
             theme: self.theme,
-            area: floating.area,
+            area,
             bounds,
         })
     }
@@ -229,9 +229,6 @@ impl MainWindow {
         let mut specs = Vec::new();
 
         for (group, _) in layout.floating_groups_in_paint_order() {
-            if self.floating_windows.contains_key(&group) {
-                continue;
-            }
             let Some(bounds) = frame
                 .rects()
                 .floating_groups
