@@ -268,23 +268,52 @@ mod tests {
     fn keyboard_panel_move_requires_all_modifiers_and_ignores_other_keys() {
         for modifiers in [
             Modifiers::default(),
-            Modifiers { shift: true, ..Modifiers::default() },
-            Modifiers { control: true, shift: true, ..Modifiers::default() },
-            Modifiers { control: true, alt: true, ..Modifiers::default() },
-            Modifiers { control: true, alt: true, shift: true, function: true, ..Modifiers::default() },
+            Modifiers {
+                shift: true,
+                ..Modifiers::default()
+            },
+            Modifiers {
+                control: true,
+                shift: true,
+                ..Modifiers::default()
+            },
+            Modifiers {
+                control: true,
+                alt: true,
+                ..Modifiers::default()
+            },
+            Modifiers {
+                control: true,
+                alt: true,
+                shift: true,
+                function: true,
+                ..Modifiers::default()
+            },
         ] {
             assert_eq!(keyboard_panel_move_direction(&key("up", modifiers)), None);
         }
         assert_eq!(
-            keyboard_panel_move_direction(
-                &key("down", Modifiers { control: true, alt: true, shift: true, ..Modifiers::default() })
-            ),
+            keyboard_panel_move_direction(&key(
+                "down",
+                Modifiers {
+                    control: true,
+                    alt: true,
+                    shift: true,
+                    ..Modifiers::default()
+                },
+            )),
             Some(PanelMoveDirection::Next)
         );
         assert_eq!(
-            keyboard_panel_move_direction(
-                &key("escape", Modifiers { control: true, alt: true, shift: true, ..Modifiers::default() })
-            ),
+            keyboard_panel_move_direction(&key(
+                "escape",
+                Modifiers {
+                    control: true,
+                    alt: true,
+                    shift: true,
+                    ..Modifiers::default()
+                },
+            )),
             None
         );
     }
