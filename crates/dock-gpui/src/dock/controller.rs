@@ -212,6 +212,20 @@ impl DockController {
         Ok(())
     }
 
+    /// Starts a drag from a native floating window and restricts target geometry to the main dock.
+    pub(crate) fn begin_external_drag(
+        &mut self,
+        payload: DragPayload,
+        handle: DragHandle,
+        pointer_start: Point,
+    ) -> Result<(), DragStartError> {
+        self.begin_drag(payload, handle, pointer_start)?;
+        if let Session::Drag(gesture) = &mut self.session {
+            gesture.external_window_drag = true;
+        }
+        Ok(())
+    }
+
     /// Clears a pending press or an active drag without changing the layout.
     pub(crate) fn cancel_drag(&mut self) -> bool {
         let Session::Drag(gesture) = &self.session else {
@@ -273,14 +287,19 @@ impl DockController {
                 ) {
                     return Ok(false);
                 }
-                Some((gesture.payload, gesture.handle, gesture.origin))
+                Some((
+                    gesture.payload,
+                    gesture.handle,
+                    gesture.origin,
+                    gesture.external_window_drag,
+                ))
             }
             // The active-Core branch was checked against its snapshot above.
             Session::Drag(_) => None,
             Session::Idle | Session::Resize(_) => return Ok(false),
         };
 
-        if let Some((payload, handle, origin)) = start {
+        if let Some((payload, handle, origin, external_window_drag)) = start {
             let frame = frame.ok_or(DragUpdateError::MissingFrameGeometry)?;
             if frame.layout_version() != self.workspace.layout.version()
                 || frame.rects().viewport != Some(viewport)
@@ -306,23 +325,51 @@ impl DockController {
             let mut capture_root_nodes = None;
             let resolver = match (payload, handle) {
                 (DragPayload::Panel { panel }, DragHandle::PanelTab | DragHandle::FlyoutPanel) => {
-                    Some(frame.prepare_drop_resolver(
-                        &self.workspace.layout,
-                        DropSource::Panel { panel },
-                        &self.workspace.metrics,
-                    )?)
+                    Some(if external_window_drag {
+                        frame.prepare_main_dock_resolver(
+                            &self.workspace.layout,
+                            DropSource::Panel { panel },
+                            &self.workspace.metrics,
+                        )?
+                    } else {
+                        frame.prepare_drop_resolver(
+                            &self.workspace.layout,
+                            DropSource::Panel { panel },
+                            &self.workspace.metrics,
+                        )?
+                    })
                 }
                 (DragPayload::Group { group }, DragHandle::GroupGrip) => {
-                    Some(frame.prepare_drop_resolver(
-                        &self.workspace.layout,
-                        DropSource::Group { group },
-                        &self.workspace.metrics,
-                    )?)
+                    Some(if external_window_drag {
+                        frame.prepare_main_dock_resolver(
+                            &self.workspace.layout,
+                            DropSource::Group { group },
+                            &self.workspace.metrics,
+                        )?
+                    } else {
+                        frame.prepare_drop_resolver(
+                            &self.workspace.layout,
+                            DropSource::Group { group },
+                            &self.workspace.metrics,
+                        )?
+                    })
                 }
                 (DragPayload::FloatingGroup { group }, DragHandle::FloatingCapture) => {
                     let (source, nodes) = floating_capture_source(&self.workspace.layout, group)?;
                     capture_root_nodes = Some(nodes);
-                    Some(frame.prepare_drop_resolver(&self.workspace.layout, source, &self.workspace.metrics)?)
+                    Some(if external_window_drag {
+                        frame.prepare_main_dock_resolver(
+                            &self.workspace.layout,
+                            source,
+                            &self.workspace.metrics,
+                        )?
+                    } else {
+                        frame.prepare_drop_resolver(
+                            &self.workspace.layout,
+                            source,
+                            &self.workspace.metrics,
+                        )?
+                    })
                 }
                 (DragPayload::FloatingGroup { .. }, DragHandle::FloatingTitle) => None,
                 _ => None,
