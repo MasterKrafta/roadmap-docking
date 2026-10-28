@@ -1,4 +1,4 @@
-use dock_core::Axis;
+use dock_core::{Axis, ResizeEdge};
 use gpui::{Keystroke, StatefulInteractiveElement, Styled, rgb};
 use ui::Theme;
 
@@ -26,6 +26,33 @@ pub(crate) fn keyboard_tab_reorder_direction(
         "left" | "arrowleft" => Some(TabReorderDirection::Previous),
         "right" | "arrowright" => Some(TabReorderDirection::Next),
         _ => None,
+    }
+}
+
+/// Selects the resize axis for a floating edge from the focused arrow key.
+pub(crate) fn keyboard_resize_axis_for_floating_edge(
+    keystroke: &Keystroke,
+    edge: ResizeEdge,
+) -> Option<Axis> {
+    match edge {
+        ResizeEdge::Left | ResizeEdge::Right => {
+            keyboard_resize_delta(keystroke, Axis::X).map(|_| Axis::X)
+        }
+        ResizeEdge::Top | ResizeEdge::Bottom => {
+            keyboard_resize_delta(keystroke, Axis::Y).map(|_| Axis::Y)
+        }
+        ResizeEdge::TopLeft
+        | ResizeEdge::TopRight
+        | ResizeEdge::BottomLeft
+        | ResizeEdge::BottomRight => {
+            if keyboard_resize_delta(keystroke, Axis::X).is_some() {
+                Some(Axis::X)
+            } else if keyboard_resize_delta(keystroke, Axis::Y).is_some() {
+                Some(Axis::Y)
+            } else {
+                None
+            }
+        }
     }
 }
 
@@ -73,10 +100,11 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        TabReorderDirection, is_keyboard_activation_key, keyboard_resize_delta,
+        TabReorderDirection, is_keyboard_activation_key, keyboard_resize_axis_for_floating_edge,
+        keyboard_resize_delta,
         keyboard_tab_reorder_direction,
     };
-    use dock_core::Axis;
+    use dock_core::{Axis, ResizeEdge};
     use gpui::{Keystroke, Modifiers};
 
     fn key(key: &str, modifiers: Modifiers) -> Keystroke {
@@ -145,6 +173,52 @@ mod tests {
         );
         assert_eq!(
             keyboard_tab_reorder_direction(&key("escape", Modifiers::default())),
+            None
+        );
+    }
+
+    #[test]
+    fn floating_edge_resize_selects_only_supported_arrow_axis() {
+        assert_eq!(
+            keyboard_resize_axis_for_floating_edge(
+                &key("left", Modifiers::default()),
+                ResizeEdge::Left,
+            ),
+            Some(Axis::X)
+        );
+        assert_eq!(
+            keyboard_resize_axis_for_floating_edge(
+                &key("up", Modifiers::default()),
+                ResizeEdge::Left,
+            ),
+            None
+        );
+        assert_eq!(
+            keyboard_resize_axis_for_floating_edge(
+                &key("down", Modifiers::default()),
+                ResizeEdge::Bottom,
+            ),
+            Some(Axis::Y)
+        );
+        assert_eq!(
+            keyboard_resize_axis_for_floating_edge(
+                &key("right", Modifiers::default()),
+                ResizeEdge::TopLeft,
+            ),
+            Some(Axis::X)
+        );
+        assert_eq!(
+            keyboard_resize_axis_for_floating_edge(
+                &key("up", Modifiers { shift: true, ..Modifiers::default() }),
+                ResizeEdge::BottomRight,
+            ),
+            Some(Axis::Y)
+        );
+        assert_eq!(
+            keyboard_resize_axis_for_floating_edge(
+                &key("escape", Modifiers::default()),
+                ResizeEdge::BottomRight,
+            ),
             None
         );
     }
