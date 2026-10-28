@@ -9,7 +9,8 @@ use crate::FrameGeometry;
 
 use super::MainWindow;
 
-/// Immutable render snapshot shared by a native floating-window view.\npub(crate) struct FloatingWindowSnapshot {
+/// Immutable render snapshot shared by a native floating-window view.
+pub(crate) struct FloatingWindowSnapshot {
     pub(crate) layout: dock_core::Layout,
     pub(crate) frame: FrameGeometry,
     pub(crate) theme: Theme,
@@ -25,7 +26,7 @@ struct FloatingWindowSpec {
 }
 
 impl MainWindow {
-pub(crate) fn floating_window_snapshot(
+    pub(crate) fn floating_window_snapshot(
         &self,
         group: FloatingGroupId,
     ) -> Option<FloatingWindowSnapshot> {
