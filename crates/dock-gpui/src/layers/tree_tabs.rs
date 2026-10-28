@@ -7,7 +7,7 @@ use gpui::{AnyElement, IntoElement};
 use crate::components::focus_ring::{
     PanelColumnMoveDirection, PanelMoveDirection, TabReorderDirection,
     keyboard_panel_column_move_direction, keyboard_panel_move_direction,
-    keyboard_tab_reorder_direction,
+    keyboard_panel_other_side_move, keyboard_tab_reorder_direction,
 };
 use crate::components::{ColumnModeButton, GroupMenuButton, PanelTab, TabOverflowButton};
 use crate::dock::{activate_tab, collapse_group, cycle_column_mode};
@@ -236,6 +236,7 @@ fn move_panel_key_handler(
         adjacent_main_column_groups(layout, source_group);
     let move_previous_column = previous_column_group.and_then(move_to_group);
     let move_next_column = next_column_group.and_then(move_to_group);
+    let move_other_side = opposite_main_dock_group(layout, source_group).and_then(move_to_group);
 
     Some(Box::new(move |event, window, app| {
         match keyboard_panel_move_direction(&event.keystroke) {
@@ -264,6 +265,11 @@ fn move_panel_key_handler(
             }
             None => {}
         }
+        if keyboard_panel_other_side_move(&event.keystroke) {
+            if let Some(handler) = &move_other_side {
+                handler(event, window, app);
+            }
+        }
     }))
 }
 
@@ -287,21 +293,8 @@ fn adjacent_main_column_groups(
     };
 
     for side in [DockSide::Left, DockSide::Right] {
-        let Some(area) = layout.main_area(side) else {
+        let Some(columns) = main_column_ids(layout, side) else {
             continue;
-        };
-        let columns = match layout.node(area.root) {
-            Some(Node::Column(_)) => vec![area.root],
-            Some(Node::Split(split))
-                if split.axis == Axis::X
-                    && split
-                        .children
-                        .iter()
-                        .all(|child| matches!(layout.node(*child), Some(Node::Column(_)))) =>
-            {
-                split.children.clone()
-            }
-            _ => continue,
         };
         let Some(source_column_index) = columns.iter().position(|id| *id == source_column) else {
             continue;
@@ -327,6 +320,57 @@ fn adjacent_main_column_groups(
     (None, None)
 }
 
+/// Returns the ordered main columns for a side, or None when that dock tree is unsupported.
+fn main_column_ids(layout: &Layout, side: DockSide) -> Option<Vec<NodeId>> {
+    let area = layout.main_area(side)?;
+    match layout.node(area.root) {
+        Some(Node::Column(_)) => Some(vec![area.root]),
+        Some(Node::Split(split))
+            if split.axis == Axis::X
+                && split.children.iter().all(|child| {
+                    matches!(layout.node(*child), Some(Node::Column(_)))
+                }) =>
+        {
+            Some(split.children.clone())
+        }
+        _ => None,
+    }
+}
+
+fn opposite_main_dock_group(layout: &Layout, source_group: NodeId) -> Option<NodeId> {
+    let source = [DockSide::Left, DockSide::Right]
+        .into_iter()
+        .find_map(|side| {
+            let columns = main_column_ids(layout, side)?;
+            columns.iter().enumerate().find_map(|(column_index, column_id)| {
+                let Node::Column(column) = layout.node(*column_id)? else {
+                    return None;
+                };
+                if column.mode.is_rail() {
+                    return None;
+                }
+                let group_index = column.groups.iter().position(|group| *group == source_group)?;
+                Some((side, column_index, group_index))
+            })
+        })?;
+    let target_side = match source.0 {
+        DockSide::Left => DockSide::Right,
+        DockSide::Right => DockSide::Left,
+    };
+    let target_columns = main_column_ids(layout, target_side)?;
+    let target_column_index = corresponding_group_index(source.1, target_columns.len())?;
+    let target_column_id = *target_columns.get(target_column_index)?;
+    let Node::Column(target_column) = layout.node(target_column_id)? else {
+        return None;
+    };
+    if target_column.mode.is_rail() {
+        return None;
+    }
+    let target_group_index = corresponding_group_index(source.2, target_column.groups.len())?;
+    let target_group = *target_column.groups.get(target_group_index)?;
+    matches!(layout.node(target_group), Some(Node::Tabs(_))).then_some(target_group)
+}
+
 fn corresponding_group_index(source_index: usize, target_group_count: usize) -> Option<usize> {
     if target_group_count == 0 {
         None
@@ -350,7 +394,12 @@ fn adjacent_indices(
 
 #[cfg(test)]
 mod keyboard_panel_move_tests {
-    use super::{adjacent_indices, corresponding_group_index};
+    use super::{
+        adjacent_indices, corresponding_group_index, main_column_ids, opposite_main_dock_group,
+    };
+    use crate::dock::DockController;
+    use dock_core::{DockCommand, DockSide, Node};
+    use ui::Theme;
 
     #[test]
     fn panel_move_only_targets_adjacent_items() {
@@ -370,6 +419,50 @@ mod keyboard_panel_move_tests {
         assert_eq!(corresponding_group_index(2, 1), Some(0));
         assert_eq!(corresponding_group_index(4, 2), Some(1));
         assert_eq!(corresponding_group_index(0, 0), None);
+    }
+
+    #[test]
+    fn panel_side_move_targets_a_regular_group_on_the_opposite_side() {
+        let mut controller = DockController::new_initial(&Theme::default())
+            .expect("initial layout should be valid");
+        let group_to_move = main_column_ids(controller.layout(), DockSide::Right)
+            .expect("initial layout should have a right dock")
+            .into_iter()
+            .find_map(|column_id| match controller.layout().node(column_id) {
+                Some(Node::Column(column)) => column.groups.first().copied(),
+                _ => None,
+            })
+            .expect("initial layout should have a right-side group");
+        controller
+            .apply(DockCommand::MoveGroupToMainColumn {
+                group: group_to_move,
+                side: DockSide::Left,
+                index: 0,
+            })
+            .expect("moving a group should create the left dock");
+
+        let layout = controller.layout();
+        let source_group = main_column_ids(layout, DockSide::Left)
+            .expect("moving the group should create a left dock")
+            .into_iter()
+            .find_map(|column_id| match layout.node(column_id) {
+                Some(Node::Column(column)) if !column.mode.is_rail() => {
+                    column.groups.first().copied()
+                }
+                _ => None,
+            })
+            .expect("left dock should contain a regular group");
+        let target_group = opposite_main_dock_group(layout, source_group)
+            .expect("opposite dock should contain a regular target group");
+        let right_columns = main_column_ids(layout, DockSide::Right)
+            .expect("right dock should remain available");
+
+        assert!(right_columns.into_iter().any(|column_id| {
+            matches!(
+                layout.node(column_id),
+                Some(Node::Column(column)) if column.groups.contains(&target_group)
+            )
+        }));
     }
 }
 

@@ -8,7 +8,8 @@ use ui::Theme;
 use crate::components::{
     focus_ring::{
         is_keyboard_activation_key, keyboard_panel_column_move_direction,
-        keyboard_panel_move_direction, keyboard_tab_reorder_direction,
+        keyboard_panel_move_direction, keyboard_panel_other_side_move,
+        keyboard_tab_reorder_direction,
     },
     with_focus_ring,
 };
@@ -82,6 +83,7 @@ impl RenderOnce for PanelTab {
                     on_reorder_key(event, window, app);
                 } else if keyboard_panel_move_direction(&event.keystroke).is_some()
                     || keyboard_panel_column_move_direction(&event.keystroke).is_some()
+                    || keyboard_panel_other_side_move(&event.keystroke)
                 {
                     if let Some(handler) = &on_move_panel_key {
                         handler(event, window, app);

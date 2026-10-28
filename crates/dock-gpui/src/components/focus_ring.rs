@@ -83,6 +83,18 @@ pub(crate) fn keyboard_panel_column_move_direction(
     }
 }
 
+/// Returns true for the shortcut that transfers a focused panel to the opposite dock side.
+///
+/// Ctrl/Cmd + Alt + Shift + Home avoids conflicting with adjacent-column movement.
+pub(crate) fn keyboard_panel_other_side_move(keystroke: &Keystroke) -> bool {
+    let modifiers = keystroke.modifiers;
+    (modifiers.control || modifiers.platform)
+        && modifiers.alt
+        && modifiers.shift
+        && !modifiers.function
+        && keystroke.key.eq_ignore_ascii_case("home")
+}
+
 /// Direction requested when reordering a focused tab with the keyboard.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum TabReorderDirection {
@@ -183,7 +195,8 @@ mod tests {
     use super::{
         GroupMoveDirection, PanelColumnMoveDirection, PanelMoveDirection, TabReorderDirection,
         is_keyboard_activation_key, keyboard_group_move_direction, keyboard_panel_column_move_direction,
-        keyboard_panel_move_direction, keyboard_resize_axis_for_floating_edge,
+        keyboard_panel_move_direction, keyboard_panel_other_side_move,
+        keyboard_resize_axis_for_floating_edge,
         keyboard_resize_delta, keyboard_tab_reorder_direction,
     };
     use dock_core::{Axis, ResizeEdge};
@@ -412,6 +425,57 @@ mod tests {
                 None
             );
         }
+    }
+
+    #[test]
+    fn keyboard_panel_other_side_move_accepts_command_alt_shift_home() {
+        let control_alt_shift = Modifiers {
+            control: true,
+            alt: true,
+            shift: true,
+            ..Modifiers::default()
+        };
+        assert!(keyboard_panel_other_side_move(&key("home", control_alt_shift)));
+        assert!(keyboard_panel_other_side_move(&key("Home", control_alt_shift)));
+
+        let platform_alt_shift = Modifiers {
+            platform: true,
+            alt: true,
+            shift: true,
+            ..Modifiers::default()
+        };
+        assert!(keyboard_panel_other_side_move(&key("HOME", platform_alt_shift)));
+    }
+
+    #[test]
+    fn keyboard_panel_other_side_move_rejects_other_keys_and_missing_modifiers() {
+        assert!(!keyboard_panel_other_side_move(&key(
+            "home",
+            Modifiers {
+                control: true,
+                shift: true,
+                ..Modifiers::default()
+            }
+        )));
+        assert!(!keyboard_panel_other_side_move(&key(
+            "end",
+            Modifiers {
+                control: true,
+                alt: true,
+                shift: true,
+                ..Modifiers::default()
+            }
+        )));
+        assert!(!keyboard_panel_other_side_move(&key(
+            "home",
+            Modifiers {
+                control: true,
+                alt: true,
+                shift: true,
+                function: true,
+                ..Modifiers::default()
+            }
+        )));
     }
 
     #[test]
