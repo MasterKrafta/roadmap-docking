@@ -58,10 +58,7 @@ impl fmt::Debug for DragGesture {
                 "capture_root_node_count",
                 &self.capture_root_nodes.as_ref().map(|nodes| nodes.len()),
             )
-            .field(
-                "capture_main_column_only",
-                &self.capture_main_column_only,
-            )
+            .field("capture_main_column_only", &self.capture_main_column_only)
             .field("overlay_available", &self.overlay.is_some())
             .finish()
     }
