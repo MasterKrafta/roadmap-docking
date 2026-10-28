@@ -1,8 +1,8 @@
 use dock_core::{ColumnMode, NodeId, Rect};
-use gpui::{App, ClickEvent, IntoElement, RenderOnce, Window};
+use gpui::{App, IntoElement, RenderOnce, Window};
 use ui::Theme;
 
-use crate::components::IconButton;
+use crate::components::{ClickHandler, IconButton};
 
 /// Stateless control for cycling a column between expanded and rail presentations.
 ///
@@ -19,7 +19,7 @@ pub struct ColumnModeButton {
     /// Shared application theme.
     pub theme: Theme,
     /// Requests the next column mode through the owning controller.
-    pub on_toggle: Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>,
+    pub on_toggle: ClickHandler,
 }
 
 impl RenderOnce for ColumnModeButton {
