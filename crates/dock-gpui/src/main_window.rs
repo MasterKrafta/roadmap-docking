@@ -189,8 +189,24 @@ impl MainWindow {
         let viewport = self.last_dock_viewport?;
         let layout = self.dock.layout().clone();
         let metrics = *self.dock.metrics();
+        let floating_bounds = layout.floating_group(group)?.bounds;
         let area = layout.floating_group(group)?.area;
-        let frame = FrameGeometry::compute(&layout, viewport, &metrics).ok()?;
+        // Use a geometry viewport large enough to contain the actual native window.
+        // This avoids clamping its local panel geometry to the main window's viewport.
+        let right = viewport.checked_right().ok()?.max(floating_bounds.checked_right().ok()?);
+        let bottom = viewport
+            .checked_bottom()
+            .ok()?
+            .max(floating_bounds.checked_bottom().ok()?);
+        let origin = Point::new(
+            viewport.origin.x.min(floating_bounds.origin.x),
+            viewport.origin.y.min(floating_bounds.origin.y),
+        );
+        let geometry_viewport = Rect::new(
+            origin,
+            Size::new(right - origin.x, bottom - origin.y),
+        );
+        let frame = FrameGeometry::compute(&layout, geometry_viewport, &metrics).ok()?;
         let bounds = frame
             .rects()
             .floating_groups
@@ -539,6 +555,164 @@ impl MainWindow {
         if let Err(error) = self.dock.begin_drag(payload, handle, pointer) {
             tracing::debug!(error = ?error, "could not record dock drag pointer-down");
         }
+    }
+
+    /// Starts a docking drag initiated in a separate native floating window.
+    ///
+    /// Pointer coordinates are translated into the main dock's local surface space,
+    /// so the existing controller can prepare and validate drop zones unchanged.
+    pub(crate) fn begin_external_drag(
+        &mut self,
+        payload: DragPayload,
+        handle: DragHandle,
+        source_bounds: Bounds<Pixels>,
+        source_viewport: gpui::Size<Pixels>,
+        position: gpui::Point<Pixels>,
+    ) {
+        let Some(pointer) = self.external_surface_pointer(
+            source_bounds,
+            source_viewport,
+            position,
+        ) else {
+            return;
+        };
+        if let Err(error) = self.dock.begin_drag(payload, handle, pointer) {
+            tracing::debug!(error = ?error, "could not record cross-window dock drag");
+        }
+    }
+
+    /// Updates the shared docking gesture from pointer events delivered to a floating window.
+    pub(crate) fn handle_external_surface_mouse_move(
+        &mut self,
+        event: &MouseMoveEvent,
+        source_bounds: Bounds<Pixels>,
+        source_viewport: gpui::Size<Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.dock.resize_session().is_some() {
+            return;
+        }
+        let Some(pointer) = self.external_surface_pointer(
+            source_bounds,
+            source_viewport,
+            event.position,
+        ) else {
+            return;
+        };
+        if event.pressed_button != Some(MouseButton::Left) {
+            if self.dock.cancel_drag() {
+                cx.notify();
+            }
+            return;
+        }
+
+        let Some(viewport) = self.last_dock_viewport else {
+            self.dock.cancel_drag();
+            cx.notify();
+            return;
+        };
+        let frame = if self.dock.drag_needs_start(pointer) {
+            match self.dock.frame(viewport) {
+                Ok(frame) => Some(frame),
+                Err(error) => {
+                    tracing::warn!(
+                        error = ?error,
+                        "could not compute geometry to start cross-window dock drag"
+                    );
+                    self.dock.cancel_drag();
+                    cx.notify();
+                    return;
+                }
+            }
+        } else {
+            None
+        };
+
+        match self.dock.update_drag(pointer, viewport, frame.as_ref()) {
+            Ok(changed) => {
+                if changed {
+                    cx.notify();
+                }
+            }
+            Err(error) => {
+                tracing::warn!(error = ?error, "cross-window dock drag update failed");
+                self.dock.cancel_drag();
+                cx.notify();
+            }
+        }
+    }
+
+    /// Completes a cross-window docking gesture at the pointer's current screen position.
+    pub(crate) fn handle_external_surface_mouse_up(
+        &mut self,
+        event: &MouseUpEvent,
+        source_bounds: Bounds<Pixels>,
+        source_viewport: gpui::Size<Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        if event.button != MouseButton::Left || self.dock.resize_session().is_some() {
+            return;
+        }
+        let Some(pointer) = self.external_surface_pointer(
+            source_bounds,
+            source_viewport,
+            event.position,
+        ) else {
+            self.dock.cancel_drag();
+            cx.notify();
+            return;
+        };
+        let Some(viewport) = self.last_dock_viewport else {
+            self.dock.cancel_drag();
+            cx.notify();
+            return;
+        };
+
+        let had_overlay = self.dock.drag_overlay().is_some();
+        let mut changed = had_overlay;
+        match self.dock.finish_drag(pointer, viewport) {
+            Ok(Some(request)) => {
+                changed = true;
+                match self.dock.commit_drop_request(request, viewport) {
+                    Ok(action) => tracing::debug!(
+                        action = ?action,
+                        "cross-window dock drag committed"
+                    ),
+                    Err(error) => tracing::warn!(
+                        error = %error,
+                        "cross-window dock drop was rejected"
+                    ),
+                }
+            }
+            Ok(None) => {}
+            Err(error) => {
+                changed = true;
+                tracing::warn!(error = ?error, "could not finish cross-window dock drag");
+            }
+        }
+        self.schedule_workspace_save(cx);
+        if changed {
+            cx.notify();
+        }
+    }
+
+    fn external_surface_pointer(
+        &self,
+        source_bounds: Bounds<Pixels>,
+        source_viewport: gpui::Size<Pixels>,
+        position: gpui::Point<Pixels>,
+    ) -> Option<Point> {
+        let main_bounds = self.last_window_bounds?;
+        let main_viewport = self.last_viewport_size?;
+        let pointer = native_pointer_in_dock_surface(
+            source_bounds,
+            source_viewport,
+            position,
+            main_bounds,
+            main_viewport,
+            self.last_surface_top,
+        );
+        pointer.is_finite().then_some(pointer)
     }
 
     pub(crate) fn begin_resize(
@@ -1254,6 +1428,32 @@ fn synchronize_floating_windows(
             }
         }
     }
+}
+
+fn native_pointer_in_dock_surface(
+    source_bounds: Bounds<Pixels>,
+    source_viewport: gpui::Size<Pixels>,
+    position: gpui::Point<Pixels>,
+    main_bounds: Bounds<Pixels>,
+    main_viewport: gpui::Size<Pixels>,
+    surface_top: f32,
+) -> Point {
+    let source_chrome_width =
+        (source_bounds.size.width.as_f32() - source_viewport.width.as_f32()).max(0.0);
+    let source_chrome_height =
+        (source_bounds.size.height.as_f32() - source_viewport.height.as_f32()).max(0.0);
+    let main_chrome_width =
+        (main_bounds.size.width.as_f32() - main_viewport.width.as_f32()).max(0.0);
+    let main_chrome_height =
+        (main_bounds.size.height.as_f32() - main_viewport.height.as_f32()).max(0.0);
+
+    let screen_x = source_bounds.origin.x.as_f32() + source_chrome_width + position.x.as_f32();
+    let screen_y =
+        source_bounds.origin.y.as_f32() + source_chrome_height + position.y.as_f32();
+    Point::new(
+        screen_x - main_bounds.origin.x.as_f32() - main_chrome_width,
+        screen_y - main_bounds.origin.y.as_f32() - main_chrome_height - surface_top,
+    )
 }
 
 fn floating_bounds_match(left: Rect, right: Rect) -> bool {
