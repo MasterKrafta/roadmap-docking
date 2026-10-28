@@ -59,6 +59,8 @@ pub(crate) struct DockController {
     history: UndoRedoHistory,
     scroll_handles: HashMap<NodeId, ScrollHandle>,
     session: Session,
+    #[cfg(test)]
+    last_error: Option<CommandError>,
 }
 
 impl DockController {
@@ -100,6 +102,8 @@ impl DockController {
             history: UndoRedoHistory::new(),
             scroll_handles: HashMap::new(),
             session: Session::Idle,
+            #[cfg(test)]
+            last_error: None,
         }
     }
 
@@ -431,6 +435,10 @@ impl DockController {
             DragDropAction::NoOp => {
                 // A rejected previous operation must not remain visible after a
                 // successfully resolved no-op drop.
+                #[cfg(test)]
+                {
+                    self.last_error = None;
+                }
             }
         }
 
@@ -704,6 +712,10 @@ impl DockController {
     ) -> Result<T, CommandError> {
         match result {
             Ok(value) => {
+                #[cfg(test)]
+                {
+                    self.last_error = None;
+                }
                 Ok(value)
             }
             Err(error) => {
@@ -712,9 +724,19 @@ impl DockController {
                     error = %error,
                     "dock controller operation failed"
                 );
+                #[cfg(test)]
+                {
+                    self.last_error = Some(error.clone());
+                }
                 Err(error)
             }
         }
+    }
+
+    /// Exposes the most recent command error to controller tests.
+    #[cfg(test)]
+    pub(crate) fn last_error(&self) -> Option<&CommandError> {
+        self.last_error.as_ref()
     }
 
     pub(crate) fn layout(&self) -> &Layout {
