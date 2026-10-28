@@ -175,7 +175,7 @@ impl MainWindow {
         }
     }
 
-/// Starts a docking drag initiated in a separate native floating window.
+    /// Starts a docking drag initiated in a separate native floating window.
     ///
     /// Pointer coordinates are translated into the main dock's local surface space,
     /// so the existing controller can prepare and validate drop zones unchanged.
@@ -521,4 +521,55 @@ fn floating_bounds_match(left: Rect, right: Rect) -> bool {
         && (left.origin.y - right.origin.y).abs() < EPSILON
         && (left.size.width - right.size.width).abs() < EPSILON
         && (left.size.height - right.size.height).abs() < EPSILON
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::{native_pointer_in_dock_surface, native_window_contains_pointer};
+    use dock_core::Point;
+    use gpui::{Bounds, point, px, size};
+
+    #[test]
+    fn external_pointer_is_translated_from_window_to_main_dock_coordinates() {
+        let main_bounds = Bounds::new(
+            point(px(100.0), px(200.0)),
+            size(px(820.0), px(640.0)),
+        );
+        let source_bounds = Bounds::new(
+            point(px(450.0), px(520.0)),
+            size(px(420.0), px(340.0)),
+        );
+
+        let pointer = native_pointer_in_dock_surface(
+            source_bounds,
+            size(px(400.0), px(300.0)),
+            point(px(10.0), px(20.0)),
+            main_bounds,
+            size(px(800.0), px(600.0)),
+            24.0,
+        );
+
+        assert_eq!(pointer, Point::new(360.0, 316.0));
+    }
+
+    #[test]
+    fn external_drag_does_not_target_the_main_surface_while_over_source_window() {
+        let bounds = Bounds::new(
+            point(px(450.0), px(520.0)),
+            size(px(420.0), px(340.0)),
+        );
+        let viewport = size(px(400.0), px(300.0));
+
+        assert!(native_window_contains_pointer(
+            bounds,
+            viewport,
+            point(px(10.0), px(20.0)),
+        ));
+        assert!(!native_window_contains_pointer(
+            bounds,
+            viewport,
+            point(px(450.0), px(350.0)),
+        ));
+    }
 }
