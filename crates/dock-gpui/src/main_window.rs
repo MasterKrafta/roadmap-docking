@@ -13,7 +13,7 @@ use gpui::{
 };
 use ui::Theme;
 
-use crate::DockSurface;
+use crate::{DockSurface, FrameGeometry};
 use crate::components::{
     PopupMenu, PopupMenuItem,
     focus_ring::{keyboard_resize_axis_for_floating_edge, keyboard_resize_delta},
@@ -267,10 +267,13 @@ impl MainWindow {
         specs
     }
 
-    fn floating_bounds_from_native_window(
-        &self,
+    /// Syncs an OS window move/resize back into the canonical layout without an undo step.
+    pub(crate) fn sync_floating_native_bounds(
+        &mut self,
+        group: FloatingGroupId,
         native_bounds: Bounds<Pixels>,
         viewport_size: gpui::Size<Pixels>,
+        cx: &mut Context<Self>,
     ) -> Option<Rect> {
         let parent_bounds = self.last_window_bounds?;
         let origin = Point::new(
@@ -284,7 +287,26 @@ impl MainWindow {
             Size::new(viewport_size.width.as_f32(), viewport_size.height.as_f32()),
         );
         bounds.validate_non_empty().ok()?;
-        Some(bounds)
+
+        let current_bounds = self.dock.layout().floating_group(group)?.bounds;
+        if floating_bounds_match(current_bounds, bounds) {
+            return Some(bounds);
+        }
+        match self.dock.sync_floating_bounds(group, bounds) {
+            Ok(()) => {
+                self.schedule_workspace_save(cx);
+                cx.notify();
+                Some(bounds)
+            }
+            Err(error) => {
+                tracing::debug!(
+                    group = ?group,
+                    error = %error,
+                    "native floating window geometry was rejected"
+                );
+                None
+            }
+        }
     }
 
     /// Debounces persistence only when the serialized persistent workspace changes.
