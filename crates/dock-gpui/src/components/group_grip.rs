@@ -1,11 +1,12 @@
 use dock_core::{NodeId, Rect};
 use gpui::{
-    App, IntoElement, InteractiveElement, KeyDownEvent, MouseButton, MouseDownEvent, RenderOnce,
-    Styled, Window, div, px, rgb,
+    App, IntoElement, InteractiveElement, MouseButton, RenderOnce, Styled, Window, div, px, rgb,
 };
 use ui::Theme;
 
-use crate::components::{focus_ring::keyboard_group_move_direction, with_focus_ring};
+use crate::components::{
+    focus_ring::keyboard_group_move_direction, with_focus_ring, KeyDownHandler, MouseDownHandler,
+};
 
 /// A narrow, full-width drag target used above a group's tab strip.
 #[derive(IntoElement)]
@@ -17,9 +18,9 @@ pub struct GroupGrip {
     /// Shared application theme.
     pub theme: Theme,
     /// Begins dragging the group.
-    pub on_drag_start: Box<dyn Fn(&MouseDownEvent, &mut Window, &mut App) + 'static>,
+    pub on_drag_start: MouseDownHandler,
     /// Moves the group within its column when the keyboard shortcut is pressed.
-    pub on_move_key: Option<Box<dyn Fn(&KeyDownEvent, &mut Window, &mut App) + 'static>>,
+    pub on_move_key: Option<KeyDownHandler>,
 }
 
 impl RenderOnce for GroupGrip {
