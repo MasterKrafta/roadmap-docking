@@ -26,6 +26,6 @@ impl Render for NextDockWindow {
         let width = viewport.width.as_f32().max(1.0);
         let height = viewport.height.as_f32().max(1.0);
 
-        view::render(&self.layout, width, height, &self.theme)
+        view::render(&self.layout, width, height, window, &self.theme)
     }
 }
