@@ -3,7 +3,7 @@ use std::{
     time::Duration,
 };
 
-use dock_core::{DockCommand, DragHandle, DragPayload, FloatingGroupId, Point, Rect, Size};
+use dock_core::{Axis, DockCommand, DragHandle, DragPayload, FloatingGroupId, Point, Rect, Size};
 use gpui::{
     Context, DispatchPhase, InteractiveElement, IntoElement, KeyDownEvent, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Render, StatefulInteractiveElement,
@@ -11,7 +11,7 @@ use gpui::{
 };
 use ui::Theme;
 
-use crate::components::{with_focus_ring, PopupMenu, PopupMenuItem};
+use crate::components::{focus_ring::keyboard_resize_delta, with_focus_ring, PopupMenu, PopupMenuItem};
 use crate::host::DockHost;
 use crate::dock::{
     floating_group_at_point, resolve_shortcut, DockController, DockInitializationError, Shortcut,
@@ -398,6 +398,59 @@ impl MainWindow {
             return;
         }
 
+        cx.notify();
+    }
+
+    /// Resizes a focused splitter by a small keyboard-controlled delta.
+    ///
+    /// Reuses the normal resize session so Core constraints, preview policy,
+    /// and undo history remain identical to pointer-driven resizing.
+    pub(crate) fn resize_splitter_by_keyboard(
+        &mut self,
+        handle: ResizeHandle,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let ResizeHandle::Splitter { axis, .. } = handle else {
+            return;
+        };
+        let Some(delta) = keyboard_resize_delta(&event.keystroke, axis) else {
+            return;
+        };
+        cx.stop_propagation();
+
+        let frame = match self.dock.frame(self.dock_viewport(window)) {
+            Ok(frame) => frame,
+            Err(error) => {
+                tracing::debug!(error = ?error, "could not compute frame for keyboard splitter resize");
+                return;
+            }
+        };
+
+        if let Err(error) = self.dock.begin_resize(handle, Point::ZERO, &frame) {
+            tracing::debug!(error = ?error, "could not begin keyboard splitter resize");
+            return;
+        }
+
+        let pointer = match axis {
+            Axis::X => Point::new(delta, 0.0),
+            Axis::Y => Point::new(0.0, delta),
+        };
+        if let Err(error) = self.dock.update_resize(pointer) {
+            self.dock.cancel_resize();
+            tracing::debug!(error = ?error, "keyboard splitter resize preview was rejected");
+            cx.notify();
+            return;
+        }
+
+        if let Err(error) = self.dock.commit_resize(pointer) {
+            tracing::debug!(error = ?error, "keyboard splitter resize commit was rejected");
+            cx.notify();
+            return;
+        }
+
+        self.schedule_workspace_save(cx);
         cx.notify();
     }
 
