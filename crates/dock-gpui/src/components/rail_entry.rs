@@ -1,11 +1,11 @@
 use dock_core::{ColumnMode, Rect};
 use gpui::{
-    App, ClickEvent, InteractiveElement, IntoElement, KeyDownEvent, ParentElement, RenderOnce,
+    App, InteractiveElement, IntoElement, ParentElement, RenderOnce,
     StatefulInteractiveElement, Styled, Window, div, px, rgb,
 };
 use ui::Theme;
 
-use crate::components::{focus_ring::is_keyboard_activation_key, with_focus_ring};
+use crate::components::{focus_ring::is_keyboard_activation_key, with_focus_ring, ClickHandler, KeyDownHandler};
 
 /// A panel entry in a flattened dock rail.
 #[derive(IntoElement)]
@@ -25,9 +25,9 @@ pub struct RailEntry {
     /// Shared application theme.
     pub theme: Theme,
     /// Requests opening this panel in the flyout.
-    pub on_open: Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>,
+    pub on_open: ClickHandler,
     /// Handler invoked when Enter or Space opens the focused rail entry.
-    pub on_open_key: Box<dyn Fn(&KeyDownEvent, &mut Window, &mut App) + 'static>,
+    pub on_open_key: KeyDownHandler,
 }
 
 impl RenderOnce for RailEntry {
