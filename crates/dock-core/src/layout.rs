@@ -22,7 +22,12 @@ const MAX_REMEMBERED_DOCK_LOCATIONS: usize = 256;
  * Keep Debug snapshots stable when read-only operations warm the cache.
  */
 #[derive(Clone, Default)]
-struct ValidationCache(Cell<Option<(u64, DockMetrics)>>);
+/// Per-value memoization for read-path validation.
+///
+/// This `Cell` intentionally makes `Layout` `!Sync`: cache updates can occur
+/// through shared references, so the same value is not meant to be concurrently
+/// shared by reference across threads. Revisit this choice only if the API gains
+/// a concrete concurrent-shared-layout requirement.
 
 impl ValidationCache {
     fn get(&self) -> Option<(u64, DockMetrics)> {
@@ -62,6 +67,9 @@ pub(crate) type FloatingBoundsClampResult =
 /// Layout is the sole owner of runtime arenas. Public access is read-only;
 /// external edits are performed only through Layout::apply and typed DockCommand
 /// values. Clones retain the same history lineage; newly created or loaded layouts do not.
+/// The internal `ValidationCache(Cell<...>)` means this type is not `Sync`; current
+/// consumers keep the live value with its owning controller/entity rather than sharing
+/// a reference to one `Layout` concurrently across threads.
 #[derive(Clone, Debug)]
 pub struct Layout {
     nodes: SlotMap<NodeId, Node>,
