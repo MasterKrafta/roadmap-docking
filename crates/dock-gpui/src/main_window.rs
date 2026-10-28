@@ -1,6 +1,5 @@
 mod floating;
 use floating::synchronize_floating_windows;
-pub(crate) use floating::FloatingWindowSnapshot;
 
 use std::{
     collections::{HashMap, HashSet},
