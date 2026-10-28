@@ -151,3 +151,33 @@ fn split(axis: SplitAxis, weights: &[f32], children: Vec<DockNode>) -> DockNode 
         children,
     }
 }
+
+/// One composition slot in the workspace container.
+/// An empty slot is reserved for another composition to be docked later.
+#[derive(Clone, Debug)]
+pub(super) struct CompositionSlot {
+    pub(super) layout: Option<DockLayout>,
+    pub(super) weight: f32,
+}
+
+/// Contains side-by-side compositions while keeping each tree independent.
+#[derive(Clone, Debug)]
+pub(super) struct CompositionContainer {
+    pub(super) slots: Vec<CompositionSlot>,
+}
+
+impl CompositionContainer {
+    /// Creates a workspace with one full-width composition.
+    pub(super) fn initial() -> Self {
+        Self {
+            slots: vec![CompositionSlot {
+                layout: Some(DockLayout::initial()),
+                weight: 1.0,
+            }],
+        }
+    }
+
+    pub(super) fn layout_mut(&mut self, index: usize) -> Option<&mut DockLayout> {
+        self.slots.get_mut(index)?.layout.as_mut()
+    }
+}

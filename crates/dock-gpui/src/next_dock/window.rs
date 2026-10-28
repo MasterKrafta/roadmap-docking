@@ -5,15 +5,15 @@ use gpui::{Context, IntoElement, MouseButton, MouseMoveEvent, Render, Window};
 use ui::Theme;
 
 use super::geometry;
-use super::model::{DockLayout, SplitAxis};
+use super::model::{CompositionContainer, NodePathStep, SplitAxis};
 use super::view::{self, SplitResizeSpec};
 
 /// Owns the prototype layout and renders it in a regular GPUI window.
 pub(super) struct NextDockWindow {
     theme: Theme,
-    layout: DockLayout,
+    container: CompositionContainer,
     active_resize: Option<ActiveResize>,
-    floating_composition: Option<Rect>,
+    floating_composition: Option<FloatingComposition>,
     pending_move: Option<PendingCompositionMove>,
     active_move: Option<ActiveCompositionMove>,
     composition_drop_zone: Option<CompositionDropZone>,
@@ -29,6 +29,7 @@ struct ActiveResize {
 struct PendingCompositionMove {
     start_position: Point,
     viewport_size: Size,
+    composition_index: usize,
 }
 
 #[derive(Clone)]
@@ -36,6 +37,13 @@ struct ActiveCompositionMove {
     start_position: Point,
     start_origin: Point,
     viewport_size: Size,
+    composition_index: usize,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(super) struct FloatingComposition {
+    pub(super) composition_index: usize,
+    pub(super) bounds: Rect,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -50,7 +58,7 @@ impl NextDockWindow {
     pub(super) fn new(theme: Theme) -> Self {
         Self {
             theme,
-            layout: DockLayout::initial(),
+            container: CompositionContainer::initial(),
             active_resize: None,
             floating_composition: None,
             pending_move: None,
@@ -132,7 +140,12 @@ impl NextDockWindow {
             .map(|extent| extent.max(0.0) / spec.available_extent)
             .collect();
 
-        let Some(current_weights) = self.layout.split_weights_mut(&spec.path) else {
+        let Some(layout) = self.container.layout_mut(spec.composition_index) else {
+            self.active_resize = None;
+            return;
+        };
+
+        let Some(current_weights) = layout.split_weights_mut(&spec.path) else {
             self.active_resize = None;
             return;
         };
@@ -154,6 +167,7 @@ impl NextDockWindow {
 
     pub(super) fn begin_composition_move(
         &mut self,
+        composition_index: usize,
         position: gpui::Point<gpui::Pixels>,
         viewport_width: f32,
         viewport_height: f32,
@@ -164,6 +178,7 @@ impl NextDockWindow {
         }
 
         self.pending_move = Some(PendingCompositionMove {
+            composition_index,
             start_position: Point::new(
                 position.x.as_f32(),
                 (position.y.as_f32() - geometry::HEADER_HEIGHT).max(0.0),
@@ -261,7 +276,10 @@ impl NextDockWindow {
 
         let moved_bounds = Rect::new(origin, bounds.size);
 
-        self.floating_composition = Some(moved_bounds);
+        self.floating_composition = Some(FloatingComposition {
+            composition_index: active.composition_index,
+            bounds: moved_bounds,
+        });
         self.composition_drop_zone = detect_composition_drop_zone(moved_bounds, viewport_width);
 
         cx.notify();
@@ -303,7 +321,7 @@ impl Render for NextDockWindow {
         let height = viewport.height.as_f32().max(1.0);
 
         view::render(
-            &self.layout,
+            &self.container,
             width,
             height,
             window,

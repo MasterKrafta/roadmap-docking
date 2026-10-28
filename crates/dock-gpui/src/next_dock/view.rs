@@ -11,11 +11,12 @@ use crate::components::{GroupFrame, MouseDownHandler, PanelSurface, SplitterHand
 
 use super::components::{ColumnHeader, GroupHeader};
 use super::geometry::{self, GeometryKind, NodeGeometry};
-use super::model::{DockLayout, DockNode, NodePathStep, SplitAxis, TabGroup};
-use super::window::{CompositionDropZone, NextDockWindow};
+use super::model::{CompositionContainer, DockLayout, DockNode, NodePathStep, SplitAxis, TabGroup};
+use super::window::{CompositionDropZone, FloatingComposition, NextDockWindow};
 
 #[derive(Clone)]
 pub(super) struct SplitResizeSpec {
+    pub(super) composition_index: usize,
     pub(super) path: Vec<NodePathStep>,
     pub(super) boundary_index: usize,
     pub(super) axis: SplitAxis,
@@ -26,13 +27,14 @@ pub(super) struct SplitResizeSpec {
 }
 
 pub(super) fn render(
+    container: &CompositionContainer,
     layout: &DockLayout,
     width: f32,
     height: f32,
     window: &Window,
     theme: &Theme,
     owner: WeakEntity<NextDockWindow>,
-    floating: Option<Rect>,
+    floating: Option<FloatingComposition>,
     drop_zone: Option<CompositionDropZone>,
 ) -> Div {
     let width = width.max(1.0);
@@ -43,40 +45,120 @@ pub(super) fn render(
         (bounds.size.width, bounds.size.height)
     });
 
-    let root_geometry = geometry::compute(&layout.root, tree_width, tree_height, window, theme);
+    let floating_index = floating.map(|item| item.composition_index);
 
-    let content = render_node(
-        &layout.root,
-        &root_geometry,
-        theme,
-        "root",
-        &[],
-        window,
-        &owner,
-        Size::new(width, content_height),
-    );
+    let docked_slots: Vec<(usize, &super::model::CompositionSlot)> = container
+        .slots
+        .iter()
+        .enumerate()
+        .filter_map(|(index, slot)| (Some(index) != floating_index).then_some((index, slot)))
+        .collect();
+
+    let splitter_extent = theme.metrics.splitter_thickness.max(0.0);
+    let splitter_count = docked_slots.len().saturating_sub(1);
+    let available_width = (width - splitter_extent * splitter_count as f32).max(0.0);
+
+    let weights: Vec<f32> = docked_slots
+        .iter()
+        .map(|(_, slot)| slot.weight.max(0.0))
+        .collect();
+
+    let widths = distribute_composition_widths(available_width, &weights);
+
+    let mut docked_row = div().flex().flex_row().w(px(width)).h(px(content_height));
+
+    for (position, ((composition_index, slot), slot_width)) in
+        docked_slots.iter().zip(widths.iter()).enumerate()
+    {
+        if position > 0 {
+            docked_row = docked_row.child(
+                div()
+                    .w(px(splitter_extent))
+                    .h(px(content_height))
+                    .bg(rgb(theme.colors.splitter_handle)),
+            );
+        }
+
+        let slot_view = match slot.layout.as_ref() {
+            Some(layout) => {
+                let node_geometry =
+                    geometry::compute(&layout.root, *slot_width, content_height, window, theme);
+
+                render_node(
+                    &layout.root,
+                    &node_geometry,
+                    theme,
+                    &format!("composition-{composition_index}"),
+                    &[],
+                    window,
+                    &owner,
+                    Size::new(width, content_height),
+                    *composition_index,
+                )
+            }
+            None => div()
+                .w(px(*slot_width))
+                .h(px(content_height))
+                .bg(rgb(theme.colors.panel_surface_background))
+                .border_1()
+                .border_color(rgb(theme.colors.border)),
+        };
+
+        docked_row = docked_row.child(
+            div()
+                .w(px(*slot_width))
+                .h(px(content_height))
+                .child(slot_view),
+        );
+    }
 
     let mut body = div()
         .relative()
         .w(px(width))
         .h(px(content_height))
-        .bg(rgb(theme.colors.window_background));
+        .bg(rgb(theme.colors.window_background))
+        .child(docked_row);
 
-    body = if let Some(bounds) = floating {
-        body.child(
-            div()
-                .absolute()
-                .left(px(bounds.origin.x))
-                .top(px(bounds.origin.y))
-                .w(px(bounds.size.width))
-                .h(px(bounds.size.height))
-                .border_1()
-                .border_color(rgb(theme.colors.border))
-                .child(content),
-        )
-    } else {
-        body.child(content)
-    };
+    if let Some(floating) = floating {
+        if let Some(layout) = container
+            .slots
+            .get(floating.composition_index)
+            .and_then(|slot| slot.layout.as_ref())
+        {
+            let bounds = floating.bounds;
+            let node_geometry = geometry::compute(
+                &layout.root,
+                bounds.size.width,
+                bounds.size.height,
+                window,
+                theme,
+            );
+
+            let floating_content = render_node(
+                &layout.root,
+                &node_geometry,
+                theme,
+                &format!("composition-{}-floating", floating.composition_index),
+                &[],
+                window,
+                &owner,
+                Size::new(width, content_height),
+                floating.composition_index,
+            );
+
+            body = body.child(
+                div()
+                    .absolute()
+                    .left(px(bounds.origin.x))
+                    .top(px(bounds.origin.y))
+                    .w(px(bounds.size.width))
+                    .h(px(bounds.size.height))
+                    .border_1()
+                    .border_color(rgb(theme.colors.border))
+                    .child(floating_content),
+            );
+        }
+    }
 
     if let Some(drop_zone) = drop_zone {
         let zone_width = 12.0;
@@ -156,6 +238,32 @@ pub(super) fn render(
         },
     )
 }
+
+fn distribute_composition_widths(available: f32, weights: &[f32]) -> Vec<f32> {
+    if weights.is_empty() {
+        return Vec::new();
+    }
+
+    let total_weight: f32 = weights.iter().sum();
+
+    let mut widths = if total_weight <= f32::EPSILON {
+        vec![available / weights.len() as f32; weights.len()]
+    } else {
+        weights
+            .iter()
+            .map(|weight| available * weight / total_weight)
+            .collect()
+    };
+
+    let allocated: f32 = widths.iter().sum();
+
+    if let Some(last) = widths.last_mut() {
+        *last += available - allocated;
+    }
+
+    widths
+}
+
 fn render_node(
     node: &DockNode,
     geometry: &NodeGeometry,
@@ -165,6 +273,7 @@ fn render_node(
     window: &Window,
     owner: &WeakEntity<NextDockWindow>,
     viewport_size: Size,
+    composition_index: usize,
 ) -> Div {
     match (&geometry.kind, node) {
         (
@@ -212,6 +321,7 @@ fn render_node(
                     window,
                     owner,
                     viewport_size,
+                    composition_index,
                 ));
 
             let drag_owner = owner.clone();
@@ -222,6 +332,7 @@ fn render_node(
                     if let Some(owner) = drag_owner.upgrade() {
                         owner.update(app, |this, _cx| {
                             this.begin_composition_move(
+                                composition_index,
                                 event.position,
                                 viewport_size.width,
                                 viewport_size.height,
@@ -300,6 +411,7 @@ fn render_node(
                     };
 
                     let spec = SplitResizeSpec {
+                        composition_index,
                         path: path.to_vec(),
                         boundary_index,
                         axis: *axis,
@@ -371,6 +483,7 @@ fn render_node(
                     window,
                     owner,
                     viewport_size,
+                    composition_index,
                 ));
             }
 
