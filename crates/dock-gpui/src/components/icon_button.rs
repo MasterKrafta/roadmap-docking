@@ -18,6 +18,7 @@ pub struct IconButton {
     background_color: u32,
     hover_color: u32,
     border_color: u32,
+    center_glyph: bool,
     on_click: ClickHandler,
 }
 
@@ -39,6 +40,7 @@ impl IconButton {
             background_color: theme.colors.icon_button_background,
             hover_color: theme.colors.icon_button_hover,
             border_color: theme.colors.icon_button_border,
+            center_glyph: false,
             on_click,
         }
     }
@@ -53,6 +55,12 @@ impl IconButton {
     pub fn with_colors(mut self, background_color: u32, hover_color: u32) -> Self {
         self.background_color = background_color;
         self.hover_color = hover_color;
+        self
+    }
+
+    /// Centers the glyph horizontally and vertically inside the button.
+    pub fn with_centered_glyph(mut self) -> Self {
+        self.center_glyph = true;
         self
     }
 }
@@ -74,8 +82,17 @@ impl RenderOnce for IconButton {
             .font_family(typography.family)
             .text_size(px(typography.body_size))
             .line_height(px(typography.line_height))
-            .hover(move |style| style.bg(rgb(hover_color)))
-            .child(self.glyph);
+            .hover(move |style| style.bg(rgb(hover_color)));
+
+        if self.center_glyph {
+            button = button
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(div().relative().top(px(-3.0)).child(self.glyph));
+        } else {
+            button = button.child(self.glyph);
+        }
 
         if self.border {
             button = button.border_1().border_color(rgb(border_color));

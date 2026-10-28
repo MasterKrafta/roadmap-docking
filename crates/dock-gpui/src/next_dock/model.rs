@@ -1,6 +1,6 @@
 //! Minimal independent tree model used by the next dock prototype.
 
-/// Orientation of a split between two dock nodes.
+/// Orientation of a split between dock nodes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum SplitAxis {
     Horizontal,
@@ -21,16 +21,27 @@ pub(super) struct TabGroup {
     pub(super) active: usize,
 }
 
-/// The complete tree of dock areas.
+/// A node in the independent dock layout.
 #[derive(Clone, Debug)]
 pub(super) enum DockNode {
+    /// A split containing any number of adjacent children.
+    ///
+    /// Weights define their relative sizes along the split axis.
     Split {
         axis: SplitAxis,
-        ratio: f32,
-        first: Box<DockNode>,
-        second: Box<DockNode>,
+        weights: Vec<f32>,
+        children: Vec<DockNode>,
     },
+    /// A column with its own header and content.
+    Column { content: Box<DockNode> },
+    /// A tab group and its active panel.
     Tabs(TabGroup),
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(super) enum NodePathStep {
+    SplitChild(usize),
+    ColumnContent,
 }
 
 /// Owns only the new prototype tree; it has no dependency on the previous dock model.
@@ -46,32 +57,56 @@ impl DockLayout {
             ("Navigator", "Document navigation and outline."),
             ("Assets", "Imported assets and reusable resources."),
         ]);
+
         let canvas = tabs(&[
             ("Canvas", "Main document workspace."),
             ("Preview", "Preview the current document."),
         ]);
+
         let bottom = tabs(&[
             ("Timeline", "Animation and sequence tracks."),
             ("Console", "Messages and diagnostics."),
         ]);
+
         let right = tabs(&[
             ("Layers", "Layer hierarchy and visibility."),
             ("Color", "Color selection and recent colors."),
             ("Properties", "Properties of the selected item."),
         ]);
 
+        let workspace = column(split(
+            SplitAxis::Vertical,
+            &[0.76, 0.24],
+            vec![canvas, bottom],
+        ));
+
         Self {
             root: split(
                 SplitAxis::Horizontal,
-                0.21,
-                left,
-                split(
-                    SplitAxis::Horizontal,
-                    0.75,
-                    split(SplitAxis::Vertical, 0.76, canvas, bottom),
-                    right,
-                ),
+                &[0.21, 0.59, 0.20],
+                vec![column(left), workspace, column(right)],
             ),
+        }
+    }
+
+    pub(super) fn split_weights_mut(&mut self, path: &[NodePathStep]) -> Option<&mut Vec<f32>> {
+        let mut node = &mut self.root;
+
+        for step in path {
+            node = match (node, *step) {
+                (DockNode::Split { children, .. }, NodePathStep::SplitChild(index)) => {
+                    children.get_mut(index)?
+                }
+
+                (DockNode::Column { content }, NodePathStep::ColumnContent) => content.as_mut(),
+
+                _ => return None,
+            };
+        }
+
+        match node {
+            DockNode::Split { weights, .. } => Some(weights),
+            _ => None,
         }
     }
 }
@@ -86,11 +121,33 @@ fn tabs(panels: &[(&'static str, &'static str)]) -> DockNode {
     })
 }
 
-fn split(axis: SplitAxis, ratio: f32, first: DockNode, second: DockNode) -> DockNode {
+fn column(content: DockNode) -> DockNode {
+    DockNode::Column {
+        content: Box::new(content),
+    }
+}
+
+fn split(axis: SplitAxis, weights: &[f32], children: Vec<DockNode>) -> DockNode {
+    let mut normalized_weights: Vec<f32> = if weights.len() == children.len() {
+        weights.iter().map(|weight| weight.max(0.0)).collect()
+    } else {
+        vec![1.0; children.len()]
+    };
+
+    let total: f32 = normalized_weights.iter().sum();
+
+    if total > f32::EPSILON {
+        for weight in &mut normalized_weights {
+            *weight /= total;
+        }
+    } else if !normalized_weights.is_empty() {
+        let equal_weight = 1.0 / normalized_weights.len() as f32;
+        normalized_weights.fill(equal_weight);
+    }
+
     DockNode::Split {
         axis,
-        ratio: ratio.clamp(0.1, 0.9),
-        first: Box::new(first),
-        second: Box::new(second),
+        weights: normalized_weights,
+        children,
     }
 }

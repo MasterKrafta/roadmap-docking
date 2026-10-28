@@ -1,51 +1,19 @@
 //! Rendering for the independent dock tree.
 
-use dock_core::{Point, Rect, Size};
-use gpui::{AnyElement, Div, IntoElement, ParentElement, Styled, Window, div, px, rgb};
-use ui::Theme;
-
-use crate::components::{GroupFrame, PanelSurface};
-
-use super::components::GroupHeader;
-use super::geometry::{self, GeometryKind, NodeGeometry};
-use super::model::{DockLayout, DockNode, SplitAxis, TabGroup};
-
-pub(super) fn render(
-    layout: &DockLayout,
-    width: f32,
-    height: f32,
-    window: &Window,
+use super::model::NodePathStep;
+use super::window::NextDockWindow;
+use crate::components::SplitterHandle;
+use crate::components::splitter_handle::ResizeStartHandler;
+use dock_core::Axis;
+fn render_node(
+    node: &DockNode,
+    geometry: &NodeGeometry,
     theme: &Theme,
+    key: &str,
+    path: &[NodePathStep],
+    window: &Window,
+    owner: &WeakEntity<NextDockWindow>,
 ) -> Div {
-    let width = width.max(1.0);
-    let height = height.max(1.0);
-    let content_height = (height - geometry::HEADER_HEIGHT).max(1.0);
-
-    let root_geometry = geometry::compute(&layout.root, width, content_height, window, theme);
-
-    div()
-        .flex()
-        .flex_col()
-        .w(px(width))
-        .h(px(height))
-        .bg(rgb(theme.colors.window_background))
-        .text_color(rgb(theme.colors.primary_text))
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .w(px(width))
-                .h(px(geometry::HEADER_HEIGHT))
-                .px(px(14.0))
-                .bg(rgb(theme.colors.toolbar_background))
-                .border_1()
-                .border_color(rgb(theme.colors.border))
-                .child("NEXT DOCK  /  independent model prototype"),
-        )
-        .child(render_node(&layout.root, &root_geometry, theme, "root"))
-}
-
-fn render_node(node: &DockNode, geometry: &NodeGeometry, theme: &Theme, key: &str) -> Div {
     match (&geometry.kind, node) {
         (
             GeometryKind::Tabs {
@@ -64,50 +32,178 @@ fn render_node(node: &DockNode, geometry: &NodeGeometry, theme: &Theme, key: &st
         ),
 
         (
+            GeometryKind::Column {
+                header_height,
+                content: content_geometry,
+            },
+            DockNode::Column { content },
+        ) => {
+            let header_rect = Rect::new(Point::ZERO, Size::new(geometry.width, *header_height));
+
+            let mut content_path = path.to_vec();
+            content_path.push(NodePathStep::ColumnContent);
+
+            let content_key = format!("{key}-content");
+
+            let content_view = div()
+                .absolute()
+                .left(px(0.0))
+                .top(px(*header_height))
+                .w(px(content_geometry.width))
+                .h(px(content_geometry.height))
+                .child(render_node(
+                    content,
+                    content_geometry.as_ref(),
+                    theme,
+                    &content_key,
+                    &content_path,
+                    window,
+                    owner,
+                ));
+
+            div()
+                .relative()
+                .w(px(geometry.width))
+                .h(px(geometry.height))
+                .child(ColumnHeader {
+                    rect: header_rect,
+                    theme: *theme,
+                    key: key.to_owned(),
+                })
+                .child(content_view)
+        }
+
+        (
             GeometryKind::Split {
                 splitter_extent,
-                first: first_geometry,
-                second: second_geometry,
+                children: child_geometries,
             },
-            DockNode::Split {
-                axis,
-                first,
-                second,
-                ..
-            },
+            DockNode::Split { axis, children, .. },
         ) => {
-            let first_key = format!("{key}-first");
-            let second_key = format!("{key}-second");
+            let initial_extents: Vec<f32> = child_geometries
+                .iter()
+                .map(|child| match axis {
+                    SplitAxis::Horizontal => child.width,
+                    SplitAxis::Vertical => child.height,
+                })
+                .collect();
 
-            match axis {
+            let available_extent: f32 = initial_extents.iter().sum();
+
+            let mut split_view = match axis {
                 SplitAxis::Horizontal => div()
+                    .relative()
                     .flex()
                     .flex_row()
                     .w(px(geometry.width))
-                    .h(px(geometry.height))
-                    .child(render_node(first, first_geometry, theme, &first_key))
-                    .child(
-                        div()
-                            .w(px(*splitter_extent))
-                            .h(px(geometry.height))
-                            .bg(rgb(theme.colors.splitter_handle)),
-                    )
-                    .child(render_node(second, second_geometry, theme, &second_key)),
-
+                    .h(px(geometry.height)),
                 SplitAxis::Vertical => div()
+                    .relative()
                     .flex()
                     .flex_col()
                     .w(px(geometry.width))
-                    .h(px(geometry.height))
-                    .child(render_node(first, first_geometry, theme, &first_key))
-                    .child(
-                        div()
+                    .h(px(geometry.height)),
+            };
+
+            for (index, (child, child_geometry)) in
+                children.iter().zip(child_geometries).enumerate()
+            {
+                if index > 0 {
+                    let boundary_index = index - 1;
+
+                    let (min_first, min_second) = match axis {
+                        SplitAxis::Horizontal => (
+                            geometry::minimum_width(
+                                &children[boundary_index],
+                                theme.metrics.splitter_thickness.max(0.0),
+                                window,
+                                theme,
+                            ),
+                            geometry::minimum_width(
+                                child,
+                                theme.metrics.splitter_thickness.max(0.0),
+                                window,
+                                theme,
+                            ),
+                        ),
+                        SplitAxis::Vertical => (80.0, 80.0),
+                    };
+
+                    let spec = SplitResizeSpec {
+                        path: path.to_vec(),
+                        boundary_index,
+                        axis: *axis,
+                        available_extent,
+                        initial_extents: initial_extents.clone(),
+                        min_first,
+                        min_second,
+                    };
+
+                    let resize_owner = owner.clone();
+
+                    let on_resize_start: ResizeStartHandler =
+                        Box::new(move |event: &MouseDownEvent, _window, app| {
+                            if let Some(owner) = resize_owner.upgrade() {
+                                owner.update(app, |this, cx| {
+                                    this.begin_resize(spec.clone(), event.position, cx);
+                                });
+                            }
+                        });
+
+                    let handle_rect = match axis {
+                        SplitAxis::Horizontal => {
+                            Rect::new(Point::ZERO, Size::new(*splitter_extent, geometry.height))
+                        }
+                        SplitAxis::Vertical => {
+                            Rect::new(Point::ZERO, Size::new(geometry.width, *splitter_extent))
+                        }
+                    };
+
+                    let handle = SplitterHandle {
+                        id: format!("next-dock-splitter-{key}-{boundary_index}"),
+                        rect: handle_rect,
+                        axis: match axis {
+                            SplitAxis::Horizontal => Axis::X,
+                            SplitAxis::Vertical => Axis::Y,
+                        },
+                        theme: *theme,
+                        on_resize_start: Some(on_resize_start),
+                        on_resize_key: None,
+                    };
+
+                    let splitter_slot = match axis {
+                        SplitAxis::Horizontal => div()
+                            .relative()
+                            .w(px(*splitter_extent))
+                            .h(px(geometry.height))
+                            .child(handle),
+                        SplitAxis::Vertical => div()
+                            .relative()
                             .w(px(geometry.width))
                             .h(px(*splitter_extent))
-                            .bg(rgb(theme.colors.splitter_handle)),
-                    )
-                    .child(render_node(second, second_geometry, theme, &second_key)),
+                            .child(handle),
+                    };
+
+                    split_view = split_view.child(splitter_slot);
+                }
+
+                let mut child_path = path.to_vec();
+                child_path.push(NodePathStep::SplitChild(index));
+
+                let child_key = format!("{key}-child-{index}");
+
+                split_view = split_view.child(render_node(
+                    child,
+                    child_geometry,
+                    theme,
+                    &child_key,
+                    &child_path,
+                    window,
+                    owner,
+                ));
             }
+
+            split_view
         }
 
         _ => div()
