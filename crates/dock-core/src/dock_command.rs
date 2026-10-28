@@ -134,7 +134,10 @@ pub enum DockCommand {
     /// Update a floating window's origin and size atomically during an edge/corner resize.
     ///
     /// This preserves one-command resize semantics when resizing from the top or left edges.
-    ResizeFloatingBounds { group: FloatingGroupId, bounds: Rect },
+    ResizeFloatingBounds {
+        group: FloatingGroupId,
+        bounds: Rect,
+    },
     /// Resize a floating window by setting its requested size.
     ResizeFloating { group: FloatingGroupId, size: Size },
     /// Raise a floating group to the front of the stacking order.

@@ -49,57 +49,32 @@ mod tests {
 
     #[test]
     fn scrolled_drop_zones_are_translated_and_clipped_to_the_column_viewport() {
-        let viewport = Rect::new(
-            Point::new(20.0, 10.0),
-            Size::new(180.0, 100.0),
-        );
-        let zone = Rect::new(
-            Point::new(20.0, 120.0),
-            Size::new(180.0, 40.0),
-        );
+        let viewport = Rect::new(Point::new(20.0, 10.0), Size::new(180.0, 100.0));
+        let zone = Rect::new(Point::new(20.0, 120.0), Size::new(180.0, 40.0));
         assert_eq!(
             scroll_rect_in_viewport(zone, viewport, -30.0),
-            Some(Rect::new(
-                Point::new(20.0, 90.0),
-                Size::new(180.0, 20.0),
-            ))
+            Some(Rect::new(Point::new(20.0, 90.0), Size::new(180.0, 20.0),))
         );
         assert_eq!(scroll_rect_in_viewport(zone, viewport, f32::NAN), None);
     }
 
     #[test]
     fn floating_descendant_rects_are_relative_to_the_container_origin() {
-        let rect = Rect::new(
-            Point::new(145.0, 92.0),
-            Size::new(180.0, 48.0),
-        );
+        let rect = Rect::new(Point::new(145.0, 92.0), Size::new(180.0, 48.0));
         assert_eq!(
             translate_rect_to_local(rect, Point::new(100.0, 60.0)),
-            Rect::new(
-                Point::new(45.0, 32.0),
-                Size::new(180.0, 48.0),
-            ),
+            Rect::new(Point::new(45.0, 32.0), Size::new(180.0, 48.0),),
         );
     }
     #[test]
     fn union_rects_combines_bounds_and_handles_an_empty_accumulator() {
-        let first = Rect::new(
-            Point::new(10.0, 20.0),
-            Size::new(30.0, 40.0),
-        );
-        let second = Rect::new(
-            Point::new(0.0, 35.0),
-            Size::new(20.0, 10.0),
-        );
+        let first = Rect::new(Point::new(10.0, 20.0), Size::new(30.0, 40.0));
+        let second = Rect::new(Point::new(0.0, 35.0), Size::new(20.0, 10.0));
 
         assert_eq!(union_rects(None, first), first);
         assert_eq!(
             union_rects(Some(first), second),
-            Rect::new(
-                Point::new(0.0, 20.0),
-                Size::new(40.0, 40.0),
-            )
+            Rect::new(Point::new(0.0, 20.0), Size::new(40.0, 40.0),)
         );
     }
-
 }

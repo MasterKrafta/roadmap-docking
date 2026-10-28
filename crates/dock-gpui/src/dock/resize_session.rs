@@ -1,16 +1,25 @@
+use crate::requests::ResizeHandle;
 use dock_core::{
     Axis, DockCommand, DockMetrics, DockSide, Layout, LayoutRects, Node, Point, Rect, ResizeEdge,
 };
-use crate::requests::ResizeHandle;
 
 /// Geometry measured once at pointer-down and reused for the entire resize.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) enum StartGeometry {
-    VerticalGroups { available_height: f32 },
+    VerticalGroups {
+        available_height: f32,
+    },
     HorizontalSplit,
-    OuterColumn { start_width: f32 },
-    FloatingEdge { bounds: Rect },
-    FlyoutWidth { start_width: f32, expands_left: bool },
+    OuterColumn {
+        start_width: f32,
+    },
+    FloatingEdge {
+        bounds: Rect,
+    },
+    FlyoutWidth {
+        start_width: f32,
+        expands_left: bool,
+    },
 }
 
 /// Failure to begin a resize from an invalid handle or incomplete frame snapshot.
@@ -216,7 +225,10 @@ impl ResizeSession {
             }
             (
                 ResizeHandle::Flyout { panel },
-                StartGeometry::FlyoutWidth { start_width, expands_left },
+                StartGeometry::FlyoutWidth {
+                    start_width,
+                    expands_left,
+                },
             ) => {
                 if !delta_x.is_finite() {
                     return Err(ResizeUpdateError::InvalidDelta);
@@ -236,24 +248,31 @@ impl ResizeSession {
     }
 }
 
-fn resized_floating_bounds(
-    mut bounds: Rect,
-    edge: ResizeEdge,
-    delta_x: f32,
-    delta_y: f32,
-) -> Rect {
-    if matches!(edge, ResizeEdge::Left | ResizeEdge::TopLeft | ResizeEdge::BottomLeft) {
+fn resized_floating_bounds(mut bounds: Rect, edge: ResizeEdge, delta_x: f32, delta_y: f32) -> Rect {
+    if matches!(
+        edge,
+        ResizeEdge::Left | ResizeEdge::TopLeft | ResizeEdge::BottomLeft
+    ) {
         bounds.origin.x += delta_x;
         bounds.size.width -= delta_x;
     }
-    if matches!(edge, ResizeEdge::Right | ResizeEdge::TopRight | ResizeEdge::BottomRight) {
+    if matches!(
+        edge,
+        ResizeEdge::Right | ResizeEdge::TopRight | ResizeEdge::BottomRight
+    ) {
         bounds.size.width += delta_x;
     }
-    if matches!(edge, ResizeEdge::Top | ResizeEdge::TopLeft | ResizeEdge::TopRight) {
+    if matches!(
+        edge,
+        ResizeEdge::Top | ResizeEdge::TopLeft | ResizeEdge::TopRight
+    ) {
         bounds.origin.y += delta_y;
         bounds.size.height -= delta_y;
     }
-    if matches!(edge, ResizeEdge::Bottom | ResizeEdge::BottomLeft | ResizeEdge::BottomRight) {
+    if matches!(
+        edge,
+        ResizeEdge::Bottom | ResizeEdge::BottomLeft | ResizeEdge::BottomRight
+    ) {
         bounds.size.height += delta_y;
     }
     bounds
@@ -342,7 +361,8 @@ fn capture_start_geometry(
             let Some(Node::Column(_)) = layout.node(column) else {
                 return Err(ResizeStartError::InvalidHandle);
             };
-            let Some(column_rect) = rects.columns.iter().find(|entry| entry.column == column) else {
+            let Some(column_rect) = rects.columns.iter().find(|entry| entry.column == column)
+            else {
                 return Err(ResizeStartError::MissingColumnGeometry);
             };
             if column_rect.rect.validate_non_empty().is_err() {
@@ -398,10 +418,11 @@ fn capture_start_geometry(
     }
 }
 
-
 #[cfg(test)]
 mod tests {
-    use super::{capture_start_geometry, ResizeSession, ResizeStartError, ResizeUpdateError, StartGeometry};
+    use super::{
+        ResizeSession, ResizeStartError, ResizeUpdateError, StartGeometry, capture_start_geometry,
+    };
     use crate::dock::DockController;
     use crate::requests::ResizeHandle;
     use dock_core::{Axis, DockCommand, DockSide, Node, Point, Rect, ResizeEdge, Size};
@@ -425,8 +446,13 @@ mod tests {
     fn flyout_resize_uses_absolute_x_delta_and_correct_edge_direction() {
         use dock_core::PanelId;
 
-        let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
-        let handle = ResizeHandle::Flyout { panel: PanelId::null() };
+        let layout = DockController::new_initial(&Theme::default())
+            .unwrap()
+            .layout()
+            .clone();
+        let handle = ResizeHandle::Flyout {
+            panel: PanelId::null(),
+        };
         let right_edge = session(
             &layout,
             handle,
@@ -436,8 +462,13 @@ mod tests {
             },
         );
         assert_eq!(
-            right_edge.command_for_pointer(Point::new(120.0, 100.0)).unwrap(),
-            DockCommand::ResizeFlyout { panel: PanelId::null(), width: 320.0 }
+            right_edge
+                .command_for_pointer(Point::new(120.0, 100.0))
+                .unwrap(),
+            DockCommand::ResizeFlyout {
+                panel: PanelId::null(),
+                width: 320.0
+            }
         );
 
         let left_edge = session(
@@ -449,14 +480,22 @@ mod tests {
             },
         );
         assert_eq!(
-            left_edge.command_for_pointer(Point::new(120.0, 100.0)).unwrap(),
-            DockCommand::ResizeFlyout { panel: PanelId::null(), width: 280.0 }
+            left_edge
+                .command_for_pointer(Point::new(120.0, 100.0))
+                .unwrap(),
+            DockCommand::ResizeFlyout {
+                panel: PanelId::null(),
+                width: 280.0
+            }
         );
     }
 
     #[test]
     fn vertical_splitter_uses_absolute_y_delta_and_keeps_zero_delta() {
-        let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
+        let layout = DockController::new_initial(&Theme::default())
+            .unwrap()
+            .layout()
+            .clone();
         let owner = layout
             .nodes()
             .find_map(|(id, node)| matches!(node, Node::Column(_)).then_some(id))
@@ -475,7 +514,9 @@ mod tests {
         );
 
         assert_eq!(
-            session.command_for_pointer(Point::new(123.0, 117.5)).unwrap(),
+            session
+                .command_for_pointer(Point::new(123.0, 117.5))
+                .unwrap(),
             DockCommand::ResizeGroups {
                 column: owner,
                 boundary_index: 0,
@@ -484,7 +525,9 @@ mod tests {
             }
         );
         assert_eq!(
-            session.command_for_pointer(Point::new(100.0, 100.0)).unwrap(),
+            session
+                .command_for_pointer(Point::new(100.0, 100.0))
+                .unwrap(),
             DockCommand::ResizeGroups {
                 column: owner,
                 boundary_index: 0,
@@ -496,7 +539,10 @@ mod tests {
 
     #[test]
     fn horizontal_splitter_maps_main_root_to_its_actual_side() {
-        let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
+        let layout = DockController::new_initial(&Theme::default())
+            .unwrap()
+            .layout()
+            .clone();
         let (side, owner) = [DockSide::Left, DockSide::Right]
             .into_iter()
             .find_map(|side| {
@@ -516,7 +562,9 @@ mod tests {
         );
 
         assert_eq!(
-            session.command_for_pointer(Point::new(112.0, 130.0)).unwrap(),
+            session
+                .command_for_pointer(Point::new(112.0, 130.0))
+                .unwrap(),
             DockCommand::ResizeColumnBoundary {
                 side,
                 boundary_index: 0,
@@ -527,7 +575,10 @@ mod tests {
 
     #[test]
     fn horizontal_splitter_rejects_overflowing_used_x_delta() {
-        let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
+        let layout = DockController::new_initial(&Theme::default())
+            .unwrap()
+            .layout()
+            .clone();
         let (_, owner) = [DockSide::Left, DockSide::Right]
             .into_iter()
             .find_map(|side| {
@@ -555,7 +606,10 @@ mod tests {
 
     #[test]
     fn horizontal_splitter_ignores_unused_y_delta_overflow() {
-        let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
+        let layout = DockController::new_initial(&Theme::default())
+            .unwrap()
+            .layout()
+            .clone();
         let (side, owner) = [DockSide::Left, DockSide::Right]
             .into_iter()
             .find_map(|side| {
@@ -606,7 +660,11 @@ mod tests {
                 continue;
             };
             if !matches!(layout.node(column), Some(Node::Column(value)) if !value.mode.is_rail())
-                || !frame.rects().columns.iter().any(|entry| entry.column == column)
+                || !frame
+                    .rects()
+                    .columns
+                    .iter()
+                    .any(|entry| entry.column == column)
             {
                 continue;
             }
@@ -640,7 +698,10 @@ mod tests {
             checked_any = true;
         }
 
-        assert!(checked_any, "initial layout should expose a resizable outer column");
+        assert!(
+            checked_any,
+            "initial layout should expose a resizable outer column"
+        );
     }
 
     #[test]
@@ -659,7 +720,11 @@ mod tests {
                     DockSide::Right => columns.first().copied(),
                 }?;
                 (matches!(layout.node(column), Some(Node::Column(value)) if !value.mode.is_rail())
-                    && frame.rects().columns.iter().any(|entry| entry.column == column))
+                    && frame
+                        .rects()
+                        .columns
+                        .iter()
+                        .any(|entry| entry.column == column))
                 .then_some((column, side))
             })
             .expect("initial layout should expose a resizable outer column");
@@ -684,7 +749,10 @@ mod tests {
 
     #[test]
     fn outer_column_resize_rejects_overflowing_pointer_delta() {
-        let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
+        let layout = DockController::new_initial(&Theme::default())
+            .unwrap()
+            .layout()
+            .clone();
         let column = layout
             .nodes()
             .find_map(|(id, node)| matches!(node, Node::Column(_)).then_some(id))
@@ -707,7 +775,10 @@ mod tests {
 
     #[test]
     fn outer_column_resize_rejects_overflowing_computed_width() {
-        let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
+        let layout = DockController::new_initial(&Theme::default())
+            .unwrap()
+            .layout()
+            .clone();
         let column = layout
             .nodes()
             .find_map(|(id, node)| matches!(node, Node::Column(_)).then_some(id))
@@ -748,7 +819,10 @@ mod tests {
 
     #[test]
     fn outer_columns_use_opposite_width_delta_and_floating_edges_keep_the_opposite_corner() {
-        let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
+        let layout = DockController::new_initial(&Theme::default())
+            .unwrap()
+            .layout()
+            .clone();
         let column = layout
             .nodes()
             .find_map(|(id, node)| matches!(node, Node::Column(_)).then_some(id))
@@ -761,7 +835,9 @@ mod tests {
                 StartGeometry::OuterColumn { start_width: 280.0 },
             );
             assert_eq!(
-                session.command_for_pointer(Point::new(120.0, 100.0)).unwrap(),
+                session
+                    .command_for_pointer(Point::new(120.0, 100.0))
+                    .unwrap(),
                 DockCommand::ResizeColumn { column, width }
             );
         }
@@ -777,7 +853,9 @@ mod tests {
             },
         );
         assert_eq!(
-            floating.command_for_pointer(Point::new(120.0, 130.0)).unwrap(),
+            floating
+                .command_for_pointer(Point::new(120.0, 130.0))
+                .unwrap(),
             DockCommand::ResizeFloatingBounds {
                 group: dock_core::FloatingGroupId::null(),
                 bounds: Rect::new(Point::new(30.0, 50.0), Size::new(280.0, 170.0)),
@@ -791,7 +869,10 @@ mod tests {
 
     #[test]
     fn single_axis_floating_edges_reject_zero_sized_bounds() {
-        let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
+        let layout = DockController::new_initial(&Theme::default())
+            .unwrap()
+            .layout()
+            .clone();
         let group = dock_core::FloatingGroupId::null();
         let start_bounds = Rect::new(Point::new(10.0, 20.0), Size::new(300.0, 200.0));
         let cases = [
@@ -809,16 +890,22 @@ mod tests {
                     bounds: start_bounds,
                 },
             );
-            assert!(matches!(
-                session.command_for_pointer(pointer),
-                Err(ResizeUpdateError::InvalidBounds)
-            ), "zero-sized bounds must be rejected for {edge:?}");
+            assert!(
+                matches!(
+                    session.command_for_pointer(pointer),
+                    Err(ResizeUpdateError::InvalidBounds)
+                ),
+                "zero-sized bounds must be rejected for {edge:?}"
+            );
         }
     }
 
     #[test]
     fn single_axis_floating_edges_resize_expected_sides() {
-        let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
+        let layout = DockController::new_initial(&Theme::default())
+            .unwrap()
+            .layout()
+            .clone();
         let group = dock_core::FloatingGroupId::null();
         let start_bounds = Rect::new(Point::new(10.0, 20.0), Size::new(300.0, 200.0));
         let cases = [
@@ -849,7 +936,9 @@ mod tests {
                 },
             );
             assert_eq!(
-                session.command_for_pointer(Point::new(120.0, 130.0)).unwrap(),
+                session
+                    .command_for_pointer(Point::new(120.0, 130.0))
+                    .unwrap(),
                 DockCommand::ResizeFloatingBounds {
                     group,
                     bounds: expected_bounds,
@@ -861,7 +950,10 @@ mod tests {
 
     #[test]
     fn floating_corner_edges_reject_zero_sized_bounds() {
-        let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
+        let layout = DockController::new_initial(&Theme::default())
+            .unwrap()
+            .layout()
+            .clone();
         let group = dock_core::FloatingGroupId::null();
         let cases = [
             (ResizeEdge::TopLeft, Point::new(400.0, 100.0)),
@@ -877,24 +969,27 @@ mod tests {
         for (edge, pointer) in cases {
             let session = session(
                 &layout,
-                ResizeHandle::FloatingEdge {
-                    group,
-                    edge,
-                },
+                ResizeHandle::FloatingEdge { group, edge },
                 StartGeometry::FloatingEdge {
                     bounds: Rect::new(Point::new(10.0, 20.0), Size::new(300.0, 200.0)),
                 },
             );
-            assert!(matches!(
-                session.command_for_pointer(pointer),
-                Err(ResizeUpdateError::InvalidBounds)
-            ), "zero-sized bounds must be rejected for {edge:?} at {pointer:?}");
+            assert!(
+                matches!(
+                    session.command_for_pointer(pointer),
+                    Err(ResizeUpdateError::InvalidBounds)
+                ),
+                "zero-sized bounds must be rejected for {edge:?} at {pointer:?}"
+            );
         }
     }
 
     #[test]
     fn floating_corner_edges_resize_expected_sides() {
-        let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
+        let layout = DockController::new_initial(&Theme::default())
+            .unwrap()
+            .layout()
+            .clone();
         let group = dock_core::FloatingGroupId::null();
         let start_bounds = Rect::new(Point::new(10.0, 20.0), Size::new(300.0, 200.0));
         let cases = [
@@ -925,7 +1020,9 @@ mod tests {
                 },
             );
             assert_eq!(
-                session.command_for_pointer(Point::new(120.0, 130.0)).unwrap(),
+                session
+                    .command_for_pointer(Point::new(120.0, 130.0))
+                    .unwrap(),
                 DockCommand::ResizeFloatingBounds {
                     group,
                     bounds: expected_bounds,
@@ -937,7 +1034,10 @@ mod tests {
 
     #[test]
     fn floating_resize_rejects_finite_delta_when_resulting_bounds_overflow() {
-        let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
+        let layout = DockController::new_initial(&Theme::default())
+            .unwrap()
+            .layout()
+            .clone();
         let group = dock_core::FloatingGroupId::null();
 
         let mut right = session(
@@ -975,7 +1075,10 @@ mod tests {
 
     #[test]
     fn floating_resize_rejects_left_and_top_growth_overflow() {
-        let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
+        let layout = DockController::new_initial(&Theme::default())
+            .unwrap()
+            .layout()
+            .clone();
         let group = dock_core::FloatingGroupId::null();
 
         let mut left = session(
@@ -985,10 +1088,7 @@ mod tests {
                 edge: ResizeEdge::Left,
             },
             StartGeometry::FloatingEdge {
-                bounds: Rect::new(
-                    Point::new(-f32::MAX, 0.0),
-                    Size::new(f32::MAX, 200.0),
-                ),
+                bounds: Rect::new(Point::new(-f32::MAX, 0.0), Size::new(f32::MAX, 200.0)),
             },
         );
         left.pointer_start = Point::ZERO;
@@ -1004,10 +1104,7 @@ mod tests {
                 edge: ResizeEdge::Top,
             },
             StartGeometry::FloatingEdge {
-                bounds: Rect::new(
-                    Point::new(0.0, -f32::MAX),
-                    Size::new(300.0, f32::MAX),
-                ),
+                bounds: Rect::new(Point::new(0.0, -f32::MAX), Size::new(300.0, f32::MAX)),
             },
         );
         top.pointer_start = Point::ZERO;
@@ -1019,7 +1116,10 @@ mod tests {
 
     #[test]
     fn single_axis_floating_edge_rejects_overflowing_used_delta() {
-        let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
+        let layout = DockController::new_initial(&Theme::default())
+            .unwrap()
+            .layout()
+            .clone();
         let group = dock_core::FloatingGroupId::null();
         let start_bounds = Rect::new(Point::new(10.0, 20.0), Size::new(300.0, 200.0));
 
@@ -1058,7 +1158,10 @@ mod tests {
 
     #[test]
     fn single_axis_floating_edge_ignores_unused_delta_overflow() {
-        let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
+        let layout = DockController::new_initial(&Theme::default())
+            .unwrap()
+            .layout()
+            .clone();
         let group = dock_core::FloatingGroupId::null();
         let start_bounds = Rect::new(Point::new(10.0, 20.0), Size::new(300.0, 200.0));
 
@@ -1074,7 +1177,8 @@ mod tests {
         );
         top.pointer_start = Point::new(f32::MAX, 100.0);
         assert_eq!(
-            top.command_for_pointer(Point::new(-f32::MAX, 110.0)).unwrap(),
+            top.command_for_pointer(Point::new(-f32::MAX, 110.0))
+                .unwrap(),
             DockCommand::ResizeFloatingBounds {
                 group,
                 bounds: Rect::new(Point::new(10.0, 30.0), Size::new(300.0, 190.0)),
@@ -1093,7 +1197,9 @@ mod tests {
         );
         right.pointer_start = Point::new(100.0, f32::MAX);
         assert_eq!(
-            right.command_for_pointer(Point::new(110.0, -f32::MAX)).unwrap(),
+            right
+                .command_for_pointer(Point::new(110.0, -f32::MAX))
+                .unwrap(),
             DockCommand::ResizeFloatingBounds {
                 group,
                 bounds: Rect::new(Point::new(10.0, 20.0), Size::new(310.0, 200.0)),
@@ -1103,7 +1209,10 @@ mod tests {
 
     #[test]
     fn corner_floating_edge_rejects_overflowing_used_axis_delta() {
-        let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
+        let layout = DockController::new_initial(&Theme::default())
+            .unwrap()
+            .layout()
+            .clone();
         let group = dock_core::FloatingGroupId::null();
         let start_bounds = Rect::new(Point::new(10.0, 20.0), Size::new(300.0, 200.0));
 
@@ -1142,7 +1251,10 @@ mod tests {
 
     #[test]
     fn command_for_pointer_rejects_non_finite_coordinates() {
-        let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
+        let layout = DockController::new_initial(&Theme::default())
+            .unwrap()
+            .layout()
+            .clone();
         let owner = layout
             .nodes()
             .find_map(|(id, node)| matches!(node, Node::Column(_)).then_some(id))
@@ -1169,10 +1281,12 @@ mod tests {
         ));
     }
 
-
     #[test]
     fn command_for_pointer_rejects_overflowing_used_delta() {
-        let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
+        let layout = DockController::new_initial(&Theme::default())
+            .unwrap()
+            .layout()
+            .clone();
         let owner = layout
             .nodes()
             .find_map(|(id, node)| matches!(node, Node::Column(_)).then_some(id))
@@ -1198,7 +1312,10 @@ mod tests {
 
     #[test]
     fn command_for_pointer_ignores_overflowing_unused_axis_delta() {
-        let layout = DockController::new_initial(&Theme::default()).unwrap().layout().clone();
+        let layout = DockController::new_initial(&Theme::default())
+            .unwrap()
+            .layout()
+            .clone();
         let owner = layout
             .nodes()
             .find_map(|(id, node)| matches!(node, Node::Column(_)).then_some(id))
@@ -1358,9 +1475,7 @@ mod tests {
         let group = stale_layout
             .nodes()
             .find_map(|(_, node)| match node {
-                Node::Column(column) if column.groups.len() > 1 => {
-                    column.groups.first().copied()
-                }
+                Node::Column(column) if column.groups.len() > 1 => column.groups.first().copied(),
                 _ => None,
             })
             .expect("initial layout should contain a column with multiple groups");
@@ -1412,9 +1527,7 @@ mod tests {
         let group = layout
             .nodes()
             .find_map(|(_, node)| match node {
-                Node::Column(column) if column.groups.len() > 1 => {
-                    column.groups.first().copied()
-                }
+                Node::Column(column) if column.groups.len() > 1 => column.groups.first().copied(),
                 _ => None,
             })
             .expect("initial layout should contain a column with multiple groups");
@@ -1541,5 +1654,4 @@ mod tests {
             Err(ResizeStartError::MissingColumnGeometry)
         );
     }
-
 }

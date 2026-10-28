@@ -1,15 +1,10 @@
 //! Workspace loading, export, floating-bound adjustment, and load repairs.
 
-
-
 use super::*;
 
 use crate::{WorkspaceFile, WorkspaceFileError};
 
-
-
 impl Layout {
-
     #[cfg(feature = "serde")]
     pub(crate) fn from_workspace_parts(parts: WorkspaceLayoutParts) -> Self {
         let WorkspaceLayoutParts {
@@ -145,11 +140,7 @@ impl Layout {
 
     #[cfg(feature = "serde")]
     fn subtree_contains_panel(&self, root: NodeId) -> bool {
-        fn contains_panel(
-            layout: &Layout,
-            node_id: NodeId,
-            visited: &mut HashSet<NodeId>,
-        ) -> bool {
+        fn contains_panel(layout: &Layout, node_id: NodeId, visited: &mut HashSet<NodeId>) -> bool {
             if !visited.insert(node_id) {
                 return false;
             }
@@ -205,10 +196,9 @@ impl Layout {
                 Some(Node::Column(_)) => vec![area.root],
                 Some(Node::Split(split))
                     if split.axis == Axis::X
-                        && split
-                            .children
-                            .iter()
-                            .all(|child| matches!(self.nodes.get(*child), Some(Node::Column(_)))) =>
+                        && split.children.iter().all(|child| {
+                            matches!(self.nodes.get(*child), Some(Node::Column(_)))
+                        }) =>
                 {
                     split.children.clone()
                 }
@@ -303,8 +293,9 @@ impl Layout {
                 .copied()
                 .filter(|column| !retained.contains(column))
             {
-                if let Some((_, sources)) =
-                    merges.iter_mut().find(|(existing_target, _)| *existing_target == target)
+                if let Some((_, sources)) = merges
+                    .iter_mut()
+                    .find(|(existing_target, _)| *existing_target == target)
                 {
                     sources.push(source);
                 } else {
@@ -446,11 +437,7 @@ impl Layout {
             let Some(area) = self.dock_areas.get(area_id).copied() else {
                 continue;
             };
-            if !self.repair_duplicate_singletons_in_node(
-                area.root,
-                &mut first_by_key,
-                &mut notes,
-            ) {
+            if !self.repair_duplicate_singletons_in_node(area.root, &mut first_by_key, &mut notes) {
                 self.main_areas[index] = None;
                 self.dock_areas.remove(area_id);
             }
@@ -464,11 +451,7 @@ impl Layout {
             let Some(area) = self.dock_areas.get(group.area).copied() else {
                 continue;
             };
-            if !self.repair_duplicate_singletons_in_node(
-                area.root,
-                &mut first_by_key,
-                &mut notes,
-            ) {
+            if !self.repair_duplicate_singletons_in_node(area.root, &mut first_by_key, &mut notes) {
                 self.floating_groups.remove(group_id);
                 self.dock_areas.remove(group.area);
             }
@@ -664,17 +647,16 @@ impl Layout {
                 .map_err(|_| {
                     vec![ValidationError::InvalidColumn {
                         node: node_id,
-                        reason: ValidationReason::CannotComputeMinimumWidthRequiredByExpandedContents,
+                        reason:
+                            ValidationReason::CannotComputeMinimumWidthRequiredByExpandedContents,
                     }]
                 })?;
-            let maximum = self
-                .maximum_expanded_column_width(node_id)
-                .map_err(|_| {
-                    vec![ValidationError::InvalidColumn {
-                        node: node_id,
-                        reason: ValidationReason::CannotComputeMaximumWidthAllowedByExpandedContents,
-                    }]
-                })?;
+            let maximum = self.maximum_expanded_column_width(node_id).map_err(|_| {
+                vec![ValidationError::InvalidColumn {
+                    node: node_id,
+                    reason: ValidationReason::CannotComputeMaximumWidthAllowedByExpandedContents,
+                }]
+            })?;
             if maximum.is_some_and(|maximum| maximum < minimum) {
                 return Err(vec![ValidationError::InvalidColumn {
                     node: node_id,
@@ -724,6 +706,4 @@ impl Layout {
 
         Ok(())
     }
-
 }
-

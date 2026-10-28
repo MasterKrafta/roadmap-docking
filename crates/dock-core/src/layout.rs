@@ -93,20 +93,20 @@ pub struct Layout {
 }
 
 mod column_width_management;
-mod floating_operations;
 mod command_panels;
 mod drop_handling;
+mod floating_operations;
 
-mod group_operations;
 mod command_target_operations;
 mod commands;
+mod group_operations;
 mod helpers;
-mod sizing;
 mod layout_api;
-#[cfg(feature = "serde")]
-mod workspace;
+mod sizing;
 mod tree_navigation;
 mod validation;
+#[cfg(feature = "serde")]
+mod workspace;
 
 #[cfg(test)]
 mod tests;

@@ -3,17 +3,16 @@ use std::collections::HashMap;
 #[path = "compute_drop_zones/drop_zone_tree.rs"]
 mod drop_zone_tree;
 pub(super) use drop_zone_tree::{
-    can_add_column, collect_panels, contains_node, direct_parent, edge_group_for_column,
-    edge_group_for_dock_edge, group_edge_is_noop, group_main_column, is_rail_group,
-    main_columns, owner_column,
-    panel_node, source_allows, source_is_floating_root, source_root, target_area,
-    DropZoneTreeIndex,
+    DropZoneTreeIndex, can_add_column, collect_panels, contains_node, direct_parent,
+    edge_group_for_column, edge_group_for_dock_edge, group_edge_is_noop, group_main_column,
+    is_rail_group, main_columns, owner_column, panel_node, source_allows, source_is_floating_root,
+    source_root, target_area,
 };
 
-#[path = "compute_drop_zones/drop_zone_main.rs"]
-mod drop_zone_main;
 #[path = "compute_drop_zones/drop_zone_floating.rs"]
 mod drop_zone_floating;
+#[path = "compute_drop_zones/drop_zone_main.rs"]
+mod drop_zone_main;
 
 use crate::{
     AllowedArea, ComputeRectsError, DockMetrics, DockSide, DropSource, DropTarget, DropZone,
@@ -103,7 +102,9 @@ impl Layout {
         metrics: &DockMetrics,
         tree_index: &DropZoneTreeIndex,
     ) -> Result<Vec<DropZoneRect>, ComputeRectsError> {
-        let viewport = rects.viewport.ok_or(ComputeRectsError::InvalidLayoutState)?;
+        let viewport = rects
+            .viewport
+            .ok_or(ComputeRectsError::InvalidLayoutState)?;
         viewport
             .validate_non_empty()
             .map_err(ComputeRectsError::Geometry)?;
@@ -276,9 +277,7 @@ pub(super) fn floating_edge_rect_for_branch(
         Point::new(left, edge_rect.origin.y),
         Size::new((right - left).max(0.0), edge_rect.size.height),
     );
-    result
-        .validate()
-        .map_err(ComputeRectsError::Geometry)?;
+    result.validate().map_err(ComputeRectsError::Geometry)?;
     Ok(result)
 }
 
@@ -418,10 +417,7 @@ impl DropZoneResolver {
         self.resolve_validated(point)
     }
 
-    fn resolve_validated(
-        &self,
-        point: Point,
-    ) -> Result<Option<DropTarget>, ComputeRectsError> {
+    fn resolve_validated(&self, point: Point) -> Result<Option<DropTarget>, ComputeRectsError> {
         let mut topmost_floating: Option<&FloatingDropArea> = None;
         for floating in &self.floating_areas {
             if floating
@@ -448,7 +444,9 @@ impl DropZoneResolver {
                         | DropZone::TabInsertion
                         | DropZone::Left
                         | DropZone::Right
-                ) && zone.target.referenced_node_id()
+                ) && zone
+                    .target
+                    .referenced_node_id()
                     .map(|node| contains_node(&self.tree_index, floating.root, node))
                     .unwrap_or(false)
             });

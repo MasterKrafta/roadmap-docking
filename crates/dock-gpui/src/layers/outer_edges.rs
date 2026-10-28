@@ -7,10 +7,7 @@ use crate::requests::ResizeHandle;
 use crate::surface::RenderData;
 use crate::tree_query::main_column_ids;
 
-pub(crate) fn render(
-    data: &RenderData<'_>,
-    host: &mut dyn DockHost,
-) -> Vec<gpui::AnyElement> {
+pub(crate) fn render(data: &RenderData<'_>, host: &mut dyn DockHost) -> Vec<gpui::AnyElement> {
     let layout = data.layout;
     let rects = data.rects;
     let theme = data.theme;
@@ -32,7 +29,10 @@ pub(crate) fn render(
         let Some(column_rect) = rects.columns.iter().find(|entry| entry.column == column_id) else {
             continue;
         };
-        let width = theme.metrics.splitter_hit_zone.min(column_rect.rect.size.width);
+        let width = theme
+            .metrics
+            .splitter_hit_zone
+            .min(column_rect.rect.size.width);
         let edge_x = if side == DockSide::Left {
             column_rect.rect.origin.x + column_rect.rect.size.width
         } else {

@@ -40,21 +40,96 @@ impl DockMetrics {
     /// Validates finiteness, positivity, and the required metric relationships.
     pub fn validate(self) -> Result<(), &'static str> {
         let positive = [
-            ("default_column_width", self.default_column_width, "default_column_width must be finite", "default_column_width must be positive"),
-            ("min_column_width", self.min_column_width, "min_column_width must be finite", "min_column_width must be positive"),
-            ("rail_width", self.rail_width, "rail_width must be finite", "rail_width must be positive"),
-            ("splitter_thickness", self.splitter_thickness, "splitter_thickness must be finite", "splitter_thickness must be positive"),
-            ("splitter_hit_zone", self.splitter_hit_zone, "splitter_hit_zone must be finite", "splitter_hit_zone must be positive"),
-            ("edge_drop_width", self.edge_drop_width, "edge_drop_width must be finite", "edge_drop_width must be positive"),
-            ("drag_threshold", self.drag_threshold, "drag_threshold must be finite", "drag_threshold must be positive"),
-            ("min_group_height", self.min_group_height, "min_group_height must be finite", "min_group_height must be positive"),
-            ("collapsed_group_height", self.collapsed_group_height, "collapsed_group_height must be finite", "collapsed_group_height must be positive"),
-            ("header_height", self.header_height, "header_height must be finite", "header_height must be positive"),
-            ("tab_strip_height", self.tab_strip_height, "tab_strip_height must be finite", "tab_strip_height must be positive"),
-            ("group_control_button_width", self.group_control_button_width, "group_control_button_width must be finite", "group_control_button_width must be positive"),
-            ("min_tab_width", self.min_tab_width, "min_tab_width must be finite", "min_tab_width must be positive"),
-            ("tab_overflow_button_width", self.tab_overflow_button_width, "tab_overflow_button_width must be finite", "tab_overflow_button_width must be positive"),
-            ("min_canvas_width", self.min_canvas_width, "min_canvas_width must be finite", "min_canvas_width must be positive"),
+            (
+                "default_column_width",
+                self.default_column_width,
+                "default_column_width must be finite",
+                "default_column_width must be positive",
+            ),
+            (
+                "min_column_width",
+                self.min_column_width,
+                "min_column_width must be finite",
+                "min_column_width must be positive",
+            ),
+            (
+                "rail_width",
+                self.rail_width,
+                "rail_width must be finite",
+                "rail_width must be positive",
+            ),
+            (
+                "splitter_thickness",
+                self.splitter_thickness,
+                "splitter_thickness must be finite",
+                "splitter_thickness must be positive",
+            ),
+            (
+                "splitter_hit_zone",
+                self.splitter_hit_zone,
+                "splitter_hit_zone must be finite",
+                "splitter_hit_zone must be positive",
+            ),
+            (
+                "edge_drop_width",
+                self.edge_drop_width,
+                "edge_drop_width must be finite",
+                "edge_drop_width must be positive",
+            ),
+            (
+                "drag_threshold",
+                self.drag_threshold,
+                "drag_threshold must be finite",
+                "drag_threshold must be positive",
+            ),
+            (
+                "min_group_height",
+                self.min_group_height,
+                "min_group_height must be finite",
+                "min_group_height must be positive",
+            ),
+            (
+                "collapsed_group_height",
+                self.collapsed_group_height,
+                "collapsed_group_height must be finite",
+                "collapsed_group_height must be positive",
+            ),
+            (
+                "header_height",
+                self.header_height,
+                "header_height must be finite",
+                "header_height must be positive",
+            ),
+            (
+                "tab_strip_height",
+                self.tab_strip_height,
+                "tab_strip_height must be finite",
+                "tab_strip_height must be positive",
+            ),
+            (
+                "group_control_button_width",
+                self.group_control_button_width,
+                "group_control_button_width must be finite",
+                "group_control_button_width must be positive",
+            ),
+            (
+                "min_tab_width",
+                self.min_tab_width,
+                "min_tab_width must be finite",
+                "min_tab_width must be positive",
+            ),
+            (
+                "tab_overflow_button_width",
+                self.tab_overflow_button_width,
+                "tab_overflow_button_width must be finite",
+                "tab_overflow_button_width must be positive",
+            ),
+            (
+                "min_canvas_width",
+                self.min_canvas_width,
+                "min_canvas_width must be finite",
+                "min_canvas_width must be positive",
+            ),
         ];
 
         for (_name, value, non_finite, non_positive) in positive {
@@ -88,7 +163,6 @@ impl DockMetrics {
         Ok(())
     }
 }
-
 
 #[cfg(feature = "serde")]
 impl<'de> serde::Deserialize<'de> for DockMetrics {
@@ -228,7 +302,8 @@ mod tests {
     #[cfg(feature = "serde")]
     #[test]
     fn serde_deserialization_rejects_invalid_metric_relationships() {
-        let invalid = r#"{ "header_height": 60.0, "tab_strip_height": 40.0, "min_group_height": 80.0 }"#;
+        let invalid =
+            r#"{ "header_height": 60.0, "tab_strip_height": 40.0, "min_group_height": 80.0 }"#;
         assert!(serde_json::from_str::<DockMetrics>(invalid).is_err());
         let defaults: DockMetrics = serde_json::from_str("{}").unwrap();
         assert_eq!(defaults, DockMetrics::default());

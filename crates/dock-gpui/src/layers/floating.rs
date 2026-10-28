@@ -8,12 +8,12 @@ use crate::requests::ResizeHandle;
 use crate::surface::RenderData;
 use crate::tree_query::first_panel_in_subtree;
 
-use super::{rect_element, tree::{self, TreeArea}};
+use super::{
+    rect_element,
+    tree::{self, TreeArea},
+};
 
-pub(crate) fn render(
-    data: &RenderData<'_>,
-    host: &mut dyn DockHost,
-) -> Vec<AnyElement> {
+pub(crate) fn render(data: &RenderData<'_>, host: &mut dyn DockHost) -> Vec<AnyElement> {
     let layout = data.layout;
     let rects = data.rects;
     let theme = data.theme;

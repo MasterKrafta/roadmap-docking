@@ -16,12 +16,7 @@ pub(super) struct DragGeometrySnapshot {
 }
 
 impl DragGeometrySnapshot {
-    pub(super) fn matches(
-        self,
-        layout_version: u64,
-        viewport: Rect,
-        metrics: DockMetrics,
-    ) -> bool {
+    pub(super) fn matches(self, layout_version: u64, viewport: Rect, metrics: DockMetrics) -> bool {
         self.layout_version == layout_version
             && self.viewport == viewport
             && self.metrics == metrics
@@ -95,14 +90,15 @@ impl fmt::Display for DragUpdateError {
         match self {
             Self::Core(error) => write!(formatter, "core drag update failed: {error:?}"),
             Self::Geometry(error) => {
-                write!(formatter, "drop-zone geometry preparation failed: {error:?}")
+                write!(
+                    formatter,
+                    "drop-zone geometry preparation failed: {error:?}"
+                )
             }
             Self::MissingFrameGeometry => {
                 formatter.write_str("drag activation requires current frame geometry")
             }
-            Self::StaleFrameGeometry => {
-                formatter.write_str("drag frame geometry is stale")
-            }
+            Self::StaleFrameGeometry => formatter.write_str("drag frame geometry is stale"),
         }
     }
 }

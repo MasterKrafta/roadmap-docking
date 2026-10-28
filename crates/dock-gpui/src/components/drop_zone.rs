@@ -41,7 +41,6 @@ impl RenderOnce for DropZone {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use crate::color::blend_rgb;

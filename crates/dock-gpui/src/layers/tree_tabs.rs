@@ -1,14 +1,13 @@
 use dock_core::{
-    Axis, ColumnMode, DockCommand, DockSide, DragHandle, DragPayload, DropTarget,
-    Layout, LayoutRects, Node, NodeId, PanelId, Point, Profile, Rect, Size,
+    Axis, ColumnMode, DockCommand, DockSide, DragHandle, DragPayload, DropTarget, Layout,
+    LayoutRects, Node, NodeId, PanelId, Point, Profile, Rect, Size,
 };
 use gpui::{AnyElement, IntoElement};
 
 use crate::components::focus_ring::{
     PanelColumnMoveDirection, PanelMoveDirection, TabReorderDirection,
-    keyboard_panel_column_move_direction, keyboard_panel_move_direction,
-    keyboard_panel_other_side_move, keyboard_panel_rail_move, keyboard_panel_float_move,
-    keyboard_tab_reorder_direction,
+    keyboard_panel_column_move_direction, keyboard_panel_float_move, keyboard_panel_move_direction,
+    keyboard_panel_other_side_move, keyboard_panel_rail_move, keyboard_tab_reorder_direction,
 };
 use crate::components::{ColumnModeButton, GroupMenuButton, PanelTab, TabOverflowButton};
 use crate::dock::{activate_tab, collapse_group, cycle_column_mode};
@@ -32,11 +31,15 @@ pub(crate) fn render(
     let nodes = area.nodes;
     let mut elements = Vec::new();
 
-    for header in rects.tab_headers.iter().filter(|entry| {
-        nodes.contains(&entry.group) && !rail_groups.contains(&entry.group)
-    }) {
-        let collapsed = matches!(layout.node(header.group), Some(Node::Tabs(tabs)) if tabs.collapsed);
-        let label = layout.panel_instance(header.panel)
+    for header in rects
+        .tab_headers
+        .iter()
+        .filter(|entry| nodes.contains(&entry.group) && !rail_groups.contains(&entry.group))
+    {
+        let collapsed =
+            matches!(layout.node(header.group), Some(Node::Tabs(tabs)) if tabs.collapsed);
+        let label = layout
+            .panel_instance(header.panel)
             .map(|instance| host.panel_title(instance).to_string())
             .unwrap_or_else(|| "Missing panel".to_owned());
         let display_label = tab_header_label(&label, collapsed, header.index);
@@ -74,30 +77,47 @@ pub(crate) fn render(
                 ),
                 on_collapse_toggle: host.command(collapse_group(header.group, !collapsed)),
                 on_drag_start: host.drag_start(
-                    DragPayload::Panel { panel: header.panel },
+                    DragPayload::Panel {
+                        panel: header.panel,
+                    },
                     DragHandle::PanelTab,
                 ),
-            }.into_any_element(),
+            }
+            .into_any_element(),
         );
     }
 
-    for overflow in rects.tab_overflows.iter().filter(|entry| nodes.contains(&entry.group)) {
+    for overflow in rects
+        .tab_overflows
+        .iter()
+        .filter(|entry| nodes.contains(&entry.group))
+    {
         elements.push(
             TabOverflowButton {
                 group: overflow.group,
                 rect: area.rect(overflow.button_rect),
                 theme: *theme,
-                on_open: host.menu(DockMenuRequest::TabOverflow { group: overflow.group }),
-            }.into_any_element(),
+                on_open: host.menu(DockMenuRequest::TabOverflow {
+                    group: overflow.group,
+                }),
+            }
+            .into_any_element(),
         );
     }
 
-    for strip in rects.tab_strips.iter().filter(|entry| {
-        nodes.contains(&entry.group) && !rail_groups.contains(&entry.group)
-    }) {
-        let Some(Node::Tabs(tabs)) = layout.node(strip.group) else { continue; };
+    for strip in rects
+        .tab_strips
+        .iter()
+        .filter(|entry| nodes.contains(&entry.group) && !rail_groups.contains(&entry.group))
+    {
+        let Some(Node::Tabs(tabs)) = layout.node(strip.group) else {
+            continue;
+        };
         let strip_bounds = area.rect(strip.rect);
-        let button_width = theme.metrics.group_control_button_width.min(strip.rect.size.width);
+        let button_width = theme
+            .metrics
+            .group_control_button_width
+            .min(strip.rect.size.width);
         let mode_button_column = layout.nodes().find_map(|(column_id, node)| match node {
             Node::Column(column)
                 if column.groups.first().copied() == Some(strip.group)
@@ -125,7 +145,8 @@ pub(crate) fn render(
                     rect: Rect::new(
                         Point::new(
                             strip_bounds.origin.x + strip_bounds.size.width
-                                - button_width - mode_button_width,
+                                - button_width
+                                - mode_button_width,
                             strip_bounds.origin.y,
                         ),
                         Size::new(mode_button_width, strip_bounds.size.height),
@@ -137,7 +158,10 @@ pub(crate) fn render(
             );
         }
         let menu_rect = Rect::new(
-            Point::new(strip_bounds.origin.x + strip_bounds.size.width - button_width, strip_bounds.origin.y),
+            Point::new(
+                strip_bounds.origin.x + strip_bounds.size.width - button_width,
+                strip_bounds.origin.y,
+            ),
             Size::new(button_width, strip_bounds.size.height),
         );
         let panel = active_panel(layout, tabs);
@@ -147,8 +171,12 @@ pub(crate) fn render(
                 panel,
                 rect: menu_rect,
                 theme: *theme,
-                on_open: host.menu(DockMenuRequest::PanelGroup { group: strip.group, panel }),
-            }.into_any_element(),
+                on_open: host.menu(DockMenuRequest::PanelGroup {
+                    group: strip.group,
+                    panel,
+                }),
+            }
+            .into_any_element(),
         );
     }
 
@@ -181,8 +209,8 @@ fn reorder_tab_key_handler(
         None
     };
 
-    Box::new(move |event, window, app| {
-        match keyboard_tab_reorder_direction(&event.keystroke) {
+    Box::new(
+        move |event, window, app| match keyboard_tab_reorder_direction(&event.keystroke) {
             Some(TabReorderDirection::Previous) => {
                 if let Some(handler) = &move_previous {
                     handler(event, window, app);
@@ -194,8 +222,8 @@ fn reorder_tab_key_handler(
                 }
             }
             None => {}
-        }
-    })
+        },
+    )
 }
 
 fn move_panel_key_handler(
@@ -212,9 +240,11 @@ fn move_panel_key_handler(
         if column.mode.is_rail() {
             return None;
         }
-        let source_index = column.groups.iter().position(|group| *group == source_group)?;
-        let (previous_index, next_index) =
-            adjacent_indices(source_index, column.groups.len());
+        let source_index = column
+            .groups
+            .iter()
+            .position(|group| *group == source_group)?;
+        let (previous_index, next_index) = adjacent_indices(source_index, column.groups.len());
         Some((
             previous_index.and_then(|index| column.groups.get(index).copied()),
             next_index.and_then(|index| column.groups.get(index).copied()),
@@ -348,9 +378,10 @@ fn main_column_ids(layout: &Layout, side: DockSide) -> Option<Vec<NodeId>> {
         Some(Node::Column(_)) => Some(vec![area.root]),
         Some(Node::Split(split))
             if split.axis == Axis::X
-                && split.children.iter().all(|child| {
-                    matches!(layout.node(*child), Some(Node::Column(_)))
-                }) =>
+                && split
+                    .children
+                    .iter()
+                    .all(|child| matches!(layout.node(*child), Some(Node::Column(_)))) =>
         {
             Some(split.children.clone())
         }
@@ -363,16 +394,22 @@ fn opposite_main_dock_group(layout: &Layout, source_group: NodeId) -> Option<Nod
         .into_iter()
         .find_map(|side| {
             let columns = main_column_ids(layout, side)?;
-            columns.iter().enumerate().find_map(|(column_index, column_id)| {
-                let Node::Column(column) = layout.node(*column_id)? else {
-                    return None;
-                };
-                if column.mode.is_rail() {
-                    return None;
-                }
-                let group_index = column.groups.iter().position(|group| *group == source_group)?;
-                Some((side, column_index, group_index))
-            })
+            columns
+                .iter()
+                .enumerate()
+                .find_map(|(column_index, column_id)| {
+                    let Node::Column(column) = layout.node(*column_id)? else {
+                        return None;
+                    };
+                    if column.mode.is_rail() {
+                        return None;
+                    }
+                    let group_index = column
+                        .groups
+                        .iter()
+                        .position(|group| *group == source_group)?;
+                    Some((side, column_index, group_index))
+                })
         })?;
     let target_side = match source.0 {
         DockSide::Left => DockSide::Right,
@@ -394,17 +431,19 @@ fn opposite_main_dock_group(layout: &Layout, source_group: NodeId) -> Option<Nod
 
 /// Returns the append slot of the first icon-rail column on the side owning this main-dock group.
 fn main_rail_target_for_group(layout: &Layout, source_group: NodeId) -> Option<(NodeId, usize)> {
-    let columns = [DockSide::Left, DockSide::Right].into_iter().find_map(|side| {
-        let columns = main_column_ids(layout, side)?;
-        let source_is_expanded = columns.iter().any(|column_id| {
-            matches!(
-                layout.node(*column_id),
-                Some(Node::Column(column))
-                    if !column.mode.is_rail() && column.groups.contains(&source_group)
-            )
-        });
-        source_is_expanded.then_some(columns)
-    })?;
+    let columns = [DockSide::Left, DockSide::Right]
+        .into_iter()
+        .find_map(|side| {
+            let columns = main_column_ids(layout, side)?;
+            let source_is_expanded = columns.iter().any(|column_id| {
+                matches!(
+                    layout.node(*column_id),
+                    Some(Node::Column(column))
+                        if !column.mode.is_rail() && column.groups.contains(&source_group)
+                )
+            });
+            source_is_expanded.then_some(columns)
+        })?;
 
     let rail_column = columns.into_iter().find(|column_id| {
         matches!(layout.node(*column_id), Some(Node::Column(column)) if column.mode.is_rail())
@@ -435,7 +474,9 @@ fn floating_panel_bounds(
     }
 
     let canvas = rects.canvas?;
-    let source_bounds = rects.groups.iter()
+    let source_bounds = rects
+        .groups
+        .iter()
         .find(|entry| entry.group == source_group)
         .map(|entry| entry.rect)?;
     centered_floating_bounds(canvas, source_bounds)
@@ -470,10 +511,7 @@ fn corresponding_group_index(source_index: usize, target_group_count: usize) -> 
     }
 }
 
-fn adjacent_indices(
-    source_index: usize,
-    item_count: usize,
-) -> (Option<usize>, Option<usize>) {
+fn adjacent_indices(source_index: usize, item_count: usize) -> (Option<usize>, Option<usize>) {
     if source_index >= item_count {
         return (None, None);
     }
@@ -487,12 +525,13 @@ fn adjacent_indices(
 mod keyboard_panel_move_tests {
     use super::{
         adjacent_indices, centered_floating_bounds, corresponding_group_index,
-        floating_panel_bounds, main_column_ids, main_rail_target_for_group, opposite_main_dock_group,
+        floating_panel_bounds, main_column_ids, main_rail_target_for_group,
+        opposite_main_dock_group,
     };
     use crate::dock::DockController;
     use dock_core::{
-        ColumnMode, DockCommand, DockSide, DropTarget, GroupRect, LayoutRects, Node, Point, Profile,
-        Rect, Size,
+        ColumnMode, DockCommand, DockSide, DropTarget, GroupRect, LayoutRects, Node, Point,
+        Profile, Rect, Size,
     };
     use ui::Theme;
 
@@ -518,18 +557,24 @@ mod keyboard_panel_move_tests {
 
     #[test]
     fn floating_panel_target_requires_multi_tab_photoshop_group_and_geometry() {
-        let mut controller = DockController::new_initial(&Theme::default())
-            .expect("initial layout should be valid");
+        let mut controller =
+            DockController::new_initial(&Theme::default()).expect("initial layout should be valid");
         let (source_group, panel) = controller
             .layout()
             .nodes()
             .find_map(|(group, node)| {
-                let Node::Tabs(tabs) = node else { return None; };
-                if tabs.children.len() < 2 { return None; }
-                tabs.children.iter().find_map(|child| match controller.layout().node(*child) {
-                    Some(Node::Panel(value)) => Some((group, value.panel_id)),
-                    _ => None,
-                })
+                let Node::Tabs(tabs) = node else {
+                    return None;
+                };
+                if tabs.children.len() < 2 {
+                    return None;
+                }
+                tabs.children
+                    .iter()
+                    .find_map(|child| match controller.layout().node(*child) {
+                        Some(Node::Panel(value)) => Some((group, value.panel_id)),
+                        _ => None,
+                    })
             })
             .expect("initial Photoshop layout should contain a multi-tab group");
         let canvas = Rect::new(Point::ZERO, Size::new(800.0, 600.0));
@@ -542,7 +587,10 @@ mod keyboard_panel_move_tests {
 
         let bounds = floating_panel_bounds(controller.layout(), &rects, source_group, panel)
             .expect("eligible panel and available geometry should produce bounds");
-        assert_eq!(bounds, Rect::new(Point::new(260.0, 170.0), Size::new(280.0, 260.0)));
+        assert_eq!(
+            bounds,
+            Rect::new(Point::new(260.0, 170.0), Size::new(280.0, 260.0))
+        );
 
         controller
             .apply(DockCommand::FloatPanelAsGroup { panel, bounds })
@@ -558,29 +606,41 @@ mod keyboard_panel_move_tests {
             .layout()
             .nodes()
             .find_map(|(group, node)| {
-                let Node::Tabs(tabs) = node else { return None; };
-                let panel = tabs.children.iter().find_map(|child| match controller.layout().node(*child) {
-                    Some(Node::Panel(value)) => Some(value.panel_id),
-                    _ => None,
+                let Node::Tabs(tabs) = node else {
+                    return None;
+                };
+                let panel = tabs.children.iter().find_map(|child| {
+                    match controller.layout().node(*child) {
+                        Some(Node::Panel(value)) => Some(value.panel_id),
+                        _ => None,
+                    }
                 })?;
                 Some((group, panel))
             })
             .expect("initial layout should contain a panel group");
         let rects = LayoutRects::default();
-        assert_eq!(floating_panel_bounds(controller.layout(), &rects, source_group, panel), None);
+        assert_eq!(
+            floating_panel_bounds(controller.layout(), &rects, source_group, panel),
+            None
+        );
 
         let generic_layout = dock_core::Layout::new(Profile::Generic);
-        assert_eq!(floating_panel_bounds(&generic_layout, &rects, source_group, panel), None);
+        assert_eq!(
+            floating_panel_bounds(&generic_layout, &rects, source_group, panel),
+            None
+        );
     }
 
     #[test]
     fn panel_move_targets_append_slot_in_same_side_icon_rail() {
-        let mut controller = DockController::new_initial(&Theme::default())
-            .expect("initial layout should be valid");
+        let mut controller =
+            DockController::new_initial(&Theme::default()).expect("initial layout should be valid");
         let initial_columns = main_column_ids(controller.layout(), DockSide::Right)
             .expect("initial layout should have a right dock");
         let initial_group = match controller.layout().node(initial_columns[0]) {
-            Some(Node::Column(column)) => *column.groups.first().expect("column should have a group"),
+            Some(Node::Column(column)) => {
+                *column.groups.first().expect("column should have a group")
+            }
             _ => panic!("main dock root should be a column"),
         };
         assert!(main_rail_target_for_group(controller.layout(), initial_group).is_none());
@@ -616,12 +676,17 @@ mod keyboard_panel_move_tests {
             })
             .expect("right dock should retain an expanded source column");
         let source_group = match controller.layout().node(source_column) {
-            Some(Node::Column(column)) => *column.groups.first().expect("source column has a group"),
+            Some(Node::Column(column)) => {
+                *column.groups.first().expect("source column has a group")
+            }
             _ => panic!("source column should be a column"),
         };
         let source_panel = match controller.layout().node(source_group) {
             Some(Node::Tabs(tabs)) => match controller.layout().node(
-                *tabs.children.first().expect("source group should contain a panel"),
+                *tabs
+                    .children
+                    .first()
+                    .expect("source group should contain a panel"),
             ) {
                 Some(Node::Panel(panel)) => panel.panel_id,
                 _ => panic!("tab group child should be a panel"),
@@ -683,8 +748,8 @@ mod keyboard_panel_move_tests {
 
     #[test]
     fn panel_side_move_targets_a_regular_group_on_the_opposite_side() {
-        let mut controller = DockController::new_initial(&Theme::default())
-            .expect("initial layout should be valid");
+        let mut controller =
+            DockController::new_initial(&Theme::default()).expect("initial layout should be valid");
         let group_to_move = main_column_ids(controller.layout(), DockSide::Right)
             .expect("initial layout should have a right dock")
             .into_iter()
@@ -714,8 +779,8 @@ mod keyboard_panel_move_tests {
             .expect("left dock should contain a regular group");
         let target_group = opposite_main_dock_group(layout, source_group)
             .expect("opposite dock should contain a regular target group");
-        let right_columns = main_column_ids(layout, DockSide::Right)
-            .expect("right dock should remain available");
+        let right_columns =
+            main_column_ids(layout, DockSide::Right).expect("right dock should remain available");
 
         assert!(right_columns.into_iter().any(|column_id| {
             matches!(
@@ -725,4 +790,3 @@ mod keyboard_panel_move_tests {
         }));
     }
 }
-

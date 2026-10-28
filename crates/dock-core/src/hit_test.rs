@@ -1,9 +1,8 @@
 use std::collections::HashSet;
 
 use crate::{
-    Axis, ComputeRectsError, DockMetrics, DropTarget, DropZone, FloatingGroupId,
-    FloatingGroupRect, FlyoutRect, Layout, LayoutRects, Node, NodeId, PanelId, Point, Rect,
-    ResizeEdge, Size,
+    Axis, ComputeRectsError, DockMetrics, DropTarget, DropZone, FloatingGroupId, FloatingGroupRect,
+    FlyoutRect, Layout, LayoutRects, Node, NodeId, PanelId, Point, Rect, ResizeEdge, Size,
 };
 
 /// Semantic result of hit-testing a point against a LayoutRects snapshot.
@@ -153,7 +152,6 @@ mod hit_result_tests {
     }
 }
 
-
 impl Layout {
     /// Hit-tests a logical-pixel point against a geometry snapshot previously
     /// produced for this same Layout.
@@ -285,7 +283,6 @@ impl Layout {
 #[path = "hit_test_tests.rs"]
 mod tests;
 
-
 fn floating_front_to_back(floating: &[FloatingGroupRect]) -> Vec<FloatingGroupRect> {
     let mut ordered = floating.to_vec();
     ordered.sort_by_key(|item| std::cmp::Reverse(item.z_order));
@@ -301,7 +298,10 @@ fn collect_subtree(
     if !nodes.insert(root) {
         return Ok(());
     }
-    match layout.node(root).ok_or(ComputeRectsError::InvalidLayoutState)? {
+    match layout
+        .node(root)
+        .ok_or(ComputeRectsError::InvalidLayoutState)?
+    {
         Node::Split(split) => {
             for child in &split.children {
                 collect_subtree(layout, *child, nodes, panels)?;

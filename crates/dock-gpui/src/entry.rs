@@ -8,7 +8,11 @@ fn default_workspace_path() -> Option<PathBuf> {
     {
         std::env::var_os("APPDATA")
             .or_else(|| std::env::var_os("LOCALAPPDATA"))
-            .map(|root| PathBuf::from(root).join("RoadmapDocking").join("workspace.json"))
+            .map(|root| {
+                PathBuf::from(root)
+                    .join("RoadmapDocking")
+                    .join("workspace.json")
+            })
     }
 
     #[cfg(target_os = "macos")]
@@ -25,7 +29,11 @@ fn default_workspace_path() -> Option<PathBuf> {
     #[cfg(all(unix, not(target_os = "macos")))]
     {
         if let Some(data_home) = std::env::var_os("XDG_DATA_HOME") {
-            Some(PathBuf::from(data_home).join("roadmap-docking").join("workspace.json"))
+            Some(
+                PathBuf::from(data_home)
+                    .join("roadmap-docking")
+                    .join("workspace.json"),
+            )
         } else {
             std::env::var_os("HOME").map(|home| {
                 PathBuf::from(home)
@@ -86,10 +94,7 @@ struct BoxedAssetSource(Box<dyn AssetSource>);
 
 #[cfg(windows)]
 impl AssetSource for BoxedAssetSource {
-    fn load(
-        &self,
-        path: &str,
-    ) -> gpui::Result<Option<std::borrow::Cow<'static, [u8]>>> {
+    fn load(&self, path: &str) -> gpui::Result<Option<std::borrow::Cow<'static, [u8]>>> {
         self.0.load(path)
     }
 
@@ -124,11 +129,7 @@ fn run_windows(options: RunOptions) {
             }
         };
 
-        let bounds = Bounds::centered(
-            None,
-            size(px(width.max(1.0)), px(height.max(1.0))),
-            cx,
-        );
+        let bounds = Bounds::centered(None, size(px(width.max(1.0)), px(height.max(1.0))), cx);
         let window_options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             titlebar: Some(TitlebarOptions {
@@ -160,7 +161,9 @@ fn run_windows(options: RunOptions) {
 
     let application = application();
     match assets {
-        Some(assets) => application.with_assets(BoxedAssetSource(assets)).run(run_application),
+        Some(assets) => application
+            .with_assets(BoxedAssetSource(assets))
+            .run(run_application),
         None => application.run(run_application),
     }
 }

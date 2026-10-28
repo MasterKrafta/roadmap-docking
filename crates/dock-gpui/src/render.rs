@@ -18,7 +18,15 @@ pub fn render_with_host(
     host: &mut dyn DockHost,
     drag_overlay: Option<&DragOverlay>,
 ) -> Div {
-    render_layout(layout, rects, None, scroll_handles, theme, host, drag_overlay)
+    render_layout(
+        layout,
+        rects,
+        None,
+        scroll_handles,
+        theme,
+        host,
+        drag_overlay,
+    )
 }
 
 /// Preferred frame-aware entrypoint: geometry, drop zones and drawing share one snapshot.

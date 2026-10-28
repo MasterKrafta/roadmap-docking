@@ -95,7 +95,11 @@ fn source_rect_for_request(
     })
 }
 
-fn panel_group_rect(layout: &Layout, rects: &LayoutRects, panel: dock_core::PanelId) -> Option<Rect> {
+fn panel_group_rect(
+    layout: &Layout,
+    rects: &LayoutRects,
+    panel: dock_core::PanelId,
+) -> Option<Rect> {
     let panel_node = layout.nodes().find_map(|(node_id, node)| match node {
         Node::Panel(value) if value.panel_id == panel => Some(node_id),
         _ => None,

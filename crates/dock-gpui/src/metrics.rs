@@ -47,10 +47,7 @@ mod tests {
         assert_eq!(metrics.header_height, 34.0);
         assert_eq!(metrics.group_control_button_width, 40.0);
         assert_eq!(metrics.min_canvas_width, 360.0);
-        assert_eq!(
-            metrics.min_tab_width,
-            DockMetrics::default().min_tab_width
-        );
+        assert_eq!(metrics.min_tab_width, DockMetrics::default().min_tab_width);
         assert_eq!(
             metrics.tab_overflow_button_width,
             DockMetrics::default().tab_overflow_button_width

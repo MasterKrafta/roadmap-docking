@@ -470,12 +470,7 @@ fn move_group_to_main_column_reorders_single_group_columns_without_panicking() {
     for name in ["move-column-a", "move-column-b", "move-column-c"] {
         let (_, panel) = builder.panel(PanelKey::new(name).unwrap(), constraints());
         let group = builder.tabs(vec![panel], 0, false);
-        let column = builder.column(
-            280.0,
-            ColumnMode::Expanded,
-            vec![group],
-            vec![1.0],
-        );
+        let column = builder.column(280.0, ColumnMode::Expanded, vec![group], vec![1.0]);
         columns.push(column);
         groups.push(group);
     }
@@ -793,13 +788,7 @@ fn valid_commands(layout: &Layout, metrics: &DockMetrics, serial: &mut usize) ->
             ratios: ratios.clone(),
         });
         if owned_groups.len() > 1
-            && resize_groups_preconditions_hold(
-                layout,
-                owned_groups,
-                ratios,
-                height,
-                metrics,
-            )
+            && resize_groups_preconditions_hold(layout, owned_groups, ratios, height, metrics)
         {
             commands.push(DockCommand::ResizeGroups {
                 column: *column,
@@ -952,10 +941,14 @@ mod tests {
         let metrics = DockMetrics::default();
         let mut builder = LayoutBuilder::new(crate::Profile::Generic);
 
-        let (_, first_panel) =
-            builder.panel(PanelKey::new("generated-resize-small").unwrap(), constraints());
-        let (_, second_panel) =
-            builder.panel(PanelKey::new("generated-resize-large").unwrap(), constraints());
+        let (_, first_panel) = builder.panel(
+            PanelKey::new("generated-resize-small").unwrap(),
+            constraints(),
+        );
+        let (_, second_panel) = builder.panel(
+            PanelKey::new("generated-resize-large").unwrap(),
+            constraints(),
+        );
         let first_group = builder.tabs(vec![first_panel], 0, false);
         let second_group = builder.tabs(vec![second_panel], 0, false);
         let column = builder.column(
@@ -1237,7 +1230,10 @@ fn assert_layout_state_invariants(layout: &Layout, metrics: &DockMetrics) {
     }
 
     let rects = layout
-        .compute_rects(Rect::new(Point::ZERO, Size::new(32_768.0, 32_768.0)), metrics)
+        .compute_rects(
+            Rect::new(Point::ZERO, Size::new(32_768.0, 32_768.0)),
+            metrics,
+        )
         .unwrap_or_else(|error| panic!("valid layout failed large-viewport geometry: {error}"));
     crate::layout_rects::assert_layout_rects_invariants(&rects);
 }
@@ -1393,8 +1389,10 @@ fn assert_history_round_trip(
 fn expected_small_viewport_errors_are_constraints_not_layout_regressions() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Generic);
-    let (_, panel_node) =
-        builder.panel(PanelKey::new("small-viewport-canvas").unwrap(), constraints());
+    let (_, panel_node) = builder.panel(
+        PanelKey::new("small-viewport-canvas").unwrap(),
+        constraints(),
+    );
     let group = builder.tabs(vec![panel_node], 0, false);
     let column = builder.column(280.0, ColumnMode::Expanded, vec![group], vec![1.0]);
     builder.main_area(DockSide::Left, column);
@@ -1413,12 +1411,11 @@ fn expected_small_viewport_errors_are_constraints_not_layout_regressions() {
     ));
 
     // The same valid layout computes successfully when enough width is available.
-    assert!(layout
-        .compute_rects(
-            Rect::new(Point::ZERO, Size::new(800.0, 900.0)),
-            &metrics
-        )
-        .is_ok());
+    assert!(
+        layout
+            .compute_rects(Rect::new(Point::ZERO, Size::new(800.0, 900.0)), &metrics)
+            .is_ok()
+    );
 
     // A floating group's minimum content height also cannot be fitted into a
     // viewport that is shorter than the required content. Keep this failure
@@ -1437,10 +1434,7 @@ fn expected_small_viewport_errors_are_constraints_not_layout_regressions() {
     let floating_layout = builder.build();
     assert_eq!(floating_layout.validate(&metrics), Ok(()));
     let constrained_rects = floating_layout
-        .compute_rects(
-            Rect::new(Point::ZERO, Size::new(1000.0, 100.0)),
-            &metrics,
-        )
+        .compute_rects(Rect::new(Point::ZERO, Size::new(1000.0, 100.0)), &metrics)
         .expect("an undersized floating window is isolated from the rest of geometry");
     assert_eq!(
         constrained_rects.canvas,
@@ -1449,12 +1443,11 @@ fn expected_small_viewport_errors_are_constraints_not_layout_regressions() {
     assert!(constrained_rects.floating_groups.is_empty());
     assert!(constrained_rects.panels.is_empty());
     assert_eq!(floating_layout.validate(&metrics), Ok(()));
-    assert!(floating_layout
-        .compute_rects(
-            Rect::new(Point::ZERO, Size::new(1000.0, 600.0)),
-            &metrics
-        )
-        .is_ok());
+    assert!(
+        floating_layout
+            .compute_rects(Rect::new(Point::ZERO, Size::new(1000.0, 600.0)), &metrics)
+            .is_ok()
+    );
 }
 
 #[test]
@@ -1520,7 +1513,13 @@ fn mutation_sequences_round_trip_through_undo_redo_without_reviving_stale_ids() 
     // Rail mode and flyout are separate transitions; flyout visibility is
     // transient and must not enter persistent undo history.
     let command = first_valid_command(&layout, &metrics, &mut serial, |command| {
-        matches!(command, DockCommand::SetColumnMode { mode: ColumnMode::IconsOnly, .. })
+        matches!(
+            command,
+            DockCommand::SetColumnMode {
+                mode: ColumnMode::IconsOnly,
+                ..
+            }
+        )
     });
     assert_history_round_trip(&mut layout, &mut history, command, &metrics, true);
 
@@ -1528,13 +1527,19 @@ fn mutation_sequences_round_trip_through_undo_redo_without_reviving_stale_ids() 
         matches!(command, DockCommand::OpenFlyout { .. })
     });
     assert_history_round_trip(&mut layout, &mut history, command, &metrics, false);
-    assert!(layout.flyout().is_some(), "OpenFlyout should set transient state");
+    assert!(
+        layout.flyout().is_some(),
+        "OpenFlyout should set transient state"
+    );
 
     let command = first_valid_command(&layout, &metrics, &mut serial, |command| {
         matches!(command, DockCommand::CloseFlyout)
     });
     assert_history_round_trip(&mut layout, &mut history, command, &metrics, false);
-    assert!(layout.flyout().is_none(), "CloseFlyout should clear transient state");
+    assert!(
+        layout.flyout().is_none(),
+        "CloseFlyout should clear transient state"
+    );
 }
 
 #[cfg(feature = "serde")]
@@ -1988,13 +1993,11 @@ fn c47_failed_commands_preserve_full_state_and_version() {
     assert!(layout.panel_instance(panel_id).is_some());
 }
 
-
 #[test]
 fn float_group_as_column_preserves_group_and_wraps_it_in_one_column() {
     let metrics = DockMetrics::default();
     let mut layout = photoshop_sequence_layout();
-    let (source_column, source_groups, _, _, _) =
-        main_columns(&layout, DockSide::Right)[0].clone();
+    let (source_column, source_groups, _, _, _) = main_columns(&layout, DockSide::Right)[0].clone();
     let moved_group = source_groups[0];
     let bounds = Rect::new(Point::new(25.0, 35.0), Size::new(280.0, 360.0));
 
@@ -2026,8 +2029,7 @@ fn float_group_as_column_preserves_group_and_wraps_it_in_one_column() {
 fn float_panel_as_group_creates_a_one_tab_group_inside_a_column() {
     let metrics = DockMetrics::default();
     let mut layout = photoshop_sequence_layout();
-    let (_, source_groups, _, _, _) =
-        main_columns(&layout, DockSide::Right)[0].clone();
+    let (_, source_groups, _, _, _) = main_columns(&layout, DockSide::Right)[0].clone();
     let source_group = source_groups[0];
     let source_panel_node = match layout.node(source_group) {
         Some(Node::Tabs(tabs)) if tabs.children.len() > 1 => tabs.children[0],
@@ -2073,14 +2075,10 @@ fn float_panel_as_group_creates_a_one_tab_group_inside_a_column() {
 fn float_group_as_column_rejects_detaching_the_last_group_atomically() {
     let metrics = DockMetrics::default();
     let mut layout = photoshop_sequence_layout();
-    let (column, groups, _, _, _) =
-        main_columns(&layout, DockSide::Right)[0].clone();
+    let (column, groups, _, _, _) = main_columns(&layout, DockSide::Right)[0].clone();
     let retained_group = groups[1];
     layout
-        .apply(
-            DockCommand::CloseGroup { group: groups[0] },
-            &metrics,
-        )
+        .apply(DockCommand::CloseGroup { group: groups[0] }, &metrics)
         .unwrap();
     assert!(matches!(
         layout.node(column),
@@ -2101,8 +2099,7 @@ fn float_group_as_column_rejects_detaching_the_last_group_atomically() {
 fn float_panel_as_group_rejects_detaching_the_only_tab_atomically() {
     let metrics = DockMetrics::default();
     let mut layout = photoshop_sequence_layout();
-    let (_, groups, _, _, _) =
-        main_columns(&layout, DockSide::Right)[0].clone();
+    let (_, groups, _, _, _) = main_columns(&layout, DockSide::Right)[0].clone();
     let group = groups[0];
     let panel_nodes = match layout.node(group) {
         Some(Node::Tabs(tabs)) => tabs.children.clone(),

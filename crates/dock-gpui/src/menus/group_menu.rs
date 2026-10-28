@@ -1,5 +1,5 @@
-use dock_core::{ColumnMode, DockCommand, DockMetrics, Layout, Node, NodeId, PanelId, Point};
 use crate::{dock::initial_float_bounds, frame::FrameGeometry};
+use dock_core::{ColumnMode, DockCommand, DockMetrics, Layout, Node, NodeId, PanelId, Point};
 
 use super::MenuItemModel;
 
@@ -30,7 +30,11 @@ pub(super) fn items(
     if let Some(Node::Tabs(tabs)) = layout.node(group) {
         items.push(item(
             "collapse-group",
-            if tabs.collapsed { "Развернуть группу" } else { "Свернуть группу" },
+            if tabs.collapsed {
+                "Развернуть группу"
+            } else {
+                "Свернуть группу"
+            },
             tabs.collapsed,
             Some(DockCommand::CollapseGroup {
                 group,
@@ -58,7 +62,11 @@ pub(super) fn items(
     if let Some((column, current_mode, group_count)) = parent_column {
         for (mode, label, id) in [
             (ColumnMode::Expanded, "Обычный режим", "mode-expanded"),
-            (ColumnMode::IconsAndLabels, "Значки и подписи", "mode-icons-labels"),
+            (
+                ColumnMode::IconsAndLabels,
+                "Значки и подписи",
+                "mode-icons-labels",
+            ),
             (ColumnMode::IconsOnly, "Только значки", "mode-icons"),
         ] {
             items.push(item(
@@ -110,7 +118,10 @@ pub(super) fn items(
             if parent_column.is_some_and(|(_, _, count)| count > 1) {
                 DockCommand::FloatGroupAsColumn { group, bounds }
             } else {
-                DockCommand::Float { node: group, bounds }
+                DockCommand::Float {
+                    node: group,
+                    bounds,
+                }
             }
         });
     items.push(item(
@@ -123,12 +134,7 @@ pub(super) fn items(
     items
 }
 
-fn item(
-    id: &str,
-    label: &str,
-    checked: bool,
-    command: Option<DockCommand>,
-) -> MenuItemModel {
+fn item(id: &str, label: &str, checked: bool, command: Option<DockCommand>) -> MenuItemModel {
     MenuItemModel {
         id: id.to_owned(),
         label: label.to_owned(),

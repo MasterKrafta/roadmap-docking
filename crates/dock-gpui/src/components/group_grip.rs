@@ -1,11 +1,11 @@
 use dock_core::{NodeId, Rect};
 use gpui::{
-    App, IntoElement, InteractiveElement, MouseButton, RenderOnce, Styled, Window, div, px, rgb,
+    App, InteractiveElement, IntoElement, MouseButton, RenderOnce, Styled, Window, div, px, rgb,
 };
 use ui::Theme;
 
 use crate::components::{
-    focus_ring::keyboard_group_move_direction, with_focus_ring, KeyDownHandler, MouseDownHandler,
+    KeyDownHandler, MouseDownHandler, focus_ring::keyboard_group_move_direction, with_focus_ring,
 };
 
 /// A narrow, full-width drag target used above a group's tab strip.

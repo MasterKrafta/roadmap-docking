@@ -1,6 +1,5 @@
 use super::*;
 
-
 pub(super) fn layout_node(
     layout: &Layout,
     id: NodeId,
@@ -10,7 +9,9 @@ pub(super) fn layout_node(
     output: &mut LayoutRects,
 ) -> Result<(), ComputeRectsError> {
     rect.validate().map_err(ComputeRectsError::Geometry)?;
-    let node = layout.node(id).ok_or(ComputeRectsError::InvalidLayoutState)?;
+    let node = layout
+        .node(id)
+        .ok_or(ComputeRectsError::InvalidLayoutState)?;
 
     // Columns and vertical splits manage their own stack overflow. Other nodes
     // need an expanded content rect when the parent viewport is shorter than
@@ -172,7 +173,14 @@ pub(super) fn layout_column(
             Point::new(rect.origin.x, y),
             Size::new(rect.size.width, height),
         );
-        layout_node(layout, *group_id, group_rect, metrics, minimum_sizes, output)?;
+        layout_node(
+            layout,
+            *group_id,
+            group_rect,
+            metrics,
+            minimum_sizes,
+            output,
+        )?;
         y += height;
 
         if index + 1 < column.groups.len() {
@@ -353,7 +361,14 @@ pub(super) fn layout_tabs(
         Size::new(group_rect.size.width, content_height),
     );
     if let Some(active_child) = tabs.active_child() {
-        layout_node(layout, active_child, content_rect, metrics, minimum_sizes, output)?;
+        layout_node(
+            layout,
+            active_child,
+            content_rect,
+            metrics,
+            minimum_sizes,
+            output,
+        )?;
     }
     Ok(())
 }

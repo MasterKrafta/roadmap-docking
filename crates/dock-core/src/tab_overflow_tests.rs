@@ -102,7 +102,10 @@ fn active_tab_is_not_hidden_when_its_index_exceeds_visible_overflow_window() {
     assert_eq!(rects.tab_headers[1].panel, panels[3]);
     assert_eq!(rects.tab_headers[1].index, 3);
     assert!(rects.tab_headers.iter().all(|header| header.group == group));
-    assert_eq!(rects.tab_overflows[0].hidden_tabs, vec![panels[0], panels[1]]);
+    assert_eq!(
+        rects.tab_overflows[0].hidden_tabs,
+        vec![panels[0], panels[1]]
+    );
 }
 
 #[test]

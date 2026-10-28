@@ -71,19 +71,14 @@ fn generated_workspace_layout(
 
             let active_index =
                 usize::from(active_choices[group_index % active_choices.len()]) % panels.len();
-            let collapsed = *panel_count > 1
-                && collapsed_choices[group_index % collapsed_choices.len()];
+            let collapsed =
+                *panel_count > 1 && collapsed_choices[group_index % collapsed_choices.len()];
             groups.push(builder.tabs(panels, active_index, collapsed));
             group_index += 1;
         }
 
         let group_ratios = vec![1.0 / groups.len() as f32; groups.len()];
-        column_nodes.push(builder.column(
-            *width,
-            ColumnMode::Expanded,
-            groups,
-            group_ratios,
-        ));
+        column_nodes.push(builder.column(*width, ColumnMode::Expanded, groups, group_ratios));
     }
 
     let root = if column_nodes.len() == 1 {
@@ -109,8 +104,8 @@ fn generated_workspace_layout(
 
             let active_index =
                 usize::from(active_choices[group_index % active_choices.len()]) % panels.len();
-            let collapsed = *panel_count > 1
-                && collapsed_choices[group_index % collapsed_choices.len()];
+            let collapsed =
+                *panel_count > 1 && collapsed_choices[group_index % collapsed_choices.len()];
             groups.push(builder.tabs(panels, active_index, collapsed));
             group_index += 1;
         }
@@ -125,7 +120,10 @@ fn generated_workspace_layout(
         let offset = floating_index as f32 * 24.0;
         builder.floating_group(
             floating_root,
-            Rect::new(Point::new(44.0 + offset, 55.0 + offset), Size::new(420.0, 320.0)),
+            Rect::new(
+                Point::new(44.0 + offset, 55.0 + offset),
+                Size::new(420.0, 320.0),
+            ),
             7 + floating_index as i32,
         );
     }
@@ -380,15 +378,21 @@ fn migrated_recoverable_damage_is_normalized_and_round_trips_without_losing_unkn
     )
     .expect("safe, deterministic v1 data damage should be normalized");
 
-    assert!(report.diagnostics.contains(&WorkspaceDiagnostic::SchemaMigrated {
-        from: 1,
-        to: WORKSPACE_VERSION,
-    }));
-    assert!(report.diagnostics.contains(
-        &WorkspaceDiagnostic::UnknownPanelKeyPreserved {
-            key: "history".to_owned()
-        }
-    ));
+    assert!(
+        report
+            .diagnostics
+            .contains(&WorkspaceDiagnostic::SchemaMigrated {
+                from: 1,
+                to: WORKSPACE_VERSION,
+            })
+    );
+    assert!(
+        report
+            .diagnostics
+            .contains(&WorkspaceDiagnostic::UnknownPanelKeyPreserved {
+                key: "history".to_owned()
+            })
+    );
     assert!(report.diagnostics.iter().any(|diagnostic| {
         matches!(diagnostic, WorkspaceDiagnostic::LayoutNormalized { issues }
             if issues.iter().any(|issue| issue.contains("ratios must sum to 1.0"))
@@ -398,10 +402,7 @@ fn migrated_recoverable_damage_is_normalized_and_round_trips_without_losing_unkn
     assert_eq!(report.layout.validate(&metrics), Ok(()));
     report
         .layout
-        .compute_rects(
-            Rect::new(Point::ZERO, Size::new(2400.0, 1600.0)),
-            &metrics,
-        )
+        .compute_rects(Rect::new(Point::ZERO, Size::new(2400.0, 1600.0)), &metrics)
         .expect("normalized layout should resolve geometry in a sufficient viewport");
 
     let right = report.layout.main_area(DockSide::Right).unwrap().root;
@@ -444,16 +445,15 @@ fn migrated_recoverable_damage_is_normalized_and_round_trips_without_losing_unkn
     assert_eq!(reopened.layout.validate(&metrics), Ok(()));
     reopened
         .layout
-        .compute_rects(
-            Rect::new(Point::ZERO, Size::new(2400.0, 1600.0)),
-            &metrics,
-        )
+        .compute_rects(Rect::new(Point::ZERO, Size::new(2400.0, 1600.0)), &metrics)
         .expect("round-tripped workspace should still resolve geometry");
-    assert!(reopened.diagnostics.contains(
-        &WorkspaceDiagnostic::UnknownPanelKeyPreserved {
-            key: "history".to_owned()
-        }
-    ));
+    assert!(
+        reopened
+            .diagnostics
+            .contains(&WorkspaceDiagnostic::UnknownPanelKeyPreserved {
+                key: "history".to_owned()
+            })
+    );
     assert!(
         !reopened
             .diagnostics
@@ -584,10 +584,7 @@ fn layout_with_nested_splits(depth: usize) -> Layout {
     let mut builder = LayoutBuilder::new(Profile::Generic);
     let (_, mut root) = builder.panel(key("export-depth-root"), constraints());
     for index in 1..depth {
-        let (_, side) = builder.panel(
-            key(&format!("export-depth-side-{index}")),
-            constraints(),
-        );
+        let (_, side) = builder.panel(key(&format!("export-depth-side-{index}")), constraints());
         root = builder.split(Axis::X, vec![root, side], vec![0.5, 0.5]);
     }
     builder.main_area(DockSide::Right, root);
@@ -604,8 +601,7 @@ fn from_layout_at_maximum_workspace_depth_round_trips() {
     let json = file
         .to_json_pretty()
         .expect("a workspace at the maximum depth should serialize");
-    WorkspaceFile::from_json(&json)
-        .expect("a workspace at the maximum depth should parse again");
+    WorkspaceFile::from_json(&json).expect("a workspace at the maximum depth should parse again");
 }
 
 #[test]
@@ -666,7 +662,8 @@ fn workspace_json_size_limit_is_checked_before_parsing() {
 fn malformed_version_field_reports_type_error_not_missing_field() {
     let metrics = DockMetrics::default();
     let (layout, _) = sample_layout();
-    let original = serde_json::to_value(WorkspaceFile::from_layout(&layout, &metrics).unwrap()).unwrap();
+    let original =
+        serde_json::to_value(WorkspaceFile::from_layout(&layout, &metrics).unwrap()).unwrap();
 
     for malformed_version in [serde_json::json!("2"), serde_json::json!(2.0)] {
         let mut value = original.clone();
@@ -1067,18 +1064,21 @@ fn workspace_load_reports_conflicting_expanded_content_minimum_and_maximum() {
         let file = WorkspaceFile::from_layout_unchecked_for_test(&builder.build()).unwrap();
         let json = serde_json::to_string(&file).unwrap();
 
-        assert!(matches!(
-            WorkspaceFile::load_json(
-                &json,
-                &descriptors,
-                &metrics,
-                WorkspaceLoadOptions::default(),
+        assert!(
+            matches!(
+                WorkspaceFile::load_json(
+                    &json,
+                    &descriptors,
+                    &metrics,
+                    WorkspaceLoadOptions::default(),
+                ),
+                Err(WorkspaceFileError::InvalidLayout(errors))
+                    if errors.iter().any(|error| error.to_string().contains(
+                        "minimum width required by expanded contents exceeds panel maximum width"
+                    ))
             ),
-            Err(WorkspaceFileError::InvalidLayout(errors))
-                if errors.iter().any(|error| error.to_string().contains(
-                    "minimum width required by expanded contents exceeds panel maximum width"
-                ))
-        ), "incompatible min/max constraints must fail for {profile:?}");
+            "incompatible min/max constraints must fail for {profile:?}"
+        );
     }
 }
 
@@ -1268,11 +1268,15 @@ fn floating_bounds_clamped_diagnostic_keeps_json_index_after_earlier_group_is_re
     .expect("remaining floating group should clamp after normalizing the duplicate singleton");
 
     assert_eq!(report.layout.floating_groups_in_paint_order().len(), 1);
-    assert!(report.diagnostics.contains(&WorkspaceDiagnostic::FloatingBoundsClamped {
-        index: 1,
-        original,
-        clamped: region,
-    }));
+    assert!(
+        report
+            .diagnostics
+            .contains(&WorkspaceDiagnostic::FloatingBoundsClamped {
+                index: 1,
+                original,
+                clamped: region,
+            })
+    );
 }
 
 #[test]
@@ -1322,10 +1326,11 @@ fn workspace_normalizes_empty_floating_columns_before_clamping_bounds() {
     assert!(report.layout.validate(&metrics).is_ok());
     let floating = report.layout.floating_groups_in_paint_order();
     let area = report.layout.dock_area(floating[0].1.area).unwrap();
-    assert!(matches!(report.layout.node(area.root), Some(crate::Node::Column(column)) if column.groups.len() == 1));
+    assert!(
+        matches!(report.layout.node(area.root), Some(crate::Node::Column(column)) if column.groups.len() == 1)
+    );
     assert!(report.diagnostics.iter().any(|diagnostic| {
         matches!(diagnostic, WorkspaceDiagnostic::LayoutNormalized { issues }
             if issues.iter().any(|issue| issue.contains("must contain at least one group before normalization")))
     }));
 }
-

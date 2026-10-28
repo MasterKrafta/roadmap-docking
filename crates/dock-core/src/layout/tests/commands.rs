@@ -4,19 +4,34 @@ use super::*;
 fn open_panel_expands_collapsed_photoshop_target_group() {
     let metrics = DockMetrics::default();
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
-    let (_, existing_panel) = builder.panel(PanelKey::new("open-collapsed-existing").unwrap(), descriptors()[0].1);
+    let (_, existing_panel) = builder.panel(
+        PanelKey::new("open-collapsed-existing").unwrap(),
+        descriptors()[0].1,
+    );
     let group = builder.tabs(vec![existing_panel], 0, true);
-    let column = builder.column(metrics.default_column_width, crate::ColumnMode::Expanded, vec![group], vec![1.0]);
+    let column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![group],
+        vec![1.0],
+    );
     builder.main_area(DockSide::Right, column);
     let mut layout = builder.build();
 
-    layout.apply(DockCommand::OpenPanel {
-        key: PanelKey::new("open-collapsed-new").unwrap(),
-        constraints: descriptors()[0].1,
-        target: Some(DropTarget::Tabs { group, index: 1 }),
-    }, &metrics).unwrap();
+    layout
+        .apply(
+            DockCommand::OpenPanel {
+                key: PanelKey::new("open-collapsed-new").unwrap(),
+                constraints: descriptors()[0].1,
+                target: Some(DropTarget::Tabs { group, index: 1 }),
+            },
+            &metrics,
+        )
+        .unwrap();
 
-    assert!(matches!(layout.node(group), Some(Node::Tabs(tabs)) if !tabs.collapsed && tabs.children.len() == 2));
+    assert!(
+        matches!(layout.node(group), Some(Node::Tabs(tabs)) if !tabs.collapsed && tabs.children.len() == 2)
+    );
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
 
@@ -210,8 +225,10 @@ fn main_column_ratios_reset_visible_widths() {
     let metrics = DockMetrics::default();
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
 
-    let (_, first_panel) =
-        builder.panel(PanelKey::new("reset-main-width-first").unwrap(), descriptors()[0].1);
+    let (_, first_panel) = builder.panel(
+        PanelKey::new("reset-main-width-first").unwrap(),
+        descriptors()[0].1,
+    );
     let first_group = builder.tabs(vec![first_panel], 0, false);
     let first_column = builder.column(
         360.0,
@@ -220,8 +237,10 @@ fn main_column_ratios_reset_visible_widths() {
         vec![1.0],
     );
 
-    let (_, second_panel) =
-        builder.panel(PanelKey::new("reset-main-width-second").unwrap(), descriptors()[0].1);
+    let (_, second_panel) = builder.panel(
+        PanelKey::new("reset-main-width-second").unwrap(),
+        descriptors()[0].1,
+    );
     let second_group = builder.tabs(vec![second_panel], 0, false);
     let second_column = builder.column(
         200.0,
@@ -236,10 +255,16 @@ fn main_column_ratios_reset_visible_widths() {
     assert_eq!(layout.validate(&metrics), Ok(()));
 
     layout
-        .apply(DockCommand::ResetMainColumnRatios { side: DockSide::Left }, &metrics)
+        .apply(
+            DockCommand::ResetMainColumnRatios {
+                side: DockSide::Left,
+            },
+            &metrics,
+        )
         .unwrap();
 
-    let (first_width, second_width) = match (layout.node(first_column), layout.node(second_column)) {
+    let (first_width, second_width) = match (layout.node(first_column), layout.node(second_column))
+    {
         (Some(Node::Column(first)), Some(Node::Column(second))) => (first.width, second.width),
         _ => panic!("both main columns must remain in the layout"),
     };
@@ -254,7 +279,11 @@ fn main_column_ratios_reset_visible_widths() {
         .compute_rects(Rect::new(Point::ZERO, Size::new(1200.0, 800.0)), &metrics)
         .unwrap();
     for column in [first_column, second_column] {
-        let rect = rects.columns.iter().find(|rect| rect.column == column).unwrap();
+        let rect = rects
+            .columns
+            .iter()
+            .find(|rect| rect.column == column)
+            .unwrap();
         assert!((rect.rect.size.width - 280.0).abs() < 1.0e-3);
     }
 }
@@ -264,8 +293,10 @@ fn main_column_split_group_ratio_controls_new_column_width() {
     let metrics = DockMetrics::default();
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
 
-    let (_, source_panel) =
-        builder.panel(PanelKey::new("ratio-main-width-source").unwrap(), descriptors()[0].1);
+    let (_, source_panel) = builder.panel(
+        PanelKey::new("ratio-main-width-source").unwrap(),
+        descriptors()[0].1,
+    );
     let source_group = builder.tabs(vec![source_panel], 0, false);
     let source_column = builder.column(
         metrics.default_column_width,
@@ -275,8 +306,10 @@ fn main_column_split_group_ratio_controls_new_column_width() {
     );
     builder.main_area(DockSide::Left, source_column);
 
-    let (_, target_panel) =
-        builder.panel(PanelKey::new("ratio-main-width-target").unwrap(), descriptors()[0].1);
+    let (_, target_panel) = builder.panel(
+        PanelKey::new("ratio-main-width-target").unwrap(),
+        descriptors()[0].1,
+    );
     let target_group = builder.tabs(vec![target_panel], 0, false);
     let target_column = builder.column(
         360.0,
@@ -308,7 +341,12 @@ fn main_column_split_group_ratio_controls_new_column_width() {
             assert_eq!(split.ratios.len(), 2);
             assert!((split.ratios[0] - 0.6).abs() < 1.0e-4);
             assert!((split.ratios[1] - 0.4).abs() < 1.0e-4);
-            split.children.iter().copied().find(|id| *id != target_column).unwrap()
+            split
+                .children
+                .iter()
+                .copied()
+                .find(|id| *id != target_column)
+                .unwrap()
         }
         other => panic!("expected a horizontal split of main columns, found {other:?}"),
     };
@@ -944,25 +982,40 @@ fn c43_opening_existing_singleton_activates_it_without_toggling_or_validating_ne
 fn moving_panel_to_own_group_edge_is_a_no_op() {
     let metrics = DockMetrics::default();
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
-    let (panel_id, panel_node) = builder.panel(PanelKey::new("own-edge-panel").unwrap(), descriptors()[0].1);
-    let (_, sibling_node) = builder.panel(PanelKey::new("own-edge-sibling").unwrap(), descriptors()[0].1);
+    let (panel_id, panel_node) =
+        builder.panel(PanelKey::new("own-edge-panel").unwrap(), descriptors()[0].1);
+    let (_, sibling_node) = builder.panel(
+        PanelKey::new("own-edge-sibling").unwrap(),
+        descriptors()[0].1,
+    );
     let group = builder.tabs(vec![panel_node, sibling_node], 0, true);
-    let column = builder.column(metrics.default_column_width, crate::ColumnMode::Expanded, vec![group], vec![1.0]);
+    let column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![group],
+        vec![1.0],
+    );
     builder.main_area(DockSide::Right, column);
     let mut layout = builder.build();
     let before_version = layout.version();
 
-    let outcome = layout.apply(
-        DockCommand::MovePanel {
-            panel: panel_id,
-            target: DropTarget::GroupEdge { group, zone: crate::DropZone::Top },
-        },
-        &metrics,
-    ).unwrap();
+    let outcome = layout
+        .apply(
+            DockCommand::MovePanel {
+                panel: panel_id,
+                target: DropTarget::GroupEdge {
+                    group,
+                    zone: crate::DropZone::Top,
+                },
+            },
+            &metrics,
+        )
+        .unwrap();
 
     assert_eq!(layout.version(), before_version);
     assert!(outcome.changed_nodes.is_empty());
-    assert!(matches!(layout.node(group), Some(Node::Tabs(tabs)) if tabs.collapsed && tabs.children == vec![panel_node,sibling_node]));
+    assert!(
+        matches!(layout.node(group), Some(Node::Tabs(tabs)) if tabs.collapsed && tabs.children == vec![panel_node,sibling_node])
+    );
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
-

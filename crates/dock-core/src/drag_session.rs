@@ -1,4 +1,3 @@
-
 use crate::{
     DockMetrics, DragCancelReason, DragDropRequest, DragHandle, DragPayload, DragPreview,
     DragSessionError, DragState, DropTarget, Point,
@@ -94,7 +93,10 @@ impl DragSession {
     /// resolve the target again for the new point before release.
     pub fn pointer_move(&mut self, position: Point) -> Result<(), DragSessionError> {
         if !position.is_finite() {
-            if matches!(self.state, DragState::Pressed { .. } | DragState::Dragging { .. }) {
+            if matches!(
+                self.state,
+                DragState::Pressed { .. } | DragState::Dragging { .. }
+            ) {
                 self.cancel_with_reason(DragCancelReason::InvalidPointerPosition)?;
             }
             return Err(DragSessionError::InvalidPointerPosition);
@@ -207,7 +209,10 @@ impl DragSession {
         resolved_target: Option<DropTarget>,
     ) -> Result<Option<DragDropRequest>, DragSessionError> {
         if !position.is_finite() {
-            if matches!(self.state, DragState::Pressed { .. } | DragState::Dragging { .. }) {
+            if matches!(
+                self.state,
+                DragState::Pressed { .. } | DragState::Dragging { .. }
+            ) {
                 self.cancel_with_reason(DragCancelReason::InvalidPointerPosition)?;
             }
             return Err(DragSessionError::InvalidPointerPosition);
@@ -278,7 +283,10 @@ impl DragSession {
         self.cancel_with_reason(DragCancelReason::FocusLost)
     }
 
-    pub(super) fn cancel_with_reason(&mut self, reason: DragCancelReason) -> Result<(), DragSessionError> {
+    pub(super) fn cancel_with_reason(
+        &mut self,
+        reason: DragCancelReason,
+    ) -> Result<(), DragSessionError> {
         self.state = match self.state {
             DragState::Pressed {
                 payload,

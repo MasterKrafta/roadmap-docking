@@ -147,8 +147,7 @@ mod tests {
     fn rejects_positive_dimensions_whose_edges_collapse_at_large_origins() {
         // At 2^24, adjacent f32 values are two units apart; adding one rounds
         // back to the original coordinate rather than creating a distinct edge.
-        let horizontal =
-            Rect::new(Point::new(16_777_216.0, 0.0), Size::new(1.0, 10.0));
+        let horizontal = Rect::new(Point::new(16_777_216.0, 0.0), Size::new(1.0, 10.0));
         assert_eq!(
             horizontal.checked_right(),
             Err(GeometryError::NonPositiveDimension)
@@ -173,8 +172,7 @@ mod tests {
             Err(GeometryError::NonPositiveDimension)
         );
 
-        let vertical =
-            Rect::new(Point::new(0.0, 16_777_216.0), Size::new(10.0, 1.0));
+        let vertical = Rect::new(Point::new(0.0, 16_777_216.0), Size::new(10.0, 1.0));
         assert_eq!(
             vertical.checked_bottom(),
             Err(GeometryError::NonPositiveDimension)

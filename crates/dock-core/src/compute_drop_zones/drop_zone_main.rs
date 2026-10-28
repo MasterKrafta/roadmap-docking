@@ -95,9 +95,13 @@ impl Layout {
                 group_edge_rect(group_rect.rect, DropZone::Left, metrics.edge_drop_width)?;
             let right_edge =
                 group_edge_rect(group_rect.rect, DropZone::Right, metrics.edge_drop_width)?;
-            if let Some((side, column_index, _column_rect)) =
-                group_main_column(self, tree_index, group_rect.group, left_columns, right_columns)
-            {
+            if let Some((side, column_index, _column_rect)) = group_main_column(
+                self,
+                tree_index,
+                group_rect.group,
+                left_columns,
+                right_columns,
+            ) {
                 if may_add_column {
                     let left_target = match source {
                         DropSource::Panel { .. } => DropTarget::MainColumn {

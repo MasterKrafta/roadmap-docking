@@ -151,10 +151,7 @@ fn c45_resize_groups_cannot_shrink_below_tab_chrome_and_panel_minimum() {
     assert_eq!(format!("{layout:?}"), before);
 
     let rects = layout
-        .compute_rects(
-            Rect::new(Point::ZERO, Size::new(1000.0, 356.0)),
-            &metrics,
-        )
+        .compute_rects(Rect::new(Point::ZERO, Size::new(1000.0, 356.0)), &metrics)
         .unwrap();
     assert_eq!(
         rects
@@ -244,10 +241,7 @@ fn c45_resize_groups_rejects_height_below_shared_expanded_group_minimums() {
 
     // Geometry honors those same minima and includes the splitter in the column.
     let rects = layout
-        .compute_rects(
-            Rect::new(Point::ZERO, Size::new(1000.0, 336.0)),
-            &metrics,
-        )
+        .compute_rects(Rect::new(Point::ZERO, Size::new(1000.0, 336.0)), &metrics)
         .unwrap();
     assert_eq!(
         rects
@@ -307,7 +301,10 @@ fn c45_resize_groups_uses_effective_collapsed_height_when_tab_strip_is_taller() 
     builder.main_area(DockSide::Right, column);
     let mut layout = builder.build();
     assert_eq!(
-        layout.minimum_node_size(collapsed, &metrics).unwrap().height,
+        layout
+            .minimum_node_size(collapsed, &metrics)
+            .unwrap()
+            .height,
         42.0
     );
     assert_eq!(
@@ -361,10 +358,7 @@ fn c45_resize_groups_uses_effective_collapsed_height_when_tab_strip_is_taller() 
     // Geometry consumes the same minimum contract: 42 px collapsed strip,
     // 170 px expanded group, and one 4 px splitter.
     let rects = layout
-        .compute_rects(
-            Rect::new(Point::ZERO, Size::new(1000.0, 216.0)),
-            &metrics,
-        )
+        .compute_rects(Rect::new(Point::ZERO, Size::new(1000.0, 216.0)), &metrics)
         .unwrap();
     assert_eq!(
         rects
@@ -1079,7 +1073,6 @@ fn c45_column_boundary_and_ratio_reset_reject_non_finite_or_non_positive_inputs(
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
 
-
 #[test]
 fn c46_resize_groups_clamps_against_tab_chrome_and_restores_inverse_atomically() {
     let metrics = DockMetrics {
@@ -1101,12 +1094,7 @@ fn c46_resize_groups_clamps_against_tab_chrome_and_restores_inverse_atomically()
     );
     let (_, panel_b) = builder.panel(
         PanelKey::new("c46-chrome-resize-b").unwrap(),
-        PanelConstraints::new(
-            Size::new(120.0, 80.0),
-            Size::new(200.0, 120.0),
-            None,
-            false,
-        ),
+        PanelConstraints::new(Size::new(120.0, 80.0), Size::new(200.0, 120.0), None, false),
     );
     let group_a = builder.tabs(vec![panel_a], 0, false);
     let group_b = builder.tabs(vec![panel_b], 0, false);

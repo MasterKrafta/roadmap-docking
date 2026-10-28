@@ -56,7 +56,10 @@ impl ThemeMetrics {
         let positive = [
             ("column_header_height", self.column_header_height),
             ("tab_strip_height", self.tab_strip_height),
-            ("group_control_button_width", self.group_control_button_width),
+            (
+                "group_control_button_width",
+                self.group_control_button_width,
+            ),
             ("tab_drag_zone_width", self.tab_drag_zone_width),
             ("button_size", self.button_size),
             ("popup_menu_width", self.popup_menu_width),
@@ -141,7 +144,10 @@ impl ThemeMetrics {
         for (name, value) in [
             ("button_gap", self.button_gap),
             ("content_padding", self.content_padding),
-            ("popup_menu_horizontal_padding", self.popup_menu_horizontal_padding),
+            (
+                "popup_menu_horizontal_padding",
+                self.popup_menu_horizontal_padding,
+            ),
         ] {
             if !value.is_finite() || value < 0.0 {
                 return Err(match name {
@@ -248,13 +254,19 @@ mod tests {
             popup_menu_width: 0.0,
             ..defaults
         };
-        assert_eq!(invalid_width.validate(), Err("popup_menu_width must be positive"));
+        assert_eq!(
+            invalid_width.validate(),
+            Err("popup_menu_width must be positive")
+        );
 
         let invalid_row_height = ThemeMetrics {
             popup_menu_row_height: f32::INFINITY,
             ..defaults
         };
-        assert_eq!(invalid_row_height.validate(), Err("popup_menu_row_height must be finite"));
+        assert_eq!(
+            invalid_row_height.validate(),
+            Err("popup_menu_row_height must be finite")
+        );
 
         let invalid_padding = ThemeMetrics {
             popup_menu_horizontal_padding: -1.0,

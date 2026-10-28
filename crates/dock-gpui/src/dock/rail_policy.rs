@@ -37,7 +37,10 @@ impl RailPolicy {
         if let DockCommand::ResizeColumn { column, width } = resize_command
             && crate::tree_query::main_column_ids(baseline, DockSide::Left)
                 .into_iter()
-                .chain(crate::tree_query::main_column_ids(baseline, DockSide::Right))
+                .chain(crate::tree_query::main_column_ids(
+                    baseline,
+                    DockSide::Right,
+                ))
                 .any(|candidate_column| candidate_column == *column)
             && let (Some(Node::Column(start_column)), Some(Node::Column(previous_column))) =
                 (baseline.node(*column), previous_preview.node(*column))
@@ -113,7 +116,6 @@ impl RailPolicy {
 
         Ok((candidate, commands, outcome))
     }
-
 }
 
 #[cfg(test)]
@@ -141,7 +143,14 @@ mod tests {
             column,
             width: 219.0,
         };
-        let (preview, commands, _) = policy.preview(controller.layout(), controller.layout(), &collapsed, &metrics).unwrap();
+        let (preview, commands, _) = policy
+            .preview(
+                controller.layout(),
+                controller.layout(),
+                &collapsed,
+                &metrics,
+            )
+            .unwrap();
         assert_eq!(
             commands,
             vec![
@@ -152,8 +161,12 @@ mod tests {
                 }
             ]
         );
-        assert!(matches!(preview.node(column), Some(Node::Column(value)) if value.mode == ColumnMode::IconsOnly));
-        assert!(matches!(controller.layout().node(column), Some(Node::Column(value)) if value.mode == ColumnMode::Expanded));
+        assert!(
+            matches!(preview.node(column), Some(Node::Column(value)) if value.mode == ColumnMode::IconsOnly)
+        );
+        assert!(
+            matches!(controller.layout().node(column), Some(Node::Column(value)) if value.mode == ColumnMode::Expanded)
+        );
 
         let mut rail = controller.layout().clone();
         rail.apply(
@@ -179,14 +192,32 @@ mod tests {
                 expand,
             ]
         );
-        assert!(matches!(preview.node(column), Some(Node::Column(value)) if value.mode == ColumnMode::Expanded && value.width >= 240.0));
+        assert!(
+            matches!(preview.node(column), Some(Node::Column(value)) if value.mode == ColumnMode::Expanded && value.width >= 240.0)
+        );
 
         // Once expanded during a gesture, the column stays expanded until the lower
         // collapse threshold is crossed. The gap between 220 and 240 prevents flicker.
-        let intermediate = DockCommand::ResizeColumn { column, width: 230.0 };
-        let (preview, commands, _) = policy.preview(&rail, &preview, &intermediate, &metrics).unwrap();
-        assert_eq!(commands, vec![DockCommand::SetColumnMode { column, mode: ColumnMode::Expanded }, intermediate]);
-        assert!(matches!(preview.node(column), Some(Node::Column(value)) if value.mode == ColumnMode::Expanded && value.width >= 230.0));
+        let intermediate = DockCommand::ResizeColumn {
+            column,
+            width: 230.0,
+        };
+        let (preview, commands, _) = policy
+            .preview(&rail, &preview, &intermediate, &metrics)
+            .unwrap();
+        assert_eq!(
+            commands,
+            vec![
+                DockCommand::SetColumnMode {
+                    column,
+                    mode: ColumnMode::Expanded
+                },
+                intermediate
+            ]
+        );
+        assert!(
+            matches!(preview.node(column), Some(Node::Column(value)) if value.mode == ColumnMode::Expanded && value.width >= 230.0)
+        );
 
         let boundary = DockCommand::ResizeColumnBoundary {
             side: DockSide::Right,
@@ -194,7 +225,12 @@ mod tests {
             delta: -70.0,
         };
         let (preview, commands, _) = policy
-            .preview(controller.layout(), controller.layout(), &boundary, &metrics)
+            .preview(
+                controller.layout(),
+                controller.layout(),
+                &boundary,
+                &metrics,
+            )
             .unwrap();
         assert_eq!(
             commands,

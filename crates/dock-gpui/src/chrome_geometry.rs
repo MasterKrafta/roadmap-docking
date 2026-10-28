@@ -194,12 +194,21 @@ fn normalize_rail_overflow_extents(
     rail_column_reservations: &HashMap<NodeId, f32>,
 ) {
     for (column_id, reserved) in rail_column_reservations {
-        let Some(column_rect) = rects.columns.iter().find(|entry| entry.column == *column_id) else {
+        let Some(column_rect) = rects
+            .columns
+            .iter()
+            .find(|entry| entry.column == *column_id)
+        else {
             continue;
         };
         let group_ids = layout
             .column_display_order(*column_id)
-            .map(|items| items.into_iter().map(|item| item.group).collect::<HashSet<_>>())
+            .map(|items| {
+                items
+                    .into_iter()
+                    .map(|item| item.group)
+                    .collect::<HashSet<_>>()
+            })
             .unwrap_or_else(|_| match layout.node(*column_id) {
                 Some(Node::Column(column)) => column.groups.iter().copied().collect(),
                 _ => HashSet::new(),
@@ -210,8 +219,8 @@ fn normalize_rail_overflow_extents(
             .filter(|entry| group_ids.contains(&entry.group))
             .map(|entry| entry.rect.origin.y + entry.rect.size.height)
             .fold(column_rect.rect.origin.y, f32::max);
-        let required_height = (required_bottom - column_rect.rect.origin.y)
-            .max(column_rect.rect.size.height);
+        let required_height =
+            (required_bottom - column_rect.rect.origin.y).max(column_rect.rect.size.height);
 
         if let Some(overflow) = rects
             .vertical_overflow
@@ -287,17 +296,23 @@ fn normalize_tab_strip_widths(
     // This applies to floating Tabs groups too, so controls never cover a tab.
     for group_rect in &rects.groups {
         let group_id = group_rect.group;
-        if rail_groups.contains(&group_id) || !matches!(layout.node(group_id), Some(Node::Tabs(_))) {
+        if rail_groups.contains(&group_id) || !matches!(layout.node(group_id), Some(Node::Tabs(_)))
+        {
             continue;
         }
         let width = group_rect.rect.size.width.max(0.0);
         let menu_width = metrics.group_control_button_width.min(width);
         let mode_width = if mode_button_groups.contains(&group_id) {
-            metrics.group_control_button_width.min((width - menu_width).max(0.0))
+            metrics
+                .group_control_button_width
+                .min((width - menu_width).max(0.0))
         } else {
             0.0
         };
-        let has_overflow = rects.tab_overflows.iter().any(|entry| entry.group == group_id);
+        let has_overflow = rects
+            .tab_overflows
+            .iter()
+            .any(|entry| entry.group == group_id);
         let overflow_width = if has_overflow {
             metrics
                 .tab_overflow_button_width
@@ -392,12 +407,10 @@ fn floating_title_geometry_by_group(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        normalize_docked_group_geometry, rail_control_row_height, GROUP_DRAG_GRIP_HEIGHT,
-    };
+    use super::{GROUP_DRAG_GRIP_HEIGHT, normalize_docked_group_geometry, rail_control_row_height};
     use dock_core::{
-        create_initial_layout, ColumnMode, DockCommand, DockMetrics, DockSide, DropTarget,
-        Layout, Node, NodeId, PanelConstraints, PanelKey, Point, Profile, Rect, Size,
+        ColumnMode, DockCommand, DockMetrics, DockSide, DropTarget, Layout, Node, NodeId,
+        PanelConstraints, PanelKey, Point, Profile, Rect, Size, create_initial_layout,
     };
 
     fn layout_with_tab_count(tab_count: usize, metrics: DockMetrics) -> (Layout, NodeId) {
@@ -411,8 +424,7 @@ mod tests {
             .into_iter()
             .map(|key| (PanelKey::new(key).unwrap(), constraints))
             .collect::<Vec<_>>();
-        let mut layout =
-            create_initial_layout(Profile::Photoshop, &descriptors, metrics).unwrap();
+        let mut layout = create_initial_layout(Profile::Photoshop, &descriptors, metrics).unwrap();
 
         let column_id = layout.main_area(DockSide::Right).unwrap().root;
         let Node::Column(column) = layout.node(column_id).unwrap() else {
@@ -488,7 +500,10 @@ mod tests {
                 .rect;
 
             assert!(
-                !rects.tab_overflows.iter().any(|entry| entry.group == group_id),
+                !rects
+                    .tab_overflows
+                    .iter()
+                    .any(|entry| entry.group == group_id),
                 "the {tab_count}-tab fixture should not overflow"
             );
 
@@ -552,7 +567,10 @@ mod tests {
             .width;
 
         assert!(
-            !rects.tab_overflows.iter().any(|entry| entry.group == group_id),
+            !rects
+                .tab_overflows
+                .iter()
+                .any(|entry| entry.group == group_id),
             "the two-tab fixture should not overflow"
         );
 
@@ -591,8 +609,7 @@ mod tests {
             tab_strip_height: 24.0,
             ..DockMetrics::default()
         };
-        let mut layout =
-            create_initial_layout(Profile::Photoshop, &descriptors, metrics).unwrap();
+        let mut layout = create_initial_layout(Profile::Photoshop, &descriptors, metrics).unwrap();
         let root = layout.main_area(DockSide::Right).unwrap().root;
         let Node::Column(column) = layout.node(root).unwrap() else {
             panic!("Photoshop main area should use a column");
@@ -622,12 +639,26 @@ mod tests {
         normalize_docked_group_geometry(&layout, &metrics, &mut rects);
 
         let floating = rects.floating_groups.first().unwrap().rect;
-        let group_rect = rects.groups.iter().find(|entry| entry.group == group).unwrap().rect;
-        let strip = rects.tab_strips.iter().find(|entry| entry.group == group).unwrap().rect;
+        let group_rect = rects
+            .groups
+            .iter()
+            .find(|entry| entry.group == group)
+            .unwrap()
+            .rect;
+        let strip = rects
+            .tab_strips
+            .iter()
+            .find(|entry| entry.group == group)
+            .unwrap()
+            .rect;
         let expected_y = floating.origin.y + metrics.header_height;
         assert!((group_rect.origin.y - expected_y).abs() < 0.001);
         assert!((strip.origin.y - expected_y).abs() < 0.001);
-        for header in rects.tab_headers.iter().filter(|entry| entry.group == group) {
+        for header in rects
+            .tab_headers
+            .iter()
+            .filter(|entry| entry.group == group)
+        {
             assert!((header.rect.origin.y - expected_y).abs() < 0.001);
         }
     }
@@ -659,23 +690,51 @@ mod tests {
             panic!("Photoshop main area should use a column");
         };
         let group_id = column.groups[0];
-        let group_rect = before.groups.iter().find(|entry| entry.group == group_id).unwrap().rect;
-        let before_strip = before.tab_strips.iter().find(|entry| entry.group == group_id).unwrap().rect;
-        assert_eq!(before_strip.origin.y, group_rect.origin.y + metrics.header_height);
+        let group_rect = before
+            .groups
+            .iter()
+            .find(|entry| entry.group == group_id)
+            .unwrap()
+            .rect;
+        let before_strip = before
+            .tab_strips
+            .iter()
+            .find(|entry| entry.group == group_id)
+            .unwrap()
+            .rect;
+        assert_eq!(
+            before_strip.origin.y,
+            group_rect.origin.y + metrics.header_height
+        );
         let Node::Tabs(tabs) = layout.node(group_id).unwrap() else {
             panic!("column children should be tab groups");
         };
         let active_panel_id = super::active_panel(&layout, tabs).unwrap();
-        let before_panel = before.panels.iter().find(|entry| entry.panel == active_panel_id).unwrap().rect;
+        let before_panel = before
+            .panels
+            .iter()
+            .find(|entry| entry.panel == active_panel_id)
+            .unwrap()
+            .rect;
 
         normalize_docked_group_geometry(&layout, &metrics, &mut rects);
 
-        let after_strip = rects.tab_strips.iter().find(|entry| entry.group == group_id).unwrap().rect;
+        let after_strip = rects
+            .tab_strips
+            .iter()
+            .find(|entry| entry.group == group_id)
+            .unwrap()
+            .rect;
         assert_eq!(
             after_strip.origin.y,
             group_rect.origin.y + GROUP_DRAG_GRIP_HEIGHT
         );
-        let after_panel = rects.panels.iter().find(|entry| entry.panel == active_panel_id).unwrap().rect;
+        let after_panel = rects
+            .panels
+            .iter()
+            .find(|entry| entry.panel == active_panel_id)
+            .unwrap()
+            .rect;
         assert_eq!(
             after_panel.origin.y,
             group_rect.origin.y + GROUP_DRAG_GRIP_HEIGHT + metrics.tab_strip_height
@@ -693,7 +752,8 @@ mod tests {
             .iter()
             .map(|header| header.rect.origin.x + header.rect.size.width)
             .fold(group_rect.origin.x, f32::max);
-        let menu_left = group_rect.origin.x + group_rect.size.width - metrics.group_control_button_width;
+        let menu_left =
+            group_rect.origin.x + group_rect.size.width - metrics.group_control_button_width;
         let mode_button_left = menu_left - metrics.group_control_button_width;
         assert!(
             (mode_button_left - tab_right).abs() < 0.001,
@@ -722,8 +782,7 @@ mod tests {
             .into_iter()
             .map(|key| (PanelKey::new(key).unwrap(), constraints))
             .collect::<Vec<_>>();
-        let mut layout =
-            create_initial_layout(Profile::Photoshop, &descriptors, metrics).unwrap();
+        let mut layout = create_initial_layout(Profile::Photoshop, &descriptors, metrics).unwrap();
         let column_id = layout.main_area(DockSide::Right).unwrap().root;
         layout
             .apply(
@@ -762,9 +821,10 @@ mod tests {
             first_group_before.origin.y + reserved
         );
         assert!(
-            rects.tab_headers.iter().all(|header| {
-                header.rect.origin.y >= column_rect.origin.y + reserved
-            }),
+            rects
+                .tab_headers
+                .iter()
+                .all(|header| { header.rect.origin.y >= column_rect.origin.y + reserved }),
             "every rail item must start below the pinned mode-control row"
         );
     }
@@ -782,8 +842,7 @@ mod tests {
             .into_iter()
             .map(|key| (PanelKey::new(key).unwrap(), constraints))
             .collect::<Vec<_>>();
-        let mut layout =
-            create_initial_layout(Profile::Photoshop, &descriptors, metrics).unwrap();
+        let mut layout = create_initial_layout(Profile::Photoshop, &descriptors, metrics).unwrap();
         let column_id = layout.main_area(DockSide::Right).unwrap().root;
         layout
             .apply(
@@ -820,5 +879,4 @@ mod tests {
             original_overflow.content_extent.size.height + row_height
         );
     }
-
 }

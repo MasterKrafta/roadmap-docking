@@ -89,12 +89,27 @@ fn active_index(layout: &Layout, group: NodeId) -> usize {
 
 fn assert_base_rectangles_equal(before: &crate::LayoutRects, after: &crate::LayoutRects) {
     assert_eq!(after.viewport, before.viewport, "viewport must not reflow");
-    assert_eq!(after.canvas, before.canvas, "flyout must overlay the Canvas");
-    assert_eq!(after.columns, before.columns, "dock columns must not reflow");
+    assert_eq!(
+        after.canvas, before.canvas,
+        "flyout must overlay the Canvas"
+    );
+    assert_eq!(
+        after.columns, before.columns,
+        "dock columns must not reflow"
+    );
     assert_eq!(after.groups, before.groups, "dock groups must not reflow");
-    assert_eq!(after.tab_strips, before.tab_strips, "tab strips must not reflow");
-    assert_eq!(after.tab_headers, before.tab_headers, "tab headers must not reflow");
-    assert_eq!(after.tab_overflows, before.tab_overflows, "tab overflow must not reflow");
+    assert_eq!(
+        after.tab_strips, before.tab_strips,
+        "tab strips must not reflow"
+    );
+    assert_eq!(
+        after.tab_headers, before.tab_headers,
+        "tab headers must not reflow"
+    );
+    assert_eq!(
+        after.tab_overflows, before.tab_overflows,
+        "tab overflow must not reflow"
+    );
     assert_eq!(after.panels, before.panels, "panel content must not reflow");
     assert_eq!(after.splitters, before.splitters, "splitters must not move");
     assert_eq!(
@@ -105,7 +120,10 @@ fn assert_base_rectangles_equal(before: &crate::LayoutRects, after: &crate::Layo
         after.floating_resize_edges, before.floating_resize_edges,
         "floating resize handles must not move",
     );
-    assert_eq!(after.drop_zones, before.drop_zones, "drop zones must not reflow");
+    assert_eq!(
+        after.drop_zones, before.drop_zones,
+        "drop zones must not reflow"
+    );
     assert_eq!(
         after.vertical_overflow, before.vertical_overflow,
         "vertical overflow geometry must not change",

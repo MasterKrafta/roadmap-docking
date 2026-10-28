@@ -2,8 +2,8 @@
 
 use std::collections::HashMap;
 
-use super::*;
 use super::helpers::{normalized_ratios, ratio_issues};
+use super::*;
 
 impl Layout {
     pub(super) fn apply_group_resize_command(
@@ -17,21 +17,17 @@ impl Layout {
                 boundary_index,
                 delta,
                 available_height,
-            } => {
-                self.apply_resize_groups_command(
-                    column,
-                    boundary_index,
-                    delta,
-                    available_height,
-                    metrics,
-                )
-            }
+            } => self.apply_resize_groups_command(
+                column,
+                boundary_index,
+                delta,
+                available_height,
+                metrics,
+            ),
             DockCommand::ResetColumnRatios {
                 column,
                 available_height,
-            } => {
-                self.apply_reset_column_ratios_command(column, available_height, metrics)
-            }
+            } => self.apply_reset_column_ratios_command(column, available_height, metrics),
             DockCommand::RestoreGroupRatios { column, ratios } => {
                 self.apply_restore_group_ratios_command(column, ratios)
             }
@@ -116,8 +112,7 @@ impl Layout {
             });
         }
         if current.groups.iter().enumerate().any(|(index, group)| {
-            !self.group_is_collapsed(*group)
-                && heights[index] + PIXEL_TOLERANCE < minimums[index]
+            !self.group_is_collapsed(*group) && heights[index] + PIXEL_TOLERANCE < minimums[index]
         }) {
             return Err(CommandError::InvalidValue {
                 field: "available_height",
@@ -160,12 +155,8 @@ impl Layout {
                 reason: "constrained resize produced a negative group weight",
             });
         }
-        let final_heights = self.group_heights_for_ratios(
-            *column,
-            &new_ratios,
-            *available_height,
-            metrics,
-        )?;
+        let final_heights =
+            self.group_heights_for_ratios(*column, &new_ratios, *available_height, metrics)?;
         let actual_delta = final_heights[left_index] - heights[left_index];
         if actual_delta == 0.0 || new_ratios == current.group_ratios {
             return Ok(CommandApplication {
@@ -629,14 +620,15 @@ impl Layout {
             .get(node_id)
             .ok_or(CommandError::MissingNode { node: node_id })?;
         let size = match node {
-            Node::Panel(panel) => self
-                .panel_instances
-                .get(panel.panel_id)
-                .ok_or(CommandError::MissingPanel {
-                    panel: panel.panel_id,
-                })?
-                .constraints
-                .min_size,
+            Node::Panel(panel) => {
+                self.panel_instances
+                    .get(panel.panel_id)
+                    .ok_or(CommandError::MissingPanel {
+                        panel: panel.panel_id,
+                    })?
+                    .constraints
+                    .min_size
+            }
             Node::Tabs(tabs) if tabs.collapsed => {
                 Size::new(0.0, metrics.effective_collapsed_group_height())
             }
@@ -694,10 +686,11 @@ impl Layout {
             Node::Column(column) => {
                 let mut height = 0.0_f32;
                 for group in &column.groups {
-                    height += self.minimum_node_size_with_cache(*group, metrics, cache)?.height;
+                    height += self
+                        .minimum_node_size_with_cache(*group, metrics, cache)?
+                        .height;
                 }
-                height += metrics.splitter_thickness
-                    * column.groups.len().saturating_sub(1) as f32;
+                height += metrics.splitter_thickness * column.groups.len().saturating_sub(1) as f32;
                 Size::new(column.width, height)
             }
         };
@@ -752,13 +745,14 @@ impl Layout {
                 minimum
             }
             Some(Node::Column(column))
-                if column.groups.len() > 1
-                    && self.floating_branch_starts_collapsed(node_id) =>
+                if column.groups.len() > 1 && self.floating_branch_starts_collapsed(node_id) =>
             {
                 let base = self.minimum_node_size_with_cache(node_id, metrics, cache)?;
                 Size::new(base.width, base.height + metrics.header_height)
             }
-            Some(Node::Split(split)) if split.axis == Axis::Y && self.floating_branch_starts_collapsed(node_id) => {
+            Some(Node::Split(split))
+                if split.axis == Axis::Y && self.floating_branch_starts_collapsed(node_id) =>
+            {
                 let base = self.minimum_node_size_with_cache(node_id, metrics, cache)?;
                 Size::new(base.width, base.height + metrics.header_height)
             }
@@ -775,8 +769,7 @@ impl Layout {
                     };
                     height = height.max(child_size.height + title_reserve);
                 }
-                width += metrics.splitter_thickness
-                    * split.children.len().saturating_sub(1) as f32;
+                width += metrics.splitter_thickness * split.children.len().saturating_sub(1) as f32;
                 Size::new(width, height)
             }
             Some(_) => self.minimum_node_size_with_cache(node_id, metrics, cache)?,
@@ -805,9 +798,9 @@ impl Layout {
     pub(crate) fn floating_branch_starts_collapsed(&self, node_id: NodeId) -> bool {
         match self.nodes.get(node_id) {
             Some(Node::Tabs(tabs)) => tabs.collapsed,
-            Some(Node::Column(column)) => column.groups.first().is_some_and(|group| {
-                matches!(self.nodes.get(*group), Some(Node::Tabs(tabs)) if tabs.collapsed)
-            }),
+            Some(Node::Column(column)) => column.groups.first().is_some_and(
+                |group| matches!(self.nodes.get(*group), Some(Node::Tabs(tabs)) if tabs.collapsed),
+            ),
             Some(Node::Split(split)) if split.axis == Axis::Y => split
                 .children
                 .first()

@@ -1,5 +1,5 @@
-use dock_core::{DockCommand, Layout, Node, NodeId};
 use crate::frame::FrameGeometry;
+use dock_core::{DockCommand, Layout, Node, NodeId};
 
 use super::MenuItemModel;
 
@@ -15,7 +15,9 @@ pub(super) fn items(layout: &Layout, frame: &FrameGeometry, group: NodeId) -> Ve
     let mut items = hidden_tabs
         .into_iter()
         .filter_map(|panel| {
-            let title = layout.panel_instance(panel).map(crate::panels::panel_title)?;
+            let title = layout
+                .panel_instance(panel)
+                .map(crate::panels::panel_title)?;
             Some(MenuItemModel {
                 id: format!("overflow-{:?}-{:?}", group, panel),
                 label: title,

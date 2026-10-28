@@ -93,10 +93,11 @@ fn validation_rejects_programmatically_constructed_trees_beyond_depth_limit() {
     );
 
     let errors = layout.validate(&DockMetrics::default()).unwrap_err();
-    assert!(errors.iter().any(|error| matches!(
-        error,
-        ValidationError::TreeTooDeep { max_depth: 256 }
-    )));
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, ValidationError::TreeTooDeep { max_depth: 256 }))
+    );
 }
 
 #[test]
@@ -313,7 +314,6 @@ fn validation_accepts_narrow_canvas_but_rejects_invalid_metrics() {
             .iter()
             .any(|error| matches!(error, ValidationError::InvalidMetrics { .. }))
     );
-
 }
 
 #[test]
@@ -345,4 +345,3 @@ fn compute_rects_preserves_layout_validation_errors() {
         }
     )));
 }
-

@@ -1,8 +1,8 @@
 use super::*;
 use crate::layout_builder::LayoutBuilder;
 use crate::{
-    AllowedArea, ColumnMode, DockCommand, DockMetrics, DockSide, DropSource, DropTarget,
-    DropZone, PanelConstraints, PanelKey, Point, Profile, Rect, Size,
+    AllowedArea, ColumnMode, DockCommand, DockMetrics, DockSide, DropSource, DropTarget, DropZone,
+    PanelConstraints, PanelKey, Point, Profile, Rect, Size,
 };
 use slotmap::Key;
 
@@ -264,8 +264,7 @@ fn command_application_revalidates_allowed_area_even_for_forged_targets() {
         constraints().with_allowed_areas(AllowedArea::MAIN_DOCK),
     );
     let source_group = builder.tabs(vec![source_node], 0, false);
-    let source_column =
-        builder.column(280.0, ColumnMode::Expanded, vec![source_group], vec![1.0]);
+    let source_column = builder.column(280.0, ColumnMode::Expanded, vec![source_group], vec![1.0]);
     builder.main_area(DockSide::Right, source_column);
 
     let (_, rail_node) = builder.panel(key("command-area-rail"), constraints());
@@ -619,28 +618,31 @@ fn floating_horizontal_composition_drop_zones_target_the_branch_under_pointer() 
 
     let (source_panel, source_node) = builder.panel(key("float-x-source"), constraints());
     let source_group = builder.tabs(vec![source_node], 0, false);
-    let source_column =
-        builder.column(280.0, ColumnMode::Expanded, vec![source_group], vec![1.0]);
+    let source_column = builder.column(280.0, ColumnMode::Expanded, vec![source_group], vec![1.0]);
     builder.main_area(DockSide::Left, source_column);
 
     let (_, left_panel_node) = builder.panel(key("float-x-left"), constraints());
     let left_group = builder.tabs(vec![left_panel_node], 0, false);
-    let left_column =
-        builder.column(300.0, ColumnMode::Expanded, vec![left_group], vec![1.0]);
+    let left_column = builder.column(300.0, ColumnMode::Expanded, vec![left_group], vec![1.0]);
 
     let (_, right_panel_node) = builder.panel(key("float-x-right"), constraints());
     let right_group = builder.tabs(vec![right_panel_node], 0, false);
-    let right_column =
-        builder.column(300.0, ColumnMode::Expanded, vec![right_group], vec![1.0]);
+    let right_column = builder.column(300.0, ColumnMode::Expanded, vec![right_group], vec![1.0]);
 
-    let root = builder.split(crate::Axis::X, vec![left_column, right_column], vec![0.5, 0.5]);
+    let root = builder.split(
+        crate::Axis::X,
+        vec![left_column, right_column],
+        vec![0.5, 0.5],
+    );
     let bounds = Rect::new(Point::new(500.0, 120.0), Size::new(604.0, 320.0));
     let floating_id = builder.floating_group(root, bounds, 4);
     let layout = builder.build();
     let rects = layout.compute_rects(viewport(), &metrics).unwrap();
     let zones = layout
         .compute_drop_zones(
-            DropSource::Panel { panel: source_panel },
+            DropSource::Panel {
+                panel: source_panel,
+            },
             &rects,
             &metrics,
         )
@@ -654,16 +656,15 @@ fn floating_horizontal_composition_drop_zones_target_the_branch_under_pointer() 
         .rect;
     let right_center = Point::new(
         right_group_rect.origin.x + right_group_rect.size.width / 2.0,
-        right_group_rect.origin.y
-            + metrics.header_height
-            + metrics.tab_strip_height
-            + 40.0,
+        right_group_rect.origin.y + metrics.header_height + metrics.tab_strip_height + 40.0,
     );
     assert_eq!(
         layout
             .resolve_drop(
                 right_center,
-                DropSource::Panel { panel: source_panel },
+                DropSource::Panel {
+                    panel: source_panel
+                },
                 &rects,
                 &metrics,
             )
@@ -676,25 +677,57 @@ fn floating_horizontal_composition_drop_zones_target_the_branch_under_pointer() 
 
     for (x, expected_group, edge, zone) in [
         (
-            rects.columns.iter().find(|entry| entry.column == left_column).unwrap().rect.origin.x + 100.0,
+            rects
+                .columns
+                .iter()
+                .find(|entry| entry.column == left_column)
+                .unwrap()
+                .rect
+                .origin
+                .x
+                + 100.0,
             left_group,
             DropZone::Top,
             DropZone::FloatingTop,
         ),
         (
-            rects.columns.iter().find(|entry| entry.column == right_column).unwrap().rect.origin.x + 100.0,
+            rects
+                .columns
+                .iter()
+                .find(|entry| entry.column == right_column)
+                .unwrap()
+                .rect
+                .origin
+                .x
+                + 100.0,
             right_group,
             DropZone::Top,
             DropZone::FloatingTop,
         ),
         (
-            rects.columns.iter().find(|entry| entry.column == left_column).unwrap().rect.origin.x + 100.0,
+            rects
+                .columns
+                .iter()
+                .find(|entry| entry.column == left_column)
+                .unwrap()
+                .rect
+                .origin
+                .x
+                + 100.0,
             left_group,
             DropZone::Bottom,
             DropZone::FloatingBottom,
         ),
         (
-            rects.columns.iter().find(|entry| entry.column == right_column).unwrap().rect.origin.x + 100.0,
+            rects
+                .columns
+                .iter()
+                .find(|entry| entry.column == right_column)
+                .unwrap()
+                .rect
+                .origin
+                .x
+                + 100.0,
             right_group,
             DropZone::Bottom,
             DropZone::FloatingBottom,
@@ -719,7 +752,9 @@ fn floating_horizontal_composition_drop_zones_target_the_branch_under_pointer() 
             layout
                 .resolve_drop(
                     point,
-                    DropSource::Panel { panel: source_panel },
+                    DropSource::Panel {
+                        panel: source_panel
+                    },
                     &rects,
                     &metrics,
                 )
@@ -740,8 +775,7 @@ fn icon_rail_targets_flattened_insertion_order() {
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
     let (source_panel, source_node) = builder.panel(key("rail-source"), constraints());
     let source_group = builder.tabs(vec![source_node], 0, false);
-    let source_column =
-        builder.column(280.0, ColumnMode::Expanded, vec![source_group], vec![1.0]);
+    let source_column = builder.column(280.0, ColumnMode::Expanded, vec![source_group], vec![1.0]);
     builder.main_area(DockSide::Right, source_column);
 
     let (_, first_node) = builder.panel(key("rail-first"), constraints());
@@ -785,8 +819,7 @@ fn labeled_rail_targets_flattened_insertion_order() {
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
     let (source_panel, source_node) = builder.panel(key("rail-source"), constraints());
     let source_group = builder.tabs(vec![source_node], 0, false);
-    let source_column =
-        builder.column(280.0, ColumnMode::Expanded, vec![source_group], vec![1.0]);
+    let source_column = builder.column(280.0, ColumnMode::Expanded, vec![source_group], vec![1.0]);
     builder.main_area(DockSide::Right, source_column);
 
     let (_, first_node) = builder.panel(key("rail-first"), constraints());
@@ -1061,8 +1094,7 @@ fn synthetic_drop_zone_layout(
         for group_index in 0..groups_per_column {
             let mut panel_nodes = Vec::with_capacity(panels_per_group);
             for panel_index in 0..panels_per_group {
-                let panel_key =
-                    format!("bench-c{column_index}-g{group_index}-p{panel_index}");
+                let panel_key = format!("bench-c{column_index}-g{group_index}-p{panel_index}");
                 let (panel, panel_node) = builder.panel(key(&panel_key), constraints());
                 source_panel.get_or_insert(panel);
                 panel_nodes.push(panel_node);
@@ -1093,13 +1125,11 @@ fn synthetic_drop_zone_layout(
 
     // Keep one floating group in both fixtures to include the floating-area
     // ancestry lookups performed by the same public drop-zone pipeline.
-    let (_, floating_panel_node) =
-        builder.panel(key("bench-floating-panel"), constraints());
+    let (_, floating_panel_node) = builder.panel(key("bench-floating-panel"), constraints());
     let floating_tabs = builder.tabs(vec![floating_panel_node], 0, false);
 
-    let viewport_width = column_count as f32 * metrics.default_column_width
-        + metrics.min_canvas_width
-        + 256.0;
+    let viewport_width =
+        column_count as f32 * metrics.default_column_width + metrics.min_canvas_width + 256.0;
     let viewport_height = groups_per_column as f32
         * (metrics.header_height
             + metrics.tab_strip_height
@@ -1198,12 +1228,8 @@ fn benchmark_compute_drop_zones_typical_and_large_layouts() {
         group_iterations,
     ) in cases
     {
-        let (layout, source_panel, source_group, viewport) = synthetic_drop_zone_layout(
-            column_count,
-            groups_per_column,
-            panels_per_group,
-            &metrics,
-        );
+        let (layout, source_panel, source_group, viewport) =
+            synthetic_drop_zone_layout(column_count, groups_per_column, panels_per_group, &metrics);
         assert_eq!(layout.validate(&metrics), Ok(()));
         let rects = layout
             .compute_rects(viewport, &metrics)
@@ -1212,7 +1238,9 @@ fn benchmark_compute_drop_zones_typical_and_large_layouts() {
         measure_drop_zone_case(
             &format!("{label}-panel-source"),
             &layout,
-            DropSource::Panel { panel: source_panel },
+            DropSource::Panel {
+                panel: source_panel,
+            },
             &rects,
             &metrics,
             panel_iterations,
@@ -1220,7 +1248,9 @@ fn benchmark_compute_drop_zones_typical_and_large_layouts() {
         measure_drop_zone_case(
             &format!("{label}-group-source"),
             &layout,
-            DropSource::Group { group: source_group },
+            DropSource::Group {
+                group: source_group,
+            },
             &rects,
             &metrics,
             group_iterations,

@@ -198,8 +198,7 @@ impl Layout {
                 reason: geometry_error_reason(reason),
             });
         }
-        let panel_placements =
-            self.validate_node_records(metrics, metrics_are_valid, &mut errors);
+        let panel_placements = self.validate_node_records(metrics, metrics_are_valid, &mut errors);
         self.validate_panel_instances(&panel_placements, &mut errors);
 
         let roots = self.validate_dock_areas(metrics, metrics_are_valid, &mut errors);
@@ -824,7 +823,11 @@ impl Layout {
             let Some(area_id) = area_id else {
                 continue;
             };
-            let side = if index == 0 { DockSide::Left } else { DockSide::Right };
+            let side = if index == 0 {
+                DockSide::Left
+            } else {
+                DockSide::Right
+            };
             let Some(area) = self.dock_areas.get(area_id).copied() else {
                 return Err(vec![ValidationError::InvalidMainArea {
                     area: area_id,
@@ -1004,5 +1007,4 @@ impl Layout {
             }
         }
     }
-
 }

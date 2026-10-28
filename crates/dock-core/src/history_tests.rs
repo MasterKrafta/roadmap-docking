@@ -93,9 +93,8 @@ fn history_benchmark_layout(
         for group_index in 0..groups_per_column {
             let mut panel_nodes = Vec::with_capacity(panels_per_group);
             for panel_index in 0..panels_per_group {
-                let panel_key = format!(
-                    "history-bench-main-{column_index}-{group_index}-{panel_index}"
-                );
+                let panel_key =
+                    format!("history-bench-main-{column_index}-{group_index}-{panel_index}");
                 let (_, panel_node) = builder.panel(key(&panel_key), constraints());
                 panel_nodes.push(panel_node);
             }
@@ -136,7 +135,10 @@ fn history_benchmark_layout(
         builder.floating_group(
             tabs,
             Rect::new(
-                Point::new(40.0 + floating_index as f32 * 12.0, 50.0 + floating_index as f32 * 9.0),
+                Point::new(
+                    40.0 + floating_index as f32 * 12.0,
+                    50.0 + floating_index as f32 * 9.0,
+                ),
                 Size::new(400.0, 300.0),
             ),
             floating_index as i32,
@@ -419,13 +421,8 @@ fn benchmark_history_snapshot_and_bounded_history() {
 
     for (name, columns, groups, panels_per_group, floats, panels_per_float, iterations) in scenarios
     {
-        let (layout, resize_column) = history_benchmark_layout(
-            columns,
-            groups,
-            panels_per_group,
-            floats,
-            panels_per_float,
-        );
+        let (layout, resize_column) =
+            history_benchmark_layout(columns, groups, panels_per_group, floats, panels_per_float);
         layout
             .validate(&metrics)
             .expect("benchmark layout must satisfy normal layout invariants");
@@ -472,7 +469,11 @@ fn benchmark_history_snapshot_and_bounded_history() {
                     .apply(
                         DockCommand::ResizeColumn {
                             column: resize_column,
-                            width: if alternate_preview_width { 279.0 } else { 281.0 },
+                            width: if alternate_preview_width {
+                                279.0
+                            } else {
+                                281.0
+                            },
                         },
                         &metrics,
                     )
@@ -710,7 +711,10 @@ fn zero_history_limit_preserves_apply_outcomes_errors_and_state_without_history(
         .unwrap();
     let direct_outcome = direct_layout.apply(resize, &metrics).unwrap();
     assert_eq!(history_outcome, direct_outcome);
-    assert_eq!(persistent_shape(&history_layout), persistent_shape(&direct_layout));
+    assert_eq!(
+        persistent_shape(&history_layout),
+        persistent_shape(&direct_layout)
+    );
     assert_eq!(history_layout.version(), direct_layout.version());
 
     assert_eq!(history.undo_len(), 0);
@@ -734,7 +738,10 @@ fn zero_history_limit_preserves_apply_outcomes_errors_and_state_without_history(
     assert!(history_error.is_err());
     assert_eq!(persistent_shape(&history_layout), before_failure);
     assert_eq!(history_layout.version(), before_failure_version);
-    assert_eq!(persistent_shape(&history_layout), persistent_shape(&direct_layout));
+    assert_eq!(
+        persistent_shape(&history_layout),
+        persistent_shape(&direct_layout)
+    );
     assert_eq!(history_layout.version(), direct_layout.version());
     assert_eq!(history.undo_len(), 0);
     assert_eq!(history.redo_len(), 0);
@@ -801,7 +808,17 @@ fn narrow_canvas_measurements_can_be_updated_without_blocking_commands() {
     assert!(fixture.layout.update_canvas_bounds(Some(narrow)).unwrap());
     assert_eq!(fixture.layout.canvas().last_known_bounds(), Some(narrow));
     assert_eq!(fixture.layout.validate(&metrics), Ok(()));
-    assert!(fixture.layout.apply(DockCommand::SetChrome { mode: ChromeMode::DockHidden }, &metrics).is_ok());
+    assert!(
+        fixture
+            .layout
+            .apply(
+                DockCommand::SetChrome {
+                    mode: ChromeMode::DockHidden
+                },
+                &metrics
+            )
+            .is_ok()
+    );
     assert_eq!(fixture.layout.update_canvas_bounds(Some(narrow)), Ok(false));
 }
 
@@ -810,7 +827,16 @@ fn undo_history_discards_checkpoints_when_used_with_a_replaced_layout() {
     let metrics = DockMetrics::default();
     let mut original = fixture();
     let mut history = UndoRedoHistory::new();
-    history.apply(&mut original.layout, DockCommand::ResizeColumn { column: original.column, width: 320.0 }, &metrics).unwrap();
+    history
+        .apply(
+            &mut original.layout,
+            DockCommand::ResizeColumn {
+                column: original.column,
+                width: 320.0,
+            },
+            &metrics,
+        )
+        .unwrap();
     assert!(history.can_undo());
 
     let mut replacement = fixture();
@@ -819,7 +845,16 @@ fn undo_history_discards_checkpoints_when_used_with_a_replaced_layout() {
     assert_eq!(history.redo_len(), 0);
     assert_eq!(replacement.layout.version(), 0);
 
-    history.apply(&mut replacement.layout, DockCommand::ResizeColumn { column: replacement.column, width: 330.0 }, &metrics).unwrap();
+    history
+        .apply(
+            &mut replacement.layout,
+            DockCommand::ResizeColumn {
+                column: replacement.column,
+                width: 330.0,
+            },
+            &metrics,
+        )
+        .unwrap();
     assert!(history.undo(&mut replacement.layout, &metrics).unwrap());
     assert_eq!(history.undo_len(), 0);
 }
@@ -828,12 +863,56 @@ fn undo_history_discards_checkpoints_when_used_with_a_replaced_layout() {
 fn undo_preserves_panel_runtime_size_changed_after_checkpoint() {
     let metrics = DockMetrics::default();
     let mut fixture = fixture();
-    fixture.layout.apply(DockCommand::SetColumnMode { column: fixture.column, mode: ColumnMode::IconsOnly }, &metrics).unwrap();
-    fixture.layout.apply(DockCommand::OpenFlyout { column: fixture.column, panel: fixture.layers }, &metrics).unwrap();
-    fixture.layout.apply(DockCommand::ResizeFlyout { panel: fixture.layers, width: 320.0 }, &metrics).unwrap();
+    fixture
+        .layout
+        .apply(
+            DockCommand::SetColumnMode {
+                column: fixture.column,
+                mode: ColumnMode::IconsOnly,
+            },
+            &metrics,
+        )
+        .unwrap();
+    fixture
+        .layout
+        .apply(
+            DockCommand::OpenFlyout {
+                column: fixture.column,
+                panel: fixture.layers,
+            },
+            &metrics,
+        )
+        .unwrap();
+    fixture
+        .layout
+        .apply(
+            DockCommand::ResizeFlyout {
+                panel: fixture.layers,
+                width: 320.0,
+            },
+            &metrics,
+        )
+        .unwrap();
     let mut history = UndoRedoHistory::new();
-    history.apply(&mut fixture.layout, DockCommand::SetChrome { mode: ChromeMode::DockHidden }, &metrics).unwrap();
-    fixture.layout.apply(DockCommand::ResizeFlyout { panel: fixture.layers, width: 460.0 }, &metrics).unwrap();
+    history
+        .apply(
+            &mut fixture.layout,
+            DockCommand::SetChrome {
+                mode: ChromeMode::DockHidden,
+            },
+            &metrics,
+        )
+        .unwrap();
+    fixture
+        .layout
+        .apply(
+            DockCommand::ResizeFlyout {
+                panel: fixture.layers,
+                width: 460.0,
+            },
+            &metrics,
+        )
+        .unwrap();
 
     assert!(history.undo(&mut fixture.layout, &metrics).unwrap());
     let panel = fixture.layout.panel_instance(fixture.layers).unwrap();
@@ -970,7 +1049,6 @@ fn history_limit_is_bounded() {
     assert!(!history.can_undo());
 }
 
-
 #[test]
 fn resize_groups_with_tab_chrome_supports_history_undo_and_redo_after_clamping() {
     let metrics = DockMetrics {
@@ -990,12 +1068,7 @@ fn resize_groups_with_tab_chrome_supports_history_undo_and_redo_after_clamping()
     );
     let (_, panel_b) = builder.panel(
         key("history-chrome-resize-b"),
-        PanelConstraints::new(
-            Size::new(120.0, 80.0),
-            Size::new(200.0, 120.0),
-            None,
-            false,
-        ),
+        PanelConstraints::new(Size::new(120.0, 80.0), Size::new(200.0, 120.0), None, false),
     );
     let group_a = builder.tabs(vec![panel_a], 0, false);
     let group_b = builder.tabs(vec![panel_b], 0, false);

@@ -1,11 +1,11 @@
 use dock_core::{Rect, ResizeEdge};
 use gpui::{
-    App, InteractiveElement, IntoElement, MouseButton, MouseDownEvent, RenderOnce,
-    Styled, Window, div, px, rgb,
+    App, InteractiveElement, IntoElement, MouseButton, MouseDownEvent, RenderOnce, Styled, Window,
+    div, px, rgb,
 };
 use ui::Theme;
 
-use crate::components::{with_focus_ring, KeyDownHandler};
+use crate::components::{KeyDownHandler, with_focus_ring};
 
 pub type ResizeStartHandler = Box<dyn Fn(&MouseDownEvent, &mut Window, &mut App) + 'static>;
 

@@ -32,12 +32,7 @@ pub fn render_missing(instance: &PanelInstance) -> AnyElement {
 }
 
 /// Renders the legacy sized placeholder while the app window is being migrated.
-pub fn render(
-    theme: ui::Theme,
-    selected_tab: &'static str,
-    width: f32,
-    height: f32,
-) -> Div {
+pub fn render(theme: ui::Theme, selected_tab: &'static str, width: f32, height: f32) -> Div {
     div()
         .flex()
         .flex_col()

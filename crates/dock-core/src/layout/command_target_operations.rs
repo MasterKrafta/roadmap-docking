@@ -1,8 +1,8 @@
 //! Insertion of nodes, groups, and columns into docking targets.
 
+use super::helpers::{equal_ratios, normalized_ratios, side_index, split_sibling_ratios};
 use super::*;
 use crate::ColumnDisplayItem;
-use super::helpers::{equal_ratios, normalized_ratios, side_index, split_sibling_ratios};
 
 impl Layout {
     pub(super) fn insert_node_for_target(
@@ -137,18 +137,17 @@ impl Layout {
                     reason: "split ratio target does not identify an existing group",
                 });
             }
-            split_sibling_ratios(
-                &column.group_ratios,
-                old_len,
-                target_index,
-                index,
-                ratio,
-            )
+            split_sibling_ratios(&column.group_ratios, old_len, target_index, index, ratio)
         } else if column.groups.is_empty() {
             vec![1.0]
         } else {
             let old_ratios = normalized_ratios(
-                column.groups.iter().enumerate().map(|(index, _)| column.group_ratios.get(index).copied()).collect(),
+                column
+                    .groups
+                    .iter()
+                    .enumerate()
+                    .map(|(index, _)| column.group_ratios.get(index).copied())
+                    .collect(),
             );
             let old_scale = column.groups.len() as f32 / groups.len() as f32;
             let mut preserved = Vec::with_capacity(groups.len());
@@ -156,7 +155,11 @@ impl Layout {
                 if group_index == index {
                     preserved.push(1.0 / groups.len() as f32);
                 } else {
-                    let old_index = if group_index < index { group_index } else { group_index - 1 };
+                    let old_index = if group_index < index {
+                        group_index
+                    } else {
+                        group_index - 1
+                    };
                     preserved.push(old_ratios[old_index] * old_scale);
                 }
             }
@@ -231,10 +234,7 @@ impl Layout {
                         });
                     }
                     self.resize_inserted_column_for_split_ratio(
-                        area_root,
-                        new_column,
-                        ratio,
-                        metrics,
+                        area_root, new_column, ratio, metrics,
                     )?;
                 }
                 let children = if index == 0 {
@@ -306,7 +306,6 @@ impl Layout {
             }),
         }
     }
-
 
     pub(super) fn is_group_in_icon_rail(&self, group: NodeId) -> bool {
         let Some(column_id) = self.find_owner_column(group) else {

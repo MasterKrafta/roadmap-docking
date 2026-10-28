@@ -1,8 +1,8 @@
 use super::{ComputeRectsError, HitResult, Point, Rect};
 use crate::layout_builder::LayoutBuilder;
 use crate::{
-    Axis, ColumnMode, DockMetrics, DockSide, DropSource, DropTarget, DropZone,
-    GeometryError, LayoutRects, PanelConstraints, PanelKey, Profile, ResizeEdge, Size,
+    Axis, ColumnMode, DockMetrics, DockSide, DropSource, DropTarget, DropZone, GeometryError,
+    LayoutRects, PanelConstraints, PanelKey, Profile, ResizeEdge, Size,
 };
 
 fn constraints() -> PanelConstraints {
@@ -129,7 +129,9 @@ fn blank_space_in_frontmost_floating_window_does_not_leak_through() {
 
     assert_eq!(
         layout.hit_test(blank_point, &rects, &metrics).unwrap(),
-        HitResult::FloatingGroup { group: top_floating }
+        HitResult::FloatingGroup {
+            group: top_floating
+        }
     );
 }
 
@@ -151,9 +153,7 @@ fn benchmark_hit_test_multiple_floating_subtrees() {
         let start = std::time::Instant::now();
         let mut actual = HitResult::Miss;
         for _ in 0..iterations {
-            actual = std::hint::black_box(
-                layout.hit_test(point, &rects, &metrics).unwrap(),
-            );
+            actual = std::hint::black_box(layout.hit_test(point, &rects, &metrics).unwrap());
         }
         let elapsed = start.elapsed();
         assert_eq!(actual, expected);
@@ -287,14 +287,12 @@ fn drop_zone_precedence_makes_tab_insertions_and_group_edges_reachable() {
     let (_, first_node) = builder.panel(key("drop-target-first"), constraints());
     let (_, second_node) = builder.panel(key("drop-target-second"), constraints());
     let target_group = builder.tabs(vec![first_node, second_node], 0, false);
-    let target_column =
-        builder.column(280.0, ColumnMode::Expanded, vec![target_group], vec![1.0]);
+    let target_column = builder.column(280.0, ColumnMode::Expanded, vec![target_group], vec![1.0]);
     builder.main_area(DockSide::Left, target_column);
 
     let (source_panel, source_node) = builder.panel(key("drop-source"), constraints());
     let source_group = builder.tabs(vec![source_node], 0, false);
-    let source_column =
-        builder.column(280.0, ColumnMode::Expanded, vec![source_group], vec![1.0]);
+    let source_column = builder.column(280.0, ColumnMode::Expanded, vec![source_group], vec![1.0]);
     builder.main_area(DockSide::Right, source_column);
 
     let layout = builder.build();
@@ -302,7 +300,13 @@ fn drop_zone_precedence_makes_tab_insertions_and_group_edges_reachable() {
         .compute_rects(viewport(1200.0, 800.0), &metrics)
         .unwrap();
     let zones = layout
-        .compute_drop_zones(DropSource::Panel { panel: source_panel }, &rects, &metrics)
+        .compute_drop_zones(
+            DropSource::Panel {
+                panel: source_panel,
+            },
+            &rects,
+            &metrics,
+        )
         .unwrap();
     let mut drag_rects = rects.clone();
     drag_rects.drop_zones = zones.clone();
@@ -311,10 +315,11 @@ fn drop_zone_precedence_makes_tab_insertions_and_group_edges_reachable() {
         .iter()
         .find(|zone| {
             zone.zone == DropZone::TabInsertion
-                && zone.target == (DropTarget::Tabs {
-                    group: target_group,
-                    index: 0,
-                })
+                && zone.target
+                    == (DropTarget::Tabs {
+                        group: target_group,
+                        index: 0,
+                    })
         })
         .expect("the target tab should have an insertion zone");
     let tab_point = Point::new(
@@ -376,8 +381,7 @@ fn drop_zone_precedence_makes_rail_insertions_reachable() {
 
     let (source_panel, source_node) = builder.panel(key("drop-rail-source"), constraints());
     let source_group = builder.tabs(vec![source_node], 0, false);
-    let source_column =
-        builder.column(280.0, ColumnMode::Expanded, vec![source_group], vec![1.0]);
+    let source_column = builder.column(280.0, ColumnMode::Expanded, vec![source_group], vec![1.0]);
     builder.main_area(DockSide::Right, source_column);
 
     let layout = builder.build();
@@ -385,7 +389,13 @@ fn drop_zone_precedence_makes_rail_insertions_reachable() {
         .compute_rects(viewport(1200.0, 800.0), &metrics)
         .unwrap();
     let zones = layout
-        .compute_drop_zones(DropSource::Panel { panel: source_panel }, &rects, &metrics)
+        .compute_drop_zones(
+            DropSource::Panel {
+                panel: source_panel,
+            },
+            &rects,
+            &metrics,
+        )
         .unwrap();
     let mut drag_rects = rects.clone();
     drag_rects.drop_zones = zones.clone();
@@ -423,13 +433,11 @@ fn splitter_priority_beats_overlapping_panel_content() {
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
     let (_, first_panel_node) = builder.panel(key("split-left"), constraints());
     let first_group = builder.tabs(vec![first_panel_node], 0, false);
-    let first_column =
-        builder.column(280.0, ColumnMode::Expanded, vec![first_group], vec![1.0]);
+    let first_column = builder.column(280.0, ColumnMode::Expanded, vec![first_group], vec![1.0]);
 
     let (_, second_panel_node) = builder.panel(key("split-right"), constraints());
     let second_group = builder.tabs(vec![second_panel_node], 0, false);
-    let second_column =
-        builder.column(280.0, ColumnMode::Expanded, vec![second_group], vec![1.0]);
+    let second_column = builder.column(280.0, ColumnMode::Expanded, vec![second_group], vec![1.0]);
 
     let split = builder.split(Axis::X, vec![first_column, second_column], vec![0.5, 0.5]);
     builder.main_area(DockSide::Left, split);
@@ -483,13 +491,11 @@ fn splitter_hit_zone_far_edge_is_half_open() {
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
     let (_, first_panel_node) = builder.panel(key("split-gap-left"), constraints());
     let first_group = builder.tabs(vec![first_panel_node], 0, false);
-    let first_column =
-        builder.column(280.0, ColumnMode::Expanded, vec![first_group], vec![1.0]);
+    let first_column = builder.column(280.0, ColumnMode::Expanded, vec![first_group], vec![1.0]);
 
     let (_, second_panel_node) = builder.panel(key("split-gap-right"), constraints());
     let second_group = builder.tabs(vec![second_panel_node], 0, false);
-    let second_column =
-        builder.column(280.0, ColumnMode::Expanded, vec![second_group], vec![1.0]);
+    let second_column = builder.column(280.0, ColumnMode::Expanded, vec![second_group], vec![1.0]);
 
     let split = builder.split(Axis::X, vec![first_column, second_column], vec![0.5, 0.5]);
     builder.main_area(DockSide::Left, split);

@@ -109,8 +109,8 @@ fn collect_close_commands(
 #[cfg(test)]
 mod tests {
     use super::{
-        activate_tab, close_floating, close_group, close_panel, collapse_group,
-        cycle_column_mode, toggle_panel,
+        activate_tab, close_floating, close_group, close_panel, collapse_group, cycle_column_mode,
+        toggle_panel,
     };
     use crate::dock::DockController;
     use dock_core::{
@@ -171,7 +171,10 @@ mod tests {
         ] {
             assert_eq!(
                 cycle_column_mode(column, current),
-                DockCommand::SetColumnMode { column, mode: expected }
+                DockCommand::SetColumnMode {
+                    column,
+                    mode: expected
+                }
             );
         }
     }
@@ -216,9 +219,7 @@ mod tests {
             .find(|(_, instance)| instance.key.as_str() == "layers")
             .unwrap();
 
-        controller
-            .apply(DockCommand::ClosePanel { panel })
-            .unwrap();
+        controller.apply(DockCommand::ClosePanel { panel }).unwrap();
 
         let expected_constraints = (crate::panels::PANELS
             .iter()

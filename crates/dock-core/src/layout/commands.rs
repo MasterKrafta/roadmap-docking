@@ -55,7 +55,9 @@ impl Layout {
         candidate
             .normalize_in_place(metrics)
             .map_err(|errors| CommandError::InvalidLayout { errors })?;
-        candidate.validation_cache.set(Some((candidate.version, *metrics)));
+        candidate
+            .validation_cache
+            .set(Some((candidate.version, *metrics)));
 
         if candidate.same_state(self) {
             return Ok(CommandOutcome {
@@ -86,7 +88,9 @@ impl Layout {
             })?;
         let changed_nodes = self.changed_node_ids(&candidate, command);
         candidate.version = next_version;
-        candidate.validation_cache.set(Some((next_version, *metrics)));
+        candidate
+            .validation_cache
+            .set(Some((next_version, *metrics)));
         *self = candidate;
 
         Ok(CommandOutcome {
@@ -119,13 +123,12 @@ impl Layout {
             DockCommand::MovePanelFromFlyout { .. }
             | DockCommand::FloatPanelFromFlyout { .. }
             | DockCommand::MovePanel { .. } => self.apply_panel_transfer_command(command, metrics),
-            DockCommand::MoveGroup { .. }
-            | DockCommand::MoveGroupToMainColumn { .. } => {
+            DockCommand::MoveGroup { .. } | DockCommand::MoveGroupToMainColumn { .. } => {
                 self.apply_group_transfer_command(command, metrics)
             }
             DockCommand::MergeGroup { .. } | DockCommand::SplitGroup { .. } => {
                 self.apply_group_command(command, metrics)
-            },
+            }
             DockCommand::ResizeGroups { .. }
             | DockCommand::ResetColumnRatios { .. }
             | DockCommand::RestoreGroupRatios { .. } => {
@@ -201,8 +204,19 @@ impl Layout {
             }
             DockCommand::SetChrome { .. } => {
                 for layout in [self, other] {
-                    affected.extend(layout.main_areas.iter().flatten().filter_map(|area_id| layout.dock_area(*area_id).map(|area| area.root)));
-                    affected.extend(layout.floating_groups.values().filter_map(|group| layout.dock_area(group.area).map(|area| area.root)));
+                    affected.extend(
+                        layout
+                            .main_areas
+                            .iter()
+                            .flatten()
+                            .filter_map(|area_id| layout.dock_area(*area_id).map(|area| area.root)),
+                    );
+                    affected.extend(
+                        layout
+                            .floating_groups
+                            .values()
+                            .filter_map(|group| layout.dock_area(group.area).map(|area| area.root)),
+                    );
                 }
             }
             _ => {}

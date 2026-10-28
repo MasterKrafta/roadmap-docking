@@ -196,7 +196,11 @@ impl UndoRedoHistory {
 
     fn synchronize_owner(&mut self, layout: &Layout) {
         let current = layout.history_identity();
-        if self.owner.as_ref().is_some_and(|owner| !Weak::ptr_eq(owner, &current)) {
+        if self
+            .owner
+            .as_ref()
+            .is_some_and(|owner| !Weak::ptr_eq(owner, &current))
+        {
             self.undo.clear();
             self.redo.clear();
             self.owner = None;
@@ -208,7 +212,10 @@ impl UndoRedoHistory {
 
     fn discard_if_foreign_layout(&mut self, layout: &Layout) -> bool {
         let current = layout.history_identity();
-        let foreign = self.owner.as_ref().is_some_and(|owner| !Weak::ptr_eq(owner, &current));
+        let foreign = self
+            .owner
+            .as_ref()
+            .is_some_and(|owner| !Weak::ptr_eq(owner, &current));
         if foreign {
             self.undo.clear();
             self.redo.clear();

@@ -46,7 +46,12 @@ pub(crate) fn assert_layout_rects_invariants(rects: &LayoutRects) {
     emitted.extend(rects.columns.iter().map(|item| ("column", item.rect)));
     emitted.extend(rects.groups.iter().map(|item| ("group", item.rect)));
     emitted.extend(rects.tab_strips.iter().map(|item| ("tab strip", item.rect)));
-    emitted.extend(rects.tab_headers.iter().map(|item| ("tab header", item.rect)));
+    emitted.extend(
+        rects
+            .tab_headers
+            .iter()
+            .map(|item| ("tab header", item.rect)),
+    );
     emitted.extend(
         rects
             .tab_overflows
@@ -99,7 +104,10 @@ pub(crate) fn assert_layout_rects_invariants(rects: &LayoutRects) {
         let bottom = rect
             .checked_bottom()
             .expect("validated emitted rectangle must have a finite bottom edge");
-        assert!(right.is_finite(), "non-finite right edge for {kind}: {rect:?}");
+        assert!(
+            right.is_finite(),
+            "non-finite right edge for {kind}: {rect:?}"
+        );
         assert!(
             bottom.is_finite(),
             "non-finite bottom edge for {kind}: {rect:?}"
@@ -152,7 +160,12 @@ pub(crate) fn assert_layout_rects_invariants(rects: &LayoutRects) {
             .iter()
             .map(|item| ("tab overflow hit target", item.button_rect)),
     );
-    interactive.extend(rects.panels.iter().map(|item| ("panel hit region", item.rect)));
+    interactive.extend(
+        rects
+            .panels
+            .iter()
+            .map(|item| ("panel hit region", item.rect)),
+    );
     interactive.extend(
         rects
             .splitters
@@ -172,7 +185,12 @@ pub(crate) fn assert_layout_rects_invariants(rects: &LayoutRects) {
             .map(|item| ("floating resize hit target", item.rect)),
     );
     interactive.extend(rects.flyout.map(|item| ("flyout hit region", item.rect)));
-    interactive.extend(rects.drop_zones.iter().map(|item| ("drop zone hit target", item.rect)));
+    interactive.extend(
+        rects
+            .drop_zones
+            .iter()
+            .map(|item| ("drop zone hit target", item.rect)),
+    );
     for overflow in &rects.vertical_overflow {
         interactive.push(("vertical overflow viewport", overflow.viewport));
         interactive.push(("vertical overflow content", overflow.content_extent));

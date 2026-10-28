@@ -1,8 +1,8 @@
 use dock_core::{Node, Rect, Size};
 use gpui::{AnyElement, IntoElement};
 
-use crate::components::{ColumnModeButton, RailEntry};
 use crate::chrome_geometry::rail_control_row_height;
+use crate::components::{ColumnModeButton, RailEntry};
 use crate::dock::cycle_column_mode;
 use crate::host::DockHost;
 use crate::surface::RenderData;
@@ -20,11 +20,22 @@ pub(crate) fn render(
     let theme = data.theme;
     let mut elements = Vec::new();
 
-    for column_rect in rects.columns.iter().filter(|entry| nodes.contains(&entry.column)) {
-        let Some(Node::Column(column)) = layout.node(column_rect.column) else { continue; };
-        if !column.mode.is_rail() { continue; }
-        let Ok(items) = layout.column_display_order(column_rect.column) else { continue; };
-        let selected_flyout = layout.flyout()
+    for column_rect in rects
+        .columns
+        .iter()
+        .filter(|entry| nodes.contains(&entry.column))
+    {
+        let Some(Node::Column(column)) = layout.node(column_rect.column) else {
+            continue;
+        };
+        if !column.mode.is_rail() {
+            continue;
+        }
+        let Ok(items) = layout.column_display_order(column_rect.column) else {
+            continue;
+        };
+        let selected_flyout = layout
+            .flyout()
             .filter(|flyout| flyout.column == column_rect.column)
             .map(|flyout| flyout.panel);
         let column_bounds = area.column_rect(column_rect.column, column_rect.rect);
@@ -57,14 +68,27 @@ pub(crate) fn render(
         }
 
         for item in items {
-            let Some(header) = rects.tab_headers.iter().find(|header| {
-                header.group == item.group && header.panel == item.panel
-            }) else { continue; };
+            let Some(header) = rects
+                .tab_headers
+                .iter()
+                .find(|header| header.group == item.group && header.panel == item.panel)
+            else {
+                continue;
+            };
             let header_bounds = area.rect(header.rect);
-            if header_bounds.origin.y >= visible_bottom { break; }
-            let height = header_bounds.size.height.min(visible_bottom - header_bounds.origin.y);
-            if height <= 0.0 { continue; }
-            let Some(instance) = layout.panel_instance(item.panel) else { continue; };
+            if header_bounds.origin.y >= visible_bottom {
+                break;
+            }
+            let height = header_bounds
+                .size
+                .height
+                .min(visible_bottom - header_bounds.origin.y);
+            if height <= 0.0 {
+                continue;
+            }
+            let Some(instance) = layout.panel_instance(item.panel) else {
+                continue;
+            };
 
             let active_in_model = matches!(
                 layout.node(item.group),
@@ -73,7 +97,10 @@ pub(crate) fn render(
             elements.push(
                 RailEntry {
                     id: format!("dock-rail-{:?}-{:?}", column_rect.column, item.panel),
-                    rect: Rect::new(header_bounds.origin, Size::new(header_bounds.size.width, height)),
+                    rect: Rect::new(
+                        header_bounds.origin,
+                        Size::new(header_bounds.size.width, height),
+                    ),
                     mode: column.mode,
                     icon: host.panel_icon(instance).to_owned(),
                     title: host.panel_title(instance).to_string(),
@@ -87,7 +114,8 @@ pub(crate) fn render(
                         column: column_rect.column,
                         panel: item.panel,
                     }),
-                }.into_any_element(),
+                }
+                .into_any_element(),
             );
         }
     }

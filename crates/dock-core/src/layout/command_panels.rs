@@ -1,17 +1,12 @@
 //! Commands for panels and their flyouts, including transfers and sizing.
 
-
-
 use super::*;
 
 use crate::PanelConstraints;
 
 use super::helpers::geometry_error_reason;
 
-
-
 impl Layout {
-
     pub(super) fn apply_panel_command(
         &mut self,
         command: &DockCommand,
@@ -59,18 +54,9 @@ impl Layout {
             return Ok(application);
         }
 
-        let resolved_target = self.resolve_and_validate_open_panel_target(
-            key,
-            *target,
-            *constraints,
-            metrics,
-        )?;
-        self.insert_new_panel_for_open_target(
-            key,
-            *constraints,
-            resolved_target,
-            metrics,
-        )
+        let resolved_target =
+            self.resolve_and_validate_open_panel_target(key, *target, *constraints, metrics)?;
+        self.insert_new_panel_for_open_target(key, *constraints, resolved_target, metrics)
     }
 
     pub(super) fn resolve_and_validate_open_panel_target(
@@ -144,12 +130,13 @@ impl Layout {
                 });
             }
         };
-        let previous_active = tabs.children.get(tabs.active_index).and_then(|id| {
-            match self.nodes.get(*id) {
-                Some(Node::Panel(panel)) => Some(panel.panel_id),
-                _ => None,
-            }
-        });
+        let previous_active =
+            tabs.children
+                .get(tabs.active_index)
+                .and_then(|id| match self.nodes.get(*id) {
+                    Some(Node::Panel(panel)) => Some(panel.panel_id),
+                    _ => None,
+                });
         if !tabs.children.contains(&panel_node) {
             return Err(CommandError::InvalidTarget {
                 reason: "existing singleton panel is not a child of its Tabs node",
@@ -166,8 +153,7 @@ impl Layout {
         if !was_active {
             return Ok(Some(CommandApplication {
                 actual_value: None,
-                inverse: previous_active
-                    .map(|panel| DockCommand::ActivateTab { group, panel }),
+                inverse: previous_active.map(|panel| DockCommand::ActivateTab { group, panel }),
                 persistent: true,
             }));
         }
@@ -234,13 +220,13 @@ impl Layout {
                 reason: "panel is not a tab in the specified group",
             });
         };
-        let previous = tabs
-            .children
-            .get(tabs.active_index)
-            .and_then(|id| match self.nodes.get(*id) {
-                Some(Node::Panel(panel)) => Some(panel.panel_id),
-                _ => None,
-            });
+        let previous =
+            tabs.children
+                .get(tabs.active_index)
+                .and_then(|id| match self.nodes.get(*id) {
+                    Some(Node::Panel(panel)) => Some(panel.panel_id),
+                    _ => None,
+                });
         if index == tabs.active_index {
             return Ok(CommandApplication::persistent());
         }
@@ -298,8 +284,7 @@ impl Layout {
         let moved = current.children.remove(from_index);
         current.children.insert(*to_index, moved);
         if let Some(active_node) = active_node
-            && let Some(active_index) =
-                current.children.iter().position(|id| *id == active_node)
+            && let Some(active_index) = current.children.iter().position(|id| *id == active_node)
         {
             current.active_index = active_index;
         }
@@ -369,8 +354,7 @@ impl Layout {
         metrics: &DockMetrics,
     ) -> Result<CommandApplication, CommandError> {
         match command {
-            DockCommand::MovePanelFromFlyout { .. }
-            | DockCommand::FloatPanelFromFlyout { .. } => {
+            DockCommand::MovePanelFromFlyout { .. } | DockCommand::FloatPanelFromFlyout { .. } => {
                 self.apply_flyout_panel_transfer_command(command, metrics)
             }
             DockCommand::MovePanel { panel, target } => {
@@ -397,7 +381,10 @@ impl Layout {
             .find_panel_node(*panel)
             .ok_or(CommandError::MissingPanel { panel: *panel })?;
         self.validate_drop_target(*target, metrics)?;
-        if let DropTarget::GroupEdge { group: target_group, .. } = *target
+        if let DropTarget::GroupEdge {
+            group: target_group,
+            ..
+        } = *target
             && self
                 .tab_parent_index(panel_node)
                 .is_some_and(|(source_group, _)| source_group == target_group)
@@ -426,14 +413,8 @@ impl Layout {
         }
         let inverse = self.panel_transfer_inverse(*panel, panel_node);
         if let DropTarget::RailSlot { column, index } = *target {
-            return self.move_panel_to_rail_slot(
-                *panel,
-                panel_node,
-                column,
-                index,
-                metrics,
-                inverse,
-            );
+            return self
+                .move_panel_to_rail_slot(*panel, panel_node, column, index, metrics, inverse);
         }
         self.move_panel_to_drop_target(panel_node, *target, metrics)?;
         Ok(CommandApplication {
@@ -617,7 +598,8 @@ impl Layout {
                     });
                 }
                 let actual_width = (*width).clamp(constraints.min_size.width, max_width);
-                self.flyout_width_order.retain(|remembered| *remembered != key);
+                self.flyout_width_order
+                    .retain(|remembered| *remembered != key);
                 self.flyout_width_order.push_back(key.clone());
                 self.flyout_widths.insert(key, actual_width);
                 while self.flyout_width_order.len() > MAX_REMEMBERED_DOCK_LOCATIONS {
@@ -704,6 +686,4 @@ impl Layout {
             }),
         }
     }
-
 }
-

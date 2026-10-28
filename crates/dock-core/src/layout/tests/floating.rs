@@ -88,11 +88,7 @@ fn c46_float_entire_horizontal_column_composition_preserves_columns_and_groups()
         vec![1.0],
     );
 
-    let composition = builder.split(
-        Axis::X,
-        vec![left_column, right_column],
-        vec![0.4, 0.6],
-    );
+    let composition = builder.split(Axis::X, vec![left_column, right_column], vec![0.4, 0.6]);
     builder.main_area(DockSide::Right, composition);
     let mut layout = builder.build();
     assert_eq!(layout.validate(&metrics), Ok(()));
@@ -122,8 +118,12 @@ fn c46_float_entire_horizontal_column_composition_preserves_columns_and_groups()
         layout.floating_group(floating_id).unwrap().bounds,
         Rect::new(Point::new(120.0, 80.0), Size::new(620.0, 640.0))
     );
-    assert!(matches!(layout.node(left_column), Some(Node::Column(column)) if column.groups == vec![left_group]));
-    assert!(matches!(layout.node(right_column), Some(Node::Column(column)) if column.groups == vec![right_group]));
+    assert!(
+        matches!(layout.node(left_column), Some(Node::Column(column)) if column.groups == vec![left_group])
+    );
+    assert!(
+        matches!(layout.node(right_column), Some(Node::Column(column)) if column.groups == vec![right_group])
+    );
     assert_eq!(layout.validate(&metrics), Ok(()));
 
     // Closing one of the floating columns must normalize the composition to
@@ -777,7 +777,6 @@ fn c46_center_merge_between_floating_windows_keeps_panel_instances_and_cleans_so
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
 
-
 #[test]
 fn floating_one_group_column_can_detach_from_horizontal_composition() {
     let metrics = DockMetrics::default();
@@ -832,7 +831,10 @@ fn floating_one_group_column_can_detach_from_horizontal_composition() {
         Some(sibling_column),
         "detaching a one-group column must leave its sibling docked"
     );
-    let (_, floating) = layout.floating_groups().next().expect("detached column floats");
+    let (_, floating) = layout
+        .floating_groups()
+        .next()
+        .expect("detached column floats");
     assert_eq!(
         layout.dock_area(floating.area).map(|area| area.root),
         Some(selected_column),
@@ -864,11 +866,21 @@ fn docking_floating_stack_into_column_preserves_existing_group_ratio_proportions
     );
     builder.main_area(DockSide::Right, column);
 
-    let (_, floating_a) = builder.panel(PanelKey::new("ratio-floating-a").unwrap(), descriptors()[0].1);
-    let (_, floating_b) = builder.panel(PanelKey::new("ratio-floating-b").unwrap(), descriptors()[0].1);
+    let (_, floating_a) = builder.panel(
+        PanelKey::new("ratio-floating-a").unwrap(),
+        descriptors()[0].1,
+    );
+    let (_, floating_b) = builder.panel(
+        PanelKey::new("ratio-floating-b").unwrap(),
+        descriptors()[0].1,
+    );
     let floating_group_a = builder.tabs(vec![floating_a], 0, false);
     let floating_group_b = builder.tabs(vec![floating_b], 0, false);
-    let stack = builder.split(Axis::Y, vec![floating_group_a, floating_group_b], vec![0.5, 0.5]);
+    let stack = builder.split(
+        Axis::Y,
+        vec![floating_group_a, floating_group_b],
+        vec![0.5, 0.5],
+    );
     let floating = builder.floating_group(
         stack,
         Rect::new(Point::new(30.0, 40.0), Size::new(420.0, 320.0)),
@@ -876,18 +888,23 @@ fn docking_floating_stack_into_column_preserves_existing_group_ratio_proportions
     );
     let mut layout = builder.build();
 
-    layout.apply(
-        DockCommand::DockFloating {
-            group: floating,
-            target: DropTarget::ColumnSlot { column, index: 2 },
-        },
-        &metrics,
-    ).unwrap();
+    layout
+        .apply(
+            DockCommand::DockFloating {
+                group: floating,
+                target: DropTarget::ColumnSlot { column, index: 2 },
+            },
+            &metrics,
+        )
+        .unwrap();
 
     let Some(Node::Column(column_value)) = layout.node(column) else {
         panic!("main root should remain the target column");
     };
-    assert_eq!(column_value.groups, vec![group_a, group_b, floating_group_a, floating_group_b]);
+    assert_eq!(
+        column_value.groups,
+        vec![group_a, group_b, floating_group_a, floating_group_b]
+    );
     assert_eq!(column_value.group_ratios.len(), 4);
     assert!((column_value.group_ratios[0] - 0.4).abs() < 1.0e-4);
     assert!((column_value.group_ratios[1] - 0.1).abs() < 1.0e-4);
@@ -900,7 +917,10 @@ fn docking_floating_stack_into_column_preserves_existing_group_ratio_proportions
 fn docking_floating_group_onto_its_own_descendant_is_a_no_op() {
     let metrics = DockMetrics::default();
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
-    let (_, panel) = builder.panel(PanelKey::new("floating-self-drop").unwrap(), descriptors()[0].1);
+    let (_, panel) = builder.panel(
+        PanelKey::new("floating-self-drop").unwrap(),
+        descriptors()[0].1,
+    );
     let root = builder.tabs(vec![panel], 0, false);
     let floating = builder.floating_group(
         root,
@@ -910,13 +930,18 @@ fn docking_floating_group_onto_its_own_descendant_is_a_no_op() {
     let mut layout = builder.build();
     let before_version = layout.version();
 
-    let outcome = layout.apply(
-        DockCommand::DockFloating {
-            group: floating,
-            target: DropTarget::Tabs { group: root, index: 1 },
-        },
-        &metrics,
-    ).unwrap();
+    let outcome = layout
+        .apply(
+            DockCommand::DockFloating {
+                group: floating,
+                target: DropTarget::Tabs {
+                    group: root,
+                    index: 1,
+                },
+            },
+            &metrics,
+        )
+        .unwrap();
 
     assert_eq!(layout.version(), before_version);
     assert!(outcome.changed_nodes.is_empty());
@@ -929,7 +954,10 @@ fn docking_floating_group_onto_its_own_descendant_is_a_no_op() {
 fn floating_geometry_commands_report_the_affected_root_for_ui_invalidation() {
     let metrics = DockMetrics::default();
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
-    let (_, main_panel) = builder.panel(PanelKey::new("changed-node-main").unwrap(), descriptors()[0].1);
+    let (_, main_panel) = builder.panel(
+        PanelKey::new("changed-node-main").unwrap(),
+        descriptors()[0].1,
+    );
     let main_group = builder.tabs(vec![main_panel], 0, false);
     let main_column = builder.column(
         metrics.default_column_width,
@@ -939,7 +967,10 @@ fn floating_geometry_commands_report_the_affected_root_for_ui_invalidation() {
     );
     builder.main_area(DockSide::Right, main_column);
 
-    let (_, floating_panel) = builder.panel(PanelKey::new("changed-node-floating").unwrap(), descriptors()[0].1);
+    let (_, floating_panel) = builder.panel(
+        PanelKey::new("changed-node-floating").unwrap(),
+        descriptors()[0].1,
+    );
     let floating_root = builder.tabs(vec![floating_panel], 0, false);
     let floating = builder.floating_group(
         floating_root,
@@ -948,13 +979,25 @@ fn floating_geometry_commands_report_the_affected_root_for_ui_invalidation() {
     );
     let mut layout = builder.build();
 
-    let moved = layout.apply(
-        DockCommand::MoveFloating { group: floating, origin: Point::new(50.0, 60.0) },
-        &metrics,
-    ).unwrap();
+    let moved = layout
+        .apply(
+            DockCommand::MoveFloating {
+                group: floating,
+                origin: Point::new(50.0, 60.0),
+            },
+            &metrics,
+        )
+        .unwrap();
     assert!(moved.changed_nodes.contains(&floating_root));
 
-    let chrome = layout.apply(DockCommand::SetChrome { mode: crate::ChromeMode::DockHidden }, &metrics).unwrap();
+    let chrome = layout
+        .apply(
+            DockCommand::SetChrome {
+                mode: crate::ChromeMode::DockHidden,
+            },
+            &metrics,
+        )
+        .unwrap();
     assert!(chrome.changed_nodes.contains(&main_column));
     assert!(chrome.changed_nodes.contains(&floating_root));
 }
@@ -986,12 +1029,13 @@ fn floating_vertical_stack_reserves_title_row_when_first_group_collapsed() {
     assert_eq!(layout.validate(&metrics), Ok(()));
 
     let rects = layout
-        .compute_rects(
-            Rect::new(Point::ZERO, Size::new(1200.0, 900.0)),
-            &metrics,
-        )
+        .compute_rects(Rect::new(Point::ZERO, Size::new(1200.0, 900.0)), &metrics)
         .unwrap();
-    let top_rect = rects.groups.iter().find(|entry| entry.group == top_group).unwrap();
+    let top_rect = rects
+        .groups
+        .iter()
+        .find(|entry| entry.group == top_group)
+        .unwrap();
     assert_eq!(top_rect.rect.origin.y, 30.0 + metrics.header_height);
     assert!(rects.groups.iter().any(|entry| entry.group == bottom_group));
 }

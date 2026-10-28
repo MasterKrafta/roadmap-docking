@@ -21,29 +21,44 @@ pub(crate) fn render(
     let mut elements = Vec::new();
 
     let legacy_panel_nodes = data.frame.is_none().then(|| {
-        layout.nodes().filter_map(|(node_id, node)| match node {
-            Node::Panel(panel) => Some((panel.panel_id, node_id)),
-            _ => None,
-        }).collect::<HashMap<PanelId, NodeId>>()
+        layout
+            .nodes()
+            .filter_map(|(node_id, node)| match node {
+                Node::Panel(panel) => Some((panel.panel_id, node_id)),
+                _ => None,
+            })
+            .collect::<HashMap<PanelId, NodeId>>()
     });
 
     for panel_rect in rects.panels.iter().filter(|entry| {
-        let node_id = data.frame.and_then(|frame| frame.panel_node(entry.panel)).or_else(|| {
-            legacy_panel_nodes.as_ref().and_then(|nodes| nodes.get(&entry.panel).copied())
-        });
+        let node_id = data
+            .frame
+            .and_then(|frame| frame.panel_node(entry.panel))
+            .or_else(|| {
+                legacy_panel_nodes
+                    .as_ref()
+                    .and_then(|nodes| nodes.get(&entry.panel).copied())
+            });
         node_id.is_some_and(|node_id| nodes.contains(&node_id))
     }) {
-        let Some(instance) = layout.panel_instance(panel_rect.panel) else { continue; };
+        let Some(instance) = layout.panel_instance(panel_rect.panel) else {
+            continue;
+        };
         elements.push(
             PanelSurface {
                 rect: area.rect(panel_rect.rect),
                 theme: *data.theme,
                 content: host.render_panel(instance),
-            }.into_any_element(),
+            }
+            .into_any_element(),
         );
     }
 
-    for splitter in rects.splitters.iter().filter(|entry| nodes.contains(&entry.owner)) {
+    for splitter in rects
+        .splitters
+        .iter()
+        .filter(|entry| nodes.contains(&entry.owner))
+    {
         let handle = supported_splitter_handle(
             layout,
             splitter.owner,
@@ -52,13 +67,17 @@ pub(crate) fn render(
         );
         elements.push(
             SplitterHandle {
-                id: format!("dock-splitter-{:?}-{}", splitter.owner, splitter.boundary_index),
+                id: format!(
+                    "dock-splitter-{:?}-{}",
+                    splitter.owner, splitter.boundary_index
+                ),
                 rect: area.rect(splitter.rect),
                 axis: splitter.axis,
                 theme: *data.theme,
                 on_resize_start: handle.map(|handle| host.resize_start(handle)),
                 on_resize_key: handle.map(|handle| host.resize_key(handle)),
-            }.into_any_element(),
+            }
+            .into_any_element(),
         );
     }
 
@@ -93,7 +112,6 @@ fn supported_splitter_handle(
     })
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::supported_splitter_handle;
@@ -110,24 +128,12 @@ mod tests {
         let (column_id, group_count) = layout
             .nodes()
             .find_map(|(id, node)| match node {
-                Node::Column(column) if column.groups.len() >= 2 => {
-                    Some((id, column.groups.len()))
-                }
+                Node::Column(column) if column.groups.len() >= 2 => Some((id, column.groups.len())),
                 _ => None,
             })
             .expect("initial layout should contain a column with multiple groups");
-        assert!(supported_splitter_handle(
-            layout,
-            column_id,
-            group_count - 2,
-            Axis::Y
-        ).is_some());
-        assert!(supported_splitter_handle(
-            layout,
-            column_id,
-            group_count - 1,
-            Axis::Y
-        ).is_none());
+        assert!(supported_splitter_handle(layout, column_id, group_count - 2, Axis::Y).is_some());
+        assert!(supported_splitter_handle(layout, column_id, group_count - 1, Axis::Y).is_none());
 
         let (split_id, child_count) = layout
             .nodes()
@@ -138,18 +144,8 @@ mod tests {
                 _ => None,
             })
             .expect("initial layout should contain a horizontal split");
-        assert!(supported_splitter_handle(
-            layout,
-            split_id,
-            child_count - 2,
-            Axis::X
-        ).is_some());
-        assert!(supported_splitter_handle(
-            layout,
-            split_id,
-            child_count - 1,
-            Axis::X
-        ).is_none());
+        assert!(supported_splitter_handle(layout, split_id, child_count - 2, Axis::X).is_some());
+        assert!(supported_splitter_handle(layout, split_id, child_count - 1, Axis::X).is_none());
     }
 
     #[test]
@@ -160,10 +156,12 @@ mod tests {
             controller.layout().node(owner),
             Some(Node::Split(split)) if split.axis == Axis::X
         ));
-        controller.apply(DockCommand::Float {
-            node: owner,
-            bounds: Rect::new(Point::new(80.0, 60.0), Size::new(700.0, 560.0)),
-        }).unwrap();
+        controller
+            .apply(DockCommand::Float {
+                node: owner,
+                bounds: Rect::new(Point::new(80.0, 60.0), Size::new(700.0, 560.0)),
+            })
+            .unwrap();
 
         assert_eq!(
             supported_splitter_handle(controller.layout(), owner, 0, Axis::X),

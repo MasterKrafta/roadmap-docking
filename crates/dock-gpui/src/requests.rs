@@ -20,7 +20,9 @@ pub enum ResizeHandle {
         edge: ResizeEdge,
     },
     /// Resizes the active rail flyout along the edge facing the canvas.
-    Flyout { panel: PanelId },
+    Flyout {
+        panel: PanelId,
+    },
 }
 
 /// Source-aware, transient overlay produced from Core's drag preview and drop-zone geometry.

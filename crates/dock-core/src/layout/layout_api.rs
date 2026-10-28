@@ -67,11 +67,16 @@ impl Layout {
 
     /// Validates once per persistent revision and metric set for render/drag hot paths.
     /// Public `validate` always performs the full check for callers asking for diagnostics.
-    pub(crate) fn validate_cached(&self, metrics: &DockMetrics) -> Result<(), Vec<ValidationError>> {
+    pub(crate) fn validate_cached(
+        &self,
+        metrics: &DockMetrics,
+    ) -> Result<(), Vec<ValidationError>> {
         if self
             .validation_cache
             .get()
-            .is_some_and(|(version, cached_metrics)| version == self.version && cached_metrics == *metrics)
+            .is_some_and(|(version, cached_metrics)| {
+                version == self.version && cached_metrics == *metrics
+            })
         {
             return Ok(());
         }

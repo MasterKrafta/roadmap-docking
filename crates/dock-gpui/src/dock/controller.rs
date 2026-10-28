@@ -1,23 +1,21 @@
 use std::collections::{HashMap, HashSet};
 
 use dock_core::{
-    create_initial_layout, CommandError, CommandOutcome, ComputeRectsError, DockCommand,
-    DockMetrics, DockSide, DragDropAction, DragDropRequest, DragHandle, DragPayload,
-    DragSession as CoreDragSession, DragState, DropSource, DropTarget, DropZone,
-    FloatingGroupId, InitialLayoutError, Layout, Node, NodeId, PanelId, Point, Profile, Rect,
-    ResizeEdge, UndoRedoHistory, ValidationError,
+    CommandError, CommandOutcome, ComputeRectsError, DockCommand, DockMetrics, DockSide,
+    DragDropAction, DragDropRequest, DragHandle, DragPayload, DragSession as CoreDragSession,
+    DragState, DropSource, DropTarget, DropZone, FloatingGroupId, InitialLayoutError, Layout, Node,
+    NodeId, PanelId, Point, Profile, Rect, ResizeEdge, UndoRedoHistory, ValidationError,
+    create_initial_layout,
 };
 use gpui::ScrollHandle;
 use ui::Theme;
 
-use crate::{dock_metrics_from_theme, FrameGeometry};
 use crate::requests::{DragOverlay, ResizeHandle};
+use crate::{FrameGeometry, dock_metrics_from_theme};
 
-use super::drag_session::{
-    DragGeometrySnapshot, DragGesture, DragStartError, DragUpdateError,
-};
-use super::resize_session::{ResizeSession, ResizeStartError, ResizeUpdateError, StartGeometry};
+use super::drag_session::{DragGeometrySnapshot, DragGesture, DragStartError, DragUpdateError};
 use super::rail_policy::RailPolicy;
+use super::resize_session::{ResizeSession, ResizeStartError, ResizeUpdateError, StartGeometry};
 
 #[derive(Debug)]
 enum Session {
@@ -108,10 +106,7 @@ impl DockController {
     }
 
     /// Applies a layout command, recording it unless it only changes floating z-order.
-    pub(crate) fn apply(
-        &mut self,
-        command: DockCommand,
-    ) -> Result<CommandOutcome, CommandError> {
+    pub(crate) fn apply(&mut self, command: DockCommand) -> Result<CommandOutcome, CommandError> {
         // A persistent command must not race an uncommitted preview based on an
         // older layout snapshot. Roll the gesture back before mutating history.
         self.cancel_resize();
@@ -122,8 +117,7 @@ impl DockController {
             // version when z-order changes, invalidating geometry snapshots safely.
             self.layout.apply(command, &self.metrics)
         } else {
-            self.history
-                .apply(&mut self.layout, command, &self.metrics)
+            self.history.apply(&mut self.layout, command, &self.metrics)
         };
         self.track_command_result(result, "apply")
     }
@@ -132,10 +126,7 @@ impl DockController {
     ///
     /// Core has no atomic CloseFloating command, so every group is closed through
     /// the standard history path and can be restored with one Undo per group.
-    pub(crate) fn close_floating(
-        &mut self,
-        group: FloatingGroupId,
-    ) -> Result<(), CommandError> {
+    pub(crate) fn close_floating(&mut self, group: FloatingGroupId) -> Result<(), CommandError> {
         let commands = super::commands::close_floating(&self.layout, group).ok_or_else(|| {
             if self.layout.floating_group(group).is_some() {
                 CommandError::InvalidTarget {
@@ -205,11 +196,9 @@ impl DockController {
     /// Reports whether this pointer move crosses the threshold and needs a fresh frame.
     pub(crate) fn drag_needs_start(&self, pointer: Point) -> bool {
         match &self.session {
-            Session::Drag(gesture) if gesture.core.is_none() => DragGesture::threshold_reached(
-                gesture.origin,
-                pointer,
-                self.metrics.drag_threshold,
-            ),
+            Session::Drag(gesture) if gesture.core.is_none() => {
+                DragGesture::threshold_reached(gesture.origin, pointer, self.metrics.drag_threshold)
+            }
             Session::Idle | Session::Resize(_) | Session::Drag(_) => false,
         }
     }
@@ -228,9 +217,11 @@ impl DockController {
         // its resolver. Cancel here so callers cannot accidentally keep using
         // stale zones after handling the returned error.
         let stale_snapshot = match &self.session {
-            Session::Drag(gesture) if gesture.core.is_some() => gesture.snapshot.is_none_or(
-                |snapshot| !snapshot.matches(self.layout.version(), viewport, self.metrics),
-            ),
+            Session::Drag(gesture) if gesture.core.is_some() => {
+                gesture.snapshot.is_none_or(|snapshot| {
+                    !snapshot.matches(self.layout.version(), viewport, self.metrics)
+                })
+            }
             Session::Idle | Session::Resize(_) | Session::Drag(_) => false,
         };
         if stale_snapshot {
@@ -452,9 +443,11 @@ impl DockController {
         viewport: Rect,
     ) -> Result<DragDropAction, CommandError> {
         if request.target == Some(DropTarget::FreeArea) {
-            let frame = FrameGeometry::compute(&self.layout, viewport, &self.metrics)
-                .map_err(|_| CommandError::InvalidTarget {
-                    reason: "could not compute source geometry for floating drop",
+            let frame =
+                FrameGeometry::compute(&self.layout, viewport, &self.metrics).map_err(|_| {
+                    CommandError::InvalidTarget {
+                        reason: "could not compute source geometry for floating drop",
+                    }
                 })?;
             super::drop_commit::supply_floating_bounds(
                 &self.layout,
@@ -482,10 +475,11 @@ impl DockController {
                     .ok_or(CommandError::MissingFloatingGroup { group })?
                     .bounds
                     .origin;
-                let frame = FrameGeometry::compute(&self.layout, viewport, &self.metrics)
-                    .map_err(|_| CommandError::InvalidTarget {
+                let frame = FrameGeometry::compute(&self.layout, viewport, &self.metrics).map_err(
+                    |_| CommandError::InvalidTarget {
                         reason: "could not compute current floating geometry for move",
-                    })?;
+                    },
+                )?;
                 let visible_bounds = frame
                     .rects()
                     .floating_groups
@@ -575,10 +569,14 @@ impl DockController {
             Session::Resize(session) => match session.command_for_pointer(pointer) {
                 Err(error) => Err(error),
                 Ok(command) => {
-                    let command =
-                        preserve_floating_resize_anchor(session, command, &self.metrics);
+                    let command = preserve_floating_resize_anchor(session, command, &self.metrics);
                     if let Some(policy) = self.rail_policy {
-                        match policy.preview(session.baseline(), &self.layout, &command, &self.metrics) {
+                        match policy.preview(
+                            session.baseline(),
+                            &self.layout,
+                            &command,
+                            &self.metrics,
+                        ) {
                             Ok((candidate, _, outcome)) => Ok((candidate, outcome)),
                             Err(error) => {
                                 command_error = Some(error);
@@ -639,7 +637,8 @@ impl DockController {
             .map(|command| preserve_floating_resize_anchor(&session, command, &self.metrics))
             .and_then(|command| {
                 if let Some(policy) = self.rail_policy {
-                    match policy.preview(session.baseline(), &self.layout, &command, &self.metrics) {
+                    match policy.preview(session.baseline(), &self.layout, &command, &self.metrics)
+                    {
                         Ok((_, commands, _)) => Ok(commands),
                         Err(_) => Err(ResizeUpdateError::Command),
                     }
@@ -807,9 +806,7 @@ fn filter_capture_target(
 
 /// Builds the starting arrangement inside the controller so no other module
 /// mutates a live Layout. The setup commands are deliberately outside history.
-fn build_initial_layout(
-    theme: &Theme,
-) -> Result<(Layout, DockMetrics), DockInitializationError> {
+fn build_initial_layout(theme: &Theme) -> Result<(Layout, DockMetrics), DockInitializationError> {
     let metrics = dock_metrics_from_theme(theme);
     let descriptors = crate::panels::descriptors(theme);
     let mut layout = create_initial_layout(Profile::Photoshop, &descriptors, metrics)?;
@@ -923,17 +920,14 @@ fn build_initial_layout(
             source,
         })?;
 
-    layout.validate(&metrics).map_err(|errors| {
-        DockInitializationError::InvalidConstructedLayout { errors }
-    })?;
+    layout
+        .validate(&metrics)
+        .map_err(|errors| DockInitializationError::InvalidConstructedLayout { errors })?;
 
     Ok((layout, metrics))
 }
 
-fn panel_id_for_key(
-    layout: &Layout,
-    key: &str,
-) -> Result<PanelId, DockInitializationError> {
+fn panel_id_for_key(layout: &Layout, key: &str) -> Result<PanelId, DockInitializationError> {
     layout
         .panel_instances()
         .find_map(|(id, instance)| (instance.key.as_str() == key).then_some(id))
@@ -980,10 +974,7 @@ fn preserve_floating_resize_anchor(
     if probe.apply(command.clone(), metrics).is_err() {
         return command;
     }
-    let Some(actual_bounds) = probe
-        .floating_group(group)
-        .map(|floating| floating.bounds)
-    else {
+    let Some(actual_bounds) = probe.floating_group(group).map(|floating| floating.bounds) else {
         return command;
     };
 
@@ -1020,13 +1011,19 @@ mod floating_resize_anchor_tests {
                 let original_right = original.origin.x + original.size.width;
                 let actual_right = actual.origin.x + actual.size.width;
                 assert!((actual_right - original_right).abs() < 0.01);
-                assert!(actual.size.width > 1.0, "Core should clamp to minimum width");
+                assert!(
+                    actual.size.width > 1.0,
+                    "Core should clamp to minimum width"
+                );
             }
             ResizeEdge::Top => {
                 let original_bottom = original.origin.y + original.size.height;
                 let actual_bottom = actual.origin.y + actual.size.height;
                 assert!((actual_bottom - original_bottom).abs() < 0.01);
-                assert!(actual.size.height > 1.0, "Core should clamp to minimum height");
+                assert!(
+                    actual.size.height > 1.0,
+                    "Core should clamp to minimum height"
+                );
             }
             ResizeEdge::TopLeft => {
                 let original_right = original.origin.x + original.size.width;
@@ -1035,8 +1032,14 @@ mod floating_resize_anchor_tests {
                 let actual_bottom = actual.origin.y + actual.size.height;
                 assert!((actual_right - original_right).abs() < 0.01);
                 assert!((actual_bottom - original_bottom).abs() < 0.01);
-                assert!(actual.size.width > 1.0, "Core should clamp to minimum width");
-                assert!(actual.size.height > 1.0, "Core should clamp to minimum height");
+                assert!(
+                    actual.size.width > 1.0,
+                    "Core should clamp to minimum width"
+                );
+                assert!(
+                    actual.size.height > 1.0,
+                    "Core should clamp to minimum height"
+                );
             }
             _ => unreachable!("test covers left, top, and top-left edges"),
         }
@@ -1086,12 +1089,8 @@ mod floating_resize_anchor_tests {
                 _ => unreachable!("test covers the left, top, and top-left edges"),
             };
             let end = match edge {
-                ResizeEdge::Left => {
-                    Point::new(start.x + original_bounds.size.width - 1.0, start.y)
-                }
-                ResizeEdge::Top => {
-                    Point::new(start.x, start.y + original_bounds.size.height - 1.0)
-                }
+                ResizeEdge::Left => Point::new(start.x + original_bounds.size.width - 1.0, start.y),
+                ResizeEdge::Top => Point::new(start.x, start.y + original_bounds.size.height - 1.0),
                 ResizeEdge::TopLeft => Point::new(
                     start.x + original_bounds.size.width - 1.0,
                     start.y + original_bounds.size.height - 1.0,

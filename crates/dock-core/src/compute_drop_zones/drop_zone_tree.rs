@@ -19,7 +19,10 @@ impl DropZoneTreeIndex {
             }
         }
 
-        Self { parent_by_node, panel_by_id }
+        Self {
+            parent_by_node,
+            panel_by_id,
+        }
     }
 
     pub(super) fn contains_node(&self, root: NodeId, target: NodeId) -> bool {

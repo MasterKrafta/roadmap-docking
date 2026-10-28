@@ -1,11 +1,11 @@
 use dock_core::Rect;
 use gpui::{
-    App, InteractiveElement, IntoElement, ParentElement, RenderOnce,
-    StatefulInteractiveElement, Styled, Window, div, px, rgb,
+    App, InteractiveElement, IntoElement, ParentElement, RenderOnce, StatefulInteractiveElement,
+    Styled, Window, div, px, rgb,
 };
 use ui::Theme;
 
-use crate::components::{with_focus_ring, ClickHandler};
+use crate::components::{ClickHandler, with_focus_ring};
 
 /// One rendered row in the popup menu.
 pub struct PopupMenuItem {
@@ -69,7 +69,9 @@ impl RenderOnce for PopupMenu {
             row = row.child(if item.checked { "✓" } else { " " });
             row = row.child(item.label);
 
-            if item.enabled && let Some(on_select) = item.on_select {
+            if item.enabled
+                && let Some(on_select) = item.on_select
+            {
                 let hover_color = self.theme.colors.hover;
                 popup = popup.child(
                     with_focus_ring(row, &self.theme)

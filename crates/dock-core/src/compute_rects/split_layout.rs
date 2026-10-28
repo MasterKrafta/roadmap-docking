@@ -10,7 +10,12 @@ pub(super) fn layout_split(
     output: &mut LayoutRects,
 ) -> Result<(), ComputeRectsError> {
     layout_split_inner(
-        SplitLayoutContext { layout, metrics, minimum_sizes, output },
+        SplitLayoutContext {
+            layout,
+            metrics,
+            minimum_sizes,
+            output,
+        },
         id,
         split,
         rect,
@@ -56,15 +61,18 @@ pub(super) fn layout_floating_root(
             );
             layout_node(layout, id, content_rect, metrics, minimum_sizes, output)
         }
-        Some(Node::Split(split)) if split.axis == Axis::X => {
-            layout_split_inner(
-                SplitLayoutContext { layout, metrics, minimum_sizes, output },
-                id,
-                split,
-                rect,
-                true,
-            )
-        }
+        Some(Node::Split(split)) if split.axis == Axis::X => layout_split_inner(
+            SplitLayoutContext {
+                layout,
+                metrics,
+                minimum_sizes,
+                output,
+            },
+            id,
+            split,
+            rect,
+            true,
+        ),
         _ => layout_node(layout, id, rect, metrics, minimum_sizes, output),
     }
 }

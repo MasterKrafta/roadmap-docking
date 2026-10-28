@@ -154,7 +154,7 @@ mod tests {
         time::{SystemTime, UNIX_EPOCH},
     };
 
-    use dock_core::{create_initial_layout, Profile, WorkspaceFile};
+    use dock_core::{Profile, WorkspaceFile, create_initial_layout};
     use ui::Theme;
 
     use crate::{dock_metrics_from_theme, panels};
@@ -206,7 +206,10 @@ mod tests {
             .expect("valid workspace should parse")
             .expect("valid workspace should load");
         assert_eq!(loaded.validate(&metrics), Ok(()));
-        assert_eq!(loaded.panel_instances().count(), layout.panel_instances().count());
+        assert_eq!(
+            loaded.panel_instances().count(),
+            layout.panel_instances().count()
+        );
         fs::remove_file(path).expect("test workspace should be removable");
     }
 

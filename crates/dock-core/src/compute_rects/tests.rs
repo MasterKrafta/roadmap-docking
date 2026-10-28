@@ -1,8 +1,8 @@
-use super::{minimum_node_size, weighted_sizes, ComputeRectsError};
+use super::{ComputeRectsError, minimum_node_size, weighted_sizes};
 use crate::layout_builder::LayoutBuilder;
 use crate::{
-    Axis, ColumnMode, DockMetrics, DockSide, GeometryError,
-    LayoutRects, Node, PanelConstraints, PanelKey, Point, Profile, Rect, Size,
+    Axis, ColumnMode, DockMetrics, DockSide, GeometryError, LayoutRects, Node, PanelConstraints,
+    PanelKey, Point, Profile, Rect, Size,
 };
 
 const PIXEL_TOLERANCE: f32 = 1.0e-3;
@@ -82,15 +82,13 @@ fn columns_keep_model_width_and_canvas_receives_horizontal_remainder() {
 
     let (_, inner_panel_node) = builder.panel(key("rect-inner"), constraints());
     let inner_group = builder.tabs(vec![inner_panel_node], 0, false);
-    let inner_column =
-        builder.column(300.0, ColumnMode::Expanded, vec![inner_group], vec![1.0]);
+    let inner_column = builder.column(300.0, ColumnMode::Expanded, vec![inner_group], vec![1.0]);
     let left_root = builder.split(Axis::X, vec![left_column, inner_column], vec![0.5, 0.5]);
     builder.main_area(DockSide::Left, left_root);
 
     let (_, right_panel_node) = builder.panel(key("rect-right"), constraints());
     let right_group = builder.tabs(vec![right_panel_node], 0, false);
-    let right_column =
-        builder.column(220.0, ColumnMode::Expanded, vec![right_group], vec![1.0]);
+    let right_column = builder.column(220.0, ColumnMode::Expanded, vec![right_group], vec![1.0]);
     builder.main_area(DockSide::Right, right_column);
 
     let layout = builder.build();
@@ -180,8 +178,7 @@ fn ratio_allocation_clamps_small_group_to_its_panel_minimum_and_redistributes_re
         .iter()
         .map(|group| group.rect.size.height)
         .collect();
-    let minimum =
-        metrics.header_height + metrics.tab_strip_height + constraints().min_size.height;
+    let minimum = metrics.header_height + metrics.tab_strip_height + constraints().min_size.height;
 
     assert_eq!(heights[0], metrics.collapsed_group_height);
     assert!((heights[2] - minimum).abs() < PIXEL_TOLERANCE);
@@ -260,12 +257,7 @@ fn single_group_floating_column_keeps_standalone_group_geometry() {
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
     let (_, panel_node) = builder.panel(key("floating-single-column"), constraints());
     let group = builder.tabs(vec![panel_node], 0, true);
-    let column = builder.column(
-        300.0,
-        ColumnMode::Expanded,
-        vec![group],
-        vec![1.0],
-    );
+    let column = builder.column(300.0, ColumnMode::Expanded, vec![group], vec![1.0]);
     let bounds = Rect::new(Point::new(40.0, 50.0), Size::new(300.0, 260.0));
     builder.floating_group(column, bounds, 1);
     let layout = builder.build();
@@ -282,7 +274,10 @@ fn single_group_floating_column_keeps_standalone_group_geometry() {
 
     assert_eq!(rects.floating_groups[0].rect, bounds);
     assert_eq!(group_rect.origin.y, bounds.origin.y);
-    assert_eq!(group_rect.size.height, metrics.effective_collapsed_group_height());
+    assert_eq!(
+        group_rect.size.height,
+        metrics.effective_collapsed_group_height()
+    );
 }
 
 #[test]
@@ -294,11 +289,9 @@ fn floating_column_reserves_window_title_before_allocating_a_collapsed_first_gro
     };
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
 
-    let (_, collapsed_panel_node) =
-        builder.panel(key("floating-column-collapsed"), constraints());
+    let (_, collapsed_panel_node) = builder.panel(key("floating-column-collapsed"), constraints());
     let collapsed_group = builder.tabs(vec![collapsed_panel_node], 0, true);
-    let (_, expanded_panel_node) =
-        builder.panel(key("floating-column-expanded"), constraints());
+    let (_, expanded_panel_node) = builder.panel(key("floating-column-expanded"), constraints());
     let expanded_group = builder.tabs(vec![expanded_panel_node], 0, false);
     let column = builder.column(
         300.0,
@@ -334,7 +327,10 @@ fn floating_column_reserves_window_title_before_allocating_a_collapsed_first_gro
 
     assert_eq!(rects.floating_groups[0].rect, bounds);
     assert_eq!(first.origin.y, bounds.origin.y + metrics.header_height);
-    assert_eq!(first.size.height, metrics.effective_collapsed_group_height());
+    assert_eq!(
+        first.size.height,
+        metrics.effective_collapsed_group_height()
+    );
     assert!(
         second.origin.y >= first.origin.y + first.size.height + metrics.splitter_thickness,
         "the expanded sibling must begin after the collapsed row and splitter"
@@ -344,9 +340,7 @@ fn floating_column_reserves_window_title_before_allocating_a_collapsed_first_gro
         first.origin.y + first.size.height
     );
     assert!(
-        ((second.origin.y + second.size.height)
-            - (bounds.origin.y + bounds.size.height))
-        .abs()
+        ((second.origin.y + second.size.height) - (bounds.origin.y + bounds.size.height)).abs()
             < PIXEL_TOLERANCE
     );
 }
@@ -360,8 +354,7 @@ fn floating_horizontal_split_reserves_title_for_each_collapsed_column_branch() {
     };
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
 
-    let (_, collapsed_panel_node) =
-        builder.panel(key("split-floating-collapsed"), constraints());
+    let (_, collapsed_panel_node) = builder.panel(key("split-floating-collapsed"), constraints());
     let collapsed_group = builder.tabs(vec![collapsed_panel_node], 0, true);
     let left_column = builder.column(
         300.0,
@@ -370,15 +363,9 @@ fn floating_horizontal_split_reserves_title_for_each_collapsed_column_branch() {
         vec![1.0],
     );
 
-    let (_, expanded_panel_node) =
-        builder.panel(key("split-floating-expanded"), constraints());
+    let (_, expanded_panel_node) = builder.panel(key("split-floating-expanded"), constraints());
     let expanded_group = builder.tabs(vec![expanded_panel_node], 0, false);
-    let right_column = builder.column(
-        300.0,
-        ColumnMode::Expanded,
-        vec![expanded_group],
-        vec![1.0],
-    );
+    let right_column = builder.column(300.0, ColumnMode::Expanded, vec![expanded_group], vec![1.0]);
     let root = builder.split(Axis::X, vec![left_column, right_column], vec![0.5, 0.5]);
     let bounds = Rect::new(Point::new(40.0, 50.0), Size::new(604.0, 400.0));
     builder.floating_group(root, bounds, 1);
@@ -414,9 +401,15 @@ fn floating_horizontal_split_reserves_title_for_each_collapsed_column_branch() {
 
     assert_eq!(rects.floating_groups[0].rect, bounds);
     assert_eq!(collapsed.origin.y, bounds.origin.y + metrics.header_height);
-    assert_eq!(collapsed_strip.origin.y, bounds.origin.y + metrics.header_height);
+    assert_eq!(
+        collapsed_strip.origin.y,
+        bounds.origin.y + metrics.header_height
+    );
     assert_eq!(expanded.origin.y, bounds.origin.y);
-    assert_eq!(expanded_strip.origin.y, bounds.origin.y + metrics.header_height);
+    assert_eq!(
+        expanded_strip.origin.y,
+        bounds.origin.y + metrics.header_height
+    );
     assert!(
         (collapsed_strip.origin.y - expanded_strip.origin.y).abs() < PIXEL_TOLERANCE,
         "both horizontal branches must align their tab strips below the shared title"
@@ -433,21 +426,13 @@ fn floating_horizontal_split_minimum_includes_title_for_collapsed_branches() {
     for name in ["floating-min-split-left", "floating-min-split-right"] {
         let (_, panel_node) = builder.panel(key(name), constraints());
         let group = builder.tabs(vec![panel_node], 0, true);
-        let column = builder.column(
-            300.0,
-            ColumnMode::Expanded,
-            vec![group],
-            vec![1.0],
-        );
+        let column = builder.column(300.0, ColumnMode::Expanded, vec![group], vec![1.0]);
         groups.push(group);
         columns.push(column);
     }
 
     let root = builder.split(Axis::X, columns, vec![0.5, 0.5]);
-    let requested_bounds = Rect::new(
-        Point::new(40.0, 50.0),
-        Size::new(604.0, 40.0),
-    );
+    let requested_bounds = Rect::new(Point::new(40.0, 50.0), Size::new(604.0, 40.0));
     let floating = builder.floating_group(root, requested_bounds, 1);
     let layout = builder.build();
 
@@ -493,11 +478,9 @@ fn floating_horizontal_split_minimum_includes_title_for_collapsed_branches() {
 fn floating_multi_group_column_minimum_includes_title_for_collapsed_first_group() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
-    let (_, collapsed_panel) =
-        builder.panel(key("floating-min-column-collapsed"), constraints());
+    let (_, collapsed_panel) = builder.panel(key("floating-min-column-collapsed"), constraints());
     let collapsed_group = builder.tabs(vec![collapsed_panel], 0, true);
-    let (_, expanded_panel) =
-        builder.panel(key("floating-min-column-expanded"), constraints());
+    let (_, expanded_panel) = builder.panel(key("floating-min-column-expanded"), constraints());
     let expanded_group = builder.tabs(vec![expanded_panel], 0, false);
     let column = builder.column(
         300.0,
@@ -505,10 +488,7 @@ fn floating_multi_group_column_minimum_includes_title_for_collapsed_first_group(
         vec![collapsed_group, expanded_group],
         vec![0.5, 0.5],
     );
-    let requested_bounds = Rect::new(
-        Point::new(40.0, 50.0),
-        Size::new(300.0, 100.0),
-    );
+    let requested_bounds = Rect::new(Point::new(40.0, 50.0), Size::new(300.0, 100.0));
     let floating = builder.floating_group(column, requested_bounds, 1);
     let layout = builder.build();
 
@@ -525,9 +505,8 @@ fn floating_multi_group_column_minimum_includes_title_for_collapsed_first_group(
     let expanded_minimum = metrics
         .min_group_height
         .max(metrics.header_height + metrics.tab_strip_height + constraints().min_size.height);
-    let required_without_title = metrics.effective_collapsed_group_height()
-        + expanded_minimum
-        + metrics.splitter_thickness;
+    let required_without_title =
+        metrics.effective_collapsed_group_height() + expanded_minimum + metrics.splitter_thickness;
     assert_eq!(
         actual_bounds.size.height,
         required_without_title + metrics.header_height
@@ -539,21 +518,16 @@ fn floating_multi_group_column_minimum_includes_title_for_collapsed_first_group(
 fn floating_vertical_split_minimum_includes_title_for_collapsed_first_branch() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
-    let (_, collapsed_panel) =
-        builder.panel(key("floating-y-min-collapsed"), constraints());
+    let (_, collapsed_panel) = builder.panel(key("floating-y-min-collapsed"), constraints());
     let collapsed_group = builder.tabs(vec![collapsed_panel], 0, true);
-    let (_, expanded_panel) =
-        builder.panel(key("floating-y-min-expanded"), constraints());
+    let (_, expanded_panel) = builder.panel(key("floating-y-min-expanded"), constraints());
     let expanded_group = builder.tabs(vec![expanded_panel], 0, false);
     let root = builder.split(
         Axis::Y,
         vec![collapsed_group, expanded_group],
         vec![0.5, 0.5],
     );
-    let requested_bounds = Rect::new(
-        Point::new(40.0, 50.0),
-        Size::new(300.0, 100.0),
-    );
+    let requested_bounds = Rect::new(Point::new(40.0, 50.0), Size::new(300.0, 100.0));
     let floating = builder.floating_group(root, requested_bounds, 1);
     let layout = builder.build();
 
@@ -579,9 +553,8 @@ fn floating_vertical_split_minimum_includes_title_for_collapsed_first_branch() {
     let expanded_minimum = metrics
         .min_group_height
         .max(metrics.header_height + metrics.tab_strip_height + constraints().min_size.height);
-    let required_without_title = metrics.effective_collapsed_group_height()
-        + expanded_minimum
-        + metrics.splitter_thickness;
+    let required_without_title =
+        metrics.effective_collapsed_group_height() + expanded_minimum + metrics.splitter_thickness;
 
     assert_eq!(
         actual_bounds.size.height,
@@ -597,14 +570,12 @@ fn floating_vertical_split_minimum_includes_title_for_collapsed_first_branch() {
     );
     assert_eq!(
         expanded_rect.origin.y,
-        collapsed_rect.origin.y
-            + collapsed_rect.size.height
-            + metrics.splitter_thickness
+        collapsed_rect.origin.y + collapsed_rect.size.height + metrics.splitter_thickness
     );
     assert!(
         ((expanded_rect.origin.y + expanded_rect.size.height)
             - (actual_bounds.origin.y + actual_bounds.size.height))
-        .abs()
+            .abs()
             < PIXEL_TOLERANCE
     );
     assert_eq!(
@@ -755,15 +726,13 @@ fn golden_rects_for_1280_by_800_cover_both_docks_columns_groups_and_splitters() 
 
     let (_, middle_panel_node) = builder.panel(key("golden-1280-left-middle"), constraints());
     let middle_group = builder.tabs(vec![middle_panel_node], 0, false);
-    let second_column =
-        builder.column(300.0, ColumnMode::Expanded, vec![middle_group], vec![1.0]);
+    let second_column = builder.column(300.0, ColumnMode::Expanded, vec![middle_group], vec![1.0]);
     let left_root = builder.split(Axis::X, vec![first_column, second_column], vec![0.5, 0.5]);
     builder.main_area(DockSide::Left, left_root);
 
     let (_, right_panel_node) = builder.panel(key("golden-1280-right"), constraints());
     let right_group = builder.tabs(vec![right_panel_node], 0, false);
-    let right_column =
-        builder.column(220.0, ColumnMode::Expanded, vec![right_group], vec![1.0]);
+    let right_column = builder.column(220.0, ColumnMode::Expanded, vec![right_group], vec![1.0]);
     builder.main_area(DockSide::Right, right_column);
 
     let layout = builder.build();
@@ -1143,11 +1112,9 @@ fn unfit_floating_window_does_not_abort_geometry_for_other_areas() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
 
-    let (main_panel, main_panel_node) =
-        builder.panel(key("float-fallback-main"), constraints());
+    let (main_panel, main_panel_node) = builder.panel(key("float-fallback-main"), constraints());
     let main_group = builder.tabs(vec![main_panel_node], 0, false);
-    let main_column =
-        builder.column(280.0, ColumnMode::Expanded, vec![main_group], vec![1.0]);
+    let main_column = builder.column(280.0, ColumnMode::Expanded, vec![main_group], vec![1.0]);
     builder.main_area(DockSide::Left, main_column);
 
     let tight = PanelConstraints::new(
@@ -1156,8 +1123,7 @@ fn unfit_floating_window_does_not_abort_geometry_for_other_areas() {
         Some(Size::new(800.0, 600.0)),
         false,
     );
-    let (too_tall_panel, too_tall_panel_node) =
-        builder.panel(key("float-too-tall"), tight);
+    let (too_tall_panel, too_tall_panel_node) = builder.panel(key("float-too-tall"), tight);
     let too_tall_group = builder.tabs(vec![too_tall_panel_node], 0, false);
     let too_tall_floating = builder.floating_group(
         too_tall_group,
@@ -1180,7 +1146,10 @@ fn unfit_floating_window_does_not_abort_geometry_for_other_areas() {
         .expect("one unfit floating window must not abort the whole snapshot");
 
     assert!(
-        rects.columns.iter().any(|column| column.column == main_column),
+        rects
+            .columns
+            .iter()
+            .any(|column| column.column == main_column),
         "main dock geometry should still be available"
     );
     assert!(
@@ -1188,19 +1157,31 @@ fn unfit_floating_window_does_not_abort_geometry_for_other_areas() {
         "main dock panel geometry should still be available"
     );
     assert!(
-        rects.floating_groups.iter().any(|group| group.group == visible_floating),
+        rects
+            .floating_groups
+            .iter()
+            .any(|group| group.group == visible_floating),
         "a valid floating window should remain visible"
     );
     assert!(
-        !rects.floating_groups.iter().any(|group| group.group == too_tall_floating),
+        !rects
+            .floating_groups
+            .iter()
+            .any(|group| group.group == too_tall_floating),
         "a floating window that cannot fit should be omitted from this snapshot"
     );
     assert!(
-        rects.panels.iter().any(|panel| panel.panel == visible_panel),
+        rects
+            .panels
+            .iter()
+            .any(|panel| panel.panel == visible_panel),
         "the valid floating panel should remain available"
     );
     assert!(
-        !rects.panels.iter().any(|panel| panel.panel == too_tall_panel),
+        !rects
+            .panels
+            .iter()
+            .any(|panel| panel.panel == too_tall_panel),
         "failed floating geometry must not leave partial panel rectangles"
     );
     assert!(layout.validate(&metrics).is_ok());
@@ -1312,7 +1293,9 @@ fn overflowing_minimum_size_still_reports_arithmetic_overflow() {
             &metrics,
             &mut std::collections::HashMap::new(),
         ),
-        Err(ComputeRectsError::Geometry(GeometryError::ArithmeticOverflow))
+        Err(ComputeRectsError::Geometry(
+            GeometryError::ArithmeticOverflow
+        ))
     ));
 }
 
@@ -1499,7 +1482,10 @@ fn collapsed_group_unit_weight_does_not_leave_expanded_column_weight_sum_zero() 
             .height
     };
     assert!((height(expanded) - 468.0).abs() < PIXEL_TOLERANCE);
-    assert_eq!(height(collapsed), metrics.effective_collapsed_group_height());
+    assert_eq!(
+        height(collapsed),
+        metrics.effective_collapsed_group_height()
+    );
     assert!(rects.vertical_overflow.is_empty());
 }
 
@@ -1544,7 +1530,10 @@ fn nested_vertical_split_shares_space_when_all_expanded_child_weights_are_zero()
     };
     assert!((height(group_a) - 232.0).abs() < PIXEL_TOLERANCE);
     assert!((height(group_b) - 232.0).abs() < PIXEL_TOLERANCE);
-    assert_eq!(height(collapsed), metrics.effective_collapsed_group_height());
+    assert_eq!(
+        height(collapsed),
+        metrics.effective_collapsed_group_height()
+    );
     assert!(rects.vertical_overflow.is_empty());
 }
 
@@ -1588,17 +1577,11 @@ fn zero_weight_child_keeps_its_minimum_without_changing_positive_weight_proporti
     let quarter_height = height(group_quarter);
     let three_quarters_height = height(group_three_quarters);
 
-    let minimum = metrics
-        .header_height
-        + metrics.tab_strip_height
-        + constraints().min_size.height;
+    let minimum = metrics.header_height + metrics.tab_strip_height + constraints().min_size.height;
     assert!((zero_height - minimum).abs() < PIXEL_TOLERANCE);
     assert!((quarter_height - 219.0).abs() < PIXEL_TOLERANCE);
     assert!((three_quarters_height - 657.0).abs() < PIXEL_TOLERANCE);
-    assert!(
-        (quarter_height / three_quarters_height - 0.25 / 0.75).abs()
-            < PIXEL_TOLERANCE
-    );
+    assert!((quarter_height / three_quarters_height - 0.25 / 0.75).abs() < PIXEL_TOLERANCE);
     assert!(rects.vertical_overflow.is_empty());
 }
 
@@ -1608,8 +1591,7 @@ fn dominant_ratio_keeps_zero_weight_groups_at_minimum_and_gives_remainder_to_dom
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
     let mut groups = Vec::new();
     for index in 0..3 {
-        let (_, panel_node) =
-            builder.panel(key(&format!("dominant-ratio-{index}")), constraints());
+        let (_, panel_node) = builder.panel(key(&format!("dominant-ratio-{index}")), constraints());
         groups.push(builder.tabs(vec![panel_node], 0, false));
     }
     let zero_a = groups[0];
@@ -1640,15 +1622,12 @@ fn dominant_ratio_keeps_zero_weight_groups_at_minimum_and_gives_remainder_to_dom
             .size
             .height
     };
-    let minimum = metrics.header_height
-        + metrics.tab_strip_height
-        + constraints().min_size.height;
+    let minimum = metrics.header_height + metrics.tab_strip_height + constraints().min_size.height;
 
     assert!((height(zero_a) - minimum).abs() < PIXEL_TOLERANCE);
     assert!((height(zero_b) - minimum).abs() < PIXEL_TOLERANCE);
     assert!(
-        (height(dominant)
-            - (viewport_height - 2.0 * metrics.splitter_thickness - 2.0 * minimum))
+        (height(dominant) - (viewport_height - 2.0 * metrics.splitter_thickness - 2.0 * minimum))
             .abs()
             < PIXEL_TOLERANCE
     );
@@ -1662,8 +1641,7 @@ fn all_collapsed_groups_keep_their_fixed_strip_height_and_do_not_overflow() {
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
     let mut groups = Vec::new();
     for index in 0..3 {
-        let (_, panel_node) =
-            builder.panel(key(&format!("all-collapsed-{index}")), constraints());
+        let (_, panel_node) = builder.panel(key(&format!("all-collapsed-{index}")), constraints());
         groups.push(builder.tabs(vec![panel_node], 0, true));
     }
     let column = builder.column(
@@ -1740,9 +1718,7 @@ fn ratio_allocation_remains_valid_through_multiple_nested_vertical_splits() {
             .size
             .height
     };
-    let minimum = metrics.header_height
-        + metrics.tab_strip_height
-        + constraints().min_size.height;
+    let minimum = metrics.header_height + metrics.tab_strip_height + constraints().min_size.height;
     let outer_left = height(group_a);
     let outer_right = height(group_d);
     let inner_zero_weight = height(group_b);
@@ -1752,8 +1728,7 @@ fn ratio_allocation_remains_valid_through_multiple_nested_vertical_splits() {
     assert!((inner_zero_weight - minimum).abs() < PIXEL_TOLERANCE);
     assert!(inner_dominant > minimum);
     assert!(
-        ((inner_zero_weight + inner_dominant + metrics.splitter_thickness)
-            - 2.0 * outer_left)
+        ((inner_zero_weight + inner_dominant + metrics.splitter_thickness) - 2.0 * outer_left)
             .abs()
             < PIXEL_TOLERANCE
     );
@@ -1799,13 +1774,7 @@ fn floating_bounds_clamp_rejects_positive_but_unrepresentable_edge() {
     let bounds = Rect::new(Point::new(2_147_483_648.0, 0.0), Size::new(80.0, 300.0));
 
     assert_eq!(
-        super::clamp_floating_bounds(
-            &layout,
-            root,
-            bounds,
-            viewport(800.0, 600.0),
-            &metrics,
-        ),
+        super::clamp_floating_bounds(&layout, root, bounds, viewport(800.0, 600.0), &metrics,),
         Err(ComputeRectsError::Geometry(
             GeometryError::NonPositiveDimension
         ))
@@ -1832,21 +1801,12 @@ fn floating_bounds_clamp_handles_rounding_at_large_client_origin() {
     // width rounds its right edge down to +200, so deriving max_x as
     // checked_right - width can round below the origin.
     let origin_x = 16_777_216.0_f32;
-    let client_area = Rect::new(
-        Point::new(origin_x, 0.0),
-        Size::new(200.6, 300.0),
-    );
+    let client_area = Rect::new(Point::new(origin_x, 0.0), Size::new(200.6, 300.0));
     assert_eq!(client_area.validate_non_empty(), Ok(()));
     let bounds = Rect::new(Point::new(-50.0, 20.0), Size::new(300.0, 250.0));
 
-    let clamped = super::clamp_floating_bounds(
-        &layout,
-        root,
-        bounds,
-        client_area,
-        &metrics,
-    )
-    .expect("rounding at a large origin must not be reported as arithmetic overflow");
+    let clamped = super::clamp_floating_bounds(&layout, root, bounds, client_area, &metrics)
+        .expect("rounding at a large origin must not be reported as arithmetic overflow");
 
     assert_eq!(clamped.origin.x, origin_x);
     assert_eq!(clamped.size.width, client_area.size.width);
@@ -1868,9 +1828,7 @@ fn add_perf_tabs_group(
     builder.tabs(panels, 0, false)
 }
 
-fn perf_wide_layout(
-    metrics: &DockMetrics,
-) -> (crate::Layout, Rect, &'static str) {
+fn perf_wide_layout(metrics: &DockMetrics) -> (crate::Layout, Rect, &'static str) {
     let column_count = 10;
     let groups_per_column = 8;
     let panels_per_group = 3;
@@ -1904,9 +1862,8 @@ fn perf_wide_layout(
         + metrics.splitter_thickness * (column_count - 1) as f32
         + metrics.min_canvas_width
         + 512.0;
-    let viewport_height = groups_per_column as f32
-        * (metrics.min_group_height + metrics.splitter_thickness)
-        + 800.0;
+    let viewport_height =
+        groups_per_column as f32 * (metrics.min_group_height + metrics.splitter_thickness) + 800.0;
     (
         builder.build(),
         viewport(viewport_width, viewport_height),
@@ -1914,19 +1871,13 @@ fn perf_wide_layout(
     )
 }
 
-fn perf_deep_layout(
-    metrics: &DockMetrics,
-) -> (crate::Layout, Rect, &'static str) {
+fn perf_deep_layout(metrics: &DockMetrics) -> (crate::Layout, Rect, &'static str) {
     let depth = 24;
     let mut builder = LayoutBuilder::new(Profile::Generic);
     let mut root = add_perf_tabs_group(&mut builder, "rects-deep-leaf", 1);
 
     for level in 0..depth {
-        let sibling = add_perf_tabs_group(
-            &mut builder,
-            &format!("rects-deep-level{level}"),
-            1,
-        );
+        let sibling = add_perf_tabs_group(&mut builder, &format!("rects-deep-level{level}"), 1);
         // Keep this fixture focused on recursion depth. The wide fixture
         // already exercises horizontal allocation; alternating X/Y splits
         // here can generate a minimum-width stress case that is unrelated
@@ -1935,12 +1886,9 @@ fn perf_deep_layout(
     }
     builder.main_area(DockSide::Left, root);
 
-    let viewport_width = metrics.default_column_width
-        + metrics.min_canvas_width
-        + 800.0;
-    let viewport_height = depth as f32
-        * (metrics.min_group_height + metrics.splitter_thickness)
-        + 1200.0;
+    let viewport_width = metrics.default_column_width + metrics.min_canvas_width + 800.0;
+    let viewport_height =
+        depth as f32 * (metrics.min_group_height + metrics.splitter_thickness) + 1200.0;
     (
         builder.build(),
         viewport(viewport_width, viewport_height),
@@ -1948,9 +1896,7 @@ fn perf_deep_layout(
     )
 }
 
-fn perf_many_tabs_layout(
-    metrics: &DockMetrics,
-) -> (crate::Layout, Rect, &'static str) {
+fn perf_many_tabs_layout(metrics: &DockMetrics) -> (crate::Layout, Rect, &'static str) {
     let tabs_count = 128;
     let mut builder = LayoutBuilder::new(Profile::Generic);
     let group = add_perf_tabs_group(&mut builder, "rects-tabs", tabs_count);
@@ -1962,9 +1908,7 @@ fn perf_many_tabs_layout(
     );
     builder.main_area(DockSide::Left, column);
 
-    let viewport_width = metrics.default_column_width
-        + metrics.min_canvas_width
-        + 512.0;
+    let viewport_width = metrics.default_column_width + metrics.min_canvas_width + 512.0;
     let viewport_height = metrics.min_group_height + 1200.0;
     (
         builder.build(),
@@ -1996,7 +1940,10 @@ fn measure_compute_rects_case(
     let initial = layout
         .compute_rects(viewport, metrics)
         .expect("benchmark fixture must compute geometry");
-    assert!(!initial.panels.is_empty(), "benchmark should lay out panels");
+    assert!(
+        !initial.panels.is_empty(),
+        "benchmark should lay out panels"
+    );
 
     for _ in 0..iterations.min(8) {
         let rects = layout
@@ -2033,12 +1980,15 @@ fn measure_compute_rects_case(
     let minimum_helper = visit_summary(&visits, |counts| counts.minimum_node_size_helper);
     let minimum_recursive = visit_summary(&visits, |counts| counts.recursive_minimum_node_size);
     let allocation_child = visit_summary(&visits, |counts| counts.allocate_stack_child);
-    let total_node_visits: u64 = visits.values().map(|counts| {
-        counts.preferred_width
-            + counts.minimum_node_size_helper
-            + counts.recursive_minimum_node_size
-            + counts.allocate_stack_child
-    }).sum();
+    let total_node_visits: u64 = visits
+        .values()
+        .map(|counts| {
+            counts.preferred_width
+                + counts.minimum_node_size_helper
+                + counts.recursive_minimum_node_size
+                + counts.allocate_stack_child
+        })
+        .sum();
     let unique_nodes = visits.len();
 
     println!(
@@ -2058,10 +2008,18 @@ fn measure_compute_rects_case(
     println!(
         "compute-rects visits [{}]: preferred_width=total/{}/nodes_repeated/{}/max_per_node/{}, minimum_node_size_helper=total/{}/nodes_repeated/{}/max_per_node/{}, recursive_minimum_node_size=total/{}/nodes_repeated/{}/max_per_node/{}, allocate_stack_children=total/{}/nodes_repeated/{}/max_per_node/{}",
         label,
-        preferred.0, preferred.1, preferred.2,
-        minimum_helper.0, minimum_helper.1, minimum_helper.2,
-        minimum_recursive.0, minimum_recursive.1, minimum_recursive.2,
-        allocation_child.0, allocation_child.1, allocation_child.2,
+        preferred.0,
+        preferred.1,
+        preferred.2,
+        minimum_helper.0,
+        minimum_helper.1,
+        minimum_helper.2,
+        minimum_recursive.0,
+        minimum_recursive.1,
+        minimum_recursive.2,
+        allocation_child.0,
+        allocation_child.1,
+        allocation_child.2,
     );
 }
 
@@ -2081,13 +2039,7 @@ fn benchmark_compute_rects_node_size_visits() {
     for (layout, viewport, label) in cases {
         let node_count = layout.nodes().count();
         let iterations = if node_count > 300 { 20 } else { 60 };
-        measure_compute_rects_case(
-            &layout,
-            viewport,
-            &metrics,
-            label,
-            iterations,
-        );
+        measure_compute_rects_case(&layout, viewport, &metrics, label, iterations);
     }
 }
 
@@ -2141,8 +2093,7 @@ fn geometry_respects_column_modes() {
     let metrics = DockMetrics::default();
     let build_layout = |mode: ColumnMode| {
         let mut builder = LayoutBuilder::new(Profile::Photoshop);
-        let (_, panel) =
-            builder.panel(key("minimum-size-column-mode"), constraints());
+        let (_, panel) = builder.panel(key("minimum-size-column-mode"), constraints());
         let group = builder.tabs(vec![panel], 0, false);
         let width = match mode {
             ColumnMode::Expanded => metrics.default_column_width,
@@ -2178,10 +2129,7 @@ fn geometry_respects_column_modes() {
         labels_rects.columns[0].rect.size.width,
         metrics.min_column_width
     );
-    assert_eq!(
-        icons_rects.columns[0].rect.size.width,
-        metrics.rail_width
-    );
+    assert_eq!(icons_rects.columns[0].rect.size.width, metrics.rail_width);
     assert_eq!(expanded_rects.panels.len(), 1);
     assert!(labels_rects.panels.is_empty());
     assert!(icons_rects.panels.is_empty());
@@ -2192,8 +2140,7 @@ fn geometry_respects_collapsed_states() {
     let metrics = DockMetrics::default();
     let build_layout = |collapsed: bool| {
         let mut builder = LayoutBuilder::new(Profile::Generic);
-        let (_, panel) =
-            builder.panel(key("minimum-size-collapsed"), constraints());
+        let (_, panel) = builder.panel(key("minimum-size-collapsed"), constraints());
         let group = builder.tabs(vec![panel], 0, collapsed);
         let column = builder.column(
             metrics.default_column_width,

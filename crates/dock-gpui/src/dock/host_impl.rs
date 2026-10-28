@@ -42,78 +42,87 @@ impl DockHost for WindowHost<'_, '_> {
     }
 
     fn command(&self, command: DockCommand) -> CommandClickHandler {
-        Box::new(self.cx.listener::<ClickEvent>(
-            move |this, _event, _window, cx| {
-                this.apply_dock_command(command.clone(), cx);
-                cx.notify();
-            },
-        ))
+        Box::new(
+            self.cx
+                .listener::<ClickEvent>(move |this, _event, _window, cx| {
+                    this.apply_dock_command(command.clone(), cx);
+                    cx.notify();
+                }),
+        )
     }
 
     fn command_key(&self, command: DockCommand) -> CommandKeyHandler {
-        Box::new(self.cx.listener::<KeyDownEvent>(
-            move |this, _event, _window, cx| {
-                this.apply_dock_command(command.clone(), cx);
-                cx.notify();
-            },
-        ))
+        Box::new(
+            self.cx
+                .listener::<KeyDownEvent>(move |this, _event, _window, cx| {
+                    this.apply_dock_command(command.clone(), cx);
+                    cx.notify();
+                }),
+        )
     }
 
     fn close_floating(&self, group: FloatingGroupId) -> CommandClickHandler {
-        Box::new(self.cx.listener::<ClickEvent>(
-            move |this, _event, _window, cx| {
-                this.close_floating_window(group, cx);
-                cx.notify();
-            },
-        ))
+        Box::new(
+            self.cx
+                .listener::<ClickEvent>(move |this, _event, _window, cx| {
+                    this.close_floating_window(group, cx);
+                    cx.notify();
+                }),
+        )
     }
 
     fn menu(&self, request: DockMenuRequest) -> CommandClickHandler {
-        Box::new(self.cx.listener::<ClickEvent>(
-            move |this, event, _window, cx| {
-                this.open_menu(request, event.position());
-                cx.notify();
-            },
-        ))
+        Box::new(
+            self.cx
+                .listener::<ClickEvent>(move |this, event, _window, cx| {
+                    this.open_menu(request, event.position());
+                    cx.notify();
+                }),
+        )
     }
 
     fn drag_start(&self, payload: DragPayload, handle: DragHandle) -> DragStartHandler {
-        Box::new(self.cx.listener::<MouseDownEvent>(
-            move |this, event, _window, _cx| {
-                this.begin_drag(payload, handle, event.position);
-            },
-        ))
+        Box::new(
+            self.cx
+                .listener::<MouseDownEvent>(move |this, event, _window, _cx| {
+                    this.begin_drag(payload, handle, event.position);
+                }),
+        )
     }
 
     fn resize_start(&self, handle: ResizeHandle) -> ResizeStartHandler {
-        Box::new(self.cx.listener::<MouseDownEvent>(
-            move |this, event, window, cx| {
-                this.begin_resize(handle, event.position, window, cx);
-            },
-        ))
+        Box::new(
+            self.cx
+                .listener::<MouseDownEvent>(move |this, event, window, cx| {
+                    this.begin_resize(handle, event.position, window, cx);
+                }),
+        )
     }
 
     fn resize_key(&self, handle: ResizeHandle) -> CommandKeyHandler {
-        Box::new(self.cx.listener::<KeyDownEvent>(
-            move |this, event, window, cx| {
-                this.resize_by_keyboard(handle, event, window, cx);
-            },
-        ))
+        Box::new(
+            self.cx
+                .listener::<KeyDownEvent>(move |this, event, window, cx| {
+                    this.resize_by_keyboard(handle, event, window, cx);
+                }),
+        )
     }
 
     fn surface_mouse_move(&self) -> SurfaceMouseMoveHandler {
-        Box::new(self.cx.listener::<MouseMoveEvent>(
-            move |this, event, window, cx| {
-                this.handle_surface_mouse_move(event, window, cx);
-            },
-        ))
+        Box::new(
+            self.cx
+                .listener::<MouseMoveEvent>(move |this, event, window, cx| {
+                    this.handle_surface_mouse_move(event, window, cx);
+                }),
+        )
     }
 
     fn surface_mouse_up(&self) -> SurfaceMouseUpHandler {
-        Box::new(self.cx.listener::<MouseUpEvent>(
-            move |this, event, window, cx| {
-                this.handle_surface_mouse_up(event, window, cx);
-            },
-        ))
+        Box::new(
+            self.cx
+                .listener::<MouseUpEvent>(move |this, event, window, cx| {
+                    this.handle_surface_mouse_up(event, window, cx);
+                }),
+        )
     }
 }

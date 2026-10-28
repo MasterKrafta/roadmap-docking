@@ -36,7 +36,10 @@ mod tests {
         let controller = DockController::new_initial(&theme).unwrap();
         let items = items(controller.layout(), &theme);
         assert_eq!(
-            items.iter().map(|item| item.id.as_str()).collect::<Vec<_>>(),
+            items
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
             vec![
                 "dockers-layers",
                 "dockers-color",

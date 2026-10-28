@@ -1,11 +1,11 @@
 use dock_core::Rect;
 use gpui::{
-    App, InteractiveElement, IntoElement, ParentElement, RenderOnce,
-    StatefulInteractiveElement, Styled, Window, div, px, rgb,
+    App, InteractiveElement, IntoElement, ParentElement, RenderOnce, StatefulInteractiveElement,
+    Styled, Window, div, px, rgb,
 };
 use ui::Theme;
 
-use crate::components::{with_focus_ring, ClickHandler};
+use crate::components::{ClickHandler, with_focus_ring};
 
 /// A small absolutely positioned button that displays a single glyph.
 #[derive(IntoElement)]

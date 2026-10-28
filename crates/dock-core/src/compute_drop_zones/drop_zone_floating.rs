@@ -1,7 +1,6 @@
 use super::*;
 use crate::{FloatingGroupRect, GroupRect};
 
-
 struct FloatingZoneContext<'a> {
     layout: &'a Layout,
     source: DropSource,
@@ -251,7 +250,11 @@ impl FloatingZoneContext<'_> {
         let Some(last_group) = column_groups.last().copied() else {
             return Ok(());
         };
-        let Some(column_rect) = self.rects.columns.iter().find(|entry| entry.column == column)
+        let Some(column_rect) = self
+            .rects
+            .columns
+            .iter()
+            .find(|entry| entry.column == column)
         else {
             return Ok(());
         };

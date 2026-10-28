@@ -11,9 +11,10 @@ fn minimum_floating_size(
     layout
         .minimum_floating_size_with_cache(root, metrics, minimum_sizes)
         .map_err(|error| match error {
-            crate::CommandError::InvalidValue { field: "size", reason }
-                if reason.contains("overflow") =>
-            {
+            crate::CommandError::InvalidValue {
+                field: "size",
+                reason,
+            } if reason.contains("overflow") => {
                 ComputeRectsError::Geometry(GeometryError::ArithmeticOverflow)
             }
             _ => ComputeRectsError::InvalidLayoutState,
@@ -126,7 +127,9 @@ pub(super) fn preferred_width(
 ) -> Result<f32, ComputeRectsError> {
     #[cfg(test)]
     visit_probe::record_preferred_width(id);
-    let node = layout.node(id).ok_or(ComputeRectsError::InvalidLayoutState)?;
+    let node = layout
+        .node(id)
+        .ok_or(ComputeRectsError::InvalidLayoutState)?;
     let width = match node {
         Node::Column(column) => effective_column_width(column, metrics),
         Node::Tabs(_) | Node::Panel(_) => metrics

@@ -1,6 +1,6 @@
 use dock_core::{
-    create_initial_layout, DockMetrics, DockSide, DropSource, DropTarget, DropZone, Layout,
-    Node, PanelConstraints, PanelId, PanelKey, Point, Profile, Rect, Size,
+    DockMetrics, DockSide, DropSource, DropTarget, DropZone, Layout, Node, PanelConstraints,
+    PanelId, PanelKey, Point, Profile, Rect, Size, create_initial_layout,
 };
 use dock_gpui::FrameGeometry;
 
@@ -20,8 +20,7 @@ fn fixture() -> (Layout, DockMetrics, Rect) {
         tab_strip_height: 24.0,
         ..DockMetrics::default()
     };
-    let layout =
-        create_initial_layout(Profile::Photoshop, &descriptors, metrics).unwrap();
+    let layout = create_initial_layout(Profile::Photoshop, &descriptors, metrics).unwrap();
     let viewport = Rect::new(Point::ZERO, Size::new(1000.0, 700.0));
 
     (layout, metrics, viewport)
@@ -118,7 +117,12 @@ fn drop_tab_insertion_zones_match_the_normalized_headers() {
                             if group == target_group && index == header.index
                     )
             })
-            .unwrap_or_else(|| panic!("missing insertion zone aligned with header {:?}", header.panel));
+            .unwrap_or_else(|| {
+                panic!(
+                    "missing insertion zone aligned with header {:?}",
+                    header.panel
+                )
+            });
 
         assert_eq!(frame_zone.rect.size.height, header.rect.size.height);
 

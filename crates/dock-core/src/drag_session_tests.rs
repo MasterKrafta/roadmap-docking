@@ -3,8 +3,8 @@ use slotmap::SlotMap;
 use super::DragSession;
 use crate::{
     DockAreaId, DockMetrics, DragCancelReason, DragDropRequest, DragHandle, DragPayload,
-    DragPreview, DragSessionError, DragState, DropTarget, FloatingGroupId, Layout, Node,
-    NodeId, PanelConstraints, PanelId, PanelKey, Point, Profile, Size, create_initial_layout,
+    DragPreview, DragSessionError, DragState, DropTarget, FloatingGroupId, Layout, Node, NodeId,
+    PanelConstraints, PanelId, PanelKey, Point, Profile, Size, create_initial_layout,
 };
 
 fn panel_payload() -> DragPayload {
@@ -134,8 +134,17 @@ fn non_finite_move_cancels_active_drag() {
     let payload = panel_payload();
     let mut session = session();
     session.pointer_down(payload, Point::ZERO).unwrap();
-    assert_eq!(session.pointer_move(Point::new(0.0, f32::INFINITY)), Err(DragSessionError::InvalidPointerPosition));
-    assert!(matches!(session.state(), DragState::Cancelled { reason: DragCancelReason::InvalidPointerPosition, .. }));
+    assert_eq!(
+        session.pointer_move(Point::new(0.0, f32::INFINITY)),
+        Err(DragSessionError::InvalidPointerPosition)
+    );
+    assert!(matches!(
+        session.state(),
+        DragState::Cancelled {
+            reason: DragCancelReason::InvalidPointerPosition,
+            ..
+        }
+    ));
 }
 
 #[test]

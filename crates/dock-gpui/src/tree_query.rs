@@ -8,9 +8,7 @@ use dock_core::{Axis, DockSide, DropTarget, Layout, Node, NodeId, PanelId, Tabs}
 pub(crate) fn floating_title_groups_in_tree(layout: &Layout, root: NodeId) -> Vec<NodeId> {
     match layout.node(root) {
         Some(Node::Tabs(_)) => vec![root],
-        Some(Node::Column(column)) => {
-            column.groups.first().copied().into_iter().collect()
-        }
+        Some(Node::Column(column)) => column.groups.first().copied().into_iter().collect(),
         Some(Node::Split(split)) if split.axis == Axis::X => split
             .children
             .iter()
@@ -30,9 +28,7 @@ pub(crate) fn drop_target_node(target: DropTarget) -> Option<NodeId> {
         DropTarget::Tabs { group, .. }
         | DropTarget::GroupTabs { group, .. }
         | DropTarget::GroupEdge { group, .. } => Some(group),
-        DropTarget::ColumnSlot { column, .. } | DropTarget::RailSlot { column, .. } => {
-            Some(column)
-        }
+        DropTarget::ColumnSlot { column, .. } | DropTarget::RailSlot { column, .. } => Some(column),
         DropTarget::MainColumn { .. } | DropTarget::FreeArea => None,
     }
 }
@@ -45,7 +41,10 @@ pub(crate) fn main_column_ids(layout: &Layout, side: DockSide) -> Vec<NodeId> {
         Some(Node::Column(_)) => vec![area.root],
         Some(Node::Split(split))
             if split.axis == Axis::X
-                && split.children.iter().all(|child| matches!(layout.node(*child), Some(Node::Column(_)))) =>
+                && split
+                    .children
+                    .iter()
+                    .all(|child| matches!(layout.node(*child), Some(Node::Column(_)))) =>
         {
             split.children.clone()
         }
@@ -102,4 +101,3 @@ pub(crate) fn active_panel(layout: &Layout, tabs: &Tabs) -> Option<PanelId> {
         _ => None,
     }
 }
-

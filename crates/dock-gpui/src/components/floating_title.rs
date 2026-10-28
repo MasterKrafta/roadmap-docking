@@ -46,8 +46,8 @@ impl RenderOnce for FloatingTitle {
             button_count,
             button_gap,
         );
-        let buttons_width = button_width * button_count as f32
-            + button_gap * button_count.saturating_sub(1) as f32;
+        let buttons_width =
+            button_width * button_count as f32 + button_gap * button_count.saturating_sub(1) as f32;
         let drag_width = (self.rect.size.width - buttons_width).max(0.0);
 
         let typography = self.theme.typography;
@@ -137,7 +137,6 @@ impl RenderOnce for FloatingTitle {
     }
 }
 
-
 fn floating_title_button_width(
     header_height: f32,
     button_size: f32,
@@ -150,9 +149,11 @@ fn floating_title_button_width(
     }
 
     let total_gap_width = button_gap * button_count.saturating_sub(1) as f32;
-    let max_button_width =
-        (header_width - total_gap_width).max(0.0) / button_count as f32;
-    header_height.min(button_size).min(max_button_width).max(0.0)
+    let max_button_width = (header_width - total_gap_width).max(0.0) / button_count as f32;
+    header_height
+        .min(button_size)
+        .min(max_button_width)
+        .max(0.0)
 }
 
 #[cfg(test)]

@@ -110,9 +110,7 @@ pub(crate) fn items(
     match state {
         MenuState::Closed => Vec::new(),
         MenuState::Dockers { .. } => dockers_menu::items(layout, theme),
-        MenuState::Overflow { group, .. } => {
-            overflow_menu::items(layout, frame, *group)
-        }
+        MenuState::Overflow { group, .. } => overflow_menu::items(layout, frame, *group),
         MenuState::PanelGroup { group, panel, .. } => {
             group_menu::items(layout, metrics, frame, *group, *panel)
         }
@@ -120,8 +118,16 @@ pub(crate) fn items(
 }
 
 /// Computes the popup's screen-space bounds, clamped to the window viewport.
-pub(crate) fn popup_bounds(anchor: Point, viewport: Rect, item_count: usize, theme: &Theme) -> Rect {
-    let width = theme.metrics.popup_menu_width.min(viewport.size.width.max(1.0));
+pub(crate) fn popup_bounds(
+    anchor: Point,
+    viewport: Rect,
+    item_count: usize,
+    theme: &Theme,
+) -> Rect {
+    let width = theme
+        .metrics
+        .popup_menu_width
+        .min(viewport.size.width.max(1.0));
     let height = ((item_count.max(1) as f32) * theme.metrics.popup_menu_row_height)
         .min(viewport.size.height.max(1.0));
     let max_x = (viewport.origin.x + viewport.size.width - width).max(viewport.origin.x);
@@ -156,9 +162,9 @@ pub(crate) fn contains(bounds: Rect, point: Point) -> bool {
 mod tests {
     use super::{MenuState, contains, popup_bounds};
     use crate::requests::DockMenuRequest;
-    use ui::Theme;
     use dock_core::{NodeId, Point, Rect, Size};
     use slotmap::Key;
+    use ui::Theme;
 
     #[test]
     fn menu_selection_wraps_and_closed_state_stays_closed() {
@@ -201,7 +207,10 @@ mod tests {
         assert_eq!(bounds.origin, Point::new(88.0, 30.0));
         assert_eq!(
             bounds.size,
-            Size::new(theme.metrics.popup_menu_width, 5.0 * theme.metrics.popup_menu_row_height)
+            Size::new(
+                theme.metrics.popup_menu_width,
+                5.0 * theme.metrics.popup_menu_row_height
+            )
         );
         assert!(contains(bounds, Point::new(100.0, 40.0)));
         assert!(!contains(bounds, Point::new(320.0, 40.0)));

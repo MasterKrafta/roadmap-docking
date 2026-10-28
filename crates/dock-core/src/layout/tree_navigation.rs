@@ -108,15 +108,22 @@ impl Layout {
             {
                 let index = match self.nodes.get(group) {
                     Some(Node::Tabs(tabs)) => tabs.children.len(),
-                    _ => return Err(CommandError::InvalidTarget {
-                        reason: "profile default placement did not resolve to a Tabs node",
-                    }),
+                    _ => {
+                        return Err(CommandError::InvalidTarget {
+                            reason: "profile default placement did not resolve to a Tabs node",
+                        });
+                    }
                 };
                 return Ok(DropTarget::Tabs { group, index });
             }
         }
-        let index = self.main_columns(DockSide::Right).map_or(0, |columns| columns.len());
-        Ok(DropTarget::MainColumn { side: DockSide::Right, index })
+        let index = self
+            .main_columns(DockSide::Right)
+            .map_or(0, |columns| columns.len());
+        Ok(DropTarget::MainColumn {
+            side: DockSide::Right,
+            index,
+        })
     }
 
     pub(super) fn first_tabs_in_subtree(&self, root: NodeId) -> Option<NodeId> {
@@ -459,7 +466,8 @@ impl Layout {
         let key = instance.key.clone();
         if let Some(location) = self.dock_location_for_node(panel_node) {
             self.last_dock_locations.insert(key.clone(), location);
-            self.last_dock_location_order.retain(|remembered| *remembered != key);
+            self.last_dock_location_order
+                .retain(|remembered| *remembered != key);
             self.last_dock_location_order.push_back(key);
             while self.last_dock_location_order.len() > MAX_REMEMBERED_DOCK_LOCATIONS {
                 if let Some(expired) = self.last_dock_location_order.pop_front() {

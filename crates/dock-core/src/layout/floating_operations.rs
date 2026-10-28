@@ -1,7 +1,7 @@
 //! Floating command dispatch, creation, docking, geometry, and stacking order.
 
-use super::*;
 use super::helpers::{geometry_error_reason, normalized_ratios};
+use super::*;
 use crate::AllowedArea;
 
 impl Layout {
@@ -137,11 +137,11 @@ impl Layout {
                 reason: geometry_error_reason(error),
             })?;
 
-        let source_column_id = self.find_owner_column(group).ok_or(
-            CommandError::InvalidTarget {
-                reason: "FloatGroupAsColumn requires a group owned by a Column",
-            },
-        )?;
+        let source_column_id =
+            self.find_owner_column(group)
+                .ok_or(CommandError::InvalidTarget {
+                    reason: "FloatGroupAsColumn requires a group owned by a Column",
+                })?;
         let source_column = match self.nodes.get(source_column_id) {
             Some(Node::Column(column)) if column.groups.len() > 1 => column.clone(),
             Some(Node::Column(_)) => {
@@ -210,11 +210,11 @@ impl Layout {
         let panel_node = self
             .find_panel_node(panel)
             .ok_or(CommandError::MissingPanel { panel })?;
-        let source_group = self.find_parent(panel_node).ok_or(
-            CommandError::InvalidTarget {
+        let source_group = self
+            .find_parent(panel_node)
+            .ok_or(CommandError::InvalidTarget {
                 reason: "FloatPanelAsGroup requires a panel inside a Tabs group",
-            },
-        )?;
+            })?;
         match self.nodes.get(source_group) {
             Some(Node::Tabs(tabs))
                 if tabs.children.len() > 1 && tabs.children.contains(&panel_node) => {}
@@ -312,7 +312,10 @@ impl Layout {
             })?
             .root;
         self.validate_drop_target(target, metrics)?;
-        if target.referenced_node_id().is_some_and(|node| self.is_descendant_or_same(root, node)) {
+        if target
+            .referenced_node_id()
+            .is_some_and(|node| self.is_descendant_or_same(root, node))
+        {
             return Ok(());
         }
         if let DropTarget::Tabs { .. } | DropTarget::GroupTabs { .. } = target
@@ -459,8 +462,7 @@ impl Layout {
                 target_tabs.children.insert(insert_at + offset, child);
             }
             if moving_count > 0 {
-                target_tabs.active_index =
-                    insert_at + source_active_index.min(moving_count - 1);
+                target_tabs.active_index = insert_at + source_active_index.min(moving_count - 1);
             }
         } else {
             return Err(CommandError::InvalidTarget {

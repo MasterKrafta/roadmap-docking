@@ -146,8 +146,8 @@ impl FrameGeometry {
 mod tests {
     use super::FrameGeometry;
     use dock_core::{
-        create_initial_layout, DockMetrics, DockSide, PanelConstraints, PanelKey, Point, Profile,
-        Rect, Size,
+        DockMetrics, DockSide, PanelConstraints, PanelKey, Point, Profile, Rect, Size,
+        create_initial_layout,
     };
 
     #[test]
@@ -167,8 +167,7 @@ mod tests {
             tab_strip_height: 24.0,
             ..DockMetrics::default()
         };
-        let layout =
-            create_initial_layout(Profile::Photoshop, &descriptors, metrics).unwrap();
+        let layout = create_initial_layout(Profile::Photoshop, &descriptors, metrics).unwrap();
         let viewport = Rect::new(Point::ZERO, Size::new(1000.0, 700.0));
 
         let mut normalized_once = layout.compute_rects(viewport, &metrics).unwrap();

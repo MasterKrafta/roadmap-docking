@@ -56,7 +56,11 @@ pub(crate) fn elements(
 
     let mut computed_rail_groups = HashSet::new();
     if data.frame.is_none() {
-        for column_rect in rects.columns.iter().filter(|entry| nodes.contains(&entry.column)) {
+        for column_rect in rects
+            .columns
+            .iter()
+            .filter(|entry| nodes.contains(&entry.column))
+        {
             if matches!(
                 layout.node(column_rect.column),
                 Some(Node::Column(column)) if column.mode.is_rail()
@@ -66,26 +70,45 @@ pub(crate) fn elements(
             }
         }
     }
-    let rail_groups = data.frame
+    let rail_groups = data
+        .frame
         .map(crate::frame::FrameGeometry::rail_groups)
         .unwrap_or(&computed_rail_groups);
 
-    for column in rects.columns.iter().filter(|entry| nodes.contains(&entry.column)) {
+    for column in rects
+        .columns
+        .iter()
+        .filter(|entry| nodes.contains(&entry.column))
+    {
         elements.push(
-            RectBox::new(area.column_rect(column.column, column.rect), theme.colors.dock_background)
-                .into_any_element(),
+            RectBox::new(
+                area.column_rect(column.column, column.rect),
+                theme.colors.dock_background,
+            )
+            .into_any_element(),
         );
     }
 
-    for group in rects.groups.iter().filter(|entry| nodes.contains(&entry.group)) {
+    for group in rects
+        .groups
+        .iter()
+        .filter(|entry| nodes.contains(&entry.group))
+    {
         let group_bounds = area.rect(group.rect);
         elements.push(
-            GroupFrame { rect: group_bounds, theme: *theme }.into_any_element(),
+            GroupFrame {
+                rect: group_bounds,
+                theme: *theme,
+            }
+            .into_any_element(),
         );
 
         if let Some(Node::Tabs(tabs)) = layout.node(group.group)
             && !tabs.collapsed
-            && let Some(strip) = rects.tab_strips.iter().find(|strip| strip.group == group.group)
+            && let Some(strip) = rects
+                .tab_strips
+                .iter()
+                .find(|strip| strip.group == group.group)
         {
             let grip_height = crate::chrome_geometry::GROUP_DRAG_GRIP_HEIGHT
                 .min(theme.metrics.column_header_height)
@@ -95,22 +118,34 @@ pub(crate) fn elements(
                 elements.push(
                     GroupGrip {
                         group: group.group,
-                        rect: Rect::new(group_bounds.origin, Size::new(group.rect.size.width, grip_height)),
+                        rect: Rect::new(
+                            group_bounds.origin,
+                            Size::new(group.rect.size.width, grip_height),
+                        ),
                         theme: *theme,
                         on_drag_start: host.drag_start(
                             dock_core::DragPayload::Group { group: group.group },
                             dock_core::DragHandle::GroupGrip,
                         ),
                         on_move_key: group_move_key_handler(layout, host, group.group),
-                    }.into_any_element(),
+                    }
+                    .into_any_element(),
                 );
             }
         }
     }
 
-    for strip in rects.tab_strips.iter().filter(|entry| nodes.contains(&entry.group)) {
+    for strip in rects
+        .tab_strips
+        .iter()
+        .filter(|entry| nodes.contains(&entry.group))
+    {
         elements.push(
-            TabStrip { rect: area.rect(strip.rect), theme: *theme }.into_any_element(),
+            TabStrip {
+                rect: area.rect(strip.rect),
+                theme: *theme,
+            }
+            .into_any_element(),
         );
     }
 
@@ -142,19 +177,7 @@ fn group_move_key_handler(
         return None;
     }
 
-    let move_previous = group_move_target_index(
-        index,
-        group_count,
-        GroupMoveDirection::Previous,
-    )
-    .map(|target_index| {
-        host.command_key(DockCommand::MoveGroup {
-            group,
-            column: column_id,
-            index: target_index,
-        })
-    });
-    let move_next = group_move_target_index(index, group_count, GroupMoveDirection::Next)
+    let move_previous = group_move_target_index(index, group_count, GroupMoveDirection::Previous)
         .map(|target_index| {
             host.command_key(DockCommand::MoveGroup {
                 group,
@@ -162,9 +185,17 @@ fn group_move_key_handler(
                 index: target_index,
             })
         });
+    let move_next =
+        group_move_target_index(index, group_count, GroupMoveDirection::Next).map(|target_index| {
+            host.command_key(DockCommand::MoveGroup {
+                group,
+                column: column_id,
+                index: target_index,
+            })
+        });
 
-    Some(Box::new(move |event, window, app| {
-        match keyboard_group_move_direction(&event.keystroke) {
+    Some(Box::new(
+        move |event, window, app| match keyboard_group_move_direction(&event.keystroke) {
             Some(GroupMoveDirection::Previous) => {
                 if let Some(handler) = &move_previous {
                     handler(event, window, app);
@@ -176,8 +207,8 @@ fn group_move_key_handler(
                 }
             }
             None => {}
-        }
-    }))
+        },
+    ))
 }
 
 fn group_move_target_index(

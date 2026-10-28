@@ -1,7 +1,5 @@
 use dock_core::{NodeId, PanelId, Point, Rect, Size};
-use gpui::{
-    App, IntoElement, ParentElement, RenderOnce, Styled, Window, div, px, rgb,
-};
+use gpui::{App, IntoElement, ParentElement, RenderOnce, Styled, Window, div, px, rgb};
 use ui::Theme;
 
 use crate::components::{ClickHandler, IconButton};

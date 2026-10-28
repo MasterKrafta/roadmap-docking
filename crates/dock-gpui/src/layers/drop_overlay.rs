@@ -1,9 +1,7 @@
 use std::collections::HashMap;
 
 use dock_core::{DragHandle, DragPayload, Node, NodeId, Point, Rect, Size};
-use gpui::{
-    AnyElement, IntoElement, ParentElement, Styled, div, px, rgb, ScrollHandle,
-};
+use gpui::{AnyElement, IntoElement, ParentElement, ScrollHandle, Styled, div, px, rgb};
 
 use crate::color::blend_rgb;
 use crate::components::DropZone;
@@ -39,7 +37,11 @@ pub(crate) fn render(
         elements.push(
             rect_element(
                 source_rect,
-                blend_rgb(theme.colors.window_background, theme.colors.group_background, 0.18),
+                blend_rgb(
+                    theme.colors.window_background,
+                    theme.colors.group_background,
+                    0.18,
+                ),
             )
             .into_any_element(),
         );
@@ -48,7 +50,9 @@ pub(crate) fn render(
     for zone in &overlay.zones {
         let mut zone_rect = zone.rect;
         if let Some(target_node) = drop_target_node(zone.target)
-            && let Some(overflow) = overflows.iter().find(|entry| entry.nodes.contains(&target_node))
+            && let Some(overflow) = overflows
+                .iter()
+                .find(|entry| entry.nodes.contains(&target_node))
         {
             let scroll_offset_y = scroll_handles
                 .get(&overflow.owner)
@@ -72,12 +76,15 @@ pub(crate) fn render(
     }
 
     let label = drag_label(data, overlay.preview.payload);
-    let ghost_width = theme
-        .metrics
-        .default_column_width
-        .min(data.rects.viewport.map_or(theme.metrics.default_column_width, |rect| rect.size.width));
+    let ghost_width = theme.metrics.default_column_width.min(
+        data.rects
+            .viewport
+            .map_or(theme.metrics.default_column_width, |rect| rect.size.width),
+    );
     let ghost_height = theme.metrics.column_header_height.min(
-        data.rects.viewport.map_or(theme.metrics.column_header_height, |rect| rect.size.height),
+        data.rects
+            .viewport
+            .map_or(theme.metrics.column_header_height, |rect| rect.size.height),
     );
     let ghost = Rect::new(
         Point::new(
@@ -201,9 +208,7 @@ fn drag_label(data: &RenderData<'_>, payload: DragPayload) -> String {
             .map(crate::panels::panel_title)
     };
     match payload {
-        DragPayload::Panel { panel } => {
-            panel_title(panel).unwrap_or_else(|| "Panel".to_owned())
-        }
+        DragPayload::Panel { panel } => panel_title(panel).unwrap_or_else(|| "Panel".to_owned()),
         DragPayload::Group { group } => first_panel_in_subtree(data.layout, group)
             .and_then(panel_title)
             .map(|title| format!("Group · {title}"))
@@ -217,4 +222,3 @@ fn drag_label(data: &RenderData<'_>, payload: DragPayload) -> String {
             .unwrap_or_else(|| "Floating group".to_owned()),
     }
 }
-

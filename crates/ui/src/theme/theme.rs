@@ -78,9 +78,6 @@ mod tests {
         let mut theme = Theme::default();
         theme.colors.focus = 0x1FF_0000;
 
-        assert_eq!(
-            theme.validate(),
-            Err("focus must be a 24-bit RGB color")
-        );
+        assert_eq!(theme.validate(), Err("focus must be a 24-bit RGB color"));
     }
 }

@@ -48,12 +48,8 @@ impl ValidationReason {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::SplitMustContainAtLeastTwoChildren => "must contain at least two children",
-            Self::RatioCountMustMatchChildGroupCount => {
-                "ratio count must match child/group count"
-            }
-            Self::RatiosMustBeFiniteAndNonNegative => {
-                "ratios must be finite and non-negative"
-            }
+            Self::RatioCountMustMatchChildGroupCount => "ratio count must match child/group count",
+            Self::RatiosMustBeFiniteAndNonNegative => "ratios must be finite and non-negative",
             Self::RatiosMustSumToOne => "ratios must sum to 1.0 within 1e-4",
             Self::TabsMustContainAtLeastOneChild => "must contain at least one child",
             Self::ActiveTabIndexOutsideChildren => "active_index is outside children",
@@ -68,9 +64,7 @@ impl ValidationReason {
             Self::IconsAndLabelsWidthMustEqualMinimumColumnWidth => {
                 "IconsAndLabels width must equal min_column_width"
             }
-            Self::IconsOnlyWidthMustEqualRailWidth => {
-                "IconsOnly width must equal rail_width"
-            }
+            Self::IconsOnlyWidthMustEqualRailWidth => "IconsOnly width must equal rail_width",
             Self::LastExpandedWidthMustBeFiniteAndPositive => {
                 "last_expanded_width must be finite and positive"
             }
@@ -158,13 +152,22 @@ pub enum ValidationError {
     },
 
     #[error("invalid Split node {node:?}: {reason}")]
-    InvalidSplit { node: NodeId, reason: ValidationReason },
+    InvalidSplit {
+        node: NodeId,
+        reason: ValidationReason,
+    },
 
     #[error("invalid Tabs node {node:?}: {reason}")]
-    InvalidTabs { node: NodeId, reason: ValidationReason },
+    InvalidTabs {
+        node: NodeId,
+        reason: ValidationReason,
+    },
 
     #[error("invalid Column node {node:?}: {reason}")]
-    InvalidColumn { node: NodeId, reason: ValidationReason },
+    InvalidColumn {
+        node: NodeId,
+        reason: ValidationReason,
+    },
 
     #[error("invalid DockArea {area:?}: {reason}")]
     InvalidDockArea {

@@ -92,14 +92,8 @@ impl DragHandle {
             (Self::PanelTab, DragPayload::Panel { .. })
                 | (Self::FlyoutPanel, DragPayload::Panel { .. })
                 | (Self::GroupGrip, DragPayload::Group { .. })
-                | (
-                    Self::FloatingTitle,
-                    DragPayload::FloatingGroup { .. }
-                )
-                | (
-                    Self::FloatingCapture,
-                    DragPayload::FloatingGroup { .. }
-                )
+                | (Self::FloatingTitle, DragPayload::FloatingGroup { .. })
+                | (Self::FloatingCapture, DragPayload::FloatingGroup { .. })
         )
     }
 }

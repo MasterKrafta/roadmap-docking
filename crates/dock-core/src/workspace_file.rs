@@ -54,10 +54,7 @@ impl WorkspaceFile {
     ///
     /// The structural export runs first so malformed or excessively deep runtime
     /// trees are rejected before recursive model validation.
-    pub fn from_layout(
-        layout: &Layout,
-        metrics: &DockMetrics,
-    ) -> Result<Self, WorkspaceFileError> {
+    pub fn from_layout(layout: &Layout, metrics: &DockMetrics) -> Result<Self, WorkspaceFileError> {
         let file = Self::export_layout_unchecked(layout)?;
         layout
             .validate(metrics)
@@ -335,13 +332,9 @@ impl WorkspaceFile {
                 .collect::<Vec<_>>();
             ordered_floating.sort_by_key(|(_, group)| group.z_order);
             for (index, group) in ordered_floating.into_iter() {
-                group
-                    .bounds
-                    .validate_non_empty()
-                    .map_err(|reason| WorkspaceFileError::InvalidFloatingBounds {
-                        index,
-                        reason,
-                    })?;
+                group.bounds.validate_non_empty().map_err(|reason| {
+                    WorkspaceFileError::InvalidFloatingBounds { index, reason }
+                })?;
             }
         }
 
@@ -602,18 +595,11 @@ impl WorkspaceFile {
     }
 }
 
-fn validate_workspace_tree_limits(
-    layout: &WorkspaceLayout,
-) -> Result<(), WorkspaceFileError> {
+fn validate_workspace_tree_limits(layout: &WorkspaceLayout) -> Result<(), WorkspaceFileError> {
     let mut pending = Vec::<(&WorkspaceNode, usize)>::new();
     pending.extend(layout.left.iter().map(|node| (node, 1)));
     pending.extend(layout.right.iter().map(|node| (node, 1)));
-    pending.extend(
-        layout
-            .floating_groups
-            .iter()
-            .map(|group| (&group.root, 1)),
-    );
+    pending.extend(layout.floating_groups.iter().map(|group| (&group.root, 1)));
 
     let mut count = 0usize;
     while let Some((node, depth)) = pending.pop() {

@@ -161,7 +161,11 @@ mod drop_target_tests {
             Some(group)
         );
         assert_eq!(
-            DropTarget::GroupEdge { group, zone: DropZone::Top }.referenced_node_id(),
+            DropTarget::GroupEdge {
+                group,
+                zone: DropZone::Top
+            }
+            .referenced_node_id(),
             Some(group)
         );
         assert_eq!(
@@ -173,7 +177,11 @@ mod drop_target_tests {
             Some(column)
         );
         assert_eq!(
-            DropTarget::MainColumn { side: DockSide::Right, index: 0 }.referenced_node_id(),
+            DropTarget::MainColumn {
+                side: DockSide::Right,
+                index: 0
+            }
+            .referenced_node_id(),
             None
         );
         assert_eq!(DropTarget::FreeArea.referenced_node_id(), None);

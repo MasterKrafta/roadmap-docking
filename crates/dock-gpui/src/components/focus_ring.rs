@@ -10,9 +10,7 @@ pub(crate) enum GroupMoveDirection {
 }
 
 /// Recognizes the platform command modifier + Shift + Up/Down group-move shortcut.
-pub(crate) fn keyboard_group_move_direction(
-    keystroke: &Keystroke,
-) -> Option<GroupMoveDirection> {
+pub(crate) fn keyboard_group_move_direction(keystroke: &Keystroke) -> Option<GroupMoveDirection> {
     let modifiers = keystroke.modifiers;
     if !(modifiers.control || modifiers.platform)
         || !modifiers.shift
@@ -37,9 +35,7 @@ pub(crate) enum PanelMoveDirection {
 }
 
 /// Recognizes command/control + Alt + Shift + Up/Down for moving a panel between groups.
-pub(crate) fn keyboard_panel_move_direction(
-    keystroke: &Keystroke,
-) -> Option<PanelMoveDirection> {
+pub(crate) fn keyboard_panel_move_direction(keystroke: &Keystroke) -> Option<PanelMoveDirection> {
     let modifiers = keystroke.modifiers;
     if !(modifiers.control || modifiers.platform)
         || !modifiers.alt
@@ -127,9 +123,7 @@ pub(crate) enum TabReorderDirection {
 }
 
 /// Recognizes the platform command modifier + Shift + Left/Right tab-reorder shortcut.
-pub(crate) fn keyboard_tab_reorder_direction(
-    keystroke: &Keystroke,
-) -> Option<TabReorderDirection> {
+pub(crate) fn keyboard_tab_reorder_direction(keystroke: &Keystroke) -> Option<TabReorderDirection> {
     let modifiers = keystroke.modifiers;
     if !(modifiers.control || modifiers.platform)
         || !modifiers.shift
@@ -218,11 +212,11 @@ where
 mod tests {
     use super::{
         GroupMoveDirection, PanelColumnMoveDirection, PanelMoveDirection, TabReorderDirection,
-        is_keyboard_activation_key, keyboard_group_move_direction, keyboard_panel_column_move_direction,
-        keyboard_panel_move_direction, keyboard_panel_other_side_move,
-        keyboard_panel_rail_move, keyboard_panel_float_move,
-        keyboard_resize_axis_for_floating_edge,
-        keyboard_resize_delta, keyboard_tab_reorder_direction,
+        is_keyboard_activation_key, keyboard_group_move_direction,
+        keyboard_panel_column_move_direction, keyboard_panel_float_move,
+        keyboard_panel_move_direction, keyboard_panel_other_side_move, keyboard_panel_rail_move,
+        keyboard_resize_axis_for_floating_edge, keyboard_resize_delta,
+        keyboard_tab_reorder_direction,
     };
     use dock_core::{Axis, ResizeEdge};
     use gpui::{Keystroke, Modifiers};
@@ -460,8 +454,14 @@ mod tests {
             shift: true,
             ..Modifiers::default()
         };
-        assert!(keyboard_panel_other_side_move(&key("home", control_alt_shift)));
-        assert!(keyboard_panel_other_side_move(&key("Home", control_alt_shift)));
+        assert!(keyboard_panel_other_side_move(&key(
+            "home",
+            control_alt_shift
+        )));
+        assert!(keyboard_panel_other_side_move(&key(
+            "Home",
+            control_alt_shift
+        )));
 
         let platform_alt_shift = Modifiers {
             platform: true,
@@ -469,7 +469,10 @@ mod tests {
             shift: true,
             ..Modifiers::default()
         };
-        assert!(keyboard_panel_other_side_move(&key("HOME", platform_alt_shift)));
+        assert!(keyboard_panel_other_side_move(&key(
+            "HOME",
+            platform_alt_shift
+        )));
     }
 
     #[test]
@@ -644,13 +647,19 @@ mod tests {
     #[test]
     fn keyboard_reorder_requires_modifiers_and_ignores_other_keys() {
         let no_modifiers = Modifiers::default();
-        assert_eq!(keyboard_tab_reorder_direction(&key("left", no_modifiers)), None);
+        assert_eq!(
+            keyboard_tab_reorder_direction(&key("left", no_modifiers)),
+            None
+        );
 
         let shift_only = Modifiers {
             shift: true,
             ..Modifiers::default()
         };
-        assert_eq!(keyboard_tab_reorder_direction(&key("right", shift_only)), None);
+        assert_eq!(
+            keyboard_tab_reorder_direction(&key("right", shift_only)),
+            None
+        );
 
         let alt_modified = Modifiers {
             control: true,
@@ -658,7 +667,10 @@ mod tests {
             alt: true,
             ..Modifiers::default()
         };
-        assert_eq!(keyboard_tab_reorder_direction(&key("left", alt_modified)), None);
+        assert_eq!(
+            keyboard_tab_reorder_direction(&key("left", alt_modified)),
+            None
+        );
 
         let function_modified = Modifiers {
             control: true,
@@ -708,7 +720,13 @@ mod tests {
         );
         assert_eq!(
             keyboard_resize_axis_for_floating_edge(
-                &key("up", Modifiers { shift: true, ..Modifiers::default() }),
+                &key(
+                    "up",
+                    Modifiers {
+                        shift: true,
+                        ..Modifiers::default()
+                    }
+                ),
                 ResizeEdge::BottomRight,
             ),
             Some(Axis::Y)
@@ -725,29 +743,26 @@ mod tests {
     #[test]
     fn keyboard_resize_uses_axis_direction_and_shift_step() {
         assert_eq!(
-            keyboard_resize_delta(
-                &key("left", Modifiers::default()),
-                Axis::X
-            ),
+            keyboard_resize_delta(&key("left", Modifiers::default()), Axis::X),
             Some(-10.0)
         );
         assert_eq!(
-            keyboard_resize_delta(
-                &key("ArrowRight", Modifiers::default()),
-                Axis::X
-            ),
+            keyboard_resize_delta(&key("ArrowRight", Modifiers::default()), Axis::X),
             Some(10.0)
         );
         assert_eq!(
-            keyboard_resize_delta(
-                &key("up", Modifiers::default()),
-                Axis::Y
-            ),
+            keyboard_resize_delta(&key("up", Modifiers::default()), Axis::Y),
             Some(-10.0)
         );
         assert_eq!(
             keyboard_resize_delta(
-                &key("down", Modifiers { shift: true, ..Modifiers::default() }),
+                &key(
+                    "down",
+                    Modifiers {
+                        shift: true,
+                        ..Modifiers::default()
+                    }
+                ),
                 Axis::Y
             ),
             Some(50.0)
@@ -765,12 +780,27 @@ mod tests {
             None
         );
         for modifiers in [
-            Modifiers { control: true, ..Modifiers::default() },
-            Modifiers { platform: true, ..Modifiers::default() },
-            Modifiers { alt: true, ..Modifiers::default() },
-            Modifiers { function: true, ..Modifiers::default() },
+            Modifiers {
+                control: true,
+                ..Modifiers::default()
+            },
+            Modifiers {
+                platform: true,
+                ..Modifiers::default()
+            },
+            Modifiers {
+                alt: true,
+                ..Modifiers::default()
+            },
+            Modifiers {
+                function: true,
+                ..Modifiers::default()
+            },
         ] {
-            assert_eq!(keyboard_resize_delta(&key("right", modifiers), Axis::X), None);
+            assert_eq!(
+                keyboard_resize_delta(&key("right", modifiers), Axis::X),
+                None
+            );
         }
     }
 

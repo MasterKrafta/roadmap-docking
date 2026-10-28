@@ -7,13 +7,16 @@ use gpui::{
 };
 
 use crate::chrome_geometry::rail_control_row_height;
-use crate::geometry::translate_rect_to_local;
 use crate::components::ColumnModeButton;
 use crate::dock::cycle_column_mode;
+use crate::geometry::translate_rect_to_local;
 use crate::host::DockHost;
 use crate::surface::RenderData;
 
-use super::{rect_element, tree::{self, TreeArea}};
+use super::{
+    rect_element,
+    tree::{self, TreeArea},
+};
 
 /// A scroll viewport and the nodes inside its column, reused for drop-zone clipping.
 pub(crate) struct ScrollOverflow {
@@ -80,10 +83,8 @@ pub(crate) fn render(
                 continue;
             };
             let column_nodes = tree::nodes_for_root(layout, overflow.owner, frame);
-            let content_extent = translate_rect_to_local(
-                overflow.content_extent,
-                overflow.viewport.origin,
-            );
+            let content_extent =
+                translate_rect_to_local(overflow.content_extent, overflow.viewport.origin);
             let mut content = div()
                 .relative()
                 .w(px(overflow.content_extent.size.width))

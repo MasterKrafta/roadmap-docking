@@ -9,7 +9,6 @@ use ui::Theme;
 
 use crate::labels::UNKNOWN_PANEL_TITLE;
 
-
 pub mod content;
 
 /// Describes one supported panel kind without owning its runtime layout state.
@@ -114,7 +113,10 @@ mod tests {
 
     #[test]
     fn registry_contains_the_four_builtin_panels_in_menu_order() {
-        let keys = PANELS.iter().map(|definition| definition.key).collect::<Vec<_>>();
+        let keys = PANELS
+            .iter()
+            .map(|definition| definition.key)
+            .collect::<Vec<_>>();
         assert_eq!(keys, vec!["layers", "color", "properties", "history"]);
 
         for definition in PANELS {
@@ -133,17 +135,17 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(keys, vec!["layers", "color", "properties", "history"]);
-        assert!(values.iter().all(|(_, constraints)| constraints.validate().is_ok()));
+        assert!(
+            values
+                .iter()
+                .all(|(_, constraints)| constraints.validate().is_ok())
+        );
     }
 
     #[test]
     fn def_for_returns_none_for_an_unknown_panel_kind() {
-        let constraints = PanelConstraints::new(
-            Size::new(120.0, 80.0),
-            Size::new(280.0, 220.0),
-            None,
-            false,
-        );
+        let constraints =
+            PanelConstraints::new(Size::new(120.0, 80.0), Size::new(280.0, 220.0), None, false);
         let unknown = PanelInstance::new(
             PanelKey::new("unknown-panel").expect("test key should be valid"),
             constraints,
@@ -152,15 +154,10 @@ mod tests {
         assert!(def_for(&unknown).is_none());
     }
 
-
     #[test]
     fn registry_helpers_supply_title_icon_and_unknown_fallbacks() {
-        let constraints = PanelConstraints::new(
-            Size::new(120.0, 80.0),
-            Size::new(280.0, 220.0),
-            None,
-            false,
-        );
+        let constraints =
+            PanelConstraints::new(Size::new(120.0, 80.0), Size::new(280.0, 220.0), None, false);
         let layers = PanelInstance::new(
             PanelKey::new("layers").expect("built-in key should be valid"),
             constraints,
@@ -172,9 +169,11 @@ mod tests {
             PanelKey::new("unknown-panel").expect("test key should be valid"),
             constraints,
         );
-        assert_eq!(super::panel_title(&unknown), crate::labels::UNKNOWN_PANEL_TITLE);
+        assert_eq!(
+            super::panel_title(&unknown),
+            crate::labels::UNKNOWN_PANEL_TITLE
+        );
         assert_eq!(super::panel_icon(&unknown), "?");
         let _fallback = super::render_panel(&unknown);
     }
-
 }

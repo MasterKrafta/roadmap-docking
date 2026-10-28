@@ -53,12 +53,12 @@ pub fn create_initial_layout(
         if !seen.insert(key.as_str()) {
             return Err(InitialLayoutError::DuplicatePanelKey);
         }
-        constraints.validate().map_err(|source| {
-            InitialLayoutError::InvalidPanelConstraints {
+        constraints
+            .validate()
+            .map_err(|source| InitialLayoutError::InvalidPanelConstraints {
                 key: key.to_string(),
                 source,
-            }
-        })?;
+            })?;
     }
 
     for key in REQUIRED_PANEL_KEYS {
@@ -77,14 +77,14 @@ pub fn create_initial_layout(
             .map(|(key, constraints)| (key.clone(), *constraints))
     };
 
-    let (layers_key, layers_constraints) = descriptor("layers")
-        .ok_or(InitialLayoutError::MissingRequiredPanel { key: "layers" })?;
-    let (color_key, color_constraints) = descriptor("color")
-        .ok_or(InitialLayoutError::MissingRequiredPanel { key: "color" })?;
+    let (layers_key, layers_constraints) =
+        descriptor("layers").ok_or(InitialLayoutError::MissingRequiredPanel { key: "layers" })?;
+    let (color_key, color_constraints) =
+        descriptor("color").ok_or(InitialLayoutError::MissingRequiredPanel { key: "color" })?;
     let (properties_key, properties_constraints) = descriptor("properties")
         .ok_or(InitialLayoutError::MissingRequiredPanel { key: "properties" })?;
-    let (history_key, history_constraints) = descriptor("history")
-        .ok_or(InitialLayoutError::MissingRequiredPanel { key: "history" })?;
+    let (history_key, history_constraints) =
+        descriptor("history").ok_or(InitialLayoutError::MissingRequiredPanel { key: "history" })?;
 
     // Both built-in groups are tab stacks, so their minimum width is the widest
     // panel minimum in that group. The column must satisfy both groups and the
@@ -97,14 +97,13 @@ pub fn create_initial_layout(
             .max(properties_constraints.min_size.width)
             .max(history_constraints.min_size.width),
     );
-    let tab_group_maximum = |left: PanelConstraints, right: PanelConstraints| {
-        match (left.max_size, right.max_size) {
+    let tab_group_maximum =
+        |left: PanelConstraints, right: PanelConstraints| match (left.max_size, right.max_size) {
             (Some(left), Some(right)) => Some(left.width.min(right.width)),
             (Some(left), None) => Some(left.width),
             (None, Some(right)) => Some(right.width),
             (None, None) => None,
-        }
-    };
+        };
     let mut maximum_column_width: Option<f32> = None;
     for group_maximum in [
         tab_group_maximum(layers_constraints, color_constraints),
@@ -113,9 +112,8 @@ pub fn create_initial_layout(
     .into_iter()
     .flatten()
     {
-        maximum_column_width = Some(
-            maximum_column_width.map_or(group_maximum, |current| current.min(group_maximum)),
-        );
+        maximum_column_width =
+            Some(maximum_column_width.map_or(group_maximum, |current| current.min(group_maximum)));
     }
     if maximum_column_width.is_some_and(|maximum| minimum_column_width > maximum) {
         return Err(InitialLayoutError::ConflictingPanelWidthConstraints);
@@ -177,10 +175,10 @@ pub fn create_initial_layout(
 
 #[cfg(test)]
 mod tests {
-    use super::{create_initial_layout, InitialLayoutError};
+    use super::{InitialLayoutError, create_initial_layout};
     use crate::{
-        Column, ColumnMode, DockMetrics, DockSide, Node, PanelConstraints, PanelKey, Point, Profile,
-        Rect, Size,
+        Column, ColumnMode, DockMetrics, DockSide, Node, PanelConstraints, PanelKey, Point,
+        Profile, Rect, Size,
     };
 
     fn baseline_panel_constraints() -> PanelConstraints {
@@ -255,7 +253,8 @@ mod tests {
         let mut duplicate = descriptors();
         duplicate.push(duplicate[0].clone());
         assert_eq!(
-            create_initial_layout(Profile::Generic, &duplicate, DockMetrics::default()).unwrap_err(),
+            create_initial_layout(Profile::Generic, &duplicate, DockMetrics::default())
+                .unwrap_err(),
             InitialLayoutError::DuplicatePanelKey
         );
     }
@@ -308,12 +307,8 @@ mod tests {
         ));
 
         let mut invalid_constraints = descriptors();
-        invalid_constraints[0].1 = PanelConstraints::new(
-            Size::new(400.0, 80.0),
-            Size::new(280.0, 220.0),
-            None,
-            false,
-        );
+        invalid_constraints[0].1 =
+            PanelConstraints::new(Size::new(400.0, 80.0), Size::new(280.0, 220.0), None, false);
         assert!(matches!(
             create_initial_layout(
                 Profile::Generic,
@@ -402,5 +397,4 @@ mod tests {
             );
         }
     }
-
 }

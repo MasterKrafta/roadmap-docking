@@ -3,29 +3,28 @@ use std::{
     time::Duration,
 };
 
-use dock_core::{
-    Axis, DockCommand, DragHandle, DragPayload, FloatingGroupId, Point, Rect, Size,
-};
+use dock_core::{Axis, DockCommand, DragHandle, DragPayload, FloatingGroupId, Point, Rect, Size};
 use gpui::{
     Context, DispatchPhase, InteractiveElement, IntoElement, KeyDownEvent, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Render, StatefulInteractiveElement,
-    Styled, Subscription, Window, canvas, div, px, rgb,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Render,
+    StatefulInteractiveElement, Styled, Subscription, Window, canvas, div, px, rgb,
 };
 use ui::Theme;
 
+use crate::DockSurface;
 use crate::components::{
+    PopupMenu, PopupMenuItem,
     focus_ring::{keyboard_resize_axis_for_floating_edge, keyboard_resize_delta},
-    with_focus_ring, PopupMenu, PopupMenuItem,
+    with_focus_ring,
+};
+use crate::dock::{
+    DockController, DockInitializationError, Shortcut, WindowHost, floating_group_at_point,
+    resolve_shortcut,
 };
 use crate::host::DockHost;
 use crate::labels::{DOCK_GEOMETRY_ERROR_PREFIX, PANEL_MENU_TRIGGER_LABEL};
-use crate::dock::{
-    floating_group_at_point, resolve_shortcut, DockController, DockInitializationError, Shortcut,
-    WindowHost,
-};
 use crate::menus::{self, MenuItemModel, MenuState};
 use crate::requests::{DockMenuRequest, ResizeHandle};
-use crate::DockSurface;
 
 /// Host window for the dock surface. Commands and pointer gestures dispatch through
 /// the controller; popup state is transient and owned by the window.
@@ -134,9 +133,9 @@ impl MainWindow {
 
         let workspace_path = workspace_path.map(Path::to_path_buf);
         let saved_snapshot = if workspace_loaded {
-            workspace_path.as_deref().and_then(|_| {
-                crate::dock::serialize_layout(dock.layout(), dock.metrics()).ok()
-            })
+            workspace_path
+                .as_deref()
+                .and_then(|_| crate::dock::serialize_layout(dock.layout(), dock.metrics()).ok())
         } else {
             None
         };
@@ -158,10 +157,8 @@ impl MainWindow {
             return;
         }
 
-        let snapshot = match crate::dock::serialize_layout(
-            self.dock.layout(),
-            self.dock.metrics(),
-        ) {
+        let snapshot = match crate::dock::serialize_layout(self.dock.layout(), self.dock.metrics())
+        {
             Ok(snapshot) => snapshot,
             Err(error) => {
                 tracing::warn!(error = %error, "could not prepare workspace autosave");
@@ -361,11 +358,7 @@ impl MainWindow {
         cx.notify();
     }
 
-    pub(crate) fn close_floating_window(
-        &mut self,
-        group: FloatingGroupId,
-        cx: &mut Context<Self>,
-    ) {
+    pub(crate) fn close_floating_window(&mut self, group: FloatingGroupId, cx: &mut Context<Self>) {
         if let Err(error) = self.dock.close_floating(group) {
             tracing::warn!(group = ?group, error = %error, "could not close floating window");
         }
@@ -399,7 +392,10 @@ impl MainWindow {
             }
         };
 
-        if let Err(error) = self.dock.begin_resize(handle, dock_pointer(position), &frame) {
+        if let Err(error) = self
+            .dock
+            .begin_resize(handle, dock_pointer(position), &frame)
+        {
             tracing::warn!(error = ?error, "could not begin dock resize");
             return;
         }
@@ -427,7 +423,7 @@ impl MainWindow {
                     return;
                 };
                 axis
-            },
+            }
         };
         let Some(delta) = keyboard_resize_delta(&event.keystroke, axis) else {
             return;
@@ -657,19 +653,17 @@ impl MainWindow {
             this.handle_surface_mouse_up(event, window, cx);
         });
 
-        let outside_menu_down = cx.listener::<MouseDownEvent>(
-            move |this, event, _window, cx| {
-                if event.button != MouseButton::Left || !this.menu_state.is_open() {
-                    return;
-                }
-                if menu_bounds
-                    .is_some_and(|bounds| !menus::contains(bounds, dock_pointer(event.position)))
-                {
-                    this.menu_state = MenuState::Closed;
-                    cx.notify();
-                }
-            },
-        );
+        let outside_menu_down = cx.listener::<MouseDownEvent>(move |this, event, _window, cx| {
+            if event.button != MouseButton::Left || !this.menu_state.is_open() {
+                return;
+            }
+            if menu_bounds
+                .is_some_and(|bounds| !menus::contains(bounds, dock_pointer(event.position)))
+            {
+                this.menu_state = MenuState::Closed;
+                cx.notify();
+            }
+        });
 
         let menu_bounds_for_flyout = menu_bounds;
         let outside_flyout_down = cx.listener::<MouseDownEvent>(
@@ -714,70 +708,56 @@ impl MainWindow {
         canvas(
             |_, _, _| (),
             move |_, _, window, _cx| {
-                window.on_key_event(
-                    move |event: &KeyDownEvent, phase, window, cx| {
-                        if phase == DispatchPhase::Capture {
-                            key_down(event, window, cx);
-                        }
-                    },
-                );
-                window.on_key_event(
-                    move |event: &KeyDownEvent, phase, window, cx| {
-                        if phase == DispatchPhase::Bubble {
-                            global_shortcuts(event, window, cx);
-                        }
-                    },
-                );
-                window.on_mouse_event(
-                    move |event: &MouseMoveEvent, phase, window, cx| {
-                        if phase == DispatchPhase::Capture
-                            && !surface_contains_window_point(
-                                event.position,
-                                width,
-                                surface_top,
-                                content_height,
-                            )
-                        {
-                            outside_move(event, window, cx);
-                        }
-                    },
-                );
-                window.on_mouse_event(
-                    move |event: &MouseUpEvent, phase, window, cx| {
-                        if phase == DispatchPhase::Capture
-                            && event.button == MouseButton::Left
-                            && !surface_contains_window_point(
-                                event.position,
-                                width,
-                                surface_top,
-                                content_height,
-                            )
-                        {
-                            outside_up(event, window, cx);
-                        }
-                    },
-                );
-                window.on_mouse_event(
-                    move |event: &MouseDownEvent, phase, window, cx| {
-                        if phase == DispatchPhase::Capture && event.button == MouseButton::Left {
-                            outside_menu_down(event, window, cx);
-                        }
-                    },
-                );
-                window.on_mouse_event(
-                    move |event: &MouseDownEvent, phase, window, cx| {
-                        if phase == DispatchPhase::Capture && event.button == MouseButton::Left {
-                            outside_flyout_down(event, window, cx);
-                        }
-                    },
-                );
-                window.on_mouse_event(
-                    move |event: &MouseDownEvent, phase, window, cx| {
-                        if phase == DispatchPhase::Capture {
-                            raise_floating(event, window, cx);
-                        }
-                    },
-                );
+                window.on_key_event(move |event: &KeyDownEvent, phase, window, cx| {
+                    if phase == DispatchPhase::Capture {
+                        key_down(event, window, cx);
+                    }
+                });
+                window.on_key_event(move |event: &KeyDownEvent, phase, window, cx| {
+                    if phase == DispatchPhase::Bubble {
+                        global_shortcuts(event, window, cx);
+                    }
+                });
+                window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
+                    if phase == DispatchPhase::Capture
+                        && !surface_contains_window_point(
+                            event.position,
+                            width,
+                            surface_top,
+                            content_height,
+                        )
+                    {
+                        outside_move(event, window, cx);
+                    }
+                });
+                window.on_mouse_event(move |event: &MouseUpEvent, phase, window, cx| {
+                    if phase == DispatchPhase::Capture
+                        && event.button == MouseButton::Left
+                        && !surface_contains_window_point(
+                            event.position,
+                            width,
+                            surface_top,
+                            content_height,
+                        )
+                    {
+                        outside_up(event, window, cx);
+                    }
+                });
+                window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
+                    if phase == DispatchPhase::Capture && event.button == MouseButton::Left {
+                        outside_menu_down(event, window, cx);
+                    }
+                });
+                window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
+                    if phase == DispatchPhase::Capture && event.button == MouseButton::Left {
+                        outside_flyout_down(event, window, cx);
+                    }
+                });
+                window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
+                    if phase == DispatchPhase::Capture {
+                        raise_floating(event, window, cx);
+                    }
+                });
             },
         )
         .absolute()
@@ -790,16 +770,14 @@ impl MainWindow {
 impl Render for MainWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if self.activation_subscription.is_none() {
-            self.activation_subscription = Some(cx.observe_window_activation(
-                window,
-                |this, window, cx| {
+            self.activation_subscription =
+                Some(cx.observe_window_activation(window, |this, window, cx| {
                     if !window.is_window_active()
                         && (this.dock.cancel_resize() || this.dock.cancel_drag())
                     {
                         cx.notify();
                     }
-                },
-            ));
+                }));
         }
 
         let window_size = window.viewport_size();
@@ -833,16 +811,23 @@ impl Render for MainWindow {
             &menu_state_snapshot,
         );
         let menu_viewport = Rect::new(Point::ZERO, Size::new(width, height));
-        let menu_bounds = menu_state_snapshot
-            .anchor()
-            .map(|anchor| menus::popup_bounds(anchor, menu_viewport, menu_items.len(), &self.theme));
+        let menu_bounds = menu_state_snapshot.anchor().map(|anchor| {
+            menus::popup_bounds(anchor, menu_viewport, menu_items.len(), &self.theme)
+        });
 
         let flyout_hit_bounds = frame.rects().flyout.map(|flyout| {
-            let edge_padding =
-                (self.theme.metrics.splitter_hit_zone.min(flyout.rect.size.width)) / 2.0;
+            let edge_padding = (self
+                .theme
+                .metrics
+                .splitter_hit_zone
+                .min(flyout.rect.size.width))
+                / 2.0;
             Rect::new(
                 Point::new(flyout.rect.origin.x - edge_padding, flyout.rect.origin.y),
-                Size::new(flyout.rect.size.width + edge_padding * 2.0, flyout.rect.size.height),
+                Size::new(
+                    flyout.rect.size.width + edge_padding * 2.0,
+                    flyout.rect.size.height,
+                ),
             )
         });
         // Raise floating windows during capture, but do not let clicks on a menu
@@ -899,12 +884,13 @@ impl Render for MainWindow {
                 .enumerate()
                 .map(|(index, item)| {
                     let on_select = if item.enabled {
-                        Some(Box::new(cx.listener(
-                            move |this, _event, window, cx| {
-                                this.activate_menu_item(index, window, cx);
-                                cx.notify();
-                            },
-                        )) as Box<dyn Fn(&gpui::ClickEvent, &mut Window, &mut gpui::App) + 'static>)
+                        Some(Box::new(cx.listener(move |this, _event, window, cx| {
+                            this.activate_menu_item(index, window, cx);
+                            cx.notify();
+                        }))
+                            as Box<
+                                dyn Fn(&gpui::ClickEvent, &mut Window, &mut gpui::App) + 'static,
+                            >)
                     } else {
                         None
                     };
@@ -988,9 +974,7 @@ mod tests {
 
     #[test]
     fn surface_contains_top_left_but_excludes_right_and_bottom_edges() {
-        let contains = |x, y| {
-            surface_contains_window_point(point(px(x), px(y)), 200.0, 24.0, 76.0)
-        };
+        let contains = |x, y| surface_contains_window_point(point(px(x), px(y)), 200.0, 24.0, 76.0);
 
         assert!(contains(0.0, 24.0));
         assert!(contains(199.0, 99.0));
@@ -1018,8 +1002,7 @@ mod tests {
 
     #[test]
     fn successfully_saved_snapshot_does_not_schedule_again() {
-        let mut state =
-            WorkspaceSaveState::with_saved_snapshot(Some("saved layout".to_owned()));
+        let mut state = WorkspaceSaveState::with_saved_snapshot(Some("saved layout".to_owned()));
 
         assert!(state.schedule("saved layout".to_owned()).is_none());
     }
@@ -1046,8 +1029,7 @@ mod tests {
 
         window.save_workspace_now();
 
-        let actual =
-            fs::read_to_string(&path).expect("first-run workspace should be created");
+        let actual = fs::read_to_string(&path).expect("first-run workspace should be created");
         fs::remove_file(&path).expect("test workspace should be removable");
         assert!(
             actual.contains("\"version\": 2"),

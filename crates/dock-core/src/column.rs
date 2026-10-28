@@ -129,4 +129,3 @@ mod column_mode_tests {
         }
     }
 }
-

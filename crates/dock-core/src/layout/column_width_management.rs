@@ -1,7 +1,7 @@
 //! Column width constraints, sizing helpers, and resize command handling.
 
-use super::*;
 use super::helpers::*;
+use super::*;
 
 pub(super) struct AdjacentColumnResize<'a> {
     pub(super) left_id: NodeId,
@@ -75,15 +75,16 @@ impl Layout {
             .get(node_id)
             .ok_or(CommandError::MissingNode { node: node_id })?;
         let width = match node {
-            Node::Panel(panel) => self
-                .panel_instances
-                .get(panel.panel_id)
-                .ok_or(CommandError::MissingPanel {
-                    panel: panel.panel_id,
-                })?
-                .constraints
-                .min_size
-                .width,
+            Node::Panel(panel) => {
+                self.panel_instances
+                    .get(panel.panel_id)
+                    .ok_or(CommandError::MissingPanel {
+                        panel: panel.panel_id,
+                    })?
+                    .constraints
+                    .min_size
+                    .width
+            }
             Node::Tabs(tabs) => {
                 let mut width = 0.0_f32;
                 for child in &tabs.children {
@@ -101,8 +102,8 @@ impl Layout {
                     }
                 }
                 if split.axis == Axis::X {
-                    width += metrics.splitter_thickness
-                        * split.children.len().saturating_sub(1) as f32;
+                    width +=
+                        metrics.splitter_thickness * split.children.len().saturating_sub(1) as f32;
                 }
                 width
             }
@@ -227,7 +228,9 @@ impl Layout {
             let left_min = self.minimum_column_width(left_id, metrics)?;
             let right_min = self.minimum_column_width(right_id, metrics)?;
             let left_max = self.maximum_column_width(left_id)?.unwrap_or(f32::INFINITY);
-            let right_max = self.maximum_column_width(right_id)?.unwrap_or(f32::INFINITY);
+            let right_max = self
+                .maximum_column_width(right_id)?
+                .unwrap_or(f32::INFINITY);
             let lower_delta = (left_min - left.width).max(right.width - right_max);
             let upper_delta = (right.width - right_min).min(left_max - left.width);
             if lower_delta > upper_delta {
@@ -370,12 +373,14 @@ impl Layout {
                     reason: "split-ratio target must be a Column node",
                 });
             }
-            None => return Err(CommandError::MissingNode { node: target_column }),
+            None => {
+                return Err(CommandError::MissingNode {
+                    node: target_column,
+                });
+            }
         };
         let minimum = self.minimum_column_width(new_column, metrics)?;
-        let maximum = self
-            .maximum_column_width(new_column)?
-            .unwrap_or(f32::MAX);
+        let maximum = self.maximum_column_width(new_column)?.unwrap_or(f32::MAX);
         if !target_width.is_finite()
             || target_width <= 0.0
             || !minimum.is_finite()
@@ -449,10 +454,7 @@ impl Layout {
         Ok(())
     }
 
-    fn main_column_widths_for_reset(
-        &self,
-        columns: &[NodeId],
-    ) -> Result<Vec<f32>, CommandError> {
+    fn main_column_widths_for_reset(&self, columns: &[NodeId]) -> Result<Vec<f32>, CommandError> {
         columns
             .iter()
             .map(|id| match self.nodes.get(*id) {
@@ -594,16 +596,17 @@ impl Layout {
                 side,
                 boundary_index,
                 delta,
-            } => {
-                self.apply_resize_column_boundary_command(side, boundary_index, delta, metrics)
-            }
+            } => self.apply_resize_column_boundary_command(side, boundary_index, delta, metrics),
             DockCommand::ResizeSplitColumnBoundary {
                 split,
                 boundary_index,
                 delta,
-            } => {
-                self.apply_resize_split_column_boundary_command(split, boundary_index, delta, metrics)
-            }
+            } => self.apply_resize_split_column_boundary_command(
+                split,
+                boundary_index,
+                delta,
+                metrics,
+            ),
             DockCommand::ResetMainColumnRatios { side } => {
                 self.apply_reset_main_column_ratios_command(side, metrics)
             }
@@ -635,15 +638,9 @@ impl Layout {
             None => return Err(CommandError::MissingNode { node: *column }),
         };
         let old_width = current.width;
-        let (min_width, max_width) =
-            self.column_resize_limits(*column, &current, metrics)?;
-        let actual_width = Self::effective_column_width(
-            *width,
-            current.mode,
-            min_width,
-            max_width,
-            metrics,
-        )?;
+        let (min_width, max_width) = self.column_resize_limits(*column, &current, metrics)?;
+        let actual_width =
+            Self::effective_column_width(*width, current.mode, min_width, max_width, metrics)?;
         let actual_delta = actual_width - old_width;
         if actual_delta != 0.0 {
             if let Some(Node::Column(column)) = self.nodes.get_mut(*column) {
@@ -702,17 +699,15 @@ impl Layout {
                 });
             }
         };
-        let actual_delta = self.resize_adjacent_columns(
-            AdjacentColumnResize {
-                left_id,
-                right_id,
-                left: &left,
-                right: &right,
-                requested_delta: *delta,
-                metrics,
-                width_error_reason: "resized column width is not finite and positive",
-            },
-        )?;
+        let actual_delta = self.resize_adjacent_columns(AdjacentColumnResize {
+            left_id,
+            right_id,
+            left: &left,
+            right: &right,
+            requested_delta: *delta,
+            metrics,
+            width_error_reason: "resized column width is not finite and positive",
+        })?;
         if actual_delta != 0.0 {
             self.sync_main_column_ratios(left_id)?;
         }
@@ -774,28 +769,30 @@ impl Layout {
         let right_id = current_split.children[*boundary_index + 1];
         let left = match self.nodes.get(left_id) {
             Some(Node::Column(column)) => column.clone(),
-            _ => return Err(CommandError::InvalidTarget {
-                reason: "split column boundary references a non-Column node",
-            }),
+            _ => {
+                return Err(CommandError::InvalidTarget {
+                    reason: "split column boundary references a non-Column node",
+                });
+            }
         };
         let right = match self.nodes.get(right_id) {
             Some(Node::Column(column)) => column.clone(),
-            _ => return Err(CommandError::InvalidTarget {
-                reason: "split column boundary references a non-Column node",
-            }),
+            _ => {
+                return Err(CommandError::InvalidTarget {
+                    reason: "split column boundary references a non-Column node",
+                });
+            }
         };
 
-        let actual_delta = self.resize_adjacent_columns(
-            AdjacentColumnResize {
-                left_id,
-                right_id,
-                left: &left,
-                right: &right,
-                requested_delta: *delta,
-                metrics,
-                width_error_reason: "resized split column width is not finite and positive",
-            },
-        )?;
+        let actual_delta = self.resize_adjacent_columns(AdjacentColumnResize {
+            left_id,
+            right_id,
+            left: &left,
+            right: &right,
+            requested_delta: *delta,
+            metrics,
+            width_error_reason: "resized split column width is not finite and positive",
+        })?;
         if actual_delta != 0.0 {
             // Split(X) of Columns is laid out from each Column's requested
             // width. Keep ratios in sync so the tree remains meaningful if
@@ -826,13 +823,11 @@ impl Layout {
 
         Ok(CommandApplication {
             actual_value: Some(CommandValue::ColumnBoundaryDelta(actual_delta)),
-            inverse: (actual_delta != 0.0).then_some(
-                DockCommand::ResizeSplitColumnBoundary {
-                    split: *split,
-                    boundary_index: *boundary_index,
-                    delta: -actual_delta,
-                },
-            ),
+            inverse: (actual_delta != 0.0).then_some(DockCommand::ResizeSplitColumnBoundary {
+                split: *split,
+                boundary_index: *boundary_index,
+                delta: -actual_delta,
+            }),
             persistent: true,
         })
     }
@@ -849,18 +844,23 @@ impl Layout {
         match root {
             Some(Node::Column(_)) => Ok(CommandApplication::persistent()),
             Some(Node::Split(split)) if split.axis == Axis::X => {
-                if split.children.iter().any(|child| {
-                    !matches!(self.nodes.get(*child), Some(Node::Column(_)))
-                }) {
+                if split
+                    .children
+                    .iter()
+                    .any(|child| !matches!(self.nodes.get(*child), Some(Node::Column(_))))
+                {
                     return Err(CommandError::InvalidTarget {
                         reason: "main horizontal split contains a non-Column child",
                     });
                 }
-                let first_column = split.children.first().copied().ok_or(
-                    CommandError::InvalidTarget {
-                        reason: "main horizontal split has no columns",
-                    },
-                )?;
+                let first_column =
+                    split
+                        .children
+                        .first()
+                        .copied()
+                        .ok_or(CommandError::InvalidTarget {
+                            reason: "main horizontal split has no columns",
+                        })?;
                 self.reset_main_column_widths(*side, metrics)?;
                 self.sync_main_column_ratios(first_column)?;
                 Ok(CommandApplication::persistent())

@@ -20,8 +20,8 @@ mod dock_area_kind;
 mod dock_command;
 mod dock_metrics;
 mod dock_side;
-mod drag_types;
 mod drag_session;
+mod drag_types;
 mod drop_types;
 mod floating_group;
 mod floating_group_id;
@@ -56,9 +56,9 @@ mod undo_redo_history;
 mod validation_error;
 mod vertical_overflow;
 #[cfg(feature = "serde")]
-mod workspace_types;
-#[cfg(feature = "serde")]
 mod workspace_file;
+#[cfg(feature = "serde")]
+mod workspace_types;
 
 pub use allowed_area::AllowedArea;
 pub use axis::Axis;
@@ -68,6 +68,7 @@ pub use column::{Column, ColumnDisplayItem, ColumnMode, ColumnRect};
 pub use command_error::CommandError;
 pub use command_outcome::CommandOutcome;
 pub use command_value::CommandValue;
+pub use compute_drop_zones::DropZoneResolver;
 pub use compute_rects_error::ComputeRectsError;
 pub use dock_area::DockArea;
 pub use dock_area_id::DockAreaId;
@@ -75,13 +76,12 @@ pub use dock_area_kind::DockAreaKind;
 pub use dock_command::DockCommand;
 pub use dock_metrics::DockMetrics;
 pub use dock_side::DockSide;
+pub use drag_session::DragSession;
 pub use drag_types::{
     DragCancelReason, DragDropAction, DragDropRequest, DragHandle, DragPayload, DragPreview,
     DragSessionError, DragState,
 };
-pub use drag_session::DragSession;
 pub use drop_types::{DropSource, DropTarget, DropZone, DropZoneRect};
-pub use compute_drop_zones::DropZoneResolver;
 pub use floating_group::FloatingGroup;
 pub use floating_group_id::FloatingGroupId;
 pub use floating_group_rect::FloatingGroupRect;
@@ -93,7 +93,7 @@ pub use group_rect::GroupRect;
 pub use hit_test::HitResult;
 pub use last_dock_location::LastDockLocation;
 pub use layout::Layout;
-pub use layout_factory::{create_initial_layout, InitialLayoutError};
+pub use layout_factory::{InitialLayoutError, create_initial_layout};
 pub use layout_rects::LayoutRects;
 pub use node::Node;
 pub use node_id::NodeId;

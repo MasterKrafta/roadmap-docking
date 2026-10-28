@@ -1,11 +1,13 @@
 use dock_core::{ColumnMode, Rect};
 use gpui::{
-    App, InteractiveElement, IntoElement, ParentElement, RenderOnce,
-    StatefulInteractiveElement, Styled, Window, div, px, rgb,
+    App, InteractiveElement, IntoElement, ParentElement, RenderOnce, StatefulInteractiveElement,
+    Styled, Window, div, px, rgb,
 };
 use ui::Theme;
 
-use crate::components::{focus_ring::is_keyboard_activation_key, with_focus_ring, ClickHandler, KeyDownHandler};
+use crate::components::{
+    ClickHandler, KeyDownHandler, focus_ring::is_keyboard_activation_key, with_focus_ring,
+};
 
 /// A panel entry in a flattened dock rail.
 #[derive(IntoElement)]

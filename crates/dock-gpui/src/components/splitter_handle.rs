@@ -1,11 +1,11 @@
 use dock_core::{Axis, Rect};
 use gpui::{
-    App, InteractiveElement, IntoElement, MouseButton, MouseDownEvent, RenderOnce,
-    Styled, Window, div, px, rgb,
+    App, InteractiveElement, IntoElement, MouseButton, MouseDownEvent, RenderOnce, Styled, Window,
+    div, px, rgb,
 };
 use ui::Theme;
 
-use crate::components::{with_focus_ring, KeyDownHandler};
+use crate::components::{KeyDownHandler, with_focus_ring};
 
 pub type ResizeStartHandler = Box<dyn Fn(&MouseDownEvent, &mut Window, &mut App) + 'static>;
 
@@ -38,13 +38,12 @@ impl RenderOnce for SplitterHandle {
             .bg(rgb(self.theme.colors.splitter));
 
         match (self.on_resize_start, self.on_resize_key) {
-            (Some(on_resize_start), Some(on_resize_key)) => with_focus_ring(
-                element.id(self.id),
-                &self.theme,
-            )
-            .on_key_down(on_resize_key)
-            .on_mouse_down(MouseButton::Left, on_resize_start)
-            .into_any_element(),
+            (Some(on_resize_start), Some(on_resize_key)) => {
+                with_focus_ring(element.id(self.id), &self.theme)
+                    .on_key_down(on_resize_key)
+                    .on_mouse_down(MouseButton::Left, on_resize_start)
+                    .into_any_element()
+            }
             (Some(on_resize_start), None) => element
                 .id(self.id)
                 .on_mouse_down(MouseButton::Left, on_resize_start)

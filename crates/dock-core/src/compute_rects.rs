@@ -18,7 +18,6 @@ use overlay_geometry::{append_floating_geometry, compute_flyout_rect, push_resiz
 mod node_layout;
 use node_layout::layout_node;
 
-
 #[path = "compute_rects/split_layout.rs"]
 mod split_layout;
 use split_layout::{layout_floating_root, layout_split, push_splitter};
@@ -35,8 +34,8 @@ mod visit_probe {
     use std::{
         collections::HashMap,
         sync::{
-            atomic::{AtomicBool, Ordering},
             Mutex, OnceLock,
+            atomic::{AtomicBool, Ordering},
         },
     };
 
@@ -153,7 +152,9 @@ impl Layout {
 
         let available_canvas = viewport.size.width - left_width - right_width;
         if !available_canvas.is_finite() {
-            return Err(ComputeRectsError::Geometry(GeometryError::ArithmeticOverflow));
+            return Err(ComputeRectsError::Geometry(
+                GeometryError::ArithmeticOverflow,
+            ));
         }
         if available_canvas < metrics.min_canvas_width {
             return Err(ComputeRectsError::InsufficientCanvasWidth {
@@ -221,9 +222,11 @@ impl Layout {
                         metrics,
                         &mut minimum_sizes,
                     )?;
-                    floating_output
-                        .floating_groups
-                        .push(FloatingGroupRect::new(id, bounds, floating.z_order));
+                    floating_output.floating_groups.push(FloatingGroupRect::new(
+                        id,
+                        bounds,
+                        floating.z_order,
+                    ));
                     push_resize_edges(id, bounds, metrics, &mut floating_output)?;
                     layout_floating_root(
                         self,

@@ -1,11 +1,10 @@
 //! Group command dispatch, transfer, merging, and edge insertion.
 
-use super::*;
 use super::helpers::split_sibling_ratios;
+use super::*;
 use crate::AllowedArea;
 
 impl Layout {
-
     pub(super) fn apply_group_command(
         &mut self,
         command: &DockCommand,
@@ -298,20 +297,10 @@ impl Layout {
                     metrics,
                 )
             } else {
-                self.insert_group_edge_in_floating_stack(
-                    new_group,
-                    target_group,
-                    zone,
-                    split_ratio,
-                )
+                self.insert_group_edge_in_floating_stack(new_group, target_group, zone, split_ratio)
             }
         } else {
-            self.insert_group_edge_generic(
-                new_group,
-                target_group,
-                zone,
-                split_ratio,
-            )
+            self.insert_group_edge_generic(new_group, target_group, zone, split_ratio)
         }
     }
 
@@ -370,11 +359,11 @@ impl Layout {
         zone: DropZone,
         split_ratio: f32,
     ) -> Result<(), CommandError> {
-        let floating_root = self
-            .find_floating_root_containing(target_group)
-            .ok_or(CommandError::InvalidTarget {
+        let floating_root = self.find_floating_root_containing(target_group).ok_or(
+            CommandError::InvalidTarget {
                 reason: "target group is not in a Photoshop column or floating stack",
-            })?;
+            },
+        )?;
         match zone {
             DropZone::Left | DropZone::Right => Err(CommandError::InvalidTarget {
                 reason: "horizontal splits are not supported inside a floating stack",
@@ -400,15 +389,14 @@ impl Layout {
                     self.set_area_root(target_group, split)?;
                     Ok(())
                 } else {
-                    let parent = self.find_parent(target_group).ok_or(
-                        CommandError::InvalidTarget {
-                            reason: "floating group parent was not found",
-                        },
-                    )?;
+                    let parent =
+                        self.find_parent(target_group)
+                            .ok_or(CommandError::InvalidTarget {
+                                reason: "floating group parent was not found",
+                            })?;
                     match self.nodes.get(parent) {
                         Some(Node::Split(split))
-                            if split.axis == Axis::Y
-                                && split.children.contains(&target_group) =>
+                            if split.axis == Axis::Y && split.children.contains(&target_group) =>
                         {
                             let target_index = split
                                 .children
@@ -488,11 +476,11 @@ impl Layout {
                 )
             }
             DropZone::Left | DropZone::Right => {
-                let (side, column_index) = self.main_column_position(column_id).ok_or(
-                    CommandError::InvalidTarget {
-                        reason: "horizontal group splits require a column in a main dock",
-                    },
-                )?;
+                let (side, column_index) =
+                    self.main_column_position(column_id)
+                        .ok_or(CommandError::InvalidTarget {
+                            reason: "horizontal group splits require a column in a main dock",
+                        })?;
                 let insert_at = if zone == DropZone::Left {
                     column_index
                 } else {
@@ -534,9 +522,11 @@ impl Layout {
         metrics: &DockMetrics,
     ) -> Result<CommandApplication, CommandError> {
         match command {
-            DockCommand::MoveGroup { group, column, index } => {
-                self.apply_move_group_command(group, column, index)
-            }
+            DockCommand::MoveGroup {
+                group,
+                column,
+                index,
+            } => self.apply_move_group_command(group, column, index),
             DockCommand::MoveGroupToMainColumn { group, side, index } => {
                 self.apply_move_group_to_main_column_command(group, side, index, metrics)
             }
@@ -581,12 +571,8 @@ impl Layout {
         self.validate_panel_ids_allowed_for_area(&moving_panels, target_area)?;
         let source_parent = self.find_parent(*group);
         if source_parent == Some(*column)
-            && let Some(application) = self.try_reorder_group_within_column(
-                *group,
-                *column,
-                *index,
-                &target_groups,
-            )?
+            && let Some(application) =
+                self.try_reorder_group_within_column(*group, *column, *index, &target_groups)?
         {
             return Ok(application);
         }
@@ -598,12 +584,11 @@ impl Layout {
                 .map(|index| (parent, index)),
             _ => None,
         });
-        let inverse =
-            source_column.map(|(source_column, source_index)| DockCommand::MoveGroup {
-                group: *group,
-                column: source_column,
-                index: source_index,
-            });
+        let inverse = source_column.map(|(source_column, source_index)| DockCommand::MoveGroup {
+            group: *group,
+            column: source_column,
+            index: source_index,
+        });
         self.move_group_to_existing_column(*group, *column, *index)?;
         Ok(CommandApplication {
             actual_value: None,
@@ -743,13 +728,11 @@ impl Layout {
                     index: group_index,
                 })
             }
-            (_, _, Some((source_side, source_index))) => {
-                Some(DockCommand::MoveGroupToMainColumn {
-                    group,
-                    side: source_side,
-                    index: source_index,
-                })
-            }
+            (_, _, Some((source_side, source_index))) => Some(DockCommand::MoveGroupToMainColumn {
+                group,
+                side: source_side,
+                index: source_index,
+            }),
             _ => None,
         }
     }
@@ -824,11 +807,12 @@ impl Layout {
             return Ok(Some(CommandApplication::persistent()));
         }
 
-        let area_root = self.main_area(side).map(|area| area.root).ok_or(
-            CommandError::InvalidTarget {
-                reason: "destination main dock area disappeared",
-            },
-        )?;
+        let area_root =
+            self.main_area(side)
+                .map(|area| area.root)
+                .ok_or(CommandError::InvalidTarget {
+                    reason: "destination main dock area disappeared",
+                })?;
         let Some(Node::Split(mut split)) = self.nodes.get(area_root).cloned() else {
             // A single-column dock has only its current slot; a valid out-of-range
             // insertion was rejected before attempting this reorder.

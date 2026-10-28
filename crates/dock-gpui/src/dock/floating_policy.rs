@@ -302,14 +302,8 @@ mod tests {
             ..metrics
         };
         assert!(
-            initial_float_bounds(
-                source,
-                Point::ZERO,
-                Point::ZERO,
-                viewport,
-                &invalid_metrics,
-            )
-            .is_err()
+            initial_float_bounds(source, Point::ZERO, Point::ZERO, viewport, &invalid_metrics,)
+                .is_err()
         );
     }
 
@@ -381,6 +375,4 @@ mod tests {
             None
         );
     }
-
 }
-

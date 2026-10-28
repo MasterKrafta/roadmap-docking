@@ -6,13 +6,13 @@ use gpui::{
 use ui::Theme;
 
 use crate::components::{
+    ClickHandler, KeyDownHandler, MouseDownHandler,
     focus_ring::{
         is_keyboard_activation_key, keyboard_panel_column_move_direction,
-        keyboard_panel_move_direction, keyboard_panel_other_side_move,
-        keyboard_panel_rail_move, keyboard_panel_float_move,
-        keyboard_tab_reorder_direction,
+        keyboard_panel_float_move, keyboard_panel_move_direction, keyboard_panel_other_side_move,
+        keyboard_panel_rail_move, keyboard_tab_reorder_direction,
     },
-    with_focus_ring, ClickHandler, KeyDownHandler, MouseDownHandler,
+    with_focus_ring,
 };
 
 /// A single tab header that delegates all dock actions to caller-provided handlers.

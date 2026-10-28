@@ -2,12 +2,12 @@
 
 use super::*;
 use crate::{
-    AllowedArea, DragDropAction, DragDropRequest, DragHandle, DragPayload, FloatingGroupId,
-    NodeId, PanelId,
+    AllowedArea, DragDropAction, DragDropRequest, DragHandle, DragPayload, FloatingGroupId, NodeId,
+    PanelId,
 };
 
 impl Layout {
-/// Resolves a completed drag request to either one command or an explicit
+    /// Resolves a completed drag request to either one command or an explicit
     /// no-op. It only inspects pure model state; no GPUI pointer/window types
     /// participate and the Layout is never mutated.
     pub fn resolve_drag_drop(
@@ -119,7 +119,7 @@ impl Layout {
         }))
     }
 
-pub(super) fn resolve_panel_drag(
+    pub(super) fn resolve_panel_drag(
         &self,
         request: &DragDropRequest,
         panel: PanelId,
@@ -263,8 +263,13 @@ pub(super) fn resolve_panel_drag(
         }
         // Dropping a panel on its own group's edge leaves the layout unchanged.
         // A flyout release still uses the flyout command so the transient flyout closes.
-        if let (Some((source_group, _)), DropTarget::GroupEdge { group: target_group, .. }) =
-            (self.tab_parent_index(panel_node), target)
+        if let (
+            Some((source_group, _)),
+            DropTarget::GroupEdge {
+                group: target_group,
+                ..
+            },
+        ) = (self.tab_parent_index(panel_node), target)
             && source_group == target_group
         {
             return Some(if request.handle == DragHandle::FlyoutPanel {
@@ -277,7 +282,7 @@ pub(super) fn resolve_panel_drag(
         None
     }
 
-pub(super) fn resolve_group_grip_drag(
+    pub(super) fn resolve_group_grip_drag(
         &self,
         request: &DragDropRequest,
         group: NodeId,
@@ -315,10 +320,7 @@ pub(super) fn resolve_group_grip_drag(
             }));
         }
         self.validate_drop_target(target, metrics)?;
-        self.validate_panel_ids_allowed_for_target(
-            &self.panel_ids_in_subtree(group),
-            target,
-        )?;
+        self.validate_panel_ids_allowed_for_target(&self.panel_ids_in_subtree(group), target)?;
 
         match target {
             DropTarget::Tabs { .. } => Err(CommandError::InvalidTarget {
@@ -581,9 +583,7 @@ impl Layout {
             && self.main_column_position(column_id).is_some()
         {
             return match self.nodes.get(column_id) {
-                Some(Node::Column(column)) if column.mode.is_rail() => {
-                    Ok(AllowedArea::ICON_RAIL)
-                }
+                Some(Node::Column(column)) if column.mode.is_rail() => Ok(AllowedArea::ICON_RAIL),
                 Some(Node::Column(_)) => Ok(AllowedArea::MAIN_DOCK),
                 _ => Err(CommandError::InvalidTarget {
                     reason: "drop group owner is not a Column",
