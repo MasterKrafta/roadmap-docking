@@ -323,6 +323,7 @@ impl DockController {
             // FloatingTitle moves the existing window and must not resolve dock targets.
             // FloatingCapture instead resolves docking zones for the full floating root.
             let mut capture_root_nodes = None;
+            let mut capture_main_column_only = false;
             let resolver = match (payload, handle) {
                 (DragPayload::Panel { panel }, DragHandle::PanelTab | DragHandle::FlyoutPanel) => {
                     Some(if external_window_drag {
@@ -355,8 +356,10 @@ impl DockController {
                     })
                 }
                 (DragPayload::FloatingGroup { group }, DragHandle::FloatingCapture) => {
-                    let (source, nodes) = floating_capture_source(&self.workspace.layout, group)?;
+                    let (source, nodes, main_column_only) =
+                        floating_capture_source(&self.workspace.layout, group)?;
                     capture_root_nodes = Some(nodes);
+                    capture_main_column_only = main_column_only;
                     Some(if external_window_drag {
                         frame.prepare_main_dock_resolver(
                             &self.workspace.layout,
@@ -378,6 +381,7 @@ impl DockController {
                 let target = filter_capture_target(
                     handle,
                     capture_root_nodes.as_ref(),
+                    capture_main_column_only,
                     resolver.resolve(pointer)?,
                 );
                 core.set_drop_target(target)?;
@@ -394,6 +398,7 @@ impl DockController {
                             capture_target_is_actionable(
                                 handle,
                                 capture_root_nodes.as_ref(),
+                                capture_main_column_only,
                                 zone.target,
                             )
                         })
@@ -408,6 +413,7 @@ impl DockController {
             gesture.snapshot = Some(snapshot);
             gesture.resolver = resolver;
             gesture.capture_root_nodes = capture_root_nodes;
+            gesture.capture_main_column_only = capture_main_column_only;
             gesture.overlay = overlay;
             return Ok(true);
         }
@@ -423,6 +429,7 @@ impl DockController {
             let target = filter_capture_target(
                 gesture.handle,
                 gesture.capture_root_nodes.as_ref(),
+                gesture.capture_main_column_only,
                 resolver.resolve(pointer)?,
             );
             core.set_drop_target(target)?;
@@ -467,6 +474,7 @@ impl DockController {
             Some(resolver) => filter_capture_target(
                 gesture.handle,
                 gesture.capture_root_nodes.as_ref(),
+                gesture.capture_main_column_only,
                 resolver.resolve(pointer)?,
             ),
             None => None,
@@ -942,37 +950,53 @@ fn main_column_ids_for_viewport_recovery(layout: &Layout, side: DockSide) -> Vec
 fn floating_capture_source(
     layout: &Layout,
     group: dock_core::FloatingGroupId,
-) -> Result<(DropSource, HashSet<NodeId>), ComputeRectsError> {
+) -> Result<(DropSource, HashSet<NodeId>, bool), ComputeRectsError> {
     let root = layout
         .floating_group(group)
         .and_then(|floating| layout.dock_area(floating.area))
         .map(|area| area.root)
         .ok_or(ComputeRectsError::InvalidLayoutState)?;
 
-    let source = match layout.node(root) {
-        Some(Node::Tabs(_)) => DropSource::Group { group: root },
-        Some(Node::Panel(panel)) => DropSource::Panel {
-            panel: panel.panel_id,
-        },
-        // In the active Photoshop profile, Core's DockFloating mapping cannot
-        // re-dock these composite roots through this target pipeline. The UI hides capture.
-        Some(Node::Column(_) | Node::Split(_)) | None => {
+    let (source, main_column_only) = match layout.node(root) {
+        Some(Node::Tabs(_)) => (DropSource::Group { group: root }, false),
+        Some(Node::Panel(panel)) => (
+            DropSource::Panel {
+                panel: panel.panel_id,
+            },
+            false,
+        ),
+        Some(Node::Column(_)) => {
+            // Panel-based geometry exposes main-column insertion targets. The whole
+            // Column is moved as one root, so other target kinds are filtered out below.
+            let panel = crate::tree_query::first_panel_in_subtree(layout, root)
+                .ok_or(ComputeRectsError::InvalidLayoutState)?;
+            (DropSource::Panel { panel }, true)
+        }
+        Some(Node::Split(_)) | None => {
             return Err(ComputeRectsError::InvalidLayoutState);
         }
     };
 
-    Ok((source, crate::tree_query::subtree_nodes(layout, root)))
+    Ok((
+        source,
+        crate::tree_query::subtree_nodes(layout, root),
+        main_column_only,
+    ))
 }
 
 fn capture_target_is_actionable(
     handle: DragHandle,
     capture_root_nodes: Option<&HashSet<NodeId>>,
+    main_column_only: bool,
     target: DropTarget,
 ) -> bool {
     if handle != DragHandle::FloatingCapture {
         return true;
     }
     if target == DropTarget::FreeArea {
+        return false;
+    }
+    if main_column_only && !matches!(target, DropTarget::MainColumn { .. }) {
         return false;
     }
 
@@ -983,9 +1007,12 @@ fn capture_target_is_actionable(
 fn filter_capture_target(
     handle: DragHandle,
     capture_root_nodes: Option<&HashSet<NodeId>>,
+    main_column_only: bool,
     target: Option<DropTarget>,
 ) -> Option<DropTarget> {
-    target.filter(|target| capture_target_is_actionable(handle, capture_root_nodes, *target))
+    target.filter(|target| {
+        capture_target_is_actionable(handle, capture_root_nodes, main_column_only, *target)
+    })
 }
 
 /// Builds the starting arrangement inside the controller so no other module
