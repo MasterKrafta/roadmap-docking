@@ -106,8 +106,8 @@ fn command_that_would_overflow_viewport_is_rejected_without_mutating_layout() {
         "an extra column must not make the canvas too narrow"
     );
     assert_eq!(layout_debug_snapshot(&controller), before);
-    assert_eq!(controller.history.undo_len(), 0);
-    assert_eq!(controller.history.redo_len(), 0);
+    assert_eq!(controller.workspace.history.undo_len(), 0);
+    assert_eq!(controller.workspace.history.redo_len(), 0);
 }
 
 #[test]
@@ -424,15 +424,14 @@ fn outer_column_resize_commits_and_undoes_on_both_sides() {
             }
             .expect("source right column should contain a group");
 
-            controller
-                .layout
+            controller.workspace.layout
                 .apply(
                     DockCommand::MoveGroupToMainColumn {
                         group,
                         side: DockSide::Left,
                         index: 0,
                     },
-                    &controller.metrics,
+                    &controller.workspace.metrics,
                 )
                 .expect("test setup should create a left main column");
         }
@@ -1123,7 +1122,7 @@ fn make_initial_floating_group(
         .expect("Float should create a floating window");
 
     // Setup is outside the drag's history assertion.
-    controller.history.clear();
+    controller.workspace.history.clear();
     (floating_id, bounds)
 }
 
@@ -1251,8 +1250,8 @@ fn stale_frame_before_drag_activation_cancels_pending_session() {
     assert!(!controller.cancel_drag());
     assert_eq!(layout_debug_snapshot(&controller), layout_before);
     assert_eq!(controller.layout().version(), version_before);
-    assert_eq!(controller.history.undo_len(), 0);
-    assert_eq!(controller.history.redo_len(), 0);
+    assert_eq!(controller.workspace.history.undo_len(), 0);
+    assert_eq!(controller.workspace.history.redo_len(), 0);
 
     controller
         .begin_drag(DragPayload::Panel { panel }, DragHandle::PanelTab, origin)
@@ -1284,8 +1283,8 @@ fn stale_drag_viewport_change_cancels_session_without_mutating_layout_or_history
     );
     assert_eq!(layout_debug_snapshot(&controller), layout_before);
     assert_eq!(controller.layout().version(), version_before);
-    assert_eq!(controller.history.undo_len(), 0);
-    assert_eq!(controller.history.redo_len(), 0);
+    assert_eq!(controller.workspace.history.undo_len(), 0);
+    assert_eq!(controller.workspace.history.redo_len(), 0);
 
     controller
         .begin_drag(DragPayload::Panel { panel }, DragHandle::PanelTab, origin)
@@ -1299,9 +1298,8 @@ fn stale_drag_layout_version_cancels_session_before_resolving_old_zones() {
     let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
     let (panel, origin) = start_active_panel_drag(&mut controller, viewport);
     let original_version = controller.layout().version();
-    let metrics = controller.metrics;
-    controller
-        .layout
+    let metrics = controller.workspace.metrics;
+    controller.workspace.layout
         .apply(
             DockCommand::SetChrome {
                 mode: dock_core::ChromeMode::DockHidden,
@@ -1325,8 +1323,8 @@ fn stale_drag_layout_version_cancels_session_before_resolving_old_zones() {
     assert!(!controller.cancel_drag());
     assert_eq!(layout_debug_snapshot(&controller), changed_layout);
     assert_eq!(controller.layout().version(), changed_version);
-    assert_eq!(controller.history.undo_len(), 0);
-    assert_eq!(controller.history.redo_len(), 0);
+    assert_eq!(controller.workspace.history.undo_len(), 0);
+    assert_eq!(controller.workspace.history.redo_len(), 0);
 
     controller
         .begin_drag(DragPayload::Panel { panel }, DragHandle::PanelTab, origin)
@@ -1341,7 +1339,7 @@ fn stale_drag_metrics_cancel_session_without_mutating_layout_or_history() {
     let (panel, origin) = start_active_panel_drag(&mut controller, viewport);
     let layout_before = layout_debug_snapshot(&controller);
     let version_before = controller.layout().version();
-    controller.metrics.min_column_width += 1.0;
+    controller.workspace.metrics.min_column_width += 1.0;
     let pointer = Point::new(
         origin.x + controller.metrics().drag_threshold + 30.0,
         origin.y,
@@ -1355,8 +1353,8 @@ fn stale_drag_metrics_cancel_session_without_mutating_layout_or_history() {
     assert!(!controller.cancel_drag());
     assert_eq!(layout_debug_snapshot(&controller), layout_before);
     assert_eq!(controller.layout().version(), version_before);
-    assert_eq!(controller.history.undo_len(), 0);
-    assert_eq!(controller.history.redo_len(), 0);
+    assert_eq!(controller.workspace.history.undo_len(), 0);
+    assert_eq!(controller.workspace.history.redo_len(), 0);
 
     controller
         .begin_drag(DragPayload::Panel { panel }, DragHandle::PanelTab, origin)
@@ -1381,8 +1379,8 @@ fn finish_drag_with_stale_viewport_clears_session_without_emitting_request() {
     assert!(!controller.cancel_drag());
     assert_eq!(layout_debug_snapshot(&controller), layout_before);
     assert_eq!(controller.layout().version(), version_before);
-    assert_eq!(controller.history.undo_len(), 0);
-    assert_eq!(controller.history.redo_len(), 0);
+    assert_eq!(controller.workspace.history.undo_len(), 0);
+    assert_eq!(controller.workspace.history.redo_len(), 0);
 
     controller
         .begin_drag(DragPayload::Panel { panel }, DragHandle::PanelTab, origin)
@@ -1439,7 +1437,7 @@ fn group_grip_drop_target_matrix_maps_to_one_reversible_command() {
                 })
                 .unwrap();
             // The rail mode is fixture setup; isolate history to the drop under test.
-            controller.history.clear();
+            controller.workspace.history.clear();
         }
 
         let target = match target_kind {
@@ -1520,11 +1518,11 @@ fn group_grip_drop_target_matrix_maps_to_one_reversible_command() {
         }
 
         assert_eq!(
-            controller.history.undo_len(),
+            controller.workspace.history.undo_len(),
             1,
             "one drop must be one undo step"
         );
-        assert_eq!(controller.history.redo_len(), 0);
+        assert_eq!(controller.workspace.history.redo_len(), 0);
         assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
         match target_kind {
             "column" | "rail" => {
@@ -1543,13 +1541,13 @@ fn group_grip_drop_target_matrix_maps_to_one_reversible_command() {
 
         assert!(controller.undo().unwrap());
         assert_eq!(owner_column(&controller, source_group), Some(source_column));
-        assert_eq!(controller.history.undo_len(), 0);
-        assert_eq!(controller.history.redo_len(), 1);
+        assert_eq!(controller.workspace.history.undo_len(), 0);
+        assert_eq!(controller.workspace.history.redo_len(), 1);
         assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
 
         assert!(controller.redo().unwrap());
-        assert_eq!(controller.history.undo_len(), 1);
-        assert_eq!(controller.history.redo_len(), 0);
+        assert_eq!(controller.workspace.history.undo_len(), 1);
+        assert_eq!(controller.workspace.history.redo_len(), 0);
         assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
         match target_kind {
             "column" | "rail" => {
@@ -1578,8 +1576,8 @@ fn group_grip_no_op_preserves_existing_redo_branch() {
         })
         .unwrap();
     assert!(controller.undo().unwrap());
-    assert_eq!(controller.history.undo_len(), 0);
-    assert_eq!(controller.history.redo_len(), 1);
+    assert_eq!(controller.workspace.history.undo_len(), 0);
+    assert_eq!(controller.workspace.history.redo_len(), 1);
 
     let before = layout_debug_snapshot(&controller);
     let version_before = controller.layout().version();
@@ -1603,11 +1601,11 @@ fn group_grip_no_op_preserves_existing_redo_branch() {
     assert_eq!(action, DragDropAction::NoOp);
     assert_eq!(layout_debug_snapshot(&controller), before);
     assert_eq!(controller.layout().version(), version_before);
-    assert_eq!(controller.history.undo_len(), 0);
-    assert_eq!(controller.history.redo_len(), 1);
+    assert_eq!(controller.workspace.history.undo_len(), 0);
+    assert_eq!(controller.workspace.history.redo_len(), 1);
     assert!(controller.redo().unwrap());
-    assert_eq!(controller.history.undo_len(), 1);
-    assert_eq!(controller.history.redo_len(), 0);
+    assert_eq!(controller.workspace.history.undo_len(), 1);
+    assert_eq!(controller.workspace.history.redo_len(), 0);
     assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
 }
 
@@ -1679,7 +1677,7 @@ fn group_grip_drop_merges_whole_group_and_records_one_undo_step() {
         controller.layout().floating_groups().count(),
         original_floating_count
     );
-    assert_eq!(controller.history.undo_len(), 1);
+    assert_eq!(controller.workspace.history.undo_len(), 1);
     for panel in &source_panel_ids {
         assert_eq!(
             group_containing_panel(&controller, *panel),
@@ -1689,8 +1687,8 @@ fn group_grip_drop_merges_whole_group_and_records_one_undo_step() {
     assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
 
     assert!(controller.undo().unwrap());
-    assert_eq!(controller.history.undo_len(), 0);
-    assert_eq!(controller.history.redo_len(), 1);
+    assert_eq!(controller.workspace.history.undo_len(), 0);
+    assert_eq!(controller.workspace.history.redo_len(), 1);
     for panel in &source_panel_ids {
         assert_ne!(
             group_containing_panel(&controller, *panel),
@@ -1701,8 +1699,8 @@ fn group_grip_drop_merges_whole_group_and_records_one_undo_step() {
     assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
 
     assert!(controller.redo().unwrap());
-    assert_eq!(controller.history.undo_len(), 1);
-    assert_eq!(controller.history.redo_len(), 0);
+    assert_eq!(controller.workspace.history.undo_len(), 1);
+    assert_eq!(controller.workspace.history.redo_len(), 0);
     for panel in &source_panel_ids {
         assert_eq!(
             group_containing_panel(&controller, *panel),
@@ -1817,7 +1815,7 @@ fn floating_capture_drag_resolves_dock_target_and_docks_entire_window() {
     );
     assert!(controller.layout().floating_group(floating_id).is_none());
     assert_eq!(controller.layout().floating_groups().count(), 0);
-    assert_eq!(controller.history.undo_len(), 1);
+    assert_eq!(controller.workspace.history.undo_len(), 1);
     assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
 
     assert!(controller.undo().unwrap());
@@ -1830,7 +1828,7 @@ fn floating_capture_drag_resolves_dock_target_and_docks_entire_window() {
         .expect("undo should restore one floating group");
     assert_eq!(controller.layout().floating_groups().count(), 1);
     assert_eq!(restored_floating.1, bounds);
-    assert_eq!(controller.history.undo_len(), 0);
+    assert_eq!(controller.workspace.history.undo_len(), 0);
     assert!(controller.redo().unwrap());
     assert_eq!(controller.layout().floating_groups().count(), 0);
     assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
@@ -1847,7 +1845,7 @@ fn floating_capture_docks_a_panel_root_and_records_one_undo_step() {
             bounds: Rect::new(Point::new(80.0, 60.0), Size::new(500.0, 400.0)),
         })
         .unwrap();
-    controller.history.clear();
+    controller.workspace.history.clear();
 
     let floating_id = controller
         .layout()
@@ -1892,8 +1890,8 @@ fn floating_capture_docks_a_panel_root_and_records_one_undo_step() {
         group_containing_panel(&controller, panel),
         Some(target_group)
     );
-    assert_eq!(controller.history.undo_len(), 1);
-    assert_eq!(controller.history.redo_len(), 0);
+    assert_eq!(controller.workspace.history.undo_len(), 1);
+    assert_eq!(controller.workspace.history.redo_len(), 0);
     assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
 
     assert!(controller.undo().unwrap());
@@ -1902,8 +1900,8 @@ fn floating_capture_docks_a_panel_root_and_records_one_undo_step() {
         group_containing_panel(&controller, panel),
         Some(target_group)
     );
-    assert_eq!(controller.history.undo_len(), 0);
-    assert_eq!(controller.history.redo_len(), 1);
+    assert_eq!(controller.workspace.history.undo_len(), 0);
+    assert_eq!(controller.workspace.history.redo_len(), 1);
     assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
 
     assert!(controller.redo().unwrap());
@@ -1912,8 +1910,8 @@ fn floating_capture_docks_a_panel_root_and_records_one_undo_step() {
         group_containing_panel(&controller, panel),
         Some(target_group)
     );
-    assert_eq!(controller.history.undo_len(), 1);
-    assert_eq!(controller.history.redo_len(), 0);
+    assert_eq!(controller.workspace.history.undo_len(), 1);
+    assert_eq!(controller.workspace.history.redo_len(), 0);
     assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
 }
 
@@ -1953,8 +1951,8 @@ fn floating_capture_drop_into_its_own_tree_is_no_op() {
     assert_eq!(layout_debug_snapshot(&controller), before);
     assert_eq!(controller.layout().version(), version_before);
     assert_eq!(controller.layout().floating_groups().count(), 1);
-    assert_eq!(controller.history.undo_len(), 0);
-    assert_eq!(controller.history.redo_len(), 0);
+    assert_eq!(controller.workspace.history.undo_len(), 0);
+    assert_eq!(controller.workspace.history.redo_len(), 0);
     assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
 }
 
@@ -1993,8 +1991,8 @@ fn floating_capture_rejects_free_area_without_mutating_layout_or_history() {
             .bounds,
         bounds
     );
-    assert_eq!(controller.history.undo_len(), 0);
-    assert_eq!(controller.history.redo_len(), 0);
+    assert_eq!(controller.workspace.history.undo_len(), 0);
+    assert_eq!(controller.workspace.history.redo_len(), 0);
     assert!(controller.last_error().is_some());
     assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
 }
@@ -2047,7 +2045,7 @@ fn floating_title_drag_moves_window_without_resolving_dock_targets() {
     assert_eq!(actual_bounds.size, original_bounds.size);
     assert_eq!(controller.layout().floating_groups().count(), 1);
     assert!(controller.layout().version() > original_version);
-    assert_eq!(controller.history.undo_len(), 1);
+    assert_eq!(controller.workspace.history.undo_len(), 1);
     assert!(controller.layout().validate(controller.metrics()).is_ok());
 
     assert!(controller.undo().unwrap());
@@ -2059,7 +2057,7 @@ fn floating_title_drag_moves_window_without_resolving_dock_targets() {
             .bounds,
         original_bounds
     );
-    assert_eq!(controller.history.undo_len(), 0);
+    assert_eq!(controller.workspace.history.undo_len(), 0);
     assert!(controller.redo().unwrap());
     assert_eq!(
         controller
@@ -2115,7 +2113,7 @@ fn floating_title_drag_clamps_position_to_viewport_and_remains_undoable() {
         Rect::new(Point::ZERO, original_bounds.size),
         "persistent and rendered positions should agree after clamping"
     );
-    assert_eq!(controller.history.undo_len(), 1);
+    assert_eq!(controller.workspace.history.undo_len(), 1);
     assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
 
     assert!(controller.undo().unwrap());
@@ -2136,8 +2134,8 @@ fn floating_title_drag_clamps_position_to_viewport_and_remains_undoable() {
             .bounds,
         Rect::new(Point::ZERO, original_bounds.size)
     );
-    assert_eq!(controller.history.undo_len(), 1);
-    assert_eq!(controller.history.redo_len(), 0);
+    assert_eq!(controller.workspace.history.undo_len(), 1);
+    assert_eq!(controller.workspace.history.redo_len(), 0);
     assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
 
     // The drag's original pointer is still the actual title-bar grab point;
@@ -2152,8 +2150,7 @@ fn floating_title_drag_uses_visible_position_when_saved_origin_is_offscreen() {
     let (floating_id, original_bounds) = make_initial_floating_group(&mut controller);
     let legacy_origin = Point::new(-500.0, 80.0);
     let metrics = *controller.metrics();
-    controller
-        .layout
+    controller.workspace.layout
         .apply(
             DockCommand::MoveFloating {
                 group: floating_id,
@@ -2162,7 +2159,7 @@ fn floating_title_drag_uses_visible_position_when_saved_origin_is_offscreen() {
             &metrics,
         )
         .unwrap();
-    controller.history.clear();
+    controller.workspace.history.clear();
 
     let frame = controller.frame(viewport).unwrap();
     let visible_bounds = frame
@@ -2215,7 +2212,7 @@ fn floating_title_drag_uses_visible_position_when_saved_origin_is_offscreen() {
             .bounds,
         Rect::new(expected_origin, original_bounds.size)
     );
-    assert_eq!(controller.history.undo_len(), 1);
+    assert_eq!(controller.workspace.history.undo_len(), 1);
     assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
 }
 
@@ -2226,9 +2223,8 @@ fn floating_title_drag_with_stale_layout_snapshot_is_cancelled_before_commit() {
     let (floating_id, original_bounds, origin) =
         start_active_floating_title_drag(&mut controller, viewport);
     let original_version = controller.layout().version();
-    let metrics = controller.metrics;
-    controller
-        .layout
+    let metrics = controller.workspace.metrics;
+    controller.workspace.layout
         .apply(
             DockCommand::SetChrome {
                 mode: dock_core::ChromeMode::DockHidden,
@@ -2263,8 +2259,8 @@ fn floating_title_drag_with_stale_layout_snapshot_is_cancelled_before_commit() {
         original_bounds,
         "the rejected title drag must not move or dock the floating window"
     );
-    assert_eq!(controller.history.undo_len(), 0);
-    assert_eq!(controller.history.redo_len(), 0);
+    assert_eq!(controller.workspace.history.undo_len(), 0);
+    assert_eq!(controller.workspace.history.redo_len(), 0);
 
     controller
         .begin_drag(
@@ -2309,8 +2305,8 @@ fn successful_drop_commits_one_command_and_one_undo_step() {
         "a drop into a different group should resolve to one command"
     );
     assert_ne!(controller.layout().version(), original_version);
-    assert_eq!(controller.history.undo_len(), 1);
-    assert_eq!(controller.history.redo_len(), 0);
+    assert_eq!(controller.workspace.history.undo_len(), 1);
+    assert_eq!(controller.workspace.history.redo_len(), 0);
     assert!(
         matches!(controller.layout().node(target_group), Some(Node::Tabs(tabs))
                 if tabs.children.contains(&source_panel_node)),
@@ -2327,7 +2323,7 @@ fn successful_drop_commits_one_command_and_one_undo_step() {
         !controller.undo().unwrap(),
         "the drop must create exactly one undo step"
     );
-    assert_eq!(controller.history.redo_len(), 1);
+    assert_eq!(controller.workspace.history.redo_len(), 1);
 }
 
 fn free_area_request(
@@ -2400,7 +2396,7 @@ fn panel_drop_target_matrix_maps_dock_targets_to_move_panel() {
                     mode: ColumnMode::IconsOnly,
                 })
                 .unwrap();
-            controller.history.clear();
+            controller.workspace.history.clear();
         }
 
         let target = match target_kind {
@@ -2443,8 +2439,8 @@ fn panel_drop_target_matrix_maps_dock_targets_to_move_panel() {
             group_containing_panel(&controller, panel),
             Some(source_group)
         );
-        assert_eq!(controller.history.undo_len(), 1);
-        assert_eq!(controller.history.redo_len(), 0);
+        assert_eq!(controller.workspace.history.undo_len(), 1);
+        assert_eq!(controller.workspace.history.redo_len(), 0);
         assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
 
         assert!(controller.undo().unwrap());
@@ -2452,8 +2448,8 @@ fn panel_drop_target_matrix_maps_dock_targets_to_move_panel() {
             group_containing_panel(&controller, panel),
             Some(source_group)
         );
-        assert_eq!(controller.history.undo_len(), 0);
-        assert_eq!(controller.history.redo_len(), 1);
+        assert_eq!(controller.workspace.history.undo_len(), 0);
+        assert_eq!(controller.workspace.history.redo_len(), 1);
         assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
 
         assert!(controller.redo().unwrap());
@@ -2461,8 +2457,8 @@ fn panel_drop_target_matrix_maps_dock_targets_to_move_panel() {
             group_containing_panel(&controller, panel),
             Some(source_group)
         );
-        assert_eq!(controller.history.undo_len(), 1);
-        assert_eq!(controller.history.redo_len(), 0);
+        assert_eq!(controller.workspace.history.undo_len(), 1);
+        assert_eq!(controller.workspace.history.redo_len(), 0);
         assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
     }
 }
@@ -2524,7 +2520,7 @@ fn flyout_panel_drop_target_matrix_uses_move_panel_from_flyout() {
                 .unwrap();
         }
         // Keep the gesture under test as the only persistent history entry.
-        controller.history.clear();
+        controller.workspace.history.clear();
         controller
             .apply(DockCommand::OpenFlyout {
                 column: source_column,
@@ -2532,7 +2528,7 @@ fn flyout_panel_drop_target_matrix_uses_move_panel_from_flyout() {
             })
             .unwrap();
         assert!(controller.layout().flyout().is_some());
-        assert_eq!(controller.history.undo_len(), 0);
+        assert_eq!(controller.workspace.history.undo_len(), 0);
 
         let target = match target_kind {
             "edge" => DropTarget::GroupEdge {
@@ -2592,8 +2588,8 @@ fn flyout_panel_drop_target_matrix_uses_move_panel_from_flyout() {
             group_containing_panel(&controller, panel),
             Some(source_group)
         );
-        assert_eq!(controller.history.undo_len(), 1);
-        assert_eq!(controller.history.redo_len(), 0);
+        assert_eq!(controller.workspace.history.undo_len(), 1);
+        assert_eq!(controller.workspace.history.redo_len(), 0);
         assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
 
         assert!(controller.undo().unwrap());
@@ -2609,8 +2605,8 @@ fn flyout_panel_drop_target_matrix_uses_move_panel_from_flyout() {
             original_panel_count
         );
         assert_eq!(controller.layout().floating_groups().count(), 0);
-        assert_eq!(controller.history.undo_len(), 0);
-        assert_eq!(controller.history.redo_len(), 1);
+        assert_eq!(controller.workspace.history.undo_len(), 0);
+        assert_eq!(controller.workspace.history.redo_len(), 1);
         assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
 
         assert!(controller.redo().unwrap());
@@ -2623,8 +2619,8 @@ fn flyout_panel_drop_target_matrix_uses_move_panel_from_flyout() {
             group_containing_panel(&controller, panel),
             Some(source_group)
         );
-        assert_eq!(controller.history.undo_len(), 1);
-        assert_eq!(controller.history.redo_len(), 0);
+        assert_eq!(controller.workspace.history.undo_len(), 1);
+        assert_eq!(controller.workspace.history.redo_len(), 0);
         assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
     }
 }
@@ -2656,8 +2652,8 @@ fn singleton_panel_drop_on_own_group_edge_is_no_op_and_preserves_redo() {
         })
         .unwrap();
     assert!(controller.undo().unwrap());
-    assert_eq!(controller.history.undo_len(), 0);
-    assert_eq!(controller.history.redo_len(), 1);
+    assert_eq!(controller.workspace.history.undo_len(), 0);
+    assert_eq!(controller.workspace.history.redo_len(), 1);
 
     let before = layout_debug_snapshot(&controller);
     let version_before = controller.layout().version();
@@ -2679,11 +2675,11 @@ fn singleton_panel_drop_on_own_group_edge_is_no_op_and_preserves_redo() {
     assert_eq!(action, DragDropAction::NoOp);
     assert_eq!(layout_debug_snapshot(&controller), before);
     assert_eq!(controller.layout().version(), version_before);
-    assert_eq!(controller.history.undo_len(), 0);
-    assert_eq!(controller.history.redo_len(), 1);
+    assert_eq!(controller.workspace.history.undo_len(), 0);
+    assert_eq!(controller.workspace.history.redo_len(), 1);
     assert!(controller.redo().unwrap());
-    assert_eq!(controller.history.undo_len(), 1);
-    assert_eq!(controller.history.redo_len(), 0);
+    assert_eq!(controller.workspace.history.undo_len(), 1);
+    assert_eq!(controller.workspace.history.redo_len(), 0);
     assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
 }
 
@@ -2739,7 +2735,7 @@ fn panel_reorder_commits_once_and_own_group_edge_drop_is_no_op() {
         Some(Node::Tabs(tabs)) => assert_eq!(tabs.children, reordered),
         other => panic!("source group should remain a Tabs node, got {other:?}"),
     }
-    assert_eq!(controller.history.undo_len(), 1);
+    assert_eq!(controller.workspace.history.undo_len(), 1);
     assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
 
     assert!(controller.undo().unwrap());
@@ -2756,7 +2752,7 @@ fn panel_reorder_commits_once_and_own_group_edge_drop_is_no_op() {
 
     // A panel dropped on its own group's edge is a no-op, even when
     // the group contains multiple tabs; detaching requires a different target group.
-    controller.history.clear();
+    controller.workspace.history.clear();
     let split_target = DropTarget::GroupEdge {
         group,
         zone: dock_core::DropZone::Right,
@@ -2779,8 +2775,8 @@ fn panel_reorder_commits_once_and_own_group_edge_drop_is_no_op() {
     assert_eq!(layout_debug_snapshot(&controller), before_edge_drop);
     assert_eq!(controller.layout().version(), version_before_edge_drop);
     assert_eq!(group_containing_panel(&controller, panel), Some(group));
-    assert_eq!(controller.history.undo_len(), 0);
-    assert_eq!(controller.history.redo_len(), 0);
+    assert_eq!(controller.workspace.history.undo_len(), 0);
+    assert_eq!(controller.workspace.history.redo_len(), 0);
     assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
 }
 
@@ -2813,8 +2809,8 @@ fn incompatible_drag_targets_are_rejected_without_mutating_layout_or_history() {
     assert!(panel_to_group_tabs.is_err());
     assert_eq!(layout_debug_snapshot(&controller), initial_layout);
     assert_eq!(controller.layout().version(), initial_version);
-    assert_eq!(controller.history.undo_len(), 0);
-    assert_eq!(controller.history.redo_len(), 0);
+    assert_eq!(controller.workspace.history.undo_len(), 0);
+    assert_eq!(controller.workspace.history.redo_len(), 0);
 
     let group_to_tabs = controller.commit_drop_request(
         DragDropRequest {
@@ -2835,8 +2831,8 @@ fn incompatible_drag_targets_are_rejected_without_mutating_layout_or_history() {
     assert!(group_to_tabs.is_err());
     assert_eq!(layout_debug_snapshot(&controller), initial_layout);
     assert_eq!(controller.layout().version(), initial_version);
-    assert_eq!(controller.history.undo_len(), 0);
-    assert_eq!(controller.history.redo_len(), 0);
+    assert_eq!(controller.workspace.history.undo_len(), 0);
+    assert_eq!(controller.workspace.history.redo_len(), 0);
     assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
 }
 
@@ -2886,8 +2882,8 @@ fn free_area_panel_drop_computes_bounds_floats_panel_and_records_one_undo_step()
         original_floating_count + 1
     );
     assert!(controller.layout().version() > original_version);
-    assert_eq!(controller.history.undo_len(), 1);
-    assert_eq!(controller.history.redo_len(), 0);
+    assert_eq!(controller.workspace.history.undo_len(), 1);
+    assert_eq!(controller.workspace.history.redo_len(), 0);
     assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
 
     assert!(controller.undo().unwrap());
@@ -2895,8 +2891,8 @@ fn free_area_panel_drop_computes_bounds_floats_panel_and_records_one_undo_step()
         controller.layout().floating_groups().count(),
         original_floating_count
     );
-    assert_eq!(controller.history.undo_len(), 0);
-    assert_eq!(controller.history.redo_len(), 1);
+    assert_eq!(controller.workspace.history.undo_len(), 0);
+    assert_eq!(controller.workspace.history.redo_len(), 1);
     assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
 }
 
@@ -2949,7 +2945,7 @@ fn free_area_group_drop_floats_the_complete_group_and_records_one_undo_step() {
         original_floating_count + 1
     );
     assert!(controller.layout().version() > original_version);
-    assert_eq!(controller.history.undo_len(), 1);
+    assert_eq!(controller.workspace.history.undo_len(), 1);
     assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
 
     assert!(controller.undo().unwrap());
@@ -2957,7 +2953,7 @@ fn free_area_group_drop_floats_the_complete_group_and_records_one_undo_step() {
         controller.layout().floating_groups().count(),
         original_floating_count
     );
-    assert_eq!(controller.history.undo_len(), 0);
+    assert_eq!(controller.workspace.history.undo_len(), 0);
     assert!(controller.redo().unwrap());
     assert_eq!(
         controller.layout().floating_groups().count(),
@@ -2997,7 +2993,7 @@ fn flyout_panel_drop_to_dock_uses_move_panel_from_flyout_and_records_one_undo_st
         })
         .unwrap();
     // Keep only the drop under test in undo history.
-    controller.history.clear();
+    controller.workspace.history.clear();
     controller
         .apply(DockCommand::OpenFlyout {
             column: source_column,
@@ -3005,7 +3001,7 @@ fn flyout_panel_drop_to_dock_uses_move_panel_from_flyout_and_records_one_undo_st
         })
         .unwrap();
     assert!(controller.layout().flyout().is_some());
-    assert_eq!(controller.history.undo_len(), 0);
+    assert_eq!(controller.workspace.history.undo_len(), 0);
 
     let target_group = controller
         .layout()
@@ -3090,7 +3086,7 @@ fn flyout_panel_drop_to_dock_uses_move_panel_from_flyout_and_records_one_undo_st
         controller.layout().floating_groups().count(),
         original_floating_count
     );
-    assert_eq!(controller.history.undo_len(), 1);
+    assert_eq!(controller.workspace.history.undo_len(), 1);
     assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
 
     assert!(controller.undo().unwrap());
@@ -3107,8 +3103,8 @@ fn flyout_panel_drop_to_dock_uses_move_panel_from_flyout_and_records_one_undo_st
         controller.layout().panel_instances().count(),
         original_panel_count
     );
-    assert_eq!(controller.history.undo_len(), 0);
-    assert_eq!(controller.history.redo_len(), 1);
+    assert_eq!(controller.workspace.history.undo_len(), 0);
+    assert_eq!(controller.workspace.history.redo_len(), 1);
     assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
 
     assert!(controller.redo().unwrap());
@@ -3117,8 +3113,8 @@ fn flyout_panel_drop_to_dock_uses_move_panel_from_flyout_and_records_one_undo_st
         group_containing_panel(&controller, panel),
         Some(target_group)
     );
-    assert_eq!(controller.history.undo_len(), 1);
-    assert_eq!(controller.history.redo_len(), 0);
+    assert_eq!(controller.workspace.history.undo_len(), 1);
+    assert_eq!(controller.workspace.history.redo_len(), 0);
     assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
 }
 
@@ -3154,7 +3150,7 @@ fn free_area_drop_from_flyout_uses_flyout_command_closes_flyout_and_undo_restore
         .unwrap();
 
     // The rail mode is setup for this scenario, not part of the drop's undo step.
-    controller.history.clear();
+    controller.workspace.history.clear();
     controller
         .apply(DockCommand::OpenFlyout {
             column: column_id,
@@ -3162,7 +3158,7 @@ fn free_area_drop_from_flyout_uses_flyout_command_closes_flyout_and_undo_restore
         })
         .unwrap();
     assert!(controller.layout().flyout().is_some());
-    assert_eq!(controller.history.undo_len(), 0);
+    assert_eq!(controller.workspace.history.undo_len(), 0);
 
     let frame = controller.frame(viewport).unwrap();
     let flyout_rect = frame
@@ -3208,7 +3204,7 @@ fn free_area_drop_from_flyout_uses_flyout_command_closes_flyout_and_undo_restore
         controller.layout().panel_instances().count(),
         original_panel_count
     );
-    assert_eq!(controller.history.undo_len(), 1);
+    assert_eq!(controller.workspace.history.undo_len(), 1);
     assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
 
     assert!(controller.undo().unwrap());
@@ -3224,8 +3220,8 @@ fn free_area_drop_from_flyout_uses_flyout_command_closes_flyout_and_undo_restore
         controller.layout().panel_instances().count(),
         original_panel_count
     );
-    assert_eq!(controller.history.undo_len(), 0);
-    assert_eq!(controller.history.redo_len(), 1);
+    assert_eq!(controller.workspace.history.undo_len(), 0);
+    assert_eq!(controller.workspace.history.redo_len(), 1);
     assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
 
     assert!(controller.redo().unwrap());
@@ -3279,8 +3275,8 @@ fn release_outside_valid_drop_zones_finishes_drag_without_mutating_layout_or_his
     assert!(controller.drag_overlay().is_none());
     assert_eq!(layout_debug_snapshot(&controller), layout_before);
     assert_eq!(controller.layout().version(), version_before);
-    assert_eq!(controller.history.undo_len(), 0);
-    assert_eq!(controller.history.redo_len(), 0);
+    assert_eq!(controller.workspace.history.undo_len(), 0);
+    assert_eq!(controller.workspace.history.redo_len(), 0);
 
     // finish_drag must leave the controller idle, not stuck in a terminal gesture.
     controller
@@ -3328,8 +3324,8 @@ fn cancelling_active_drag_clears_session_without_touching_layout_or_history() {
     assert!(controller.drag_overlay().is_none());
     assert_eq!(layout_debug_snapshot(&controller), layout_before);
     assert_eq!(controller.layout().version(), version_before);
-    assert_eq!(controller.history.undo_len(), 0);
-    assert_eq!(controller.history.redo_len(), 0);
+    assert_eq!(controller.workspace.history.undo_len(), 0);
+    assert_eq!(controller.workspace.history.redo_len(), 0);
 
     // A fresh drag may begin immediately after cancellation.
     controller
@@ -3339,8 +3335,8 @@ fn cancelling_active_drag_clears_session_without_touching_layout_or_history() {
     assert!(!controller.cancel_drag());
     assert_eq!(layout_debug_snapshot(&controller), layout_before);
     assert_eq!(controller.layout().version(), version_before);
-    assert_eq!(controller.history.undo_len(), 0);
-    assert_eq!(controller.history.redo_len(), 0);
+    assert_eq!(controller.workspace.history.undo_len(), 0);
+    assert_eq!(controller.workspace.history.redo_len(), 0);
 }
 
 #[test]
@@ -3354,10 +3350,10 @@ fn no_op_drop_does_not_change_layout_or_history() {
             mode: dock_core::ChromeMode::DockHidden,
         })
         .unwrap();
-    assert_eq!(controller.history.undo_len(), 1);
+    assert_eq!(controller.workspace.history.undo_len(), 1);
     assert!(controller.undo().unwrap());
-    assert_eq!(controller.history.undo_len(), 0);
-    assert_eq!(controller.history.redo_len(), 1);
+    assert_eq!(controller.workspace.history.undo_len(), 0);
+    assert_eq!(controller.workspace.history.redo_len(), 1);
 
     let (group, _, panel) = first_panels_by_group(&controller)[0];
     let original_layout = layout_debug_snapshot(&controller);
@@ -3378,13 +3374,13 @@ fn no_op_drop_does_not_change_layout_or_history() {
     assert_eq!(action, DragDropAction::NoOp);
     assert_eq!(layout_debug_snapshot(&controller), original_layout);
     assert_eq!(controller.layout().version(), original_version);
-    assert_eq!(controller.history.undo_len(), 0);
-    assert_eq!(controller.history.redo_len(), 1);
+    assert_eq!(controller.workspace.history.undo_len(), 0);
+    assert_eq!(controller.workspace.history.redo_len(), 1);
     assert!(!controller.undo().unwrap());
-    assert_eq!(controller.history.redo_len(), 1);
+    assert_eq!(controller.workspace.history.redo_len(), 1);
     assert!(controller.redo().unwrap());
-    assert_eq!(controller.history.undo_len(), 1);
-    assert_eq!(controller.history.redo_len(), 0);
+    assert_eq!(controller.workspace.history.undo_len(), 1);
+    assert_eq!(controller.workspace.history.redo_len(), 0);
 }
 
 #[test]
@@ -3408,8 +3404,8 @@ fn rejected_drop_and_rejected_command_leave_layout_and_history_unchanged() {
     );
     assert_eq!(layout_debug_snapshot(&controller), original_layout);
     assert_eq!(controller.layout().version(), original_version);
-    assert_eq!(controller.history.undo_len(), 0);
-    assert_eq!(controller.history.redo_len(), 0);
+    assert_eq!(controller.workspace.history.undo_len(), 0);
+    assert_eq!(controller.workspace.history.redo_len(), 0);
     assert!(controller.last_error().is_some());
 
     // A command rejected by dock-core must also leave the live state and
@@ -3424,8 +3420,8 @@ fn rejected_drop_and_rejected_command_leave_layout_and_history_unchanged() {
     );
     assert_eq!(layout_debug_snapshot(&controller), original_layout);
     assert_eq!(controller.layout().version(), original_version);
-    assert_eq!(controller.history.undo_len(), 0);
-    assert_eq!(controller.history.redo_len(), 0);
+    assert_eq!(controller.workspace.history.undo_len(), 0);
+    assert_eq!(controller.workspace.history.redo_len(), 0);
     assert!(controller.last_error().is_some());
 
     // A successful no-op clears the stale error without touching layout/history.
@@ -3444,8 +3440,8 @@ fn rejected_drop_and_rejected_command_leave_layout_and_history_unchanged() {
     assert!(controller.last_error().is_none());
     assert_eq!(layout_debug_snapshot(&controller), original_layout);
     assert_eq!(controller.layout().version(), original_version);
-    assert_eq!(controller.history.undo_len(), 0);
-    assert_eq!(controller.history.redo_len(), 0);
+    assert_eq!(controller.workspace.history.undo_len(), 0);
+    assert_eq!(controller.workspace.history.redo_len(), 0);
 }
 
 #[test]
@@ -3475,7 +3471,7 @@ fn raising_floating_window_does_not_add_undo_or_clear_redo() {
             .unwrap();
     }
     assert_eq!(controller.layout().floating_groups().count(), 2);
-    assert_eq!(controller.history.undo_len(), 2);
+    assert_eq!(controller.workspace.history.undo_len(), 2);
 
     controller
         .apply(DockCommand::SetChrome {
@@ -3483,8 +3479,8 @@ fn raising_floating_window_does_not_add_undo_or_clear_redo() {
         })
         .unwrap();
     assert!(controller.undo().unwrap());
-    assert_eq!(controller.history.undo_len(), 2);
-    assert_eq!(controller.history.redo_len(), 1);
+    assert_eq!(controller.workspace.history.undo_len(), 2);
+    assert_eq!(controller.workspace.history.redo_len(), 1);
 
     let order_before: Vec<_> = controller
         .layout()
@@ -3512,15 +3508,15 @@ fn raising_floating_window_does_not_add_undo_or_clear_redo() {
         .collect();
     assert_eq!(order_after.first(), Some(&group_to_raise));
     assert_eq!(controller.layout().version(), version_before + 1);
-    assert_eq!(controller.history.undo_len(), 2);
-    assert_eq!(controller.history.redo_len(), 1);
+    assert_eq!(controller.workspace.history.undo_len(), 2);
+    assert_eq!(controller.workspace.history.redo_len(), 1);
     assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
 
     assert!(
         controller.redo().unwrap(),
         "raising must preserve the redo branch"
     );
-    assert_eq!(controller.history.redo_len(), 0);
+    assert_eq!(controller.workspace.history.redo_len(), 0);
 }
 
 #[test]
@@ -3556,20 +3552,20 @@ fn closing_floating_column_closes_each_group_and_keeps_each_close_undoable() {
     assert_eq!(column.groups.len(), group_count);
 
     // Exclude setup from the close-history assertions.
-    controller.history.clear();
+    controller.workspace.history.clear();
     controller.close_floating(floating_id).unwrap();
 
     assert!(controller.layout().floating_groups().next().is_none());
     assert!(controller.layout().panel_instances().count() < original_panel_count);
-    assert_eq!(controller.history.undo_len(), group_count);
-    assert_eq!(controller.history.redo_len(), 0);
+    assert_eq!(controller.workspace.history.undo_len(), group_count);
+    assert_eq!(controller.workspace.history.redo_len(), 0);
     assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
 
     for _ in 0..group_count {
         assert!(controller.undo().unwrap());
     }
-    assert_eq!(controller.history.undo_len(), 0);
-    assert_eq!(controller.history.redo_len(), group_count);
+    assert_eq!(controller.workspace.history.undo_len(), 0);
+    assert_eq!(controller.workspace.history.redo_len(), group_count);
     assert_eq!(controller.layout().floating_groups().count(), 1);
     assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
 
@@ -3577,7 +3573,7 @@ fn closing_floating_column_closes_each_group_and_keeps_each_close_undoable() {
         assert!(controller.redo().unwrap());
     }
     assert_eq!(controller.layout().floating_groups().count(), 0);
-    assert_eq!(controller.history.redo_len(), 0);
+    assert_eq!(controller.workspace.history.redo_len(), 0);
     assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
 }
 
