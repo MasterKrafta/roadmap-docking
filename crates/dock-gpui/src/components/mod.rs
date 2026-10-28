@@ -1,5 +1,16 @@
 //! Stateless GPUI building blocks used by the dock renderer.
 
+use gpui::{App, ClickEvent, KeyDownEvent, MouseDownEvent, Window};
+
+/// Boxed callback invoked by a GPUI click event.
+pub type ClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
+
+/// Boxed callback invoked by a GPUI key-down event.
+pub type KeyDownHandler = Box<dyn Fn(&KeyDownEvent, &mut Window, &mut App) + 'static>;
+
+/// Boxed callback invoked by a GPUI mouse-down event.
+pub type MouseDownHandler = Box<dyn Fn(&MouseDownEvent, &mut Window, &mut App) + 'static>;
+
 pub mod column_mode_button;
 pub mod drop_zone;
 pub mod floating_title;
