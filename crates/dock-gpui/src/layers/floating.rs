@@ -112,8 +112,8 @@ pub(crate) fn render_group(
     }
 
     if mode == FloatingGroupRenderMode::NativeWindow {
-        // Native title-bar movement is handled by the OS. Capture moves a single
-        // group when the column has one group, or a whole supported floating root.
+        // Native title-bar movement is handled by the OS. When Core can express
+        // the source as one group, this capture affordance offers a direct dock-back drag.
         let capture_drag = match layout.node(area.root) {
             Some(Node::Tabs(_) | Node::Panel(_)) => Some((
                 DragPayload::FloatingGroup { group: floating_id },
@@ -124,10 +124,6 @@ pub(crate) fn render_group(
                 matches!(layout.node(group), Some(Node::Tabs(_)))
                     .then_some((DragPayload::Group { group }, DragHandle::GroupGrip))
             }
-            Some(Node::Column(_)) => Some((
-                DragPayload::FloatingGroup { group: floating_id },
-                DragHandle::FloatingCapture,
-            )),
             _ => None,
         };
         if let Some((payload, handle)) = capture_drag {
@@ -191,13 +187,10 @@ pub(crate) fn render_group(
                     DragPayload::FloatingGroup { group: floating_id },
                     DragHandle::FloatingTitle,
                 ),
-                on_capture_drag_start: (matches!(
+                on_capture_drag_start: matches!(
                     layout.node(area.root),
                     Some(Node::Tabs(_) | Node::Panel(_))
-                ) || matches!(
-                    layout.node(area.root),
-                    Some(Node::Column(column)) if column.groups.len() > 1
-                ))
+                )
                 .then(|| {
                     host.drag_start(
                         DragPayload::FloatingGroup { group: floating_id },

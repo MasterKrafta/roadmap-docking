@@ -38,8 +38,6 @@ pub(crate) struct DragGesture {
     pub(super) resolver: Option<DropZoneResolver>,
     /// Nodes belonging to the floating window being captured; targets inside it are not docking targets.
     pub(super) capture_root_nodes: Option<HashSet<dock_core::NodeId>>,
-    /// Whole-column capture can only dock into a main-column slot.
-    pub(super) capture_main_column_only: bool,
     pub(super) overlay: Option<DragOverlay>,
 }
 
@@ -58,7 +56,6 @@ impl fmt::Debug for DragGesture {
                 "capture_root_node_count",
                 &self.capture_root_nodes.as_ref().map(|nodes| nodes.len()),
             )
-            .field("capture_main_column_only", &self.capture_main_column_only)
             .field("overlay_available", &self.overlay.is_some())
             .finish()
     }
@@ -133,7 +130,6 @@ impl DragGesture {
             snapshot: None,
             resolver: None,
             capture_root_nodes: None,
-            capture_main_column_only: false,
             overlay: None,
         })
     }
