@@ -194,7 +194,7 @@ impl MainWindow {
         ) else {
             return;
         };
-        if let Err(error) = self.dock.begin_drag(payload, handle, pointer) {
+        if let Err(error) = self.dock.begin_external_drag(payload, handle, pointer) {
             tracing::debug!(error = ?error, "could not record cross-window dock drag");
         }
     }
