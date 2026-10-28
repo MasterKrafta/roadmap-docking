@@ -1,13 +1,14 @@
 use dock_core::{
-    Axis, ColumnMode, DockCommand, DockSide, DragHandle, DragPayload, DropTarget, Layout, Node,
-    NodeId, PanelId, Point, Rect, Size,
+    Axis, ColumnMode, DockCommand, DockSide, DragHandle, DragPayload, DropTarget, GroupRect,
+    Layout, LayoutRects, Node, NodeId, PanelId, Point, Profile, Rect, Size,
 };
 use gpui::{AnyElement, IntoElement};
 
 use crate::components::focus_ring::{
     PanelColumnMoveDirection, PanelMoveDirection, TabReorderDirection,
     keyboard_panel_column_move_direction, keyboard_panel_move_direction,
-    keyboard_panel_other_side_move, keyboard_panel_rail_move, keyboard_tab_reorder_direction,
+    keyboard_panel_other_side_move, keyboard_panel_rail_move, keyboard_panel_float_move,
+    keyboard_tab_reorder_direction,
 };
 use crate::components::{ColumnModeButton, GroupMenuButton, PanelTab, TabOverflowButton};
 use crate::dock::{activate_tab, collapse_group, cycle_column_mode};
@@ -66,6 +67,7 @@ pub(crate) fn render(
                 ),
                 on_move_panel_key: move_panel_key_handler(
                     layout,
+                    rects,
                     host,
                     header.group,
                     header.panel,
@@ -198,6 +200,7 @@ fn reorder_tab_key_handler(
 
 fn move_panel_key_handler(
     layout: &Layout,
+    rects: &LayoutRects,
     host: &dyn DockHost,
     source_group: NodeId,
     panel: PanelId,
@@ -243,6 +246,8 @@ fn move_panel_key_handler(
             target: DropTarget::RailSlot { column, index },
         })
     });
+    let move_to_floating = floating_panel_bounds(layout, rects, source_group, panel)
+        .map(|bounds| host.command_key(DockCommand::FloatPanelAsGroup { panel, bounds }));
 
     Some(Box::new(move |event, window, app| {
         match keyboard_panel_move_direction(&event.keystroke) {
@@ -278,6 +283,11 @@ fn move_panel_key_handler(
         }
         if keyboard_panel_rail_move(&event.keystroke) {
             if let Some(handler) = &move_to_rail {
+                handler(event, window, app);
+            }
+        }
+        if keyboard_panel_float_move(&event.keystroke) {
+            if let Some(handler) = &move_to_floating {
                 handler(event, window, app);
             }
         }
@@ -403,6 +413,55 @@ fn main_rail_target_for_group(layout: &Layout, source_group: NodeId) -> Option<(
     Some((rail_column, index))
 }
 
+/// Resolves a centered floating-window rectangle for a panel that can be detached safely.
+fn floating_panel_bounds(
+    layout: &Layout,
+    rects: &LayoutRects,
+    source_group: NodeId,
+    panel: PanelId,
+) -> Option<Rect> {
+    if layout.profile() != Profile::Photoshop {
+        return None;
+    }
+    let Some(Node::Tabs(tabs)) = layout.node(source_group) else {
+        return None;
+    };
+    if tabs.children.len() <= 1
+        || !tabs.children.iter().any(|child| {
+            matches!(layout.node(*child), Some(Node::Panel(value)) if value.panel_id == panel)
+        })
+    {
+        return None;
+    }
+
+    let canvas = rects.canvas?;
+    let source_bounds = rects.groups.iter()
+        .find(|entry| entry.group == source_group)
+        .map(|entry| entry.rect)?;
+    centered_floating_bounds(canvas, source_bounds)
+}
+
+/// Centers the source group's dimensions in the canvas, shrinking to the canvas when necessary.
+fn centered_floating_bounds(canvas: Rect, source: Rect) -> Option<Rect> {
+    canvas.validate_non_empty().ok()?;
+    source.validate_non_empty().ok()?;
+
+    let width = source.size.width.min(canvas.size.width);
+    let height = source.size.height.min(canvas.size.height);
+    if width <= 0.0 || height <= 0.0 {
+        return None;
+    }
+    let bounds = Rect::new(
+        Point::new(
+            canvas.origin.x + (canvas.size.width - width) / 2.0,
+            canvas.origin.y + (canvas.size.height - height) / 2.0,
+        ),
+        Size::new(width, height),
+    );
+    bounds.validate_non_empty().ok()?;
+    Some(bounds)
+}
+
 fn corresponding_group_index(source_index: usize, target_group_count: usize) -> Option<usize> {
     if target_group_count == 0 {
         None
@@ -427,12 +486,92 @@ fn adjacent_indices(
 #[cfg(test)]
 mod keyboard_panel_move_tests {
     use super::{
-        adjacent_indices, corresponding_group_index, main_column_ids, main_rail_target_for_group,
-        opposite_main_dock_group,
+        adjacent_indices, centered_floating_bounds, corresponding_group_index,
+        floating_panel_bounds, main_column_ids, main_rail_target_for_group, opposite_main_dock_group,
     };
     use crate::dock::DockController;
-    use dock_core::{ColumnMode, DockCommand, DockSide, DropTarget, Node};
+    use dock_core::{
+        ColumnMode, DockCommand, DockSide, DropTarget, GroupRect, LayoutRects, Node, Point, Profile,
+        Rect, Size,
+    };
     use ui::Theme;
+
+    #[test]
+    fn floating_bounds_center_source_size_and_clamp_to_canvas() {
+        let canvas = Rect::new(Point::new(10.0, 20.0), Size::new(800.0, 600.0));
+        let source = Rect::new(Point::new(100.0, 110.0), Size::new(300.0, 200.0));
+        assert_eq!(
+            centered_floating_bounds(canvas, source),
+            Some(Rect::new(Point::new(260.0, 220.0), Size::new(300.0, 200.0)))
+        );
+
+        let oversized_source = Rect::new(Point::ZERO, Size::new(1000.0, 900.0));
+        assert_eq!(
+            centered_floating_bounds(canvas, oversized_source),
+            Some(canvas)
+        );
+        assert_eq!(
+            centered_floating_bounds(canvas, Rect::new(Point::ZERO, Size::ZERO)),
+            None
+        );
+    }
+
+    #[test]
+    fn floating_panel_target_requires_multi_tab_photoshop_group_and_geometry() {
+        let mut controller = DockController::new_initial(&Theme::default())
+            .expect("initial layout should be valid");
+        let (source_group, panel) = controller
+            .layout()
+            .nodes()
+            .find_map(|(group, node)| {
+                let Node::Tabs(tabs) = node else { return None; };
+                if tabs.children.len() < 2 { return None; }
+                tabs.children.iter().find_map(|child| match controller.layout().node(*child) {
+                    Some(Node::Panel(value)) => Some((group, value.panel_id)),
+                    _ => None,
+                })
+            })
+            .expect("initial Photoshop layout should contain a multi-tab group");
+        let canvas = Rect::new(Point::ZERO, Size::new(800.0, 600.0));
+        let source_bounds = Rect::new(Point::new(20.0, 40.0), Size::new(280.0, 260.0));
+        let rects = LayoutRects {
+            canvas: Some(canvas),
+            groups: vec![GroupRect::new(source_group, source_bounds)],
+            ..LayoutRects::default()
+        };
+
+        let bounds = floating_panel_bounds(controller.layout(), &rects, source_group, panel)
+            .expect("eligible panel and available geometry should produce bounds");
+        assert_eq!(bounds, Rect::new(Point::new(260.0, 170.0), Size::new(280.0, 260.0)));
+
+        controller
+            .apply(DockCommand::FloatPanelAsGroup { panel, bounds })
+            .expect("Core should detach one tab into a floating group");
+        assert_eq!(controller.layout().floating_groups().count(), 1);
+    }
+
+    #[test]
+    fn floating_panel_target_is_unavailable_when_the_group_would_be_empty_or_canvas_is_missing() {
+        let controller = DockController::new_initial(&Theme::default())
+            .expect("initial Photoshop layout should be valid");
+        let (source_group, panel) = controller
+            .layout()
+            .nodes()
+            .find_map(|(group, node)| {
+                let Node::Tabs(tabs) = node else { return None; };
+                let panel = tabs.children.iter().find_map(|child| match controller.layout().node(*child) {
+                    Some(Node::Panel(value)) => Some(value.panel_id),
+                    _ => None,
+                })?;
+                Some((group, panel))
+            })
+            .expect("initial layout should contain a panel group");
+        let rects = LayoutRects::default();
+        assert_eq!(floating_panel_bounds(controller.layout(), &rects, source_group, panel), None);
+
+        let generic_layout = dock_core::Layout::new(Profile::Generic);
+        assert_eq!(floating_panel_bounds(&generic_layout, &rects, source_group, panel), None);
+    }
 
     #[test]
     fn panel_move_targets_append_slot_in_same_side_icon_rail() {

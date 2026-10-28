@@ -107,6 +107,18 @@ pub(crate) fn keyboard_panel_rail_move(keystroke: &Keystroke) -> bool {
         && keystroke.key.eq_ignore_ascii_case("r")
 }
 
+/// Returns true for the shortcut that detaches a focused panel into a floating window.
+///
+/// Ctrl/Cmd + Alt + Shift + F creates a floating window when the source group has other tabs.
+pub(crate) fn keyboard_panel_float_move(keystroke: &Keystroke) -> bool {
+    let modifiers = keystroke.modifiers;
+    (modifiers.control || modifiers.platform)
+        && modifiers.alt
+        && modifiers.shift
+        && !modifiers.function
+        && keystroke.key.eq_ignore_ascii_case("f")
+}
+
 /// Direction requested when reordering a focused tab with the keyboard.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum TabReorderDirection {
@@ -208,7 +220,7 @@ mod tests {
         GroupMoveDirection, PanelColumnMoveDirection, PanelMoveDirection, TabReorderDirection,
         is_keyboard_activation_key, keyboard_group_move_direction, keyboard_panel_column_move_direction,
         keyboard_panel_move_direction, keyboard_panel_other_side_move,
-        keyboard_panel_rail_move,
+        keyboard_panel_rail_move, keyboard_panel_float_move,
         keyboard_resize_axis_for_floating_edge,
         keyboard_resize_delta, keyboard_tab_reorder_direction,
     };
@@ -544,6 +556,61 @@ mod tests {
             },
         ] {
             assert!(!keyboard_panel_rail_move(&key("r", modifiers)));
+        }
+    }
+
+    #[test]
+    fn keyboard_panel_float_move_accepts_command_alt_shift_f() {
+        let control_alt_shift = Modifiers {
+            control: true,
+            alt: true,
+            shift: true,
+            ..Modifiers::default()
+        };
+        assert!(keyboard_panel_float_move(&key("f", control_alt_shift)));
+        assert!(keyboard_panel_float_move(&key("F", control_alt_shift)));
+
+        let platform_alt_shift = Modifiers {
+            platform: true,
+            alt: true,
+            shift: true,
+            ..Modifiers::default()
+        };
+        assert!(keyboard_panel_float_move(&key("f", platform_alt_shift)));
+    }
+
+    #[test]
+    fn keyboard_panel_float_move_rejects_other_keys_and_missing_modifiers() {
+        assert!(!keyboard_panel_float_move(&key("f", Modifiers::default())));
+        assert!(!keyboard_panel_float_move(&key(
+            "r",
+            Modifiers {
+                control: true,
+                alt: true,
+                shift: true,
+                ..Modifiers::default()
+            }
+        )));
+        for modifiers in [
+            Modifiers {
+                control: true,
+                alt: true,
+                ..Modifiers::default()
+            },
+            Modifiers {
+                control: true,
+                shift: true,
+                ..Modifiers::default()
+            },
+            Modifiers {
+                control: true,
+                alt: true,
+                shift: true,
+                function: true,
+                ..Modifiers::default()
+            },
+        ] {
+            assert!(!keyboard_panel_float_move(&key("f", modifiers)));
         }
     }
 
