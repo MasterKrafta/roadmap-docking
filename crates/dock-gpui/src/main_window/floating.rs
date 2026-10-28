@@ -1,7 +1,7 @@
 use dock_core::{DragHandle, DragPayload, FloatingGroupId, Point, Rect, Size};
 use gpui::{
     App, AppContext, Bounds, Context, MouseButton, MouseMoveEvent, MouseUpEvent, Pixels,
-    TitlebarOptions, Window, WindowBounds, WindowHandle, WindowOptions, point, px, size,
+    TitlebarOptions, WindowBounds, WindowOptions, point, px, size,
 };
 use ui::Theme;
 
@@ -443,8 +443,10 @@ pub(super) fn synchronize_floating_windows(
                     .is_some();
                 if still_exists {
                     owner_entity.update(app, |main, cx| {
-                        if !main.floating_windows.contains_key(&group) {
-                            main.floating_windows.insert(group, handle);
+                        if let std::collections::hash_map::Entry::Vacant(entry) =
+                            main.floating_windows.entry(group)
+                        {
+                            entry.insert(handle);
                             cx.notify();
                         }
                     });
