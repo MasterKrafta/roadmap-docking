@@ -1,6 +1,6 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use dock_core::{Layout, LayoutRects, NodeId};
+use dock_core::{FloatingGroupId, Layout, LayoutRects, NodeId};
 use gpui::{
     Div, InteractiveElement, MouseButton, ParentElement, ScrollHandle, Styled, div, px, rgb,
 };
@@ -30,6 +30,7 @@ pub struct DockSurface<'a> {
     scroll_handles: &'a HashMap<NodeId, ScrollHandle>,
     theme: &'a Theme,
     overlay: Option<&'a DragOverlay>,
+    excluded_floating_groups: Option<&'a HashSet<FloatingGroupId>>,
 }
 
 impl<'a> DockSurface<'a> {
@@ -46,11 +47,21 @@ impl<'a> DockSurface<'a> {
             scroll_handles,
             theme,
             overlay,
+            excluded_floating_groups: None,
         }
     }
 
+    /// Omits floating groups that are rendered in independent native windows.
+    pub(crate) fn exclude_floating_groups(
+        mut self,
+        groups: &'a HashSet<FloatingGroupId>,
+    ) -> Self {
+        self.excluded_floating_groups = Some(groups);
+        self
+    }
+
     pub fn build(self, host: &mut dyn DockHost) -> Div {
-        render_layout(
+        render_layout_excluding(
             self.layout,
             self.frame.rects(),
             Some(self.frame),
@@ -58,6 +69,7 @@ impl<'a> DockSurface<'a> {
             self.theme,
             host,
             self.overlay,
+            self.excluded_floating_groups,
         )
     }
 }
@@ -71,6 +83,29 @@ pub(crate) fn render_layout(
     theme: &Theme,
     host: &mut dyn DockHost,
     overlay: Option<&DragOverlay>,
+) -> Div {
+    render_layout_excluding(
+        layout,
+        rects,
+        frame,
+        scroll_handles,
+        theme,
+        host,
+        overlay,
+        None,
+    )
+}
+
+/// Shared composition for regular and native-window-backed floating groups.
+pub(crate) fn render_layout_excluding(
+    layout: &Layout,
+    rects: &LayoutRects,
+    frame: Option<&FrameGeometry>,
+    scroll_handles: &HashMap<NodeId, ScrollHandle>,
+    theme: &Theme,
+    host: &mut dyn DockHost,
+    overlay: Option<&DragOverlay>,
+    excluded_floating_groups: Option<&HashSet<FloatingGroupId>>,
 ) -> Div {
     let data = RenderData {
         layout,
@@ -97,7 +132,7 @@ pub(crate) fn render_layout(
     for element in layers::outer_edges::render(&data, host) {
         root = root.child(element);
     }
-    for element in layers::floating::render(&data, host) {
+    for element in layers::floating::render(&data, host, excluded_floating_groups) {
         root = root.child(element);
     }
     for element in layers::flyout::render(&data, host) {
