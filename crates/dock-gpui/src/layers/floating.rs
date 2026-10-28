@@ -112,33 +112,41 @@ pub(crate) fn render_group(
     }
 
     if mode == FloatingGroupRenderMode::NativeWindow {
-        // Native title-bar movement is handled by the OS. This small capture affordance
-        // starts an application-owned drag that can dock the entire group back into the workspace.
-        let capture_size = theme
-            .metrics
-            .button_size
-            .min(bounds.size.height)
-            .min(bounds.size.width)
-            .max(1.0);
-        container = container.child(
-            div()
-                .absolute()
-                .left(px((bounds.size.width - capture_size).max(0.0)))
-                .top(px(0.0))
-                .w(px(capture_size))
-                .h(px(capture_size))
-                .bg(rgb(theme.colors.floating_title_background))
-                .text_color(rgb(theme.colors.primary_text))
-                .child("⇲")
-                .id(format!("dock-floating-native-capture-{:?}", floating_id))
-                .on_mouse_down(
-                    MouseButton::Left,
-                    host.drag_start(
-                        DragPayload::FloatingGroup { group: floating_id },
-                        DragHandle::FloatingCapture,
-                    ),
-                ),
-        );
+        // Native title-bar movement is handled by the OS. When Core can express
+        // the source as one group, this capture affordance offers a direct dock-back drag.
+        let capture_drag = match layout.node(area.root) {
+            Some(Node::Tabs(_) | Node::Panel(_)) => Some((
+                DragPayload::FloatingGroup { group: floating_id },
+                DragHandle::FloatingCapture,
+            )),
+            Some(Node::Column(column)) if column.groups.len() == 1 => {
+                let group = column.groups[0];
+                matches!(layout.node(group), Some(Node::Tabs(_)))
+                    .then_some((DragPayload::Group { group }, DragHandle::GroupGrip))
+            }
+            _ => None,
+        };
+        if let Some((payload, handle)) = capture_drag {
+            let capture_size = theme
+                .metrics
+                .button_size
+                .min(bounds.size.height)
+                .min(bounds.size.width)
+                .max(1.0);
+            container = container.child(
+                div()
+                    .absolute()
+                    .left(px((bounds.size.width - capture_size).max(0.0)))
+                    .top(px(0.0))
+                    .w(px(capture_size))
+                    .h(px(capture_size))
+                    .bg(rgb(theme.colors.floating_title_background))
+                    .text_color(rgb(theme.colors.primary_text))
+                    .child("⇲")
+                    .id(format!("dock-floating-native-capture-{:?}", floating_id))
+                    .on_mouse_down(MouseButton::Left, host.drag_start(payload, handle)),
+            );
+        }
     }
 
     if mode == FloatingGroupRenderMode::DockSurface {
