@@ -30,6 +30,8 @@ impl DragGeometrySnapshot {
 pub(crate) struct DragGesture {
     pub(super) payload: DragPayload,
     pub(super) handle: DragHandle,
+    /// External drags resolve against the main dock only, not hidden floating geometry.
+    pub(super) external_window_drag: bool,
     pub(super) origin: Point,
     pub(super) core: Option<CoreDragSession>,
     pub(super) snapshot: Option<DragGeometrySnapshot>,
@@ -45,6 +47,7 @@ impl fmt::Debug for DragGesture {
             .debug_struct("DragGesture")
             .field("payload", &self.payload)
             .field("handle", &self.handle)
+            .field("external_window_drag", &self.external_window_drag)
             .field("origin", &self.origin)
             .field("core_started", &self.core.is_some())
             .field("snapshot", &self.snapshot)
@@ -121,6 +124,7 @@ impl DragGesture {
         Ok(Self {
             payload,
             handle,
+            external_window_drag: false,
             origin,
             core: None,
             snapshot: None,
