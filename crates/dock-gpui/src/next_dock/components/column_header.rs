@@ -88,32 +88,6 @@ impl RenderOnce for ColumnHeader {
                 .with_centered_glyph()
                 .into_any_element(),
             )
-            .child(
-                IconButton::new(
-                    format!("next-dock-column-collapse-{}", self.key),
-                    collapse_rect,
-                    ">>",
-                    &theme,
-                    noop_click(),
-                )
-                .with_colors(background, hover_background)
-                .with_border()
-                .with_centered_glyph()
-                .into_any_element(),
-            )
-            .child(
-                IconButton::new(
-                    format!("next-dock-column-close-{}", self.key),
-                    close_rect,
-                    "×",
-                    &theme,
-                    noop_click(),
-                )
-                .with_colors(background, hover_background)
-                .with_border()
-                .with_centered_glyph()
-                .into_any_element(),
-            )
     }
 }
 
