@@ -51,6 +51,13 @@ pub trait DockHost {
 
     fn resize_start(&self, handle: ResizeHandle) -> ResizeStartHandler;
 
+    /// Handles keyboard resizing for a supported dock splitter.
+    ///
+    /// Preview hosts may keep the default no-op implementation.
+    fn resize_key(&self, _handle: ResizeHandle) -> CommandKeyHandler {
+        Box::new(|_, _, _| {})
+    }
+
     /// Installs the single root-level move listener for the active surface gesture.
     fn surface_mouse_move(&self) -> SurfaceMouseMoveHandler {
         Box::new(|_, _, _| {})
