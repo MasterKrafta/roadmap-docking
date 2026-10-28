@@ -115,7 +115,16 @@ pub(crate) fn render_group(
         // Native title-bar movement is handled by the OS. When Core can express
         // the source as one group, this capture affordance offers a direct dock-back drag.
         let capture_drag = match layout.node(area.root) {
-            Some(Node::Tabs(_) | Node::Panel(_) | Node::Column(_)) => Some((
+            Some(Node::Tabs(_) | Node::Panel(_)) => Some((
+                DragPayload::FloatingGroup { group: floating_id },
+                DragHandle::FloatingCapture,
+            )),
+            Some(Node::Column(column)) if column.groups.len() == 1 => {
+                let group = column.groups[0];
+                matches!(layout.node(group), Some(Node::Tabs(_)))
+                    .then_some((DragPayload::Group { group }, DragHandle::GroupGrip))
+            }
+            Some(Node::Column(_)) => Some((
                 DragPayload::FloatingGroup { group: floating_id },
                 DragHandle::FloatingCapture,
             )),
@@ -182,10 +191,13 @@ pub(crate) fn render_group(
                     DragPayload::FloatingGroup { group: floating_id },
                     DragHandle::FloatingTitle,
                 ),
-                on_capture_drag_start: matches!(
+                on_capture_drag_start: (matches!(
                     layout.node(area.root),
-                    Some(Node::Tabs(_) | Node::Panel(_) | Node::Column(_))
-                )
+                    Some(Node::Tabs(_) | Node::Panel(_))
+                ) || matches!(
+                    layout.node(area.root),
+                    Some(Node::Column(column)) if column.groups.len() > 1
+                ))
                 .then(|| {
                     host.drag_start(
                         DragPayload::FloatingGroup { group: floating_id },
