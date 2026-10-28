@@ -24,6 +24,8 @@ pub struct ColumnModeButton {
 
 impl RenderOnce for ColumnModeButton {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+        let background_color = self.theme.colors.column_mode_button;
+        let hover_color = self.theme.colors.column_mode_button_hover;
         IconButton::new(
             format!("dock-column-mode-{:?}", self.column),
             self.rect,
@@ -31,6 +33,7 @@ impl RenderOnce for ColumnModeButton {
             &self.theme,
             self.on_toggle,
         )
+        .with_colors(background_color, hover_color)
         .with_border()
     }
 }

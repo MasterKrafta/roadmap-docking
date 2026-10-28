@@ -57,7 +57,7 @@ impl RenderOnce for FloatingTitle {
             .top(px(self.rect.origin.y))
             .w(px(self.rect.size.width))
             .h(px(self.rect.size.height))
-            .bg(rgb(self.theme.colors.toolbar_background))
+            .bg(rgb(self.theme.colors.floating_title_background))
             .font_family(typography.family)
             .text_size(px(typography.title_size))
             .line_height(px(typography.line_height));
@@ -125,7 +125,7 @@ impl RenderOnce for FloatingTitle {
                 .top(px(0.0))
                 .w(px(button_width))
                 .h(px(self.rect.size.height))
-                .bg(rgb(self.theme.colors.toolbar_background))
+                .bg(rgb(self.theme.colors.floating_title_background))
                 .text_color(rgb(self.theme.colors.primary_text))
                 .child("⇲")
                 .id(format!("dock-floating-capture-{:?}", self.group))

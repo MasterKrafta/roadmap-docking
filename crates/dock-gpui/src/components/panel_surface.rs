@@ -21,7 +21,7 @@ impl RenderOnce for PanelSurface {
         let content_height = self.rect.size.height;
         let padding = self.theme.metrics.content_padding;
 
-        RectBox::new(self.rect, self.theme.colors.group_background).child(
+        RectBox::new(self.rect, self.theme.colors.panel_surface_background).child(
             div()
                 .w(px(content_width))
                 .h(px(content_height))

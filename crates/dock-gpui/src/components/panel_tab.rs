@@ -45,14 +45,14 @@ pub struct PanelTab {
 impl RenderOnce for PanelTab {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
         let background = if self.active {
-            self.theme.colors.active_tab
+            self.theme.colors.panel_tab_active
         } else {
-            self.theme.colors.toolbar_background
+            self.theme.colors.panel_tab_inactive
         };
         let hover_background = if self.active {
             background
         } else {
-            self.theme.colors.hover
+            self.theme.colors.panel_tab_hover
         };
         let typography = self.theme.typography;
 

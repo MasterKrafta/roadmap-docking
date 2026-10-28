@@ -47,7 +47,7 @@ impl RenderOnce for ResizeEdgeHandle {
             .top(px(self.rect.origin.y))
             .w(px(self.rect.size.width))
             .h(px(self.rect.size.height))
-            .bg(rgb(self.theme.colors.splitter))
+            .bg(rgb(self.theme.colors.resize_edge_handle))
             .id(id);
 
         if let Some(on_resize_key) = self.on_resize_key {

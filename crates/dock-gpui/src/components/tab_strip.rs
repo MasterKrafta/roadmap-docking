@@ -15,6 +15,6 @@ pub struct TabStrip {
 
 impl RenderOnce for TabStrip {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
-        RectBox::new(self.rect, self.theme.colors.toolbar_background)
+        RectBox::new(self.rect, self.theme.colors.tab_strip_background)
     }
 }

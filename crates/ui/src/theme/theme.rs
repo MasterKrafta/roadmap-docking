@@ -28,6 +28,36 @@ impl Theme {
             ("focus", self.colors.focus),
             ("drop_target", self.colors.drop_target),
             ("toolbar_background", self.colors.toolbar_background),
+            ("column_mode_button", self.colors.column_mode_button),
+            ("column_mode_button_hover", self.colors.column_mode_button_hover),
+            ("drop_zone", self.colors.drop_zone),
+            ("drop_zone_border", self.colors.drop_zone_border),
+            ("floating_title_background", self.colors.floating_title_background),
+            ("flyout_header_background", self.colors.flyout_header_background),
+            ("group_frame_background", self.colors.group_frame_background),
+            ("group_frame_border", self.colors.group_frame_border),
+            ("group_grip_background", self.colors.group_grip_background),
+            ("group_menu_button", self.colors.group_menu_button),
+            ("group_menu_button_hover", self.colors.group_menu_button_hover),
+            ("icon_button_background", self.colors.icon_button_background),
+            ("icon_button_hover", self.colors.icon_button_hover),
+            ("icon_button_border", self.colors.icon_button_border),
+            ("panel_surface_background", self.colors.panel_surface_background),
+            ("panel_tab_active", self.colors.panel_tab_active),
+            ("panel_tab_inactive", self.colors.panel_tab_inactive),
+            ("panel_tab_hover", self.colors.panel_tab_hover),
+            ("popup_menu_background", self.colors.popup_menu_background),
+            ("popup_menu_selected", self.colors.popup_menu_selected),
+            ("popup_menu_hover", self.colors.popup_menu_hover),
+            ("popup_menu_border", self.colors.popup_menu_border),
+            ("rail_entry_active", self.colors.rail_entry_active),
+            ("rail_entry_inactive", self.colors.rail_entry_inactive),
+            ("rail_entry_hover", self.colors.rail_entry_hover),
+            ("resize_edge_handle", self.colors.resize_edge_handle),
+            ("splitter_handle", self.colors.splitter_handle),
+            ("tab_overflow_button", self.colors.tab_overflow_button),
+            ("tab_overflow_button_hover", self.colors.tab_overflow_button_hover),
+            ("tab_strip_background", self.colors.tab_strip_background),
         ] {
             if color > 0xFF_FFFF {
                 return Err(match name {
@@ -44,7 +74,7 @@ impl Theme {
                     "focus" => "focus must be a 24-bit RGB color",
                     "drop_target" => "drop_target must be a 24-bit RGB color",
                     "toolbar_background" => "toolbar_background must be a 24-bit RGB color",
-                    _ => "theme colors must be 24-bit RGB values",
+                    _ => "component theme colors must be 24-bit RGB values",
                 });
             }
         }
@@ -79,5 +109,16 @@ mod tests {
         theme.colors.focus = 0x1FF_0000;
 
         assert_eq!(theme.validate(), Err("focus must be a 24-bit RGB color"));
+    }
+
+    #[test]
+    fn rejects_non_rgb_component_palette_values() {
+        let mut theme = Theme::default();
+        theme.colors.popup_menu_background = 0x1FF_0000;
+
+        assert_eq!(
+            theme.validate(),
+            Err("component theme colors must be 24-bit RGB values")
+        );
     }
 }

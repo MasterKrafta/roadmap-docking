@@ -19,14 +19,14 @@ impl RenderOnce for DropZone {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
         let weight = if self.active { 0.38 } else { 0.13 };
         let fill = blend_rgb(
-            self.theme.colors.drop_target,
+            self.theme.colors.drop_zone,
             self.theme.colors.canvas_background,
             weight,
         );
         let border = if self.active {
-            self.theme.colors.focus
+            self.theme.colors.drop_zone_border
         } else {
-            self.theme.colors.drop_target
+            self.theme.colors.drop_zone
         };
 
         div()
@@ -47,8 +47,9 @@ mod tests {
 
     #[test]
     fn active_and_idle_drop_zones_use_distinct_blends() {
-        let active = blend_rgb(0x0C8CE9, 0x121212, 0.38);
-        let idle = blend_rgb(0x0C8CE9, 0x121212, 0.13);
+        let theme = ui::Theme::default();
+        let active = blend_rgb(theme.colors.drop_zone, theme.colors.canvas_background, 0.38);
+        let idle = blend_rgb(theme.colors.drop_zone, theme.colors.canvas_background, 0.13);
 
         assert_ne!(active, idle);
         assert_ne!(active, 0x121212);

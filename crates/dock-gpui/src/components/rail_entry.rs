@@ -36,14 +36,14 @@ impl RenderOnce for RailEntry {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
         let label = crate::labels::rail_entry_label(self.mode, &self.icon, &self.title);
         let background = if self.active {
-            self.theme.colors.active_tab
+            self.theme.colors.rail_entry_active
         } else {
-            self.theme.colors.toolbar_background
+            self.theme.colors.rail_entry_inactive
         };
         let hover_background = if self.active {
             background
         } else {
-            self.theme.colors.hover
+            self.theme.colors.rail_entry_hover
         };
         let typography = self.theme.typography;
         let entry = div()

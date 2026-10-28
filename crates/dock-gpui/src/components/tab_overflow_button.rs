@@ -19,6 +19,8 @@ pub struct TabOverflowButton {
 
 impl RenderOnce for TabOverflowButton {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+        let background_color = self.theme.colors.tab_overflow_button;
+        let hover_color = self.theme.colors.tab_overflow_button_hover;
         IconButton::new(
             format!("dock-tab-overflow-{:?}", self.group),
             self.rect,
@@ -26,5 +28,6 @@ impl RenderOnce for TabOverflowButton {
             &self.theme,
             self.on_open,
         )
+        .with_colors(background_color, hover_color)
     }
 }

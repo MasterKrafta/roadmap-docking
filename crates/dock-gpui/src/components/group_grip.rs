@@ -31,7 +31,7 @@ impl RenderOnce for GroupGrip {
             .top(px(self.rect.origin.y))
             .w(px(self.rect.size.width))
             .h(px(self.rect.size.height))
-            .bg(rgb(self.theme.colors.toolbar_background))
+            .bg(rgb(self.theme.colors.group_grip_background))
             .id(format!("dock-group-grip-{:?}", self.group));
 
         if let Some(on_move_key) = self.on_move_key {

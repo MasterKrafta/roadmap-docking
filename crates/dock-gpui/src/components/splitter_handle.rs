@@ -35,7 +35,7 @@ impl RenderOnce for SplitterHandle {
             .top(px(self.rect.origin.y))
             .w(px(self.rect.size.width))
             .h(px(self.rect.size.height))
-            .bg(rgb(self.theme.colors.splitter));
+            .bg(rgb(self.theme.colors.splitter_handle));
 
         match (self.on_resize_start, self.on_resize_key) {
             (Some(on_resize_start), Some(on_resize_key)) => {

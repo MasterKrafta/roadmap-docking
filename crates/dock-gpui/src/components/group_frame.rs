@@ -19,8 +19,8 @@ impl RenderOnce for GroupFrame {
             .top(px(self.rect.origin.y))
             .w(px(self.rect.size.width))
             .h(px(self.rect.size.height))
-            .bg(rgb(self.theme.colors.group_background))
+            .bg(rgb(self.theme.colors.group_frame_background))
             .border_1()
-            .border_color(rgb(self.theme.colors.border))
+            .border_color(rgb(self.theme.colors.group_frame_border))
     }
 }

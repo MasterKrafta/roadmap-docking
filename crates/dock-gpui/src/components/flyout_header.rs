@@ -32,7 +32,7 @@ impl RenderOnce for FlyoutHeader {
             .top(px(self.rect.origin.y))
             .w(px(self.rect.size.width))
             .h(px(self.rect.size.height))
-            .bg(rgb(self.theme.colors.toolbar_background))
+            .bg(rgb(self.theme.colors.flyout_header_background))
             .text_color(rgb(self.theme.colors.primary_text))
             .child(self.title);
 

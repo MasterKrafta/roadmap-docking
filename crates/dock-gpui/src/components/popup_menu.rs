@@ -44,13 +44,13 @@ impl RenderOnce for PopupMenu {
             .top(px(self.bounds.origin.y))
             .w(px(self.bounds.size.width))
             .h(px(self.bounds.size.height))
-            .bg(rgb(self.theme.colors.window_background))
+            .bg(rgb(self.theme.colors.popup_menu_background))
             .text_color(rgb(self.theme.colors.primary_text))
             .font_family(typography.family)
             .text_size(px(typography.body_size))
             .line_height(px(typography.line_height))
             .border_1()
-            .border_color(rgb(self.theme.colors.border));
+            .border_color(rgb(self.theme.colors.popup_menu_border));
 
         for item in self.items {
             let mut row = div()
@@ -63,7 +63,7 @@ impl RenderOnce for PopupMenu {
                 .text_color(rgb(self.theme.colors.primary_text));
 
             if item.selected {
-                row = row.bg(rgb(self.theme.colors.toolbar_background));
+                row = row.bg(rgb(self.theme.colors.popup_menu_selected));
             }
 
             row = row.child(if item.checked { "✓" } else { " " });
@@ -72,7 +72,7 @@ impl RenderOnce for PopupMenu {
             if item.enabled
                 && let Some(on_select) = item.on_select
             {
-                let hover_color = self.theme.colors.hover;
+                let hover_color = self.theme.colors.popup_menu_hover;
                 popup = popup.child(
                     with_focus_ring(row, &self.theme)
                         .hover(move |style| style.bg(rgb(hover_color)))

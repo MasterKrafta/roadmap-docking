@@ -22,6 +22,8 @@ pub struct GroupMenuButton {
 impl RenderOnce for GroupMenuButton {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
         let _panel = self.panel;
+        let background_color = self.theme.colors.group_menu_button;
+        let hover_color = self.theme.colors.group_menu_button_hover;
         IconButton::new(
             format!("dock-group-menu-{:?}", self.group),
             self.rect,
@@ -29,6 +31,7 @@ impl RenderOnce for GroupMenuButton {
             &self.theme,
             self.on_open,
         )
+        .with_colors(background_color, hover_color)
         .with_border()
     }
 }
