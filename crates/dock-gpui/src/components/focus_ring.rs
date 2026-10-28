@@ -1,3 +1,4 @@
+use dock_core::Axis;
 use gpui::{Keystroke, StatefulInteractiveElement, Styled, rgb};
 use ui::Theme;
 
@@ -28,6 +29,27 @@ pub(crate) fn keyboard_tab_reorder_direction(
     }
 }
 
+/// Returns a signed resize delta for arrow-key input on a focused splitter.
+///
+/// Arrow keys follow the splitter axis. Shift selects a larger, 50px increment;
+/// unmodified arrows move the boundary by 10px. Command/control shortcuts are
+/// left to the focused element's normal shortcut handling.
+pub(crate) fn keyboard_resize_delta(keystroke: &Keystroke, axis: Axis) -> Option<f32> {
+    let modifiers = keystroke.modifiers;
+    if modifiers.control || modifiers.platform || modifiers.alt || modifiers.function {
+        return None;
+    }
+
+    let step = if modifiers.shift { 50.0 } else { 10.0 };
+    match (axis, keystroke.key.to_ascii_lowercase().as_str()) {
+        (Axis::X, "left" | "arrowleft") => Some(-step),
+        (Axis::X, "right" | "arrowright") => Some(step),
+        (Axis::Y, "up" | "arrowup") => Some(-step),
+        (Axis::Y, "down" | "arrowdown") => Some(step),
+        _ => None,
+    }
+}
+
 /// Returns whether a keystroke should activate a focused dock control.
 pub(crate) fn is_keyboard_activation_key(key: &str) -> bool {
     key.eq_ignore_ascii_case("enter")
@@ -51,8 +73,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        TabReorderDirection, is_keyboard_activation_key, keyboard_tab_reorder_direction,
+        TabReorderDirection, is_keyboard_activation_key, keyboard_resize_delta,
+        keyboard_tab_reorder_direction,
     };
+    use dock_core::Axis;
     use gpui::{Keystroke, Modifiers};
 
     fn key(key: &str, modifiers: Modifiers) -> Keystroke {
@@ -123,6 +147,58 @@ mod tests {
             keyboard_tab_reorder_direction(&key("escape", Modifiers::default())),
             None
         );
+    }
+
+    #[test]
+    fn keyboard_resize_uses_axis_direction_and_shift_step() {
+        assert_eq!(
+            keyboard_resize_delta(
+                &key("left", Modifiers::default()),
+                Axis::X
+            ),
+            Some(-10.0)
+        );
+        assert_eq!(
+            keyboard_resize_delta(
+                &key("ArrowRight", Modifiers::default()),
+                Axis::X
+            ),
+            Some(10.0)
+        );
+        assert_eq!(
+            keyboard_resize_delta(
+                &key("up", Modifiers::default()),
+                Axis::Y
+            ),
+            Some(-10.0)
+        );
+        assert_eq!(
+            keyboard_resize_delta(
+                &key("down", Modifiers { shift: true, ..Modifiers::default() }),
+                Axis::Y
+            ),
+            Some(50.0)
+        );
+    }
+
+    #[test]
+    fn keyboard_resize_ignores_wrong_axis_and_modified_shortcuts() {
+        assert_eq!(
+            keyboard_resize_delta(&key("up", Modifiers::default()), Axis::X),
+            None
+        );
+        assert_eq!(
+            keyboard_resize_delta(&key("right", Modifiers::default()), Axis::Y),
+            None
+        );
+        for modifiers in [
+            Modifiers { control: true, ..Modifiers::default() },
+            Modifiers { platform: true, ..Modifiers::default() },
+            Modifiers { alt: true, ..Modifiers::default() },
+            Modifiers { function: true, ..Modifiers::default() },
+        ] {
+            assert_eq!(keyboard_resize_delta(&key("right", modifiers), Axis::X), None);
+        }
     }
 
     #[test]
