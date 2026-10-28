@@ -149,6 +149,7 @@ impl Render for Gallery {
                             on_activate: noop_click(),
                             on_activate_key: noop_key_down(),
                             on_reorder_key: noop_key_down(),
+                            on_move_panel_key: Some(noop_key_down()),
                             on_collapse_toggle: noop_click(),
                             on_drag_start: noop_mouse_down(),
                         })
@@ -161,6 +162,7 @@ impl Render for Gallery {
                             on_activate: noop_click(),
                             on_activate_key: noop_key_down(),
                             on_reorder_key: noop_key_down(),
+                            on_move_panel_key: Some(noop_key_down()),
                             on_collapse_toggle: noop_click(),
                             on_drag_start: noop_mouse_down(),
                         }),
@@ -186,6 +188,7 @@ impl Render for Gallery {
                             on_activate: noop_click(),
                             on_activate_key: noop_key_down(),
                             on_reorder_key: noop_key_down(),
+                            on_move_panel_key: Some(noop_key_down()),
                             on_collapse_toggle: noop_click(),
                             on_drag_start: noop_mouse_down(),
                         })
@@ -198,6 +201,7 @@ impl Render for Gallery {
                             on_activate: noop_click(),
                             on_activate_key: noop_key_down(),
                             on_reorder_key: noop_key_down(),
+                            on_move_panel_key: Some(noop_key_down()),
                             on_collapse_toggle: noop_click(),
                             on_drag_start: noop_mouse_down(),
                         })
