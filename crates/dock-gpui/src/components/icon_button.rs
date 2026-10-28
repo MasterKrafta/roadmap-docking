@@ -1,11 +1,11 @@
 use dock_core::Rect;
 use gpui::{
-    App, ClickEvent, InteractiveElement, IntoElement, ParentElement, RenderOnce,
+    App, InteractiveElement, IntoElement, ParentElement, RenderOnce,
     StatefulInteractiveElement, Styled, Window, div, px, rgb,
 };
 use ui::Theme;
 
-use crate::components::with_focus_ring;
+use crate::components::{with_focus_ring, ClickHandler};
 
 /// A small absolutely positioned button that displays a single glyph.
 #[derive(IntoElement)]
@@ -15,7 +15,7 @@ pub struct IconButton {
     glyph: String,
     theme: Theme,
     border: bool,
-    on_click: Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>,
+    on_click: ClickHandler,
 }
 
 impl IconButton {
