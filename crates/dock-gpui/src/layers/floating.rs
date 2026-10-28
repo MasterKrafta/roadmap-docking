@@ -123,7 +123,10 @@ pub(crate) fn render(
                         group: handle.group,
                         edge: handle.edge,
                     }),
-                    on_resize_key: None,
+                    on_resize_key: Some(host.resize_key(ResizeHandle::FloatingEdge {
+                        group: handle.group,
+                        edge: handle.edge,
+                    })),
                 }
                 .into_any_element(),
             );
