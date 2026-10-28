@@ -4,7 +4,7 @@ use std::{
 };
 
 use dock_core::{
-    Axis, DockCommand, DragHandle, DragPayload, FloatingGroupId, Point, Rect, ResizeEdge, Size,
+    Axis, DockCommand, DragHandle, DragPayload, FloatingGroupId, Point, Rect, Size,
 };
 use gpui::{
     Context, DispatchPhase, InteractiveElement, IntoElement, KeyDownEvent, MouseButton,
@@ -13,7 +13,10 @@ use gpui::{
 };
 use ui::Theme;
 
-use crate::components::{focus_ring::keyboard_resize_delta, with_focus_ring, PopupMenu, PopupMenuItem};
+use crate::components::{
+    focus_ring::{keyboard_resize_axis_for_floating_edge, keyboard_resize_delta},
+    with_focus_ring, PopupMenu, PopupMenuItem,
+};
 use crate::host::DockHost;
 use crate::dock::{
     floating_group_at_point, resolve_shortcut, DockController, DockInitializationError, Shortcut,
@@ -417,21 +420,12 @@ impl MainWindow {
         let axis = match handle {
             ResizeHandle::Splitter { axis, .. } => axis,
             ResizeHandle::OuterColumn { .. } | ResizeHandle::Flyout { .. } => Axis::X,
-            ResizeHandle::FloatingEdge { edge, .. } => match edge {
-                ResizeEdge::Left | ResizeEdge::Right => Axis::X,
-                ResizeEdge::Top | ResizeEdge::Bottom => Axis::Y,
-                ResizeEdge::TopLeft
-                | ResizeEdge::TopRight
-                | ResizeEdge::BottomLeft
-                | ResizeEdge::BottomRight => {
-                    if keyboard_resize_delta(&event.keystroke, Axis::X).is_some() {
-                        Axis::X
-                    } else if keyboard_resize_delta(&event.keystroke, Axis::Y).is_some() {
-                        Axis::Y
-                    } else {
-                        return;
-                    }
-                }
+            ResizeHandle::FloatingEdge { edge, .. } => {
+                let Some(axis) = keyboard_resize_axis_for_floating_edge(&event.keystroke, edge)
+                else {
+                    return;
+                };
+                axis
             },
         };
         let Some(delta) = keyboard_resize_delta(&event.keystroke, axis) else {
