@@ -1,6 +1,8 @@
 use dock_core::PanelInstance;
 use gpui::{AnyElement, Div, IntoElement, ParentElement, Styled, div, px, rgb};
 
+use crate::labels::UNKNOWN_PANEL_TITLE;
+
 /// Renders intentionally generic placeholder content for the bundled reference window.
 ///
 /// This is the sample registry callback, not an application data renderer. The enclosing dock
@@ -25,7 +27,7 @@ pub fn render_missing(instance: &PanelInstance) -> AnyElement {
         .flex()
         .items_center()
         .justify_center()
-        .child(format!("Missing panel: {}", instance.key))
+        .child(format!("{UNKNOWN_PANEL_TITLE}: {}", instance.key))
         .into_any_element()
 }
 

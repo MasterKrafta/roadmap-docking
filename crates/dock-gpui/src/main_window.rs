@@ -18,6 +18,7 @@ use crate::components::{
     with_focus_ring, PopupMenu, PopupMenuItem,
 };
 use crate::host::DockHost;
+use crate::labels::{DOCK_GEOMETRY_ERROR_PREFIX, PANEL_MENU_TRIGGER_LABEL};
 use crate::dock::{
     floating_group_at_point, resolve_shortcut, DockController, DockInitializationError, Shortcut,
     WindowHost,
@@ -820,7 +821,7 @@ impl Render for MainWindow {
                     .h(px(height))
                     .bg(rgb(self.theme.colors.window_background))
                     .text_color(rgb(self.theme.colors.primary_text))
-                    .child(format!("Could not compute dock geometry: {error:?}"));
+                    .child(format!("{DOCK_GEOMETRY_ERROR_PREFIX}: {error:?}"));
             }
         };
         let menu_state_snapshot = self.menu_state.clone();
@@ -886,7 +887,7 @@ impl Render for MainWindow {
                 .h(px(menu_height))
                 .px(px(10.0))
                 .text_color(rgb(self.theme.colors.primary_text))
-                .child("Dockers ▾"),
+                .child(PANEL_MENU_TRIGGER_LABEL),
             &self.theme,
         )
         .on_click(host.menu(DockMenuRequest::Dockers));

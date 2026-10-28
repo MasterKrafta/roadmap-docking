@@ -3,6 +3,7 @@ use gpui::{AnyElement, IntoElement, ParentElement, Styled, rgb};
 
 use crate::components::{FloatingTitle, ResizeEdgeHandle, ResizeEdgeKind};
 use crate::host::DockHost;
+use crate::labels::FLOATING_GROUP_TITLE;
 use crate::requests::ResizeHandle;
 use crate::surface::RenderData;
 use crate::tree_query::first_panel_in_subtree;
@@ -55,7 +56,7 @@ pub(crate) fn render(
         let title = first_panel_in_subtree(layout, area.root)
             .and_then(|panel| layout.panel_instance(panel))
             .map(|instance| host.panel_title(instance).to_string())
-            .unwrap_or_else(|| "Floating group".to_owned());
+            .unwrap_or_else(|| FLOATING_GROUP_TITLE.to_owned());
         let collapse_target = match layout.node(area.root) {
             Some(Node::Tabs(tabs)) => Some((area.root, tabs.collapsed)),
             Some(Node::Column(column)) if column.groups.len() == 1 => {

@@ -7,6 +7,8 @@ use dock_core::{PanelConstraints, PanelInstance, PanelKey, Size};
 use gpui::{AnyElement, SharedString};
 use ui::Theme;
 
+use crate::labels::UNKNOWN_PANEL_TITLE;
+
 
 pub mod content;
 
@@ -64,7 +66,7 @@ pub fn def_for(instance: &PanelInstance) -> Option<&'static PanelDef> {
 pub fn panel_title(instance: &PanelInstance) -> String {
     def_for(instance)
         .map(|definition| definition.title.to_string())
-        .unwrap_or_else(|| "Missing panel".to_owned())
+        .unwrap_or_else(|| UNKNOWN_PANEL_TITLE.to_owned())
 }
 
 /// Returns the rail icon for a panel, or a question mark for unknown kinds.
@@ -170,7 +172,7 @@ mod tests {
             PanelKey::new("unknown-panel").expect("test key should be valid"),
             constraints,
         );
-        assert_eq!(super::panel_title(&unknown), "Missing panel");
+        assert_eq!(super::panel_title(&unknown), crate::labels::UNKNOWN_PANEL_TITLE);
         assert_eq!(super::panel_icon(&unknown), "?");
         let _fallback = super::render_panel(&unknown);
     }
