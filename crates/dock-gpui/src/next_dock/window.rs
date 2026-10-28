@@ -16,6 +16,7 @@ pub(super) struct NextDockWindow {
     floating_composition: Option<Rect>,
     pending_move: Option<PendingCompositionMove>,
     active_move: Option<ActiveCompositionMove>,
+    composition_drop_zone: Option<CompositionDropZone>,
 }
 
 #[derive(Clone)]
@@ -37,6 +38,14 @@ struct ActiveCompositionMove {
     viewport_size: Size,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum CompositionDropZone {
+    LeftEdge,
+    RightEdge,
+}
+
+const COMPOSITION_DROP_ZONE_WIDTH: f32 = 24.0;
+
 impl NextDockWindow {
     pub(super) fn new(theme: Theme) -> Self {
         Self {
@@ -46,6 +55,7 @@ impl NextDockWindow {
             floating_composition: None,
             pending_move: None,
             active_move: None,
+            composition_drop_zone: None,
         }
     }
     pub(super) fn begin_resize(
@@ -148,6 +158,7 @@ impl NextDockWindow {
         viewport_width: f32,
         viewport_height: f32,
     ) {
+        self.composition_drop_zone = None;
         if self.active_resize.is_some() {
             return;
         }
@@ -197,7 +208,12 @@ impl NextDockWindow {
                 (active.start_origin.y + pointer.y - active.start_position.y).clamp(0.0, max_y),
             );
 
-            self.floating_composition = Some(Rect::new(origin, bounds.size));
+            let moved_bounds = Rect::new(origin, bounds.size);
+
+            self.floating_composition = Some(moved_bounds);
+            self.composition_drop_zone =
+                detect_composition_drop_zone(moved_bounds, active.viewport_size.width);
+
             cx.notify();
             return;
         }
@@ -243,7 +259,11 @@ impl NextDockWindow {
             (bounds.origin.y + dy).clamp(0.0, max_y),
         );
 
-        self.floating_composition = Some(Rect::new(origin, bounds.size));
+        let moved_bounds = Rect::new(origin, bounds.size);
+
+        self.floating_composition = Some(moved_bounds);
+        self.composition_drop_zone = detect_composition_drop_zone(moved_bounds, viewport_width);
+
         cx.notify();
     }
 
@@ -251,9 +271,28 @@ impl NextDockWindow {
         let had_pending = self.pending_move.take().is_some();
         let had_active = self.active_move.take().is_some();
 
+        if had_active && self.composition_drop_zone.is_some() {
+            // With only one composition, dropping at either window edge
+            // restores it to the full dock area.
+            self.floating_composition = None;
+        }
+
+        self.composition_drop_zone = None;
+
         if had_pending || had_active {
             cx.notify();
         }
+    }
+}
+
+fn detect_composition_drop_zone(bounds: Rect, viewport_width: f32) -> Option<CompositionDropZone> {
+    if bounds.origin.x <= COMPOSITION_DROP_ZONE_WIDTH {
+        Some(CompositionDropZone::LeftEdge)
+    } else if viewport_width - (bounds.origin.x + bounds.size.width) <= COMPOSITION_DROP_ZONE_WIDTH
+    {
+        Some(CompositionDropZone::RightEdge)
+    } else {
+        None
     }
 }
 
@@ -271,6 +310,7 @@ impl Render for NextDockWindow {
             &self.theme,
             cx.entity().downgrade(),
             self.floating_composition,
+            self.composition_drop_zone,
         )
     }
 }

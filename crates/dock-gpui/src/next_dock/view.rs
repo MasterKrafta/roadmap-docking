@@ -12,7 +12,7 @@ use crate::components::{GroupFrame, MouseDownHandler, PanelSurface, SplitterHand
 use super::components::{ColumnHeader, GroupHeader};
 use super::geometry::{self, GeometryKind, NodeGeometry};
 use super::model::{DockLayout, DockNode, NodePathStep, SplitAxis, TabGroup};
-use super::window::NextDockWindow;
+use super::window::{CompositionDropZone, NextDockWindow};
 
 #[derive(Clone)]
 pub(super) struct SplitResizeSpec {
@@ -33,6 +33,7 @@ pub(super) fn render(
     theme: &Theme,
     owner: WeakEntity<NextDockWindow>,
     floating: Option<Rect>,
+    drop_zone: Option<CompositionDropZone>,
 ) -> Div {
     let width = width.max(1.0);
     let height = height.max(1.0);
@@ -76,6 +77,26 @@ pub(super) fn render(
     } else {
         body.child(content)
     };
+
+    if let Some(drop_zone) = drop_zone {
+        let zone_width = 12.0;
+        let zone_x = match drop_zone {
+            CompositionDropZone::LeftEdge => 0.0,
+            CompositionDropZone::RightEdge => (width - zone_width).max(0.0),
+        };
+
+        body = body.child(
+            div()
+                .absolute()
+                .left(px(zone_x))
+                .top(px(0.0))
+                .w(px(zone_width))
+                .h(px(content_height))
+                .bg(rgb(theme.colors.splitter_handle))
+                .border_1()
+                .border_color(rgb(theme.colors.border)),
+        );
+    }
 
     let root = div()
         .flex()

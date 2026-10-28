@@ -7,6 +7,8 @@ use super::components::minimum_width_for_group;
 use super::model::{DockNode, SplitAxis};
 
 pub(super) const HEADER_HEIGHT: f32 = 36.0;
+/// Minimum width of a dock column in logical pixels.
+pub(super) const MIN_COLUMN_WIDTH: f32 = 180.0;
 
 #[derive(Clone, Debug)]
 pub(super) struct NodeGeometry {
@@ -61,7 +63,9 @@ pub(super) fn minimum_width(
 ) -> f32 {
     match node {
         DockNode::Tabs(group) => minimum_width_for_group(group, window, theme),
-        DockNode::Column { content } => minimum_width(content, splitter_thickness, window, theme),
+        DockNode::Column { content } => {
+            minimum_width(content, splitter_thickness, window, theme).max(MIN_COLUMN_WIDTH)
+        }
         DockNode::Split { axis, children, .. } => {
             let widths: Vec<f32> = children
                 .iter()
