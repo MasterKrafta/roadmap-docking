@@ -1,8 +1,8 @@
 use dock_core::{NodeId, Rect};
-use gpui::{App, ClickEvent, IntoElement, RenderOnce, Window};
+use gpui::{App, IntoElement, RenderOnce, Window};
 use ui::Theme;
 
-use crate::components::IconButton;
+use crate::components::{ClickHandler, IconButton};
 
 /// The button that opens the list of tabs hidden by group overflow.
 #[derive(IntoElement)]
@@ -14,7 +14,7 @@ pub struct TabOverflowButton {
     /// Shared application theme.
     pub theme: Theme,
     /// Opens the overflow menu.
-    pub on_open: Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>,
+    pub on_open: ClickHandler,
 }
 
 impl RenderOnce for TabOverflowButton {
