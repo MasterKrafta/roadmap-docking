@@ -162,9 +162,78 @@ impl FrameGeometry {
 mod tests {
     use super::FrameGeometry;
     use dock_core::{
-        DockMetrics, DockSide, PanelConstraints, PanelKey, Point, Profile, Rect, Size,
-        create_initial_layout,
+        ColumnMode, DockMetrics, DockSide, DropSource, DropZone, LayoutBuilder,
+        PanelConstraints, PanelKey, Point, Profile, Rect, Size, create_initial_layout,
     };
+
+    #[test]
+    fn main_dock_resolver_ignores_native_floating_window_targets() {
+        let metrics = DockMetrics::default();
+        let constraints = PanelConstraints::new(
+            Size::new(80.0, 60.0),
+            Size::new(180.0, 140.0),
+            None,
+            false,
+        );
+        let mut builder = LayoutBuilder::new(Profile::Photoshop);
+        let (source_panel, source_node) =
+            builder.panel(PanelKey::new("external-source").unwrap(), constraints);
+        let source_group = builder.tabs(vec![source_node], 0, false);
+        let (_, target_node) =
+            builder.panel(PanelKey::new("external-main-target").unwrap(), constraints);
+        let target_group = builder.tabs(vec![target_node], 0, false);
+        let main_column = builder.column(
+            metrics.default_column_width,
+            ColumnMode::Expanded,
+            vec![source_group, target_group],
+            vec![0.5, 0.5],
+        );
+        builder.main_area(DockSide::Left, main_column);
+
+        let (_, floating_a) =
+            builder.panel(PanelKey::new("external-floating-a").unwrap(), constraints);
+        let (_, floating_b) =
+            builder.panel(PanelKey::new("external-floating-b").unwrap(), constraints);
+        let floating_group = builder.tabs(vec![floating_a, floating_b], 0, false);
+        builder.floating_group(
+            floating_group,
+            Rect::new(Point::new(650.0, 120.0), Size::new(320.0, 300.0)),
+            1,
+        );
+
+        let layout = builder.build();
+        let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
+        let frame = FrameGeometry::compute(&layout, viewport, &metrics).unwrap();
+        let source = DropSource::Panel { panel: source_panel };
+        let all_windows = frame
+            .prepare_drop_resolver(&layout, source, &metrics)
+            .unwrap();
+        let main_dock_only = frame
+            .prepare_main_dock_resolver(&layout, source, &metrics)
+            .unwrap();
+
+        assert!(
+            all_windows
+                .zones()
+                .iter()
+                .any(|zone| zone.zone == DropZone::FloatingCenter),
+            "regular drags should still target floating groups"
+        );
+        assert!(
+            main_dock_only
+                .zones()
+                .iter()
+                .any(|zone| zone.zone == DropZone::Center),
+            "external drags should keep valid main-dock targets"
+        );
+        assert!(
+            !main_dock_only.zones().iter().any(|zone| matches!(
+                zone.zone,
+                DropZone::FloatingCenter | DropZone::FloatingTop | DropZone::FloatingBottom
+            )),
+            "external drags must not target hidden geometry underneath native windows"
+        );
+    }
 
     #[test]
     fn compute_is_deterministic_for_unchanged_layout() {
