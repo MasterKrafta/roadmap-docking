@@ -57,6 +57,7 @@ pub(crate) struct DockController {
     history: UndoRedoHistory,
     scroll_handles: HashMap<NodeId, ScrollHandle>,
     session: Session,
+    last_viewport: Option<Rect>,
     #[cfg(test)]
     last_error: Option<CommandError>,
 }
@@ -100,6 +101,7 @@ impl DockController {
             history: UndoRedoHistory::new(),
             scroll_handles: HashMap::new(),
             session: Session::Idle,
+            last_viewport: None,
             #[cfg(test)]
             last_error: None,
         }
@@ -111,6 +113,26 @@ impl DockController {
         // older layout snapshot. Roll the gesture back before mutating history.
         self.cancel_resize();
         self.cancel_drag();
+
+        if let Some(viewport) = self.last_viewport {
+            let mut candidate = self.layout.clone();
+            if candidate.apply(command.clone(), &self.metrics).is_ok()
+                && let Err(error) = FrameGeometry::compute(&candidate, viewport, &self.metrics)
+            {
+                tracing::warn!(
+                    error = %error,
+                    "rejecting dock command because the resulting layout does not fit the current viewport"
+                );
+                return self.track_command_result(
+                    Err(CommandError::InvalidValue {
+                        field: "layout",
+                        reason: "command does not fit the current viewport",
+                    }),
+                    "apply",
+                );
+            }
+        }
+
         let result = if matches!(&command, DockCommand::RaiseFloating { .. }) {
             // Stacking order is interaction state, not a user-editable layout step.
             // Core still performs the command transaction and advances the layout
@@ -686,7 +708,14 @@ impl DockController {
     /// record the resulting canvas bounds so subsequent column-resize commands
     /// use the current window size rather than a stale saved measurement.
     pub(crate) fn frame(&mut self, viewport: Rect) -> Result<FrameGeometry, ComputeRectsError> {
-        let frame = FrameGeometry::compute(&self.layout, viewport, &self.metrics)?;
+        self.last_viewport = Some(viewport);
+        let frame = match FrameGeometry::compute(&self.layout, viewport, &self.metrics) {
+            Ok(frame) => frame,
+            Err(error @ ComputeRectsError::InsufficientCanvasWidth { .. }) => {
+                self.recover_main_columns_for_viewport(viewport, error)?
+            }
+            Err(error) => return Err(error),
+        };
         self.layout
             .update_canvas_bounds(frame.rects().canvas)
             .map_err(ComputeRectsError::Geometry)?;
@@ -702,6 +731,82 @@ impl DockController {
             .retain(|column_id, _| live_columns.contains(column_id));
 
         Ok(frame)
+    }
+
+    /// Collapses main-dock columns into icon rails when a restored layout is too wide.
+    ///
+    /// This preserves every panel and tries outer columns first, keeping the
+    /// canvas usable instead of replacing the complete dock surface with an error.
+    fn recover_main_columns_for_viewport(
+        &mut self,
+        viewport: Rect,
+        original_error: ComputeRectsError,
+    ) -> Result<FrameGeometry, ComputeRectsError> {
+        if self.layout.profile() != Profile::Photoshop {
+            return Err(original_error);
+        }
+
+        let left_columns = main_column_ids_for_viewport_recovery(&self.layout, DockSide::Left);
+        let right_columns = main_column_ids_for_viewport_recovery(&self.layout, DockSide::Right);
+        let mut collapse_order = Vec::new();
+
+        // Preserve the columns nearest the canvas while shrinking outer columns first.
+        collapse_order.extend(
+            left_columns
+                .iter()
+                .take(left_columns.len().saturating_sub(1))
+                .copied(),
+        );
+        collapse_order.extend(
+            right_columns
+                .iter()
+                .rev()
+                .take(right_columns.len().saturating_sub(1))
+                .copied(),
+        );
+        collapse_order.extend(left_columns.last().copied());
+        collapse_order.extend(right_columns.first().copied());
+
+        let mut candidate = self.layout.clone();
+        let mut collapsed_columns = Vec::new();
+        for column_id in collapse_order {
+            let Some(Node::Column(column)) = candidate.node(column_id) else {
+                continue;
+            };
+            if column.mode == dock_core::ColumnMode::IconsOnly {
+                continue;
+            }
+
+            if candidate
+                .apply(
+                    DockCommand::SetColumnMode {
+                        column: column_id,
+                        mode: dock_core::ColumnMode::IconsOnly,
+                    },
+                    &self.metrics,
+                )
+                .is_err()
+            {
+                continue;
+            }
+            collapsed_columns.push(column_id);
+
+            if let Ok(frame) = FrameGeometry::compute(&candidate, viewport, &self.metrics) {
+                self.layout = candidate;
+                // Viewport recovery is an automatic presentation change, not a
+                // user action that should leave undo snapshots which no longer fit.
+                self.history.clear();
+                tracing::warn!(
+                    columns = ?collapsed_columns,
+                    viewport_width = viewport.size.width,
+                    cause = %original_error,
+                    "collapsed main dock columns to icon rails to restore a usable viewport"
+                );
+                return Ok(frame);
+            }
+        }
+
+        Err(original_error)
     }
 
     fn track_command_result<T>(
@@ -752,6 +857,23 @@ impl DockController {
 
     pub(crate) fn scroll_handles_mut(&mut self) -> &mut HashMap<NodeId, ScrollHandle> {
         &mut self.scroll_handles
+    }
+}
+
+
+fn main_column_ids_for_viewport_recovery(layout: &Layout, side: DockSide) -> Vec<NodeId> {
+    let Some(area) = layout.main_area(side) else {
+        return Vec::new();
+    };
+    match layout.node(area.root) {
+        Some(Node::Column(_)) => vec![area.root],
+        Some(Node::Split(split)) if split.axis == dock_core::Axis::X => split
+            .children
+            .iter()
+            .copied()
+            .filter(|id| matches!(layout.node(*id), Some(Node::Column(_))))
+            .collect(),
+        _ => Vec::new(),
     }
 }
 
