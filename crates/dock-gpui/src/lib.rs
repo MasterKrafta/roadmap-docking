@@ -9,6 +9,7 @@ pub mod components;
 mod dock;
 mod entry;
 mod frame;
+mod floating_window;
 mod geometry;
 pub mod host;
 mod labels;
