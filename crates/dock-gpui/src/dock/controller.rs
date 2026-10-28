@@ -157,6 +157,27 @@ impl DockController {
         Ok(())
     }
 
+    /// Synchronizes native window geometry without adding an undo checkpoint.
+    ///
+    /// Moving or resizing an operating-system window can generate many bounds
+    /// updates. These are persisted as workspace state but are not separate
+    /// user-visible layout actions in the undo history.
+    pub(crate) fn sync_floating_bounds(
+        &mut self,
+        group: FloatingGroupId,
+        bounds: Rect,
+    ) -> Result<(), CommandError> {
+        self.cancel_resize();
+        self.cancel_drag();
+        self.workspace
+            .layout
+            .apply(
+                DockCommand::ResizeFloatingBounds { group, bounds },
+                &self.workspace.metrics,
+            )
+            .map(|_| ())
+    }
+
     /// Restores the preceding recorded layout revision, if one exists.
     pub(crate) fn undo(&mut self) -> Result<bool, CommandError> {
         self.cancel_resize();
