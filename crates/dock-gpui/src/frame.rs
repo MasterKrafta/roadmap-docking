@@ -82,6 +82,9 @@ impl FrameGeometry {
     }
 
     /// Returns the layout revision used to compute this frame snapshot.
+    ///
+    /// This helps reject geometry stale relative to the active layout revision;
+    /// it is not a content identifier across independently mutated layout clones.
     pub const fn layout_version(&self) -> u64 {
         self.layout_version
     }

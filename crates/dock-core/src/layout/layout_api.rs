@@ -97,6 +97,12 @@ impl Layout {
         self.profile
     }
 
+    /// Returns the persistent revision counter for this layout value.
+    ///
+    /// This counter is not a content hash or globally unique identifier. Cloned
+    /// layouts inherit the same revision and may be mutated independently, so two
+    /// different preview candidates can have equal versions. Do not use the version
+    /// alone as a cache key across independently branched layouts.
     pub const fn version(&self) -> u64 {
         self.version
     }

@@ -357,6 +357,49 @@ fn failed_command_sequence_leaves_layout_and_history_unchanged() {
     assert_eq!(history.redo_len(), 0);
 }
 
+#[test]
+fn independently_mutated_layout_clones_can_share_revision_with_different_content() {
+    let metrics = DockMetrics::default();
+    let fixture = fixture();
+    let initial_version = fixture.layout.version();
+    let mut narrow_candidate = fixture.layout.clone();
+    let mut wide_candidate = fixture.layout.clone();
+
+    narrow_candidate
+        .apply(
+            DockCommand::ResizeColumn {
+                column: fixture.column,
+                width: 310.0,
+            },
+            &metrics,
+        )
+        .unwrap();
+    wide_candidate
+        .apply(
+            DockCommand::ResizeColumn {
+                column: fixture.column,
+                width: 350.0,
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    assert_eq!(narrow_candidate.version(), wide_candidate.version());
+    assert_eq!(narrow_candidate.version(), initial_version + 1);
+    assert_ne!(
+        persistent_shape(&narrow_candidate),
+        persistent_shape(&wide_candidate)
+    );
+    assert!(matches!(
+        narrow_candidate.node(fixture.column),
+        Some(Node::Column(column)) if (column.width - 310.0).abs() < 0.01
+    ));
+    assert!(matches!(
+        wide_candidate.node(fixture.column),
+        Some(Node::Column(column)) if (column.width - 350.0).abs() < 0.01
+    ));
+}
+
 /// Manual release-mode probe for Layout copies, resize candidates, and bounded-history costs.
 ///
 /// Run with:
