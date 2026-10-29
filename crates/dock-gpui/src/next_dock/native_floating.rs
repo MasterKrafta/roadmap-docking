@@ -347,7 +347,25 @@ fn ensure_hidden_floating_window(
     let Some(owner_entity) = owner.upgrade() else {
         return;
     };
-    if !owner_entity.read(app).native_floating_pool.is_empty() {
+    let prepared_windows = owner_entity.read(app).native_floating_pool.clone();
+    if !prepared_windows.is_empty() {
+        // The surface is created before the main HWND exists. Attach the owner
+        // once the main window is available, so closing the main window also
+        // closes its already-prepared hidden floating surface.
+        if let Some(main_handle) = main_handle {
+            for handle in prepared_windows {
+                if let Err(error) = handle.update(app, |_, window, _| {
+                    if let Some(native_handle) = NativeWindowHandle::from_window(window) {
+                        platform::windows::set_owner(native_handle, main_handle);
+                    }
+                }) {
+                    tracing::debug!(
+                        error = %error,
+                        "could not attach prepared floating surface to the main window"
+                    );
+                }
+            }
+        }
         return;
     }
 
