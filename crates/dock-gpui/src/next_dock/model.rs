@@ -119,6 +119,38 @@ impl DockLayout {
         }
     }
 
+    pub(super) fn single_group(group: TabGroup) -> Self {
+        Self {
+            root: column(DockNode::Tabs(group)),
+        }
+    }
+
+    pub(super) fn take_group(&mut self, path: &[NodePathStep]) -> Option<TabGroup> {
+        let mut node = &mut self.root;
+
+        for step in path {
+            node = match (node, *step) {
+                (DockNode::Split { children, .. }, NodePathStep::SplitChild(index)) => {
+                    children.get_mut(index)?
+                }
+                (DockNode::Column { content }, NodePathStep::ColumnContent) => content.as_mut(),
+                _ => return None,
+            };
+        }
+
+        let DockNode::Tabs(group) = node else {
+            return None;
+        };
+
+        Some(std::mem::replace(
+            group,
+            TabGroup {
+                panels: Vec::new(),
+                active: 0,
+            },
+        ))
+    }
+
     pub(super) fn remove_panel(
         &mut self,
         path: &[NodePathStep],
