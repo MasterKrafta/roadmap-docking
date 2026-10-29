@@ -270,6 +270,8 @@ pub(super) fn synchronize_floating_windows(
         });
     }
 
+    let mut preparation_scheduled = false;
+
     for floating in specs {
         if owner_entity
             .read(app)
@@ -279,11 +281,22 @@ pub(super) fn synchronize_floating_windows(
             continue;
         }
 
-        ensure_hidden_floating_window(owner.clone(), Some(main_handle), app);
         let Some(handle) =
             owner_entity.update(app, |main, _cx| main.native_floating_pool.pop())
         else {
-            tracing::debug!(composition_id = floating.id, "no prepared floating surface is available");
+            tracing::debug!(
+                composition_id = floating.id,
+                "no prepared floating surface is available; waiting for deferred preparation"
+            );
+            if !preparation_scheduled {
+                schedule_hidden_floating_window_preparation(
+                    owner.clone(),
+                    main_handle,
+                    true,
+                    app,
+                );
+                preparation_scheduled = true;
+            }
             continue;
         };
 
@@ -335,8 +348,40 @@ pub(super) fn synchronize_floating_windows(
         }
     }
 
-    // Keep one hidden surface ready even when none are currently floating.
-    ensure_hidden_floating_window(owner, Some(main_handle), app);
+    // Replenish the hidden pool outside the drag/synchronization pass.
+    // Opening a GPUI window is synchronous and can stall the UI for hundreds of ms.
+    if !preparation_scheduled && owner_entity.read(app).native_floating_pool.is_empty() {
+        schedule_hidden_floating_window_preparation(owner, main_handle, false, app);
+    }
+}
+
+fn schedule_hidden_floating_window_preparation(
+    owner: gpui::WeakEntity<NextDockWindow>,
+    main_handle: NativeWindowHandle,
+    retry_synchronization: bool,
+    app: &mut App,
+) {
+    app.spawn(async move |cx| {
+        // Do not open another native window while the user is still dragging.
+        while platform::windows::left_button_down() {
+            cx.background_executor()
+                .timer(Duration::from_millis(25))
+                .await;
+        }
+
+        // Let the release/docking update finish before opening the next hidden window.
+        cx.background_executor()
+            .timer(Duration::from_millis(100))
+            .await;
+
+        cx.update(|app| {
+            ensure_hidden_floating_window(owner.clone(), Some(main_handle), app);
+            if retry_synchronization {
+                synchronize_floating_windows(owner, main_handle, app);
+            }
+        });
+    })
+    .detach();
 }
 
 fn ensure_hidden_floating_window(
