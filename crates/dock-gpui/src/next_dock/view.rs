@@ -382,7 +382,9 @@ fn render_node(
     tab_reorder_preview: Option<&TabReorderPreview>,
 ) -> Div {
     if group_drag_preview.is_some_and(|preview| {
-        preview.composition_index == composition_index && preview.group_key.as_str() == key
+        preview.composition_index == composition_index
+            && (preview.group_key.as_str() == key
+                || preview.group_key.strip_suffix("-content") == Some(key))
     }) {
         return div()
             .w(px(geometry.width))
