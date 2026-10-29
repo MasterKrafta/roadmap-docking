@@ -125,6 +125,10 @@ impl DockLayout {
         }
     }
 
+    pub(super) fn is_empty(&self) -> bool {
+        matches!(&self.root, DockNode::Tabs(group) if group.panels.is_empty())
+    }
+
     pub(super) fn take_group(&mut self, path: &[NodePathStep]) -> Option<TabGroup> {
         let group = {
             let mut node = &mut self.root;
@@ -402,6 +406,21 @@ impl CompositionContainer {
         });
 
         index
+    }
+
+    pub(super) fn remove_empty_layout(&mut self, index: usize) -> bool {
+        let is_empty = self
+            .slots
+            .get(index)
+            .and_then(|slot| slot.layout.as_ref())
+            .is_some_and(DockLayout::is_empty);
+
+        if !is_empty {
+            return false;
+        }
+
+        self.slots.remove(index);
+        true
     }
 
     pub(super) fn reserve_empty_neighbor(
