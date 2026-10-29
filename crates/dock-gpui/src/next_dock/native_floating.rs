@@ -41,6 +41,8 @@ impl NextDockWindow {
 
         // If there is no reserved empty composition slot, merge the floating
         // tree beside the first docked tree rather than dropping its contents.
+        // Prefer a docked composition. If every remaining composition is
+        // floating, merge into another floating layout and make it docked too.
         let target_index = self
             .container
             .slots
@@ -54,11 +56,23 @@ impl NextDockWindow {
                         .iter()
                         .any(|candidate| candidate.composition_index == *index)
             })
-            .map(|(index, _)| index);
+            .map(|(index, _)| index)
+            .or_else(|| {
+                self.container
+                    .slots
+                    .iter()
+                    .enumerate()
+                    .find(|(index, slot)| *index != source_index && slot.layout.is_some())
+                    .map(|(index, _)| index)
+            });
 
         let Some(target_index) = target_index else {
             return false;
         };
+        let target_was_floating = self
+            .floating_compositions
+            .iter()
+            .any(|candidate| candidate.composition_index == target_index);
 
         let (target_slot, source_slot) = if source_index < target_index {
             let (before, after) = self.container.slots.split_at_mut(target_index);
@@ -95,7 +109,9 @@ impl NextDockWindow {
 
         self.container.slots.remove(source_index);
         self.floating_compositions.retain_mut(|candidate| {
-            if candidate.id == id {
+            if candidate.id == id
+                || (target_was_floating && candidate.composition_index == target_index)
+            {
                 false
             } else {
                 if candidate.composition_index > source_index {
