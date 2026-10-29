@@ -1,7 +1,7 @@
 //! Native-window lifecycle and docking behavior for next_dock on Windows.
 
 use gpui::{
-    App, Context, WindowBounds, WindowHandle, WindowKind, WindowOptions, point, px, size,
+    App, Context, WindowBounds, WindowKind, WindowOptions, point, px, size,
 };
 use platform::windows::NativeWindowHandle;
 
@@ -34,9 +34,7 @@ impl NextDockWindow {
         {
             self.floating_compositions
                 .retain(|candidate| candidate.id != id);
-            self.pending_move = None;
-            self.active_move = None;
-            self.composition_drop_zone = None;
+            self.clear_native_move_state();
             cx.notify();
             return true;
         }
@@ -95,8 +93,7 @@ impl NextDockWindow {
         };
         *target_slot = Some(target_layout);
 
-        let removed = self.container.remove_empty_layout(source_index);
-        debug_assert!(removed, "the emptied floating composition slot must be removable");
+        self.container.slots.remove(source_index);
         self.floating_compositions.retain_mut(|candidate| {
             if candidate.id == id {
                 false
@@ -107,9 +104,7 @@ impl NextDockWindow {
                 true
             }
         });
-        self.pending_move = None;
-        self.active_move = None;
-        self.composition_drop_zone = None;
+        self.clear_native_move_state();
         cx.notify();
         true
     }
@@ -133,7 +128,7 @@ impl NextDockWindow {
         cx: &mut Context<Self>,
     ) {
         let drop_zone = self.native_drop_zone(cursor);
-        self.composition_drop_zone = None;
+        self.clear_native_move_state();
         if let Some(drop_zone) = drop_zone {
             if self.dock_floating_composition(id, drop_zone, cx) {
                 return;

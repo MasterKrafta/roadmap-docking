@@ -33,8 +33,8 @@ pub(super) struct NextDockWindow {
     pub(super) native_floating_windows: HashMap<u64, WindowHandle<FloatingCompositionWindow>>,
     #[cfg(windows)]
     last_native_sync_ids: Vec<u64>,
-    pub(super) pending_move: Option<PendingCompositionMove>,
-    pub(super) active_move: Option<ActiveCompositionMove>,
+    pending_move: Option<PendingCompositionMove>,
+    active_move: Option<ActiveCompositionMove>,
     pub(super) composition_drop_zone: Option<CompositionDropZone>,
     pending_tab_drag: Option<PendingTabDrag>,
     active_tab_drag: Option<ActiveTabDrag>,
@@ -208,6 +208,12 @@ impl NextDockWindow {
             .as_ref()?
             .clone();
         Some((floating, layout, self.theme))
+    }
+
+    pub(super) fn clear_native_move_state(&mut self) {
+        self.pending_move = None;
+        self.active_move = None;
+        self.composition_drop_zone = None;
     }
 
     pub(super) fn begin_resize(
