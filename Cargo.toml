@@ -4,10 +4,11 @@ members = [
     "app",
     "crates/dock-core",
     "crates/dock-gpui",
+    "crates/dock-experiment",
     "crates/ui",
     "crates/platform",
 ]
-default-members = ["app", "crates/dock-core", "crates/dock-gpui", "crates/ui", "crates/platform"]
+default-members = ["app", "crates/dock-core", "crates/dock-gpui", "crates/dock-experiment", "crates/ui", "crates/platform"]
 
 [workspace.package]
 version = "0.1.0"
