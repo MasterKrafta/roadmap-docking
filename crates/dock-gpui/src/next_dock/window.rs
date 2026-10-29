@@ -23,6 +23,7 @@ const DRAG_DETACH_THRESHOLD: f32 = 2.0;
 /// Owns the prototype layout and renders it in a regular GPUI window.
 pub(super) struct NextDockWindow {
     theme: Theme,
+    pub(super) startup_started: std::time::Instant,
     pub(super) container: CompositionContainer,
     active_resize: Option<ActiveResize>,
     pub(super) floating_compositions: Vec<FloatingComposition>,
@@ -162,9 +163,10 @@ pub(super) enum CompositionDropZone {
 pub(super) const COMPOSITION_DROP_ZONE_WIDTH: f32 = 24.0;
 
 impl NextDockWindow {
-    pub(super) fn new(theme: Theme) -> Self {
+    pub(super) fn new(theme: Theme, startup_started: std::time::Instant) -> Self {
         Self {
             theme,
+            startup_started,
             container: CompositionContainer::initial(),
             active_resize: None,
             floating_compositions: Vec::new(),
@@ -1058,6 +1060,9 @@ impl Render for NextDockWindow {
                 current_ids.sort_unstable();
 
                 if self.last_native_sync_ids.as_ref() != Some(&current_ids) {
+                    if self.last_native_sync_ids.is_none() {
+                        eprintln!("[timing] первый render главного: {:?}", self.startup_started.elapsed());
+                    }
                     self.last_native_sync_ids = Some(current_ids);
                     let owner = cx.entity().downgrade();
                     window.defer(cx, move |_, app| {

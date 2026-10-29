@@ -16,6 +16,8 @@ mod native_floating;
 
 #[cfg(windows)]
 use gpui::AssetSource;
+#[cfg(windows)]
+use std::time::Instant;
 
 use crate::RunOptions;
 
@@ -59,6 +61,8 @@ fn run_windows(options: RunOptions) {
     } = options;
 
     let run_application = move |cx: &mut App| {
+        let startup_started = Instant::now();
+        eprintln!("[timing] старт next_dock: {:?}", startup_started.elapsed());
         let theme = ui::Theme::default();
         let bounds = Bounds::centered(None, size(px(width.max(1.0)), px(height.max(1.0))), cx);
         let window_options = WindowOptions {
@@ -70,9 +74,14 @@ fn run_windows(options: RunOptions) {
             ..Default::default()
         };
 
-        if let Err(error) = cx.open_window(window_options, move |_window, cx| {
-            cx.new(|_| window::NextDockWindow::new(theme))
-        }) {
+        eprintln!("[timing] вызов open_window главного: {:?}", startup_started.elapsed());
+        let main_startup_started = startup_started;
+        let open_window_result = cx.open_window(window_options, move |_window, cx| {
+            cx.new(|_| window::NextDockWindow::new(theme, main_startup_started))
+        });
+        eprintln!("[timing] главное окно создано: {:?}", startup_started.elapsed());
+
+        if let Err(error) = open_window_result {
             tracing::error!(error = %error, "could not open the next dock window");
             return;
         }

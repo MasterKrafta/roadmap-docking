@@ -215,6 +215,11 @@ pub(super) fn synchronize_floating_windows(
         return;
     };
 
+    eprintln!(
+        "[timing] синхронизация floating вызвана: {:?}",
+        owner_entity.read(app).startup_started.elapsed()
+    );
+
     let (specs, existing) = owner_entity.update(app, |main, _cx| {
         (
             main.floating_compositions.clone(),
@@ -338,6 +343,12 @@ fn ensure_hidden_floating_window(
         return;
     }
 
+    let startup_started = owner_entity.read(app).startup_started;
+    eprintln!(
+        "[timing] создание скрытой floating-поверхности началось: {:?}",
+        startup_started.elapsed()
+    );
+
     let Some((client_x, client_y)) = platform::windows::client_origin(main_handle) else {
         tracing::debug!("could not determine the main window client origin for a prepared surface");
         return;
@@ -362,6 +373,10 @@ fn ensure_hidden_floating_window(
     let owner_for_close = owner.clone();
 
     match app.open_window(options, move |window, cx| {
+        eprintln!(
+            "[timing] floating window builder вызван: {:?}",
+            startup_started.elapsed()
+        );
         if let Some(native_handle) = NativeWindowHandle::from_window(window) {
             platform::windows::set_owner(native_handle, main_handle);
             platform::windows::enable_native_resize(native_handle);
@@ -397,6 +412,10 @@ fn ensure_hidden_floating_window(
                 main.native_floating_pool.push(handle);
                 cx.notify();
             });
+            eprintln!(
+                "[timing] скрытая floating-поверхность готова: {:?}",
+                startup_started.elapsed()
+            );
         }
         Err(error) => {
             tracing::warn!(error = %error, "could not prepare a hidden floating surface");
