@@ -119,7 +119,7 @@ impl RenderOnce for GroupHeader {
                         let grab_offset_x =
                             event.position.x.as_f32() - (strip_bounds.origin.x + tab_left_x);
 
-                        owner.update(app, |this, _cx| {
+                        owner.update(app, |this, cx| {
                             this.begin_tab_drag(
                                 composition_index,
                                 path,
@@ -131,6 +131,7 @@ impl RenderOnce for GroupHeader {
                                 tab_widths_for_drag,
                                 grab_offset_x,
                                 group_key,
+                                cx,
                             );
                         });
                     })
@@ -283,7 +284,7 @@ fn make_group_drag_handler(context: Option<TabDragContext>, group: TabGroup) -> 
         let group_key = group_key.clone();
         let grab_offset_x = event.position.x.as_f32() - strip_bounds.origin.x;
 
-        owner.update(app, |this, _cx| {
+        owner.update(app, |this, cx| {
             this.begin_group_drag(
                 composition_index,
                 path,
@@ -293,6 +294,7 @@ fn make_group_drag_handler(context: Option<TabDragContext>, group: TabGroup) -> 
                 strip_bounds,
                 grab_offset_x,
                 group_key,
+                cx,
             );
         });
     })

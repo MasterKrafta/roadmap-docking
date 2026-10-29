@@ -1,5 +1,7 @@
 //! Native-window lifecycle and docking behavior for next_dock on Windows.
 
+use std::time::Duration;
+
 use gpui::{
     App, AppContext, Context, WindowBounds, WindowKind, WindowOptions, point, px, size,
 };
@@ -11,6 +13,27 @@ use super::model::{DockNode, SplitAxis};
 use super::window::{CompositionDropZone, NextDockWindow, COMPOSITION_DROP_ZONE_WIDTH};
 
 impl NextDockWindow {
+    pub(super) fn start_native_drag_polling(&mut self, cx: &mut Context<Self>) {
+        if self.native_drag_polling {
+            return;
+        }
+        self.native_drag_polling = true;
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(4))
+                    .await;
+                if !matches!(
+                    this.update(cx, |main, cx| main.tick_native_drag_polling(cx)),
+                    Ok(true)
+                ) {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
     pub(super) fn dock_floating_composition(
         &mut self,
         id: u64,

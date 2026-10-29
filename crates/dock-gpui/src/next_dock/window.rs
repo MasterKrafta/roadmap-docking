@@ -10,12 +10,14 @@ use std::collections::HashMap;
 #[cfg(windows)]
 use gpui::WindowHandle;
 #[cfg(windows)]
-use platform::windows::NativeWindowHandle;
+use platform::windows::{self, NativeWindowHandle};
 
 #[cfg(windows)]
 use super::floating_window::FloatingCompositionWindow;
 use super::geometry;
 use super::model::{CompositionContainer, DockLayout, NodePathStep, Panel, SplitAxis, TabGroup};
+
+const DRAG_DETACH_THRESHOLD: f32 = 2.0;
 use super::view::{self, SplitResizeSpec};
 
 /// Owns the prototype layout and renders it in a regular GPUI window.
@@ -29,6 +31,8 @@ pub(super) struct NextDockWindow {
     pub(super) native_main_handle: Option<NativeWindowHandle>,
     #[cfg(windows)]
     pub(super) native_main_viewport: Size,
+    #[cfg(windows)]
+    pub(super) native_drag_polling: bool,
     #[cfg(windows)]
     pub(super) native_floating_windows: HashMap<u64, WindowHandle<FloatingCompositionWindow>>,
     #[cfg(windows)]
@@ -169,6 +173,8 @@ impl NextDockWindow {
             native_main_handle: None,
             #[cfg(windows)]
             native_main_viewport: Size::new(1.0, 1.0),
+            #[cfg(windows)]
+            native_drag_polling: false,
             #[cfg(windows)]
             native_floating_windows: HashMap::new(),
             #[cfg(windows)]
@@ -335,6 +341,7 @@ impl NextDockWindow {
         tab_widths: Vec<f32>,
         grab_offset_x: f32,
         group_key: String,
+        _cx: &mut Context<Self>,
     ) {
         if self.active_resize.is_some() {
             return;
@@ -365,6 +372,8 @@ impl NextDockWindow {
             preview_bounds: None,
             group_key,
         });
+        #[cfg(windows)]
+        self.start_native_drag_polling(_cx);
     }
 
     pub(super) fn begin_group_drag(
@@ -377,6 +386,7 @@ impl NextDockWindow {
         strip_bounds: Rect,
         grab_offset_x: f32,
         group_key: String,
+        _cx: &mut Context<Self>,
     ) {
         if self.active_resize.is_some() {
             return;
@@ -416,6 +426,8 @@ impl NextDockWindow {
             grab_offset_y: position.y.as_f32() - geometry::HEADER_HEIGHT - strip_bounds.origin.y,
             group_key,
         });
+        #[cfg(windows)]
+        self.start_native_drag_polling(_cx);
     }
 
     pub(super) fn update_group_drag(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
@@ -448,44 +460,16 @@ impl NextDockWindow {
             return;
         }
 
-        let Some(mut pending) = self.pending_group_drag.take() else {
+        let Some(pending) = self.pending_group_drag.as_ref() else {
             return;
         };
-
-        // A click alone should not detach the group, but dragging from
-        // the dedicated group drag zone should float it without leaving the strip.
         let dx = pointer.x - pending.start_position.x;
         let dy = pointer.y - pending.start_position.y;
-        if dx * dx + dy * dy < 25.0 {
-            self.pending_group_drag = Some(pending);
+        if dx.abs().max(dy.abs()) < DRAG_DETACH_THRESHOLD {
             return;
         }
 
-        let viewport = pending.viewport_size;
-        let width = (viewport.width * 0.38)
-            .min(480.0)
-            .clamp(1.0, viewport.width);
-        let height = (viewport.height * 0.55)
-            .min(520.0)
-            .clamp(1.0, viewport.height);
-        let column_header_height = self.theme.metrics.column_header_height.max(0.0);
-
-        let origin = Point::new(
-            (pointer.x - pending.grab_offset_x).clamp(0.0, (viewport.width - width).max(0.0)),
-            (pointer.y - column_header_height - pending.grab_offset_y)
-                .clamp(0.0, (viewport.height - height).max(0.0)),
-        );
-
-        pending.start_position = pointer;
-        self.active_group_drag = Some(ActiveGroupDrag {
-            pending,
-            start_origin: origin,
-            bounds: Rect::new(origin, Size::new(width, height)),
-        });
-
-        // Promote the group while the mouse is still held. The native
-        // floating surface is already prepared and can take over the drag.
-        self.end_group_drag(cx);
+        self.promote_pending_native_drag(pointer, cx, true);
     }
 
     pub(super) fn update_tab_drag(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
@@ -635,40 +619,102 @@ impl NextDockWindow {
             return;
         }
 
-        // Вышли за границы всей полосы — переключаемся с перестановки
-        // вкладки на перетаскивание отдельной колонки.
-        let viewport = pending.viewport_size;
+        self.pending_tab_drag = Some(pending);
+        self.promote_pending_native_drag(pointer, cx, true);
+    }
 
-        let width = (viewport.width * 0.38)
-            .min(480.0)
-            .clamp(1.0, viewport.width);
-        let height = (viewport.height * 0.55)
-            .min(520.0)
-            .clamp(1.0, viewport.height);
-
+    fn promote_pending_native_drag(
+        &mut self,
+        pointer: Point,
+        cx: &mut Context<Self>,
+        clamp_to_viewport: bool,
+    ) {
         let column_header_height = self.theme.metrics.column_header_height.max(0.0);
+        let make_bounds = |viewport: Size, grab_x: f32, grab_y: f32| {
+            let width = (viewport.width * 0.38)
+                .min(480.0)
+                .clamp(1.0, viewport.width);
+            let height = (viewport.height * 0.55)
+                .min(520.0)
+                .clamp(1.0, viewport.height);
+            let x = pointer.x - grab_x;
+            let y = pointer.y - column_header_height - grab_y;
+            let origin = if clamp_to_viewport {
+                Point::new(
+                    x.clamp(0.0, (viewport.width - width).max(0.0)),
+                    y.clamp(0.0, (viewport.height - height).max(0.0)),
+                )
+            } else {
+                Point::new(x, y)
+            };
+            Rect::new(origin, Size::new(width, height))
+        };
 
-        let origin = Point::new(
-            (pointer.x - pending.grab_offset_x).clamp(0.0, (viewport.width - width).max(0.0)),
-            (pointer.y - column_header_height - pending.grab_offset_y)
-                .clamp(0.0, (viewport.height - height).max(0.0)),
+        if let Some(pending) = self.pending_group_drag.take() {
+            let bounds = make_bounds(
+                pending.viewport_size,
+                pending.grab_offset_x,
+                pending.grab_offset_y,
+            );
+            self.active_group_drag = Some(ActiveGroupDrag {
+                pending,
+                start_origin: bounds.origin,
+                bounds,
+            });
+            self.end_group_drag(cx);
+        } else if let Some(pending) = self.pending_tab_drag.take() {
+            let bounds = make_bounds(
+                pending.viewport_size,
+                pending.grab_offset_x,
+                pending.grab_offset_y,
+            );
+            self.active_tab_drag = Some(ActiveTabDrag {
+                pending,
+                start_origin: bounds.origin,
+                bounds,
+            });
+            self.end_tab_drag(cx);
+        }
+    }
+
+    #[cfg(windows)]
+    pub(super) fn tick_native_drag_polling(&mut self, cx: &mut Context<Self>) -> bool {
+        if !windows::left_button_down() {
+            self.native_drag_polling = false;
+            self.end_group_drag(cx);
+            self.end_tab_drag(cx);
+            return false;
+        }
+
+        let Some(main_handle) = self.native_main_handle else {
+            return true;
+        };
+        let Some((left, top)) = windows::client_origin(main_handle) else {
+            return true;
+        };
+        let scale = windows::scale_factor(main_handle).max(0.1);
+        let cursor = windows::cursor_position();
+        let pointer = Point::new(
+            (cursor.0 - left) as f32 / scale,
+            (cursor.1 - top) as f32 / scale - geometry::HEADER_HEIGHT,
         );
 
-        let bounds = Rect::new(origin, Size::new(width, height));
-
-        // Начало дальнейшего перемещения — точка, в которой
-        // вкладка оторвалась от исходной полосы.
-        pending.start_position = pointer;
-
-        self.active_tab_drag = Some(ActiveTabDrag {
-            pending,
-            start_origin: origin,
-            bounds,
+        let group_should_detach = self.pending_group_drag.as_ref().is_some_and(|pending| {
+            let dx = pointer.x - pending.start_position.x;
+            let dy = pointer.y - pending.start_position.y;
+            dx.abs().max(dy.abs()) >= DRAG_DETACH_THRESHOLD
         });
-
-        // Promote the tab while the mouse is still held. The native
-        // floating surface can take over before the user releases the button.
-        self.end_tab_drag(cx);
+        let tab_should_detach = self.pending_tab_drag.as_ref().is_some_and(|pending| {
+            let strip = pending.strip_bounds;
+            pointer.x < strip.origin.x
+                || pointer.x > strip.origin.x + strip.size.width
+                || pointer.y < strip.origin.y
+                || pointer.y > strip.origin.y + strip.size.height
+        });
+        if group_should_detach || tab_should_detach {
+            self.promote_pending_native_drag(pointer, cx, false);
+        }
+        true
     }
 
     pub(super) fn end_tab_drag(&mut self, cx: &mut Context<Self>) {
