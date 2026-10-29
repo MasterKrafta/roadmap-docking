@@ -206,6 +206,13 @@ impl NextDockWindow {
     }
 }
 
+pub(super) fn prepare_hidden_floating_window(
+    owner: gpui::WeakEntity<NextDockWindow>,
+    app: &mut App,
+) {
+    ensure_hidden_floating_window(owner, None, app);
+}
+
 pub(super) fn synchronize_floating_windows(
     owner: gpui::WeakEntity<NextDockWindow>,
     main_handle: NativeWindowHandle,
@@ -272,7 +279,7 @@ pub(super) fn synchronize_floating_windows(
             continue;
         }
 
-        ensure_hidden_floating_window(owner.clone(), main_handle, app);
+        ensure_hidden_floating_window(owner.clone(), Some(main_handle), app);
         let Some(handle) =
             owner_entity.update(app, |main, _cx| main.native_floating_pool.pop())
         else {
@@ -302,6 +309,7 @@ pub(super) fn synchronize_floating_windows(
             view.set_composition_id(Some(id), cx);
 
             if let Some(native_handle) = NativeWindowHandle::from_window(window) {
+                platform::windows::set_owner(native_handle, main_handle);
                 platform::windows::move_window(native_handle, left, top);
                 platform::windows::resize_window(native_handle, width, height);
                 platform::windows::show_window(native_handle);
@@ -328,12 +336,12 @@ pub(super) fn synchronize_floating_windows(
     }
 
     // Keep one hidden surface ready even when none are currently floating.
-    ensure_hidden_floating_window(owner, main_handle, app);
+    ensure_hidden_floating_window(owner, Some(main_handle), app);
 }
 
 fn ensure_hidden_floating_window(
     owner: gpui::WeakEntity<NextDockWindow>,
-    main_handle: NativeWindowHandle,
+    main_handle: Option<NativeWindowHandle>,
     app: &mut App,
 ) {
     let Some(owner_entity) = owner.upgrade() else {
@@ -349,14 +357,20 @@ fn ensure_hidden_floating_window(
         startup_started.elapsed()
     );
 
-    let Some((client_x, client_y)) = platform::windows::client_origin(main_handle) else {
-        tracing::debug!("could not determine the main window client origin for a prepared surface");
-        return;
+    let origin = match main_handle {
+        Some(main_handle) => {
+            let Some((client_x, client_y)) = platform::windows::client_origin(main_handle) else {
+                tracing::debug!("could not determine the main window client origin for a prepared surface");
+                return;
+            };
+            let scale = platform::windows::scale_factor(main_handle).max(0.1);
+            point(px(client_x as f32 / scale), px(client_y as f32 / scale))
+        }
+        None => point(px(0.0), px(0.0)),
     };
-    let scale = platform::windows::scale_factor(main_handle).max(0.1);
     let options = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(gpui::Bounds {
-            origin: point(px(client_x as f32 / scale), px(client_y as f32 / scale)),
+            origin,
             size: size(px(480.0), px(320.0)),
         })),
         titlebar: None,
@@ -378,7 +392,6 @@ fn ensure_hidden_floating_window(
             startup_started.elapsed()
         );
         if let Some(native_handle) = NativeWindowHandle::from_window(window) {
-            platform::windows::set_owner(native_handle, main_handle);
             platform::windows::enable_native_resize(native_handle);
             platform::windows::hide_window(native_handle);
         }
