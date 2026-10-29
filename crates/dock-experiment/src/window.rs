@@ -6,10 +6,15 @@ use gpui::{
 };
 use gpui::prelude::*;
 
+#[cfg(windows)]
+use platform::windows::{self, NativeWindowHandle};
+
 pub(crate) struct MainWindow {
     floating_panels: Vec<WindowHandle<FloatingPanel>>,
     panels_minimized_by_main: Vec<WindowHandle<FloatingPanel>>,
     visibility_subscription: Option<Subscription>,
+    #[cfg(windows)]
+    native_owner: Option<NativeWindowHandle>,
 }
 
 #[derive(Clone, Copy)]
@@ -35,11 +40,50 @@ impl PanelKind {
 }
 
 impl MainWindow {
+    #[cfg(windows)]
+    pub(crate) fn set_native_owner(&mut self, window: &Window) {
+        self.native_owner = NativeWindowHandle::from_window(window);
+        if self.native_owner.is_none() {
+            eprintln!("Could not obtain the main window's native handle");
+        }
+    }
+
+    #[cfg(windows)]
+    fn configure_floating_window(
+        &self,
+        panel: &WindowHandle<FloatingPanel>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(owner) = self.native_owner else {
+            eprintln!("Could not assign a native owner to a floating panel");
+            return;
+        };
+
+        match panel.update(cx, |_, window, _| {
+            let Some(panel_handle) = NativeWindowHandle::from_window(window) else {
+                return false;
+            };
+
+            windows::set_owner(panel_handle, owner);
+            windows::remove_topmost(panel_handle)
+        }) {
+            Ok(true) => {}
+            Ok(false) => {
+                eprintln!("Could not remove topmost state from a floating panel");
+            }
+            Err(error) => {
+                eprintln!("Could not configure a floating panel: {error:?}");
+            }
+        }
+    }
+
     pub(crate) fn new() -> Self {
         Self {
             floating_panels: Vec::new(),
             panels_minimized_by_main: Vec::new(),
             visibility_subscription: None,
+            #[cfg(windows)]
+            native_owner: None,
         }
     }
 
@@ -117,8 +161,9 @@ impl MainWindow {
         ));
         let options = WindowOptions {
             window_bounds: Some(bounds),
-            show: show_immediately,
-            focus: show_immediately,
+            // Configure ownership and z-order before making this window visible.
+            show: false,
+            focus: false,
             titlebar: Some(TitlebarOptions {
                 title: Some(kind.title().into()),
                 ..Default::default()
@@ -130,7 +175,19 @@ impl MainWindow {
         match cx.open_window(options, move |_window, cx| {
             cx.new(|_| FloatingPanel { key })
         }) {
-            Ok(handle) => self.floating_panels.push(handle),
+            Ok(handle) => {
+                #[cfg(windows)]
+                self.configure_floating_window(&handle, cx);
+
+                self.floating_panels.push(handle.clone());
+
+                if show_immediately
+                    && let Err(error) =
+                        handle.update(cx, |_, window, _| window.activate_window())
+                {
+                    eprintln!("Could not show floating panel '{}': {error:?}", kind.key());
+                }
+            }
             Err(error) => {
                 eprintln!("Could not open floating panel '{}': {error}", kind.key());
             }
