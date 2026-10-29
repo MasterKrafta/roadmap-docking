@@ -3,7 +3,8 @@
 
 use dock_core::{Point, Rect, Size};
 use gpui::{
-    App, IntoElement, MouseDownEvent, ParentElement, RenderOnce, Styled, Window, div, px, rgb,
+    App, InteractiveElement, IntoElement, MouseButton, MouseDownEvent, ParentElement, RenderOnce,
+    Styled, Window, div, px, rgb,
 };
 use ui::Theme;
 
@@ -79,6 +80,7 @@ impl RenderOnce for GroupHeader {
             .child(TabStrip { rect, theme });
 
         let mut x = 0.0;
+        let group_for_drag = self.group.clone();
 
         let mut tabs_viewport = div()
             .absolute()
@@ -204,6 +206,41 @@ impl RenderOnce for GroupHeader {
         let drag_width = (tab_area_width - x).max(0.0);
 
         if drag_width > 0.0 {
+            let on_group_drag_start: MouseDownHandler =
+                if let Some(context) = self.tab_drag_context.clone() {
+                    let strip_bounds = context.strip_bounds;
+                    let owner = context.owner;
+                    let composition_index = context.composition_index;
+                    let path = context.path;
+                    let viewport_size = context.viewport_size;
+                    let drag_group = group_for_drag.clone();
+
+                    Box::new(move |event: &MouseDownEvent, _window, app| {
+                        let Some(owner) = owner.upgrade() else {
+                            return;
+                        };
+
+                        let path = path.clone();
+                        let group = drag_group.clone();
+                        let grab_offset_x =
+                            event.position.x.as_f32() - strip_bounds.origin.x;
+
+                        owner.update(app, |this, _cx| {
+                            this.begin_group_drag(
+                                composition_index,
+                                path,
+                                group,
+                                event.position,
+                                viewport_size,
+                                strip_bounds,
+                                grab_offset_x,
+                            );
+                        });
+                    })
+                } else {
+                    Box::new(|_, _, _| {})
+                };
+
             result = result.child(
                 div()
                     .absolute()
@@ -211,7 +248,8 @@ impl RenderOnce for GroupHeader {
                     .top(px(0.0))
                     .w(px(drag_width))
                     .h(px(height))
-                    .bg(rgb(theme.colors.tab_strip_background)),
+                    .bg(rgb(theme.colors.tab_strip_background))
+                    .on_mouse_down(MouseButton::Left, on_group_drag_start),
             );
         }
 
