@@ -2,7 +2,7 @@
 
 use std::{rc::Rc, time::Duration};
 
-use gpui::{Context, IntoElement, MouseDownEvent, Render, Subscription, Window, div};
+use gpui::{Context, IntoElement, MouseDownEvent, Render, Styled, Subscription, Window, div};
 use platform::windows::{self, NativeWindowHandle};
 
 use super::view;
