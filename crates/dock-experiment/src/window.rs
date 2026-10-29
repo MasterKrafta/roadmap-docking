@@ -1,6 +1,6 @@
 use dock_core::PanelKey;
 use gpui::{
-    AppContext, Bounds, Context, IntoElement, Render, Subscription, TitlebarOptions, WeakEntity,
+    AppContext, Bounds, Context, IntoElement, MouseButton, Render, Subscription, WeakEntity,
     Window, WindowBounds, WindowHandle, WindowKind, WindowOptions, WindowVisibility, div, px, rgb,
     size,
 };
@@ -164,10 +164,7 @@ impl MainWindow {
             // Configure ownership and z-order before making this window visible.
             show: false,
             focus: false,
-            titlebar: Some(TitlebarOptions {
-                title: Some(kind.title().into()),
-                ..Default::default()
-            }),
+            titlebar: None,
             kind: WindowKind::PopUp,
             ..Default::default()
         };
@@ -272,13 +269,59 @@ struct FloatingPanel {
 
 impl Render for FloatingPanel {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        let title = self.key.as_str().to_owned();
+
         div()
             .flex()
             .flex_col()
             .size_full()
             .bg(rgb(0x292f37))
             .text_color(rgb(0xe8ebef))
-            .p_4()
-            .child(self.key.as_str().to_owned())
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .w_full()
+                    .h(px(36.0))
+                    .px_2()
+                    .bg(rgb(0x2b323a))
+                    .border_b_1()
+                    .border_color(rgb(0x414a55))
+                    .on_mouse_down(MouseButton::Left, |_, window, _| {
+                        window.start_window_move();
+                    })
+                    .child(
+                        div()
+                            .flex_1()
+                            .px_2()
+                            .child(title),
+                    )
+                    .child(
+                        div()
+                            .id("close-panel")
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .size(px(28.0))
+                            .rounded_sm()
+                            .cursor_pointer()
+                            .hover(|style| style.bg(rgb(0x596777)))
+                            .child("×")
+                            .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                cx.stop_propagation();
+                            })
+                            .on_click(|_, window, _| {
+                                window.remove_window();
+                            }),
+                    ),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .w_full()
+                    .p_4()
+                    .child(self.key.as_str().to_owned()),
+            )
     }
 }
