@@ -32,8 +32,21 @@ fn run_windows() {
             ..Default::default()
         };
 
-        if let Err(error) = cx.open_window(options, |_window, cx| {
-            cx.new(|_| window::MainWindow)
+        if let Err(error) = cx.open_window(options, |window, cx| {
+            let main_window = cx.new(|_| window::MainWindow::new());
+            let weak_main_window = main_window.downgrade();
+
+            window.on_window_should_close(cx, move |_window, app| {
+                if let Err(error) = weak_main_window.update(app, |this, cx| {
+                    this.close_floating_panels(cx);
+                }) {
+                    eprintln!("Could not close floating panels: {error:?}");
+                }
+
+                true
+            });
+
+            main_window
         }) {
             eprintln!("Could not open the experiment window: {error}");
             return;
