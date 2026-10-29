@@ -630,6 +630,15 @@ impl NextDockWindow {
             return;
         };
 
+        let source_is_empty = self
+            .container
+            .layout_mut(source.composition_index)
+            .is_some_and(|layout| layout.is_empty());
+
+        if source_is_empty {
+            self.container.remove_empty_layout(source.composition_index);
+        }
+
         let layout = DockLayout::single_panel(panel);
         let composition_index = self.container.insert_floating_layout(layout);
 
@@ -665,6 +674,15 @@ impl NextDockWindow {
             cx.notify();
             return;
         };
+
+        let source_is_empty = self
+            .container
+            .layout_mut(source.composition_index)
+            .is_some_and(|layout| layout.is_empty());
+
+        if source_is_empty {
+            self.container.remove_empty_layout(source.composition_index);
+        }
 
         let layout = DockLayout::single_group(group);
         let composition_index = self.container.insert_floating_layout(layout);
