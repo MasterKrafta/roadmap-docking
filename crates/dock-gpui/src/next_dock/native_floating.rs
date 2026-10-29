@@ -1,10 +1,11 @@
 //! Native-window lifecycle and docking behavior for next_dock on Windows.
 
 use gpui::{
-    App, Context, WindowBounds, WindowKind, WindowOptions, point, px, size,
+    App, AppContext, Context, WindowBounds, WindowKind, WindowOptions, point, px, size,
 };
 use platform::windows::NativeWindowHandle;
 
+use super::floating_window::FloatingCompositionWindow;
 use super::geometry;
 use super::model::{DockNode, SplitAxis};
 use super::window::{CompositionDropZone, NextDockWindow, COMPOSITION_DROP_ZONE_WIDTH};
