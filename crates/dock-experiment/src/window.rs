@@ -63,7 +63,7 @@ fn open_floating_panel(kind: PanelKind, cx: &mut App) {
             title: Some(kind.title().into()),
             ..Default::default()
         }),
-        kind: WindowKind::Floating,
+        kind: WindowKind::PopUp,
         ..Default::default()
     };
 
