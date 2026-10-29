@@ -201,8 +201,6 @@ impl RenderOnce for GroupHeader {
             );
         }
 
-        result = result.child(tabs_viewport);
-
         // Split the empty area into a flexible hit target and a fixed-width
         // drag zone. Both start dragging the group; the menu remains separate.
         let fixed_drag_width = drag_reserve.min((tab_area_width - x).max(0.0));
@@ -227,6 +225,9 @@ impl RenderOnce for GroupHeader {
                     ),
             );
         }
+
+        // Render tabs above the flexible empty space, but below the fixed drag zone.
+        result = result.child(tabs_viewport);
 
         if fixed_drag_width > 0.0 {
             result = result.child(
