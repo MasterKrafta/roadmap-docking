@@ -75,8 +75,12 @@ impl MainWindow {
     /// Closes every still-open panel before GPUI closes the main window.
     pub(crate) fn close_floating_panels(&mut self, cx: &mut Context<Self>) {
         for panel in self.floating_panels.drain(..) {
-            // A panel may already have been closed directly by the user.
-            if let Err(_error) = panel.update(cx, |_, window, _| window.remove_window()) {}
+            match panel.update(cx, |_, window, _| window.remove_window()) {
+                Ok(()) => {}
+                Err(_error) => {
+                    // If the user already closed this panel, cleanup is already complete.
+                }
+            }
         }
     }
 }
