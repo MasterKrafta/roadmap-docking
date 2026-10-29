@@ -53,6 +53,7 @@ struct PendingTabDrag {
     strip_bounds: Rect,
     tab_widths: Vec<f32>,
     grab_offset_x: f32,
+    grab_offset_y: f32,
     reorder_started: bool,
     preview_bounds: Option<Rect>,
     group_key: String,
@@ -233,8 +234,21 @@ impl NextDockWindow {
         grab_offset_x: f32,
         group_key: String,
     ) {
-        // Пока поддерживаем только один floating-макет одновременно.
-        if self.active_resize.is_some() || self.floating_composition.is_some() {
+        if self.active_resize.is_some() {
+            return;
+        }
+
+        // Вкладка плавающей композиции перемещает всю композицию.
+        if let Some(floating) = self.floating_composition {
+            if floating.composition_index == composition_index {
+                self.begin_composition_move(
+                    composition_index,
+                    position,
+                    viewport_size.width,
+                    viewport_size.height,
+                );
+            }
+
             return;
         }
 
@@ -256,6 +270,7 @@ impl NextDockWindow {
             strip_bounds,
             tab_widths,
             grab_offset_x,
+            grab_offset_y: position.y.as_f32() - geometry::HEADER_HEIGHT - strip_bounds.origin.y,
             reorder_started: false,
             preview_bounds: None,
             group_key,
@@ -420,25 +435,24 @@ impl NextDockWindow {
             .min(520.0)
             .clamp(1.0, viewport.height);
 
+        let column_header_height = self.theme.metrics.column_header_height.max(0.0);
+
         let origin = Point::new(
-            (pending.start_position.x - 32.0).clamp(0.0, (viewport.width - width).max(0.0)),
-            (pending.start_position.y
-                - self.theme.metrics.column_header_height.max(0.0)
-                - self.theme.metrics.tab_strip_height.max(0.0) * 0.5)
+            (pointer.x - pending.grab_offset_x).clamp(0.0, (viewport.width - width).max(0.0)),
+            (pointer.y - column_header_height - pending.grab_offset_y)
                 .clamp(0.0, (viewport.height - height).max(0.0)),
         );
 
-        let start_bounds = Rect::new(origin, Size::new(width, height));
+        let bounds = Rect::new(origin, Size::new(width, height));
 
-        let moved_origin = Point::new(
-            (origin.x + dx).clamp(0.0, (viewport.width - width).max(0.0)),
-            (origin.y + dy).clamp(0.0, (viewport.height - height).max(0.0)),
-        );
+        // Начало дальнейшего перемещения — точка, в которой
+        // вкладка оторвалась от исходной полосы.
+        pending.start_position = pointer;
 
         self.active_tab_drag = Some(ActiveTabDrag {
             pending,
-            start_origin: start_bounds.origin,
-            bounds: Rect::new(moved_origin, start_bounds.size),
+            start_origin: origin,
+            bounds,
         });
 
         cx.notify();
