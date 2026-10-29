@@ -336,6 +336,7 @@ fn ensure_hidden_floating_window(
         ..Default::default()
     };
     let owner_for_view = owner.clone();
+    let owner_for_close = owner.clone();
 
     match app.open_window(options, move |window, cx| {
         if let Some(native_handle) = NativeWindowHandle::from_window(window) {
@@ -344,7 +345,29 @@ fn ensure_hidden_floating_window(
             platform::windows::hide_window(native_handle);
         }
 
-        cx.new(|_| FloatingCompositionWindow::new(owner_for_view.clone(), None))
+        let view = cx.new(|_| FloatingCompositionWindow::new(owner_for_view.clone(), None));
+        let view_for_close = view.downgrade();
+        view.update(cx, |_, view_cx| {
+            window.on_window_should_close(view_cx, move |_window, app| {
+                let Some(view) = view_for_close.upgrade() else {
+                    return true;
+                };
+                let Some(id) = view.read(app).composition_id() else {
+                    return true;
+                };
+                let Some(owner) = owner_for_close.upgrade() else {
+                    return true;
+                };
+
+                owner.update(app, |main, cx| {
+                    main.dock_floating_composition(id, CompositionDropZone::RightEdge, cx);
+                });
+
+                // Keep the hidden surface alive; the next sync hides and pools it.
+                false
+            });
+        });
+        view
     }) {
         Ok(handle) => {
             owner_entity.update(app, |main, cx| {
