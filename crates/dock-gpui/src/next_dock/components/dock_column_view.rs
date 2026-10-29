@@ -21,8 +21,7 @@ pub(in crate::next_dock) struct DockColumnView {
 
 impl DockColumnView {
     pub(in crate::next_dock) fn render(self) -> Div {
-        let header_rect =
-            Rect::new(Point::ZERO, Size::new(self.width, self.header_height));
+        let header_rect = Rect::new(Point::ZERO, Size::new(self.width, self.header_height));
 
         div()
             .relative()

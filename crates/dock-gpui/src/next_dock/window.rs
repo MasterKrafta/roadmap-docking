@@ -344,18 +344,12 @@ impl NextDockWindow {
             ),
             viewport_size: Size::new(viewport_size.width.max(1.0), viewport_size.height.max(1.0)),
             grab_offset_x,
-            grab_offset_y: position.y.as_f32()
-                - geometry::HEADER_HEIGHT
-                - strip_bounds.origin.y,
+            grab_offset_y: position.y.as_f32() - geometry::HEADER_HEIGHT - strip_bounds.origin.y,
             group_key,
         });
     }
 
-    pub(super) fn update_group_drag(
-        &mut self,
-        event: &MouseMoveEvent,
-        cx: &mut Context<Self>,
-    ) {
+    pub(super) fn update_group_drag(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
         if event.pressed_button != Some(MouseButton::Left) {
             return;
         }
@@ -399,8 +393,12 @@ impl NextDockWindow {
         }
 
         let viewport = pending.viewport_size;
-        let width = (viewport.width * 0.38).min(480.0).clamp(1.0, viewport.width);
-        let height = (viewport.height * 0.55).min(520.0).clamp(1.0, viewport.height);
+        let width = (viewport.width * 0.38)
+            .min(480.0)
+            .clamp(1.0, viewport.width);
+        let height = (viewport.height * 0.55)
+            .min(520.0)
+            .clamp(1.0, viewport.height);
         let column_header_height = self.theme.metrics.column_header_height.max(0.0);
 
         let origin = Point::new(
@@ -916,12 +914,15 @@ impl Render for NextDockWindow {
             bounds: active.bounds,
         });
 
-        let group_drag_preview = self.active_group_drag.as_ref().map(|active| GroupDragPreview {
-            group: active.pending.group.clone(),
-            bounds: active.bounds,
-            composition_index: active.pending.composition_index,
-            group_key: active.pending.group_key.clone(),
-        });
+        let group_drag_preview = self
+            .active_group_drag
+            .as_ref()
+            .map(|active| GroupDragPreview {
+                group: active.pending.group.clone(),
+                bounds: active.bounds,
+                composition_index: active.pending.composition_index,
+                group_key: active.pending.group_key.clone(),
+            });
 
         let tab_reorder_preview = self.pending_tab_drag.as_ref().and_then(|pending| {
             pending.preview_bounds.map(|bounds| TabReorderPreview {

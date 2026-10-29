@@ -1,8 +1,8 @@
 //! Rendering for the independent dock tree.
 use dock_core::{Axis, Point, Rect, Size};
 use gpui::{
-    App, Div, InteractiveElement, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, ParentElement, Styled, WeakEntity, Window, div, px, rgb,
+    App, Div, InteractiveElement, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+    ParentElement, Styled, WeakEntity, Window, div, px, rgb,
 };
 use ui::Theme;
 
@@ -663,5 +663,3 @@ fn render_node(
             .child("Dock geometry mismatch"),
     }
 }
-
-

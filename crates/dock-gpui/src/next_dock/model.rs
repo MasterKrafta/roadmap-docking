@@ -530,7 +530,6 @@ mod tests {
         assert_eq!(group.panels[0].title, "B");
     }
 
-
     #[test]
     fn removing_last_group_removes_the_empty_composition_slot() {
         let mut container = CompositionContainer {
@@ -547,7 +546,11 @@ mod tests {
             .and_then(|layout| layout.take_group(&[NodePathStep::ColumnContent]))
             .expect("source group should be returned");
 
-        assert!(container.layout_mut(0).is_some_and(|layout| layout.is_empty()));
+        assert!(
+            container
+                .layout_mut(0)
+                .is_some_and(|layout| layout.is_empty())
+        );
         assert!(container.remove_empty_layout(0));
         assert!(container.slots.is_empty());
 

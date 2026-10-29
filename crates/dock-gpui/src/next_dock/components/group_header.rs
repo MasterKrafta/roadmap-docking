@@ -204,8 +204,7 @@ impl RenderOnce for GroupHeader {
         // Split the empty area into a flexible hit target and a fixed-width
         // drag zone. Both start dragging the group; the menu remains separate.
         let fixed_drag_width = drag_reserve.min((tab_area_width - x).max(0.0));
-        let flexible_drag_width =
-            (tab_area_width - x - fixed_drag_width).max(0.0);
+        let flexible_drag_width = (tab_area_width - x - fixed_drag_width).max(0.0);
 
         if flexible_drag_width > 0.0 {
             result = result.child(
@@ -262,10 +261,7 @@ impl RenderOnce for GroupHeader {
     }
 }
 
-fn make_group_drag_handler(
-    context: Option<TabDragContext>,
-    group: TabGroup,
-) -> MouseDownHandler {
+fn make_group_drag_handler(context: Option<TabDragContext>, group: TabGroup) -> MouseDownHandler {
     let Some(context) = context else {
         return Box::new(|_, _, _| {});
     };
