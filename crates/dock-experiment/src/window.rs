@@ -1,12 +1,15 @@
 use dock_core::PanelKey;
 use gpui::{
     AppContext, Bounds, Context, IntoElement, Render, TitlebarOptions, WeakEntity, Window,
-    WindowBounds, WindowHandle, WindowKind, WindowOptions, div, px, rgb, size,
+    Subscription, WindowBounds, WindowHandle, WindowKind, WindowOptions, WindowVisibility, div,
+    px, rgb, size,
 };
 use gpui::prelude::*;
 
 pub(crate) struct MainWindow {
     floating_panels: Vec<WindowHandle<FloatingPanel>>,
+    panels_minimized_by_main: Vec<WindowHandle<FloatingPanel>>,
+    visibility_subscription: Option<Subscription>,
 }
 
 #[derive(Clone, Copy)]
@@ -35,6 +38,8 @@ impl MainWindow {
     pub(crate) fn new() -> Self {
         Self {
             floating_panels: Vec::new(),
+            panels_minimized_by_main: Vec::new(),
+            visibility_subscription: None,
         }
     }
 
@@ -49,6 +54,44 @@ impl MainWindow {
         for panel in &self.floating_panels {
             if let Err(error) = panel.update(cx, |_, window, _| window.activate_window()) {
                 eprintln!("Could not show a startup panel: {error:?}");
+            }
+        }
+    }
+
+    fn handle_main_window_visibility(
+        &mut self,
+        visibility: WindowVisibility,
+        cx: &mut Context<Self>,
+    ) {
+        match visibility {
+            WindowVisibility::Hidden => {
+                self.panels_minimized_by_main.clear();
+
+                for panel in &self.floating_panels {
+                    match panel.update(cx, |_, window, _| {
+                        if window.is_visible() {
+                            window.minimize_window();
+                            true
+                        } else {
+                            false
+                        }
+                    }) {
+                        Ok(true) => self.panels_minimized_by_main.push(panel.clone()),
+                        Ok(false) => {}
+                        Err(_error) => {
+                            // The panel may already have been closed by the user.
+                        }
+                    }
+                }
+            }
+            WindowVisibility::Visible => {
+                for panel in self.panels_minimized_by_main.drain(..) {
+                    if let Err(error) =
+                        panel.update(cx, |_, window, _| window.activate_window())
+                    {
+                        eprintln!("Could not restore a floating panel: {error:?}");
+                    }
+                }
             }
         }
     }
@@ -127,7 +170,16 @@ fn menu_button(kind: PanelKind, owner: WeakEntity<MainWindow>) -> impl IntoEleme
 }
 
 impl Render for MainWindow {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.visibility_subscription.is_none() {
+            self.visibility_subscription = Some(cx.observe_window_visibility(
+                window,
+                |this, visibility, _window, cx| {
+                    this.handle_main_window_visibility(visibility, cx);
+                },
+            ));
+        }
+
         let owner = cx.entity().downgrade();
 
         div()
