@@ -32,7 +32,9 @@ pub(super) struct NextDockWindow {
     #[cfg(windows)]
     pub(super) native_floating_windows: HashMap<u64, WindowHandle<FloatingCompositionWindow>>,
     #[cfg(windows)]
-    last_native_sync_ids: Vec<u64>,
+    pub(super) native_floating_pool: Vec<WindowHandle<FloatingCompositionWindow>>,
+    #[cfg(windows)]
+    last_native_sync_ids: Option<Vec<u64>>,
     pending_move: Option<PendingCompositionMove>,
     active_move: Option<ActiveCompositionMove>,
     pub(super) composition_drop_zone: Option<CompositionDropZone>,
@@ -170,7 +172,9 @@ impl NextDockWindow {
             #[cfg(windows)]
             native_floating_windows: HashMap::new(),
             #[cfg(windows)]
-            last_native_sync_ids: Vec::new(),
+            native_floating_pool: Vec::new(),
+            #[cfg(windows)]
+            last_native_sync_ids: None,
             pending_move: None,
             active_move: None,
             composition_drop_zone: None,
@@ -479,7 +483,9 @@ impl NextDockWindow {
             bounds: Rect::new(origin, Size::new(width, height)),
         });
 
-        cx.notify();
+        // Promote the group while the mouse is still held. The native
+        // floating surface is already prepared and can take over the drag.
+        self.end_group_drag(cx);
     }
 
     pub(super) fn update_tab_drag(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
@@ -660,7 +666,9 @@ impl NextDockWindow {
             bounds,
         });
 
-        cx.notify();
+        // Promote the tab while the mouse is still held. The native
+        // floating surface can take over before the user releases the button.
+        self.end_tab_drag(cx);
     }
 
     pub(super) fn end_tab_drag(&mut self, cx: &mut Context<Self>) {
@@ -1003,8 +1011,8 @@ impl Render for NextDockWindow {
                     .collect::<Vec<_>>();
                 current_ids.sort_unstable();
 
-                if current_ids != self.last_native_sync_ids {
-                    self.last_native_sync_ids = current_ids;
+                if self.last_native_sync_ids.as_ref() != Some(&current_ids) {
+                    self.last_native_sync_ids = Some(current_ids);
                     let owner = cx.entity().downgrade();
                     window.defer(cx, move |_, app| {
                         super::native_floating::synchronize_floating_windows(
