@@ -109,6 +109,50 @@ impl DockLayout {
             _ => None,
         }
     }
+
+    pub(super) fn single_panel(panel: Panel) -> Self {
+        Self {
+            root: column(DockNode::Tabs(TabGroup {
+                panels: vec![panel],
+                active: 0,
+            })),
+        }
+    }
+
+    pub(super) fn remove_panel(
+        &mut self,
+        path: &[NodePathStep],
+        panel_index: usize,
+    ) -> Option<Panel> {
+        let mut node = &mut self.root;
+
+        for step in path {
+            node = match (node, *step) {
+                (DockNode::Split { children, .. }, NodePathStep::SplitChild(index)) => {
+                    children.get_mut(index)?
+                }
+                (DockNode::Column { content }, NodePathStep::ColumnContent) => content.as_mut(),
+                _ => return None,
+            };
+        }
+
+        let DockNode::Tabs(group) = node else {
+            return None;
+        };
+
+        let panel = group.panels.get(panel_index).copied()?;
+        group.panels.remove(panel_index);
+
+        if group.panels.is_empty() {
+            group.active = 0;
+        } else if panel_index < group.active {
+            group.active -= 1;
+        } else if group.active >= group.panels.len() {
+            group.active = group.panels.len() - 1;
+        }
+
+        Some(panel)
+    }
 }
 
 fn tabs(panels: &[(&'static str, &'static str)]) -> DockNode {
@@ -179,6 +223,22 @@ impl CompositionContainer {
 
     pub(super) fn layout_mut(&mut self, index: usize) -> Option<&mut DockLayout> {
         self.slots.get_mut(index)?.layout.as_mut()
+    }
+
+    pub(super) fn insert_floating_layout(&mut self, layout: DockLayout) -> usize {
+        if let Some(index) = self.slots.iter().position(|slot| slot.layout.is_none()) {
+            self.slots[index].layout = Some(layout);
+            return index;
+        }
+
+        let index = self.slots.len();
+
+        self.slots.push(CompositionSlot {
+            layout: Some(layout),
+            weight: 1.0,
+        });
+
+        index
     }
 
     pub(super) fn reserve_empty_neighbor(

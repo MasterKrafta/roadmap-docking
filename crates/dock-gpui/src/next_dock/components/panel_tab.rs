@@ -2,12 +2,12 @@
 
 use dock_core::Rect;
 use gpui::{
-    App, InteractiveElement, IntoElement, ParentElement, RenderOnce, StatefulInteractiveElement,
-    Styled, Window, div, px, rgb,
+    App, InteractiveElement, IntoElement, MouseButton, ParentElement, RenderOnce,
+    StatefulInteractiveElement, Styled, Window, div, px, rgb,
 };
 use ui::Theme;
 
-use crate::components::{ClickHandler, with_focus_ring};
+use crate::components::{ClickHandler, MouseDownHandler, with_focus_ring};
 
 #[derive(IntoElement)]
 pub(super) struct PanelTab {
@@ -17,6 +17,7 @@ pub(super) struct PanelTab {
     pub(super) active: bool,
     pub(super) theme: Theme,
     pub(super) on_activate: ClickHandler,
+    pub(super) on_drag_start: MouseDownHandler,
 }
 
 impl RenderOnce for PanelTab {
@@ -57,6 +58,7 @@ impl RenderOnce for PanelTab {
 
         with_focus_ring(tab.id(self.id), &theme)
             .hover(move |style| style.bg(rgb(hover_background)))
+            .on_mouse_down(MouseButton::Left, self.on_drag_start)
             .on_click(self.on_activate)
     }
 }

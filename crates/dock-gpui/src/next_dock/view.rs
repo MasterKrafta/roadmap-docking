@@ -11,8 +11,10 @@ use crate::components::{GroupFrame, MouseDownHandler, PanelSurface, SplitterHand
 
 use super::components::{ColumnHeader, GroupHeader};
 use super::geometry::{self, GeometryKind, NodeGeometry};
-use super::model::{CompositionContainer, DockNode, NodePathStep, SplitAxis, TabGroup};
-use super::window::{CompositionDropZone, FloatingComposition, NextDockWindow};
+use super::model::{CompositionContainer, DockLayout, DockNode, NodePathStep, SplitAxis, TabGroup};
+use super::window::{
+    CompositionDropZone, FloatingComposition, NextDockWindow, TabDragContext, TabDragPreview,
+};
 
 #[derive(Clone)]
 pub(super) struct SplitResizeSpec {
@@ -35,6 +37,7 @@ pub(super) fn render(
     owner: WeakEntity<NextDockWindow>,
     floating: Option<FloatingComposition>,
     drop_zone: Option<CompositionDropZone>,
+    tab_drag_preview: Option<TabDragPreview>,
 ) -> Div {
     let width = width.max(1.0);
     let height = height.max(1.0);
@@ -89,6 +92,7 @@ pub(super) fn render(
                     &owner,
                     Size::new(width, content_height),
                     *composition_index,
+                    true,
                 )
             }
             None => div()
@@ -139,6 +143,7 @@ pub(super) fn render(
                 &owner,
                 Size::new(width, content_height),
                 floating.composition_index,
+                true,
             );
 
             body = body.child(
@@ -153,6 +158,43 @@ pub(super) fn render(
                     .child(floating_content),
             );
         }
+    }
+
+    if let Some(preview) = tab_drag_preview {
+        let preview_layout = DockLayout::single_panel(preview.panel);
+
+        let node_geometry = geometry::compute(
+            &preview_layout.root,
+            preview.bounds.size.width,
+            preview.bounds.size.height,
+            window,
+            theme,
+        );
+
+        let preview_content = render_node(
+            &preview_layout.root,
+            &node_geometry,
+            theme,
+            "tab-drag-preview",
+            &[],
+            window,
+            &owner,
+            Size::new(width, content_height),
+            0,
+            false,
+        );
+
+        body = body.child(
+            div()
+                .absolute()
+                .left(px(preview.bounds.origin.x))
+                .top(px(preview.bounds.origin.y))
+                .w(px(preview.bounds.size.width))
+                .h(px(preview.bounds.size.height))
+                .border_1()
+                .border_color(rgb(theme.colors.border))
+                .child(preview_content),
+        );
     }
 
     if let Some(drop_zone) = drop_zone {
@@ -206,6 +248,7 @@ pub(super) fn render(
                 owner.update(app, |this, cx| {
                     this.update_resize(event, cx);
                     this.update_composition_move(event, cx);
+                    this.update_tab_drag(event, cx);
                 });
             }
         },
@@ -216,6 +259,7 @@ pub(super) fn render(
             if let Some(owner) = up_owner.upgrade() {
                 owner.update(app, |this, cx| {
                     this.end_resize(cx);
+                    this.end_tab_drag(cx);
                     this.end_composition_move(cx);
                 });
             }
@@ -227,6 +271,7 @@ pub(super) fn render(
             if let Some(owner) = up_out_owner.upgrade() {
                 owner.update(app, |this, cx| {
                     this.end_resize(cx);
+                    this.end_tab_drag(cx);
                     this.end_composition_move(cx);
                 });
             }
@@ -269,6 +314,7 @@ fn render_node(
     owner: &WeakEntity<NextDockWindow>,
     viewport_size: Size,
     composition_index: usize,
+    interactive: bool,
 ) -> Div {
     match (&geometry.kind, node) {
         (
@@ -277,15 +323,25 @@ fn render_node(
                 content_height,
             },
             DockNode::Tabs(group),
-        ) => render_tabs(
-            group,
-            geometry.width,
-            geometry.height,
-            *tab_height,
-            *content_height,
-            theme,
-            key,
-        ),
+        ) => {
+            let tab_drag_context = interactive.then(|| TabDragContext {
+                composition_index,
+                path: path.to_vec(),
+                viewport_size,
+                owner: owner.clone(),
+            });
+
+            render_tabs(
+                group,
+                geometry.width,
+                geometry.height,
+                *tab_height,
+                *content_height,
+                theme,
+                key,
+                tab_drag_context,
+            )
+        }
 
         (
             GeometryKind::Column {
@@ -317,12 +373,13 @@ fn render_node(
                     owner,
                     viewport_size,
                     composition_index,
+                    true,
                 ));
 
             let drag_owner = owner.clone();
             let viewport_size = viewport_size;
 
-            let on_drag_start: MouseDownHandler =
+            let on_drag_start: MouseDownHandler = if interactive == true {
                 Box::new(move |event: &MouseDownEvent, _window, app| {
                     if let Some(owner) = drag_owner.upgrade() {
                         owner.update(app, |this, _cx| {
@@ -334,7 +391,10 @@ fn render_node(
                             );
                         });
                     }
-                });
+                })
+            } else {
+                Box::new(|_, _, _| {})
+            };
 
             div()
                 .relative()
@@ -479,6 +539,7 @@ fn render_node(
                     owner,
                     viewport_size,
                     composition_index,
+                    true,
                 ));
             }
 
@@ -501,6 +562,7 @@ fn render_tabs(
     content_height: f32,
     theme: &Theme,
     key: &str,
+    tab_drag_context: Option<TabDragContext>,
 ) -> Div {
     let group_rect = Rect::new(Point::ZERO, Size::new(width, height));
 
@@ -548,5 +610,6 @@ fn render_tabs(
             group: group.clone(),
             theme: *theme,
             key: key.to_owned(),
+            tab_drag_context,
         })
 }

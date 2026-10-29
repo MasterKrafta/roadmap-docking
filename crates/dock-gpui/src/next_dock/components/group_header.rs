@@ -2,12 +2,16 @@
 //! drag zone, and group menu for the next dock implementation.
 
 use dock_core::{Point, Rect, Size};
-use gpui::{App, IntoElement, ParentElement, RenderOnce, Styled, Window, div, px, rgb};
+use gpui::{
+    App, IntoElement, MouseDownEvent, ParentElement, RenderOnce, Styled, WeakEntity, Window, div,
+    px, rgb,
+};
 use ui::Theme;
 
-use crate::components::{ClickHandler, TabStrip};
+use crate::components::{ClickHandler, MouseDownHandler, TabStrip};
 
-use super::super::model::TabGroup;
+use super::super::model::{NodePathStep, Panel, TabGroup};
+use super::super::window::{NextDockWindow, TabDragContext};
 use super::group_menu_button::GroupMenuButton;
 use super::panel_tab::PanelTab;
 
@@ -21,6 +25,7 @@ pub(in crate::next_dock) struct GroupHeader {
     pub(in crate::next_dock) group: TabGroup,
     pub(in crate::next_dock) theme: Theme,
     pub(in crate::next_dock) key: String,
+    pub(in crate::next_dock) tab_drag_context: Option<TabDragContext>,
 }
 
 impl RenderOnce for GroupHeader {
@@ -88,6 +93,37 @@ impl RenderOnce for GroupHeader {
 
             let tab_rect = Rect::new(Point::new(x, 0.0), Size::new(tab_width, height));
 
+            let panel = *panel;
+
+            let on_drag_start: MouseDownHandler =
+                if let Some(context) = self.tab_drag_context.as_ref() {
+                    let owner = context.owner.clone();
+                    let composition_index = context.composition_index;
+                    let path = context.path.clone();
+                    let viewport_size = context.viewport_size;
+
+                    Box::new(move |event: &MouseDownEvent, _window, app| {
+                        let Some(owner) = owner.upgrade() else {
+                            return;
+                        };
+
+                        let path = path.clone();
+
+                        owner.update(app, |this, _cx| {
+                            this.begin_tab_drag(
+                                composition_index,
+                                path,
+                                index,
+                                panel,
+                                event.position,
+                                viewport_size,
+                            );
+                        });
+                    })
+                } else {
+                    Box::new(|_, _, _| {})
+                };
+
             tabs_viewport = tabs_viewport.child(PanelTab {
                 id: format!("next-dock-tab-{}-{index}", self.key),
                 rect: tab_rect,
@@ -95,6 +131,7 @@ impl RenderOnce for GroupHeader {
                 active: index == active_index,
                 theme,
                 on_activate: noop_click(),
+                on_drag_start,
             });
 
             x += tab_width;
