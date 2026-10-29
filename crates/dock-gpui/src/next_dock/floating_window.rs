@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use gpui::{
     Context, InteractiveElement, IntoElement, MouseButton, MouseMoveEvent, ParentElement, Render,
-    Styled, Subscription, Window, div, px, rgb,
+    StatefulInteractiveElement, Styled, Subscription, Window, div, px, rgb,
 };
 use platform::windows::{self, NativeWindowHandle};
 
