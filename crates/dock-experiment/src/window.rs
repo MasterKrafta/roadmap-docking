@@ -123,7 +123,7 @@ impl MainWindow {
                 title: Some(kind.title().into()),
                 ..Default::default()
             }),
-            kind: WindowKind::Floating,
+            kind: WindowKind::PopUp,
             ..Default::default()
         };
 
