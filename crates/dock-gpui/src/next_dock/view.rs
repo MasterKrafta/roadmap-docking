@@ -19,10 +19,10 @@ use super::window::{
     TabDragPreview, TabReorderPreview,
 };
 
-#[derive(Clone)]
 pub(super) type NativeWindowMoveHandler =
     Rc<dyn Fn(&MouseDownEvent, &mut Window, &mut App) + 'static>;
 
+#[derive(Clone)]
 pub(super) struct SplitResizeSpec {
     pub(super) composition_index: usize,
     pub(super) path: Vec<NodePathStep>,
