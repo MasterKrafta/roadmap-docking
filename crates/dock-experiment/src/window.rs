@@ -170,7 +170,10 @@ impl MainWindow {
         };
 
         match cx.open_window(options, move |_window, cx| {
-            cx.new(|_| FloatingPanel { key })
+            cx.new(|_| FloatingPanel {
+                key,
+                should_move: false,
+            })
         }) {
             Ok(handle) => {
                 #[cfg(windows)]
@@ -265,6 +268,7 @@ impl Render for MainWindow {
 
 struct FloatingPanel {
     key: PanelKey,
+    should_move: bool,
 }
 
 impl Render for FloatingPanel {
@@ -288,9 +292,27 @@ impl Render for FloatingPanel {
                     .bg(rgb(0x2b323a))
                     .border_b_1()
                     .border_color(rgb(0x414a55))
-                    .on_mouse_down(MouseButton::Left, |_, window, _| {
-                        window.start_window_move();
-                    })
+                    .on_mouse_down_out(cx.listener(|this, _event, _window, _cx| {
+                        this.should_move = false;
+                    }))
+                    .on_mouse_up(
+                        MouseButton::Left,
+                        cx.listener(|this, _event, _window, _cx| {
+                            this.should_move = false;
+                        }),
+                    )
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _event, _window, _cx| {
+                            this.should_move = true;
+                        }),
+                    )
+                    .on_mouse_move(cx.listener(|this, _event, window, _cx| {
+                        if this.should_move {
+                            this.should_move = false;
+                            window.start_window_move();
+                        }
+                    }))
                     .child(
                         div()
                             .flex_1()
