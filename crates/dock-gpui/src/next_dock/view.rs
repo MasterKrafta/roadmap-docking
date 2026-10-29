@@ -101,6 +101,7 @@ pub(super) fn render(
                     *composition_index,
                     true,
                     slot_origin,
+                    tab_reorder_preview,
                 )
             }
             None => div()
@@ -155,6 +156,7 @@ pub(super) fn render(
                 floating.composition_index,
                 true,
                 bounds.origin,
+                tab_reorder_preview.as_ref(),
             );
 
             body = body.child(
@@ -194,6 +196,7 @@ pub(super) fn render(
             0,
             false,
             preview.bounds.origin,
+            tab_reorder_preview.as_ref(),
         );
 
         body = body.child(
@@ -209,7 +212,7 @@ pub(super) fn render(
         );
     }
 
-    if let Some(preview) = tab_reorder_preview {
+    if let Some(preview) = tab_reorder_preview.as_ref() {
         let typography = theme.typography;
 
         body = body.child(
@@ -355,6 +358,7 @@ fn render_node(
     composition_index: usize,
     interactive: bool,
     origin: Point,
+    tab_reorder_preview: Option<TabReorderPreview>,
 ) -> Div {
     match (&geometry.kind, node) {
         (
@@ -364,11 +368,18 @@ fn render_node(
             },
             DockNode::Tabs(group),
         ) => {
+            let dragged_panel_index = tab_reorder_preview
+                .filter(|preview| {
+                    preview.composition_index == composition_index && preview.group_key == key
+                })
+                .map(|preview| preview.panel_index);
             let tab_drag_context = interactive.then(|| TabDragContext {
                 composition_index,
                 path: path.to_vec(),
                 viewport_size,
                 owner: owner.clone(),
+                group_key: key.to_owned(),
+                dragged_panel_index,
                 strip_bounds: Rect::new(origin, Size::new(geometry.width, *tab_height)),
             });
 

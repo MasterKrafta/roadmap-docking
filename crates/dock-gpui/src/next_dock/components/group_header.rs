@@ -132,15 +132,33 @@ impl RenderOnce for GroupHeader {
                     Box::new(|_, _, _| {})
                 };
 
-            tabs_viewport = tabs_viewport.child(PanelTab {
-                id: format!("next-dock-tab-{}-{index}", self.key),
-                rect: tab_rect,
-                label: panel.title.to_owned(),
-                active: index == active_index,
-                theme,
-                on_activate: noop_click(),
-                on_drag_start,
-            });
+            let is_dragged_tab = self
+                .tab_drag_context
+                .as_ref()
+                .and_then(|context| context.dragged_panel_index)
+                == Some(index);
+
+            if is_dragged_tab {
+                tabs_viewport = tabs_viewport.child(
+                    div()
+                        .absolute()
+                        .left(px(tab_rect.origin.x))
+                        .top(px(tab_rect.origin.y))
+                        .w(px(tab_rect.size.width))
+                        .h(px(tab_rect.size.height))
+                        .bg(rgb(theme.colors.tab_strip_background)),
+                );
+            } else {
+                tabs_viewport = tabs_viewport.child(PanelTab {
+                    id: format!("next-dock-tab-{}-{index}", self.key),
+                    rect: tab_rect,
+                    label: panel.title.to_owned(),
+                    active: index == active_index,
+                    theme,
+                    on_activate: noop_click(),
+                    on_drag_start,
+                });
+            }
 
             x += tab_width;
         }

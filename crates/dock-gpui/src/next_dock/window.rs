@@ -55,6 +55,7 @@ struct PendingTabDrag {
     grab_offset_x: f32,
     reorder_started: bool,
     preview_bounds: Option<Rect>,
+    group_key: String,
 }
 
 #[derive(Clone)]
@@ -70,10 +71,13 @@ pub(super) struct TabDragPreview {
     pub(super) bounds: Rect,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct TabReorderPreview {
     pub(super) panel: Panel,
     pub(super) bounds: Rect,
+    pub(super) composition_index: usize,
+    pub(super) group_key: String,
+    pub(super) panel_index: usize,
 }
 
 #[derive(Clone)]
@@ -83,6 +87,8 @@ pub(super) struct TabDragContext {
     pub(super) viewport_size: Size,
     pub(super) owner: gpui::WeakEntity<NextDockWindow>,
     pub(super) strip_bounds: Rect,
+    pub(super) group_key: String,
+    pub(super) dragged_panel_index: Option<usize>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -225,6 +231,7 @@ impl NextDockWindow {
         strip_bounds: Rect,
         tab_widths: Vec<f32>,
         grab_offset_x: f32,
+        group_key: String,
     ) {
         // Пока поддерживаем только один floating-макет одновременно.
         if self.active_resize.is_some() || self.floating_composition.is_some() {
@@ -251,6 +258,7 @@ impl NextDockWindow {
             grab_offset_x,
             reorder_started: false,
             preview_bounds: None,
+            group_key: String,
         });
     }
 
@@ -317,12 +325,21 @@ impl NextDockWindow {
                 let index = pending.panel_index;
                 let mut moved = false;
 
+                let tab_lane_width: f32 = pending.tab_widths.iter().sum();
+
+                let dragged_width = pending.tab_widths.get(index).copied().unwrap_or(120.0);
+
+                let dragged_left = (local_x - pending.grab_offset_x)
+                    .clamp(0.0, (tab_lane_width - dragged_width).max(0.0));
+
+                let dragged_center = dragged_left + dragged_width * 0.5;
+
                 if index + 1 < pending.tab_widths.len() {
                     let next = index + 1;
                     let next_start: f32 = pending.tab_widths[..next].iter().sum();
                     let threshold = next_start + pending.tab_widths[next] * 0.75;
 
-                    if local_x >= threshold {
+                    if dragged_center >= threshold {
                         moved = self
                             .container
                             .layout_mut(pending.composition_index)
@@ -345,7 +362,7 @@ impl NextDockWindow {
                     let previous_start: f32 = pending.tab_widths[..previous].iter().sum();
                     let threshold = previous_start + pending.tab_widths[previous] * 0.25;
 
-                    if local_x <= threshold {
+                    if dragged_center <= threshold {
                         moved = self
                             .container
                             .layout_mut(pending.composition_index)
@@ -378,8 +395,8 @@ impl NextDockWindow {
                 (local_x - pending.grab_offset_x).clamp(0.0, (tab_lane_width - tab_width).max(0.0));
 
             pending.preview_bounds = Some(Rect::new(
-                Point::new(strip.origin.x + tab_left, strip.origin.y),
-                Size::new(tab_width, strip.size.height),
+                Point::new(strip.origin.x + dragged_left, strip.origin.y),
+                Size::new(dragged_width, strip.size.height),
             ));
 
             self.pending_tab_drag = Some(pending);
@@ -652,6 +669,9 @@ impl Render for NextDockWindow {
             pending.preview_bounds.map(|bounds| TabReorderPreview {
                 panel: pending.panel,
                 bounds,
+                composition_index: pending.composition_index,
+                group_key: pending.group_key.clone(),
+                panel_index: pending.panel_index,
             })
         });
 
