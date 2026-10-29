@@ -38,6 +38,12 @@ impl MainWindow {
         }
     }
 
+    /// Opens the panels that should be visible when the experiment starts.
+    pub(crate) fn open_startup_panels(&mut self, cx: &mut Context<Self>) {
+        self.open_floating_panel(PanelKind::Layers, cx);
+        self.open_floating_panel(PanelKind::Properties, cx);
+    }
+
     fn open_floating_panel(&mut self, kind: PanelKind, cx: &mut Context<Self>) {
         let key = match PanelKey::new(kind.key()) {
             Ok(key) => key,
