@@ -29,6 +29,41 @@ pub(super) struct SplitResizeSpec {
     pub(super) min_second: f32,
 }
 
+pub(super) fn render_floating_layout(
+    layout: &DockLayout,
+    composition_index: usize,
+    width: f32,
+    height: f32,
+    window: &Window,
+    theme: &Theme,
+    owner: WeakEntity<NextDockWindow>,
+) -> Div {
+    let width = width.max(1.0);
+    let height = height.max(1.0);
+    let node_geometry = geometry::compute(&layout.root, width, height, window, theme);
+    let content = render_node(
+        &layout.root,
+        &node_geometry,
+        theme,
+        &format!("composition-{composition_index}-native"),
+        &[],
+        window,
+        &owner,
+        Size::new(width, height),
+        composition_index,
+        false,
+        Point::ZERO,
+        None,
+        None,
+    );
+
+    div()
+        .relative()
+        .w(px(width))
+        .h(px(height))
+        .child(content)
+}
+
 pub(super) fn render(
     container: &CompositionContainer,
     width: f32,
@@ -37,6 +72,7 @@ pub(super) fn render(
     theme: &Theme,
     owner: WeakEntity<NextDockWindow>,
     floating_compositions: &[FloatingComposition],
+    native_floating_ids: &[u64],
     drop_zone: Option<CompositionDropZone>,
     tab_drag_preview: Option<TabDragPreview>,
     group_drag_preview: Option<GroupDragPreview>,
@@ -135,6 +171,10 @@ pub(super) fn render(
         .child(docked_row);
 
     for floating in floating_compositions {
+        if native_floating_ids.contains(&floating.id) {
+            continue;
+        }
+
         if let Some(layout) = container
             .slots
             .get(floating.composition_index)

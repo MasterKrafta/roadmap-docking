@@ -10,6 +10,11 @@ mod view;
 mod window;
 
 #[cfg(windows)]
+mod floating_window;
+#[cfg(windows)]
+mod native_floating;
+
+#[cfg(windows)]
 use gpui::AssetSource;
 
 use crate::RunOptions;

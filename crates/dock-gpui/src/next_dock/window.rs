@@ -4,6 +4,16 @@ use dock_core::{Point, Rect, Size};
 use gpui::{Context, IntoElement, MouseButton, MouseMoveEvent, Render, Window};
 use ui::Theme;
 
+#[cfg(windows)]
+use std::collections::HashMap;
+
+#[cfg(windows)]
+use gpui::WindowHandle;
+#[cfg(windows)]
+use platform::windows::NativeWindowHandle;
+
+#[cfg(windows)]
+use super::floating_window::FloatingCompositionWindow;
 use super::geometry;
 use super::model::{CompositionContainer, DockLayout, NodePathStep, Panel, SplitAxis, TabGroup};
 use super::view::{self, SplitResizeSpec};
@@ -11,12 +21,21 @@ use super::view::{self, SplitResizeSpec};
 /// Owns the prototype layout and renders it in a regular GPUI window.
 pub(super) struct NextDockWindow {
     theme: Theme,
-    container: CompositionContainer,
+    pub(super) container: CompositionContainer,
     active_resize: Option<ActiveResize>,
-    floating_compositions: Vec<FloatingComposition>,
-    pending_move: Option<PendingCompositionMove>,
-    active_move: Option<ActiveCompositionMove>,
-    composition_drop_zone: Option<CompositionDropZone>,
+    pub(super) floating_compositions: Vec<FloatingComposition>,
+    next_floating_id: u64,
+    #[cfg(windows)]
+    pub(super) native_main_handle: Option<NativeWindowHandle>,
+    #[cfg(windows)]
+    pub(super) native_main_viewport: Size,
+    #[cfg(windows)]
+    pub(super) native_floating_windows: HashMap<u64, WindowHandle<FloatingCompositionWindow>>,
+    #[cfg(windows)]
+    last_native_sync_ids: Vec<u64>,
+    pub(super) pending_move: Option<PendingCompositionMove>,
+    pub(super) active_move: Option<ActiveCompositionMove>,
+    pub(super) composition_drop_zone: Option<CompositionDropZone>,
     pending_tab_drag: Option<PendingTabDrag>,
     active_tab_drag: Option<ActiveTabDrag>,
     pending_group_drag: Option<PendingGroupDrag>,
@@ -123,6 +142,7 @@ pub(super) struct TabDragContext {
 
 #[derive(Clone, Copy, Debug)]
 pub(super) struct FloatingComposition {
+    pub(super) id: u64,
     pub(super) composition_index: usize,
     pub(super) bounds: Rect,
 }
@@ -133,7 +153,7 @@ pub(super) enum CompositionDropZone {
     RightEdge,
 }
 
-const COMPOSITION_DROP_ZONE_WIDTH: f32 = 24.0;
+pub(super) const COMPOSITION_DROP_ZONE_WIDTH: f32 = 24.0;
 
 impl NextDockWindow {
     pub(super) fn new(theme: Theme) -> Self {
@@ -142,6 +162,15 @@ impl NextDockWindow {
             container: CompositionContainer::initial(),
             active_resize: None,
             floating_compositions: Vec::new(),
+            next_floating_id: 1,
+            #[cfg(windows)]
+            native_main_handle: None,
+            #[cfg(windows)]
+            native_main_viewport: Size::new(1.0, 1.0),
+            #[cfg(windows)]
+            native_floating_windows: HashMap::new(),
+            #[cfg(windows)]
+            last_native_sync_ids: Vec::new(),
             pending_move: None,
             active_move: None,
             composition_drop_zone: None,
@@ -151,6 +180,36 @@ impl NextDockWindow {
             active_group_drag: None,
         }
     }
+    fn add_floating_composition(&mut self, composition_index: usize, bounds: Rect) -> u64 {
+        let id = self.next_floating_id;
+        self.next_floating_id = self.next_floating_id.wrapping_add(1);
+        self.floating_compositions.push(FloatingComposition {
+            id,
+            composition_index,
+            bounds,
+        });
+        id
+    }
+
+    pub(super) fn floating_composition_snapshot(
+        &self,
+        id: u64,
+    ) -> Option<(FloatingComposition, DockLayout, Theme)> {
+        let floating = self
+            .floating_compositions
+            .iter()
+            .find(|floating| floating.id == id)
+            .copied()?;
+        let layout = self
+            .container
+            .slots
+            .get(floating.composition_index)?
+            .layout
+            .as_ref()?
+            .clone();
+        Some((floating, layout, self.theme))
+    }
+
     pub(super) fn begin_resize(
         &mut self,
         spec: SplitResizeSpec,
@@ -629,10 +688,7 @@ impl NextDockWindow {
         self.active_move = None;
         self.composition_drop_zone = None;
 
-        self.floating_compositions.push(FloatingComposition {
-            composition_index,
-            bounds: active.bounds,
-        });
+        self.add_floating_composition(composition_index, active.bounds);
 
         cx.notify();
     }
@@ -666,10 +722,7 @@ impl NextDockWindow {
         self.pending_move = None;
         self.active_move = None;
         self.composition_drop_zone = None;
-        self.floating_compositions.push(FloatingComposition {
-            composition_index,
-            bounds: active.bounds,
-        });
+        self.add_floating_composition(composition_index, active.bounds);
 
         cx.notify();
     }
@@ -829,10 +882,7 @@ impl NextDockWindow {
         {
             floating.bounds = bounds;
         } else {
-            self.floating_compositions.push(FloatingComposition {
-                composition_index: pending.composition_index,
-                bounds,
-            });
+            self.add_floating_composition(pending.composition_index, bounds);
         }
 
         self.active_move = Some(ActiveCompositionMove {
@@ -934,6 +984,37 @@ impl Render for NextDockWindow {
             })
         });
 
+        #[cfg(windows)]
+        let native_floating_ids = {
+            self.native_main_handle = NativeWindowHandle::from_window(window);
+            self.native_main_viewport = Size::new(width, height);
+
+            if let Some(main_handle) = self.native_main_handle {
+                let mut current_ids = self
+                    .floating_compositions
+                    .iter()
+                    .map(|floating| floating.id)
+                    .collect::<Vec<_>>();
+                current_ids.sort_unstable();
+
+                if current_ids != self.last_native_sync_ids {
+                    self.last_native_sync_ids = current_ids;
+                    let owner = cx.entity().downgrade();
+                    window.defer(cx, move |_, app| {
+                        super::native_floating::synchronize_floating_windows(
+                            owner,
+                            main_handle,
+                            app,
+                        );
+                    });
+                }
+            }
+
+            self.native_floating_windows.keys().copied().collect::<Vec<_>>()
+        };
+        #[cfg(not(windows))]
+        let native_floating_ids: Vec<u64> = Vec::new();
+
         view::render(
             &self.container,
             width,
@@ -942,6 +1023,7 @@ impl Render for NextDockWindow {
             &self.theme,
             cx.entity().downgrade(),
             &self.floating_compositions,
+            &native_floating_ids,
             self.composition_drop_zone,
             tab_drag_preview,
             group_drag_preview,
