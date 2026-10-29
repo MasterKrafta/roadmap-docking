@@ -8,11 +8,16 @@ use platform::windows::{self, NativeWindowHandle};
 use super::view;
 use super::window::NextDockWindow;
 
+const TICK_MS: u64 = 4;
+const DRAG_THRESHOLD: i32 = 2;
+
 #[derive(Clone, Copy)]
 struct NativeMoveDrag {
     handle: NativeWindowHandle,
     offset_x: i32,
     offset_y: i32,
+    start_cursor: (i32, i32),
+    moved: bool,
 }
 
 pub(super) struct FloatingCompositionWindow {
@@ -64,12 +69,14 @@ impl FloatingCompositionWindow {
             handle,
             offset_x: cursor.0 - left,
             offset_y: cursor.1 - top,
+            start_cursor: cursor,
+            moved: false,
         });
 
         cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor()
-                    .timer(Duration::from_millis(8))
+                    .timer(Duration::from_millis(TICK_MS))
                     .await;
 
                 if !matches!(this.update(cx, |view, cx| view.tick_move(cx)), Ok(true)) {
@@ -88,14 +95,30 @@ impl FloatingCompositionWindow {
         let cursor = windows::cursor_position();
         if !windows::left_button_down() {
             self.drag = None;
-            if let Some(owner) = self.owner.upgrade() {
-                if let Some(composition_id) = self.composition_id {
+            if drag.moved {
+                if let (Some(owner), Some(composition_id)) =
+                    (self.owner.upgrade(), self.composition_id)
+                {
                     owner.update(cx, |main, cx| {
                         main.finish_native_floating_drag(composition_id, cursor, cx);
                     });
                 }
             }
             return false;
+        }
+
+        if !drag.moved {
+            let distance = (cursor.0 - drag.start_cursor.0)
+                .abs()
+                .max((cursor.1 - drag.start_cursor.1).abs());
+            if distance < DRAG_THRESHOLD {
+                return true;
+            }
+
+            self.drag = Some(NativeMoveDrag {
+                moved: true,
+                ..drag
+            });
         }
 
         let _moved = windows::move_window(
