@@ -81,7 +81,7 @@ fn open_floating_panel(kind: PanelKind, _owner: OwnerWindow, cx: &mut App) {
 
     let bounds = WindowBounds::Windowed(Bounds::centered(
         None,
-        size(px(340.0), px(460.0)),
+        size(px(280.0), px(360.0)),
         cx,
     ));
     let options = WindowOptions {
