@@ -1,8 +1,8 @@
 use dock_core::PanelKey;
 use gpui::{
-    AppContext, Bounds, Context, IntoElement, Render, TitlebarOptions, WeakEntity, Window,
-    Subscription, WindowBounds, WindowHandle, WindowKind, WindowOptions, WindowVisibility, div,
-    px, rgb, size,
+    AppContext, Bounds, Context, IntoElement, Render, Subscription, TitlebarOptions, WeakEntity,
+    Window, WindowBounds, WindowHandle, WindowKind, WindowOptions, WindowVisibility, div, px, rgb,
+    size,
 };
 use gpui::prelude::*;
 
@@ -139,6 +139,8 @@ impl MainWindow {
 
     /// Closes every still-open panel before GPUI closes the main window.
     pub(crate) fn close_floating_panels(&mut self, cx: &mut Context<Self>) {
+        self.panels_minimized_by_main.clear();
+
         for panel in self.floating_panels.drain(..) {
             match panel.update(cx, |_, window, _| window.remove_window()) {
                 Ok(()) => {}
