@@ -1,11 +1,10 @@
 use dock_core::PanelKey;
 use gpui::{
-    AppContext, Bounds, Context, IntoElement, MouseButton, Render, Subscription, WeakEntity,
-    Window, WindowBounds, WindowHandle, WindowKind, WindowOptions, WindowVisibility, div, px, rgb,
-    size,
+    AppContext, Bounds, Context, IntoElement, Render, Subscription, WeakEntity, Window,
+    WindowBounds, WindowControlArea, WindowHandle, WindowKind, WindowOptions, WindowVisibility, div,
+    px, rgb, size,
 };
 use gpui::prelude::*;
-use std::{cell::Cell, rc::Rc};
 
 #[cfg(windows)]
 use platform::windows::{self, NativeWindowHandle};
@@ -13,7 +12,6 @@ use platform::windows::{self, NativeWindowHandle};
 pub(crate) struct MainWindow {
     floating_panels: Vec<WindowHandle<FloatingPanel>>,
     panels_minimized_by_main: Vec<WindowHandle<FloatingPanel>>,
-    active_panel_count: Rc<Cell<usize>>,
     visibility_subscription: Option<Subscription>,
     #[cfg(windows)]
     native_owner: Option<NativeWindowHandle>,
@@ -83,7 +81,6 @@ impl MainWindow {
         Self {
             floating_panels: Vec::new(),
             panels_minimized_by_main: Vec::new(),
-            active_panel_count: Rc::new(Cell::new(0)),
             visibility_subscription: None,
             #[cfg(windows)]
             native_owner: None,
@@ -172,24 +169,10 @@ impl MainWindow {
             ..Default::default()
         };
 
-        let active_panel_count = Rc::clone(&self.active_panel_count);
-        #[cfg(windows)]
-        let native_owner = self.native_owner;
-
         match cx.open_window(options, move |_window, cx| {
-            cx.new(|_| FloatingPanel {
-                key,
-                should_move: false,
-                active_panel_count,
-                #[cfg(windows)]
-                native_owner,
-            })
+            cx.new(|_| FloatingPanel { key })
         }) {
             Ok(handle) => {
-                self.active_panel_count.set(
-                    self.active_panel_count.get().saturating_add(1),
-                );
-
                 #[cfg(windows)]
                 self.configure_floating_window(&handle, cx);
 
@@ -282,18 +265,11 @@ impl Render for MainWindow {
 
 struct FloatingPanel {
     key: PanelKey,
-    should_move: bool,
-    active_panel_count: Rc<Cell<usize>>,
-    #[cfg(windows)]
-    native_owner: Option<NativeWindowHandle>,
 }
 
 impl Render for FloatingPanel {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         let title = self.key.as_str().to_owned();
-        let active_panel_count = Rc::clone(&self.active_panel_count);
-        #[cfg(windows)]
-        let native_owner = self.native_owner;
 
         div()
             .flex()
@@ -312,27 +288,7 @@ impl Render for FloatingPanel {
                     .bg(rgb(0x2b323a))
                     .border_b_1()
                     .border_color(rgb(0x414a55))
-                    .on_mouse_down_out(cx.listener(|this, _event, _window, _cx| {
-                        this.should_move = false;
-                    }))
-                    .on_mouse_up(
-                        MouseButton::Left,
-                        cx.listener(|this, _event, _window, _cx| {
-                            this.should_move = false;
-                        }),
-                    )
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(|this, _event, _window, _cx| {
-                            this.should_move = true;
-                        }),
-                    )
-                    .on_mouse_move(cx.listener(|this, _event, window, _cx| {
-                        if this.should_move {
-                            this.should_move = false;
-                            window.start_window_move();
-                        }
-                    }))
+                    .window_control_area(WindowControlArea::Drag)
                     .child(
                         div()
                             .flex_1()
@@ -349,23 +305,8 @@ impl Render for FloatingPanel {
                             .rounded_sm()
                             .cursor_pointer()
                             .hover(|style| style.bg(rgb(0x596777)))
-                            .child("×")
-                            .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                                cx.stop_propagation();
-                            })
-                            .on_click(move |_, window, _| {
-                                window.remove_window();
-
-                                let remaining = active_panel_count.get().saturating_sub(1);
-                                active_panel_count.set(remaining);
-
-                                #[cfg(windows)]
-                                if remaining == 0
-                                    && let Some(owner) = native_owner
-                                {
-                                    windows::restore_and_activate(owner);
-                                }
-                            }),
+                            .window_control_area(WindowControlArea::Close)
+                            .child("×"),
                     ),
             )
             .child(
