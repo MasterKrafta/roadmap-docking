@@ -27,12 +27,16 @@ impl NextDockWindow {
         };
 
         let source_index = floating.composition_index;
-        let empty_before = matches!(drop_zone, CompositionDropZone::RightEdge);
 
-        if self
-            .container
-            .reserve_empty_neighbor(source_index, empty_before)
-        {
+        // Workspace slots are arranged horizontally. Vertical drops must be
+        // merged into a layout tree instead of creating another workspace slot.
+        if matches!(
+            drop_zone,
+            CompositionDropZone::LeftEdge | CompositionDropZone::RightEdge
+        ) && self.container.reserve_empty_neighbor(
+            source_index,
+            matches!(drop_zone, CompositionDropZone::RightEdge),
+        ) {
             self.floating_compositions
                 .retain(|candidate| candidate.id != id);
             self.clear_native_move_state();
@@ -68,7 +72,13 @@ impl NextDockWindow {
             });
 
         let Some(target_index) = target_index else {
-            return false;
+            // If every remaining layout is already floating, make this one
+            // the main docked layout rather than leaving it impossible to dock.
+            self.floating_compositions
+                .retain(|candidate| candidate.id != id);
+            self.clear_native_move_state();
+            cx.notify();
+            return true;
         };
         let target_was_floating = self
             .floating_compositions
@@ -93,17 +103,28 @@ impl NextDockWindow {
 
         let floating_root = source_layout.root;
         let docked_root = target_layout.root;
-        target_layout.root = if empty_before {
+        let axis = match drop_zone {
+            CompositionDropZone::LeftEdge | CompositionDropZone::RightEdge => {
+                SplitAxis::Horizontal
+            }
+            CompositionDropZone::TopEdge | CompositionDropZone::BottomEdge => SplitAxis::Vertical,
+        };
+        let floating_before = matches!(
+            drop_zone,
+            CompositionDropZone::LeftEdge | CompositionDropZone::TopEdge
+        );
+
+        target_layout.root = if floating_before {
             DockNode::Split {
-                axis: SplitAxis::Horizontal,
-                weights: vec![0.7, 0.3],
-                children: vec![docked_root, floating_root],
+                axis,
+                weights: vec![0.3, 0.7],
+                children: vec![floating_root, docked_root],
             }
         } else {
             DockNode::Split {
-                axis: SplitAxis::Horizontal,
-                weights: vec![0.3, 0.7],
-                children: vec![floating_root, docked_root],
+                axis,
+                weights: vec![0.7, 0.3],
+                children: vec![docked_root, floating_root],
             }
         };
         *target_slot = Some(target_layout);
@@ -177,6 +198,10 @@ impl NextDockWindow {
             Some(CompositionDropZone::LeftEdge)
         } else if content_right - cursor.0 <= edge_width {
             Some(CompositionDropZone::RightEdge)
+        } else if cursor.1 - content_top <= edge_width {
+            Some(CompositionDropZone::TopEdge)
+        } else if content_bottom - cursor.1 <= edge_width {
+            Some(CompositionDropZone::BottomEdge)
         } else {
             None
         }
