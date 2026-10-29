@@ -7,9 +7,9 @@ use ui::Theme;
 /// Places floating composition content at its current bounds and paints its frame.
 #[derive(IntoElement)]
 pub(in crate::next_dock) struct FloatingCompositionView {
-    pub(super) bounds: Rect,
-    pub(super) theme: Theme,
-    pub(super) content: Div,
+    pub(in crate::next_dock) bounds: Rect,
+    pub(in crate::next_dock) theme: Theme,
+    pub(in crate::next_dock) content: Div,
 }
 
 impl RenderOnce for FloatingCompositionView {
