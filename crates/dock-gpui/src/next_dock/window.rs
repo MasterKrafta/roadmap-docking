@@ -50,6 +50,7 @@ struct PendingTabDrag {
     panel: Panel,
     start_position: Point,
     viewport_size: Size,
+    strip_bounds: Rect,
 }
 
 #[derive(Clone)]
@@ -71,6 +72,7 @@ pub(super) struct TabDragContext {
     pub(super) path: Vec<NodePathStep>,
     pub(super) viewport_size: Size,
     pub(super) owner: gpui::WeakEntity<NextDockWindow>,
+    pub(super) strip_bounds: Rect,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -210,6 +212,7 @@ impl NextDockWindow {
         panel: Panel,
         position: gpui::Point<gpui::Pixels>,
         viewport_size: Size,
+        strip_bounds: Rect,
     ) {
         // Пока поддерживаем только один floating-макет одновременно.
         if self.active_resize.is_some() || self.floating_composition.is_some() {
@@ -231,6 +234,7 @@ impl NextDockWindow {
                 (position.y.as_f32() - geometry::HEADER_HEIGHT).max(0.0),
             ),
             viewport_size: Size::new(viewport_size.width.max(1.0), viewport_size.height.max(1.0)),
+            strip_bounds,
         });
     }
 
@@ -272,7 +276,14 @@ impl NextDockWindow {
         let dy = pointer.y - pending.start_position.y;
 
         // Обычный клик не должен отделять вкладку.
-        if dx * dx + dy * dy < 25.0 {
+        let strip = pending.strip_bounds;
+
+        let cursor_inside_strip = pointer.x >= strip.origin.x
+            && pointer.x <= strip.origin.x + strip.size.width
+            && pointer.y >= strip.origin.y
+            && pointer.y <= strip.origin.y + strip.size.height;
+
+        if cursor_inside_strip {
             return;
         }
 

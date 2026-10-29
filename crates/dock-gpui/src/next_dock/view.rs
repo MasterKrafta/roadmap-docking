@@ -93,6 +93,7 @@ pub(super) fn render(
                     Size::new(width, content_height),
                     *composition_index,
                     true,
+                    Point::new(slot_origin_x, 0.0),
                 )
             }
             None => div()
@@ -144,6 +145,7 @@ pub(super) fn render(
                 Size::new(width, content_height),
                 floating.composition_index,
                 true,
+                bounds.origin,
             );
 
             body = body.child(
@@ -182,6 +184,7 @@ pub(super) fn render(
             Size::new(width, content_height),
             0,
             false,
+            Point::new(origin.x, origin.y + *header_height),
         );
 
         body = body.child(
@@ -315,6 +318,7 @@ fn render_node(
     viewport_size: Size,
     composition_index: usize,
     interactive: bool,
+    origin: Point,
 ) -> Div {
     match (&geometry.kind, node) {
         (
@@ -329,6 +333,7 @@ fn render_node(
                 path: path.to_vec(),
                 viewport_size,
                 owner: owner.clone(),
+                strip_bounds: Rect::new(origin, Size::new(geometry.width, *tab_height)),
             });
 
             render_tabs(
@@ -374,6 +379,7 @@ fn render_node(
                     viewport_size,
                     composition_index,
                     true,
+                    preview.bounds.origin,
                 ));
 
             let drag_owner = owner.clone();

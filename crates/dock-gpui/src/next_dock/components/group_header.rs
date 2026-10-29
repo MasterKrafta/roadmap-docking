@@ -117,6 +117,7 @@ impl RenderOnce for GroupHeader {
                                 panel,
                                 event.position,
                                 viewport_size,
+                                context.strip_bounds,
                             );
                         });
                     })
