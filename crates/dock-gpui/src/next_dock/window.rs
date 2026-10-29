@@ -1061,7 +1061,8 @@ impl Render for NextDockWindow {
 
                 if self.last_native_sync_ids.as_ref() != Some(&current_ids) {
                     if self.last_native_sync_ids.is_none() {
-                        eprintln!("[timing] первый render главного: {:?}", self.startup_started.elapsed());
+                        let elapsed = self.startup_started.elapsed();
+                        eprintln!("[timing] первый render главного: {elapsed:?}");
                     }
                     self.last_native_sync_ids = Some(current_ids);
                     let owner = cx.entity().downgrade();
