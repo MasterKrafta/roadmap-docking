@@ -13,7 +13,7 @@ pub(super) struct NextDockWindow {
     theme: Theme,
     container: CompositionContainer,
     active_resize: Option<ActiveResize>,
-    floating_composition: Option<FloatingComposition>,
+    floating_compositions: Vec<FloatingComposition>,
     pending_move: Option<PendingCompositionMove>,
     active_move: Option<ActiveCompositionMove>,
     composition_drop_zone: Option<CompositionDropZone>,
@@ -141,7 +141,7 @@ impl NextDockWindow {
             theme,
             container: CompositionContainer::initial(),
             active_resize: None,
-            floating_composition: None,
+            floating_compositions: Vec::new(),
             pending_move: None,
             active_move: None,
             composition_drop_zone: None,
@@ -271,20 +271,6 @@ impl NextDockWindow {
             return;
         }
 
-        // Вкладка плавающей композиции перемещает всю композицию.
-        if let Some(floating) = self.floating_composition {
-            if floating.composition_index == composition_index {
-                self.begin_composition_move(
-                    composition_index,
-                    position,
-                    viewport_size.width,
-                    viewport_size.height,
-                );
-            }
-
-            return;
-        }
-
         self.pending_move = None;
         self.active_move = None;
         self.composition_drop_zone = None;
@@ -327,16 +313,17 @@ impl NextDockWindow {
             return;
         }
 
-        if let Some(floating) = self.floating_composition {
-            if floating.composition_index == composition_index {
-                self.begin_composition_move(
-                    composition_index,
-                    position,
-                    viewport_size.width,
-                    viewport_size.height,
-                );
-            }
-
+        if self
+            .floating_compositions
+            .iter()
+            .any(|floating| floating.composition_index == composition_index)
+        {
+            self.begin_composition_move(
+                composition_index,
+                position,
+                viewport_size.width,
+                viewport_size.height,
+            );
             return;
         }
 
@@ -635,14 +622,7 @@ impl NextDockWindow {
             return;
         };
 
-        let source_is_empty = self
-            .container
-            .layout_mut(source.composition_index)
-            .is_some_and(|layout| layout.is_empty());
-
-        if source_is_empty {
-            self.container.remove_empty_layout(source.composition_index);
-        }
+        self.remove_empty_source_layout(source.composition_index);
 
         let layout = DockLayout::single_panel(panel);
         let composition_index = self.container.insert_floating_layout(layout);
@@ -651,7 +631,7 @@ impl NextDockWindow {
         self.active_move = None;
         self.composition_drop_zone = None;
 
-        self.floating_composition = Some(FloatingComposition {
+        self.floating_compositions.push(FloatingComposition {
             composition_index,
             bounds: active.bounds,
         });
@@ -680,14 +660,7 @@ impl NextDockWindow {
             return;
         };
 
-        let source_is_empty = self
-            .container
-            .layout_mut(source.composition_index)
-            .is_some_and(|layout| layout.is_empty());
-
-        if source_is_empty {
-            self.container.remove_empty_layout(source.composition_index);
-        }
+        self.remove_empty_source_layout(source.composition_index);
 
         let layout = DockLayout::single_group(group);
         let composition_index = self.container.insert_floating_layout(layout);
@@ -695,12 +668,34 @@ impl NextDockWindow {
         self.pending_move = None;
         self.active_move = None;
         self.composition_drop_zone = None;
-        self.floating_composition = Some(FloatingComposition {
+        self.floating_compositions.push(FloatingComposition {
             composition_index,
             bounds: active.bounds,
         });
 
         cx.notify();
+    }
+
+    fn remove_empty_source_layout(&mut self, index: usize) {
+        let is_empty = self
+            .container
+            .layout_mut(index)
+            .is_some_and(|layout| layout.is_empty());
+
+        if !is_empty || !self.container.remove_empty_layout(index) {
+            return;
+        }
+
+        self.floating_compositions.retain_mut(|floating| {
+            if floating.composition_index == index {
+                false
+            } else {
+                if floating.composition_index > index {
+                    floating.composition_index -= 1;
+                }
+                true
+            }
+        });
     }
 
     pub(super) fn begin_composition_move(
@@ -753,8 +748,10 @@ impl NextDockWindow {
 
         if let Some(active) = self.active_move.clone() {
             let Some(floating) = self
-                .floating_composition
-                .filter(|floating| floating.composition_index == active.composition_index)
+                .floating_compositions
+                .iter()
+                .find(|floating| floating.composition_index == active.composition_index)
+                .copied()
             else {
                 self.active_move = None;
                 return;
@@ -772,10 +769,13 @@ impl NextDockWindow {
 
             let moved_bounds = Rect::new(origin, bounds.size);
 
-            self.floating_composition = Some(FloatingComposition {
-                composition_index: active.composition_index,
-                bounds: moved_bounds,
-            });
+            if let Some(floating) = self
+                .floating_compositions
+                .iter_mut()
+                .find(|floating| floating.composition_index == active.composition_index)
+            {
+                floating.bounds = moved_bounds;
+            }
 
             self.composition_drop_zone =
                 detect_composition_drop_zone(moved_bounds, active.viewport_size.width);
@@ -800,8 +800,9 @@ impl NextDockWindow {
         let viewport_height = pending.viewport_size.height;
 
         let bounds = self
-            .floating_composition
-            .filter(|floating| floating.composition_index == pending.composition_index)
+            .floating_compositions
+            .iter()
+            .find(|floating| floating.composition_index == pending.composition_index)
             .map(|floating| floating.bounds)
             .unwrap_or_else(|| {
                 let width = (viewport_width * 0.82).clamp(1.0, viewport_width);
@@ -814,10 +815,18 @@ impl NextDockWindow {
                 Rect::new(Point::new(origin_x, 0.0), Size::new(width, height))
             });
 
-        self.floating_composition = Some(FloatingComposition {
-            composition_index: pending.composition_index,
-            bounds,
-        });
+        if let Some(floating) = self
+            .floating_compositions
+            .iter_mut()
+            .find(|floating| floating.composition_index == pending.composition_index)
+        {
+            floating.bounds = bounds;
+        } else {
+            self.floating_compositions.push(FloatingComposition {
+                composition_index: pending.composition_index,
+                bounds,
+            });
+        }
 
         self.active_move = Some(ActiveCompositionMove {
             composition_index: pending.composition_index,
@@ -838,10 +847,13 @@ impl NextDockWindow {
 
         let moved_bounds = Rect::new(origin, bounds.size);
 
-        self.floating_composition = Some(FloatingComposition {
-            composition_index: pending.composition_index,
-            bounds: moved_bounds,
-        });
+        if let Some(floating) = self
+            .floating_compositions
+            .iter_mut()
+            .find(|floating| floating.composition_index == pending.composition_index)
+        {
+            floating.bounds = moved_bounds;
+        }
 
         self.composition_drop_zone = detect_composition_drop_zone(moved_bounds, viewport_width);
 
@@ -862,7 +874,8 @@ impl NextDockWindow {
                 .container
                 .reserve_empty_neighbor(active.composition_index, empty_before)
             {
-                self.floating_composition = None;
+                self.floating_compositions
+                    .retain(|floating| floating.composition_index != active.composition_index);
             }
         }
 
@@ -918,7 +931,7 @@ impl Render for NextDockWindow {
             window,
             &self.theme,
             cx.entity().downgrade(),
-            self.floating_composition,
+            &self.floating_compositions,
             self.composition_drop_zone,
             tab_drag_preview,
             group_drag_preview,
