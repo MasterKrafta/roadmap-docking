@@ -1,17 +1,12 @@
 //! Native floating surface for one composition owned by NextDockWindow.
 
-use std::time::Duration;
+use std::{rc::Rc, time::Duration};
 
-use gpui::{
-    Context, InteractiveElement, IntoElement, MouseButton, MouseMoveEvent, ParentElement, Render,
-    StatefulInteractiveElement, Styled, Subscription, Window, div, px, rgb,
-};
+use gpui::{Context, IntoElement, MouseDownEvent, Render, Window, div};
 use platform::windows::{self, NativeWindowHandle};
 
 use super::view;
-use super::window::{CompositionDropZone, NextDockWindow};
-
-const HEADER_HEIGHT: f32 = 30.0;
+use super::window::NextDockWindow;
 
 #[derive(Clone, Copy)]
 struct NativeMoveDrag {
@@ -22,7 +17,7 @@ struct NativeMoveDrag {
 
 pub(super) struct FloatingCompositionWindow {
     owner: gpui::WeakEntity<NextDockWindow>,
-    composition_id: u64,
+    composition_id: Option<u64>,
     drag: Option<NativeMoveDrag>,
     owner_subscription: Option<Subscription>,
 }
@@ -30,7 +25,7 @@ pub(super) struct FloatingCompositionWindow {
 impl FloatingCompositionWindow {
     pub(super) fn new(
         owner: gpui::WeakEntity<NextDockWindow>,
-        composition_id: u64,
+        composition_id: Option<u64>,
     ) -> Self {
         Self {
             owner,
@@ -38,6 +33,16 @@ impl FloatingCompositionWindow {
             drag: None,
             owner_subscription: None,
         }
+    }
+
+    pub(super) fn set_composition_id(
+        &mut self,
+        composition_id: Option<u64>,
+        cx: &mut Context<Self>,
+    ) {
+        self.composition_id = composition_id;
+        self.drag = None;
+        cx.notify();
     }
 
     pub(super) fn begin_move(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -80,9 +85,11 @@ impl FloatingCompositionWindow {
         if !windows::left_button_down() {
             self.drag = None;
             if let Some(owner) = self.owner.upgrade() {
-                owner.update(cx, |main, cx| {
-                    main.finish_native_floating_drag(self.composition_id, cursor, cx);
-                });
+                if let Some(composition_id) = self.composition_id {
+                    owner.update(cx, |main, cx| {
+                        main.finish_native_floating_drag(composition_id, cursor, cx);
+                    });
+                }
             }
             return false;
         }
@@ -101,33 +108,7 @@ impl FloatingCompositionWindow {
         true
     }
 
-    fn dock_back(&mut self, cx: &mut Context<Self>) {
-        if let Some(owner) = self.owner.upgrade() {
-            owner.update(cx, |main, cx| {
-                main.dock_floating_composition(
-                    self.composition_id,
-                    CompositionDropZone::RightEdge,
-                    cx,
-                );
-            });
-        }
-    }
 
-    fn handle_surface_mouse_move(
-        &mut self,
-        event: &MouseMoveEvent,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(owner) = self.owner.upgrade() {
-            owner.update(cx, |main, cx| main.update_resize(event, cx));
-        }
-    }
-
-    fn handle_surface_mouse_up(&mut self, cx: &mut Context<Self>) {
-        if let Some(owner) = self.owner.upgrade() {
-            owner.update(cx, |main, cx| main.end_resize(cx));
-        }
-    }
 }
 
 impl Render for FloatingCompositionWindow {
@@ -139,12 +120,15 @@ impl Render for FloatingCompositionWindow {
                 Some(cx.observe(&owner, |_this, _owner, cx| cx.notify()));
         }
 
+        let Some(composition_id) = self.composition_id else {
+            return div().size_full();
+        };
         let Some(owner_entity) = self.owner.upgrade() else {
             window.remove_window();
             return div().size_full();
         };
         let Some((floating, layout, theme)) =
-            owner_entity.read(cx).floating_composition_snapshot(self.composition_id)
+            owner_entity.read(cx).floating_composition_snapshot(composition_id)
         else {
             window.remove_window();
             return div().size_full();
@@ -153,75 +137,25 @@ impl Render for FloatingCompositionWindow {
         let viewport = window.viewport_size();
         let width = viewport.width.as_f32().max(1.0);
         let height = viewport.height.as_f32().max(1.0);
-        let content_height = (height - HEADER_HEIGHT).max(1.0);
         let owner = self.owner.clone();
+        let floating_view = cx.entity().downgrade();
+        let native_move_handler: view::NativeWindowMoveHandler = Rc::new(
+            move |_event: &MouseDownEvent, window, app| {
+                if let Some(floating_view) = floating_view.upgrade() {
+                    floating_view.update(app, |this, cx| this.begin_move(window, cx));
+                }
+            },
+        );
 
-        let drag_handle = div()
-            .id("floating-composition-drag-handle")
-            .flex_1()
-            .h(px(HEADER_HEIGHT))
-            .px_2()
-            .flex()
-            .items_center()
-            .cursor_pointer()
-            .bg(rgb(theme.colors.toolbar_background))
-            .text_color(rgb(theme.colors.primary_text))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _event, window, cx| this.begin_move(window, cx)),
-            )
-            .child("Плавающая панель");
-
-        let dock_button = div()
-            .id("floating-composition-dock")
-            .h(px(HEADER_HEIGHT))
-            .px_3()
-            .flex()
-            .items_center()
-            .cursor_pointer()
-            .bg(rgb(theme.colors.toolbar_background))
-            .text_color(rgb(theme.colors.primary_text))
-            .on_click(cx.listener(|this, _event, _window, cx| this.dock_back(cx)))
-            .child("В док");
-
-        let header = div()
-            .w_full()
-            .h(px(HEADER_HEIGHT))
-            .flex()
-            .flex_row()
-            .bg(rgb(theme.colors.toolbar_background))
-            .border_b_1()
-            .border_color(rgb(theme.colors.border))
-            .child(drag_handle)
-            .child(dock_button);
-
-        let content = view::render_floating_layout(
+        view::render_floating_layout(
             &layout,
             floating.composition_index,
             width,
-            content_height,
+            height,
             window,
             &theme,
             owner,
-        );
-
-        div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .bg(rgb(theme.colors.window_background))
-            .child(header)
-            .child(content)
-            .on_mouse_move(
-                cx.listener(|this, event, _window, cx| this.handle_surface_mouse_move(event, cx)),
-            )
-            .on_mouse_up(
-                MouseButton::Left,
-                cx.listener(|this, _event, _window, cx| this.handle_surface_mouse_up(cx)),
-            )
-            .on_mouse_up_out(
-                MouseButton::Left,
-                cx.listener(|this, _event, _window, cx| this.handle_surface_mouse_up(cx)),
-            )
+            native_move_handler,
+        )
     }
 }
