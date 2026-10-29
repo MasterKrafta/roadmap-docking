@@ -14,6 +14,7 @@ use super::geometry::{self, GeometryKind, NodeGeometry};
 use super::model::{CompositionContainer, DockLayout, DockNode, NodePathStep, SplitAxis, TabGroup};
 use super::window::{
     CompositionDropZone, FloatingComposition, NextDockWindow, TabDragContext, TabDragPreview,
+    TabReorderPreview,
 };
 
 #[derive(Clone)]
@@ -38,6 +39,7 @@ pub(super) fn render(
     floating: Option<FloatingComposition>,
     drop_zone: Option<CompositionDropZone>,
     tab_drag_preview: Option<TabDragPreview>,
+    tab_reorder_preview: Option<TabReorderPreview>,
 ) -> Div {
     let width = width.max(1.0);
     let height = height.max(1.0);
@@ -204,6 +206,33 @@ pub(super) fn render(
                 .border_1()
                 .border_color(rgb(theme.colors.border))
                 .child(preview_content),
+        );
+    }
+
+    if let Some(preview) = tab_reorder_preview {
+        let typography = theme.typography;
+
+        body = body.child(
+            div()
+                .absolute()
+                .left(px(preview.bounds.origin.x))
+                .top(px(preview.bounds.origin.y))
+                .w(px(preview.bounds.size.width))
+                .h(px(preview.bounds.size.height))
+                .flex()
+                .items_center()
+                .justify_start()
+                .px(px(8.0))
+                .whitespace_nowrap()
+                .overflow_hidden()
+                .bg(rgb(theme.colors.panel_tab_active))
+                .text_color(rgb(theme.colors.primary_text))
+                .font_family(typography.family)
+                .text_size(px(typography.tab_size))
+                .line_height(px(typography.line_height))
+                .border_1()
+                .border_color(rgb(theme.colors.border))
+                .child(preview.panel.title),
         );
     }
 

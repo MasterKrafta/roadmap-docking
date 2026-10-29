@@ -97,6 +97,8 @@ impl RenderOnce for GroupHeader {
             let on_drag_start: MouseDownHandler =
                 if let Some(context) = self.tab_drag_context.as_ref() {
                     let strip_bounds = context.strip_bounds;
+                    let drag_tab_widths = tab_widths.clone();
+                    let tab_left_x = tab_rect.origin.x;
                     let owner = context.owner.clone();
                     let composition_index = context.composition_index;
                     let path = context.path.clone();
@@ -108,6 +110,9 @@ impl RenderOnce for GroupHeader {
                         };
 
                         let path = path.clone();
+                        let tab_widths_for_drag = drag_tab_widths.clone();
+                        let grab_offset_x =
+                            event.position.x.as_f32() - (strip_bounds.origin.x + tab_left_x);
 
                         owner.update(app, |this, _cx| {
                             this.begin_tab_drag(
@@ -118,6 +123,8 @@ impl RenderOnce for GroupHeader {
                                 event.position,
                                 viewport_size,
                                 strip_bounds,
+                                tab_widths_for_drag,
+                                grab_offset_x,
                             );
                         });
                     })

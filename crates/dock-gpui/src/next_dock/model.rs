@@ -153,6 +153,56 @@ impl DockLayout {
 
         Some(panel)
     }
+
+    pub(super) fn reorder_panel(
+        &mut self,
+        path: &[NodePathStep],
+        from_index: usize,
+        to_index: usize,
+    ) -> bool {
+        if from_index == to_index {
+            return true;
+        }
+
+        let mut node = &mut self.root;
+
+        for step in path {
+            node = match (node, *step) {
+                (DockNode::Split { children, .. }, NodePathStep::SplitChild(index)) => {
+                    let Some(child) = children.get_mut(index) else {
+                        return false;
+                    };
+                    child
+                }
+                (DockNode::Column { content }, NodePathStep::ColumnContent) => content.as_mut(),
+                _ => return false,
+            };
+        }
+
+        let DockNode::Tabs(group) = node else {
+            return false;
+        };
+
+        if from_index >= group.panels.len() || to_index >= group.panels.len() {
+            return false;
+        }
+
+        let active_index = group.active;
+        let panel = group.panels.remove(from_index);
+        group.panels.insert(to_index, panel);
+
+        group.active = if active_index == from_index {
+            to_index
+        } else if from_index < active_index && to_index >= active_index {
+            active_index - 1
+        } else if from_index > active_index && to_index <= active_index {
+            active_index + 1
+        } else {
+            active_index
+        };
+
+        true
+    }
 }
 
 fn tabs(panels: &[(&'static str, &'static str)]) -> DockNode {

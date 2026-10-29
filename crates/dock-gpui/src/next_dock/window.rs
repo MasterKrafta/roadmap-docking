@@ -51,6 +51,10 @@ struct PendingTabDrag {
     start_position: Point,
     viewport_size: Size,
     strip_bounds: Rect,
+    tab_widths: Vec<f32>,
+    grab_offset_x: f32,
+    reorder_started: bool,
+    preview_bounds: Option<Rect>,
 }
 
 #[derive(Clone)]
@@ -62,6 +66,12 @@ struct ActiveTabDrag {
 
 #[derive(Clone, Copy, Debug)]
 pub(super) struct TabDragPreview {
+    pub(super) panel: Panel,
+    pub(super) bounds: Rect,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(super) struct TabReorderPreview {
     pub(super) panel: Panel,
     pub(super) bounds: Rect,
 }
@@ -213,6 +223,8 @@ impl NextDockWindow {
         position: gpui::Point<gpui::Pixels>,
         viewport_size: Size,
         strip_bounds: Rect,
+        tab_widths: Vec<f32>,
+        grab_offset_x: f32,
     ) {
         // Пока поддерживаем только один floating-макет одновременно.
         if self.active_resize.is_some() || self.floating_composition.is_some() {
@@ -235,6 +247,10 @@ impl NextDockWindow {
             ),
             viewport_size: Size::new(viewport_size.width.max(1.0), viewport_size.height.max(1.0)),
             strip_bounds,
+            tab_widths,
+            grab_offset_x,
+            reorder_started: false,
+            preview_bounds: None,
         });
     }
 
@@ -248,6 +264,8 @@ impl NextDockWindow {
             (event.position.y.as_f32() - geometry::HEADER_HEIGHT).max(0.0),
         );
 
+        // Если вкладка уже вышла из полосы и стала плавающим превью,
+        // продолжаем обычное перетаскивание.
         if let Some(active) = self.active_tab_drag.clone() {
             let viewport = active.pending.viewport_size;
             let size = active.bounds.size;
@@ -268,14 +286,10 @@ impl NextDockWindow {
             return;
         }
 
-        let Some(pending) = self.pending_tab_drag.clone() else {
+        let Some(mut pending) = self.pending_tab_drag.take() else {
             return;
         };
 
-        let dx = pointer.x - pending.start_position.x;
-        let dy = pointer.y - pending.start_position.y;
-
-        // Обычный клик не должен отделять вкладку.
         let strip = pending.strip_bounds;
 
         let cursor_inside_strip = pointer.x >= strip.origin.x
@@ -283,13 +297,100 @@ impl NextDockWindow {
             && pointer.y >= strip.origin.y
             && pointer.y <= strip.origin.y + strip.size.height;
 
+        let dx = pointer.x - pending.start_position.x;
+        let dy = pointer.y - pending.start_position.y;
+
         if cursor_inside_strip {
+            // Клик или очень короткое движение ещё не начинает перестановку.
+            if !pending.reorder_started && dx * dx + dy * dy < 25.0 {
+                self.pending_tab_drag = Some(pending);
+                return;
+            }
+
+            pending.reorder_started = true;
+
+            let local_x = pointer.x - strip.origin.x;
+
+            // Переставляем модель при пересечении порога соседней вкладки.
+            // Справа порог — 75%, слева — симметричные 25%.
+            loop {
+                let index = pending.panel_index;
+                let mut moved = false;
+
+                if index + 1 < pending.tab_widths.len() {
+                    let next = index + 1;
+                    let next_start: f32 = pending.tab_widths[..next].iter().sum();
+                    let threshold = next_start + pending.tab_widths[next] * 0.75;
+
+                    if local_x >= threshold {
+                        moved = self
+                            .container
+                            .layout_mut(pending.composition_index)
+                            .is_some_and(|layout| layout.reorder_panel(&pending.path, index, next));
+
+                        if moved {
+                            let width = pending.tab_widths.remove(index);
+                            pending.tab_widths.insert(next, width);
+                            pending.panel_index = next;
+                        }
+                    }
+                }
+
+                if moved {
+                    continue;
+                }
+
+                if index > 0 {
+                    let previous = index - 1;
+                    let previous_start: f32 = pending.tab_widths[..previous].iter().sum();
+                    let threshold = previous_start + pending.tab_widths[previous] * 0.25;
+
+                    if local_x <= threshold {
+                        moved = self
+                            .container
+                            .layout_mut(pending.composition_index)
+                            .is_some_and(|layout| {
+                                layout.reorder_panel(&pending.path, index, previous)
+                            });
+
+                        if moved {
+                            let width = pending.tab_widths.remove(index);
+                            pending.tab_widths.insert(previous, width);
+                            pending.panel_index = previous;
+                        }
+                    }
+                }
+
+                if !moved {
+                    break;
+                }
+            }
+
+            // Рисуем перетаскиваемую вкладку поверх ряда.
+            let tab_width = pending
+                .tab_widths
+                .get(pending.panel_index)
+                .copied()
+                .unwrap_or(120.0);
+
+            let tab_lane_width: f32 = pending.tab_widths.iter().sum();
+            let tab_left =
+                (local_x - pending.grab_offset_x).clamp(0.0, (tab_lane_width - tab_width).max(0.0));
+
+            pending.preview_bounds = Some(Rect::new(
+                Point::new(strip.origin.x + tab_left, strip.origin.y),
+                Size::new(tab_width, strip.size.height),
+            ));
+
+            self.pending_tab_drag = Some(pending);
+            cx.notify();
             return;
         }
 
+        // Вышли за границы всей полосы — переключаемся с перестановки
+        // вкладки на перетаскивание отдельной колонки.
         let viewport = pending.viewport_size;
 
-        // Предварительный макет компактнее, чем floating всей композиции.
         let width = (viewport.width * 0.38)
             .min(480.0)
             .clamp(1.0, viewport.width);
@@ -312,7 +413,6 @@ impl NextDockWindow {
             (origin.y + dy).clamp(0.0, (viewport.height - height).max(0.0)),
         );
 
-        self.pending_tab_drag = None;
         self.active_tab_drag = Some(ActiveTabDrag {
             pending,
             start_origin: start_bounds.origin,
@@ -548,6 +648,13 @@ impl Render for NextDockWindow {
             bounds: active.bounds,
         });
 
+        let tab_reorder_preview = self.pending_tab_drag.as_ref().and_then(|pending| {
+            pending.preview_bounds.map(|bounds| TabReorderPreview {
+                panel: pending.panel,
+                bounds,
+            })
+        });
+
         view::render(
             &self.container,
             width,
@@ -558,6 +665,7 @@ impl Render for NextDockWindow {
             self.floating_composition,
             self.composition_drop_zone,
             tab_drag_preview,
+            tab_reorder_preview,
         )
     }
 }
