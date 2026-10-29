@@ -151,8 +151,6 @@ pub(super) struct FloatingComposition {
 pub(super) enum CompositionDropZone {
     LeftEdge,
     RightEdge,
-    TopEdge,
-    BottomEdge,
 }
 
 pub(super) const COMPOSITION_DROP_ZONE_WIDTH: f32 = 24.0;
@@ -931,12 +929,7 @@ impl NextDockWindow {
         let had_active = active_move.is_some();
         let drop_zone = self.composition_drop_zone.take();
 
-        if let (Some(active), Some(drop_zone)) = (active_move, drop_zone)
-            && matches!(
-                drop_zone,
-                CompositionDropZone::LeftEdge | CompositionDropZone::RightEdge
-            )
-        {
+        if let (Some(active), Some(drop_zone)) = (active_move, drop_zone) {
             // Dropping at the right edge places the empty slot before the composition.
             let empty_before = matches!(drop_zone, CompositionDropZone::RightEdge);
 
