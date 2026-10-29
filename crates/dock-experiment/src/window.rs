@@ -44,6 +44,15 @@ impl MainWindow {
         self.open_floating_panel(PanelKind::Properties, cx);
     }
 
+    /// Shows the already-created panels after GPUI has rendered their first frame.
+    pub(crate) fn show_floating_panels(&mut self, cx: &mut Context<Self>) {
+        for panel in &self.floating_panels {
+            if let Err(error) = panel.update(cx, |_, window, _| window.activate_window()) {
+                eprintln!("Could not show a startup panel: {error:?}");
+            }
+        }
+    }
+
     fn open_floating_panel(&mut self, kind: PanelKind, cx: &mut Context<Self>) {
         let key = match PanelKey::new(kind.key()) {
             Ok(key) => key,
@@ -60,6 +69,8 @@ impl MainWindow {
         ));
         let options = WindowOptions {
             window_bounds: Some(bounds),
+            show: false,
+            focus: false,
             titlebar: Some(TitlebarOptions {
                 title: Some(kind.title().into()),
                 ..Default::default()
