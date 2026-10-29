@@ -13,8 +13,8 @@ use super::components::{ColumnHeader, GroupHeader};
 use super::geometry::{self, GeometryKind, NodeGeometry};
 use super::model::{CompositionContainer, DockLayout, DockNode, NodePathStep, SplitAxis, TabGroup};
 use super::window::{
-    CompositionDropZone, FloatingComposition, NextDockWindow, TabDragContext, TabDragPreview,
-    TabReorderPreview,
+    CompositionDropZone, FloatingComposition, GroupDragPreview, NextDockWindow, TabDragContext,
+    TabDragPreview, TabReorderPreview,
 };
 
 #[derive(Clone)]
@@ -39,6 +39,7 @@ pub(super) fn render(
     floating: Option<FloatingComposition>,
     drop_zone: Option<CompositionDropZone>,
     tab_drag_preview: Option<TabDragPreview>,
+    group_drag_preview: Option<GroupDragPreview>,
     tab_reorder_preview: Option<TabReorderPreview>,
 ) -> Div {
     let width = width.max(1.0);
@@ -212,6 +213,45 @@ pub(super) fn render(
         );
     }
 
+    if let Some(preview) = group_drag_preview {
+        let bounds = preview.bounds;
+        let preview_layout = DockLayout::single_group(preview.group);
+        let node_geometry = geometry::compute(
+            &preview_layout.root,
+            bounds.size.width,
+            bounds.size.height,
+            window,
+            theme,
+        );
+
+        let preview_content = render_node(
+            &preview_layout.root,
+            &node_geometry,
+            theme,
+            "group-drag-preview",
+            &[],
+            window,
+            &owner,
+            Size::new(width, content_height),
+            0,
+            false,
+            bounds.origin,
+            tab_reorder_preview.as_ref(),
+        );
+
+        body = body.child(
+            div()
+                .absolute()
+                .left(px(bounds.origin.x))
+                .top(px(bounds.origin.y))
+                .w(px(bounds.size.width))
+                .h(px(bounds.size.height))
+                .border_1()
+                .border_color(rgb(theme.colors.border))
+                .child(preview_content),
+        );
+    }
+
     if let Some(drop_zone) = drop_zone {
         let zone_width = 12.0;
         let zone_x = match drop_zone {
@@ -264,6 +304,7 @@ pub(super) fn render(
                     this.update_resize(event, cx);
                     this.update_composition_move(event, cx);
                     this.update_tab_drag(event, cx);
+                    this.update_group_drag(event, cx);
                 });
             }
         },
@@ -274,6 +315,7 @@ pub(super) fn render(
             if let Some(owner) = up_owner.upgrade() {
                 owner.update(app, |this, cx| {
                     this.end_resize(cx);
+                    this.end_group_drag(cx);
                     this.end_tab_drag(cx);
                     this.end_composition_move(cx);
                 });
@@ -286,6 +328,7 @@ pub(super) fn render(
             if let Some(owner) = up_out_owner.upgrade() {
                 owner.update(app, |this, cx| {
                     this.end_resize(cx);
+                    this.end_group_drag(cx);
                     this.end_tab_drag(cx);
                     this.end_composition_move(cx);
                 });
