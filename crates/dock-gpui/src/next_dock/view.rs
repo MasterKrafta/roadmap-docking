@@ -9,7 +9,7 @@ use ui::Theme;
 use crate::components::splitter_handle::ResizeStartHandler;
 use crate::components::{MouseDownHandler, SplitterHandle};
 
-use super::components::{ColumnHeader, FloatingCompositionView, render_tab_group};
+use super::components::{DockColumnView, FloatingCompositionView, render_tab_group};
 use super::geometry::{self, GeometryKind, NodeGeometry};
 use super::model::{CompositionContainer, DockLayout, DockNode, NodePathStep, SplitAxis};
 use super::window::{
@@ -437,8 +437,6 @@ fn render_node(
             },
             DockNode::Column { content },
         ) => {
-            let header_rect = Rect::new(Point::ZERO, Size::new(geometry.width, *header_height));
-
             let mut content_path = path.to_vec();
             content_path.push(NodePathStep::ColumnContent);
 
@@ -486,17 +484,16 @@ fn render_node(
                 Box::new(|_, _, _| {})
             };
 
-            div()
-                .relative()
-                .w(px(geometry.width))
-                .h(px(geometry.height))
-                .child(ColumnHeader {
-                    rect: header_rect,
-                    theme: *theme,
-                    key: key.to_owned(),
-                    on_drag_start,
-                })
-                .child(content_view)
+            DockColumnView {
+                width: geometry.width,
+                height: geometry.height,
+                header_height: *header_height,
+                theme: *theme,
+                key: key.to_owned(),
+                on_drag_start,
+                content: content_view,
+            }
+            .render()
         }
 
         (
