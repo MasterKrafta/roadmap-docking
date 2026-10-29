@@ -1,7 +1,7 @@
 //! Rendering for the independent dock tree.
 use dock_core::{Axis, Point, Rect, Size};
 use gpui::{
-    App, Div, InteractiveElement, IntoElement, MouseButton, MouseDownEvent,
+    App, Div, InteractiveElement, MouseButton, MouseDownEvent,
     MouseMoveEvent, MouseUpEvent, ParentElement, Styled, WeakEntity, Window, div, px, rgb,
 };
 use ui::Theme;
