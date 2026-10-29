@@ -23,7 +23,7 @@ pub struct NativeWindowHandle(isize);
 impl NativeWindowHandle {
     /// Returns the Win32 handle when the window is backed by a Win32 window.
     pub fn from_window(window: &Window) -> Option<Self> {
-        match window.window_handle().ok()?.as_raw() {
+        match HasWindowHandle::window_handle(window).ok()?.as_raw() {
             RawWindowHandle::Win32(handle) => Some(Self(handle.hwnd.get())),
             _ => None,
         }
@@ -69,7 +69,8 @@ pub fn client_origin(handle: NativeWindowHandle) -> Option<(i32, i32)> {
     let mut point = POINT::default();
 
     // SAFETY: handle originates from GPUI and point is a valid writable POINT.
-    if unsafe { ClientToScreen(handle.as_hwnd(), &mut point) }.is_err() {
+    let succeeded = unsafe { ClientToScreen(handle.as_hwnd(), &mut point) }.as_bool();
+    if !succeeded {
         return None;
     }
 
