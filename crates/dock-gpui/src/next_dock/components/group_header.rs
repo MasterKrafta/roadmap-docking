@@ -213,6 +213,7 @@ impl RenderOnce for GroupHeader {
                     let composition_index = context.composition_index;
                     let path = context.path;
                     let viewport_size = context.viewport_size;
+                    let group_key = context.group_key;
                     let drag_group = group_for_drag.clone();
 
                     Box::new(move |event: &MouseDownEvent, _window, app| {
@@ -222,6 +223,7 @@ impl RenderOnce for GroupHeader {
 
                         let path = path.clone();
                         let group = drag_group.clone();
+                        let group_key = group_key.clone();
                         let grab_offset_x =
                             event.position.x.as_f32() - strip_bounds.origin.x;
 
@@ -234,6 +236,7 @@ impl RenderOnce for GroupHeader {
                                 viewport_size,
                                 strip_bounds,
                                 grab_offset_x,
+                                group_key,
                             );
                         });
                     })
