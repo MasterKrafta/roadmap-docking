@@ -294,19 +294,31 @@ pub(super) fn render(
     }
 
     if let Some(drop_zone) = drop_zone {
-        let zone_width = 12.0;
-        let zone_x = match drop_zone {
-            CompositionDropZone::LeftEdge => 0.0,
-            CompositionDropZone::RightEdge => (width - zone_width).max(0.0),
+        let zone_extent = 12.0;
+        let (zone_x, zone_y, zone_width, zone_height) = match drop_zone {
+            CompositionDropZone::LeftEdge => (0.0, 0.0, zone_extent, content_height),
+            CompositionDropZone::RightEdge => (
+                (width - zone_extent).max(0.0),
+                0.0,
+                zone_extent,
+                content_height,
+            ),
+            CompositionDropZone::TopEdge => (0.0, 0.0, width, zone_extent),
+            CompositionDropZone::BottomEdge => (
+                0.0,
+                (content_height - zone_extent).max(0.0),
+                width,
+                zone_extent,
+            ),
         };
 
         body = body.child(
             div()
                 .absolute()
                 .left(px(zone_x))
-                .top(px(0.0))
+                .top(px(zone_y))
                 .w(px(zone_width))
-                .h(px(content_height))
+                .h(px(zone_height))
                 .bg(rgb(theme.colors.splitter_handle))
                 .border_1()
                 .border_color(rgb(theme.colors.border)),
