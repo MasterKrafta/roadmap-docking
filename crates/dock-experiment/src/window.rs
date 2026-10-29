@@ -15,6 +15,9 @@ type OwnerWindow = Option<NativeWindowHandle>;
 #[derive(Clone, Copy)]
 struct OwnerWindow;
 
+const FLOATING_PANEL_WIDTH: f32 = 280.0;
+const FLOATING_PANEL_HEIGHT: f32 = 360.0;
+
 pub(crate) struct MainWindow;
 
 #[derive(Clone, Copy)]
@@ -81,7 +84,7 @@ fn open_floating_panel(kind: PanelKind, _owner: OwnerWindow, cx: &mut App) {
 
     let bounds = WindowBounds::Windowed(Bounds::centered(
         None,
-        size(px(280.0), px(360.0)),
+        size(px(FLOATING_PANEL_WIDTH), px(FLOATING_PANEL_HEIGHT)),
         cx,
     ));
     let options = WindowOptions {
@@ -118,8 +121,17 @@ fn open_floating_panel(kind: PanelKind, _owner: OwnerWindow, cx: &mut App) {
         match native_handle {
             Ok(Some(floating)) => {
                 windows::set_owner(floating, owner);
-                // Showing only after SetWindowLongPtrW ensures the popup never
-                // becomes an independent top-level window without an owner.
+
+                // Match the tearoff example: explicitly size the native popup
+                // after changing its owner, accounting for the owner's DPI.
+                let scale = windows::scale_factor(owner);
+                let width = (FLOATING_PANEL_WIDTH * scale) as i32;
+                let height = (FLOATING_PANEL_HEIGHT * scale) as i32;
+                if !windows::resize_window(floating, width, height) {
+                    eprintln!("Could not apply the native size to floating panel '{}'", kind.key());
+                }
+
+                // Show only after ownership and the native size are applied.
                 windows::show_window(floating);
             }
             Ok(None) => {
