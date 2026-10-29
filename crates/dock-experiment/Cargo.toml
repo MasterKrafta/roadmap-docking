@@ -10,7 +10,6 @@ gpui.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 gpui_platform.workspace = true
-platform = { path = "../platform" }
 
 [lints]
 workspace = true
