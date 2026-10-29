@@ -9,7 +9,7 @@ use ui::Theme;
 use crate::components::splitter_handle::ResizeStartHandler;
 use crate::components::{MouseDownHandler, SplitterHandle};
 
-use super::components::{ColumnHeader, render_tab_group};
+use super::components::{ColumnHeader, FloatingCompositionView, render_tab_group};
 use super::geometry::{self, GeometryKind, NodeGeometry};
 use super::model::{CompositionContainer, DockLayout, DockNode, NodePathStep, SplitAxis};
 use super::window::{
@@ -165,17 +165,11 @@ pub(super) fn render(
                 tab_reorder_preview.as_ref(),
             );
 
-            body = body.child(
-                div()
-                    .absolute()
-                    .left(px(bounds.origin.x))
-                    .top(px(bounds.origin.y))
-                    .w(px(bounds.size.width))
-                    .h(px(bounds.size.height))
-                    .border_1()
-                    .border_color(rgb(theme.colors.border))
-                    .child(floating_content),
-            );
+            body = body.child(FloatingCompositionView {
+                bounds,
+                theme: *theme,
+                content: floating_content,
+            });
         }
     }
 
