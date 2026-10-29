@@ -268,9 +268,7 @@ fn empty_tabs_node() -> DockNode {
 
 fn prune_empty_node(node: DockNode) -> Option<DockNode> {
     match node {
-        DockNode::Tabs(group) => {
-            (!group.panels.is_empty()).then_some(DockNode::Tabs(group))
-        }
+        DockNode::Tabs(group) => (!group.panels.is_empty()).then_some(DockNode::Tabs(group)),
         DockNode::Column { content } => {
             prune_empty_node(*content).map(|content| DockNode::Column {
                 content: Box::new(content),
@@ -487,7 +485,6 @@ impl CompositionContainer {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -530,6 +527,32 @@ mod tests {
             panic!("first remaining column should keep its tab group");
         };
         assert_eq!(group.panels[0].title, "B");
+    }
+
+
+    #[test]
+    fn removing_last_group_removes_the_empty_composition_slot() {
+        let mut container = CompositionContainer {
+            slots: vec![CompositionSlot {
+                layout: Some(DockLayout {
+                    root: column(tabs(&[("A", "test")])),
+                }),
+                weight: 1.0,
+            }],
+        };
+
+        let group = container
+            .layout_mut(0)
+            .and_then(|layout| layout.take_group(&[NodePathStep::ColumnContent]))
+            .expect("source group should be returned");
+
+        assert!(container.layout_mut(0).is_some_and(|layout| layout.is_empty()));
+        assert!(container.remove_empty_layout(0));
+        assert!(container.slots.is_empty());
+
+        let floating_index = container.insert_floating_layout(DockLayout::single_group(group));
+        assert_eq!(floating_index, 0);
+        assert!(container.layout_mut(floating_index).is_some());
     }
 
     #[test]
