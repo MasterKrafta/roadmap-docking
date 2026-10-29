@@ -143,6 +143,26 @@ pub fn set_owner(window: NativeWindowHandle, owner: NativeWindowHandle) {
     }
 }
 
+/// Removes the always-on-top state without changing the window's owner.
+///
+/// Owned windows still stay above their owner, but can be covered by windows
+/// from other applications when the user switches away.
+pub fn remove_topmost(handle: NativeWindowHandle) -> bool {
+    // SAFETY: handle originates from GPUI; callers must not use it after its window closes.
+    unsafe {
+        SetWindowPos(
+            handle.as_hwnd(),
+            Some(HWND_NOTOPMOST),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+        )
+    }
+    .is_ok()
+}
+
 /// Enables the native Windows resize frame on a borderless GPUI window.
 pub fn enable_native_resize(handle: NativeWindowHandle) {
     // SAFETY: handle originates from GPUI; callers must not use it after its window closes.
