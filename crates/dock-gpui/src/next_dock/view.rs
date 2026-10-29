@@ -1,4 +1,6 @@
 //! Rendering for the independent dock tree.
+use std::rc::Rc;
+
 use dock_core::{Axis, Point, Rect, Size};
 use gpui::{
     App, Div, InteractiveElement, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
@@ -16,6 +18,9 @@ use super::window::{
     CompositionDropZone, FloatingComposition, GroupDragPreview, NextDockWindow, TabDragContext,
     TabDragPreview, TabReorderPreview,
 };
+
+pub(super) type NativeWindowMoveHandler =
+    Rc<dyn Fn(&MouseDownEvent, &mut Window, &mut App) + 'static>;
 
 #[derive(Clone)]
 pub(super) struct SplitResizeSpec {
@@ -37,6 +42,7 @@ pub(super) fn render_floating_layout(
     window: &Window,
     theme: &Theme,
     owner: WeakEntity<NextDockWindow>,
+    native_move_handler: NativeWindowMoveHandler,
 ) -> Div {
     let width = width.max(1.0);
     let height = height.max(1.0);
@@ -55,6 +61,7 @@ pub(super) fn render_floating_layout(
         Point::ZERO,
         None,
         None,
+        Some(native_move_handler),
     );
 
     div()
@@ -143,6 +150,7 @@ pub(super) fn render(
                     slot_origin,
                     group_drag_preview.as_ref(),
                     tab_reorder_preview.as_ref(),
+                    None,
                 )
             }
             None => div()
@@ -203,6 +211,7 @@ pub(super) fn render(
                 bounds.origin,
                 group_drag_preview.as_ref(),
                 tab_reorder_preview.as_ref(),
+                None,
             );
 
             body = body.child(FloatingCompositionView {
@@ -238,6 +247,7 @@ pub(super) fn render(
             preview.bounds.origin,
             None,
             tab_reorder_preview.as_ref(),
+            None,
         );
 
         body = body.child(
@@ -278,6 +288,7 @@ pub(super) fn render(
             bounds.origin,
             None,
             tab_reorder_preview.as_ref(),
+            None,
         );
 
         body = body.child(
@@ -417,6 +428,7 @@ fn render_node(
     origin: Point,
     group_drag_preview: Option<&GroupDragPreview>,
     tab_reorder_preview: Option<&TabReorderPreview>,
+    native_move_handler: Option<NativeWindowMoveHandler>,
 ) -> Div {
     if group_drag_preview.is_some_and(|preview| {
         preview.composition_index == composition_index
@@ -502,12 +514,19 @@ fn render_node(
                     Point::new(origin.x, origin.y + *header_height),
                     group_drag_preview,
                     tab_reorder_preview,
+                    native_move_handler.clone(),
                 ));
 
             let drag_owner = owner.clone();
             let viewport_size = viewport_size;
 
-            let on_drag_start: MouseDownHandler = if interactive == true {
+            let on_drag_start: MouseDownHandler = if let Some(native_move_handler) =
+                native_move_handler.clone()
+            {
+                Box::new(move |event, window, app| {
+                    native_move_handler(event, window, app);
+                })
+            } else if interactive {
                 Box::new(move |event: &MouseDownEvent, _window, app| {
                     if let Some(owner) = drag_owner.upgrade() {
                         owner.update(app, |this, _cx| {
@@ -681,6 +700,7 @@ fn render_node(
                     child_origin,
                     group_drag_preview,
                     tab_reorder_preview,
+                    native_move_handler.clone(),
                 ));
 
                 child_origin = match axis {

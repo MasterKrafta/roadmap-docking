@@ -202,22 +202,36 @@ pub(super) fn synchronize_floating_windows(
         )
     });
 
+    // Return no-longer-used windows to the hidden pool instead of destroying
+    // them, so the next tear-off does not have to create a new GPUI window.
     for (id, handle) in existing {
         if specs.iter().any(|floating| floating.id == id) {
             continue;
         }
 
-        if let Err(error) = handle.update(app, |_, window, _cx| window.remove_window()) {
-            tracing::debug!(
-                composition_id = id,
-                error = %error,
-                "could not close stale native floating composition"
-            );
-        }
-        owner_entity.update(app, |main, cx| {
-            if main.native_floating_windows.remove(&id).is_some() {
-                cx.notify();
+        let reusable = match handle.update(app, |view, window, cx| {
+            view.set_composition_id(None, cx);
+            if let Some(native_handle) = NativeWindowHandle::from_window(window) {
+                platform::windows::hide_window(native_handle);
             }
+        }) {
+            Ok(()) => true,
+            Err(error) => {
+                tracing::debug!(
+                    composition_id = id,
+                    error = %error,
+                    "could not recycle stale native floating composition"
+                );
+                false
+            }
+        };
+
+        owner_entity.update(app, |main, cx| {
+            main.native_floating_windows.remove(&id);
+            if reusable {
+                main.native_floating_pool.push(handle);
+            }
+            cx.notify();
         });
     }
 
@@ -230,102 +244,139 @@ pub(super) fn synchronize_floating_windows(
             continue;
         }
 
+        ensure_hidden_floating_window(owner.clone(), main_handle, app);
+        let Some(handle) =
+            owner_entity.update(app, |main, _cx| main.native_floating_pool.pop())
+        else {
+            tracing::debug!(composition_id = floating.id, "no prepared floating surface is available");
+            continue;
+        };
+
         let Some((client_x, client_y)) = platform::windows::client_origin(main_handle) else {
+            owner_entity.update(app, |main, _cx| main.native_floating_pool.push(handle));
             tracing::debug!("could not determine the main window client origin");
             continue;
         };
         let scale = platform::windows::scale_factor(main_handle).max(0.1);
-        let window_bounds = WindowBounds::Windowed(gpui::Bounds {
-            origin: point(
-                px(client_x as f32 / scale + floating.bounds.origin.x),
-                px(
-                    client_y as f32 / scale
-                        + geometry::HEADER_HEIGHT
-                        + floating.bounds.origin.y,
-                ),
-            ),
-            size: size(
-                px(floating.bounds.size.width.max(180.0)),
-                px(floating.bounds.size.height.max(120.0)),
-            ),
-        });
-
-        let id = floating.id;
-        let owner_for_view = owner.clone();
-        let owner_for_close = owner.clone();
+        let left = client_x + (floating.bounds.origin.x * scale).round() as i32;
+        let top = client_y
+            + ((geometry::HEADER_HEIGHT + floating.bounds.origin.y) * scale).round() as i32;
+        let width = (floating.bounds.size.width * scale)
+            .round()
+            .max((180.0 * scale).round()) as i32;
+        let height = (floating.bounds.size.height * scale)
+            .round()
+            .max((120.0 * scale).round()) as i32;
         let start_move = platform::windows::left_button_down();
-        let options = WindowOptions {
-            window_bounds: Some(window_bounds),
-            titlebar: None,
-            kind: WindowKind::PopUp,
-            show: true,
-            focus: false,
-            is_resizable: true,
-            is_minimizable: false,
-            is_movable: false,
-            window_min_size: Some(size(px(180.0), px(120.0))),
-            ..Default::default()
-        };
+        let id = floating.id;
 
-        match app.open_window(options, move |window, cx| {
-            if let Some(handle) = NativeWindowHandle::from_window(window) {
-                platform::windows::set_owner(handle, main_handle);
-                platform::windows::enable_native_resize(handle);
+        match handle.update(app, |view, window, cx| {
+            view.set_composition_id(Some(id), cx);
+
+            if let Some(native_handle) = NativeWindowHandle::from_window(window) {
+                platform::windows::move_window(native_handle, left, top);
+                platform::windows::resize_window(native_handle, width, height);
+                platform::windows::show_window(native_handle);
             }
 
-            let view = cx.new(|_| FloatingCompositionWindow::new(owner_for_view.clone(), id));
-            view.update(cx, |_, view_cx| {
-                window.on_window_should_close(view_cx, move |_window, app| {
-                    let Some(owner) = owner_for_close.upgrade() else {
-                        return true;
-                    };
-                    owner.update(app, |main, cx| {
-                        main.dock_floating_composition(id, CompositionDropZone::RightEdge, cx)
-                    })
-                });
-            });
-            view
+            if start_move && platform::windows::left_button_down() {
+                view.begin_move(window, cx);
+            }
         }) {
-            Ok(handle) => {
-                let still_exists = owner_entity
-                    .read(app)
-                    .floating_compositions
-                    .iter()
-                    .any(|candidate| candidate.id == id);
-                if still_exists {
-                    owner_entity.update(app, |main, cx| {
-                        main.native_floating_windows.insert(id, handle);
-                        cx.notify();
-                    });
-
-                    if start_move && platform::windows::left_button_down() {
-                        if let Err(error) =
-                            handle.update(app, |view, window, cx| view.begin_move(window, cx))
-                        {
-                            tracing::debug!(
-                                composition_id = id,
-                                error = %error,
-                                "could not start native floating composition drag"
-                            );
-                        }
-                    }
-                } else if let Err(error) =
-                    handle.update(app, |_, window, _cx| window.remove_window())
-                {
-                    tracing::debug!(
-                        composition_id = id,
-                        error = %error,
-                        "could not close a native floating composition that was already docked"
-                    );
-                }
+            Ok(()) => {
+                owner_entity.update(app, |main, cx| {
+                    main.native_floating_windows.insert(id, handle);
+                    cx.notify();
+                });
             }
             Err(error) => {
-                tracing::warn!(
+                tracing::debug!(
                     composition_id = id,
                     error = %error,
-                    "could not open native floating composition"
+                    "could not activate a prepared floating surface"
                 );
             }
+        }
+    }
+
+    // Keep one hidden surface ready even when none are currently floating.
+    ensure_hidden_floating_window(owner, main_handle, app);
+}
+
+fn ensure_hidden_floating_window(
+    owner: gpui::WeakEntity<NextDockWindow>,
+    main_handle: NativeWindowHandle,
+    app: &mut App,
+) {
+    let Some(owner_entity) = owner.upgrade() else {
+        return;
+    };
+    if !owner_entity.read(app).native_floating_pool.is_empty() {
+        return;
+    }
+
+    let Some((client_x, client_y)) = platform::windows::client_origin(main_handle) else {
+        tracing::debug!("could not determine the main window client origin for a prepared surface");
+        return;
+    };
+    let scale = platform::windows::scale_factor(main_handle).max(0.1);
+    let options = WindowOptions {
+        window_bounds: Some(WindowBounds::Windowed(gpui::Bounds {
+            origin: point(px(client_x as f32 / scale), px(client_y as f32 / scale)),
+            size: size(px(480.0), px(320.0)),
+        })),
+        titlebar: None,
+        kind: WindowKind::PopUp,
+        show: false,
+        focus: false,
+        is_resizable: true,
+        is_minimizable: false,
+        is_movable: false,
+        window_min_size: Some(size(px(180.0), px(120.0))),
+        ..Default::default()
+    };
+    let owner_for_view = owner.clone();
+    let owner_for_close = owner.clone();
+
+    match app.open_window(options, move |window, cx| {
+        if let Some(native_handle) = NativeWindowHandle::from_window(window) {
+            platform::windows::set_owner(native_handle, main_handle);
+            platform::windows::enable_native_resize(native_handle);
+            platform::windows::hide_window(native_handle);
+        }
+
+        let view = cx.new(|_| FloatingCompositionWindow::new(owner_for_view.clone(), None));
+        let view_for_close = view.downgrade();
+        view.update(cx, |_, view_cx| {
+            window.on_window_should_close(view_cx, move |_window, app| {
+                let Some(view) = view_for_close.upgrade() else {
+                    return true;
+                };
+                let Some(id) = view.read(app).composition_id() else {
+                    return true;
+                };
+                let Some(owner) = owner_for_close.upgrade() else {
+                    return true;
+                };
+
+                owner.update(app, |main, cx| {
+                    main.dock_floating_composition(id, CompositionDropZone::RightEdge, cx);
+                });
+
+                // Keep the hidden surface alive; the next sync hides and pools it.
+                false
+            });
+        });
+        view
+    }) {
+        Ok(handle) => {
+            owner_entity.update(app, |main, cx| {
+                main.native_floating_pool.push(handle);
+                cx.notify();
+            });
+        }
+        Err(error) => {
+            tracing::warn!(error = %error, "could not prepare a hidden floating surface");
         }
     }
 }
