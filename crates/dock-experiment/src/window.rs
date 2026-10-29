@@ -62,10 +62,10 @@ fn menu_button(kind: PanelKind, owner: OwnerWindow) -> impl IntoElement {
         .on_click(move |_, _, cx| open_floating_panel(kind, owner, cx))
 }
 
-fn open_floating_panel(kind: PanelKind, owner: OwnerWindow, cx: &mut App) {
+fn open_floating_panel(kind: PanelKind, _owner: OwnerWindow, cx: &mut App) {
     // Refuse to create an unowned HWND: it would outlive the main window.
     #[cfg(windows)]
-    let Some(owner) = owner else {
+    let Some(owner) = _owner else {
         eprintln!("Could not get the main window's native handle; panel was not opened");
         return;
     };
@@ -105,6 +105,9 @@ fn open_floating_panel(kind: PanelKind, owner: OwnerWindow, cx: &mut App) {
             return;
         }
     };
+
+    #[cfg(not(windows))]
+    let _ = handle;
 
     #[cfg(windows)]
     {
