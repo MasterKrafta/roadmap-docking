@@ -36,7 +36,7 @@ pub(super) fn render(
     window: &Window,
     theme: &Theme,
     owner: WeakEntity<NextDockWindow>,
-    floating: Option<FloatingComposition>,
+    floating_compositions: &[FloatingComposition],
     drop_zone: Option<CompositionDropZone>,
     tab_drag_preview: Option<TabDragPreview>,
     group_drag_preview: Option<GroupDragPreview>,
@@ -46,13 +46,16 @@ pub(super) fn render(
     let height = height.max(1.0);
     let content_height = (height - geometry::HEADER_HEIGHT).max(1.0);
 
-    let floating_index = floating.map(|item| item.composition_index);
-
     let docked_slots: Vec<(usize, &super::model::CompositionSlot)> = container
         .slots
         .iter()
         .enumerate()
-        .filter_map(|(index, slot)| (Some(index) != floating_index).then_some((index, slot)))
+        .filter_map(|(index, slot)| {
+            (!floating_compositions
+                .iter()
+                .any(|floating| floating.composition_index == index))
+            .then_some((index, slot))
+        })
         .collect();
 
     let splitter_extent = theme.metrics.splitter_thickness.max(0.0);
@@ -131,7 +134,7 @@ pub(super) fn render(
         .bg(rgb(theme.colors.window_background))
         .child(docked_row);
 
-    if let Some(floating) = floating {
+    for floating in floating_compositions {
         if let Some(layout) = container
             .slots
             .get(floating.composition_index)
@@ -158,7 +161,7 @@ pub(super) fn render(
                 floating.composition_index,
                 true,
                 bounds.origin,
-                None,
+                group_drag_preview.as_ref(),
                 tab_reorder_preview.as_ref(),
             );
 
