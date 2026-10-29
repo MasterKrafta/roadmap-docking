@@ -32,7 +32,7 @@ fn run_windows() {
             ..Default::default()
         };
 
-        if let Err(error) = cx.open_window(options, |window, cx| {
+        let main_window = match cx.open_window(options, |window, cx| {
             let main_window = cx.new(|_| window::MainWindow::new());
             let weak_main_window = main_window.downgrade();
 
@@ -48,7 +48,17 @@ fn run_windows() {
 
             main_window
         }) {
-            eprintln!("Could not open the experiment window: {error}");
+            Ok(handle) => handle,
+            Err(error) => {
+                eprintln!("Could not open the experiment window: {error}");
+                return;
+            }
+        };
+
+        if let Err(error) =
+            main_window.update(cx, |this, _window, cx| this.open_startup_panels(cx))
+        {
+            eprintln!("Could not open the startup panels: {error:?}");
             return;
         }
 
