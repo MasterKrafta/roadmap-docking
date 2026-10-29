@@ -5,7 +5,7 @@ use gpui::{Context, IntoElement, MouseButton, MouseMoveEvent, Render, Window};
 use ui::Theme;
 
 use super::geometry;
-use super::model::{CompositionContainer, DockLayout, NodePathStep, Panel, SplitAxis};
+use super::model::{CompositionContainer, DockLayout, NodePathStep, Panel, SplitAxis, TabGroup};
 use super::view::{self, SplitResizeSpec};
 
 /// Owns the prototype layout and renders it in a regular GPUI window.
@@ -19,6 +19,8 @@ pub(super) struct NextDockWindow {
     composition_drop_zone: Option<CompositionDropZone>,
     pending_tab_drag: Option<PendingTabDrag>,
     active_tab_drag: Option<ActiveTabDrag>,
+    pending_group_drag: Option<PendingGroupDrag>,
+    active_group_drag: Option<ActiveGroupDrag>,
 }
 
 #[derive(Clone)]
@@ -66,9 +68,34 @@ struct ActiveTabDrag {
     bounds: Rect,
 }
 
+#[derive(Clone)]
+struct PendingGroupDrag {
+    composition_index: usize,
+    path: Vec<NodePathStep>,
+    group: TabGroup,
+    start_position: Point,
+    viewport_size: Size,
+    strip_bounds: Rect,
+    grab_offset_x: f32,
+    grab_offset_y: f32,
+}
+
+#[derive(Clone)]
+struct ActiveGroupDrag {
+    pending: PendingGroupDrag,
+    start_origin: Point,
+    bounds: Rect,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub(super) struct TabDragPreview {
     pub(super) panel: Panel,
+    pub(super) bounds: Rect,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct GroupDragPreview {
+    pub(super) group: TabGroup,
     pub(super) bounds: Rect,
 }
 
@@ -118,6 +145,8 @@ impl NextDockWindow {
             composition_drop_zone: None,
             pending_tab_drag: None,
             active_tab_drag: None,
+            pending_group_drag: None,
+            active_group_drag: None,
         }
     }
     pub(super) fn begin_resize(
@@ -128,6 +157,8 @@ impl NextDockWindow {
     ) {
         self.pending_tab_drag = None;
         self.active_tab_drag = None;
+        self.pending_group_drag = None;
+        self.active_group_drag = None;
         self.pending_move = None;
         self.active_move = None;
 
@@ -256,6 +287,8 @@ impl NextDockWindow {
         self.active_move = None;
         self.composition_drop_zone = None;
         self.active_tab_drag = None;
+        self.pending_group_drag = None;
+        self.active_group_drag = None;
 
         self.pending_tab_drag = Some(PendingTabDrag {
             composition_index,
@@ -275,6 +308,127 @@ impl NextDockWindow {
             preview_bounds: None,
             group_key,
         });
+    }
+
+    pub(super) fn begin_group_drag(
+        &mut self,
+        composition_index: usize,
+        path: Vec<NodePathStep>,
+        group: TabGroup,
+        position: gpui::Point<gpui::Pixels>,
+        viewport_size: Size,
+        strip_bounds: Rect,
+        grab_offset_x: f32,
+    ) {
+        if self.active_resize.is_some() {
+            return;
+        }
+
+        if let Some(floating) = self.floating_composition {
+            if floating.composition_index == composition_index {
+                self.begin_composition_move(
+                    composition_index,
+                    position,
+                    viewport_size.width,
+                    viewport_size.height,
+                );
+            }
+
+            return;
+        }
+
+        self.pending_tab_drag = None;
+        self.active_tab_drag = None;
+        self.pending_move = None;
+        self.active_move = None;
+        self.composition_drop_zone = None;
+        self.active_group_drag = None;
+
+        self.pending_group_drag = Some(PendingGroupDrag {
+            composition_index,
+            path,
+            group,
+            start_position: Point::new(
+                position.x.as_f32(),
+                (position.y.as_f32() - geometry::HEADER_HEIGHT).max(0.0),
+            ),
+            viewport_size: Size::new(viewport_size.width.max(1.0), viewport_size.height.max(1.0)),
+            strip_bounds,
+            grab_offset_x,
+            grab_offset_y: position.y.as_f32()
+                - geometry::HEADER_HEIGHT
+                - strip_bounds.origin.y,
+        });
+    }
+
+    pub(super) fn update_group_drag(
+        &mut self,
+        event: &MouseMoveEvent,
+        cx: &mut Context<Self>,
+    ) {
+        if event.pressed_button != Some(MouseButton::Left) {
+            return;
+        }
+
+        let pointer = Point::new(
+            event.position.x.as_f32(),
+            (event.position.y.as_f32() - geometry::HEADER_HEIGHT).max(0.0),
+        );
+
+        if let Some(active) = self.active_group_drag.clone() {
+            let viewport = active.pending.viewport_size;
+            let size = active.bounds.size;
+
+            let origin = Point::new(
+                (active.start_origin.x + pointer.x - active.pending.start_position.x)
+                    .clamp(0.0, (viewport.width - size.width).max(0.0)),
+                (active.start_origin.y + pointer.y - active.pending.start_position.y)
+                    .clamp(0.0, (viewport.height - size.height).max(0.0)),
+            );
+
+            self.active_group_drag = Some(ActiveGroupDrag {
+                bounds: Rect::new(origin, size),
+                ..active
+            });
+
+            cx.notify();
+            return;
+        }
+
+        let Some(mut pending) = self.pending_group_drag.take() else {
+            return;
+        };
+
+        let strip = pending.strip_bounds;
+        let cursor_inside_strip = pointer.x >= strip.origin.x
+            && pointer.x <= strip.origin.x + strip.size.width
+            && pointer.y >= strip.origin.y
+            && pointer.y <= strip.origin.y + strip.size.height;
+
+        if cursor_inside_strip {
+            self.pending_group_drag = Some(pending);
+            return;
+        }
+
+        let viewport = pending.viewport_size;
+        let width = (viewport.width * 0.38).min(480.0).clamp(1.0, viewport.width);
+        let height = (viewport.height * 0.55).min(520.0).clamp(1.0, viewport.height);
+        let column_header_height = self.theme.metrics.column_header_height.max(0.0);
+
+        let origin = Point::new(
+            (pointer.x - pending.grab_offset_x).clamp(0.0, (viewport.width - width).max(0.0)),
+            (pointer.y - column_header_height - pending.grab_offset_y)
+                .clamp(0.0, (viewport.height - height).max(0.0)),
+        );
+
+        pending.start_position = pointer;
+        self.active_group_drag = Some(ActiveGroupDrag {
+            pending,
+            start_origin: origin,
+            bounds: Rect::new(origin, Size::new(width, height)),
+        });
+
+        cx.notify();
     }
 
     pub(super) fn update_tab_drag(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
@@ -495,6 +649,41 @@ impl NextDockWindow {
         cx.notify();
     }
 
+    pub(super) fn end_group_drag(&mut self, cx: &mut Context<Self>) {
+        let had_pending = self.pending_group_drag.take().is_some();
+
+        let Some(active) = self.active_group_drag.take() else {
+            if had_pending {
+                cx.notify();
+            }
+            return;
+        };
+
+        let source = active.pending;
+        let group = self
+            .container
+            .layout_mut(source.composition_index)
+            .and_then(|layout| layout.take_group(&source.path));
+
+        let Some(group) = group else {
+            cx.notify();
+            return;
+        };
+
+        let layout = DockLayout::single_group(group);
+        let composition_index = self.container.insert_floating_layout(layout);
+
+        self.pending_move = None;
+        self.active_move = None;
+        self.composition_drop_zone = None;
+        self.floating_composition = Some(FloatingComposition {
+            composition_index,
+            bounds: active.bounds,
+        });
+
+        cx.notify();
+    }
+
     pub(super) fn begin_composition_move(
         &mut self,
         composition_index: usize,
@@ -504,6 +693,8 @@ impl NextDockWindow {
     ) {
         self.pending_tab_drag = None;
         self.active_tab_drag = None;
+        self.pending_group_drag = None;
+        self.active_group_drag = None;
         self.composition_drop_zone = None;
         if self.active_resize.is_some() {
             return;
@@ -684,6 +875,11 @@ impl Render for NextDockWindow {
             bounds: active.bounds,
         });
 
+        let group_drag_preview = self.active_group_drag.as_ref().map(|active| GroupDragPreview {
+            group: active.pending.group.clone(),
+            bounds: active.bounds,
+        });
+
         let tab_reorder_preview = self.pending_tab_drag.as_ref().and_then(|pending| {
             pending.preview_bounds.map(|bounds| TabReorderPreview {
                 panel: pending.panel,
@@ -704,6 +900,7 @@ impl Render for NextDockWindow {
             self.floating_composition,
             self.composition_drop_zone,
             tab_drag_preview,
+            group_drag_preview,
             tab_reorder_preview,
         )
     }
