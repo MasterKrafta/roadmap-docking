@@ -1,0 +1,15 @@
+[package]
+name = "dock-experiment"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+dock-core = { path = "../dock-core" }
+gpui.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+gpui_platform.workspace = true
+
+[lints]
+workspace = true
