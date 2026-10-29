@@ -2,7 +2,7 @@
 
 use std::{rc::Rc, time::Duration};
 
-use gpui::{Context, IntoElement, MouseDownEvent, Render, Window, div};
+use gpui::{Context, IntoElement, MouseDownEvent, Render, Subscription, Window, div};
 use platform::windows::{self, NativeWindowHandle};
 
 use super::view;
@@ -43,6 +43,10 @@ impl FloatingCompositionWindow {
         self.composition_id = composition_id;
         self.drag = None;
         cx.notify();
+    }
+
+    pub(super) fn composition_id(&self) -> Option<u64> {
+        self.composition_id
     }
 
     pub(super) fn begin_move(&mut self, window: &mut Window, cx: &mut Context<Self>) {
