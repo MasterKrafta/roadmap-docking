@@ -16,9 +16,9 @@ use platform::windows::{self, NativeWindowHandle};
 use super::floating_window::FloatingCompositionWindow;
 use super::geometry;
 use super::model::{CompositionContainer, DockLayout, NodePathStep, Panel, SplitAxis, TabGroup};
+use super::view::{self, SplitResizeSpec};
 
 const DRAG_DETACH_THRESHOLD: f32 = 2.0;
-use super::view::{self, SplitResizeSpec};
 
 /// Owns the prototype layout and renders it in a regular GPUI window.
 pub(super) struct NextDockWindow {
