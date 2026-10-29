@@ -64,11 +64,14 @@ pub(super) fn render(
     let widths = distribute_composition_widths(available_width, &weights);
 
     let mut docked_row = div().flex().flex_row().w(px(width)).h(px(content_height));
+    let mut slot_origin_x = 0.0;
 
     for (position, ((composition_index, slot), slot_width)) in
         docked_slots.iter().zip(widths.iter()).enumerate()
     {
         if position > 0 {
+            slot_origin_x += splitter_extent;
+
             docked_row = docked_row.child(
                 div()
                     .w(px(splitter_extent))
@@ -76,6 +79,8 @@ pub(super) fn render(
                     .bg(rgb(theme.colors.splitter_handle)),
             );
         }
+
+        let slot_origin = Point::new(slot_origin_x, 0.0);
 
         let slot_view = match slot.layout.as_ref() {
             Some(layout) => {
@@ -93,7 +98,7 @@ pub(super) fn render(
                     Size::new(width, content_height),
                     *composition_index,
                     true,
-                    Point::new(slot_origin_x, 0.0),
+                    slot_origin,
                 )
             }
             None => div()
@@ -110,6 +115,8 @@ pub(super) fn render(
                 .h(px(content_height))
                 .child(slot_view),
         );
+
+        slot_origin_x += *slot_width;
     }
 
     let mut body = div()
@@ -184,7 +191,7 @@ pub(super) fn render(
             Size::new(width, content_height),
             0,
             false,
-            Point::new(origin.x, origin.y + *header_height),
+            preview.bounds.origin,
         );
 
         body = body.child(
@@ -378,8 +385,8 @@ fn render_node(
                     owner,
                     viewport_size,
                     composition_index,
-                    true,
-                    preview.bounds.origin,
+                    interactive,
+                    Point::new(origin.x, origin.y + *header_height),
                 ));
 
             let drag_owner = owner.clone();
@@ -446,6 +453,8 @@ fn render_node(
                     .w(px(geometry.width))
                     .h(px(geometry.height)),
             };
+
+            let mut child_origin = origin;
 
             for (index, (child, child_geometry)) in
                 children.iter().zip(child_geometries).enumerate()
@@ -528,6 +537,15 @@ fn render_node(
                     };
 
                     split_view = split_view.child(splitter_slot);
+
+                    child_origin = match axis {
+                        SplitAxis::Horizontal => {
+                            Point::new(child_origin.x + *splitter_extent, child_origin.y)
+                        }
+                        SplitAxis::Vertical => {
+                            Point::new(child_origin.x, child_origin.y + *splitter_extent)
+                        }
+                    };
                 }
 
                 let mut child_path = path.to_vec();
@@ -545,8 +563,18 @@ fn render_node(
                     owner,
                     viewport_size,
                     composition_index,
-                    true,
+                    interactive,
+                    child_origin,
                 ));
+
+                child_origin = match axis {
+                    SplitAxis::Horizontal => {
+                        Point::new(child_origin.x + child_geometry.width, child_origin.y)
+                    }
+                    SplitAxis::Vertical => {
+                        Point::new(child_origin.x, child_origin.y + child_geometry.height)
+                    }
+                };
             }
 
             split_view

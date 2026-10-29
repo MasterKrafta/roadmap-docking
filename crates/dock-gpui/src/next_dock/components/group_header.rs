@@ -3,15 +3,14 @@
 
 use dock_core::{Point, Rect, Size};
 use gpui::{
-    App, IntoElement, MouseDownEvent, ParentElement, RenderOnce, Styled, WeakEntity, Window, div,
-    px, rgb,
+    App, IntoElement, MouseDownEvent, ParentElement, RenderOnce, Styled, Window, div, px, rgb,
 };
 use ui::Theme;
 
 use crate::components::{ClickHandler, MouseDownHandler, TabStrip};
 
-use super::super::model::{NodePathStep, Panel, TabGroup};
-use super::super::window::{NextDockWindow, TabDragContext};
+use super::super::model::TabGroup;
+use super::super::window::TabDragContext;
 use super::group_menu_button::GroupMenuButton;
 use super::panel_tab::PanelTab;
 
@@ -97,6 +96,7 @@ impl RenderOnce for GroupHeader {
 
             let on_drag_start: MouseDownHandler =
                 if let Some(context) = self.tab_drag_context.as_ref() {
+                    let strip_bounds = context.strip_bounds;
                     let owner = context.owner.clone();
                     let composition_index = context.composition_index;
                     let path = context.path.clone();
@@ -117,7 +117,7 @@ impl RenderOnce for GroupHeader {
                                 panel,
                                 event.position,
                                 viewport_size,
-                                context.strip_bounds,
+                                strip_bounds,
                             );
                         });
                     })
