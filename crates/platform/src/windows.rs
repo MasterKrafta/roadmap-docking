@@ -135,6 +135,15 @@ pub fn hide_window(handle: NativeWindowHandle) {
     }
 }
 
+/// Restores and activates a window after its last owned floating panel closes.
+pub fn restore_and_activate(handle: NativeWindowHandle) {
+    // SAFETY: handle originates from a live GPUI window.
+    unsafe {
+        let _ = ShowWindow(handle.as_hwnd(), SW_RESTORE);
+        let _ = SetForegroundWindow(handle.as_hwnd());
+    }
+}
+
 /// Makes owner the owner of window, so the floating window follows its main window.
 pub fn set_owner(window: NativeWindowHandle, owner: NativeWindowHandle) {
     // SAFETY: Both handles must come from live GPUI windows.
