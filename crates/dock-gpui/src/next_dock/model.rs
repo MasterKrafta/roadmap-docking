@@ -306,7 +306,8 @@ fn prune_empty_node(node: DockNode) -> Option<DockNode> {
                             *weight /= total_weight;
                         }
                     } else {
-                        pruned_weights.fill(1.0 / pruned_weights.len() as f32);
+                        let equal_weight = 1.0 / pruned_weights.len() as f32;
+                        pruned_weights.fill(equal_weight);
                     }
 
                     Some(DockNode::Split {
