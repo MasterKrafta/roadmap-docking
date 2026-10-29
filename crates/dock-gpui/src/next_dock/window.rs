@@ -714,6 +714,15 @@ impl NextDockWindow {
             return;
         }
 
+        if let Some(index) = self
+            .floating_compositions
+            .iter()
+            .position(|floating| floating.composition_index == composition_index)
+        {
+            let floating = self.floating_compositions.remove(index);
+            self.floating_compositions.push(floating);
+        }
+
         self.pending_move = Some(PendingCompositionMove {
             composition_index,
             start_position: Point::new(
