@@ -25,6 +25,8 @@ fn run_windows() {
         let bounds = Bounds::centered(None, size(px(1200.0), px(800.0)), cx);
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
+            show: false,
+            focus: false,
             titlebar: Some(TitlebarOptions {
                 title: Some("Docking experiment".into()),
                 ..Default::default()
@@ -59,6 +61,16 @@ fn run_windows() {
             main_window.update(cx, |this, _window, cx| this.open_startup_panels(cx))
         {
             eprintln!("Could not open the startup panels: {error:?}");
+            return;
+        }
+
+        // All three windows have now completed GPUI's initial draw while hidden.
+        // Show the main window first, then reveal the already-rendered panels.
+        if let Err(error) = main_window.update(cx, |this, window, cx| {
+            window.activate_window();
+            this.show_floating_panels(cx);
+        }) {
+            eprintln!("Could not show the startup windows: {error:?}");
             return;
         }
 
