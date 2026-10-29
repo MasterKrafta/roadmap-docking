@@ -102,6 +102,7 @@ pub(super) fn render(
                     *composition_index,
                     true,
                     slot_origin,
+                    group_drag_preview.as_ref(),
                     tab_reorder_preview.as_ref(),
                 )
             }
@@ -157,6 +158,7 @@ pub(super) fn render(
                 floating.composition_index,
                 true,
                 bounds.origin,
+                None,
                 tab_reorder_preview.as_ref(),
             );
 
@@ -197,6 +199,7 @@ pub(super) fn render(
             0,
             false,
             preview.bounds.origin,
+            None,
             tab_reorder_preview.as_ref(),
         );
 
@@ -213,9 +216,9 @@ pub(super) fn render(
         );
     }
 
-    if let Some(preview) = group_drag_preview {
+    if let Some(preview) = group_drag_preview.as_ref() {
         let bounds = preview.bounds;
-        let preview_layout = DockLayout::single_group(preview.group);
+        let preview_layout = DockLayout::single_group(preview.group.clone());
         let node_geometry = geometry::compute(
             &preview_layout.root,
             bounds.size.width,
@@ -236,6 +239,7 @@ pub(super) fn render(
             0,
             false,
             bounds.origin,
+            None,
             tab_reorder_preview.as_ref(),
         );
 
@@ -374,8 +378,18 @@ fn render_node(
     composition_index: usize,
     interactive: bool,
     origin: Point,
+    group_drag_preview: Option<&GroupDragPreview>,
     tab_reorder_preview: Option<&TabReorderPreview>,
 ) -> Div {
+    if group_drag_preview.is_some_and(|preview| {
+        preview.composition_index == composition_index && preview.group_key.as_str() == key
+    }) {
+        return div()
+            .w(px(geometry.width))
+            .h(px(geometry.height))
+            .bg(rgb(theme.colors.panel_surface_background));
+    }
+
     match (&geometry.kind, node) {
         (
             GeometryKind::Tabs {
@@ -449,6 +463,7 @@ fn render_node(
                     composition_index,
                     interactive,
                     Point::new(origin.x, origin.y + *header_height),
+                    group_drag_preview,
                     tab_reorder_preview,
                 ));
 
@@ -628,6 +643,7 @@ fn render_node(
                     composition_index,
                     interactive,
                     child_origin,
+                    group_drag_preview,
                     tab_reorder_preview,
                 ));
 
