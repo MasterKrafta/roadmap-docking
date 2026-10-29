@@ -40,8 +40,8 @@ impl MainWindow {
 
     /// Opens the panels that should be visible when the experiment starts.
     pub(crate) fn open_startup_panels(&mut self, cx: &mut Context<Self>) {
-        self.open_floating_panel(PanelKind::Layers, cx);
-        self.open_floating_panel(PanelKind::Properties, cx);
+        self.open_floating_panel(PanelKind::Layers, false, cx);
+        self.open_floating_panel(PanelKind::Properties, false, cx);
     }
 
     /// Shows the already-created panels after GPUI has rendered their first frame.
@@ -53,7 +53,12 @@ impl MainWindow {
         }
     }
 
-    fn open_floating_panel(&mut self, kind: PanelKind, cx: &mut Context<Self>) {
+    fn open_floating_panel(
+        &mut self,
+        kind: PanelKind,
+        show_immediately: bool,
+        cx: &mut Context<Self>,
+    ) {
         let key = match PanelKey::new(kind.key()) {
             Ok(key) => key,
             Err(error) => {
@@ -69,8 +74,8 @@ impl MainWindow {
         ));
         let options = WindowOptions {
             window_bounds: Some(bounds),
-            show: false,
-            focus: false,
+            show: show_immediately,
+            focus: show_immediately,
             titlebar: Some(TitlebarOptions {
                 title: Some(kind.title().into()),
                 ..Default::default()
@@ -114,7 +119,7 @@ fn menu_button(kind: PanelKind, owner: WeakEntity<MainWindow>) -> impl IntoEleme
         .child(kind.title())
         .on_click(move |_, _, cx| {
             if let Err(error) =
-                owner.update(cx, |this, cx| this.open_floating_panel(kind, cx))
+                owner.update(cx, |this, cx| this.open_floating_panel(kind, true, cx))
             {
                 eprintln!("Could not access the main window to open a panel: {error:?}");
             }
