@@ -489,7 +489,7 @@ impl NextDockWindow {
             let local_x = pointer.x - strip.origin.x;
 
             // Переставляем модель при пересечении порога соседней вкладки.
-            // Справа порог — 75%, слева — симметричные 25%.
+            // Вправо — после 40% ширины следующей вкладки, влево — до отметки 60% предыдущей.
             loop {
                 let index = pending.panel_index;
                 let mut moved = false;
