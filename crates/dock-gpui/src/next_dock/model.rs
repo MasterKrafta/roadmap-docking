@@ -126,29 +126,34 @@ impl DockLayout {
     }
 
     pub(super) fn take_group(&mut self, path: &[NodePathStep]) -> Option<TabGroup> {
-        let mut node = &mut self.root;
+        let group = {
+            let mut node = &mut self.root;
 
-        for step in path {
-            node = match (node, *step) {
-                (DockNode::Split { children, .. }, NodePathStep::SplitChild(index)) => {
-                    children.get_mut(index)?
-                }
-                (DockNode::Column { content }, NodePathStep::ColumnContent) => content.as_mut(),
-                _ => return None,
+            for step in path {
+                node = match (node, *step) {
+                    (DockNode::Split { children, .. }, NodePathStep::SplitChild(index)) => {
+                        children.get_mut(index)?
+                    }
+                    (DockNode::Column { content }, NodePathStep::ColumnContent) => content.as_mut(),
+                    _ => return None,
+                };
+            }
+
+            let DockNode::Tabs(group) = node else {
+                return None;
             };
-        }
 
-        let DockNode::Tabs(group) = node else {
-            return None;
+            std::mem::replace(
+                group,
+                TabGroup {
+                    panels: Vec::new(),
+                    active: 0,
+                },
+            )
         };
 
-        Some(std::mem::replace(
-            group,
-            TabGroup {
-                panels: Vec::new(),
-                active: 0,
-            },
-        ))
+        self.prune_empty_nodes();
+        Some(group)
     }
 
     pub(super) fn remove_panel(
@@ -156,34 +161,47 @@ impl DockLayout {
         path: &[NodePathStep],
         panel_index: usize,
     ) -> Option<Panel> {
-        let mut node = &mut self.root;
+        let (panel, group_is_empty) = {
+            let mut node = &mut self.root;
 
-        for step in path {
-            node = match (node, *step) {
-                (DockNode::Split { children, .. }, NodePathStep::SplitChild(index)) => {
-                    children.get_mut(index)?
-                }
-                (DockNode::Column { content }, NodePathStep::ColumnContent) => content.as_mut(),
-                _ => return None,
+            for step in path {
+                node = match (node, *step) {
+                    (DockNode::Split { children, .. }, NodePathStep::SplitChild(index)) => {
+                        children.get_mut(index)?
+                    }
+                    (DockNode::Column { content }, NodePathStep::ColumnContent) => content.as_mut(),
+                    _ => return None,
+                };
+            }
+
+            let DockNode::Tabs(group) = node else {
+                return None;
             };
-        }
 
-        let DockNode::Tabs(group) = node else {
-            return None;
+            let panel = group.panels.get(panel_index).copied()?;
+            group.panels.remove(panel_index);
+
+            if group.panels.is_empty() {
+                group.active = 0;
+            } else if panel_index < group.active {
+                group.active -= 1;
+            } else if group.active >= group.panels.len() {
+                group.active = group.panels.len() - 1;
+            }
+
+            (panel, group.panels.is_empty())
         };
 
-        let panel = group.panels.get(panel_index).copied()?;
-        group.panels.remove(panel_index);
-
-        if group.panels.is_empty() {
-            group.active = 0;
-        } else if panel_index < group.active {
-            group.active -= 1;
-        } else if group.active >= group.panels.len() {
-            group.active = group.panels.len() - 1;
+        if group_is_empty {
+            self.prune_empty_nodes();
         }
 
         Some(panel)
+    }
+
+    fn prune_empty_nodes(&mut self) {
+        let root = std::mem::replace(&mut self.root, empty_tabs_node());
+        self.root = prune_empty_node(root).unwrap_or_else(empty_tabs_node);
     }
 
     pub(super) fn reorder_panel(
@@ -234,6 +252,69 @@ impl DockLayout {
         };
 
         true
+    }
+}
+
+fn empty_tabs_node() -> DockNode {
+    DockNode::Tabs(TabGroup {
+        panels: Vec::new(),
+        active: 0,
+    })
+}
+
+fn prune_empty_node(node: DockNode) -> Option<DockNode> {
+    match node {
+        DockNode::Tabs(group) => {
+            (!group.panels.is_empty()).then_some(DockNode::Tabs(group))
+        }
+        DockNode::Column { content } => {
+            prune_empty_node(*content).map(|content| DockNode::Column {
+                content: Box::new(content),
+            })
+        }
+        DockNode::Split {
+            axis,
+            weights,
+            children,
+        } => {
+            let weights = if weights.len() == children.len() {
+                weights
+            } else {
+                vec![1.0; children.len()]
+            };
+
+            let mut pruned_children = Vec::with_capacity(children.len());
+            let mut pruned_weights = Vec::with_capacity(children.len());
+
+            for (child, weight) in children.into_iter().zip(weights) {
+                if let Some(child) = prune_empty_node(child) {
+                    pruned_children.push(child);
+                    pruned_weights.push(weight.max(0.0));
+                }
+            }
+
+            match pruned_children.len() {
+                0 => None,
+                1 => pruned_children.pop(),
+                _ => {
+                    let total_weight: f32 = pruned_weights.iter().sum();
+
+                    if total_weight > f32::EPSILON {
+                        for weight in &mut pruned_weights {
+                            *weight /= total_weight;
+                        }
+                    } else {
+                        pruned_weights.fill(1.0 / pruned_weights.len() as f32);
+                    }
+
+                    Some(DockNode::Split {
+                        axis,
+                        weights: pruned_weights,
+                        children: pruned_children,
+                    })
+                }
+            }
+        }
     }
 }
 
@@ -384,5 +465,81 @@ impl CompositionContainer {
             }
             _ => false,
         }
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn taking_group_removes_empty_column_and_redistributes_weights() {
+        let mut layout = DockLayout {
+            root: split(
+                SplitAxis::Horizontal,
+                &[0.2, 0.3, 0.5],
+                vec![
+                    column(tabs(&[("A", "test")])),
+                    column(tabs(&[("B", "test")])),
+                    column(tabs(&[("C", "test")])),
+                ],
+            ),
+        };
+
+        let group = layout
+            .take_group(&[NodePathStep::SplitChild(0), NodePathStep::ColumnContent])
+            .expect("source group should be returned");
+
+        assert_eq!(group.panels[0].title, "A");
+
+        let DockNode::Split {
+            weights, children, ..
+        } = &layout.root
+        else {
+            panic!("the remaining two columns should stay split");
+        };
+
+        assert_eq!(children.len(), 2);
+        assert!((weights[0] - 0.375).abs() < 0.001);
+        assert!((weights[1] - 0.625).abs() < 0.001);
+
+        let DockNode::Column { content } = &children[0] else {
+            panic!("first remaining node should still be a column");
+        };
+        let DockNode::Tabs(group) = content.as_ref() else {
+            panic!("first remaining column should keep its tab group");
+        };
+        assert_eq!(group.panels[0].title, "B");
+    }
+
+    #[test]
+    fn removing_last_panel_collapses_single_child_split() {
+        let mut layout = DockLayout {
+            root: column(split(
+                SplitAxis::Vertical,
+                &[0.7, 0.3],
+                vec![tabs(&[("A", "test")]), tabs(&[("B", "test")])],
+            )),
+        };
+
+        let removed = layout
+            .remove_panel(
+                &[NodePathStep::ColumnContent, NodePathStep::SplitChild(0)],
+                0,
+            )
+            .expect("source panel should be returned");
+
+        assert_eq!(removed.title, "A");
+
+        let DockNode::Column { content } = &layout.root else {
+            panic!("outer column should remain");
+        };
+        let DockNode::Tabs(group) = content.as_ref() else {
+            panic!("single-child split should collapse to its remaining tab group");
+        };
+
+        assert_eq!(group.panels.len(), 1);
+        assert_eq!(group.panels[0].title, "B");
     }
 }
