@@ -74,11 +74,14 @@ fn run_windows(options: RunOptions) {
             ..Default::default()
         };
 
-        eprintln!("[timing] вызов open_window главного: {:?}", startup_started.elapsed());
         let main_startup_started = startup_started;
-        let open_window_result = cx.open_window(window_options, move |_window, cx| {
-            cx.new(|_| window::NextDockWindow::new(theme, main_startup_started))
-        });
+        let main_view = cx.new(|_| window::NextDockWindow::new(theme, main_startup_started));
+
+        // Подготавливаем скрытое floating-окно до создания системного главного окна.
+        native_floating::prepare_hidden_floating_window(main_view.downgrade(), cx);
+
+        eprintln!("[timing] вызов open_window главного: {:?}", startup_started.elapsed());
+        let open_window_result = cx.open_window(window_options, move |_window, _cx| main_view);
         eprintln!("[timing] главное окно создано: {:?}", startup_started.elapsed());
 
         if let Err(error) = open_window_result {
