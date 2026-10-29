@@ -1,0 +1,44 @@
+//! Minimal experimental docking application entry point.
+
+mod window;
+
+/// Starts the standalone docking experiment.
+///
+/// The experiment intentionally remains separate from the production
+/// `dock-gpui` entry point while its architecture is being evaluated.
+pub fn run() {
+    #[cfg(windows)]
+    run_windows();
+
+    #[cfg(not(windows))]
+    eprintln!("The docking experiment currently targets Windows.");
+}
+
+#[cfg(windows)]
+fn run_windows() {
+    use gpui::{
+        App, AppContext, Bounds, TitlebarOptions, WindowBounds, WindowOptions, px, size,
+    };
+    use gpui_platform::application;
+
+    application().run(|cx: &mut App| {
+        let bounds = Bounds::centered(None, size(px(1200.0), px(800.0)), cx);
+        let options = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(bounds)),
+            titlebar: Some(TitlebarOptions {
+                title: Some("Docking experiment".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        if let Err(error) = cx.open_window(options, |_window, cx| {
+            cx.new(|_| window::MainWindow)
+        }) {
+            eprintln!("Could not open the experiment window: {error}");
+            return;
+        }
+
+        cx.activate(true);
+    });
+}
