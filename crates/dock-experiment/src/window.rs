@@ -288,11 +288,15 @@ impl Render for FloatingPanel {
                     .bg(rgb(0x2b323a))
                     .border_b_1()
                     .border_color(rgb(0x414a55))
-                    .window_control_area(WindowControlArea::Drag)
                     .child(
                         div()
+                            .id("panel-drag-area")
+                            .flex()
+                            .items_center()
                             .flex_1()
+                            .h_full()
                             .px_2()
+                            .window_control_area(WindowControlArea::Drag)
                             .child(title),
                     )
                     .child(
@@ -305,6 +309,7 @@ impl Render for FloatingPanel {
                             .rounded_sm()
                             .cursor_pointer()
                             .hover(|style| style.bg(rgb(0x596777)))
+                            .occlude()
                             .window_control_area(WindowControlArea::Close)
                             .child("×"),
                     ),
