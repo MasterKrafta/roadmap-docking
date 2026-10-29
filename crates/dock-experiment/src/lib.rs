@@ -90,6 +90,7 @@ pub(crate) struct MainWindow {
     floating_panels: Vec<WindowHandle<FloatingPanel>>,
     panels_minimized_by_main: Vec<WindowHandle<FloatingPanel>>,
     visibility_subscription: Option<Subscription>,
+    main_window_handle: Option<WindowHandle<MainWindow>>,
     #[cfg(windows)]
     native_owner: Option<NativeWindowHandle>,
 }
@@ -119,6 +120,7 @@ impl PanelKind {
 impl MainWindow {
     #[cfg(windows)]
     pub(crate) fn set_native_owner(&mut self, window: &Window) {
+        self.main_window_handle = Some(WindowHandle::new(window.window_handle().window_id()));
         self.native_owner = NativeWindowHandle::from_window(window);
         if self.native_owner.is_none() {
             eprintln!("Could not obtain the main window's native handle");
@@ -159,6 +161,7 @@ impl MainWindow {
             floating_panels: Vec::new(),
             panels_minimized_by_main: Vec::new(),
             visibility_subscription: None,
+            main_window_handle: None,
             #[cfg(windows)]
             native_owner: None,
         }
@@ -246,8 +249,9 @@ impl MainWindow {
             ..Default::default()
         };
 
+        let owner = cx.entity().downgrade();
         match cx.open_window(options, move |_window, cx| {
-            cx.new(|_| FloatingPanel { key })
+            cx.new(|_| FloatingPanel { key, owner })
         }) {
             Ok(handle) => {
                 #[cfg(windows)]
@@ -342,11 +346,13 @@ impl Render for MainWindow {
 
 struct FloatingPanel {
     key: PanelKey,
+    owner: WeakEntity<MainWindow>,
 }
 
 impl Render for FloatingPanel {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         let title = self.key.as_str().to_owned();
+        let owner = self.owner.clone();
 
         div()
             .flex()
@@ -387,7 +393,41 @@ impl Render for FloatingPanel {
                             .cursor_pointer()
                             .hover(|style| style.bg(rgb(0x596777)))
                             .occlude()
-                            .window_control_area(WindowControlArea::Close)
+                            .on_click(move |_, window, cx| {
+                                let panel_id = window.window_handle().window_id();
+                                let main_window = owner.update(cx, |this, _cx| {
+                                    this.floating_panels
+                                        .retain(|panel| panel.window_id() != panel_id);
+                                    this.panels_minimized_by_main
+                                        .retain(|panel| panel.window_id() != panel_id);
+                                    this.main_window_handle
+                                });
+
+                                match main_window {
+                                    Ok(Some(main_window)) => {
+                                        if let Err(error) = main_window.update(
+                                            cx,
+                                            |_, main_window, _| main_window.activate_window(),
+                                        ) {
+                                            eprintln!(
+                                                "Could not activate the main window after closing a panel: {error:?}"
+                                            );
+                                        }
+                                    }
+                                    Ok(None) => {
+                                        eprintln!(
+                                            "Could not activate the main window after closing a panel: handle unavailable"
+                                        );
+                                    }
+                                    Err(error) => {
+                                        eprintln!(
+                                            "Could not access the main window while closing a panel: {error:?}"
+                                        );
+                                    }
+                                }
+
+                                window.remove_window();
+                            })
                             .child("×"),
                     ),
             )
