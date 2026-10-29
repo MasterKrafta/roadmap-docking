@@ -77,6 +77,7 @@ struct PendingGroupDrag {
     viewport_size: Size,
     grab_offset_x: f32,
     grab_offset_y: f32,
+    group_key: String,
 }
 
 #[derive(Clone)]
@@ -96,6 +97,8 @@ pub(super) struct TabDragPreview {
 pub(super) struct GroupDragPreview {
     pub(super) group: TabGroup,
     pub(super) bounds: Rect,
+    pub(super) composition_index: usize,
+    pub(super) group_key: String,
 }
 
 #[derive(Clone, Debug)]
@@ -318,6 +321,7 @@ impl NextDockWindow {
         viewport_size: Size,
         strip_bounds: Rect,
         grab_offset_x: f32,
+        group_key: String,
     ) {
         if self.active_resize.is_some() {
             return;
@@ -356,6 +360,7 @@ impl NextDockWindow {
             grab_offset_y: position.y.as_f32()
                 - geometry::HEADER_HEIGHT
                 - strip_bounds.origin.y,
+            group_key,
         });
     }
 
@@ -892,6 +897,8 @@ impl Render for NextDockWindow {
         let group_drag_preview = self.active_group_drag.as_ref().map(|active| GroupDragPreview {
             group: active.pending.group.clone(),
             bounds: active.bounds,
+            composition_index: active.pending.composition_index,
+            group_key: active.pending.group_key.clone(),
         });
 
         let tab_reorder_preview = self.pending_tab_drag.as_ref().and_then(|pending| {
