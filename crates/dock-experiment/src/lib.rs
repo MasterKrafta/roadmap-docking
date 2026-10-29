@@ -57,9 +57,10 @@ fn run_windows() {
             }
         };
 
-        if let Err(error) =
-            main_window.update(cx, |this, _window, cx| this.open_startup_panels(cx))
-        {
+        if let Err(error) = main_window.update(cx, |this, window, cx| {
+            this.set_native_owner(window);
+            this.open_startup_panels(cx);
+        }) {
             eprintln!("Could not open the startup panels: {error:?}");
             return;
         }
