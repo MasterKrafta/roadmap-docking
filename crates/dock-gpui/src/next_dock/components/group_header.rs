@@ -203,56 +203,47 @@ impl RenderOnce for GroupHeader {
 
         result = result.child(tabs_viewport);
 
-        let drag_width = (tab_area_width - x).max(0.0);
+        // Split the empty area into a flexible hit target and a fixed-width
+        // drag zone. Both start dragging the group; the menu remains separate.
+        let fixed_drag_width = drag_reserve.min((tab_area_width - x).max(0.0));
+        let flexible_drag_width =
+            (tab_area_width - x - fixed_drag_width).max(0.0);
 
-        if drag_width > 0.0 {
-            let on_group_drag_start: MouseDownHandler =
-                if let Some(context) = self.tab_drag_context.clone() {
-                    let strip_bounds = context.strip_bounds;
-                    let owner = context.owner;
-                    let composition_index = context.composition_index;
-                    let path = context.path;
-                    let viewport_size = context.viewport_size;
-                    let group_key = context.group_key;
-                    let drag_group = group_for_drag.clone();
-
-                    Box::new(move |event: &MouseDownEvent, _window, app| {
-                        let Some(owner) = owner.upgrade() else {
-                            return;
-                        };
-
-                        let path = path.clone();
-                        let group = drag_group.clone();
-                        let group_key = group_key.clone();
-                        let grab_offset_x =
-                            event.position.x.as_f32() - strip_bounds.origin.x;
-
-                        owner.update(app, |this, _cx| {
-                            this.begin_group_drag(
-                                composition_index,
-                                path,
-                                group,
-                                event.position,
-                                viewport_size,
-                                strip_bounds,
-                                grab_offset_x,
-                                group_key,
-                            );
-                        });
-                    })
-                } else {
-                    Box::new(|_, _, _| {})
-                };
-
+        if flexible_drag_width > 0.0 {
             result = result.child(
                 div()
                     .absolute()
                     .left(px(x))
                     .top(px(0.0))
-                    .w(px(drag_width))
+                    .w(px(flexible_drag_width))
                     .h(px(height))
                     .bg(rgb(theme.colors.tab_strip_background))
-                    .on_mouse_down(MouseButton::Left, on_group_drag_start),
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        make_group_drag_handler(
+                            self.tab_drag_context.clone(),
+                            group_for_drag.clone(),
+                        ),
+                    ),
+            );
+        }
+
+        if fixed_drag_width > 0.0 {
+            result = result.child(
+                div()
+                    .absolute()
+                    .left(px(x + flexible_drag_width))
+                    .top(px(0.0))
+                    .w(px(fixed_drag_width))
+                    .h(px(height))
+                    .bg(rgb(theme.colors.tab_strip_background))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        make_group_drag_handler(
+                            self.tab_drag_context.clone(),
+                            group_for_drag.clone(),
+                        ),
+                    ),
             );
         }
 
@@ -268,6 +259,46 @@ impl RenderOnce for GroupHeader {
             on_click: noop_click(),
         })
     }
+}
+
+fn make_group_drag_handler(
+    context: Option<TabDragContext>,
+    group: TabGroup,
+) -> MouseDownHandler {
+    let Some(context) = context else {
+        return Box::new(|_, _, _| {});
+    };
+
+    let strip_bounds = context.strip_bounds;
+    let owner = context.owner;
+    let composition_index = context.composition_index;
+    let path = context.path;
+    let viewport_size = context.viewport_size;
+    let group_key = context.group_key;
+
+    Box::new(move |event: &MouseDownEvent, _window, app| {
+        let Some(owner) = owner.upgrade() else {
+            return;
+        };
+
+        let path = path.clone();
+        let group = group.clone();
+        let group_key = group_key.clone();
+        let grab_offset_x = event.position.x.as_f32() - strip_bounds.origin.x;
+
+        owner.update(app, |this, _cx| {
+            this.begin_group_drag(
+                composition_index,
+                path,
+                group,
+                event.position,
+                viewport_size,
+                strip_bounds,
+                grab_offset_x,
+                group_key,
+            );
+        });
+    })
 }
 
 pub(in crate::next_dock) fn minimum_width_for_group(
