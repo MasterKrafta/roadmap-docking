@@ -101,7 +101,7 @@ pub(super) fn render(
                     *composition_index,
                     true,
                     slot_origin,
-                    tab_reorder_preview,
+                    tab_reorder_preview.as_ref(),
                 )
             }
             None => div()
@@ -358,7 +358,7 @@ fn render_node(
     composition_index: usize,
     interactive: bool,
     origin: Point,
-    tab_reorder_preview: Option<TabReorderPreview>,
+    tab_reorder_preview: Option<&TabReorderPreview>,
 ) -> Div {
     match (&geometry.kind, node) {
         (
@@ -370,7 +370,8 @@ fn render_node(
         ) => {
             let dragged_panel_index = tab_reorder_preview
                 .filter(|preview| {
-                    preview.composition_index == composition_index && preview.group_key == key
+                    preview.composition_index == composition_index
+                        && preview.group_key.as_str() == key
                 })
                 .map(|preview| preview.panel_index);
             let tab_drag_context = interactive.then(|| TabDragContext {
@@ -427,6 +428,7 @@ fn render_node(
                     composition_index,
                     interactive,
                     Point::new(origin.x, origin.y + *header_height),
+                    tab_reorder_preview,
                 ));
 
             let drag_owner = owner.clone();
@@ -605,6 +607,7 @@ fn render_node(
                     composition_index,
                     interactive,
                     child_origin,
+                    tab_reorder_preview,
                 ));
 
                 child_origin = match axis {

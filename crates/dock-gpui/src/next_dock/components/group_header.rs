@@ -95,14 +95,15 @@ impl RenderOnce for GroupHeader {
             let panel = *panel;
 
             let on_drag_start: MouseDownHandler =
-                if let Some(context) = self.tab_drag_context.as_ref() {
+                if let Some(context) = self.tab_drag_context.clone() {
                     let strip_bounds = context.strip_bounds;
                     let drag_tab_widths = tab_widths.clone();
                     let tab_left_x = tab_rect.origin.x;
-                    let owner = context.owner.clone();
+                    let owner = context.owner;
                     let composition_index = context.composition_index;
-                    let path = context.path.clone();
+                    let path = context.path;
                     let viewport_size = context.viewport_size;
+                    let group_key = context.group_key;
 
                     Box::new(move |event: &MouseDownEvent, _window, app| {
                         let Some(owner) = owner.upgrade() else {
@@ -111,6 +112,7 @@ impl RenderOnce for GroupHeader {
 
                         let path = path.clone();
                         let tab_widths_for_drag = drag_tab_widths.clone();
+                        let group_key = group_key.clone();
                         let grab_offset_x =
                             event.position.x.as_f32() - (strip_bounds.origin.x + tab_left_x);
 
@@ -125,6 +127,7 @@ impl RenderOnce for GroupHeader {
                                 strip_bounds,
                                 tab_widths_for_drag,
                                 grab_offset_x,
+                                group_key,
                             );
                         });
                     })

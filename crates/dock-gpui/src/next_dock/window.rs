@@ -258,7 +258,7 @@ impl NextDockWindow {
             grab_offset_x,
             reorder_started: false,
             preview_bounds: None,
-            group_key: String,
+            group_key,
         });
     }
 
@@ -391,12 +391,13 @@ impl NextDockWindow {
                 .unwrap_or(120.0);
 
             let tab_lane_width: f32 = pending.tab_widths.iter().sum();
+
             let tab_left =
                 (local_x - pending.grab_offset_x).clamp(0.0, (tab_lane_width - tab_width).max(0.0));
 
             pending.preview_bounds = Some(Rect::new(
-                Point::new(strip.origin.x + dragged_left, strip.origin.y),
-                Size::new(dragged_width, strip.size.height),
+                Point::new(strip.origin.x + tab_left, strip.origin.y),
+                Size::new(tab_width, strip.size.height),
             ));
 
             self.pending_tab_drag = Some(pending);
