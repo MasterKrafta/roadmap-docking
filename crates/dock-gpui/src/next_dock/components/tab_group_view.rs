@@ -11,7 +11,7 @@ use super::super::window::{TabDragContext, TabReorderPreview};
 use super::group_header::GroupHeader;
 
 /// Builds the visual tree for one tab group without changing its behavior.
-pub(super) fn render(
+pub(in crate::next_dock) fn render(
     group: &TabGroup,
     width: f32,
     height: f32,
