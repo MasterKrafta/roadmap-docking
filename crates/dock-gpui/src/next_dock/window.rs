@@ -75,7 +75,6 @@ struct PendingGroupDrag {
     group: TabGroup,
     start_position: Point,
     viewport_size: Size,
-    strip_bounds: Rect,
     grab_offset_x: f32,
     grab_offset_y: f32,
 }
@@ -353,7 +352,6 @@ impl NextDockWindow {
                 (position.y.as_f32() - geometry::HEADER_HEIGHT).max(0.0),
             ),
             viewport_size: Size::new(viewport_size.width.max(1.0), viewport_size.height.max(1.0)),
-            strip_bounds,
             grab_offset_x,
             grab_offset_y: position.y.as_f32()
                 - geometry::HEADER_HEIGHT
@@ -399,13 +397,11 @@ impl NextDockWindow {
             return;
         };
 
-        let strip = pending.strip_bounds;
-        let cursor_inside_strip = pointer.x >= strip.origin.x
-            && pointer.x <= strip.origin.x + strip.size.width
-            && pointer.y >= strip.origin.y
-            && pointer.y <= strip.origin.y + strip.size.height;
-
-        if cursor_inside_strip {
+        // A click alone should not detach the group, but dragging from
+        // the dedicated group drag zone should float it without leaving the strip.
+        let dx = pointer.x - pending.start_position.x;
+        let dy = pointer.y - pending.start_position.y;
+        if dx * dx + dy * dy < 25.0 {
             self.pending_group_drag = Some(pending);
             return;
         }
