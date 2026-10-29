@@ -10,7 +10,7 @@ use ui::Theme;
 use crate::components::{ClickHandler, MouseDownHandler, TabStrip};
 
 use super::super::model::TabGroup;
-use super::super::window::TabDragContext;
+use super::super::window::{TabDragContext, TabReorderPreview};
 use super::group_menu_button::GroupMenuButton;
 use super::panel_tab::PanelTab;
 
@@ -25,6 +25,7 @@ pub(in crate::next_dock) struct GroupHeader {
     pub(in crate::next_dock) theme: Theme,
     pub(in crate::next_dock) key: String,
     pub(in crate::next_dock) tab_drag_context: Option<TabDragContext>,
+    pub(in crate::next_dock) tab_reorder_preview: Option<TabReorderPreview>,
 }
 
 impl RenderOnce for GroupHeader {
@@ -164,6 +165,38 @@ impl RenderOnce for GroupHeader {
             }
 
             x += tab_width;
+        }
+
+        if let (Some(preview), Some(context)) = (
+            self.tab_reorder_preview.as_ref(),
+            self.tab_drag_context.as_ref(),
+        ) {
+            let preview_left = preview.bounds.origin.x - context.strip_bounds.origin.x;
+            let preview_top = preview.bounds.origin.y - context.strip_bounds.origin.y;
+            let typography = theme.typography;
+
+            tabs_viewport = tabs_viewport.child(
+                div()
+                    .absolute()
+                    .left(px(preview_left))
+                    .top(px(preview_top))
+                    .w(px(preview.bounds.size.width))
+                    .h(px(preview.bounds.size.height))
+                    .flex()
+                    .items_center()
+                    .justify_start()
+                    .px(px(8.0))
+                    .whitespace_nowrap()
+                    .overflow_hidden()
+                    .bg(rgb(theme.colors.panel_tab_active))
+                    .text_color(rgb(theme.colors.primary_text))
+                    .font_family(typography.family)
+                    .text_size(px(typography.tab_size))
+                    .line_height(px(typography.line_height))
+                    .border_1()
+                    .border_color(rgb(theme.colors.border))
+                    .child(preview.panel.title),
+            );
         }
 
         result = result.child(tabs_viewport);

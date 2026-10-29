@@ -337,7 +337,7 @@ impl NextDockWindow {
                 if index + 1 < pending.tab_widths.len() {
                     let next = index + 1;
                     let next_start: f32 = pending.tab_widths[..next].iter().sum();
-                    let threshold = next_start + pending.tab_widths[next] * 0.75;
+                    let threshold = next_start + pending.tab_widths[next] * 0.40;
 
                     if dragged_center >= threshold {
                         moved = self
@@ -360,7 +360,7 @@ impl NextDockWindow {
                 if index > 0 {
                     let previous = index - 1;
                     let previous_start: f32 = pending.tab_widths[..previous].iter().sum();
-                    let threshold = previous_start + pending.tab_widths[previous] * 0.25;
+                    let threshold = previous_start + pending.tab_widths[previous] * 0.60;
 
                     if dragged_center <= threshold {
                         moved = self
@@ -390,10 +390,14 @@ impl NextDockWindow {
                 .copied()
                 .unwrap_or(120.0);
 
-            let tab_lane_width: f32 = pending.tab_widths.iter().sum();
+            // Превью может заходить в свободную drag-зону,
+            // но не должно перекрывать кнопку меню.
+            let menu_width = self.theme.metrics.group_control_button_width.max(0.0);
+
+            let tab_area_width = (strip.size.width - menu_width).max(0.0);
 
             let tab_left =
-                (local_x - pending.grab_offset_x).clamp(0.0, (tab_lane_width - tab_width).max(0.0));
+                (local_x - pending.grab_offset_x).clamp(0.0, (tab_area_width - tab_width).max(0.0));
 
             pending.preview_bounds = Some(Rect::new(
                 Point::new(strip.origin.x + tab_left, strip.origin.y),

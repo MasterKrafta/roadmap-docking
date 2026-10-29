@@ -212,33 +212,6 @@ pub(super) fn render(
         );
     }
 
-    if let Some(preview) = tab_reorder_preview.as_ref() {
-        let typography = theme.typography;
-
-        body = body.child(
-            div()
-                .absolute()
-                .left(px(preview.bounds.origin.x))
-                .top(px(preview.bounds.origin.y))
-                .w(px(preview.bounds.size.width))
-                .h(px(preview.bounds.size.height))
-                .flex()
-                .items_center()
-                .justify_start()
-                .px(px(8.0))
-                .whitespace_nowrap()
-                .overflow_hidden()
-                .bg(rgb(theme.colors.panel_tab_active))
-                .text_color(rgb(theme.colors.primary_text))
-                .font_family(typography.family)
-                .text_size(px(typography.tab_size))
-                .line_height(px(typography.line_height))
-                .border_1()
-                .border_color(rgb(theme.colors.border))
-                .child(preview.panel.title),
-        );
-    }
-
     if let Some(drop_zone) = drop_zone {
         let zone_width = 12.0;
         let zone_x = match drop_zone {
@@ -368,11 +341,15 @@ fn render_node(
             },
             DockNode::Tabs(group),
         ) => {
-            let dragged_panel_index = tab_reorder_preview
+            let group_tab_reorder_preview = tab_reorder_preview
                 .filter(|preview| {
                     preview.composition_index == composition_index
                         && preview.group_key.as_str() == key
                 })
+                .cloned();
+
+            let dragged_panel_index = group_tab_reorder_preview
+                .as_ref()
                 .map(|preview| preview.panel_index);
             let tab_drag_context = interactive.then(|| TabDragContext {
                 composition_index,
@@ -393,6 +370,7 @@ fn render_node(
                 theme,
                 key,
                 tab_drag_context,
+                group_tab_reorder_preview,
             )
         }
 
@@ -640,6 +618,7 @@ fn render_tabs(
     theme: &Theme,
     key: &str,
     tab_drag_context: Option<TabDragContext>,
+    tab_reorder_preview: Option<TabReorderPreview>,
 ) -> Div {
     let group_rect = Rect::new(Point::ZERO, Size::new(width, height));
 
@@ -688,5 +667,6 @@ fn render_tabs(
             theme: *theme,
             key: key.to_owned(),
             tab_drag_context,
+            tab_reorder_preview,
         })
 }
