@@ -30,7 +30,14 @@ pub(crate) fn floating_title_groups_in_tree(layout: &Layout, root: NodeId) -> Ve
 /// temporary copy of the complete layout; source geometry never dictates the
 /// semantics of the eventual move.
 pub(crate) fn floating_capture_source(layout: &Layout, root: NodeId) -> Option<DropSource> {
-    first_panel_in_subtree(layout, root).map(|panel| DropSource::Panel { panel })
+    match layout.node(root) {
+        // A Tabs floating root is semantically one movable group. Keep Group
+        // geometry so Core can offer GroupTabs merge targets for the whole group.
+        Some(Node::Tabs(_)) => Some(DropSource::Group { group: root }),
+        // Composite roots use a representative panel only for hit-zone geometry.
+        // The controller still validates each target against the full FloatingGroup.
+        _ => first_panel_in_subtree(layout, root).map(|panel| DropSource::Panel { panel }),
+    }
 }
 
 pub(crate) fn drop_target_node(target: DropTarget) -> Option<NodeId> {
