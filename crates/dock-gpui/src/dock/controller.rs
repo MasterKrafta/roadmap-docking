@@ -394,6 +394,8 @@ impl DockController {
             };
             if let Some(resolver) = resolver.as_ref() {
                 let target = filter_capture_target(
+                    &self.workspace.layout,
+                    payload,
                     handle,
                     capture_root_nodes.as_ref(),
                     resolver.resolve(pointer)?,
@@ -410,6 +412,8 @@ impl DockController {
                         .copied()
                         .filter(|zone| {
                             capture_target_is_actionable(
+                                &self.workspace.layout,
+                                payload,
                                 handle,
                                 capture_root_nodes.as_ref(),
                                 zone.target,
@@ -439,6 +443,8 @@ impl DockController {
         core.pointer_move(pointer)?;
         if let Some(resolver) = gesture.resolver.as_ref() {
             let target = filter_capture_target(
+                &self.workspace.layout,
+                gesture.payload,
                 gesture.handle,
                 gesture.capture_root_nodes.as_ref(),
                 resolver.resolve(pointer)?,
@@ -487,6 +493,8 @@ impl DockController {
         core.pointer_move(pointer)?;
         let target = match gesture.resolver.as_ref() {
             Some(resolver) => filter_capture_target(
+                &self.workspace.layout,
+                gesture.payload,
                 gesture.handle,
                 gesture.capture_root_nodes.as_ref(),
                 resolver.resolve(pointer)?,
@@ -990,22 +998,15 @@ fn floating_capture_source(
         .map(|area| area.root)
         .ok_or(ComputeRectsError::InvalidLayoutState)?;
 
-    let source = match layout.node(root) {
-        Some(Node::Tabs(_)) => DropSource::Group { group: root },
-        Some(Node::Panel(panel)) => DropSource::Panel {
-            panel: panel.panel_id,
-        },
-        // In the active Photoshop profile, Core's DockFloating mapping cannot
-        // re-dock these composite roots through this target pipeline. The UI hides capture.
-        Some(Node::Column(_) | Node::Split(_)) | None => {
-            return Err(ComputeRectsError::InvalidLayoutState);
-        }
-    };
+    let source = crate::tree_query::floating_capture_source(layout, root)
+        .ok_or(ComputeRectsError::InvalidLayoutState)?;
 
     Ok((source, crate::tree_query::subtree_nodes(layout, root)))
 }
 
 fn capture_target_is_actionable(
+    layout: &Layout,
+    payload: DragPayload,
     handle: DragHandle,
     capture_root_nodes: Option<&HashSet<NodeId>>,
     target: DropTarget,
@@ -1017,16 +1018,41 @@ fn capture_target_is_actionable(
         return false;
     }
 
-    !crate::tree_query::drop_target_node(target)
+    if crate::tree_query::drop_target_node(target)
         .is_some_and(|node| capture_root_nodes.is_some_and(|nodes| nodes.contains(&node)))
+    {
+        return false;
+    }
+
+    // A vertical floating stack can only be docked into a main Column or an
+    // icon rail. GroupTabs and GroupEdge zones are generated for the representative
+    // Tabs source, but Core correctly rejects them for a Split(Y) floating root.
+    if let DragPayload::FloatingGroup { group } = payload
+        && let Some(root) = layout
+            .floating_group(group)
+            .and_then(|floating| layout.dock_area(floating.area))
+            .map(|area| area.root)
+        && matches!(layout.node(root), Some(Node::Split(split)) if split.axis == dock_core::Axis::Y)
+    {
+        return matches!(
+            target,
+            DropTarget::MainColumn { .. } | DropTarget::ColumnSlot { .. } | DropTarget::RailSlot { .. }
+        );
+    }
+
+    true
 }
 
 fn filter_capture_target(
+    layout: &Layout,
+    payload: DragPayload,
     handle: DragHandle,
     capture_root_nodes: Option<&HashSet<NodeId>>,
     target: Option<DropTarget>,
 ) -> Option<DropTarget> {
-    target.filter(|target| capture_target_is_actionable(handle, capture_root_nodes, *target))
+    target.filter(|target| {
+        capture_target_is_actionable(layout, payload, handle, capture_root_nodes, *target)
+    })
 }
 
 /// Builds the starting arrangement inside the controller so no other module
