@@ -732,14 +732,49 @@ impl Layout {
                                     reason: if self.find_floating_root_containing(group).is_some() {
                                         "horizontal splits are not supported inside a floating stack"
                                     } else {
-                                        "horizontal group splits require a main-dock column"
+                                        "horizontal group splits require a main-dock or floating column"
                                     },
                                 });
                             };
                             if self.main_column_position(column).is_none() {
-                                return Err(CommandError::InvalidTarget {
-                                    reason: "horizontal group splits require a column in a main dock",
-                                });
+                                let Some(floating_root) = self.find_floating_root_containing(group)
+                                else {
+                                    return Err(CommandError::InvalidTarget {
+                                        reason: "horizontal group splits require a main-dock or floating column",
+                                    });
+                                };
+
+                                let is_outer_floating_edge = match self.nodes.get(floating_root) {
+                                    Some(Node::Column(_)) => floating_root == column,
+                                    Some(Node::Split(split))
+                                        if split.axis == crate::Axis::X
+                                            && split.children.iter().all(|child| {
+                                                matches!(self.nodes.get(*child), Some(Node::Column(_)))
+                                            }) =>
+                                    {
+                                        let Some(index) = split
+                                            .children
+                                            .iter()
+                                            .position(|child| *child == column)
+                                        else {
+                                            return Err(CommandError::InvalidTarget {
+                                                reason: "floating target column is not part of its composition",
+                                            });
+                                        };
+                                        if zone == DropZone::Left {
+                                            index == 0
+                                        } else {
+                                            index + 1 == split.children.len()
+                                        }
+                                    }
+                                    _ => false,
+                                };
+
+                                if !is_outer_floating_edge {
+                                    return Err(CommandError::InvalidTarget {
+                                        reason: "floating horizontal docking is allowed only at the outer left or right edge of a Column composition",
+                                    });
+                                }
                             }
                         }
                         DropZone::Top | DropZone::Bottom => {
