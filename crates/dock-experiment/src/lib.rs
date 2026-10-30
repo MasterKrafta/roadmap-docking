@@ -297,8 +297,8 @@ impl MainWindow {
 
     /// Opens the panels that should be visible when the experiment starts.
     pub(crate) fn open_startup_panels(&mut self, cx: &mut Context<Self>) {
-        self.open_floating_panel(PanelKind::Layers, false, cx);
-        self.open_floating_panel(PanelKind::Properties, false, cx);
+        let _ = self.open_floating_panel(PanelKind::Layers, false, cx);
+        let _ = self.open_floating_panel(PanelKind::Properties, false, cx);
     }
 
     /// Shows the already-created panels after GPUI has rendered their first frame.
