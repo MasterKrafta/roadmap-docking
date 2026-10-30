@@ -395,6 +395,7 @@ impl DockController {
             if let Some(resolver) = resolver.as_ref() {
                 let target = filter_capture_target(
                     &self.workspace.layout,
+                    &self.workspace.metrics,
                     payload,
                     handle,
                     capture_root_nodes.as_ref(),
@@ -413,6 +414,7 @@ impl DockController {
                         .filter(|zone| {
                             capture_target_is_actionable(
                                 &self.workspace.layout,
+                                &self.workspace.metrics,
                                 payload,
                                 handle,
                                 capture_root_nodes.as_ref(),
@@ -444,6 +446,7 @@ impl DockController {
         if let Some(resolver) = gesture.resolver.as_ref() {
             let target = filter_capture_target(
                 &self.workspace.layout,
+                &self.workspace.metrics,
                 gesture.payload,
                 gesture.handle,
                 gesture.capture_root_nodes.as_ref(),
@@ -494,6 +497,7 @@ impl DockController {
         let target = match gesture.resolver.as_ref() {
             Some(resolver) => filter_capture_target(
                 &self.workspace.layout,
+                &self.workspace.metrics,
                 gesture.payload,
                 gesture.handle,
                 gesture.capture_root_nodes.as_ref(),
@@ -1006,6 +1010,7 @@ fn floating_capture_source(
 
 fn capture_target_is_actionable(
     layout: &Layout,
+    metrics: &DockMetrics,
     payload: DragPayload,
     handle: DragHandle,
     capture_root_nodes: Option<&HashSet<NodeId>>,
@@ -1024,34 +1029,36 @@ fn capture_target_is_actionable(
         return false;
     }
 
-    // A vertical floating stack can only be docked into a main Column or an
-    // icon rail. GroupTabs and GroupEdge zones are generated for the representative
-    // Tabs source, but Core correctly rejects them for a Split(Y) floating root.
-    if let DragPayload::FloatingGroup { group } = payload
-        && let Some(root) = layout
-            .floating_group(group)
-            .and_then(|floating| layout.dock_area(floating.area))
-            .map(|area| area.root)
-        && matches!(layout.node(root), Some(Node::Split(split)) if split.axis == dock_core::Axis::Y)
-    {
-        return matches!(
-            target,
-            DropTarget::MainColumn { .. } | DropTarget::ColumnSlot { .. } | DropTarget::RailSlot { .. }
-        );
-    }
-
-    true
+    // Hit-zone geometry comes from a representative panel, but the candidate is
+    // validated by Core against the complete FloatingGroup tree. This keeps the
+    // UI in sync with all profile-specific composition rules without reimplementing
+    // the Core drop decision table here.
+    let DragPayload::FloatingGroup { group } = payload else {
+        return false;
+    };
+    let mut candidate = layout.clone();
+    candidate
+        .apply(DockCommand::DockFloating { group, target }, metrics)
+        .is_ok()
 }
 
 fn filter_capture_target(
     layout: &Layout,
+    metrics: &DockMetrics,
     payload: DragPayload,
     handle: DragHandle,
     capture_root_nodes: Option<&HashSet<NodeId>>,
     target: Option<DropTarget>,
 ) -> Option<DropTarget> {
     target.filter(|target| {
-        capture_target_is_actionable(layout, payload, handle, capture_root_nodes, *target)
+        capture_target_is_actionable(
+            layout,
+            metrics,
+            payload,
+            handle,
+            capture_root_nodes,
+            *target,
+        )
     })
 }
 
