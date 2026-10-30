@@ -1760,6 +1760,13 @@ fn floating_capture_drag_resolves_dock_target_and_docks_entire_window() {
         .map(|area| area.root)
         .expect("floating group should have a root");
     let source_nodes = crate::tree_query::subtree_nodes(controller.layout(), floating_root);
+    assert_eq!(
+        crate::tree_query::floating_capture_source(controller.layout(), floating_root),
+        Some(dock_core::DropSource::Group {
+            group: floating_root,
+        }),
+        "a floating Tabs root must preserve group-level drop-zone semantics"
+    );
     let capture_width = controller.metrics().header_height.min(28.0);
     let origin = Point::new(
         bounds.origin.x + bounds.size.width - capture_width / 2.0,
