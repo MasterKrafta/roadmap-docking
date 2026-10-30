@@ -258,19 +258,17 @@ pub(crate) fn can_add_column(
     tree_index: &DropZoneTreeIndex,
     source: DropSource,
     source_root: NodeId,
-    left_columns: &[(NodeId, Rect)],
-    right_columns: &[(NodeId, Rect)],
+    side: DockSide,
     metrics: &DockMetrics,
 ) -> bool {
-    if layout.profile() != Profile::Photoshop
-        || left_columns.len() + right_columns.len() < metrics.max_columns
-    {
+    let current_column_count = layout.main_columns(side).map_or(usize::MAX, |columns| columns.len());
+    if layout.profile() != Profile::Photoshop || current_column_count < metrics.max_columns {
         return true;
     }
     let Some(column_id) = owner_column(layout, tree_index, source_root) else {
         return false;
     };
-    if main_side_for_node(layout, tree_index, column_id).is_none() {
+    if main_side_for_node(layout, tree_index, column_id) != Some(side) {
         return false;
     }
     let Some(Node::Column(column)) = layout.node(column_id) else {

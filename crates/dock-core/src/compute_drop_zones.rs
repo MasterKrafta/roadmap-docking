@@ -31,7 +31,8 @@ struct DropZoneBuildContext<'a> {
     viewport: Rect,
     left_columns: &'a [(NodeId, Rect)],
     right_columns: &'a [(NodeId, Rect)],
-    may_add_column: bool,
+    may_add_left_column: bool,
+    may_add_right_column: bool,
 }
 
 impl Layout {
@@ -141,13 +142,20 @@ impl Layout {
 
         let left_columns = main_columns(self, rects, DockSide::Left);
         let right_columns = main_columns(self, rects, DockSide::Right);
-        let may_add_column = can_add_column(
+        let may_add_left_column = can_add_column(
             self,
             tree_index,
             source,
             source_root,
-            &left_columns,
-            &right_columns,
+            DockSide::Left,
+            metrics,
+        );
+        let may_add_right_column = can_add_column(
+            self,
+            tree_index,
+            source,
+            source_root,
+            DockSide::Right,
             metrics,
         );
         let mut zones = Vec::new();
@@ -162,7 +170,8 @@ impl Layout {
             viewport,
             left_columns: &left_columns,
             right_columns: &right_columns,
-            may_add_column,
+            may_add_left_column,
+            may_add_right_column,
         };
         self.append_main_group_zones(&context, &mut zones)?;
         self.append_tab_insertion_zones(&context, &mut zones)?;
@@ -318,16 +327,24 @@ impl Layout {
             viewport,
             left_columns,
             right_columns,
-            may_add_column,
+            may_add_left_column,
+            may_add_right_column,
         } = *context;
         // The two outside viewport edges open/extend a dock. A whole group uses
         // its edge operation when a neighbouring column exists; panels use an exact slot.
-        if source_allows(self, source_panels, AllowedArea::MAIN_DOCK) && may_add_column {
+        if source_allows(self, source_panels, AllowedArea::MAIN_DOCK) {
             let edge_width = metrics.edge_drop_width.min(viewport.size.width / 3.0);
             for (side, columns, zone, is_left) in [
                 (DockSide::Left, left_columns, DropZone::DockEdge, true),
                 (DockSide::Right, right_columns, DropZone::DockEdge, false),
             ] {
+                let may_add_column = match side {
+                    DockSide::Left => may_add_left_column,
+                    DockSide::Right => may_add_right_column,
+                };
+                if !may_add_column {
+                    continue;
+                }
                 let rect = if is_left {
                     Rect::new(viewport.origin, Size::new(edge_width, viewport.size.height))
                 } else {

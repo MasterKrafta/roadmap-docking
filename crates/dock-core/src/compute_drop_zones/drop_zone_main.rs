@@ -15,9 +15,14 @@ impl Layout {
             metrics,
             left_columns,
             right_columns,
-            may_add_column,
+            may_add_left_column,
+            may_add_right_column,
             ..
         } = *context;
+        let may_add_column = |side| match side {
+            DockSide::Left => may_add_left_column,
+            DockSide::Right => may_add_right_column,
+        };
         // Main-dock groups: center/tab insertion, vertical group splitting,
         // and profile-correct horizontal/column splitting.
         for group_rect in &rects.groups {
@@ -102,7 +107,7 @@ impl Layout {
                 left_columns,
                 right_columns,
             ) {
-                if may_add_column {
+                if may_add_column(side) {
                     let left_target = match source {
                         DropSource::Panel { .. } => DropTarget::MainColumn {
                             side,
@@ -238,9 +243,14 @@ impl Layout {
             metrics,
             left_columns,
             right_columns,
-            may_add_column,
+            may_add_left_column,
+            may_add_right_column,
             ..
         } = *context;
+        let may_add_column = |side| match side {
+            DockSide::Left => may_add_left_column,
+            DockSide::Right => may_add_right_column,
+        };
         // Main-column side targets and append-to-column targets.
         for (side, columns) in [
             (DockSide::Left, left_columns),
@@ -299,7 +309,7 @@ impl Layout {
                     ),
                     Size::new(edge_width, column_rect.size.height),
                 );
-                if may_add_column {
+                if may_add_column(side) {
                     let targets = match source {
                         DropSource::Panel { .. } => Some((
                             DropTarget::MainColumn { side, index },

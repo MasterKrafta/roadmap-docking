@@ -295,6 +295,80 @@ fn floating_bounds_and_duplicate_z_order_are_validated() {
 }
 
 #[test]
+fn photoshop_column_limit_is_independent_for_left_and_right_docks() {
+    let metrics = DockMetrics::default();
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+
+    for side in [DockSide::Left, DockSide::Right] {
+        let mut columns = Vec::new();
+        let ratio = 1.0 / metrics.max_columns as f32;
+        for index in 0..metrics.max_columns {
+            let key = PanelKey::new(format!("dock-{side:?}-{index}").to_lowercase()).unwrap();
+            let (_, panel) = builder.panel(key, descriptors()[0].1);
+            let group = builder.tabs(vec![panel], 0, false);
+            columns.push(builder.column(
+                metrics.default_column_width,
+                crate::ColumnMode::Expanded,
+                vec![group],
+                vec![1.0],
+            ));
+        }
+        let root = builder.split(
+            Axis::X,
+            columns,
+            vec![ratio; metrics.max_columns],
+        );
+        builder.main_area(side, root);
+    }
+
+    let layout = builder.build();
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
+fn photoshop_column_limit_rejects_more_than_maximum_on_one_side() {
+    let metrics = DockMetrics::default();
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+
+    for (side, count) in [
+        (DockSide::Left, metrics.max_columns + 1),
+        (DockSide::Right, metrics.max_columns),
+    ] {
+        let mut columns = Vec::new();
+        let ratio = 1.0 / count as f32;
+        for index in 0..count {
+            let key = PanelKey::new(format!("dock-over-{side:?}-{index}").to_lowercase()).unwrap();
+            let (_, panel) = builder.panel(key, descriptors()[0].1);
+            let group = builder.tabs(vec![panel], 0, false);
+            columns.push(builder.column(
+                metrics.default_column_width,
+                crate::ColumnMode::Expanded,
+                vec![group],
+                vec![1.0],
+            ));
+        }
+        let root = builder.split(Axis::X, columns, vec![ratio; count]);
+        builder.main_area(side, root);
+    }
+
+    let layout = builder.build();
+    let errors = layout.validate(&metrics).unwrap_err();
+    assert_eq!(
+        errors
+            .iter()
+            .filter(|error| matches!(
+                error,
+                ValidationError::TooManyColumns {
+                    actual,
+                    max
+                } if *actual == metrics.max_columns + 1 && *max == metrics.max_columns
+            ))
+            .count(),
+        1
+    );
+}
+
+#[test]
 fn validation_accepts_narrow_canvas_but_rejects_invalid_metrics() {
     let mut layout = Layout::new(Profile::Generic);
     layout.canvas = CanvasState::new(Some(Rect::new(Point::ZERO, Size::new(200.0, 600.0))));

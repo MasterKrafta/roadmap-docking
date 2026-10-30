@@ -61,6 +61,9 @@ pub(super) fn is_normalizable_validation_error(error: &ValidationError) -> bool 
         // normalization to remove empty columns first; final validation still
         // rejects any layout that exceeds the limit after cleanup.
         ValidationError::TooManyColumns { .. } => true,
+        // Legacy Photoshop workspaces may contain floating Columns or horizontal
+        // column compositions; normalize_photoshop_floating_roots migrates those roots.
+        ValidationError::InvalidFloatingRoot { .. } => true,
         // Flyout is transient and may be closed if the persistent tree changes.
         ValidationError::InvalidFlyout { .. } => true,
         // All other errors describe broken references, invalid metadata, or

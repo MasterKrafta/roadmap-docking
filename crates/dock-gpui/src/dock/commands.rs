@@ -1,5 +1,5 @@
 use dock_core::{
-    ColumnMode, DockCommand, FloatingGroupId, Layout, Node, NodeId, PanelId, PanelKey,
+    ColumnMode, DockCommand, FloatingGroupId, Layout, NodeId, PanelId, PanelKey,
 };
 use ui::Theme;
 
@@ -59,51 +59,14 @@ pub(crate) fn toggle_panel(layout: &Layout, key: &str, theme: &Theme) -> Option<
     })
 }
 
-/// Builds close commands for every tab group or panel leaf in a floating window.
-///
-/// The core has no single-command CloseFloating operation, so each returned
-/// command is applied through the controller in sequence and gets its own
-/// history entry. Groups are collected in tree order so surviving IDs can be
-/// closed even as each command normalizes the surrounding composition.
+/// Builds the single atomic command used to close a floating window.
 pub(crate) fn close_floating(
     layout: &Layout,
     floating: FloatingGroupId,
-) -> Option<Vec<DockCommand>> {
+) -> Option<DockCommand> {
     let floating_group = layout.floating_group(floating)?;
-    let root = layout.dock_area(floating_group.area)?.root;
-    let mut commands = Vec::new();
-
-    if !collect_close_commands(layout, root, &mut commands) || commands.is_empty() {
-        return None;
-    }
-
-    Some(commands)
-}
-
-fn collect_close_commands(
-    layout: &Layout,
-    node_id: NodeId,
-    commands: &mut Vec<DockCommand>,
-) -> bool {
-    match layout.node(node_id) {
-        Some(Node::Tabs(_)) => {
-            commands.push(close_group(node_id));
-            true
-        }
-        Some(Node::Panel(panel)) => {
-            commands.push(close_panel(panel.panel_id));
-            true
-        }
-        Some(Node::Split(split)) => split
-            .children
-            .iter()
-            .all(|child| collect_close_commands(layout, *child, commands)),
-        Some(Node::Column(column)) => column
-            .groups
-            .iter()
-            .all(|group| collect_close_commands(layout, *group, commands)),
-        None => false,
-    }
+    layout.dock_area(floating_group.area)?;
+    Some(DockCommand::CloseFloatingGroup { group: floating })
 }
 
 #[cfg(test)]
@@ -114,28 +77,12 @@ mod tests {
     };
     use crate::dock::DockController;
     use dock_core::{
-        ColumnMode, DockCommand, DockSide, FloatingGroupId, Layout, Node, NodeId, PanelKey, Point,
-        Rect, Size,
+        ColumnMode, DockCommand, DockSide, FloatingGroupId, Layout, Node, NodeId, PanelKey,
+        Point, Rect, Size,
     };
     use slotmap::Key;
     use ui::Theme;
 
-    fn collect_tab_groups(layout: &Layout, node_id: NodeId, groups: &mut Vec<NodeId>) {
-        match layout.node(node_id) {
-            Some(Node::Tabs(_)) => groups.push(node_id),
-            Some(Node::Split(split)) => {
-                for child in &split.children {
-                    collect_tab_groups(layout, *child, groups);
-                }
-            }
-            Some(Node::Column(column)) => {
-                for group in &column.groups {
-                    collect_tab_groups(layout, *group, groups);
-                }
-            }
-            Some(Node::Panel(_)) | None => {}
-        }
-    }
 
     #[test]
     fn activate_tab_builds_the_expected_command() {
@@ -249,30 +196,29 @@ mod tests {
     }
 
     #[test]
-    fn close_floating_builds_a_close_command_for_each_tab_group_in_tree_order() {
+    fn close_floating_uses_one_atomic_core_command() {
         let theme = Theme::default();
         let mut controller = DockController::new_initial(&theme).unwrap();
-        let root = controller.layout().main_area(DockSide::Right).unwrap().root;
-        let mut expected_groups = Vec::new();
-        collect_tab_groups(controller.layout(), root, &mut expected_groups);
-
         assert!(close_floating(controller.layout(), FloatingGroupId::null()).is_none());
 
+        let root = controller.layout().main_area(DockSide::Right).unwrap().root;
+        let group = match controller.layout().node(root) {
+            Some(Node::Column(column)) => column.groups[0],
+            _ => panic!("initial Photoshop dock should start with a Column"),
+        };
         controller
             .apply(DockCommand::Float {
-                node: root,
+                node: group,
                 bounds: Rect::new(Point::new(20.0, 30.0), Size::new(640.0, 480.0)),
             })
             .unwrap();
         let (floating, _) = controller.layout().floating_groups().next().unwrap();
-        let commands = close_floating(controller.layout(), floating).unwrap();
 
         assert_eq!(
-            commands,
-            expected_groups
-                .into_iter()
-                .map(|group| DockCommand::CloseGroup { group })
-                .collect::<Vec<_>>()
+            close_floating(controller.layout(), floating),
+            Some(DockCommand::CloseFloatingGroup { group: floating })
         );
+        controller.close_floating(floating).unwrap();
+        assert!(controller.layout().floating_group(floating).is_none());
     }
 }

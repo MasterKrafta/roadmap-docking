@@ -12,12 +12,6 @@ impl Layout {
     ) -> Result<CommandApplication, CommandError> {
         match command {
             DockCommand::Float { node, bounds } => self.apply_float_command(node, bounds),
-            DockCommand::FloatGroupAsColumn { group, bounds } => {
-                self.apply_float_group_as_column_command(*group, *bounds, metrics)
-            }
-            DockCommand::FloatPanelAsGroup { panel, bounds } => {
-                self.apply_float_panel_as_group_command(*panel, *bounds, metrics)
-            }
             DockCommand::MoveFloating { .. }
             | DockCommand::ResizeFloating { .. }
             | DockCommand::ResizeFloatingBounds { .. }
@@ -27,10 +21,37 @@ impl Layout {
             DockCommand::DockFloating { group, target } => {
                 self.apply_dock_floating_command(group, target, metrics)
             }
+            DockCommand::CloseFloatingGroup { group } => {
+                self.apply_close_floating_group_command(group)
+            }
             _ => Err(CommandError::InvalidTarget {
                 reason: "floating command dispatcher received a non-floating command",
             }),
         }
+    }
+
+    pub(super) fn apply_close_floating_group_command(
+        &mut self,
+        group: &FloatingGroupId,
+    ) -> Result<CommandApplication, CommandError> {
+        let floating = self
+            .floating_groups
+            .get(*group)
+            .copied()
+            .ok_or(CommandError::MissingFloatingGroup { group: *group })?;
+        let area = self
+            .dock_areas
+            .get(floating.area)
+            .copied()
+            .ok_or(CommandError::InvalidTarget {
+                reason: "floating group references a missing dock area",
+            })?;
+
+        self.remember_subtree_dock_locations(area.root);
+        self.floating_groups.remove(*group);
+        self.dock_areas.remove(floating.area);
+        self.remove_subtree(area.root);
+        Ok(CommandApplication::persistent())
     }
 
     pub(super) fn apply_floating_window_command(
@@ -73,22 +94,12 @@ impl Layout {
             })?;
         let moving_panels = self.panel_ids_in_subtree(*node);
         self.validate_panel_ids_allowed_for_area(&moving_panels, AllowedArea::FLOATING)?;
-        let supports_photoshop_floating_root = match self.nodes.get(*node) {
-            Some(Node::Panel(_) | Node::Tabs(_)) => true,
-            Some(Node::Column(column)) => column
-                .groups
-                .iter()
-                .all(|child| matches!(self.nodes.get(*child), Some(Node::Tabs(_)))),
-            Some(Node::Split(split)) if split.axis == Axis::X => split
-                .children
-                .iter()
-                .all(|child| matches!(self.nodes.get(*child), Some(Node::Column(_)))),
-            _ => false,
-        };
+        let supports_photoshop_floating_root =
+            matches!(self.nodes.get(*node), Some(Node::Panel(_) | Node::Tabs(_)));
         if self.profile == Profile::Photoshop && !supports_photoshop_floating_root {
             return Err(CommandError::UnsupportedForProfile {
                 profile: self.profile,
-                reason: "only a panel, tab group, column, or horizontal composition of columns can become a floating root",
+                reason: "only a Panel or Tabs node can become a Photoshop floating root",
             });
         }
         let next_z = self.next_floating_z_order()?;
@@ -110,167 +121,6 @@ impl Layout {
         Ok(CommandApplication::persistent())
     }
 
-    /// Detach a group from a multi-group Column and make it the sole group in
-    /// a new floating Column. The caller decides whether detaching the group is
-    /// structurally valid; this command still rejects a last-group detach.
-    pub(super) fn apply_float_group_as_column_command(
-        &mut self,
-        group: NodeId,
-        bounds: Rect,
-        metrics: &DockMetrics,
-    ) -> Result<CommandApplication, CommandError> {
-        if self.profile != Profile::Photoshop {
-            return Err(CommandError::UnsupportedForProfile {
-                profile: self.profile,
-                reason: "floating a tab group as a Column is supported only by the Photoshop profile",
-            });
-        }
-        if !matches!(self.nodes.get(group), Some(Node::Tabs(_))) {
-            return Err(CommandError::InvalidTarget {
-                reason: "FloatGroupAsColumn requires a Tabs node",
-            });
-        }
-        bounds
-            .validate_non_empty()
-            .map_err(|error| CommandError::InvalidValue {
-                field: "bounds",
-                reason: geometry_error_reason(error),
-            })?;
-
-        let source_column_id =
-            self.find_owner_column(group)
-                .ok_or(CommandError::InvalidTarget {
-                    reason: "FloatGroupAsColumn requires a group owned by a Column",
-                })?;
-        let source_column = match self.nodes.get(source_column_id) {
-            Some(Node::Column(column)) if column.groups.len() > 1 => column.clone(),
-            Some(Node::Column(_)) => {
-                return Err(CommandError::InvalidTarget {
-                    reason: "cannot detach the only group from its Column; float the containing composition instead",
-                });
-            }
-            _ => {
-                return Err(CommandError::InvalidTarget {
-                    reason: "group owner is not a Column",
-                });
-            }
-        };
-        let requested_width = if source_column.mode == ColumnMode::Expanded {
-            source_column.width
-        } else {
-            source_column
-                .last_expanded_width
-                .unwrap_or(metrics.default_column_width)
-        };
-        let width = if requested_width.is_finite() && requested_width > 0.0 {
-            requested_width.max(metrics.min_column_width)
-        } else {
-            metrics.default_column_width
-        };
-
-        let moving_panels = self.panel_ids_in_subtree(group);
-        self.validate_panel_ids_allowed_for_area(&moving_panels, AllowedArea::FLOATING)?;
-        let next_z = self.next_floating_z_order()?;
-        self.remember_subtree_dock_locations(group);
-        self.detach_node(group)?;
-
-        let root = self.nodes.insert(Node::Column(Column {
-            width,
-            mode: ColumnMode::Expanded,
-            groups: vec![group],
-            group_ratios: vec![1.0],
-            last_expanded_width: Some(width),
-        }));
-        let area_id = self.dock_areas.insert(DockArea::floating(root));
-        self.floating_groups
-            .insert(FloatingGroup::new(area_id, bounds, next_z));
-        Ok(CommandApplication::persistent())
-    }
-
-    /// Detach a panel from a group that will retain other tabs, then wrap the
-    /// detached panel in a one-tab Tabs node and a standard single-group Column.
-    pub(super) fn apply_float_panel_as_group_command(
-        &mut self,
-        panel: PanelId,
-        bounds: Rect,
-        metrics: &DockMetrics,
-    ) -> Result<CommandApplication, CommandError> {
-        if self.profile != Profile::Photoshop {
-            return Err(CommandError::UnsupportedForProfile {
-                profile: self.profile,
-                reason: "floating a tab as its own group is supported only by the Photoshop profile",
-            });
-        }
-        bounds
-            .validate_non_empty()
-            .map_err(|error| CommandError::InvalidValue {
-                field: "bounds",
-                reason: geometry_error_reason(error),
-            })?;
-        let panel_node = self
-            .find_panel_node(panel)
-            .ok_or(CommandError::MissingPanel { panel })?;
-        let source_group = self
-            .find_parent(panel_node)
-            .ok_or(CommandError::InvalidTarget {
-                reason: "FloatPanelAsGroup requires a panel inside a Tabs group",
-            })?;
-        match self.nodes.get(source_group) {
-            Some(Node::Tabs(tabs))
-                if tabs.children.len() > 1 && tabs.children.contains(&panel_node) => {}
-            Some(Node::Tabs(_)) => {
-                return Err(CommandError::InvalidTarget {
-                    reason: "cannot detach the only tab from a group; float the containing group instead",
-                });
-            }
-            _ => {
-                return Err(CommandError::InvalidTarget {
-                    reason: "FloatPanelAsGroup requires a panel inside a Tabs group",
-                });
-            }
-        }
-        let requested_width = self
-            .find_owner_column(source_group)
-            .and_then(|column_id| match self.nodes.get(column_id) {
-                Some(Node::Column(column)) if column.mode == ColumnMode::Expanded => {
-                    Some(column.width)
-                }
-                Some(Node::Column(column)) => column.last_expanded_width,
-                _ => None,
-            })
-            .unwrap_or(metrics.default_column_width);
-        let width = if requested_width.is_finite() && requested_width > 0.0 {
-            requested_width.max(metrics.min_column_width)
-        } else {
-            metrics.default_column_width
-        };
-
-        let moving_panels = self.panel_ids_in_subtree(panel_node);
-        self.validate_panel_ids_allowed_for_area(&moving_panels, AllowedArea::FLOATING)?;
-        let next_z = self.next_floating_z_order()?;
-        self.remember_subtree_dock_locations(panel_node);
-        self.detach_node(panel_node)?;
-
-        let group = self.nodes.insert(Node::Tabs(Tabs {
-            children: vec![panel_node],
-            active_index: 0,
-            collapsed: false,
-        }));
-        let root = self.nodes.insert(Node::Column(Column {
-            width,
-            mode: ColumnMode::Expanded,
-            groups: vec![group],
-            group_ratios: vec![1.0],
-            last_expanded_width: Some(width),
-        }));
-        let area_id = self.dock_areas.insert(DockArea::floating(root));
-        self.floating_groups
-            .insert(FloatingGroup::new(area_id, bounds, next_z));
-        Ok(CommandApplication::persistent())
-    }
-}
-
-impl Layout {
     pub(super) fn apply_dock_floating_command(
         &mut self,
         group: &FloatingGroupId,
@@ -371,7 +221,10 @@ impl Layout {
                     group: target_group,
                     zone: zone @ (DropZone::Left | DropZone::Right),
                 },
-            ) if self.profile == Profile::Photoshop => {
+            ) if self.profile == Profile::Generic
+                && self.is_column_composition_root(root)
+                && self.floating_group_is_in_column_composition(target_group) =>
+            {
                 self.dock_floating_composition_to_edge(group_id, root, target_group, zone)
             }
             (Some(Node::Split(_)), _) => Err(CommandError::InvalidTarget {
@@ -620,29 +473,36 @@ impl Layout {
     /// Validates a floating-group drop. Horizontal GroupEdge targets inside
     /// floating areas are reserved for joining complete Photoshop compositions;
     /// the general GroupEdge validator remains scoped to main-dock splits.
+    fn is_column_composition_root(&self, root: NodeId) -> bool {
+        match self.nodes.get(root) {
+            Some(Node::Column(_)) => true,
+            Some(Node::Split(split)) if split.axis == Axis::X => split
+                .children
+                .iter()
+                .all(|child| matches!(self.nodes.get(*child), Some(Node::Column(_)))),
+            _ => false,
+        }
+    }
+
+    fn floating_group_is_in_column_composition(&self, node: NodeId) -> bool {
+        self.find_floating_root_containing(node)
+            .is_some_and(|root| self.is_column_composition_root(root))
+    }
+
     fn validate_floating_dock_target(
         &self,
         source_root: NodeId,
         target: DropTarget,
         metrics: &DockMetrics,
     ) -> Result<(), CommandError> {
-        let source_is_column_composition = match self.nodes.get(source_root) {
-            Some(Node::Column(_)) => true,
-            Some(Node::Split(split)) => {
-                split.axis == Axis::X
-                    && split.children.iter().all(|child| {
-                        matches!(self.nodes.get(*child), Some(Node::Column(_)))
-                    })
-            }
-            _ => false,
-        };
+        let source_is_column_composition = self.is_column_composition_root(source_root);
         if let DropTarget::GroupEdge {
             group,
             zone: zone @ (DropZone::Left | DropZone::Right),
         } = target
-            && self.profile == Profile::Photoshop
+            && self.profile == Profile::Generic
             && source_is_column_composition
-            && self.find_floating_root_containing(group).is_some()
+            && self.floating_group_is_in_column_composition(group)
         {
             return self.validate_floating_composition_edge_target(group, zone);
         }
@@ -655,12 +515,6 @@ impl Layout {
         group: NodeId,
         zone: DropZone,
     ) -> Result<(), CommandError> {
-        if self.profile != Profile::Photoshop {
-            return Err(CommandError::UnsupportedForProfile {
-                profile: self.profile,
-                reason: "side-by-side floating composition docking is supported only by the Photoshop profile",
-            });
-        }
         if !matches!(zone, DropZone::Left | DropZone::Right) {
             return Err(CommandError::InvalidTarget {
                 reason: "floating composition docking requires a left or right edge",
@@ -732,12 +586,6 @@ impl Layout {
         target_group: NodeId,
         zone: DropZone,
     ) -> Result<(), CommandError> {
-        if self.profile != Profile::Photoshop {
-            return Err(CommandError::UnsupportedForProfile {
-                profile: self.profile,
-                reason: "side-by-side floating composition docking is supported only by the Photoshop profile",
-            });
-        }
 
         let source_floating = self
             .floating_groups

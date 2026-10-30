@@ -60,9 +60,183 @@ fn c46_float_panel_keeps_panel_instance_and_id() {
 }
 
 #[test]
-fn c46_float_entire_horizontal_column_composition_preserves_columns_and_groups() {
+fn photoshop_floating_roots_reject_columns_and_horizontal_compositions() {
     let metrics = DockMetrics::default();
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, first_panel) =
+        builder.panel(PanelKey::new("floating-invalid-column").unwrap(), descriptors()[0].1);
+    let first_group = builder.tabs(vec![first_panel], 0, false);
+    let first_column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![first_group],
+        vec![1.0],
+    );
+    builder.floating_group(
+        first_column,
+        Rect::new(Point::new(20.0, 30.0), Size::new(360.0, 260.0)),
+        1,
+    );
+
+    let (_, second_panel) =
+        builder.panel(PanelKey::new("floating-invalid-split-a").unwrap(), descriptors()[0].1);
+    let second_group = builder.tabs(vec![second_panel], 0, false);
+    let second_column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![second_group],
+        vec![1.0],
+    );
+    let (_, third_panel) =
+        builder.panel(PanelKey::new("floating-invalid-split-b").unwrap(), descriptors()[0].1);
+    let third_group = builder.tabs(vec![third_panel], 0, false);
+    let third_column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![third_group],
+        vec![1.0],
+    );
+    let horizontal = builder.split(
+        Axis::X,
+        vec![second_column, third_column],
+        vec![0.5, 0.5],
+    );
+    builder.floating_group(
+        horizontal,
+        Rect::new(Point::new(420.0, 30.0), Size::new(600.0, 260.0)),
+        2,
+    );
+
+    let layout = builder.build();
+    let errors = layout.validate(&metrics).unwrap_err();
+    assert_eq!(
+        errors
+            .iter()
+            .filter(|error| matches!(error, ValidationError::InvalidFloatingRoot { .. }))
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn float_group_uses_existing_tabs_as_floating_root() {
+    let metrics = DockMetrics::default();
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, floating_panel) =
+        builder.panel(PanelKey::new("float-group-root").unwrap(), descriptors()[0].1);
+    let floating_tabs = builder.tabs(vec![floating_panel], 0, false);
+    let (_, remaining_panel) =
+        builder.panel(PanelKey::new("float-group-remaining").unwrap(), descriptors()[0].1);
+    let remaining_tabs = builder.tabs(vec![remaining_panel], 0, false);
+    let column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![floating_tabs, remaining_tabs],
+        vec![0.5, 0.5],
+    );
+    builder.main_area(DockSide::Right, column);
+
+    let mut layout = builder.build();
+    layout
+        .apply(
+            DockCommand::Float {
+                node: floating_tabs,
+                bounds: Rect::new(Point::new(80.0, 60.0), Size::new(360.0, 260.0)),
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    let (_, floating) = layout.floating_groups().next().unwrap();
+    assert_eq!(layout.dock_area(floating.area).unwrap().root, floating_tabs);
+    assert!(matches!(layout.node(floating_tabs), Some(Node::Tabs(_))));
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
+fn float_panel_uses_one_tab_floating_root() {
+    let metrics = DockMetrics::default();
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, moving_node) =
+        builder.panel(PanelKey::new("float-panel-root").unwrap(), descriptors()[0].1);
+    let (_, remaining_node) =
+        builder.panel(PanelKey::new("float-panel-remaining").unwrap(), descriptors()[0].1);
+    let source_group = builder.tabs(vec![moving_node, remaining_node], 0, false);
+    let column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![source_group],
+        vec![1.0],
+    );
+    builder.main_area(DockSide::Right, column);
+
+    let mut layout = builder.build();
+    layout
+        .apply(
+            DockCommand::Float {
+                node: moving_node,
+                bounds: Rect::new(Point::new(80.0, 60.0), Size::new(360.0, 260.0)),
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    let (_, floating) = layout.floating_groups().next().unwrap();
+    let floating_root = layout.dock_area(floating.area).unwrap().root;
+    assert!(matches!(
+        layout.node(floating_root),
+        Some(Node::Tabs(tabs)) if tabs.children == vec![moving_node]
+    ));
+    assert!(matches!(
+        layout.node(source_group),
+        Some(Node::Tabs(tabs)) if tabs.children == vec![remaining_node]
+    ));
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
+fn close_floating_group_removes_the_entire_area_atomically() {
+    let metrics = DockMetrics::default();
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, first_panel) =
+        builder.panel(PanelKey::new("close-floating-first").unwrap(), descriptors()[0].1);
+    let (_, second_panel) =
+        builder.panel(PanelKey::new("close-floating-second").unwrap(), descriptors()[0].1);
+    let first_group = builder.tabs(vec![first_panel, second_panel], 1, false);
+    let (_, third_panel) =
+        builder.panel(PanelKey::new("close-floating-third").unwrap(), descriptors()[0].1);
+    let second_group = builder.tabs(vec![third_panel], 0, false);
+    let root = builder.split(Axis::Y, vec![first_group, second_group], vec![0.6, 0.4]);
+    let floating = builder.floating_group(
+        root,
+        Rect::new(Point::new(40.0, 50.0), Size::new(440.0, 360.0)),
+        1,
+    );
+
+    let mut layout = builder.build();
+    let area = layout.floating_group(floating).unwrap().area;
+    assert_eq!(layout.validate(&metrics), Ok(()));
+
+    let outcome = layout
+        .apply(DockCommand::CloseFloatingGroup { group: floating }, &metrics)
+        .unwrap();
+
+    assert_eq!(outcome.new_version, 1);
+    assert!(layout.floating_group(floating).is_none());
+    assert!(layout.dock_area(area).is_none());
+    assert!(layout.node(root).is_none());
+    assert_eq!(layout.panel_instances().count(), 0);
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
+fn c46_float_entire_horizontal_column_composition_preserves_columns_and_groups() {
+    let metrics = DockMetrics::default();
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Generic);
 
     let (_, left_panel) = builder.panel(
         PanelKey::new("c46-float-composition-left").unwrap(),
@@ -780,7 +954,7 @@ fn c46_center_merge_between_floating_windows_keeps_panel_instances_and_cleans_so
 #[test]
 fn floating_one_group_column_can_detach_from_horizontal_composition() {
     let metrics = DockMetrics::default();
-    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Generic);
 
     let (_, selected_panel) = builder.panel(
         PanelKey::new("detach-column-selected").unwrap(),
@@ -1043,7 +1217,7 @@ fn floating_vertical_stack_reserves_title_row_when_first_group_collapsed() {
 #[test]
 fn dock_floating_columns_side_by_side_builds_a_single_horizontal_composition() {
     let metrics = DockMetrics::default();
-    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Generic);
 
     let (source_panel, source_node) = builder.panel(
         PanelKey::new("floating-compose-source").unwrap(),
@@ -1123,7 +1297,7 @@ fn dock_floating_columns_side_by_side_builds_a_single_horizontal_composition() {
 #[test]
 fn dock_floating_column_to_the_right_appends_after_the_existing_composition() {
     let metrics = DockMetrics::default();
-    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Generic);
 
     let (_, left_panel) =
         builder.panel(PanelKey::new("floating-compose-left").unwrap(), descriptors()[0].1);
@@ -1204,7 +1378,7 @@ fn dock_floating_column_to_the_right_appends_after_the_existing_composition() {
 #[test]
 fn docking_floating_horizontal_composition_to_empty_main_edge_preserves_the_tree() {
     let metrics = DockMetrics::default();
-    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Generic);
 
     let (_, left_panel) =
         builder.panel(PanelKey::new("dock-empty-main-left").unwrap(), descriptors()[0].1);
@@ -1271,7 +1445,7 @@ fn docking_floating_horizontal_composition_to_empty_main_edge_preserves_the_tree
 #[test]
 fn docking_floating_horizontal_composition_before_existing_main_column_keeps_all_columns() {
     let metrics = DockMetrics::default();
-    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Generic);
 
     let (_, main_panel) =
         builder.panel(PanelKey::new("dock-existing-main").unwrap(), descriptors()[0].1);

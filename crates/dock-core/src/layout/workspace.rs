@@ -167,19 +167,29 @@ impl Layout {
         let Some(columns_by_side) = self.photoshop_main_columns_by_side() else {
             return Vec::new();
         };
-        let total_columns: usize = columns_by_side.iter().map(Vec::len).sum();
-        if total_columns <= max_columns {
-            return Vec::new();
-        }
+        let mut notes = Vec::new();
 
-        let retained = Self::select_photoshop_columns_to_keep(&columns_by_side, max_columns);
-        let merges = Self::plan_photoshop_column_merges(&columns_by_side, &retained);
-        let (notes, removed_columns) = self.merge_photoshop_column_groups(&merges, max_columns);
-        if removed_columns.is_empty() {
-            return notes;
-        }
+        // The document defines the limit per DockArea, not across left and right.
+        for side_index in 0..2 {
+            let side_columns = &columns_by_side[side_index];
+            if side_columns.len() <= max_columns {
+                continue;
+            }
 
-        self.remove_photoshop_column_wrappers(&removed_columns);
+            let isolated_columns = if side_index == 0 {
+                [side_columns.clone(), Vec::new()]
+            } else {
+                [Vec::new(), side_columns.clone()]
+            };
+            let retained = Self::select_photoshop_columns_to_keep(&isolated_columns, max_columns);
+            let merges = Self::plan_photoshop_column_merges(&isolated_columns, &retained);
+            let (side_notes, removed_columns) =
+                self.merge_photoshop_column_groups(&merges, max_columns);
+            notes.extend(side_notes);
+            if !removed_columns.is_empty() {
+                self.remove_photoshop_column_wrappers(&removed_columns);
+            }
+        }
         notes
     }
 

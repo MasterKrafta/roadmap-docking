@@ -1280,7 +1280,7 @@ fn floating_bounds_clamped_diagnostic_keeps_json_index_after_earlier_group_is_re
 }
 
 #[test]
-fn workspace_normalizes_empty_floating_columns_before_clamping_bounds() {
+fn workspace_migrates_legacy_floating_composition_before_clamping_bounds() {
     let metrics = DockMetrics::default();
     let (layout, descriptors) = sample_layout();
     let mut file = WorkspaceFile::from_layout(&layout, &metrics).unwrap();
@@ -1326,11 +1326,13 @@ fn workspace_normalizes_empty_floating_columns_before_clamping_bounds() {
     assert!(report.layout.validate(&metrics).is_ok());
     let floating = report.layout.floating_groups_in_paint_order();
     let area = report.layout.dock_area(floating[0].1.area).unwrap();
-    assert!(
-        matches!(report.layout.node(area.root), Some(crate::Node::Column(column)) if column.groups.len() == 1)
-    );
+    assert!(matches!(
+        report.layout.node(area.root),
+        Some(crate::Node::Tabs(tabs)) if tabs.children.len() == 1
+    ));
     assert!(report.diagnostics.iter().any(|diagnostic| {
         matches!(diagnostic, WorkspaceDiagnostic::LayoutNormalized { issues }
-            if issues.iter().any(|issue| issue.contains("must contain at least one group before normalization")))
+            if issues.iter().any(|issue| issue.contains("invalid root"))
+                && issues.iter().any(|issue| issue.contains("must contain at least one group before normalization")))
     }));
 }

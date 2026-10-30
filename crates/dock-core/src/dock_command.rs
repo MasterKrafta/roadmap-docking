@@ -116,16 +116,6 @@ pub enum DockCommand {
     RestoreGroupRatios { column: NodeId, ratios: Vec<f32> },
     /// Detach a Panel or Tabs node into a floating group at these bounds.
     Float { node: NodeId, bounds: Rect },
-    /// Detach one existing tab group into a floating composition with a single Column.
-    ///
-    /// This command is for dragging a group out of a Column that will retain other groups.
-    /// It preserves the existing Tabs node and its children, and gives the new floating root
-    /// the same Column-level header and controls used by every other dock Column.
-    FloatGroupAsColumn { group: NodeId, bounds: Rect },
-    /// Detach one tab from a multi-tab group into its own group and single-Column composition.
-    ///
-    /// The source Tabs group must retain at least one tab after the move.
-    FloatPanelAsGroup { panel: PanelId, bounds: Rect },
     /// Move a floating window by setting its new origin.
     MoveFloating {
         group: FloatingGroupId,
@@ -147,6 +137,8 @@ pub enum DockCommand {
         group: FloatingGroupId,
         target: DropTarget,
     },
+    /// Close a floating window and remove every panel instance owned by its area.
+    CloseFloatingGroup { group: FloatingGroupId },
     /// Collapse or expand a Tabs group while preserving its children, active tab,
     /// and its parent container's existing size/ratio state.
     ///
@@ -291,14 +283,6 @@ mod tests {
                 node: NodeId::null(),
                 bounds: Rect::new(Point::ZERO, Size::new(400.0, 300.0)),
             },
-            DockCommand::FloatGroupAsColumn {
-                group: NodeId::null(),
-                bounds: Rect::new(Point::ZERO, Size::new(400.0, 300.0)),
-            },
-            DockCommand::FloatPanelAsGroup {
-                panel: PanelId::null(),
-                bounds: Rect::new(Point::ZERO, Size::new(400.0, 300.0)),
-            },
             DockCommand::MoveFloating {
                 group: FloatingGroupId::null(),
                 origin: Point::ZERO,
@@ -317,6 +301,9 @@ mod tests {
             DockCommand::DockFloating {
                 group: FloatingGroupId::null(),
                 target,
+            },
+            DockCommand::CloseFloatingGroup {
+                group: FloatingGroupId::null(),
             },
             DockCommand::CollapseGroup {
                 group: NodeId::null(),
@@ -341,7 +328,7 @@ mod tests {
                 mode: ChromeMode::AllHidden,
             },
         ];
-        assert_eq!(commands.len(), 35);
+        assert_eq!(commands.len(), 34);
     }
 
     #[cfg(feature = "serde")]

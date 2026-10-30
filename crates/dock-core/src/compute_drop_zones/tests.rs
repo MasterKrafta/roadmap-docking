@@ -514,7 +514,7 @@ fn max_columns_hides_new_column_targets_when_the_source_column_cannot_collapse()
 #[test]
 fn floating_center_and_edges_resolve_to_tab_or_stack_targets() {
     let metrics = DockMetrics::default();
-    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+    let mut builder = LayoutBuilder::new(Profile::Generic);
     let (source_panel, source_node) = builder.panel(key("float-drop-source"), constraints());
     let main_group = builder.tabs(vec![source_node], 0, false);
     let column = builder.column(280.0, ColumnMode::Expanded, vec![main_group], vec![1.0]);

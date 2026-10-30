@@ -254,7 +254,7 @@ fn floating_geometry_preserves_bounds_z_order_and_resize_handles() {
 #[test]
 fn single_group_floating_column_keeps_standalone_group_geometry() {
     let metrics = DockMetrics::default();
-    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+    let mut builder = LayoutBuilder::new(Profile::Generic);
     let (_, panel_node) = builder.panel(key("floating-single-column"), constraints());
     let group = builder.tabs(vec![panel_node], 0, true);
     let column = builder.column(300.0, ColumnMode::Expanded, vec![group], vec![1.0]);
@@ -287,7 +287,7 @@ fn floating_column_reserves_window_title_before_allocating_a_collapsed_first_gro
         tab_strip_height: 24.0,
         ..DockMetrics::default()
     };
-    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+    let mut builder = LayoutBuilder::new(Profile::Generic);
 
     let (_, collapsed_panel_node) = builder.panel(key("floating-column-collapsed"), constraints());
     let collapsed_group = builder.tabs(vec![collapsed_panel_node], 0, true);
@@ -352,7 +352,7 @@ fn floating_horizontal_split_reserves_title_for_each_collapsed_column_branch() {
         tab_strip_height: 24.0,
         ..DockMetrics::default()
     };
-    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+    let mut builder = LayoutBuilder::new(Profile::Generic);
 
     let (_, collapsed_panel_node) = builder.panel(key("split-floating-collapsed"), constraints());
     let collapsed_group = builder.tabs(vec![collapsed_panel_node], 0, true);
@@ -419,7 +419,7 @@ fn floating_horizontal_split_reserves_title_for_each_collapsed_column_branch() {
 #[test]
 fn floating_horizontal_split_minimum_includes_title_for_collapsed_branches() {
     let metrics = DockMetrics::default();
-    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+    let mut builder = LayoutBuilder::new(Profile::Generic);
     let mut columns = Vec::new();
     let mut groups = Vec::new();
 
@@ -477,7 +477,7 @@ fn floating_horizontal_split_minimum_includes_title_for_collapsed_branches() {
 #[test]
 fn floating_multi_group_column_minimum_includes_title_for_collapsed_first_group() {
     let metrics = DockMetrics::default();
-    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+    let mut builder = LayoutBuilder::new(Profile::Generic);
     let (_, collapsed_panel) = builder.panel(key("floating-min-column-collapsed"), constraints());
     let collapsed_group = builder.tabs(vec![collapsed_panel], 0, true);
     let (_, expanded_panel) = builder.panel(key("floating-min-column-expanded"), constraints());

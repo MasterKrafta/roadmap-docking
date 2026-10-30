@@ -127,51 +127,23 @@ pub(super) fn validate_photoshop_floating_root(
 ) {
     match nodes.get(root) {
         Some(Node::Tabs(_)) => {}
-        Some(Node::Column(column)) => {
-            let invalid_child = column.groups.iter().any(|child| {
-                nodes.contains_key(*child) && !matches!(nodes.get(*child), Some(Node::Tabs(_)))
-            });
-            if invalid_child {
-                errors.push(ValidationError::InvalidFloatingRoot {
-                    group,
-                    root,
-                    reason: "floating Column children must all be Tabs nodes",
-                });
-            }
-        }
-        Some(Node::Split(split)) if split.axis == Axis::X => {
-            let invalid_child = split.children.iter().any(|child| {
-                nodes.contains_key(*child) && !matches!(nodes.get(*child), Some(Node::Column(_)))
-            });
-            if invalid_child {
-                errors.push(ValidationError::InvalidFloatingRoot {
-                    group,
-                    root,
-                    reason: "Split(X) floating composition children must all be Column nodes",
-                });
-            }
-        }
         Some(Node::Split(split)) if split.axis == Axis::Y => {
-            let invalid_child = split.children.iter().any(|child| {
-                nodes.contains_key(*child) && !matches!(nodes.get(*child), Some(Node::Tabs(_)))
-            });
-            if invalid_child {
+            if split
+                .children
+                .iter()
+                .any(|child| !matches!(nodes.get(*child), Some(Node::Tabs(_))))
+            {
                 errors.push(ValidationError::InvalidFloatingRoot {
                     group,
                     root,
-                    reason: "Split(Y) floating root children must all be Tabs nodes",
+                    reason: "floating Split(Y) children must all be Tabs nodes",
                 });
             }
         }
-        Some(Node::Split(_)) => errors.push(ValidationError::InvalidFloatingRoot {
-            group,
-            root,
-            reason: "floating composition Split must use axis X or floating stack Split must use axis Y",
-        }),
         Some(_) => errors.push(ValidationError::InvalidFloatingRoot {
             group,
             root,
-            reason: "floating root must be Tabs, Column, Split(X) of Columns, or Split(Y) of Tabs",
+            reason: "floating root must be Tabs or Split(Y) of Tabs",
         }),
         None => {}
     }
@@ -412,7 +384,7 @@ impl Layout {
         // the tree: registered main sides and floating groups with a floating area.
         let mut registered_areas = HashSet::new();
         let mut roots = Vec::new();
-        let mut photoshop_main_columns = 0usize;
+        let mut photoshop_main_columns = [0usize; 2];
 
         for (area_id, area) in self.dock_areas.iter() {
             if let Err(reason) = area.validate_metadata() {
@@ -465,7 +437,7 @@ impl Layout {
                     && area.kind == DockAreaKind::Main
                     && area.side == Some(side)
                 {
-                    photoshop_main_columns +=
+                    photoshop_main_columns[index] +=
                         validate_photoshop_main_root(&self.nodes, area_id, area.root, errors);
                 }
             } else {
@@ -551,14 +523,15 @@ impl Layout {
             }
         }
 
-        if metrics_are_valid
-            && self.profile == Profile::Photoshop
-            && photoshop_main_columns > metrics.max_columns
-        {
-            errors.push(ValidationError::TooManyColumns {
-                actual: photoshop_main_columns,
-                max: metrics.max_columns,
-            });
+        if metrics_are_valid && self.profile == Profile::Photoshop {
+            for actual in photoshop_main_columns {
+                if actual > metrics.max_columns {
+                    errors.push(ValidationError::TooManyColumns {
+                        actual,
+                        max: metrics.max_columns,
+                    });
+                }
+            }
         }
         roots
     }
@@ -807,6 +780,8 @@ impl Layout {
 
         self.normalize_main_areas()?;
 
+        self.normalize_photoshop_floating_roots()?;
+
         self.normalize_floating_areas()?;
 
         self.close_invalid_flyout();
@@ -853,6 +828,150 @@ impl Layout {
                 }
             }
         }
+        Ok(())
+    }
+
+    /// Migrates legacy Photoshop floating roots that used to wrap groups in Columns.
+    ///
+    /// Older workspaces represented floating columns and horizontal column compositions.
+    /// The Photoshop profile now stores the same Tabs groups directly as a Tabs root or a
+    /// vertical Split(Y) stack. Existing Tabs nodes and Panel identities are preserved.
+    pub(super) fn normalize_photoshop_floating_roots(
+        &mut self,
+    ) -> Result<(), Vec<ValidationError>> {
+        if self.profile != Profile::Photoshop {
+            return Ok(());
+        }
+
+        let floating_ids: Vec<_> = self.floating_groups.keys().collect();
+        for group_id in floating_ids {
+            let Some(floating) = self.floating_groups.get(group_id).copied() else {
+                continue;
+            };
+            let Some(area) = self.dock_areas.get(floating.area).copied() else {
+                return Err(vec![ValidationError::InvalidFloatingGroup {
+                    group: group_id,
+                    reason: "references a missing DockAreaId",
+                }]);
+            };
+
+            let root = area.root;
+            let Some(root_node) = self.nodes.get(root).cloned() else {
+                return Err(vec![ValidationError::MissingNode {
+                    owner: None,
+                    missing: root,
+                }]);
+            };
+
+            let (groups, ratios, wrappers) = match root_node {
+                Node::Tabs(_) => continue,
+                Node::Split(split) if split.axis == Axis::Y => continue,
+                Node::Column(column) => {
+                    if column.groups.iter().any(|child| {
+                        !matches!(self.nodes.get(*child), Some(Node::Tabs(_)))
+                    }) {
+                        return Err(vec![ValidationError::InvalidFloatingRoot {
+                            group: group_id,
+                            root,
+                            reason: "legacy floating Column must contain only Tabs groups",
+                        }]);
+                    }
+                    let ratios = normalized_ratios(
+                        column
+                            .groups
+                            .iter()
+                            .enumerate()
+                            .map(|(index, _)| column.group_ratios.get(index).copied())
+                            .collect(),
+                    );
+                    (column.groups, ratios, vec![root])
+                }
+                Node::Split(split) if split.axis == Axis::X => {
+                    let column_ratios = normalized_ratios(
+                        split
+                            .children
+                            .iter()
+                            .enumerate()
+                            .map(|(index, _)| split.ratios.get(index).copied())
+                            .collect(),
+                    );
+                    let mut groups = Vec::new();
+                    let mut weights = Vec::new();
+                    let mut wrappers = vec![root];
+
+                    for (column_index, column_id) in split.children.iter().copied().enumerate() {
+                        let Some(Node::Column(column)) = self.nodes.get(column_id) else {
+                            return Err(vec![ValidationError::InvalidFloatingRoot {
+                                group: group_id,
+                                root,
+                                reason: "legacy floating Split(X) must contain only Columns",
+                            }]);
+                        };
+                        let group_ratios = normalized_ratios(
+                            column
+                                .groups
+                                .iter()
+                                .enumerate()
+                                .map(|(index, _)| column.group_ratios.get(index).copied())
+                                .collect(),
+                        );
+                        for (group_index, tab_group) in column.groups.iter().copied().enumerate() {
+                            if !matches!(self.nodes.get(tab_group), Some(Node::Tabs(_))) {
+                                return Err(vec![ValidationError::InvalidFloatingRoot {
+                                    group: group_id,
+                                    root,
+                                    reason: "legacy floating Columns must contain only Tabs groups",
+                                }]);
+                            }
+                            groups.push(tab_group);
+                            weights.push(
+                                column_ratios[column_index] * group_ratios[group_index],
+                            );
+                        }
+                        wrappers.push(column_id);
+                    }
+
+                    let ratios = normalized_ratios(weights.into_iter().map(Some).collect());
+                    (groups, ratios, wrappers)
+                }
+                _ => {
+                    return Err(vec![ValidationError::InvalidFloatingRoot {
+                        group: group_id,
+                        root,
+                        reason: "floating root cannot be migrated to Tabs or Split(Y) of Tabs",
+                    }]);
+                }
+            };
+
+            if groups.is_empty() {
+                self.remove_subtree(root);
+                self.floating_groups.remove(group_id);
+                self.dock_areas.remove(floating.area);
+                continue;
+            }
+
+            let new_root = if groups.len() == 1 {
+                groups[0]
+            } else {
+                self.nodes.insert(Node::Split(Split {
+                    axis: Axis::Y,
+                    children: groups,
+                    ratios,
+                }))
+            };
+
+            for wrapper in wrappers {
+                self.nodes.remove(wrapper);
+            }
+            let Some(area) = self.dock_areas.get_mut(floating.area) else {
+                return Err(vec![ValidationError::InvalidFloatingGroup {
+                    group: group_id,
+                    reason: "references a missing DockAreaId",
+                }]);
+            };
+            area.root = new_root;
+        }
+
         Ok(())
     }
 

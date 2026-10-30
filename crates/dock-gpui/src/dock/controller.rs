@@ -144,25 +144,22 @@ impl DockController {
         self.track_command_result(result, "apply")
     }
 
-    /// Closes every tab group contained in a floating window.
+    /// Closes a floating window and all of its panel instances in one core command.
     ///
-    /// Core has no atomic CloseFloating command, so every group is closed through
-    /// the standard history path and can be restored with one Undo per group.
+    /// The window is removed through the standard command path as one layout change.
     pub(crate) fn close_floating(&mut self, group: FloatingGroupId) -> Result<(), CommandError> {
-        let commands =
+        let command =
             super::commands::close_floating(&self.workspace.layout, group).ok_or_else(|| {
                 if self.workspace.layout.floating_group(group).is_some() {
                     CommandError::InvalidTarget {
-                        reason: "floating group contains an unsupported node type",
+                        reason: "floating group references an invalid dock area",
                     }
                 } else {
                     CommandError::MissingFloatingGroup { group }
                 }
             })?;
 
-        for command in commands {
-            self.apply(command)?;
-        }
+        self.apply(command)?;
         Ok(())
     }
 

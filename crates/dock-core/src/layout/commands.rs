@@ -108,13 +108,14 @@ impl Layout {
     ) -> Result<CommandApplication, CommandError> {
         match command {
             DockCommand::Float { .. }
-            | DockCommand::FloatGroupAsColumn { .. }
-            | DockCommand::FloatPanelAsGroup { .. }
             | DockCommand::MoveFloating { .. }
             | DockCommand::ResizeFloating { .. }
             | DockCommand::ResizeFloatingBounds { .. }
             | DockCommand::RaiseFloating { .. }
-            | DockCommand::DockFloating { .. } => self.apply_floating_command(command, metrics),
+            | DockCommand::DockFloating { .. }
+            | DockCommand::CloseFloatingGroup { .. } => {
+                self.apply_floating_command(command, metrics)
+            }
             DockCommand::OpenPanel { .. }
             | DockCommand::ClosePanel { .. }
             | DockCommand::CloseGroup { .. }
