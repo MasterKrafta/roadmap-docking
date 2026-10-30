@@ -123,7 +123,7 @@ enum PanelKind {
     Properties,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 struct PanelBinding {
     kind: PanelKind,
     panel_id: PanelId,
@@ -312,7 +312,7 @@ impl MainWindow {
             .panel_bindings
             .iter()
             .find(|binding| binding.kind == kind)
-            .cloned()
+            .copied()
         else {
             eprintln!("No dock-core tree is registered for panel '{}'", kind.key());
             return;
@@ -344,7 +344,7 @@ impl MainWindow {
         }
 
         let options = WindowOptions {
-            window_bounds: Some(WindowBounds::Windowed(binding.window_bounds.clone())),
+            window_bounds: Some(WindowBounds::Windowed(binding.window_bounds)),
             // Configure ownership and z-order before making this window visible.
             show: false,
             focus: false,
