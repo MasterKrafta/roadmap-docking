@@ -1,8 +1,11 @@
 //! Minimal experimental docking application entry point.
 
-use dock_core::{Axis, DockCommand, DockMetrics, DockSide, Layout, Node, NodeId, PanelKey};
+use dock_core::{
+    Axis, DockCommand, DockMetrics, DockSide, Layout, Node, NodeId, PanelConstraints, PanelKey,
+    Size,
+};
 #[cfg(windows)]
-use dock_core::{create_initial_layout, PanelConstraints, Profile, Size};
+use dock_core::{create_initial_layout, Profile};
 use gpui::{
     AnyElement, AppContext, Bounds, Context, IntoElement, Render, Subscription, WeakEntity, Window,
     WindowBounds, WindowControlArea, WindowHandle, WindowKind, WindowOptions, WindowVisibility, div,
@@ -100,6 +103,7 @@ fn run_windows() {
 pub(crate) struct MainWindow {
     layout: Layout,
     metrics: DockMetrics,
+    panel_constraints: PanelConstraints,
     floating_panels: Vec<WindowHandle<FloatingPanel>>,
     panels_minimized_by_main: Vec<WindowHandle<FloatingPanel>>,
     visibility_subscription: Option<Subscription>,
@@ -173,6 +177,7 @@ impl MainWindow {
         Self {
             layout,
             metrics,
+            panel_constraints: panel_constraints(),
             floating_panels: Vec::new(),
             panels_minimized_by_main: Vec::new(),
             visibility_subscription: None,
@@ -190,6 +195,21 @@ impl MainWindow {
         self.layout.apply(command, &self.metrics)?;
         cx.notify();
         Ok(())
+    }
+
+    fn open_dock_panel(
+        &mut self,
+        key: PanelKey,
+        cx: &mut Context<Self>,
+    ) -> Result<(), dock_core::CommandError> {
+        self.apply_layout_command(
+            DockCommand::OpenPanel {
+                key,
+                constraints: self.panel_constraints,
+                target: None,
+            },
+            cx,
+        )
     }
 
     /// Opens the panels that should be visible when the experiment starts.
@@ -312,6 +332,37 @@ impl MainWindow {
     }
 }
 
+fn dock_panel_button(key: &'static str, owner: WeakEntity<MainWindow>) -> impl IntoElement {
+    div()
+        .id(format!("open-dock-panel-{key}"))
+        .px_3()
+        .py_2()
+        .bg(rgb(0x394451))
+        .text_color(rgb(0xf0f2f5))
+        .rounded_sm()
+        .cursor_pointer()
+        .child(panel_title(key))
+        .on_click(move |_, _, cx| {
+            let key = match PanelKey::new(key) {
+                Ok(key) => key,
+                Err(error) => {
+                    eprintln!("Invalid built-in dock panel key: {error}");
+                    return;
+                }
+            };
+
+            match owner.update(cx, |this, cx| this.open_dock_panel(key, cx)) {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => {
+                    eprintln!("Could not open dock panel: {error}");
+                }
+                Err(error) => {
+                    eprintln!("Could not access the dock layout: {error:?}");
+                }
+            }
+        })
+}
+
 fn menu_button(kind: PanelKind, owner: WeakEntity<MainWindow>) -> impl IntoElement {
     div()
         .id(kind.key())
@@ -361,6 +412,11 @@ impl Render for MainWindow {
                     .bg(rgb(0x2b323a))
                     .border_b_1()
                     .border_color(rgb(0x414a55))
+                    .child("Панели")
+                    .child(dock_panel_button("layers", owner.clone()))
+                    .child(dock_panel_button("color", owner.clone()))
+                    .child(dock_panel_button("properties", owner.clone()))
+                    .child(dock_panel_button("history", owner.clone()))
                     .child("Плавающие окна")
                     .child(menu_button(PanelKind::Layers, owner.clone()))
                     .child(menu_button(PanelKind::Properties, owner.clone())),
@@ -496,12 +552,7 @@ impl Render for FloatingPanel {
 
 #[cfg(windows)]
 fn build_initial_layout(metrics: DockMetrics) -> Result<Layout, String> {
-    let constraints = PanelConstraints::new(
-        Size::new(120.0, 80.0),
-        Size::new(280.0, 220.0),
-        None,
-        false,
-    );
+    let constraints = panel_constraints();
     let descriptors = ["layers", "color", "properties", "history"]
         .into_iter()
         .map(|key| {
@@ -513,6 +564,15 @@ fn build_initial_layout(metrics: DockMetrics) -> Result<Layout, String> {
 
     create_initial_layout(Profile::Photoshop, &descriptors, metrics)
         .map_err(|error| error.to_string())
+}
+
+fn panel_constraints() -> PanelConstraints {
+    PanelConstraints::new(
+        Size::new(120.0, 80.0),
+        Size::new(280.0, 220.0),
+        None,
+        true,
+    )
 }
 
 fn panel_title(key: &str) -> &str {
