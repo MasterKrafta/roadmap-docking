@@ -1,13 +1,11 @@
 //! Minimal experimental docking application entry point.
 
 use dock_core::{
-    Axis, DockCommand, DockMetrics, DockSide, Layout, Node, NodeId, PanelConstraints, PanelKey,
-    Size,
+    DockCommand, DockMetrics, DockSide, DropTarget, FloatingGroupId, Layout, Node, PanelConstraints,
+    PanelId, PanelKey, Point, Profile, Rect, Size,
 };
-#[cfg(windows)]
-use dock_core::{create_initial_layout, Profile};
 use gpui::{
-    AnyElement, AppContext, Bounds, Context, IntoElement, Render, Subscription, WeakEntity, Window,
+    AppContext, Bounds, Context, IntoElement, Pixels, Render, Subscription, WeakEntity, Window,
     WindowBounds, WindowControlArea, WindowHandle, WindowKind, WindowOptions, WindowVisibility, div,
     px, rgb, size,
 };
@@ -35,10 +33,14 @@ pub fn run() {
 fn run_windows() {
     application().run(|cx: &mut App| {
         let metrics = DockMetrics::default();
-        let layout = match build_initial_layout(metrics) {
-            Ok(layout) => layout,
+        let panel_bounds = [
+            Bounds::centered(None, size(px(280.0), px(360.0)), cx),
+            Bounds::centered(None, size(px(280.0), px(360.0)), cx),
+        ];
+        let (layout, panel_bindings) = match build_initial_layout(metrics, panel_bounds) {
+            Ok(result) => result,
             Err(error) => {
-                eprintln!("Could not build the initial dock tree: {error}");
+                eprintln!("Could not build the initial dock trees: {error}");
                 return;
             }
         };
@@ -56,7 +58,8 @@ fn run_windows() {
         };
 
         let main_window = match cx.open_window(options, move |window, cx| {
-            let main_window = cx.new(|_| MainWindow::new(layout, metrics));
+            let main_window =
+                cx.new(|_| MainWindow::new(layout, metrics, panel_bindings));
             let weak_main_window = main_window.downgrade();
 
             window.on_window_should_close(cx, move |_window, app| {
@@ -104,7 +107,8 @@ pub(crate) struct MainWindow {
     layout: Layout,
     metrics: DockMetrics,
     panel_constraints: PanelConstraints,
-    floating_panels: Vec<WindowHandle<FloatingPanel>>,
+    panel_bindings: [PanelBinding; 2],
+    floating_panels: Vec<FloatingPanelWindow>,
     panels_minimized_by_main: Vec<WindowHandle<FloatingPanel>>,
     visibility_subscription: Option<Subscription>,
     main_window_handle: Option<WindowHandle<MainWindow>>,
@@ -112,10 +116,24 @@ pub(crate) struct MainWindow {
     native_owner: Option<NativeWindowHandle>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum PanelKind {
     Layers,
     Properties,
+}
+
+#[derive(Clone)]
+struct PanelBinding {
+    kind: PanelKind,
+    panel_id: PanelId,
+    floating_group_id: FloatingGroupId,
+    window_bounds: Bounds<Pixels>,
+}
+
+struct FloatingPanelWindow {
+    panel_id: PanelId,
+    floating_group_id: FloatingGroupId,
+    handle: WindowHandle<FloatingPanel>,
 }
 
 impl PanelKind {
@@ -173,11 +191,16 @@ impl MainWindow {
         }
     }
 
-    pub(crate) fn new(layout: Layout, metrics: DockMetrics) -> Self {
+    pub(crate) fn new(
+        layout: Layout,
+        metrics: DockMetrics,
+        panel_bindings: [PanelBinding; 2],
+    ) -> Self {
         Self {
             layout,
             metrics,
             panel_constraints: panel_constraints(),
+            panel_bindings,
             floating_panels: Vec::new(),
             panels_minimized_by_main: Vec::new(),
             visibility_subscription: None,
@@ -221,7 +244,10 @@ impl MainWindow {
     /// Shows the already-created panels after GPUI has rendered their first frame.
     pub(crate) fn show_floating_panels(&mut self, cx: &mut Context<Self>) {
         for panel in &self.floating_panels {
-            if let Err(error) = panel.update(cx, |_, window, _| window.activate_window()) {
+            if let Err(error) = panel
+                .handle
+                .update(cx, |_, window, _| window.activate_window())
+            {
                 eprintln!("Could not show a startup panel: {error:?}");
             }
         }
@@ -237,7 +263,7 @@ impl MainWindow {
                 self.panels_minimized_by_main.clear();
 
                 for panel in &self.floating_panels {
-                    match panel.update(cx, |_, window, _| {
+                    match panel.handle.update(cx, |_, window, _| {
                         if window.is_visible() {
                             window.minimize_window();
                             true
@@ -271,21 +297,43 @@ impl MainWindow {
         show_immediately: bool,
         cx: &mut Context<Self>,
     ) {
-        let key = match PanelKey::new(kind.key()) {
-            Ok(key) => key,
-            Err(error) => {
-                eprintln!("Invalid built-in panel key: {error}");
-                return;
-            }
+        let Some(binding) = self
+            .panel_bindings
+            .iter()
+            .find(|binding| binding.kind == kind)
+            .cloned()
+        else {
+            eprintln!("No dock-core tree is registered for panel '{}'", kind.key());
+            return;
         };
 
-        let bounds = WindowBounds::Windowed(Bounds::centered(
-            None,
-            size(px(280.0), px(360.0)),
+        if let Some(existing) = self
+            .floating_panels
+            .iter()
+            .find(|panel| panel.panel_id == binding.panel_id)
+        {
+            if show_immediately
+                && let Err(error) = existing
+                    .handle
+                    .update(cx, |_, window, _| window.activate_window())
+            {
+                eprintln!("Could not activate floating panel '{}': {error:?}", kind.key());
+            }
+            return;
+        }
+
+        if let Err(error) = self.apply_layout_command(
+            DockCommand::RaiseFloating {
+                group: binding.floating_group_id,
+            },
             cx,
-        ));
+        ) {
+            eprintln!("Could not raise floating panel '{}': {error}", kind.key());
+            return;
+        }
+
         let options = WindowOptions {
-            window_bounds: Some(bounds),
+            window_bounds: Some(WindowBounds::Windowed(binding.window_bounds.clone())),
             // Configure ownership and z-order before making this window visible.
             show: false,
             focus: false,
@@ -295,14 +343,25 @@ impl MainWindow {
         };
 
         let owner = cx.entity().downgrade();
+        let panel_id = binding.panel_id;
+        let floating_group_id = binding.floating_group_id;
         match cx.open_window(options, move |_window, cx| {
-            cx.new(|_| FloatingPanel { key, owner })
+            cx.new(|_| FloatingPanel {
+                panel_id,
+                floating_group_id,
+                owner,
+                bounds_subscription: None,
+            })
         }) {
             Ok(handle) => {
                 #[cfg(windows)]
                 self.configure_floating_window(&handle, cx);
 
-                self.floating_panels.push(handle.clone());
+                self.floating_panels.push(FloatingPanelWindow {
+                    panel_id,
+                    floating_group_id,
+                    handle: handle.clone(),
+                });
 
                 if show_immediately
                     && let Err(error) =
@@ -322,7 +381,10 @@ impl MainWindow {
         self.panels_minimized_by_main.clear();
 
         for panel in self.floating_panels.drain(..) {
-            match panel.update(cx, |_, window, _| window.remove_window()) {
+            match panel
+                .handle
+                .update(cx, |_, window, _| window.remove_window())
+            {
                 Ok(()) => {}
                 Err(_error) => {
                     // If the user already closed this panel, cleanup is already complete.
@@ -330,37 +392,6 @@ impl MainWindow {
             }
         }
     }
-}
-
-fn dock_panel_button(key: &'static str, owner: WeakEntity<MainWindow>) -> impl IntoElement {
-    div()
-        .id(format!("open-dock-panel-{key}"))
-        .px_3()
-        .py_2()
-        .bg(rgb(0x394451))
-        .text_color(rgb(0xf0f2f5))
-        .rounded_sm()
-        .cursor_pointer()
-        .child(panel_title(key))
-        .on_click(move |_, _, cx| {
-            let key = match PanelKey::new(key) {
-                Ok(key) => key,
-                Err(error) => {
-                    eprintln!("Invalid built-in dock panel key: {error}");
-                    return;
-                }
-            };
-
-            match owner.update(cx, |this, cx| this.open_dock_panel(key, cx)) {
-                Ok(Ok(())) => {}
-                Ok(Err(error)) => {
-                    eprintln!("Could not open dock panel: {error}");
-                }
-                Err(error) => {
-                    eprintln!("Could not access the dock layout: {error:?}");
-                }
-            }
-        })
 }
 
 fn menu_button(kind: PanelKind, owner: WeakEntity<MainWindow>) -> impl IntoElement {
@@ -426,14 +457,51 @@ impl Render for MainWindow {
 }
 
 struct FloatingPanel {
-    key: PanelKey,
+    panel_id: PanelId,
+    floating_group_id: FloatingGroupId,
     owner: WeakEntity<MainWindow>,
+    bounds_subscription: Option<Subscription>,
+}
+
+impl FloatingPanel {
+    fn sync_native_bounds(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let bounds = core_bounds(&window.window_bounds().get_bounds());
+        let group = self.floating_group_id;
+
+        if let Err(error) = self.owner.update(cx, |main, cx| {
+            main.apply_layout_command(
+                DockCommand::ResizeFloatingBounds { group, bounds },
+                cx,
+            )
+        }) {
+            eprintln!("Could not synchronize floating panel bounds: {error:?}");
+        }
+    }
 }
 
 impl Render for FloatingPanel {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        let title = self.key.as_str().to_owned();
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.bounds_subscription.is_none() {
+            self.bounds_subscription =
+                Some(cx.observe_window_bounds(window, |this, window, cx| {
+                    this.sync_native_bounds(window, cx);
+                }));
+        }
+
+        let title = self
+            .owner
+            .upgrade()
+            .and_then(|owner| {
+                owner
+                    .read(cx)
+                    .layout
+                    .panel_instance(self.panel_id)
+                    .map(|instance| panel_title(instance.key.as_str()).to_owned())
+            })
+            .unwrap_or_else(|| "Панель".to_owned());
+
         let owner = self.owner.clone();
+        let panel_id = self.panel_id;
 
         div()
             .flex()
@@ -461,7 +529,7 @@ impl Render for FloatingPanel {
                             .h_full()
                             .px_2()
                             .window_control_area(WindowControlArea::Drag)
-                            .child(title),
+                            .child(title.clone()),
                     )
                     .child(
                         div()
@@ -475,12 +543,12 @@ impl Render for FloatingPanel {
                             .hover(|style| style.bg(rgb(0x596777)))
                             .occlude()
                             .on_click(move |_, window, cx| {
-                                let panel_id = window.window_handle().window_id();
+                                let window_id = window.window_handle().window_id();
                                 let main_window = owner.update(cx, |this, _cx| {
                                     this.floating_panels
-                                        .retain(|panel| panel.window_id() != panel_id);
+                                        .retain(|panel| panel.panel_id != panel_id);
                                     this.panels_minimized_by_main
-                                        .retain(|panel| panel.window_id() != panel_id);
+                                        .retain(|panel| panel.window_id() != window_id);
                                     this.main_window_handle
                                 });
 
@@ -512,31 +580,130 @@ impl Render for FloatingPanel {
                             .child("×"),
                     ),
             )
-            .child(
-                div()
-                    .flex_1()
-                    .w_full()
-                    .p_4()
-                    .child(self.key.as_str().to_owned()),
-            )
+            .child(div().flex_1().w_full().p_4().child(title))
     }
 }
 
 
 #[cfg(windows)]
-fn build_initial_layout(metrics: DockMetrics) -> Result<Layout, String> {
-    let constraints = panel_constraints();
-    let descriptors = ["layers", "color", "properties", "history"]
-        .into_iter()
-        .map(|key| {
-            PanelKey::new(key)
-                .map(|key| (key, constraints))
-                .map_err(|error| format!("invalid built-in panel key '{key}': {error}"))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+fn build_initial_layout(
+    metrics: DockMetrics,
+    window_bounds: [Bounds<Pixels>; 2],
+) -> Result<(Layout, [PanelBinding; 2]), String> {
+    let [layers_bounds, properties_bounds] = window_bounds;
+    let mut layout = Layout::new(Profile::Generic);
 
-    create_initial_layout(Profile::Photoshop, &descriptors, metrics)
-        .map_err(|error| error.to_string())
+    let layers = create_floating_panel_tree(
+        &mut layout,
+        PanelKind::Layers,
+        DockSide::Left,
+        layers_bounds,
+        &metrics,
+    )?;
+    let properties = create_floating_panel_tree(
+        &mut layout,
+        PanelKind::Properties,
+        DockSide::Right,
+        properties_bounds,
+        &metrics,
+    )?;
+
+    layout
+        .validate(&metrics)
+        .map_err(|errors| format!("dock-core rejected the initial panel trees: {errors:?}"))?;
+
+    Ok((layout, [layers, properties]))
+}
+
+#[cfg(windows)]
+fn create_floating_panel_tree(
+    layout: &mut Layout,
+    kind: PanelKind,
+    side: DockSide,
+    window_bounds: Bounds<Pixels>,
+    metrics: &DockMetrics,
+) -> Result<PanelBinding, String> {
+    let key = PanelKey::new(kind.key())
+        .map_err(|error| format!("invalid panel key '{}': {error}", kind.key()))?;
+
+    layout
+        .apply(
+            DockCommand::OpenPanel {
+                key: key.clone(),
+                constraints: panel_constraints(),
+                target: Some(DropTarget::MainColumn { side, index: 0 }),
+            },
+            metrics,
+        )
+        .map_err(|error| format!("could not create panel '{}': {error}", kind.key()))?;
+
+    let root = layout
+        .main_area(side)
+        .map(|area| area.root)
+        .ok_or_else(|| format!("dock-core did not create the {:?} panel area", side))?;
+    let panel_id = layout
+        .panel_instances()
+        .find_map(|(panel_id, instance)| (instance.key == key).then_some(panel_id))
+        .ok_or_else(|| format!("dock-core did not register panel '{}'", kind.key()))?;
+
+    layout
+        .apply(
+            DockCommand::Float {
+                node: root,
+                bounds: core_bounds(&window_bounds),
+            },
+            metrics,
+        )
+        .map_err(|error| format!("could not float panel '{}': {error}", kind.key()))?;
+
+    let floating_group_id = layout
+        .floating_groups()
+        .find_map(|(group_id, floating)| {
+            layout
+                .dock_area(floating.area)
+                .is_some_and(|area| area.root == root)
+                .then_some(group_id)
+        })
+        .ok_or_else(|| format!("dock-core did not create a floating group for '{}'", kind.key()))?;
+
+    let is_expected_tree = match layout.node(root) {
+        Some(Node::Column(column)) if column.groups.len() == 1 => {
+            match layout.node(column.groups[0]) {
+                Some(Node::Tabs(tabs)) if tabs.children.len() == 1 => {
+                    matches!(
+                        layout.node(tabs.children[0]),
+                        Some(Node::Panel(panel)) if panel.panel_id == panel_id
+                    )
+                }
+                _ => false,
+            }
+        }
+        _ => false,
+    };
+    if !is_expected_tree {
+        return Err(format!(
+            "dock-core created an unexpected tree for '{}'; expected Column -> Tabs -> Panel",
+            kind.key()
+        ));
+    }
+
+    Ok(PanelBinding {
+        kind,
+        panel_id,
+        floating_group_id,
+        window_bounds,
+    })
+}
+
+#[cfg(windows)]
+fn core_bounds(bounds: &Bounds<Pixels>) -> Rect {
+    Rect::new(
+        Point::new(bounds.origin.x.as_f32(), bounds.origin.y.as_f32()),
+        Size::new(
+            bounds.size.width.as_f32(),
+            bounds.size.height.as_f32(),
+        ),
+    )
 }
 
 fn panel_constraints() -> PanelConstraints {
@@ -555,232 +722,5 @@ fn panel_title(key: &str) -> &str {
         "properties" => "Свойства",
         "history" => "История",
         other => other,
-    }
-}
-
-fn node_title(layout: &Layout, node_id: NodeId) -> String {
-    match layout.node(node_id) {
-        Some(Node::Panel(panel)) => layout
-            .panel_instance(panel.panel_id)
-            .map(|instance| panel_title(instance.key.as_str()).to_owned())
-            .unwrap_or_else(|| "Неизвестная панель".to_owned()),
-        Some(Node::Tabs(_)) => "Группа".to_owned(),
-        Some(Node::Column(_)) => "Колонка".to_owned(),
-        Some(Node::Split(_)) => "Разделение".to_owned(),
-        None => "Неизвестный узел".to_owned(),
-    }
-}
-
-fn render_layout_node(
-    layout: &Layout,
-    node_id: NodeId,
-    owner: WeakEntity<MainWindow>,
-) -> AnyElement {
-    let Some(node) = layout.node(node_id) else {
-        return div()
-            .p_2()
-            .text_color(rgb(0xf08a8a))
-            .child("Узел дерева не найден")
-            .into_any_element();
-    };
-
-    match node {
-        Node::Column(column) => div()
-            .flex()
-            .flex_col()
-            .w(px(column.width))
-            .h_full()
-            .gap_2()
-            .p_2()
-            .bg(rgb(0x262c33))
-            .border_l_1()
-            .border_color(rgb(0x414a55))
-            .children(
-                column
-                    .groups
-                    .iter()
-                    .map(|child| render_layout_node(layout, *child, owner.clone())),
-            )
-            .into_any_element(),
-        Node::Tabs(tabs) => {
-            let collapsed = tabs.collapsed;
-            let tab_headers = tabs.children.iter().enumerate().map(|(index, child)| {
-                let title = node_title(layout, *child);
-                let title = if collapsed && index == 0 {
-                    format!("▸ {title}")
-                } else {
-                    title
-                };
-                let active = index == tabs.active_index;
-                let panel_id = match layout.node(*child) {
-                    Some(Node::Panel(panel)) => Some(panel.panel_id),
-                    _ => None,
-                };
-
-                let tab = div()
-                    .id(format!("core-tab-{node_id:?}-{index}"))
-                    .px_2()
-                    .py_1()
-                    .rounded_sm()
-                    .bg(if active {
-                        rgb(0x465260)
-                    } else {
-                        rgb(0x303841)
-                    })
-                    .text_color(if active {
-                        rgb(0xf0f2f5)
-                    } else {
-                        rgb(0xaab4c0)
-                    })
-                    .child(title);
-
-                if let Some(panel_id) = panel_id {
-                    let tab_owner = owner.clone();
-                    let close_owner = owner.clone();
-                    let tab = tab
-                        .cursor_pointer()
-                        .hover(|style| style.bg(rgb(0x596777)))
-                        .on_click(move |event, _, cx| {
-                            let command = if event.click_count() >= 2 {
-                                DockCommand::CollapseGroup {
-                                    group: node_id,
-                                    collapsed: !collapsed,
-                                }
-                            } else {
-                                DockCommand::ActivateTab {
-                                    group: node_id,
-                                    panel: panel_id,
-                                }
-                            };
-
-                            match tab_owner.update(cx, |this, cx| {
-                                this.apply_layout_command(command, cx)
-                            }) {
-                                Ok(Ok(())) => {}
-                                Ok(Err(error)) => {
-                                    eprintln!("Could not update dock tab group: {error}");
-                                }
-                                Err(error) => {
-                                    eprintln!("Could not access the dock layout: {error:?}");
-                                }
-                            }
-                        });
-
-                    let close_button = div()
-                        .id(format!("close-core-tab-{node_id:?}-{index}"))
-                        .px_1()
-                        .rounded_sm()
-                        .text_color(rgb(0xaab4c0))
-                        .cursor_pointer()
-                        .hover(|style| style.bg(rgb(0x596777)))
-                        .on_click(move |_, _, cx| {
-                            match close_owner.update(cx, |this, cx| {
-                                this.apply_layout_command(
-                                    DockCommand::ClosePanel { panel: panel_id },
-                                    cx,
-                                )
-                            }) {
-                                Ok(Ok(())) => {}
-                                Ok(Err(error)) => {
-                                    eprintln!("Could not close dock tab: {error}");
-                                }
-                                Err(error) => {
-                                    eprintln!("Could not access the dock layout: {error:?}");
-                                }
-                            }
-                        })
-                        .child("×");
-
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_1()
-                        .child(tab)
-                        .child(close_button)
-                        .into_any_element()
-                } else {
-                    tab.into_any_element()
-                }
-            });
-
-            let header = div()
-                .flex()
-                .items_center()
-                .gap_1()
-                .w_full()
-                .px_2()
-                .py_2()
-                .bg(rgb(0x2b323a))
-                .children(tab_headers);
-
-            let group = div()
-                .flex()
-                .flex_col()
-                .w_full()
-                .bg(rgb(0x292f37))
-                .border_b_1()
-                .border_color(rgb(0x414a55))
-                .child(header);
-
-            let group = if collapsed { group } else { group.flex_1() };
-
-            if collapsed {
-                group.into_any_element()
-            } else {
-                let content = tabs
-                    .active_child()
-                    .map(|child| render_layout_node(layout, child, owner.clone()))
-                    .unwrap_or_else(|| {
-                        div()
-                            .flex_1()
-                            .p_3()
-                            .text_color(rgb(0xaab4c0))
-                            .child("Пустая группа")
-                            .into_any_element()
-                    });
-
-                group.child(content).into_any_element()
-            }
-        }
-        Node::Panel(panel) => {
-            let title = layout
-                .panel_instance(panel.panel_id)
-                .map(|instance| panel_title(instance.key.as_str()))
-                .unwrap_or("Неизвестная панель");
-
-            div()
-                .flex()
-                .flex_col()
-                .flex_1()
-                .w_full()
-                .p_3()
-                .gap_2()
-                .text_color(rgb(0xe8ebef))
-                .child(div().text_color(rgb(0xf0f2f5)).child(title.to_owned()))
-                .child(
-                    div()
-                        .text_color(rgb(0xaab4c0))
-                        .child(format!("Содержимое панели «{title}»")),
-                )
-                .into_any_element()
-        }
-        Node::Split(split) => {
-            let container = match split.axis {
-                Axis::X => div().flex().flex_row(),
-                Axis::Y => div().flex().flex_col(),
-            };
-
-            container
-                .flex_1()
-                .size_full()
-                .gap_2()
-                .children(
-                    split
-                        .children
-                        .iter()
-                        .map(|child| render_layout_node(layout, *child, owner.clone())),
-                )
-                .into_any_element()
-        }
     }
 }
