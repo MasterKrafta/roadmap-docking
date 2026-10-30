@@ -674,13 +674,9 @@ impl MainWindow {
                 }
             }
         }) {
-            Ok(Ok(docked)) => docked,
-            Ok(Err(error)) => {
-                eprintln!("Dock core rejected the panel drop: {error}");
-                false
-            }
+            Ok(docked) => docked,
             Err(error) => {
-                eprintln!("Could not update the dock layout after a panel drop: {error:?}");
+                eprintln!("Could not apply the panel drop: {error}");
                 false
             }
         };
