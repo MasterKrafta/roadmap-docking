@@ -124,10 +124,10 @@ impl MainWindow {
                         "restored workspace could not be installed; using initial layout"
                     );
                     workspace_load_failed = true;
-                    DockController::new_initial(&theme)?
+                    DockController::new_empty(&theme)?
                 }
             },
-            Ok(None) => DockController::new_initial(&theme)?,
+            Ok(None) => DockController::new_empty(&theme)?,
             Err(error) => {
                 tracing::warn!(
                     path = workspace_path.map_or_else(
@@ -138,7 +138,7 @@ impl MainWindow {
                     "workspace could not be loaded; using initial layout without enabling saves"
                 );
                 workspace_load_failed = true;
-                DockController::new_initial(&theme)?
+                DockController::new_empty(&theme)?
             }
         };
 

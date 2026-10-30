@@ -3,9 +3,11 @@ use std::collections::{HashMap, HashSet};
 use dock_core::{
     CommandError, CommandOutcome, ComputeRectsError, DockCommand, DockMetrics, DockSide,
     DragDropAction, DragDropRequest, DragHandle, DragPayload, DragSession as CoreDragSession,
-    DragState, DropSource, DropTarget, DropZone, FloatingGroupId, InitialLayoutError, Layout, Node,
-    NodeId, PanelId, Point, Profile, Rect, ResizeEdge, ValidationError, create_initial_layout,
+    DragState, DropSource, DropTarget, FloatingGroupId, Layout, Node, NodeId, Point, Profile,
+    Rect, ResizeEdge, ValidationError,
 };
+#[cfg(test)]
+use dock_core::{DropZone, InitialLayoutError, PanelId, create_initial_layout};
 use gpui::ScrollHandle;
 use ui::Theme;
 
@@ -25,20 +27,27 @@ enum Session {
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum DockInitializationError {
+    #[cfg(test)]
     #[error(transparent)]
     InitialLayout(#[from] InitialLayoutError),
+    #[error("empty initial layout is invalid: {errors:?}")]
+    InvalidInitialLayout { errors: Vec<ValidationError> },
     #[error("restored workspace layout is invalid: {errors:?}")]
     InvalidRestoredLayout { errors: Vec<ValidationError> },
+    #[cfg(test)]
     #[error("core initial layout is inconsistent: {reason}")]
     UnexpectedCoreLayout { reason: &'static str },
+    #[cfg(test)]
     #[error("core layout does not contain panel '{key}'")]
     MissingPanelKey { key: String },
+    #[cfg(test)]
     #[error("could not {operation}: {source}")]
     CoreCommand {
         operation: &'static str,
         #[source]
         source: CommandError,
     },
+    #[cfg(test)]
     #[error("constructed core layout is invalid: {errors:?}")]
     InvalidConstructedLayout { errors: Vec<ValidationError> },
     #[error("theme is invalid: {reason}")]
@@ -60,10 +69,27 @@ pub(crate) struct DockController {
 }
 
 impl DockController {
-    /// Creates the default layout before exposing the controller to user input.
+    /// Creates a clean workspace containing only the canvas.
     ///
-    /// Initial placement commands seed the layout and intentionally do not
-    /// become undo steps; all subsequent commands use the history facade.
+    /// Panels are opened later from the Dockers menu or by host commands.
+    pub(crate) fn new_empty(theme: &Theme) -> Result<Self, DockInitializationError> {
+        theme
+            .validate()
+            .map_err(|reason| DockInitializationError::InvalidTheme { reason })?;
+
+        let metrics = dock_metrics_from_theme(theme);
+        let layout = Layout::new(Profile::Photoshop);
+        layout
+            .validate(&metrics)
+            .map_err(|errors| DockInitializationError::InvalidInitialLayout { errors })?;
+
+        Ok(Self::from_layout_and_metrics(theme, layout, metrics))
+    }
+
+    /// Creates the former demo arrangement for controller tests only.
+    ///
+    /// Its setup commands intentionally do not become undo steps.
+    #[cfg(test)]
     pub(crate) fn new_initial(theme: &Theme) -> Result<Self, DockInitializationError> {
         theme
             .validate()
@@ -1064,6 +1090,7 @@ fn filter_capture_target(
 
 /// Builds the starting arrangement inside the controller so no other module
 /// mutates a live Layout. The setup commands are deliberately outside history.
+#[cfg(test)]
 fn build_initial_layout(theme: &Theme) -> Result<(Layout, DockMetrics), DockInitializationError> {
     let metrics = dock_metrics_from_theme(theme);
     let descriptors = crate::panels::descriptors(theme);
@@ -1185,6 +1212,7 @@ fn build_initial_layout(theme: &Theme) -> Result<(Layout, DockMetrics), DockInit
     Ok((layout, metrics))
 }
 
+#[cfg(test)]
 fn panel_id_for_key(layout: &Layout, key: &str) -> Result<PanelId, DockInitializationError> {
     layout
         .panel_instances()
@@ -1388,3 +1416,32 @@ mod floating_resize_anchor_tests {
 #[cfg(test)]
 #[path = "controller_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod empty_layout_tests {
+    use super::DockController;
+    use crate::FrameGeometry;
+    use dock_core::{Point, Profile, Rect, Size};
+    use ui::Theme;
+
+    #[test]
+    fn empty_startup_layout_keeps_canvas_and_has_no_panels_or_dock_areas() {
+        let theme = Theme::default();
+        let controller = DockController::new_empty(&theme).unwrap();
+
+        assert_eq!(controller.layout().profile(), Profile::Photoshop);
+        assert_eq!(controller.layout().panel_instances().count(), 0);
+        assert_eq!(controller.layout().nodes().count(), 0);
+        assert_eq!(controller.layout().dock_areas().count(), 0);
+        assert_eq!(controller.layout().floating_groups().count(), 0);
+
+        let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
+        let frame =
+            FrameGeometry::compute(controller.layout(), viewport, controller.metrics()).unwrap();
+
+        assert!(frame.rects().canvas.is_some());
+        assert!(frame.rects().columns.is_empty());
+        assert!(frame.rects().panels.is_empty());
+        assert!(frame.rects().floating_groups.is_empty());
+    }
+}
