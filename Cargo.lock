@@ -129,7 +129,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 name = "app"
 version = "0.1.0"
 dependencies = [
- "dock-gpui",
+ "dock-experiment",
 ]
 
 [[package]]
@@ -1068,12 +1068,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "dock-experiment"
+version = "0.1.0"
+dependencies = [
+ "dock-core",
+ "gpui",
+ "gpui_platform",
+ "raw-window-handle",
+ "windows",
+]
+
+[[package]]
 name = "dock-gpui"
 version = "0.1.0"
 dependencies = [
  "dock-core",
  "gpui",
  "gpui_platform",
+ "platform",
  "slotmap",
  "thiserror",
  "tracing",
