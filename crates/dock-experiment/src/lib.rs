@@ -377,7 +377,7 @@ impl MainWindow {
             if let Some(binding) = self
                 .panel_bindings
                 .iter_mut()
-                .find(|binding| binding.floating_group_id == group)
+                .find(|binding| binding.floating_group_id == Some(group))
             {
                 binding.window_bounds = native_bounds;
             }
@@ -419,7 +419,7 @@ impl MainWindow {
         if let Some(binding) = self
             .panel_bindings
             .iter_mut()
-            .find(|binding| binding.floating_group_id == group)
+            .find(|binding| binding.floating_group_id == Some(group))
         {
             binding.window_bounds = native_bounds;
         }
