@@ -1,8 +1,8 @@
 //! Windows-specific operations for GPUI-backed native windows.
 //!
 //! Call these functions on the UI thread and only while the source GPUI windows
-//! remain alive. This module deliberately does not include the example's
-//! high-resolution timer or its private GPUI redraw-message workaround.
+//! remain alive. The module includes the timer-resolution setup needed by native
+//! pointer polling, but not the example's private GPUI redraw-message workaround.
 
 use gpui::Window;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
