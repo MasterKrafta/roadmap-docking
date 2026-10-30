@@ -3,7 +3,7 @@ use crate::dock::resize_session::StartGeometry;
 use crate::requests::ResizeHandle;
 use dock_core::{
     Axis, ColumnMode, DockCommand, DockSide, DragDropAction, DragDropRequest, DragHandle,
-    DragPayload, DropTarget, Node, NodeId, Point, Profile, Rect, Size,
+    DragPayload, DropTarget, DropZone, Node, NodeId, Point, Profile, Rect, Size,
 };
 use slotmap::Key;
 use ui::Theme;
@@ -1869,6 +1869,189 @@ fn floating_capture_drag_resolves_dock_target_and_docks_entire_window() {
     assert!(controller.redo().unwrap());
     assert_eq!(controller.layout().floating_groups().count(), 0);
     assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+}
+
+#[test]
+fn floating_vertical_stack_capture_uses_core_targets_and_docks_the_whole_window() {
+    let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+    let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
+
+    let source_groups = controller
+        .layout()
+        .nodes()
+        .find_map(|(_, node)| match node {
+            Node::Column(column) if column.groups.len() == 2 => Some(column.groups.clone()),
+            _ => None,
+        })
+        .expect("initial Photoshop layout should contain a two-group column");
+    let first_bounds = Rect::new(Point::new(80.0, 60.0), Size::new(500.0, 400.0));
+    let second_bounds = Rect::new(Point::new(620.0, 90.0), Size::new(500.0, 400.0));
+
+    controller
+        .apply(DockCommand::Float {
+            node: source_groups[0],
+            bounds: first_bounds,
+        })
+        .unwrap();
+    controller
+        .apply(DockCommand::Float {
+            node: source_groups[1],
+            bounds: second_bounds,
+        })
+        .unwrap();
+
+    let floating_roots = controller
+        .layout()
+        .floating_groups()
+        .filter_map(|(id, floating)| {
+            controller
+                .layout()
+                .dock_area(floating.area)
+                .map(|area| (id, area.root))
+        })
+        .collect::<Vec<_>>();
+    let first_floating = floating_roots
+        .iter()
+        .find_map(|(id, root)| (*root == source_groups[0]).then_some(*id))
+        .expect("first detached group should have its own window");
+    let second_floating = floating_roots
+        .iter()
+        .find_map(|(id, root)| (*root == source_groups[1]).then_some(*id))
+        .expect("second detached group should have its own window");
+
+    // Stack the second floating Tabs group below the first one.
+    controller
+        .apply(DockCommand::DockFloating {
+            group: second_floating,
+            target: DropTarget::GroupEdge {
+                group: source_groups[0],
+                zone: DropZone::Bottom,
+            },
+        })
+        .unwrap();
+    controller.workspace.history.clear();
+
+    let (floating_id, bounds) = controller
+        .layout()
+        .floating_groups()
+        .next()
+        .map(|(id, floating)| (id, floating.bounds))
+        .expect("the stacked composition should remain one floating window");
+    let root = controller
+        .layout()
+        .floating_group(floating_id)
+        .and_then(|floating| controller.layout().dock_area(floating.area))
+        .map(|area| area.root)
+        .expect("the floating window should have a root");
+    let Some(Node::Split(split)) = controller.layout().node(root) else {
+        panic!("stacking two Tabs groups should create a Split root");
+    };
+    assert_eq!(split.axis, Axis::Y);
+    assert_eq!(split.children, source_groups);
+    assert_eq!(
+        crate::tree_query::floating_capture_source(controller.layout(), root),
+        Some(dock_core::DropSource::Group {
+            group: source_groups[0],
+        }),
+        "the upper Tabs group supplies hit-test geometry, not the drag payload"
+    );
+
+    let frame = controller.frame(viewport).unwrap();
+    let origin = Point::new(
+        bounds.origin.x + bounds.size.width - 12.0,
+        bounds.origin.y + controller.metrics().header_height / 2.0,
+    );
+    let activation = Point::new(
+        origin.x + controller.metrics().drag_threshold + 16.0,
+        origin.y,
+    );
+    controller
+        .begin_drag(
+            DragPayload::FloatingGroup { group: floating_id },
+            DragHandle::FloatingCapture,
+            origin,
+        )
+        .unwrap();
+    controller
+        .update_drag(activation, viewport, Some(&frame))
+        .unwrap();
+
+    let overlay = controller
+        .drag_overlay()
+        .expect("a valid stack capture should show drop zones");
+    assert!(
+        overlay.zones.iter().all(|zone| matches!(
+            zone.target,
+            DropTarget::MainColumn { .. }
+                | DropTarget::ColumnSlot { .. }
+                | DropTarget::RailSlot { .. }
+        )),
+        "Split(Y) capture must not advertise targets rejected by Core"
+    );
+    let zone = overlay
+        .zones
+        .iter()
+        .find(|zone| matches!(zone.target, DropTarget::ColumnSlot { .. }))
+        .copied()
+        .expect("a main column should expose an append slot for the stack");
+
+    let release = Point::new(
+        zone.rect.origin.x + zone.rect.size.width / 2.0,
+        zone.rect.origin.y + zone.rect.size.height / 2.0,
+    );
+    controller.update_drag(release, viewport, None).unwrap();
+    assert_eq!(
+        controller.drag_overlay().unwrap().preview.target,
+        Some(zone.target)
+    );
+    let request = controller
+        .finish_drag(release, viewport)
+        .unwrap()
+        .expect("release over a main column slot should emit a request");
+    assert_eq!(request.handle, DragHandle::FloatingCapture);
+    assert_eq!(
+        request.payload,
+        DragPayload::FloatingGroup { group: floating_id },
+        "the request keeps the whole floating-window payload"
+    );
+    assert_eq!(request.target, Some(zone.target));
+
+    assert_eq!(
+        controller.commit_drop_request(request, viewport).unwrap(),
+        DragDropAction::Command(DockCommand::DockFloating {
+            group: floating_id,
+            target: zone.target,
+        })
+    );
+    assert_eq!(controller.layout().floating_groups().count(), 0);
+    assert_eq!(controller.layout().panel_instances().count(), 4);
+    assert_eq!(controller.workspace.history.undo_len(), 1);
+    assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+
+    assert!(controller.undo().unwrap());
+    let (restored_id, restored_root) = controller
+        .layout()
+        .floating_groups()
+        .next()
+        .and_then(|(id, floating)| {
+            controller
+                .layout()
+                .dock_area(floating.area)
+                .map(|area| (id, area.root))
+        })
+        .expect("undo should restore the complete floating stack");
+    assert!(matches!(
+        controller.layout().node(restored_root),
+        Some(Node::Split(split)) if split.axis == Axis::Y && split.children.len() == 2
+    ));
+    assert_eq!(controller.layout().floating_groups().count(), 1);
+    assert_eq!(controller.workspace.history.undo_len(), 0);
+    assert!(controller.redo().unwrap());
+    assert_eq!(controller.layout().floating_groups().count(), 0);
+    assert!(controller.layout().panel_instances().count() == 4);
+    assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+
+    let _ = (first_floating, restored_id);
 }
 
 #[test]
