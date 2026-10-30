@@ -1,8 +1,8 @@
 //! Minimal experimental docking application entry point.
 
-use dock_core::{Axis, DockSide, Layout, Node, NodeId, PanelKey};
+use dock_core::{Axis, DockCommand, DockMetrics, DockSide, Layout, Node, NodeId, PanelKey};
 #[cfg(windows)]
-use dock_core::{create_initial_layout, DockMetrics, PanelConstraints, Profile, Size};
+use dock_core::{create_initial_layout, PanelConstraints, Profile, Size};
 use gpui::{
     AnyElement, AppContext, Bounds, Context, IntoElement, Render, Subscription, WeakEntity, Window,
     WindowBounds, WindowControlArea, WindowHandle, WindowKind, WindowOptions, WindowVisibility, div,
@@ -31,7 +31,8 @@ pub fn run() {
 #[cfg(windows)]
 fn run_windows() {
     application().run(|cx: &mut App| {
-        let layout = match build_initial_layout() {
+        let metrics = DockMetrics::default();
+        let layout = match build_initial_layout(metrics) {
             Ok(layout) => layout,
             Err(error) => {
                 eprintln!("Could not build the initial dock tree: {error}");
@@ -52,7 +53,7 @@ fn run_windows() {
         };
 
         let main_window = match cx.open_window(options, move |window, cx| {
-            let main_window = cx.new(|_| MainWindow::new(layout));
+            let main_window = cx.new(|_| MainWindow::new(layout, metrics));
             let weak_main_window = main_window.downgrade();
 
             window.on_window_should_close(cx, move |_window, app| {
@@ -98,6 +99,7 @@ fn run_windows() {
 
 pub(crate) struct MainWindow {
     layout: Layout,
+    metrics: DockMetrics,
     floating_panels: Vec<WindowHandle<FloatingPanel>>,
     panels_minimized_by_main: Vec<WindowHandle<FloatingPanel>>,
     visibility_subscription: Option<Subscription>,
@@ -167,9 +169,10 @@ impl MainWindow {
         }
     }
 
-    pub(crate) fn new(layout: Layout) -> Self {
+    pub(crate) fn new(layout: Layout, metrics: DockMetrics) -> Self {
         Self {
             layout,
+            metrics,
             floating_panels: Vec::new(),
             panels_minimized_by_main: Vec::new(),
             visibility_subscription: None,
@@ -177,6 +180,16 @@ impl MainWindow {
             #[cfg(windows)]
             native_owner: None,
         }
+    }
+
+    fn apply_layout_command(
+        &mut self,
+        command: DockCommand,
+        cx: &mut Context<Self>,
+    ) -> Result<(), dock_core::CommandError> {
+        self.layout.apply(command, &self.metrics)?;
+        cx.notify();
+        Ok(())
     }
 
     /// Opens the panels that should be visible when the experiment starts.
@@ -370,7 +383,7 @@ impl Render for MainWindow {
                     .child(
                         self.layout
                             .main_area(DockSide::Right)
-                            .map(|area| render_layout_node(&self.layout, area.root))
+                            .map(|area| render_layout_node(&self.layout, area.root, owner.clone()))
                             .unwrap_or_else(|| {
                                 div()
                                     .w(px(280.0))
@@ -482,7 +495,7 @@ impl Render for FloatingPanel {
 
 
 #[cfg(windows)]
-fn build_initial_layout() -> Result<Layout, String> {
+fn build_initial_layout(metrics: DockMetrics) -> Result<Layout, String> {
     let constraints = PanelConstraints::new(
         Size::new(120.0, 80.0),
         Size::new(280.0, 220.0),
@@ -498,7 +511,7 @@ fn build_initial_layout() -> Result<Layout, String> {
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    create_initial_layout(Profile::Photoshop, &descriptors, DockMetrics::default())
+    create_initial_layout(Profile::Photoshop, &descriptors, metrics)
         .map_err(|error| error.to_string())
 }
 
@@ -525,7 +538,11 @@ fn node_title(layout: &Layout, node_id: NodeId) -> String {
     }
 }
 
-fn render_layout_node(layout: &Layout, node_id: NodeId) -> AnyElement {
+fn render_layout_node(
+    layout: &Layout,
+    node_id: NodeId,
+    owner: WeakEntity<MainWindow>,
+) -> AnyElement {
     let Some(node) = layout.node(node_id) else {
         return div()
             .p_2()
@@ -549,35 +566,67 @@ fn render_layout_node(layout: &Layout, node_id: NodeId) -> AnyElement {
                 column
                     .groups
                     .iter()
-                    .map(|child| render_layout_node(layout, *child)),
+                    .map(|child| render_layout_node(layout, *child, owner.clone())),
             )
             .into_any_element(),
         Node::Tabs(tabs) => {
             let tab_headers = tabs.children.iter().enumerate().map(|(index, child)| {
                 let title = node_title(layout, *child);
-                if index == tabs.active_index {
-                    div()
-                        .px_2()
-                        .py_1()
-                        .rounded_sm()
-                        .bg(rgb(0x465260))
-                        .text_color(rgb(0xf0f2f5))
-                        .child(title)
+                let active = index == tabs.active_index;
+                let panel_id = match layout.node(*child) {
+                    Some(Node::Panel(panel)) => Some(panel.panel_id),
+                    _ => None,
+                };
+
+                let tab = div()
+                    .id(format!("core-tab-{node_id:?}-{index}"))
+                    .px_2()
+                    .py_1()
+                    .rounded_sm()
+                    .bg(if active {
+                        rgb(0x465260)
+                    } else {
+                        rgb(0x303841)
+                    })
+                    .text_color(if active {
+                        rgb(0xf0f2f5)
+                    } else {
+                        rgb(0xaab4c0)
+                    })
+                    .child(title);
+
+                if let Some(panel_id) = panel_id {
+                    let tab_owner = owner.clone();
+                    tab.cursor_pointer()
+                        .hover(|style| style.bg(rgb(0x596777)))
+                        .on_click(move |_, _, cx| {
+                            match tab_owner.update(cx, |this, cx| {
+                                this.apply_layout_command(
+                                    DockCommand::ActivateTab {
+                                        group: node_id,
+                                        panel: panel_id,
+                                    },
+                                    cx,
+                                )
+                            }) {
+                                Ok(Ok(())) => {}
+                                Ok(Err(error)) => {
+                                    eprintln!("Could not activate dock tab: {error}");
+                                }
+                                Err(error) => {
+                                    eprintln!("Could not access the dock layout: {error:?}");
+                                }
+                            }
+                        })
                         .into_any_element()
                 } else {
-                    div()
-                        .px_2()
-                        .py_1()
-                        .rounded_sm()
-                        .bg(rgb(0x303841))
-                        .text_color(rgb(0xaab4c0))
-                        .child(title)
-                        .into_any_element()
+                    tab.into_any_element()
                 }
             });
+
             let content = tabs
                 .active_child()
-                .map(|child| render_layout_node(layout, child))
+                .map(|child| render_layout_node(layout, child, owner.clone()))
                 .unwrap_or_else(|| {
                     div()
                         .flex_1()
@@ -645,7 +694,7 @@ fn render_layout_node(layout: &Layout, node_id: NodeId) -> AnyElement {
                     split
                         .children
                         .iter()
-                        .map(|child| render_layout_node(layout, *child)),
+                        .map(|child| render_layout_node(layout, *child, owner.clone())),
                 )
                 .into_any_element()
         }
