@@ -1,4 +1,4 @@
-//! Rendering for the independent dock tree.
+//! Rendering for dock layouts, floating compositions, and interaction previews.
 use std::rc::Rc;
 
 use dock_core::{Axis, Point, Rect, Size};
@@ -341,7 +341,7 @@ pub(super) fn render(
                 .bg(rgb(theme.colors.toolbar_background))
                 .border_1()
                 .border_color(rgb(theme.colors.border))
-                .child("NEXT DOCK  /  independent model prototype"),
+                .child("DOCK  /  workspace"),
         )
         .child(body);
 

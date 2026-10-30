@@ -1,5 +1,5 @@
 //! Tab strip, fixed-width active tab, compressible inactive tabs,
-//! drag zone, and group menu for the next dock implementation.
+//! drag zone, and group menu for the dock implementation.
 
 use dock_core::{Point, Rect, Size};
 use gpui::{

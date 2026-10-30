@@ -1,4 +1,4 @@
-//! Minimal independent tree model used by the next dock prototype.
+//! Layout tree and composition state for the GPUI docking implementation.
 
 /// Orientation of a split between dock nodes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -21,7 +21,7 @@ pub(super) struct TabGroup {
     pub(super) active: usize,
 }
 
-/// A node in the independent dock layout.
+/// A node in the dock layout tree.
 #[derive(Clone, Debug)]
 pub(super) enum DockNode {
     /// A split containing any number of adjacent children.
@@ -44,7 +44,7 @@ pub(super) enum NodePathStep {
     ColumnContent,
 }
 
-/// Owns only the new prototype tree; it has no dependency on the previous dock model.
+/// Owns one dock layout tree and the operations that mutate it.
 #[derive(Clone, Debug)]
 pub(super) struct DockLayout {
     pub(super) root: DockNode,
