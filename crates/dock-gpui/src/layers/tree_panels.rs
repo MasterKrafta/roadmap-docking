@@ -117,7 +117,7 @@ mod tests {
     use super::supported_splitter_handle;
     use crate::dock::DockController;
     use crate::requests::ResizeHandle;
-    use dock_core::{Axis, DockCommand, DockSide, Node, Point, Rect, Size};
+    use dock_core::{Axis, DockCommand, DockSide, Node, Point, Profile, Rect, Size};
     use ui::Theme;
 
     #[test]
@@ -150,7 +150,27 @@ mod tests {
 
     #[test]
     fn floating_horizontal_split_exposes_resize_handle() {
-        let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+        let theme = Theme::default();
+        let metrics = *DockController::new_initial(&theme).unwrap().metrics();
+        let descriptors = crate::panels::descriptors(&theme);
+        let mut layout = dock_core::create_initial_layout(Profile::Generic, &descriptors, metrics)
+            .expect("Generic baseline layout should be valid");
+        let root = layout.main_area(DockSide::Right).unwrap().root;
+        let group = match layout.node(root) {
+            Some(Node::Column(column)) => column.groups[0],
+            other => panic!("Generic baseline should start with a Column, got {other:?}"),
+        };
+        layout
+            .apply(
+                DockCommand::MoveGroupToMainColumn {
+                    group,
+                    side: DockSide::Right,
+                    index: 1,
+                },
+                &metrics,
+            )
+            .expect("moving a group should create a horizontal main split");
+        let mut controller = DockController::new_with_layout(&theme, layout).unwrap();
         let owner = controller.layout().main_area(DockSide::Right).unwrap().root;
         assert!(matches!(
             controller.layout().node(owner),
