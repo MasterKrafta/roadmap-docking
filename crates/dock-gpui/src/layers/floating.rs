@@ -110,20 +110,16 @@ pub(crate) fn render_group(
     }
 
     if mode == FloatingGroupRenderMode::NativeWindow {
-        // Native title-bar movement is handled by the OS. When Core can express
-        // the source as one group, this capture affordance offers a direct dock-back drag.
-        let capture_drag = match layout.node(area.root) {
-            Some(Node::Tabs(_) | Node::Panel(_)) => Some((
-                DragPayload::FloatingGroup { group: floating_id },
-                DragHandle::FloatingCapture,
-            )),
-            Some(Node::Column(column)) if column.groups.len() == 1 => {
-                let group = column.groups[0];
-                matches!(layout.node(group), Some(Node::Tabs(_)))
-                    .then_some((DragPayload::Group { group }, DragHandle::GroupGrip))
-            }
-            _ => None,
-        };
+        // Native title-bar movement is handled by the OS. The capture button
+        // always carries the complete FloatingGroup; a representative Tabs/Panel
+        // node is used only to calculate Core's legal drop zones.
+        let capture_drag = crate::tree_query::floating_capture_source(layout, area.root)
+            .map(|_| {
+                (
+                    DragPayload::FloatingGroup { group: floating_id },
+                    DragHandle::FloatingCapture,
+                )
+            });
         if let Some((payload, handle)) = capture_drag {
             let capture_size = theme
                 .metrics
@@ -185,16 +181,13 @@ pub(crate) fn render_group(
                     DragPayload::FloatingGroup { group: floating_id },
                     DragHandle::FloatingTitle,
                 ),
-                on_capture_drag_start: matches!(
-                    layout.node(area.root),
-                    Some(Node::Tabs(_) | Node::Panel(_))
-                )
-                .then(|| {
-                    host.drag_start(
-                        DragPayload::FloatingGroup { group: floating_id },
-                        DragHandle::FloatingCapture,
-                    )
-                }),
+                on_capture_drag_start: crate::tree_query::floating_capture_source(layout, area.root)
+                    .map(|_| {
+                        host.drag_start(
+                            DragPayload::FloatingGroup { group: floating_id },
+                            DragHandle::FloatingCapture,
+                        )
+                    }),
                 on_close: Some(host.close_floating(floating_id)),
                 on_collapse,
                 collapse_label,
