@@ -177,6 +177,13 @@ struct ExternalPanelDrag {
     cursor_offset: (i32, i32),
 }
 
+#[cfg(windows)]
+enum ExternalPanelPoll {
+    Continue,
+    Stop,
+    Docked,
+}
+
 impl PanelKind {
     const fn key(self) -> &'static str {
         match self {
@@ -574,25 +581,38 @@ impl MainWindow {
         // Polling continues even after the pointer leaves the floating window.
         // The panel itself is moved by SetWindowPos, so there is no competing
         // Win32 caption-move loop.
+        let main_window_handle = self.main_window_handle;
         cx.spawn(async move |this, cx| loop {
             cx.background_executor()
                 .timer(Duration::from_millis(4))
                 .await;
 
-            if !matches!(
-                this.update(cx, |main, cx| main.poll_external_panel_drag(cx)),
-                Ok(true)
-            ) {
-                break;
+            // Finish the MainWindow entity update before activating the native
+            // main window. Calling its WindowHandle::update from inside this
+            // closure would attempt to update the same entity recursively.
+            match this.update(cx, |main, cx| main.poll_external_panel_drag(cx)) {
+                Ok(ExternalPanelPoll::Continue) => {}
+                Ok(ExternalPanelPoll::Docked) => {
+                    if let Some(main_window) = main_window_handle
+                        && let Err(error) =
+                            main_window.update(cx, |_, window, _| window.activate_window())
+                    {
+                        eprintln!(
+                            "Could not activate the main window after docking: {error:?}"
+                        );
+                    }
+                    break;
+                }
+                Ok(ExternalPanelPoll::Stop) | Err(_) => break,
             }
         })
         .detach();
     }
 
     #[cfg(windows)]
-    fn poll_external_panel_drag(&mut self, cx: &mut Context<Self>) -> bool {
+    fn poll_external_panel_drag(&mut self, cx: &mut Context<Self>) -> ExternalPanelPoll {
         let Some(drag) = self.external_panel_drag.as_ref() else {
-            return false;
+            return ExternalPanelPoll::Stop;
         };
         let native_window = drag.native_window;
         let (offset_x, offset_y) = drag.cursor_offset;
@@ -604,11 +624,11 @@ impl MainWindow {
             self.external_panel_drag = None;
             self.sync_floating_panel_after_drag(panel_id, cx);
             cx.notify();
-            return false;
+            return ExternalPanelPoll::Stop;
         };
 
         if !self.update_external_panel_drag(pointer, cx) {
-            return false;
+            return ExternalPanelPoll::Stop;
         }
 
         let is_dragging = self.external_panel_drag.as_ref().is_some_and(|drag| {
@@ -625,10 +645,11 @@ impl MainWindow {
         }
 
         if left_button_down {
-            true
+            ExternalPanelPoll::Continue
+        } else if self.finish_external_panel_drag(pointer, cx) {
+            ExternalPanelPoll::Docked
         } else {
-            self.finish_external_panel_drag(pointer, cx);
-            false
+            ExternalPanelPoll::Stop
         }
     }
 
@@ -729,9 +750,9 @@ impl MainWindow {
     }
 
     #[cfg(windows)]
-    fn finish_external_panel_drag(&mut self, pointer: Point, cx: &mut Context<Self>) {
+    fn finish_external_panel_drag(&mut self, pointer: Point, cx: &mut Context<Self>) -> bool {
         let Some(drag) = self.external_panel_drag.take() else {
-            return;
+            return false;
         };
 
         let panel_id = drag.panel_id;
@@ -747,7 +768,7 @@ impl MainWindow {
                     self.sync_floating_panel_after_drag(panel_id, cx);
                 }
                 cx.notify();
-                return;
+                return false;
             }
         };
 
@@ -800,17 +821,12 @@ impl MainWindow {
                     .retain(|panel| panel.window_id() != window_id);
             }
 
-            if let Some(main_window) = self.main_window_handle
-                && let Err(error) =
-                    main_window.update(cx, |_, window, _| window.activate_window())
-            {
-                eprintln!("Could not activate the main window after docking: {error:?}");
-            }
         } else if had_native_move {
             self.sync_floating_panel_after_drag(panel_id, cx);
         }
 
         cx.notify();
+        docked
     }
 
     #[cfg(windows)]
