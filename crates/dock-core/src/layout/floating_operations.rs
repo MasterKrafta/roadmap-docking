@@ -499,11 +499,7 @@ impl Layout {
             .sum::<f32>();
         let source_width = floating.bounds.size.width;
         let combined_width = main_width + source_width;
-        if !combined_width.is_finite()
-            || main_width <= 0.0
-            || source_width <= 0.0
-            || !combined_width.is_finite()
-        {
+        if !combined_width.is_finite() || main_width <= 0.0 || source_width <= 0.0 {
             return Err(CommandError::InvalidValue {
                 field: "width",
                 reason: "combined main and floating dock widths must be finite and positive",
