@@ -363,7 +363,7 @@ impl Render for MainWindow {
                     .border_color(rgb(0x414a55))
                     .child("Плавающие окна")
                     .child(menu_button(PanelKind::Layers, owner.clone()))
-                    .child(menu_button(PanelKind::Properties, owner)),
+                    .child(menu_button(PanelKind::Properties, owner.clone())),
             )
             .child(
                 div()
