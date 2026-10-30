@@ -1764,6 +1764,28 @@ fn render_core_node(
                     .text_color(rgb(0xe8ebef))
                     .child(title);
 
+                #[cfg(windows)]
+                let header = if let Some((group, panel_id)) = column
+                    .groups
+                    .first()
+                    .copied()
+                    .and_then(|group| {
+                        core_node_active_panel_id(layout, group)
+                            .map(|panel_id| (group, panel_id))
+                    })
+                {
+                    let drag_owner = owner.clone();
+                    header.on_mouse_down(MouseButton::Left, move |_, _, cx| {
+                        if let Err(error) = drag_owner.update(cx, |main, cx| {
+                            main.begin_docked_panel_drag(group, panel_id, cx);
+                        }) {
+                            eprintln!("Could not begin a column-header panel drag: {error:?}");
+                        }
+                    })
+                } else {
+                    header
+                };
+
                 column_view = column_view.child(header);
             }
 
@@ -1915,6 +1937,23 @@ fn render_core_node(
                 )
                 .into_any_element()
         }
+    }
+}
+
+fn core_node_active_panel_id(layout: &Layout, node_id: NodeId) -> Option<PanelId> {
+    match layout.node(node_id)? {
+        Node::Panel(panel) => Some(panel.panel_id),
+        Node::Tabs(tabs) => tabs
+            .active_child()
+            .and_then(|child| core_node_active_panel_id(layout, child)),
+        Node::Column(column) => column
+            .groups
+            .first()
+            .and_then(|child| core_node_active_panel_id(layout, *child)),
+        Node::Split(split) => split
+            .children
+            .first()
+            .and_then(|child| core_node_active_panel_id(layout, *child)),
     }
 }
 
