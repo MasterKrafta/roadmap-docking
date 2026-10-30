@@ -114,15 +114,9 @@ pub(super) fn items(
             );
             initial_float_bounds(source, grab, pointer, viewport, metrics).ok()
         })
-        .map(|bounds| {
-            if parent_column.is_some_and(|(_, _, count)| count > 1) {
-                DockCommand::FloatGroupAsColumn { group, bounds }
-            } else {
-                DockCommand::Float {
-                    node: group,
-                    bounds,
-                }
-            }
+        .map(|bounds| DockCommand::Float {
+            node: group,
+            bounds,
         });
     items.push(item(
         "float-group",
