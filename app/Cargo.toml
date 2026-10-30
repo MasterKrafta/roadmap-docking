@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-dock-experiment = { path = "../crates/dock-experiment" }
+dock-gpui = { path = "../crates/dock-gpui" }
 
 [lints]
 workspace = true

@@ -4,7 +4,6 @@ members = [
     "app",
     "crates/dock-core",
     "crates/dock-gpui",
-    "crates/dock-experiment",
     "crates/ui",
     "crates/platform",
 ]
