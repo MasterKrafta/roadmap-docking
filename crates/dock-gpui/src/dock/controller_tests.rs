@@ -2058,6 +2058,152 @@ fn floating_vertical_stack_capture_uses_core_targets_and_docks_the_whole_window(
 }
 
 #[test]
+fn generic_horizontal_floating_composition_capture_uses_core_main_column_target() {
+    let mut controller = generic_horizontal_split_controller();
+    let viewport = Rect::new(Point::ZERO, Size::new(2000.0, 1200.0));
+    let root = controller
+        .layout()
+        .main_area(DockSide::Right)
+        .expect("Generic horizontal split should be in the right main dock")
+        .root;
+    let source_children = match controller.layout().node(root) {
+        Some(Node::Split(split)) if split.axis == Axis::X => split.children.clone(),
+        other => panic!("Generic source should be a horizontal Column composition, got {other:?}"),
+    };
+
+    controller
+        .apply(DockCommand::Float {
+            node: root,
+            bounds: Rect::new(Point::new(120.0, 80.0), Size::new(760.0, 620.0)),
+        })
+        .unwrap();
+    controller.workspace.history.clear();
+
+    let (floating_id, floating_root) = controller
+        .layout()
+        .floating_groups()
+        .next()
+        .and_then(|(id, floating)| {
+            controller
+                .layout()
+                .dock_area(floating.area)
+                .map(|area| (id, area.root))
+        })
+        .expect("the Generic composition should be a floating window");
+    assert_eq!(floating_root, root);
+    let representative_panel = crate::tree_query::first_panel_in_subtree(
+        controller.layout(),
+        floating_root,
+    )
+    .expect("the composition should contain a panel");
+    assert_eq!(
+        crate::tree_query::floating_capture_source(controller.layout(), floating_root),
+        Some(dock_core::DropSource::Panel {
+            panel: representative_panel,
+        })
+    );
+
+    let frame = controller.frame(viewport).unwrap();
+    let bounds = controller.layout().floating_group(floating_id).unwrap().bounds;
+    let origin = Point::new(
+        bounds.origin.x + bounds.size.width - 12.0,
+        bounds.origin.y + controller.metrics().header_height / 2.0,
+    );
+    let activation = Point::new(
+        origin.x + controller.metrics().drag_threshold + 16.0,
+        origin.y,
+    );
+    controller
+        .begin_external_drag(
+            DragPayload::FloatingGroup { group: floating_id },
+            DragHandle::FloatingCapture,
+            origin,
+        )
+        .unwrap();
+    controller
+        .update_drag(activation, viewport, Some(&frame))
+        .unwrap();
+
+    let overlay = controller
+        .drag_overlay()
+        .expect("Generic composition capture should expose valid destinations");
+    assert!(
+        overlay.zones.iter().any(|zone| matches!(
+            zone.target,
+            DropTarget::MainColumn {
+                side: DockSide::Right,
+                ..
+            }
+        )),
+        "a horizontal Generic floating composition should be dockable as a main-column composition"
+    );
+    assert!(
+        overlay.zones.iter().all(|zone| {
+            let mut candidate = controller.layout().clone();
+            candidate
+                .apply(
+                    DockCommand::DockFloating {
+                        group: floating_id,
+                        target: zone.target,
+                    },
+                    controller.metrics(),
+                )
+                .is_ok()
+        }),
+        "the adapter must expose only targets accepted by Core for the whole composition"
+    );
+    let zone = overlay
+        .zones
+        .iter()
+        .find(|zone| matches!(
+            zone.target,
+            DropTarget::MainColumn {
+                side: DockSide::Right,
+                ..
+            }
+        ))
+        .copied()
+        .unwrap();
+    let release = Point::new(
+        zone.rect.origin.x + zone.rect.size.width / 2.0,
+        zone.rect.origin.y + zone.rect.size.height / 2.0,
+    );
+    controller.update_drag(release, viewport, None).unwrap();
+    let request = controller
+        .finish_drag(release, viewport)
+        .unwrap()
+        .expect("release over the main dock should emit a request");
+
+    assert_eq!(
+        controller.commit_drop_request(request, viewport).unwrap(),
+        DragDropAction::Command(DockCommand::DockFloating {
+            group: floating_id,
+            target: zone.target,
+        })
+    );
+    assert_eq!(controller.layout().floating_groups().count(), 0);
+    let main_root = controller
+        .layout()
+        .main_area(DockSide::Right)
+        .expect("docking should restore a right main area")
+        .root;
+    assert!(matches!(
+        controller.layout().node(main_root),
+        Some(Node::Split(split))
+            if split.axis == Axis::X && split.children.as_slice() == source_children.as_slice()
+    ));
+    assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+
+    assert!(controller.undo().unwrap());
+    assert_eq!(controller.layout().floating_groups().count(), 1);
+    assert!(controller.layout().main_area(DockSide::Right).is_none());
+    assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+    assert!(controller.redo().unwrap());
+    assert_eq!(controller.layout().floating_groups().count(), 0);
+    assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
+}
+
+#[test]
 fn floating_capture_docks_a_panel_root_and_records_one_undo_step() {
     let mut controller = DockController::new_initial(&Theme::default()).unwrap();
     let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
