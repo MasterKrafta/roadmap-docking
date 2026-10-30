@@ -1,11 +1,13 @@
-use dock_core::{Point, Rect, Size as CoreSize};
+use std::collections::{HashMap, HashSet};
+
+use dock_core::{ColumnMode, DockSide, Layout, Node, NodeId, Point, Rect, Size as CoreSize};
 use gpui::{
-    AnyView, App, Bounds, Context, Entity, IntoElement, ParentElement, Pixels, Render,
+    AnyView, App, Bounds, Context, Entity, IntoElement, ParentElement, Pixels, Render, ScrollHandle,
     Styled, Window, canvas, div, px, rgb,
 };
 use ui::Theme;
 
-use crate::DockController;
+use crate::{DockController, main_dock_view::{MainDockView, scroll_adjusted_hit_test_point}};
 
 /// Root composition for an application's docking workspace.
 ///
@@ -22,6 +24,8 @@ pub struct DockHost {
     toolbar: Option<AnyView>,
     options_bar: Option<AnyView>,
     canvas: Option<AnyView>,
+    /// GPUI scroll positions are transient and keyed by the Core owner NodeId.
+    column_scroll_handles: HashMap<NodeId, ScrollHandle>,
 }
 
 impl DockHost {
@@ -33,6 +37,7 @@ impl DockHost {
             toolbar: None,
             options_bar: None,
             canvas: None,
+            column_scroll_handles: HashMap::new(),
         }
     }
 
@@ -71,20 +76,63 @@ impl DockHost {
     pub fn theme(&self) -> Theme {
         self.theme
     }
+
+    /// Maps a pointer point in a scrolled main column back to Core geometry.
+    ///
+    /// Call this before DockController::hit_test for points inside the given
+    /// column. The layout rectangles themselves remain unchanged.
+    pub fn scroll_adjusted_hit_test_point(&self, column: NodeId, point: Point) -> Point {
+        let offset_y = self
+            .column_scroll_handles
+            .get(&column)
+            .map(|handle| handle.offset().y.as_f32())
+            .unwrap_or(0.0);
+        scroll_adjusted_hit_test_point(point, offset_y)
+    }
 }
 
 impl Render for DockHost {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // Subscribe to controller changes so layout/chrome commands invalidate this host.
-        let chrome = self
-            .controller
-            .read_with(cx, |controller, _| controller.layout().chrome());
+        // One read transaction produces the geometry snapshot plus the IDs/modes
+        // needed by the main-dock presentation layer. The Layout remains Core-owned.
+        let (chrome, rects, main_node_ids, main_column_ids, main_column_groups, column_modes) =
+            self.controller.update(cx, |controller, _| {
+                let rects = controller.geometry().cloned();
+                let layout = controller.layout();
+                let chrome = layout.chrome();
+                let mut main_node_ids = HashSet::new();
+                let mut main_column_ids = HashSet::new();
+                let mut main_column_groups = HashMap::new();
 
-        // The controller owns geometry caching and the Canvas-bounds update.
-        // DockHost consumes only the resulting immutable snapshot.
-        let rects = self.controller.update(cx, |controller, _| {
-            controller.geometry().cloned()
-        });
+                for side in [DockSide::Left, DockSide::Right] {
+                    if let Some(area) = layout.main_area(side) {
+                        collect_main_nodes(
+                            layout,
+                            area.root,
+                            &mut main_node_ids,
+                            &mut main_column_ids,
+                            &mut main_column_groups,
+                        );
+                    }
+                }
+
+                let column_modes = main_column_ids
+                    .iter()
+                    .filter_map(|id| match layout.node(*id) {
+                        Some(Node::Column(column)) => Some((*id, column.mode)),
+                        _ => None,
+                    })
+                    .collect::<HashMap<_, _>>();
+
+                (
+                    chrome,
+                    rects,
+                    main_node_ids,
+                    main_column_ids,
+                    main_column_groups,
+                    column_modes,
+                )
+            });
         let rects = match rects {
             Ok(rects) => Some(rects),
             Err(error) => {
@@ -92,6 +140,26 @@ impl Render for DockHost {
                 None
             }
         };
+
+        // Keep scroll state only while its Column node still owns an overflow
+        // region. Removing/replacing the Core node or resolving the overflow
+        // drops the associated GPUI handle and its transient scroll position.
+        if let Some(rects) = rects.as_ref() {
+            let overflow_columns = rects
+                .vertical_overflow
+                .iter()
+                .filter(|overflow| main_column_ids.contains(&overflow.owner))
+                .map(|overflow| overflow.owner)
+                .collect::<HashSet<_>>();
+            self.column_scroll_handles.retain(|owner, _| {
+                main_column_ids.contains(owner) && overflow_columns.contains(owner)
+            });
+            for owner in overflow_columns {
+                self.column_scroll_handles
+                    .entry(owner)
+                    .or_insert_with(ScrollHandle::new);
+            }
+        }
 
         let theme = self.theme;
         let controller_for_measurement = self.controller.clone();
@@ -198,18 +266,24 @@ impl Render for DockHost {
         if chrome.dock_visible()
             && let Some(rects) = rects.as_ref()
         {
-            // MainDockView/ColumnView will replace these base surfaces in §5.2.
-            for column in &rects.columns {
-                workspace = workspace.child(
-                    div()
-                        .absolute()
-                        .left(px(column.rect.origin.x))
-                        .top(px(column.rect.origin.y))
-                        .w(px(column.rect.size.width))
-                        .h(px(column.rect.size.height))
-                        .bg(rgb(theme.colors.dock_background)),
-                );
-            }
+            let main_columns = rects
+                .columns
+                .iter()
+                .filter(|column| main_column_ids.contains(&column.column))
+                .copied()
+                .collect::<Vec<_>>();
+            workspace = workspace.child(MainDockView::render(
+                &main_columns,
+                &rects.groups,
+                &rects.splitters,
+                &rects.vertical_overflow,
+                &main_node_ids,
+                &main_column_groups,
+                &column_modes,
+                &self.column_scroll_handles,
+                self.controller.clone(),
+                theme,
+            ));
 
             // Flyout is painted above the Canvas and main dock surfaces.
             if let Some(flyout) = rects.flyout {
@@ -243,6 +317,41 @@ impl Render for DockHost {
         }
 
         root.child(workspace)
+    }
+}
+
+/// Collects only nodes reachable from the left/right main dock roots.
+/// Floating compositions are deliberately rendered by their own later layer.
+fn collect_main_nodes(
+    layout: &Layout,
+    id: NodeId,
+    nodes: &mut HashSet<NodeId>,
+    columns: &mut HashSet<NodeId>,
+    column_groups: &mut HashMap<NodeId, Vec<NodeId>>,
+) {
+    if !nodes.insert(id) {
+        return;
+    }
+
+    match layout.node(id) {
+        Some(Node::Split(split)) => {
+            for child in &split.children {
+                collect_main_nodes(layout, *child, nodes, columns, column_groups);
+            }
+        }
+        Some(Node::Column(column)) => {
+            columns.insert(id);
+            column_groups.insert(id, column.groups.clone());
+            for group in &column.groups {
+                collect_main_nodes(layout, *group, nodes, columns, column_groups);
+            }
+        }
+        Some(Node::Tabs(tabs)) => {
+            for child in &tabs.children {
+                collect_main_nodes(layout, *child, nodes, columns, column_groups);
+            }
+        }
+        Some(Node::Panel(_)) | None => {}
     }
 }
 

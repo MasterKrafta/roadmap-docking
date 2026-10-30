@@ -7,6 +7,7 @@
 
 pub mod controller;
 pub mod dock_host;
+pub mod main_dock_view;
 pub mod missing_panel;
 pub mod registry;
 
