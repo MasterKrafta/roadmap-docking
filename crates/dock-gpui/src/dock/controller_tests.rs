@@ -1937,6 +1937,7 @@ fn floating_vertical_stack_capture_uses_core_targets_and_docks_the_whole_window(
         .next()
         .map(|(id, floating)| (id, floating.bounds))
         .expect("the stacked composition should remain one floating window");
+    assert_eq!(floating_id, first_floating);
     let root = controller
         .layout()
         .floating_group(floating_id)
@@ -1947,7 +1948,7 @@ fn floating_vertical_stack_capture_uses_core_targets_and_docks_the_whole_window(
         panic!("stacking two Tabs groups should create a Split root");
     };
     assert_eq!(split.axis, Axis::Y);
-    assert_eq!(split.children, source_groups);
+    assert_eq!(split.children.as_slice(), source_groups.as_slice());
     assert_eq!(
         crate::tree_query::floating_capture_source(controller.layout(), root),
         Some(dock_core::DropSource::Group {
@@ -2029,15 +2030,15 @@ fn floating_vertical_stack_capture_uses_core_targets_and_docks_the_whole_window(
     assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
 
     assert!(controller.undo().unwrap());
-    let (restored_id, restored_root) = controller
+    let restored_root = controller
         .layout()
         .floating_groups()
         .next()
-        .and_then(|(id, floating)| {
+        .and_then(|(_, floating)| {
             controller
                 .layout()
                 .dock_area(floating.area)
-                .map(|area| (id, area.root))
+                .map(|area| area.root)
         })
         .expect("undo should restore the complete floating stack");
     assert!(matches!(
@@ -2048,10 +2049,9 @@ fn floating_vertical_stack_capture_uses_core_targets_and_docks_the_whole_window(
     assert_eq!(controller.workspace.history.undo_len(), 0);
     assert!(controller.redo().unwrap());
     assert_eq!(controller.layout().floating_groups().count(), 0);
-    assert!(controller.layout().panel_instances().count() == 4);
+    assert_eq!(controller.layout().panel_instances().count(), 4);
     assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
 
-    let _ = (first_floating, restored_id);
 }
 
 #[test]
