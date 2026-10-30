@@ -355,6 +355,13 @@ impl Layout {
                     index,
                 },
             ) => self.dock_floating_tabs_to_tabs(root, tabs, target_group, index),
+            (
+                Some(Node::Column(_)) | Some(Node::Split(_)),
+                DropTarget::GroupEdge {
+                    group: target_group,
+                    zone: zone @ (DropZone::Left | DropZone::Right),
+                },
+            ) => self.dock_floating_composition_to_edge(group_id, root, target_group, zone),
             (Some(Node::Split(_)), _) => Err(CommandError::InvalidTarget {
                 reason: "floating split stacks can only be docked into a main column or icon rail",
             }),
@@ -469,6 +476,169 @@ impl Layout {
                 reason: "tab target changed unexpectedly",
             });
         }
+        Ok(())
+    }
+
+    /// Joins two Photoshop floating areas side-by-side while retaining each
+    /// area's Columns as independent children of one horizontal composition.
+    ///
+    /// The destination FloatingGroup and its DockArea remain the window host;
+    /// the source FloatingGroup is removed when its root is detached.
+    fn dock_floating_composition_to_edge(
+        &mut self,
+        source_group_id: FloatingGroupId,
+        source_root: NodeId,
+        target_group: NodeId,
+        zone: DropZone,
+    ) -> Result<(), CommandError> {
+        if self.profile != Profile::Photoshop {
+            return Err(CommandError::UnsupportedForProfile {
+                profile: self.profile,
+                reason: "side-by-side floating composition docking is supported only by the Photoshop profile",
+            });
+        }
+
+        let source_floating = self
+            .floating_groups
+            .get(source_group_id)
+            .copied()
+            .ok_or(CommandError::MissingFloatingGroup {
+                group: source_group_id,
+            })?;
+        let target_root = self
+            .find_floating_root_containing(target_group)
+            .ok_or(CommandError::InvalidTarget {
+                reason: "side-by-side composition target must belong to another floating area",
+            })?;
+        if target_root == source_root {
+            return Ok(());
+        }
+        let target_group_id = self
+            .floating_groups
+            .iter()
+            .find_map(|(id, floating)| {
+                self.dock_areas
+                    .get(floating.area)
+                    .is_some_and(|area| area.root == target_root)
+                    .then_some(id)
+            })
+            .ok_or(CommandError::InvalidTarget {
+                reason: "side-by-side composition target has no floating window",
+            })?;
+        let target_floating = self
+            .floating_groups
+            .get(target_group_id)
+            .copied()
+            .ok_or(CommandError::MissingFloatingGroup {
+                group: target_group_id,
+            })?;
+
+        let (source_columns, source_ratios, source_was_split) =
+            match self.nodes.get(source_root) {
+                Some(Node::Column(_)) => (vec![source_root], vec![1.0], false),
+                Some(Node::Split(split))
+                    if split.axis == Axis::X
+                        && split.children.iter().all(|child| {
+                            matches!(self.nodes.get(*child), Some(Node::Column(_)))
+                        }) =>
+                {
+                    (split.children.clone(), split.ratios.clone(), true)
+                }
+                _ => {
+                    return Err(CommandError::InvalidTarget {
+                        reason: "source floating area must be a Column or horizontal composition of Columns",
+                    });
+                }
+            };
+        let (target_columns, target_ratios, target_was_split) =
+            match self.nodes.get(target_root) {
+                Some(Node::Column(_)) => (vec![target_root], vec![1.0], false),
+                Some(Node::Split(split))
+                    if split.axis == Axis::X
+                        && split.children.iter().all(|child| {
+                            matches!(self.nodes.get(*child), Some(Node::Column(_)))
+                        }) =>
+                {
+                    (split.children.clone(), split.ratios.clone(), true)
+                }
+                _ => {
+                    return Err(CommandError::InvalidTarget {
+                        reason: "target floating area must be a Column or horizontal composition of Columns",
+                    });
+                }
+            };
+
+        let target_column = self
+            .find_owner_column(target_group)
+            .ok_or(CommandError::InvalidTarget {
+                reason: "target group is not inside a floating Column",
+            })?;
+        let target_index = target_columns
+            .iter()
+            .position(|column| *column == target_column)
+            .ok_or(CommandError::InvalidTarget {
+                reason: "target group is not inside the target composition",
+            })?;
+        let is_outer_edge = match zone {
+            DropZone::Left => target_index == 0,
+            DropZone::Right => target_index + 1 == target_columns.len(),
+            _ => false,
+        };
+        if !is_outer_edge {
+            return Err(CommandError::InvalidTarget {
+                reason: "floating composition may only be joined at its outer left or right edge",
+            });
+        }
+
+        let source_ratios = normalized_ratios(
+            source_ratios.into_iter().map(Some).collect(),
+        );
+        let target_ratios = normalized_ratios(
+            target_ratios.into_iter().map(Some).collect(),
+        );
+        let combined_width = source_floating.bounds.size.width
+            + target_floating.bounds.size.width;
+        if !combined_width.is_finite() || combined_width <= 0.0 {
+            return Err(CommandError::InvalidValue {
+                field: "width",
+                reason: "combined floating composition width must be finite and positive",
+            });
+        }
+        let source_weight = source_floating.bounds.size.width / combined_width;
+        let target_weight = target_floating.bounds.size.width / combined_width;
+
+        let (mut children, mut ratios) = if zone == DropZone::Left {
+            (source_columns, Vec::new())
+        } else {
+            (target_columns.clone(), Vec::new())
+        };
+        if zone == DropZone::Left {
+            ratios.extend(source_ratios.into_iter().map(|ratio| ratio * source_weight));
+            children.extend(target_columns);
+            ratios.extend(target_ratios.into_iter().map(|ratio| ratio * target_weight));
+        } else {
+            ratios.extend(target_ratios.into_iter().map(|ratio| ratio * target_weight));
+            children.extend(source_columns);
+            ratios.extend(source_ratios.into_iter().map(|ratio| ratio * source_weight));
+        }
+
+        // Detaching the source root unregisters its FloatingGroup and DockArea,
+        // but deliberately leaves its Column/Panel nodes alive for the new tree.
+        self.detach_node(source_root)?;
+        if source_was_split {
+            self.nodes.remove(source_root);
+        }
+
+        let composition_root = self.nodes.insert(Node::Split(crate::Split {
+            axis: Axis::X,
+            children,
+            ratios,
+        }));
+        self.set_area_root(target_root, composition_root)?;
+        if target_was_split {
+            self.nodes.remove(target_root);
+        }
+
         Ok(())
     }
 
