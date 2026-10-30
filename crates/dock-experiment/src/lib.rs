@@ -663,11 +663,11 @@ impl MainWindow {
         let docked = match self.layout.update(cx, |layout, layout_cx| {
             let action = layout.resolve_drag_drop(&request, &metrics)?;
             match action {
-                DragDropAction::NoOp => Ok(false),
+                DragDropAction::NoOp => Ok::<bool, dock_core::CommandError>(false),
                 DragDropAction::Command(command) => {
                     layout.apply(command, &metrics)?;
                     layout_cx.notify();
-                    Ok(
+                    Ok::<bool, dock_core::CommandError>(
                         floating_group_for_panel(layout, panel_id).is_none()
                             && main_tabs_group_for_panel(layout, panel_id).is_some(),
                     )
