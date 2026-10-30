@@ -1789,7 +1789,9 @@ impl Render for FloatingPanel {
             .ok()
             .flatten();
 
+        #[cfg(windows)]
         let owner = self.owner.clone();
+        #[cfg(windows)]
         let panel_id = self.panel_id;
         let mut root = div()
             .relative()
@@ -2307,9 +2309,6 @@ fn render_core_node(
                     .first()
                     .copied()
                     .and_then(|group| core_node_active_panel_id(layout, group));
-                #[cfg(not(windows))]
-                let panel_id: Option<PanelId> = None;
-
                 let drag_area = div()
                     .id(format!("floating-column-title-{node_id:?}"))
                     .flex()
