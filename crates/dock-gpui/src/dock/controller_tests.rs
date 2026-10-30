@@ -1967,7 +1967,7 @@ fn floating_vertical_stack_capture_uses_core_targets_and_docks_the_whole_window(
         origin.y,
     );
     controller
-        .begin_drag(
+        .begin_external_drag(
             DragPayload::FloatingGroup { group: floating_id },
             DragHandle::FloatingCapture,
             origin,
