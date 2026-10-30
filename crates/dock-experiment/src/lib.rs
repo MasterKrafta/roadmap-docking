@@ -732,6 +732,8 @@ impl MainWindow {
             return;
         };
 
+        let panel_id = drag.panel_id;
+        let had_native_move = drag.resolver.is_some();
         let request = match {
             let mut session = drag.session;
             session.pointer_up(pointer, drag.target)
@@ -739,13 +741,14 @@ impl MainWindow {
             Ok(request) => request,
             Err(error) => {
                 eprintln!("Could not finish the panel drag session: {error}");
-                self.sync_floating_panel_after_drag(drag.panel_id, cx);
+                if had_native_move {
+                    self.sync_floating_panel_after_drag(panel_id, cx);
+                }
                 cx.notify();
                 return;
             }
         };
 
-        let panel_id = drag.panel_id;
         let metrics = self.metrics;
         let docked = match request {
             Some(request) => match self.layout.update(cx, |layout, layout_cx| {
@@ -801,7 +804,7 @@ impl MainWindow {
             {
                 eprintln!("Could not activate the main window after docking: {error:?}");
             }
-        } else {
+        } else if had_native_move {
             self.sync_floating_panel_after_drag(panel_id, cx);
         }
 
@@ -962,7 +965,12 @@ impl Render for MainWindow {
         {
             if let Some(zone) = drag
                 .target
-                .and_then(|target| drag.zones.iter().find(|zone| zone.target == target))
+                .and_then(|target| {
+                    drag.zones.iter().find(|zone| {
+                        zone.target == target
+                            && zone.rect.contains(drag.pointer).unwrap_or(false)
+                    })
+                })
             {
                 workspace = workspace.child(
                     div()
