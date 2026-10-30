@@ -392,6 +392,62 @@ impl MainWindow {
         }
     }
 
+    fn floating_drop_highlight(
+        &self,
+        panel_id: PanelId,
+        cx: &Context<Self>,
+    ) -> Option<Rect> {
+        let drag = self.panel_drag.as_ref()?;
+        if !drag.floating {
+            return None;
+        }
+        let target = drag.target?;
+        let DropTarget::GroupEdge {
+            group: target_node,
+            zone: target_zone @ (DropZone::Left | DropZone::Right),
+        } = target
+        else {
+            return None;
+        };
+
+        let layout = self.layout.read(cx);
+        let panel_group = floating_group_for_panel(&layout, panel_id)?;
+        let target_group = floating_group_for_node(&layout, target_node)?;
+        if panel_group != target_group {
+            return None;
+        }
+
+        let floating = layout.floating_group(panel_group)?;
+        let zone = drag.zones.iter().find(|zone| {
+            zone.target == target
+                && zone.zone == target_zone
+                && zone.rect.contains(drag.pointer).unwrap_or(false)
+        })?;
+
+        Some(Rect::new(
+            Point::new(
+                zone.rect.origin.x - floating.bounds.origin.x,
+                zone.rect.origin.y - floating.bounds.origin.y,
+            ),
+            zone.rect.size,
+        ))
+    }
+
+    #[cfg(windows)]
+    fn notify_floating_panel_windows(&self, cx: &mut Context<Self>) {
+        let handles = self
+            .floating_panels
+            .iter()
+            .filter(|panel| panel.visible && panel.host)
+            .map(|panel| panel.handle.clone())
+            .collect::<Vec<_>>();
+        for handle in handles {
+            if let Err(error) = handle.update(cx, |_, _, window_cx| window_cx.notify()) {
+                eprintln!("Could not refresh a floating panel drop target: {error:?}");
+            }
+        }
+    }
+
     fn sync_floating_panel_bounds(
         &mut self,
         group: FloatingGroupId,
@@ -992,6 +1048,9 @@ impl MainWindow {
             eprintln!("Could not move the floating panel during the docking drag");
         }
 
+        if target_changed {
+            self.notify_floating_panel_windows(cx);
+        }
         if pointer_changed || target_changed || resolver_created {
             cx.notify();
         }
@@ -1202,6 +1261,7 @@ impl MainWindow {
         let Some(drag) = self.panel_drag.take() else {
             return false;
         };
+        self.notify_floating_panel_windows(cx);
 
         let panel_id = drag.panel_id;
         let native_window = drag.native_window;
@@ -1611,6 +1671,7 @@ impl Render for MainWindow {
                 .and_then(|target| {
                     drag.zones.iter().find(|zone| {
                         zone.target == target
+                            && zone.zone == DropZone::DockEdge
                             && zone.rect.contains(drag.pointer).unwrap_or(false)
                     })
                 })
@@ -1716,109 +1777,81 @@ impl Render for FloatingPanel {
                     .into_any_element()
             });
 
-        let owner = self.owner.clone();
-        #[cfg(windows)]
-        let drag_owner = owner.clone();
-        let panel_id = self.panel_id;
-        let drag_area = div()
-            .id("composition-drag-area")
-            .flex()
-            .flex_1()
-            .h_full();
-        #[cfg(windows)]
-        let drag_area = drag_area.on_mouse_down(MouseButton::Left, move |_event, window, cx| {
-            let Some(native_window) = NativeWindowHandle::from_window(window) else {
-                eprintln!("Could not obtain the floating panel's native handle for dragging");
-                return;
-            };
-            if let Err(error) = drag_owner.update(cx, |main, cx| {
-                main.begin_floating_panel_drag(panel_id, native_window, cx);
-            }) {
-                eprintln!("Could not begin panel docking drag: {error:?}");
-            }
-        });
+        let drop_highlight = self
+            .owner
+            .update(cx, |main, cx| main.floating_drop_highlight(self.panel_id, cx))
+            .ok()
+            .flatten();
 
-        div()
+        let mut root = div()
+            .relative()
             .flex()
             .flex_col()
             .size_full()
             .bg(rgb(0x292f37))
             .text_color(rgb(0xe8ebef))
-            .child(
+            .child(content);
+
+        if let Some(zone) = drop_highlight {
+            root = root.child(
                 div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .w_full()
-                    .h(px(22.0))
-                    .px_1()
-                    .bg(rgb(0x242a31))
-                    .border_b_1()
-                    .border_color(rgb(0x414a55))
-                    .child(drag_area)
-                    .child(
-                        div()
-                            .id("close-panel")
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .size(px(20.0))
-                            .rounded_sm()
-                            .cursor_pointer()
-                            .hover(|style| style.bg(rgb(0x596777)))
-                            .occlude()
-                            .on_click(move |_, window, cx| {
-                                #[cfg(windows)]
-                                if let Some(native_window) = NativeWindowHandle::from_window(window) {
-                                    platform::windows::hide_window(native_window);
-                                }
+                    .absolute()
+                    .left(px(zone.origin.x))
+                    .top(px(zone.origin.y))
+                    .w(px(zone.size.width))
+                    .h(px(zone.size.height))
+                    .bg(rgb(0x286b9e))
+                    .border_2()
+                    .border_color(rgb(0x69c3ff)),
+            );
+        }
 
-                                #[cfg(not(windows))]
-                                window.remove_window();
+        root
+    }
+}
 
-                                let main_window = owner.update(cx, |this, cx| {
-                                    let composition_panel_ids = {
-                                        let layout = this.layout.read(cx);
-                                        floating_group_for_panel(&layout, panel_id)
-                                            .map(|group| floating_group_panel_ids(&layout, group))
-                                            .unwrap_or_else(|| vec![panel_id])
-                                    };
-                                    for panel in this
-                                        .floating_panels
-                                        .iter_mut()
-                                        .filter(|panel| composition_panel_ids.contains(&panel.panel_id))
-                                    {
-                                        panel.visible = false;
-                                    }
-                                    this.main_window_handle
-                                });
-                                match main_window {
-                                    Ok(Some(main_window)) => {
-                                        if let Err(error) = main_window.update(
-                                            cx,
-                                            |_, main_window, _| main_window.activate_window(),
-                                        ) {
-                                            eprintln!(
-                                                "Could not activate the main window after hiding a panel: {error:?}"
-                                            );
-                                        }
-                                    }
-                                    Ok(None) => {
-                                        eprintln!(
-                                            "Could not activate the main window after hiding a panel: handle unavailable"
-                                        );
-                                    }
-                                    Err(error) => {
-                                        eprintln!(
-                                            "Could not access the main window while hiding a panel: {error:?}"
-                                        );
-                                    }
-                                }
-                            })
-                            .child("×"),
-                    ),
-            )
-            .child(content)
+#[cfg(windows)]
+fn close_floating_composition(
+    owner: WeakEntity<MainWindow>,
+    panel_id: PanelId,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    if let Some(native_window) = NativeWindowHandle::from_window(window) {
+        platform::windows::hide_window(native_window);
+    }
+
+    let main_window = owner.update(cx, |this, cx| {
+        let composition_panel_ids = {
+            let layout = this.layout.read(cx);
+            floating_group_for_panel(&layout, panel_id)
+                .map(|group| floating_group_panel_ids(&layout, group))
+                .unwrap_or_else(|| vec![panel_id])
+        };
+        for panel in this
+            .floating_panels
+            .iter_mut()
+            .filter(|panel| composition_panel_ids.contains(&panel.panel_id))
+        {
+            panel.visible = false;
+        }
+        this.main_window_handle
+    });
+
+    match main_window {
+        Ok(Some(main_window)) => {
+            if let Err(error) =
+                main_window.update(cx, |_, main_window, _| main_window.activate_window())
+            {
+                eprintln!("Could not activate the main window after hiding a panel: {error:?}");
+            }
+        }
+        Ok(None) => {
+            eprintln!("Could not activate the main window after hiding a panel: handle unavailable");
+        }
+        Err(error) => {
+            eprintln!("Could not access the main window while hiding a panel: {error:?}");
+        }
     }
 }
 
@@ -2179,7 +2212,7 @@ fn render_main_dock(
 ) -> Option<AnyElement> {
     let root = layout.main_area(side)?.root;
     let width = main_area_width(layout, side, metrics).unwrap_or(metrics.default_column_width);
-    let content = render_core_node(layout, root, owner, true, true);
+    let content = render_core_node(layout, root, owner, true, true, false);
 
     let dock = div()
         .flex()
@@ -2206,7 +2239,7 @@ fn render_floating_group(
         .and_then(|floating| layout.dock_area(floating.area))
         .map(|area| area.root)?;
 
-    Some(render_core_node(layout, root, owner, true, false))
+    Some(render_core_node(layout, root, owner, true, false, true))
 }
 
 fn render_core_node(
@@ -2215,6 +2248,7 @@ fn render_core_node(
     owner: WeakEntity<MainWindow>,
     show_column_headers: bool,
     allow_column_header_drag: bool,
+    floating_column_headers: bool,
 ) -> AnyElement {
     let Some(node) = layout.node(node_id) else {
         return div()
@@ -2226,78 +2260,182 @@ fn render_core_node(
 
     match node {
         Node::Column(column) => {
-            let mut column_view = div()
-                .flex()
-                .flex_col()
-                .flex_1()
-                .w_full()
-                .gap_2()
-                .p_2()
-                .bg(rgb(0x262c33));
+            let title = column
+                .groups
+                .first()
+                .and_then(|group| core_node_active_panel_title(layout, *group))
+                .unwrap_or_else(|| "Колонка".to_owned());
 
-            if show_column_headers {
-                let title = column
+            if floating_column_headers {
+                let panel_id = column
                     .groups
                     .first()
-                    .and_then(|group| core_node_active_panel_title(layout, *group))
-                    .unwrap_or_else(|| "Колонка".to_owned());
+                    .copied()
+                    .and_then(|group| core_node_active_panel_id(layout, group));
+
+                let drag_area = div()
+                    .id(format!("floating-column-drag-{node_id:?}"))
+                    .flex()
+                    .items_center()
+                    .flex_1()
+                    .h_full()
+                    .child(title);
+
+                #[cfg(windows)]
+                let drag_area = {
+                    let drag_owner = owner.clone();
+                    drag_area.on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                        let Some(panel_id) = panel_id else {
+                            return;
+                        };
+                        let Some(native_window) = NativeWindowHandle::from_window(window) else {
+                            eprintln!("Could not obtain the composition window handle for dragging");
+                            return;
+                        };
+                        if let Err(error) = drag_owner.update(cx, |main, cx| {
+                            main.begin_floating_panel_drag(panel_id, native_window, cx);
+                        }) {
+                            eprintln!("Could not begin composition dragging: {error:?}");
+                        }
+                    })
+                };
+
+                let close_button = div()
+                    .id(format!("close-floating-column-{node_id:?}"))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .size(px(28.0))
+                    .rounded_sm()
+                    .cursor_pointer()
+                    .hover(|style| style.bg(rgb(0x596777)))
+                    .occlude()
+                    .child("×");
+
+                #[cfg(windows)]
+                let close_button = {
+                    let close_owner = owner.clone();
+                    close_button.on_click(move |_, window, cx| {
+                        if let Some(panel_id) = panel_id {
+                            close_floating_composition(
+                                close_owner.clone(),
+                                panel_id,
+                                window,
+                                cx,
+                            );
+                        }
+                    })
+                };
+
+                #[cfg(not(windows))]
+                let close_button =
+                    close_button.on_click(|_, window, _| window.remove_window());
 
                 let header = div()
                     .flex()
                     .items_center()
+                    .justify_between()
                     .w_full()
                     .h(px(36.0))
-                    .px_3()
+                    .px_2()
                     .bg(rgb(0x2b323a))
                     .border_b_1()
                     .border_color(rgb(0x414a55))
-                    .text_color(rgb(0xe8ebef))
-                    .child(title);
+                    .child(drag_area)
+                    .child(close_button);
 
-                #[cfg(windows)]
-                let header = if allow_column_header_drag {
-                    let drag_source = column
-                        .groups
-                        .first()
-                        .copied()
-                        .and_then(|group| {
-                            core_node_active_panel_id(layout, group)
-                                .map(|panel_id| (group, panel_id))
-                        });
-                    let drag_owner = owner.clone();
-                    header.on_mouse_down(MouseButton::Left, move |_, _, cx| {
-                        let Some((group, panel_id)) = drag_source else {
-                            return;
-                        };
-                        if let Err(error) = drag_owner.update(cx, |main, cx| {
-                            main.begin_docked_panel_drag(group, panel_id, cx);
-                        }) {
-                            eprintln!("Could not begin a column-header panel drag: {error:?}");
-                        }
-                    })
-                } else {
-                    header
-                };
+                let content = div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .w_full()
+                    .gap_2()
+                    .p_2()
+                    .bg(rgb(0x262c33))
+                    .children(column.groups.iter().map(|child| {
+                        render_core_node(
+                            layout,
+                            *child,
+                            owner.clone(),
+                            show_column_headers,
+                            allow_column_header_drag,
+                            floating_column_headers,
+                        )
+                    }));
 
-                column_view = column_view.child(header);
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .w_full()
+                    .bg(rgb(0x262c33))
+                    .child(header)
+                    .child(content)
+                    .into_any_element()
+            } else {
+                let mut column_view = div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .w_full()
+                    .gap_2()
+                    .p_2()
+                    .bg(rgb(0x262c33));
+
+                if show_column_headers {
+                    let header = div()
+                        .flex()
+                        .items_center()
+                        .w_full()
+                        .h(px(36.0))
+                        .px_3()
+                        .bg(rgb(0x2b323a))
+                        .border_b_1()
+                        .border_color(rgb(0x414a55))
+                        .text_color(rgb(0xe8ebef))
+                        .child(title);
+
+                    #[cfg(windows)]
+                    let header = if allow_column_header_drag {
+                        let drag_source = column
+                            .groups
+                            .first()
+                            .copied()
+                            .and_then(|group| {
+                                core_node_active_panel_id(layout, group)
+                                    .map(|panel_id| (group, panel_id))
+                            });
+                        let drag_owner = owner.clone();
+                        header.on_mouse_down(MouseButton::Left, move |_, _, cx| {
+                            let Some((group, panel_id)) = drag_source else {
+                                return;
+                            };
+                            if let Err(error) = drag_owner.update(cx, |main, cx| {
+                                main.begin_docked_panel_drag(group, panel_id, cx);
+                            }) {
+                                eprintln!("Could not begin a column-header panel drag: {error:?}");
+                            }
+                        })
+                    } else {
+                        header
+                    };
+
+                    column_view = column_view.child(header);
+                }
+
+                column_view
+                    .children(column.groups.iter().map(|child| {
+                        render_core_node(
+                            layout,
+                            *child,
+                            owner.clone(),
+                            show_column_headers,
+                            allow_column_header_drag,
+                            floating_column_headers,
+                        )
+                    }))
+                    .into_any_element()
             }
-
-            column_view
-                .children(
-                    column
-                        .groups
-                        .iter()
-                        .map(|child| {
-                            render_core_node(
-                                layout,
-                                *child,
-                                owner.clone(),
-                                show_column_headers,
-                                allow_column_header_drag,
-                            )
-                        }),
-                )
-                .into_any_element()
         },
         Node::Tabs(tabs) => {
             let tab_headers = tabs.children.iter().enumerate().map(|(index, child)| {
@@ -2385,6 +2523,7 @@ fn render_core_node(
                         owner.clone(),
                         show_column_headers,
                         allow_column_header_drag,
+                        floating_column_headers,
                     )
                 })
                 .unwrap_or_else(|| {
@@ -2429,46 +2568,33 @@ fn render_core_node(
                 Axis::X => div().flex().flex_row(),
                 Axis::Y => div().flex().flex_col(),
             };
-            let mut children = Vec::with_capacity(split.children.len().saturating_mul(2));
-
-            for (index, child) in split.children.iter().enumerate() {
-                if index > 0 {
-                    let separator = match split.axis {
-                        Axis::X => div()
-                            .w(px(3.0))
-                            .h_full()
-                            .bg(rgb(0x6689aa)),
-                        Axis::Y => div()
-                            .h(px(3.0))
-                            .w_full()
-                            .bg(rgb(0x6689aa)),
-                    };
-                    children.push(separator.into_any_element());
-                }
-
-                let ratio = split.ratios.get(index).copied().unwrap_or(1.0);
-                children.push(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .flex_1()
-                        .flex_grow(ratio)
-                        .child(render_core_node(
-                            layout,
-                            *child,
-                            owner.clone(),
-                            show_column_headers,
-                            allow_column_header_drag,
-                        ))
-                        .into_any_element(),
-                );
-            }
 
             container
                 .flex_1()
                 .size_full()
-                .gap_0()
-                .children(children)
+                .gap_2()
+                .children(
+                    split
+                        .children
+                        .iter()
+                        .enumerate()
+                        .map(|(index, child)| {
+                            let ratio = split.ratios.get(index).copied().unwrap_or(1.0);
+                            div()
+                                .flex()
+                                .flex_col()
+                                .flex_1()
+                                .flex_grow(ratio)
+                                .child(render_core_node(
+                                    layout,
+                                    *child,
+                                    owner.clone(),
+                                    show_column_headers,
+                                    allow_column_header_drag,
+                                    floating_column_headers,
+                                ))
+                        }),
+                )
                 .into_any_element()
         }
     }
