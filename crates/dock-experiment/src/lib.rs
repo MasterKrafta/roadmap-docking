@@ -532,7 +532,9 @@ impl MainWindow {
             return;
         };
 
-        if self.layout.read(cx).version() != drag_version {
+        if self.layout.read(cx).version() != drag_version
+            || self.last_dock_viewport != Some(viewport)
+        {
             self.external_panel_drag = None;
             cx.notify();
             return;
@@ -628,6 +630,13 @@ impl MainWindow {
             return None;
         }
 
+        if self.layout.read(cx).version() != drag.layout_version
+            || self.last_dock_viewport != Some(drag.viewport)
+        {
+            cx.notify();
+            return None;
+        }
+
         let Some(resolver) = drag.resolver.as_ref() else {
             cx.notify();
             return None;
@@ -714,6 +723,7 @@ impl MainWindow {
 
     /// Closes every still-open panel before GPUI closes the main window.
     pub(crate) fn close_floating_panels(&mut self, cx: &mut Context<Self>) {
+        self.external_panel_drag = None;
         self.panels_minimized_by_main.clear();
 
         for panel in self.floating_panels.drain(..) {
@@ -1312,18 +1322,6 @@ fn main_tabs_group_for_panel(layout: &Layout, panel_id: PanelId) -> Option<NodeI
         .into_iter()
         .filter_map(|side| layout.main_area(side).map(|area| area.root))
         .find_map(|root| tabs_group_for_panel(layout, root, panel_id))
-}
-
-fn main_column_count(layout: &Layout, side: DockSide) -> usize {
-    let Some(area) = layout.main_area(side) else {
-        return 0;
-    };
-
-    match layout.node(area.root) {
-        Some(Node::Column(_)) => 1,
-        Some(Node::Split(split)) if split.axis == Axis::X => split.children.len(),
-        _ => 0,
-    }
 }
 
 fn main_area_width(layout: &Layout, side: DockSide, metrics: DockMetrics) -> Option<f32> {
