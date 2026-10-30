@@ -13,7 +13,7 @@ use ui::Theme;
 
 use crate::{
     DockController,
-    group_view::{GroupMenuToggle, collect_group_presentations},
+    group_view::{GroupMenuToggle, TabOverflowToggle, collect_group_presentations},
     main_dock_view::{MainDockView, scroll_adjusted_hit_test_point},
 };
 
@@ -36,6 +36,10 @@ pub struct DockHost {
     column_scroll_handles: HashMap<NodeId, ScrollHandle>,
     /// Currently opened group menu; menu visibility is adapter-only state.
     open_group_menu: Option<NodeId>,
+    /// Currently opened list of tabs hidden by a tab-strip overflow button.
+    open_tab_overflow: Option<NodeId>,
+    /// Whether middle-clicking a tab closes its panel instance.
+    middle_click_closes_tabs: bool,
 }
 
 impl DockHost {
@@ -49,6 +53,8 @@ impl DockHost {
             canvas: None,
             column_scroll_handles: HashMap::new(),
             open_group_menu: None,
+            open_tab_overflow: None,
+            middle_click_closes_tabs: true,
         }
     }
 
@@ -75,6 +81,14 @@ impl DockHost {
     /// When omitted, the canvas region remains a neutral theme surface.
     pub fn canvas(mut self, view: impl Into<AnyView>) -> Self {
         self.canvas = Some(view.into());
+        self
+    }
+
+    /// Enables or disables closing the clicked panel when a tab receives a middle click.
+    ///
+    /// Enabled by default, following the common desktop-tab interaction convention.
+    pub fn middle_click_closes_tabs(mut self, enabled: bool) -> Self {
+        self.middle_click_closes_tabs = enabled;
         self
     }
 
@@ -216,6 +230,14 @@ impl Render for DockHost {
         {
             self.open_group_menu = None;
         }
+        if self.open_tab_overflow.is_some_and(|group| {
+            !group_presentations.contains_key(&group)
+                || !rects.as_ref().is_some_and(|rects| {
+                    rects.tab_overflows.iter().any(|overflow| overflow.group == group)
+                })
+        }) {
+            self.open_tab_overflow = None;
+        }
 
         let host_entity = cx.entity().downgrade();
         let toggle_group_menu: GroupMenuToggle = Rc::new(move |group, app| {
@@ -224,6 +246,7 @@ impl Render for DockHost {
                     host.open_group_menu = if host.open_group_menu == Some(group) {
                         None
                     } else {
+                        host.open_tab_overflow = None;
                         Some(group)
                     };
                     host_cx.notify();
@@ -231,6 +254,23 @@ impl Render for DockHost {
             }
         });
 
+        let overflow_host_entity = cx.entity().downgrade();
+        let toggle_tab_overflow: TabOverflowToggle = Rc::new(move |group, app| {
+            if let Some(host) = overflow_host_entity.upgrade() {
+                let _ = host.update(app, |host, host_cx| {
+                    host.open_tab_overflow = if host.open_tab_overflow == Some(group) {
+                        None
+                    } else {
+                        host.open_group_menu = None;
+                        Some(group)
+                    };
+                    host_cx.notify();
+                });
+            }
+        });
+
+        let middle_click_closes_tabs = self.middle_click_closes_tabs;
+        let overflow_group = self.open_tab_overflow;
         let theme = self.theme;
         let controller_for_measurement = self.controller.clone();
         let measurement = canvas(
@@ -347,10 +387,14 @@ impl Render for DockHost {
                 &rects.groups,
                 &rects.tab_strips,
                 &rects.tab_headers,
+                &rects.tab_overflows,
                 &group_presentations,
                 metrics,
                 self.open_group_menu,
                 toggle_group_menu,
+                overflow_group,
+                toggle_tab_overflow,
+                middle_click_closes_tabs,
                 &rects.splitters,
                 &rects.vertical_overflow,
                 &main_node_ids,

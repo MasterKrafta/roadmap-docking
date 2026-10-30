@@ -1,10 +1,12 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::group_view::{GroupMenuToggle, GroupPresentation, GroupView};
+use crate::group_view::{
+    GroupMenuToggle, GroupPresentation, GroupView, TabOverflowToggle,
+};
 
 use dock_core::{
     Axis, ColumnMode, ColumnRect, DockCommand, DockMetrics, GroupRect, NodeId, Point,
-    SplitterRect, TabHeaderRect, TabStripRect, VerticalOverflow,
+    SplitterRect, TabHeaderRect, TabOverflowRect, TabStripRect, VerticalOverflow,
 };
 use gpui::{
     Entity, IntoElement, ParentElement, ScrollHandle, Styled, div, px, rgb,
@@ -25,10 +27,14 @@ impl MainDockView {
         groups: &[GroupRect],
         tab_strips: &[TabStripRect],
         tab_headers: &[TabHeaderRect],
+        tab_overflows: &[TabOverflowRect],
         group_presentations: &HashMap<NodeId, GroupPresentation>,
         metrics: DockMetrics,
         menu_group: Option<NodeId>,
         toggle_group_menu: GroupMenuToggle,
+        overflow_group: Option<NodeId>,
+        toggle_tab_overflow: TabOverflowToggle,
+        middle_click_closes_tabs: bool,
         splitters: &[SplitterRect],
         vertical_overflow: &[VerticalOverflow],
         main_node_ids: &HashSet<NodeId>,
@@ -77,10 +83,14 @@ impl MainDockView {
                 &group_rects,
                 tab_strips,
                 tab_headers,
+                tab_overflows,
                 group_presentations,
                 metrics,
                 menu_group,
                 toggle_group_menu.clone(),
+                overflow_group,
+                toggle_tab_overflow.clone(),
+                middle_click_closes_tabs,
                 &group_splitters,
                 overflow,
                 scroll_handle,
@@ -113,10 +123,14 @@ impl ColumnView {
         groups: &[GroupRect],
         tab_strips: &[TabStripRect],
         tab_headers: &[TabHeaderRect],
+        tab_overflows: &[TabOverflowRect],
         group_presentations: &HashMap<NodeId, GroupPresentation>,
         metrics: DockMetrics,
         menu_group: Option<NodeId>,
         toggle_group_menu: GroupMenuToggle,
+        overflow_group: Option<NodeId>,
+        toggle_tab_overflow: TabOverflowToggle,
+        middle_click_closes_tabs: bool,
         splitters: &[SplitterRect],
         overflow: Option<VerticalOverflow>,
         scroll_handle: Option<ScrollHandle>,
@@ -147,6 +161,10 @@ impl ColumnView {
                         .filter(|header| header.group == group.group)
                         .copied()
                         .collect::<Vec<_>>();
+                    let overflow = tab_overflows
+                        .iter()
+                        .find(|overflow| overflow.group == group.group)
+                        .cloned();
                     let is_first_group = group.rect.origin.y == column.rect.origin.y;
                     let reserved_grip_left = if is_first_group {
                         metrics.group_control_button_width + 8.0
@@ -157,6 +175,7 @@ impl ColumnView {
                         *group,
                         strip,
                         &headers,
+                        overflow,
                         presentation,
                         content_origin,
                         metrics,
@@ -165,6 +184,9 @@ impl ColumnView {
                         theme,
                         menu_group == Some(group.group),
                         toggle_group_menu.clone(),
+                        overflow_group == Some(group.group),
+                        toggle_tab_overflow.clone(),
+                        middle_click_closes_tabs,
                     ));
                 } else {
                     content = content.child(group_surface(*group, content_origin, theme));

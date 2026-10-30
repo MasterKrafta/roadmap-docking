@@ -30,7 +30,7 @@ pub fn run(_options: RunOptions) {
 }
 
 pub use dock_host::DockHost;
-pub use group_view::{GroupView, TabStripView};
+pub use group_view::{GroupView, TabHeaderView, TabOverflow, TabStripView};
 pub use missing_panel::MissingPanelPlaceholder;
 
 pub use controller::{
