@@ -277,7 +277,16 @@ fn move_panel_key_handler(
         })
     });
     let move_to_floating = floating_panel_bounds(layout, rects, source_group, panel)
-        .map(|bounds| host.command_key(DockCommand::FloatPanelAsGroup { panel, bounds }));
+        .and_then(|bounds| {
+            let panel_node = layout.nodes().find_map(|(node_id, node)| match node {
+                Node::Panel(value) if value.panel_id == panel => Some(node_id),
+                _ => None,
+            })?;
+            Some(host.command_key(DockCommand::Float {
+                node: panel_node,
+                bounds,
+            }))
+        });
 
     Some(Box::new(move |event, window, app| {
         match keyboard_panel_move_direction(&event.keystroke) {
@@ -559,7 +568,7 @@ mod keyboard_panel_move_tests {
     fn floating_panel_target_requires_multi_tab_photoshop_group_and_geometry() {
         let mut controller =
             DockController::new_initial(&Theme::default()).expect("initial layout should be valid");
-        let (source_group, panel) = controller
+        let (source_group, panel_node, panel) = controller
             .layout()
             .nodes()
             .find_map(|(group, node)| {
@@ -572,7 +581,7 @@ mod keyboard_panel_move_tests {
                 tabs.children
                     .iter()
                     .find_map(|child| match controller.layout().node(*child) {
-                        Some(Node::Panel(value)) => Some((group, value.panel_id)),
+                        Some(Node::Panel(value)) => Some((group, *child, value.panel_id)),
                         _ => None,
                     })
             })
@@ -593,7 +602,10 @@ mod keyboard_panel_move_tests {
         );
 
         controller
-            .apply(DockCommand::FloatPanelAsGroup { panel, bounds })
+            .apply(DockCommand::Float {
+                node: panel_node,
+                bounds,
+            })
             .expect("Core should detach one tab into a floating group");
         assert_eq!(controller.layout().floating_groups().count(), 1);
     }
