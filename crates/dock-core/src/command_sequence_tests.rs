@@ -395,19 +395,28 @@ fn existing_but_wrong_node_types_and_forbidden_targets_are_rejected_atomically()
         assert_rejected_atomically(&mut layout, command, &metrics);
     }
 
-    // A complete Photoshop dock column can be floated as a composition.
-    // Keep this valid operation out of the wrong-node-type rejection list.
-    let mut floating_column_layout = layout.clone();
-    floating_column_layout
+    // A Photoshop panel can be detached independently. Core wraps it in
+    // the required one-tab floating root; a Column itself is not a valid root.
+    let mut floating_panel_layout = layout.clone();
+    floating_panel_layout
         .apply(
             DockCommand::Float {
-                node: column,
+                node: panel_node,
                 bounds: Rect::new(Point::new(20.0, 30.0), Size::new(320.0, 220.0)),
             },
             &metrics,
         )
-        .expect("a Photoshop dock column can become a floating composition");
-    assert_eq!(floating_column_layout.validate(&metrics), Ok(()));
+        .expect("a Photoshop panel can become a floating group");
+    let floating_area = floating_panel_layout
+        .floating_groups()
+        .next()
+        .and_then(|(_, group)| floating_panel_layout.dock_area(group.area))
+        .expect("detached panel should create a floating dock area");
+    assert!(matches!(
+        floating_panel_layout.node(floating_area.root),
+        Some(Node::Tabs(tabs)) if tabs.children.len() == 1
+    ));
+    assert_eq!(floating_panel_layout.validate(&metrics), Ok(()));
 
     // A flyout requires a rail column and a panel represented by one of its icons.
     layout
