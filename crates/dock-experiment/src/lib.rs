@@ -1437,6 +1437,16 @@ impl MainWindow {
         }
         platform::windows::hide_window(source_native);
 
+        if let Ok((bounds, viewport_size)) = target_handle.update(cx, |_, window, _| {
+            (window.window_bounds().get_bounds(), window.viewport_size())
+        }) {
+            if let Err(error) =
+                self.sync_floating_panel_bounds(target_group, bounds, viewport_size, cx)
+            {
+                eprintln!("Could not synchronize the joined composition bounds: {error}");
+            }
+        }
+
         if let Err(error) = target_handle.update(cx, |_, window, _| window.activate_window()) {
             eprintln!("Could not activate the joined composition window: {error:?}");
         }
@@ -2092,7 +2102,7 @@ fn floating_group_edge_rect(
         ),
         _ => return None,
     };
-    rect.is_finite().then_some(rect)
+    rect.validate_non_empty().is_ok().then_some(rect)
 }
 
 fn floating_group_title(layout: &Layout, group_id: FloatingGroupId) -> Option<String> {
