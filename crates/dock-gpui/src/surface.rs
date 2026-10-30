@@ -18,6 +18,9 @@ pub(crate) struct RenderData<'a> {
     pub rects: &'a LayoutRects,
     pub frame: Option<&'a FrameGeometry>,
     pub theme: &'a Theme,
+    /// Native floating views currently delegate window resizing to the OS and
+    /// do not own an internal splitter gesture session.
+    pub splitter_resize_enabled: bool,
 }
 
 /// Complete dock frame assembled in the canonical layer order.
@@ -64,6 +67,7 @@ impl<'a> DockSurface<'a> {
                 rects: self.frame.rects(),
                 frame: Some(self.frame),
                 theme: self.theme,
+                splitter_resize_enabled: true,
             },
             self.scroll_handles,
             host,
@@ -89,6 +93,7 @@ pub(crate) fn render_layout(
             rects,
             frame,
             theme,
+            splitter_resize_enabled: true,
         },
         scroll_handles,
         host,
