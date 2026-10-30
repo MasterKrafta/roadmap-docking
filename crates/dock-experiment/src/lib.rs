@@ -311,9 +311,32 @@ impl MainWindow {
         &mut self,
         group: FloatingGroupId,
         native_bounds: Bounds<Pixels>,
-        bounds: Rect,
+        viewport_size: gpui::Size<Pixels>,
         cx: &mut Context<Self>,
     ) -> Result<(), dock_core::CommandError> {
+        let (Some(parent_bounds), Some(parent_viewport)) =
+            (self.last_window_bounds, self.last_viewport_size)
+        else {
+            // The main window has not rendered yet. Its next bounds observation
+            // will provide the coordinate space needed for this conversion.
+            return Ok(());
+        };
+        let parent_chrome_height =
+            (parent_bounds.size.height.as_f32() - parent_viewport.height.as_f32()).max(0.0);
+        let bounds = Rect::new(
+            Point::new(
+                native_bounds.origin.x.as_f32() - parent_bounds.origin.x.as_f32(),
+                native_bounds.origin.y.as_f32()
+                    - parent_bounds.origin.y.as_f32()
+                    - parent_chrome_height
+                    - self.last_surface_top,
+            ),
+            Size::new(
+                viewport_size.width.as_f32(),
+                viewport_size.height.as_f32(),
+            ),
+        );
+
         self.layout.update(cx, |layout, layout_cx| {
             layout.apply(
                 DockCommand::ResizeFloatingBounds { group, bounds },
@@ -903,11 +926,11 @@ struct FloatingPanel {
 impl FloatingPanel {
     fn sync_native_bounds(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let native_bounds = window.window_bounds().get_bounds();
-        let bounds = core_bounds(&native_bounds);
+        let viewport_size = window.viewport_size();
         let group = self.floating_group_id;
 
         match self.owner.update(cx, |main, cx| {
-            main.sync_floating_panel_bounds(group, native_bounds, bounds, cx)
+            main.sync_floating_panel_bounds(group, native_bounds, viewport_size, cx)
         }) {
             Ok(Ok(())) => {}
             Ok(Err(error)) => {
@@ -1615,7 +1638,16 @@ fn create_floating_panel_tree(
         .apply(
             DockCommand::Float {
                 node: root,
-                bounds: core_bounds(&window_bounds),
+                // Core stores floating geometry in dock-surface coordinates,
+                // not in absolute desktop/screen coordinates. The native window
+                // reports its final local bounds once both windows have rendered.
+                bounds: Rect::new(
+                    Point::ZERO,
+                    Size::new(
+                        window_bounds.size.width.as_f32(),
+                        window_bounds.size.height.as_f32(),
+                    ),
+                ),
             },
             metrics,
         )
@@ -1658,16 +1690,6 @@ fn create_floating_panel_tree(
         floating_group_id,
         window_bounds,
     })
-}
-
-fn core_bounds(bounds: &Bounds<Pixels>) -> Rect {
-    Rect::new(
-        Point::new(bounds.origin.x.as_f32(), bounds.origin.y.as_f32()),
-        Size::new(
-            bounds.size.width.as_f32(),
-            bounds.size.height.as_f32(),
-        ),
-    )
 }
 
 #[cfg(windows)]
