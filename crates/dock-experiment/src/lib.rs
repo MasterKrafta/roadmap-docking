@@ -7,7 +7,8 @@ use dock_core::{
 #[cfg(windows)]
 use dock_core::{DockSide, DropTarget, PanelConstraints, PanelKey, Profile};
 use gpui::{
-    AnyElement, AppContext, Bounds, Context, IntoElement, Pixels, Render, Subscription, WeakEntity,
+    AnyElement, AppContext, Bounds, Context, Entity, IntoElement, Pixels, Render, Subscription,
+    WeakEntity,
     Window, WindowBounds, WindowControlArea, WindowHandle, WindowKind, WindowOptions,
     WindowVisibility, div, px, rgb, size,
 };
@@ -46,6 +47,7 @@ fn run_windows() {
                 return;
             }
         };
+        let layout = cx.new(|_| layout);
 
         let bounds = Bounds::centered(None, size(px(1200.0), px(800.0)), cx);
         let options = WindowOptions {
@@ -106,7 +108,7 @@ fn run_windows() {
 }
 
 pub(crate) struct MainWindow {
-    layout: Layout,
+    layout: Entity<Layout>,
     metrics: DockMetrics,
     panel_bindings: [PanelBinding; 2],
     floating_panels: Vec<FloatingPanelWindow>,
@@ -192,7 +194,7 @@ impl MainWindow {
     }
 
     pub(crate) fn new(
-        layout: Layout,
+        layout: Entity<Layout>,
         metrics: DockMetrics,
         panel_bindings: [PanelBinding; 2],
     ) -> Self {
@@ -214,9 +216,11 @@ impl MainWindow {
         command: DockCommand,
         cx: &mut Context<Self>,
     ) -> Result<(), dock_core::CommandError> {
-        self.layout.apply(command, &self.metrics)?;
-        cx.notify();
-        Ok(())
+        self.layout.update(cx, |layout, layout_cx| {
+            layout.apply(command, &self.metrics)?;
+            layout_cx.notify();
+            Ok(())
+        })
     }
 
 
@@ -285,10 +289,14 @@ impl MainWindow {
         bounds: Rect,
         cx: &mut Context<Self>,
     ) -> Result<(), dock_core::CommandError> {
-        self.layout.apply(
-            DockCommand::ResizeFloatingBounds { group, bounds },
-            &self.metrics,
-        )?;
+        self.layout.update(cx, |layout, layout_cx| {
+            layout.apply(
+                DockCommand::ResizeFloatingBounds { group, bounds },
+                &self.metrics,
+            )?;
+            layout_cx.notify();
+            Ok(())
+        })?;
 
         if let Some(binding) = self
             .panel_bindings
@@ -354,6 +362,7 @@ impl MainWindow {
         };
 
         let owner = cx.entity().downgrade();
+        let layout = self.layout.clone();
         let panel_id = binding.panel_id;
         let floating_group_id = binding.floating_group_id;
         match cx.open_window(options, move |_window, cx| {
@@ -361,6 +370,7 @@ impl MainWindow {
                 panel_id,
                 floating_group_id,
                 owner,
+                layout,
                 bounds_subscription: None,
             })
         }) {
@@ -470,6 +480,7 @@ struct FloatingPanel {
     panel_id: PanelId,
     floating_group_id: FloatingGroupId,
     owner: WeakEntity<MainWindow>,
+    layout: Entity<Layout>,
     bounds_subscription: Option<Subscription>,
 }
 
@@ -502,35 +513,24 @@ impl Render for FloatingPanel {
                 }));
         }
 
-        let model = self.owner.upgrade();
-        let title = model
-            .as_ref()
-            .and_then(|owner| {
-                owner
-                    .read(cx)
-                    .layout
-                    .panel_instance(self.panel_id)
-                    .map(|instance| panel_title(instance.key.as_str()).to_owned())
-            })
+        let layout = self.layout.read(cx);
+        let title = layout
+            .panel_instance(self.panel_id)
+            .map(|instance| panel_title(instance.key.as_str()).to_owned())
             .unwrap_or_else(|| "Панель".to_owned());
-        let content = model
-            .as_ref()
-            .and_then(|owner| {
-                let main = owner.read(cx);
-                render_floating_group(
-                    &main.layout,
-                    self.floating_group_id,
-                    self.owner.clone(),
-                )
-            })
-            .unwrap_or_else(|| {
-                div()
-                    .flex_1()
-                    .p_4()
-                    .text_color(rgb(0xf08a8a))
-                    .child("Дерево панели не найдено")
-                    .into_any_element()
-            });
+        let content = render_floating_group(
+            &layout,
+            self.floating_group_id,
+            self.owner.clone(),
+        )
+        .unwrap_or_else(|| {
+            div()
+                .flex_1()
+                .p_4()
+                .text_color(rgb(0xf08a8a))
+                .child("Дерево панели не найдено")
+                .into_any_element()
+        });
 
         let owner = self.owner.clone();
         let panel_id = self.panel_id;
