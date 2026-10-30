@@ -28,11 +28,6 @@ pub(crate) fn close_panel(panel: PanelId) -> DockCommand {
     DockCommand::ClosePanel { panel }
 }
 
-/// Builds the command used to close all panels in a group.
-pub(crate) fn close_group(group: NodeId) -> DockCommand {
-    DockCommand::CloseGroup { group }
-}
-
 /// Returns the command that toggles a registered panel kind in the Dockers menu.
 ///
 /// Existing instances are closed by runtime ID. Missing instances are opened
@@ -72,12 +67,11 @@ pub(crate) fn close_floating(
 #[cfg(test)]
 mod tests {
     use super::{
-        activate_tab, close_floating, close_group, close_panel, collapse_group, cycle_column_mode,
-        toggle_panel,
+        activate_tab, close_floating, close_panel, collapse_group, cycle_column_mode, toggle_panel,
     };
     use crate::dock::DockController;
     use dock_core::{
-        ColumnMode, DockCommand, DockSide, FloatingGroupId, Layout, Node, NodeId, PanelKey,
+        ColumnMode, DockCommand, DockSide, FloatingGroupId, Node, NodeId, PanelKey,
         Point, Rect, Size,
     };
     use slotmap::Key;
@@ -131,13 +125,6 @@ mod tests {
         let panel = dock_core::PanelId::null();
 
         assert_eq!(close_panel(panel), DockCommand::ClosePanel { panel });
-    }
-
-    #[test]
-    fn close_group_builds_the_expected_command() {
-        let group = NodeId::null();
-
-        assert_eq!(close_group(group), DockCommand::CloseGroup { group });
     }
 
     #[test]
