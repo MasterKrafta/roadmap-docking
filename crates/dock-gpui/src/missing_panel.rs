@@ -1,5 +1,5 @@
 use dock_core::PanelKey;
-use gpui::{Context, IntoElement, Render, Window, div};
+use gpui::{Context, IntoElement, ParentElement, Render, Window, div};
 
 /// Neutral fallback shown when a workspace contains a panel key that the
 /// current application build does not register.
