@@ -9,12 +9,24 @@ use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use windows::Win32::{
     Foundation::{HWND, POINT, RECT},
     Graphics::Gdi::ClientToScreen,
+    Media::timeBeginPeriod,
     UI::{
         HiDpi::GetDpiForWindow,
         Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON},
         WindowsAndMessaging::*,
     },
 };
+
+/// Requests 1 ms timer resolution for the short-lived native drag polling loop.
+///
+/// The request remains active for the process lifetime, matching the standalone
+/// tearoff prototype. Windows releases the process timer request at shutdown.
+pub fn begin_high_resolution_timer() {
+    // SAFETY: timeBeginPeriod takes a constant interval and does not dereference pointers.
+    unsafe {
+        let _ = timeBeginPeriod(1);
+    }
+}
 
 /// Opaque native handle obtained from a live GPUI window.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
