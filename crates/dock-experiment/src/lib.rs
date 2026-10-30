@@ -8,10 +8,10 @@ use dock_core::{
 #[cfg(windows)]
 use dock_core::{PanelConstraints, PanelKey, Profile};
 use gpui::{
-    AnyElement, AppContext, Bounds, Context, Entity, IntoElement, MouseButton, MouseMoveEvent,
-    MouseUpEvent, Pixels, Render, Subscription, WeakEntity, Window, WindowBounds,
-    WindowControlArea, WindowHandle, WindowKind, WindowOptions,
-    WindowVisibility, div, px, rgb, size,
+    AnyElement, AppContext, Bounds, Context, DispatchPhase, Entity, IntoElement, MouseButton,
+    MouseMoveEvent, MouseUpEvent, Pixels, Render, Subscription, WeakEntity, Window, WindowBounds,
+    WindowControlArea, WindowHandle, WindowKind, WindowOptions, WindowVisibility, canvas, div, px,
+    rgb, size,
 };
 use gpui::prelude::*;
 use std::collections::HashSet;
@@ -958,7 +958,70 @@ impl Render for FloatingPanel {
         let panel_id = self.panel_id;
         let move_owner = self.owner.clone();
         let release_owner = self.owner.clone();
-        let release_out_owner = self.owner.clone();
+        // Element-level mouse-move handlers stop firing when the pointer leaves
+        // the root hitbox. Register capture-phase listeners on the native window
+        // so Windows' button capture can continue this drag outside the panel.
+        let panel_window_events = canvas(
+            |_, _, _| (),
+            move |_, _, window, _cx| {
+                let move_owner = move_owner.clone();
+                window.on_mouse_event(
+                    move |event: &MouseMoveEvent, phase, window, cx| {
+                        if phase != DispatchPhase::Capture {
+                            return;
+                        }
+                        let source_bounds = window.window_bounds().get_bounds();
+                        let source_viewport = window.viewport_size();
+                        if let Err(error) = move_owner.update(cx, |main, cx| {
+                            main.handle_external_panel_mouse_move(
+                                event,
+                                source_bounds,
+                                source_viewport,
+                                cx,
+                            );
+                        }) {
+                            eprintln!("Could not update panel docking drag: {error:?}");
+                        }
+                    },
+                );
+
+                let release_owner = release_owner.clone();
+                window.on_mouse_event(
+                    move |event: &MouseUpEvent, phase, window, cx| {
+                        if phase != DispatchPhase::Capture || event.button != MouseButton::Left {
+                            return;
+                        }
+                        let source_bounds = window.window_bounds().get_bounds();
+                        let source_viewport = window.viewport_size();
+                        match release_owner.update(cx, |main, cx| {
+                            main.handle_external_panel_mouse_up(
+                                event,
+                                source_bounds,
+                                source_viewport,
+                                cx,
+                            )
+                        }) {
+                            Ok(Some(main_window)) => {
+                                window.remove_window();
+                                if let Err(error) = main_window.update(cx, |_, main_window, _| {
+                                    main_window.activate_window();
+                                }) {
+                                    eprintln!("Could not activate the main window after docking: {error:?}");
+                                }
+                            }
+                            Ok(None) => {}
+                            Err(error) => {
+                                eprintln!("Could not finish panel docking drag: {error:?}");
+                            }
+                        }
+                    },
+                );
+            },
+        )
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full();
 
         div()
             .flex()
@@ -1068,66 +1131,7 @@ impl Render for FloatingPanel {
                     ),
             )
             .child(content)
-            .on_mouse_move(move |event: &MouseMoveEvent, window, cx| {
-                let source_bounds = window.window_bounds().get_bounds();
-                let source_viewport = window.viewport_size();
-                if let Err(error) = move_owner.update(cx, |main, cx| {
-                    main.handle_external_panel_mouse_move(
-                        event,
-                        source_bounds,
-                        source_viewport,
-                        cx,
-                    );
-                }) {
-                    eprintln!("Could not update panel docking drag: {error:?}");
-                }
-            })
-            .on_mouse_up(MouseButton::Left, move |event: &MouseUpEvent, window, cx| {
-                let source_bounds = window.window_bounds().get_bounds();
-                let source_viewport = window.viewport_size();
-                match release_owner.update(cx, |main, cx| {
-                    main.handle_external_panel_mouse_up(
-                        event,
-                        source_bounds,
-                        source_viewport,
-                        cx,
-                    )
-                }) {
-                    Ok(Some(main_window)) => {
-                        window.remove_window();
-                        if let Err(error) = main_window.update(cx, |_, main_window, _| {
-                            main_window.activate_window();
-                        }) {
-                            eprintln!("Could not activate the main window after docking: {error:?}");
-                        }
-                    }
-                    Ok(None) => {}
-                    Err(error) => eprintln!("Could not finish panel docking drag: {error:?}"),
-                }
-            })
-            .on_mouse_up_out(MouseButton::Left, move |event: &MouseUpEvent, window, cx| {
-                let source_bounds = window.window_bounds().get_bounds();
-                let source_viewport = window.viewport_size();
-                match release_out_owner.update(cx, |main, cx| {
-                    main.handle_external_panel_mouse_up(
-                        event,
-                        source_bounds,
-                        source_viewport,
-                        cx,
-                    )
-                }) {
-                    Ok(Some(main_window)) => {
-                        window.remove_window();
-                        if let Err(error) = main_window.update(cx, |_, main_window, _| {
-                            main_window.activate_window();
-                        }) {
-                            eprintln!("Could not activate the main window after docking: {error:?}");
-                        }
-                    }
-                    Ok(None) => {}
-                    Err(error) => eprintln!("Could not finish panel docking drag: {error:?}"),
-                }
-            })
+            .child(panel_window_events)
     }
 }
 
