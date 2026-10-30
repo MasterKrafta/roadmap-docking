@@ -1,7 +1,7 @@
-//! The single GPUI docking implementation exposed by this crate.
+//! Independent prototype of the next docking model and GPUI view.
 //!
-//! Workspace state, rendering, interaction handling, and native floating windows
-//! are implemented in this module tree.
+//! This module deliberately does not use `dock-core`. It is developed alongside
+//! the existing implementation so its model and behavior can be evaluated separately.
 
 mod components;
 mod geometry;
@@ -21,7 +21,7 @@ use std::time::Instant;
 
 use crate::RunOptions;
 
-/// Starts the GPUI docking application.
+/// Starts the independent docking prototype.
 pub fn run(options: RunOptions) {
     #[cfg(windows)]
     run_windows(options);
@@ -57,11 +57,12 @@ fn run_windows(options: RunOptions) {
         width,
         height,
         assets,
+        workspace_path: _,
     } = options;
 
     let run_application = move |cx: &mut App| {
         let startup_started = Instant::now();
-        eprintln!("[timing] старт dock-gpui: {:?}", startup_started.elapsed());
+        eprintln!("[timing] старт next_dock: {:?}", startup_started.elapsed());
         let theme = ui::Theme::default();
         let bounds = Bounds::centered(None, size(px(width.max(1.0)), px(height.max(1.0))), cx);
         let window_options = WindowOptions {
@@ -84,7 +85,7 @@ fn run_windows(options: RunOptions) {
         eprintln!("[timing] главное окно создано: {:?}", startup_started.elapsed());
 
         if let Err(error) = open_window_result {
-            tracing::error!(error = %error, "could not open the dock window");
+            tracing::error!(error = %error, "could not open the next dock window");
             return;
         }
 

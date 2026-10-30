@@ -1,34 +1,36 @@
-//! GPUI docking implementation.
+//! Reusable GPUI docking surface, host integration contract, and a reference window entrypoint.
 //!
-//! The crate exposes one implementation: the workspace and its native floating
-//! compositions are managed by the `next_dock` module tree.
-
+//! Embedded applications provide their own [`host::DockHost`] to render domain-specific
+//! panel content. The bundled [`run`] window is a reference/demo integration; its panel
+//! bodies intentionally use the placeholder content in [`panels`]. See `docs/panel-rendering.md`.
+mod chrome_geometry;
+mod color;
 pub mod components;
+mod dock;
+mod entry;
+mod floating_window;
+mod frame;
+mod geometry;
+pub mod host;
+mod labels;
+mod layers;
+mod main_window;
+mod menus;
+mod metrics;
 mod next_dock;
+pub mod panels;
+mod render;
+pub mod requests;
+pub mod surface;
+mod tree_query;
 
-use gpui::AssetSource;
-
-/// Options used to start the dock application.
-pub struct RunOptions {
-    /// Native window title.
-    pub title: String,
-    /// Initial client-area width in logical pixels.
-    pub width: f32,
-    /// Initial client-area height in logical pixels.
-    pub height: f32,
-    /// Optional source for application assets (icons, fonts and other packaged resources).
-    pub assets: Option<Box<dyn AssetSource>>,
-}
-
-impl Default for RunOptions {
-    fn default() -> Self {
-        Self {
-            title: "Dock".to_owned(),
-            width: 1200.0,
-            height: 800.0,
-            assets: None,
-        }
-    }
-}
-
-pub use next_dock::run;
+pub use chrome_geometry::normalize_docked_group_geometry;
+pub use entry::{RunOptions, run};
+pub use frame::FrameGeometry;
+pub use geometry::union_rects;
+pub use host::{CommandClickHandler, DockHost, DragStartHandler, NoopHost, ResizeStartHandler};
+pub use metrics::dock_metrics_from_theme;
+pub use next_dock::run as run_next_dock;
+pub use render::{render_frame_with_host, render_with_host};
+pub use requests::{DockMenuRequest, DragOverlay, ResizeHandle};
+pub use surface::DockSurface;

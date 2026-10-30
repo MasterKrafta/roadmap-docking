@@ -1,4 +1,4 @@
-//! Hamburger menu button for the dock implementation.
+//! Hamburger menu button for the next dock implementation.
 
 use dock_core::Rect;
 use gpui::{

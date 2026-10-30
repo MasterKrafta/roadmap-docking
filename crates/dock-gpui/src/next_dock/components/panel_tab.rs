@@ -1,4 +1,4 @@
-//! A single tab in the dock implementation.
+//! A single tab in the next dock implementation.
 
 use dock_core::Rect;
 use gpui::{

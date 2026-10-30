@@ -1,4 +1,4 @@
-//! Main GPUI window and interaction state for the dock workspace.
+//! Native window for the independent dock prototype.
 
 use dock_core::{Point, Rect, Size};
 use gpui::{Context, IntoElement, MouseButton, MouseMoveEvent, Render, Window};
@@ -20,7 +20,7 @@ use super::view::{self, SplitResizeSpec};
 
 const DRAG_DETACH_THRESHOLD: f32 = 2.0;
 
-/// Owns the dock workspace and renders it in the main GPUI window.
+/// Owns the prototype layout and renders it in a regular GPUI window.
 pub(super) struct NextDockWindow {
     theme: Theme,
     pub(super) startup_started: std::time::Instant,

@@ -1,4 +1,4 @@
-//! Reusable components used by the dock implementation.
+//! Reusable components for the next dock implementation.
 
 mod column_header;
 mod dock_column_view;

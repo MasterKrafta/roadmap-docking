@@ -1,4 +1,4 @@
-//! Geometry calculation for the dock layout tree.
+//! Geometry calculation for the independent dock tree.
 
 use gpui::Window;
 use ui::Theme;
