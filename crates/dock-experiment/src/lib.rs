@@ -2346,6 +2346,32 @@ fn render_core_node(
                     .px_2()
                     .child(title);
 
+                #[cfg(windows)]
+                let drag_area = {
+                    let drag_owner = owner.clone();
+                    drag_area
+                        .occlude()
+                        .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                            let Some(panel_id) = panel_id else {
+                                return;
+                            };
+                            let Some(native_window) = NativeWindowHandle::from_window(window)
+                            else {
+                                eprintln!(
+                                    "Could not obtain the composition window handle for dragging"
+                                );
+                                return;
+                            };
+                            if let Err(error) = drag_owner.update(cx, |main, cx| {
+                                main.begin_floating_panel_drag(panel_id, native_window, cx);
+                            }) {
+                                eprintln!(
+                                    "Could not begin composition dragging from the column header: {error:?}"
+                                );
+                            }
+                        })
+                };
+
                 let close_button = div()
                     .id(format!("close-floating-column-{node_id:?}"))
                     .flex()
