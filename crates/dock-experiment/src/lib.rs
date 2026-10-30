@@ -627,7 +627,7 @@ fn render_layout_node(
                         .rounded_sm()
                         .text_color(rgb(0xaab4c0))
                         .cursor_pointer()
-                        .hover(|style| style.bg(rgb(0x596777)).text_color(rgb(0xffffff)))
+                        .hover(|style| style.bg(rgb(0x596777)))
                         .on_click(move |_, _, cx| {
                             match close_owner.update(cx, |this, cx| {
                                 this.apply_layout_command(
