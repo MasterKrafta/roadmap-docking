@@ -38,9 +38,23 @@ pub fn run() {
 fn run_windows() {
     application().run(|cx: &mut App| {
         let metrics = DockMetrics::default();
+        let bounds = Bounds::centered(None, size(px(1200.0), px(800.0)), cx);
+        let panel_size = size(px(280.0), px(360.0));
+        let panel_top = bounds.origin.y + px(180.0);
+        // Keep the two startup panels separate so one native popup cannot hide
+        // the other at exactly the same centered position.
         let panel_bounds = [
-            Bounds::centered(None, size(px(280.0), px(360.0)), cx),
-            Bounds::centered(None, size(px(280.0), px(360.0)), cx),
+            Bounds::new(
+                gpui::Point::new(bounds.origin.x + px(48.0), panel_top),
+                panel_size,
+            ),
+            Bounds::new(
+                gpui::Point::new(
+                    bounds.origin.x + bounds.size.width - px(328.0),
+                    panel_top,
+                ),
+                panel_size,
+            ),
         ];
         let (layout, panel_bindings) = match build_initial_layout(metrics, panel_bounds) {
             Ok(result) => result,
@@ -51,7 +65,6 @@ fn run_windows() {
         };
         let layout = cx.new(|_| layout);
 
-        let bounds = Bounds::centered(None, size(px(1200.0), px(800.0)), cx);
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             show: false,
