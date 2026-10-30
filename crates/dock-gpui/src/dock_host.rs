@@ -14,7 +14,7 @@ use ui::Theme;
 use crate::{
     DockController,
     components::{
-        GroupMenuToggle, MainDockView, TabOverflowToggle, collect_group_presentations,
+        GroupMenuToggle, MainDockView, PanelHost, TabOverflowToggle, collect_group_presentations,
     },
     input::scroll_adjusted_hit_test_point,
 };
@@ -144,7 +144,7 @@ impl DockHost {
 }
 
 impl Render for DockHost {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // One read transaction produces the geometry snapshot plus the IDs/modes
         // needed by the main-dock presentation layer. The Layout remains Core-owned.
         let (
@@ -205,6 +205,30 @@ impl Render for DockHost {
                 None
             }
         };
+
+        // Main-column panels are mounted by ColumnView so their content moves
+        // with that column's own scroll handle. The remaining panel rectangles
+        // belong to floating compositions and are mounted in workspace space.
+        let main_active_panels = main_column_groups
+            .values()
+            .flat_map(|groups| groups.iter())
+            .filter_map(|group| {
+                group_presentations
+                    .get(group)
+                    .and_then(|presentation| presentation.active_panel)
+            })
+            .collect::<HashSet<_>>();
+        let floating_panels = rects
+            .as_ref()
+            .map(|rects| {
+                rects
+                    .panels
+                    .iter()
+                    .filter(|panel| !main_active_panels.contains(&panel.panel))
+                    .copied()
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
 
         // Keep scroll state only while its Column node still owns an overflow
         // region. Removing/replacing the Core node or resolving the overflow
@@ -387,6 +411,7 @@ impl Render for DockHost {
             workspace = workspace.child(MainDockView::render(
                 &main_columns,
                 &rects.groups,
+                &rects.panels,
                 &rects.tab_strips,
                 &rects.tab_headers,
                 &rects.tab_overflows,
@@ -404,6 +429,8 @@ impl Render for DockHost {
                 &column_modes,
                 &self.column_scroll_handles,
                 self.controller.clone(),
+                window,
+                cx,
                 theme,
             ));
 
@@ -436,6 +463,16 @@ impl Render for DockHost {
                         .border_color(rgb(theme.colors.group_frame_border)),
                 );
             }
+
+            // Main panels live in their scrolling columns. Only floating panels
+            // remain here, above the floating-window surfaces.
+            workspace = workspace.child(PanelHost::render(
+                &floating_panels,
+                Point::ZERO,
+                self.controller.clone(),
+                window,
+                cx,
+            ));
         }
 
         root.child(workspace)

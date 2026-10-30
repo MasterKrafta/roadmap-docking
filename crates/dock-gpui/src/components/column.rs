@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
 use dock_core::{
-    ColumnMode, ColumnRect, DockCommand, DockMetrics, GroupRect, NodeId, Point, SplitterRect,
+    App, ColumnMode, ColumnRect, DockCommand, DockMetrics, GroupRect, NodeId, PanelRect, Point, SplitterRect,
     TabHeaderRect, TabOverflowRect, TabStripRect, VerticalOverflow,
 };
 use gpui::{
-    Entity, IntoElement, ParentElement, ScrollHandle, Styled, div, px, rgb,
+    Entity, IntoElement, ParentElement, ScrollHandle, Styled, Window, div, px, rgb,
     prelude::InteractiveElement as _,
 };
 use ui::Theme;
@@ -15,6 +15,7 @@ use crate::DockController;
 use super::{
     context_menu::GroupMenuToggle,
     group::GroupView,
+    panel_host::PanelHost,
     splitter::splitter_surface,
     tab_overflow::TabOverflowToggle,
     tab_strip::GroupPresentation,
@@ -30,6 +31,7 @@ impl ColumnView {
         column: ColumnRect,
         mode: ColumnMode,
         groups: &[GroupRect],
+        panels: &[PanelRect],
         tab_strips: &[TabStripRect],
         tab_headers: &[TabHeaderRect],
         tab_overflows: &[TabOverflowRect],
@@ -44,6 +46,8 @@ impl ColumnView {
         overflow: Option<VerticalOverflow>,
         scroll_handle: Option<ScrollHandle>,
         controller: Entity<DockController>,
+        window: &mut Window,
+        app: &mut App,
         theme: Theme,
     ) -> impl IntoElement {
         let viewport = overflow.map_or(column.rect, |value| value.viewport);
@@ -104,6 +108,17 @@ impl ColumnView {
             for splitter in splitters {
                 content = content.child(splitter_surface(*splitter, content_origin, theme));
             }
+
+            // Mount active panel content inside the scrolling content tree. This
+            // keeps panel views aligned with Core geometry and clipped by the
+            // owning column's scroll viewport.
+            content = content.child(PanelHost::render(
+                panels,
+                content_origin,
+                controller.clone(),
+                window,
+                app,
+            ));
         } else {
             // Rail entries and icons are implemented by §5.7 RailView.
             // Keep the Core-computed extent and scroll behavior ready for it.

@@ -1,10 +1,10 @@
 use std::collections::{HashMap, HashSet};
 
 use dock_core::{
-    Axis, ColumnMode, ColumnRect, DockMetrics, GroupRect, NodeId, Point, SplitterRect, TabHeaderRect,
+    App, Axis, ColumnMode, ColumnRect, DockMetrics, GroupRect, NodeId, PanelRect, Point, SplitterRect, TabHeaderRect,
     TabOverflowRect, TabStripRect, VerticalOverflow,
 };
-use gpui::{Entity, IntoElement, ParentElement, ScrollHandle, Styled, div};
+use gpui::{Entity, IntoElement, ParentElement, ScrollHandle, Styled, Window, div};
 use ui::Theme;
 
 use crate::DockController;
@@ -26,6 +26,7 @@ impl MainDockView {
     pub(crate) fn render(
         columns: &[ColumnRect],
         groups: &[GroupRect],
+        panels: &[PanelRect],
         tab_strips: &[TabStripRect],
         tab_headers: &[TabHeaderRect],
         tab_overflows: &[TabOverflowRect],
@@ -43,6 +44,8 @@ impl MainDockView {
         column_modes: &HashMap<NodeId, ColumnMode>,
         scroll_handles: &HashMap<NodeId, ScrollHandle>,
         controller: Entity<DockController>,
+        window: &mut Window,
+        app: &mut App,
         theme: Theme,
     ) -> impl IntoElement {
         let mut layer = div()
@@ -77,11 +80,25 @@ impl MainDockView {
                 .find(|overflow| overflow.owner == column.column)
                 .copied();
             let scroll_handle = scroll_handles.get(&column.column).cloned();
+            let active_panels = group_ids
+                .iter()
+                .filter_map(|group| {
+                    group_presentations
+                        .get(group)
+                        .and_then(|presentation| presentation.active_panel)
+                })
+                .collect::<HashSet<_>>();
+            let column_panels = panels
+                .iter()
+                .filter(|panel| active_panels.contains(&panel.panel))
+                .copied()
+                .collect::<Vec<_>>();
 
             layer = layer.child(ColumnView::render(
                 *column,
                 mode,
                 &group_rects,
+                &column_panels,
                 tab_strips,
                 tab_headers,
                 tab_overflows,
@@ -96,6 +113,8 @@ impl MainDockView {
                 overflow,
                 scroll_handle,
                 controller.clone(),
+                window,
+                app,
                 theme,
             ));
         }
