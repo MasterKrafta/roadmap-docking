@@ -910,6 +910,7 @@ impl MainWindow {
 
         let Some(pointer) = self.external_panel_pointer_from_screen(cursor_x, cursor_y) else {
             let was_floating = self.panel_drag.take().is_some_and(|drag| drag.floating);
+            self.notify_floating_panel_windows(cx);
             if was_floating {
                 self.sync_floating_panel_after_drag(panel_id, cx);
             }
@@ -921,6 +922,7 @@ impl MainWindow {
             || self.layout.read(cx).version() != layout_version
         {
             let was_floating = self.panel_drag.take().is_some_and(|drag| drag.floating);
+            self.notify_floating_panel_windows(cx);
             if was_floating {
                 self.sync_floating_panel_after_drag(panel_id, cx);
             }
@@ -935,6 +937,7 @@ impl MainWindow {
         if let Some(error) = pointer_update_error {
             eprintln!("Could not update the panel drag pointer: {error}");
             let was_floating = self.panel_drag.take().is_some_and(|drag| drag.floating);
+            self.notify_floating_panel_windows(cx);
             if was_floating {
                 self.sync_floating_panel_after_drag(panel_id, cx);
             }
@@ -955,6 +958,7 @@ impl MainWindow {
             && !self.detach_docked_panel_for_drag(panel_id, pointer, cursor_x, cursor_y, cx)
         {
             self.panel_drag = None;
+            self.notify_floating_panel_windows(cx);
             cx.notify();
             return PanelDragPoll::Stop;
         }
@@ -992,6 +996,7 @@ impl MainWindow {
                         .unwrap_or_default();
                     if version != expected_version {
                         self.panel_drag = None;
+                        self.notify_floating_panel_windows(cx);
                         self.sync_floating_panel_after_drag(panel_id, cx);
                         cx.notify();
                         return PanelDragPoll::Stop;
@@ -1005,6 +1010,7 @@ impl MainWindow {
                 Err(error) => {
                     eprintln!("Could not prepare panel drop zones: {error}");
                     self.panel_drag = None;
+                    self.notify_floating_panel_windows(cx);
                     self.sync_floating_panel_after_drag(panel_id, cx);
                     cx.notify();
                     return PanelDragPoll::Stop;
@@ -2267,11 +2273,14 @@ fn render_core_node(
                 .unwrap_or_else(|| "Колонка".to_owned());
 
             if floating_column_headers {
+                #[cfg(windows)]
                 let panel_id = column
                     .groups
                     .first()
                     .copied()
                     .and_then(|group| core_node_active_panel_id(layout, group));
+                #[cfg(not(windows))]
+                let panel_id: Option<PanelId> = None;
 
                 let drag_area = div()
                     .id(format!("floating-column-drag-{node_id:?}"))
