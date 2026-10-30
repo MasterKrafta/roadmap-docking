@@ -412,42 +412,15 @@ impl Render for MainWindow {
                     .bg(rgb(0x2b323a))
                     .border_b_1()
                     .border_color(rgb(0x414a55))
-                    .child("Панели")
-                    .child(dock_panel_button("layers", owner.clone()))
-                    .child(dock_panel_button("color", owner.clone()))
-                    .child(dock_panel_button("properties", owner.clone()))
-                    .child(dock_panel_button("history", owner.clone()))
                     .child("Плавающие окна")
                     .child(menu_button(PanelKind::Layers, owner.clone()))
                     .child(menu_button(PanelKind::Properties, owner.clone())),
             )
             .child(
                 div()
-                    .flex()
-                    .flex_row()
                     .flex_1()
-                    .w_full()
-                    .child(
-                        div()
-                            .flex_1()
-                            .h_full()
-                            .p_4()
-                            .bg(rgb(0x20252b))
-                            .text_color(rgb(0x626d7a))
-                            .child("Рабочая область"),
-                    )
-                    .child(
-                        self.layout
-                            .main_area(DockSide::Right)
-                            .map(|area| render_layout_node(&self.layout, area.root, owner.clone()))
-                            .unwrap_or_else(|| {
-                                div()
-                                    .w(px(280.0))
-                                    .h_full()
-                                    .bg(rgb(0x262c33))
-                                    .into_any_element()
-                            }),
-                    ),
+                    .size_full()
+                    .bg(rgb(0x20252b)),
             )
     }
 }
