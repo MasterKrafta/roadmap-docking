@@ -1,8 +1,11 @@
 //! Minimal experimental docking application entry point.
 
-use dock_core::PanelKey;
+use dock_core::{
+    Axis, Column, DockMetrics, DockSide, Layout, Node, NodeId, Panel, PanelConstraints, PanelKey,
+    Profile, Size, create_initial_layout,
+};
 use gpui::{
-    AppContext, Bounds, Context, IntoElement, Render, Subscription, WeakEntity, Window,
+    AnyElement, AppContext, Bounds, Context, IntoElement, Render, Subscription, WeakEntity, Window,
     WindowBounds, WindowControlArea, WindowHandle, WindowKind, WindowOptions, WindowVisibility, div,
     px, rgb, size,
 };
@@ -29,6 +32,14 @@ pub fn run() {
 #[cfg(windows)]
 fn run_windows() {
     application().run(|cx: &mut App| {
+        let layout = match build_initial_layout() {
+            Ok(layout) => layout,
+            Err(error) => {
+                eprintln!("Could not build the initial dock tree: {error}");
+                return;
+            }
+        };
+
         let bounds = Bounds::centered(None, size(px(1200.0), px(800.0)), cx);
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
@@ -41,8 +52,8 @@ fn run_windows() {
             ..Default::default()
         };
 
-        let main_window = match cx.open_window(options, |window, cx| {
-            let main_window = cx.new(|_| MainWindow::new());
+        let main_window = match cx.open_window(options, move |window, cx| {
+            let main_window = cx.new(|_| MainWindow::new(layout));
             let weak_main_window = main_window.downgrade();
 
             window.on_window_should_close(cx, move |_window, app| {
@@ -87,6 +98,7 @@ fn run_windows() {
 }
 
 pub(crate) struct MainWindow {
+    layout: Layout,
     floating_panels: Vec<WindowHandle<FloatingPanel>>,
     panels_minimized_by_main: Vec<WindowHandle<FloatingPanel>>,
     visibility_subscription: Option<Subscription>,
@@ -156,8 +168,9 @@ impl MainWindow {
         }
     }
 
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(layout: Layout) -> Self {
         Self {
+            layout,
             floating_panels: Vec::new(),
             panels_minimized_by_main: Vec::new(),
             visibility_subscription: None,
@@ -336,11 +349,38 @@ impl Render for MainWindow {
                     .bg(rgb(0x2b323a))
                     .border_b_1()
                     .border_color(rgb(0x414a55))
-                    .child("Панели")
+                    .child("Плавающие окна")
                     .child(menu_button(PanelKind::Layers, owner.clone()))
                     .child(menu_button(PanelKind::Properties, owner)),
             )
-            .child(div().flex_1().w_full().bg(rgb(0x20252b)))
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .flex_1()
+                    .w_full()
+                    .child(
+                        div()
+                            .flex_1()
+                            .h_full()
+                            .p_4()
+                            .bg(rgb(0x20252b))
+                            .text_color(rgb(0x626d7a))
+                            .child("Рабочая область"),
+                    )
+                    .child(
+                        self.layout
+                            .main_area(DockSide::Right)
+                            .map(|area| render_layout_node(&self.layout, area.root))
+                            .unwrap_or_else(|| {
+                                div()
+                                    .w(px(280.0))
+                                    .h_full()
+                                    .bg(rgb(0x262c33))
+                                    .into_any_element()
+                            }),
+                    ),
+            )
     }
 }
 
@@ -438,6 +478,178 @@ impl Render for FloatingPanel {
                     .p_4()
                     .child(self.key.as_str().to_owned()),
             )
+    }
+}
+
+
+#[cfg(windows)]
+fn build_initial_layout() -> Result<Layout, String> {
+    let constraints = PanelConstraints::new(
+        Size::new(120.0, 80.0),
+        Size::new(280.0, 220.0),
+        None,
+        false,
+    );
+    let descriptors = ["layers", "color", "properties", "history"]
+        .into_iter()
+        .map(|key| {
+            PanelKey::new(key)
+                .map(|key| (key, constraints))
+                .map_err(|error| format!("invalid built-in panel key '{key}': {error}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    create_initial_layout(Profile::Photoshop, &descriptors, DockMetrics::default())
+        .map_err(|error| error.to_string())
+}
+
+fn panel_title(key: &str) -> &str {
+    match key {
+        "layers" => "Слои",
+        "color" => "Цвет",
+        "properties" => "Свойства",
+        "history" => "История",
+        other => other,
+    }
+}
+
+fn node_title(layout: &Layout, node_id: NodeId) -> String {
+    match layout.node(node_id) {
+        Some(Node::Panel(panel)) => layout
+            .panel_instance(panel.panel_id)
+            .map(|instance| panel_title(instance.key.as_str()).to_owned())
+            .unwrap_or_else(|| "Неизвестная панель".to_owned()),
+        Some(Node::Tabs(_)) => "Группа".to_owned(),
+        Some(Node::Column(_)) => "Колонка".to_owned(),
+        Some(Node::Split(_)) => "Разделение".to_owned(),
+        None => "Неизвестный узел".to_owned(),
+    }
+}
+
+fn render_layout_node(layout: &Layout, node_id: NodeId) -> AnyElement {
+    let Some(node) = layout.node(node_id) else {
+        return div()
+            .p_2()
+            .text_color(rgb(0xf08a8a))
+            .child("Узел дерева не найден")
+            .into_any_element();
+    };
+
+    match node {
+        Node::Column(column) => div()
+            .flex()
+            .flex_col()
+            .w(px(column.width))
+            .h_full()
+            .gap_2()
+            .p_2()
+            .bg(rgb(0x262c33))
+            .border_l_1()
+            .border_color(rgb(0x414a55))
+            .children(
+                column
+                    .groups
+                    .iter()
+                    .map(|child| render_layout_node(layout, *child)),
+            )
+            .into_any_element(),
+        Node::Tabs(tabs) => {
+            let tab_headers = tabs.children.iter().enumerate().map(|(index, child)| {
+                let title = node_title(layout, *child);
+                if index == tabs.active_index {
+                    div()
+                        .px_2()
+                        .py_1()
+                        .rounded_sm()
+                        .bg(rgb(0x465260))
+                        .text_color(rgb(0xf0f2f5))
+                        .child(title)
+                        .into_any_element()
+                } else {
+                    div()
+                        .px_2()
+                        .py_1()
+                        .rounded_sm()
+                        .bg(rgb(0x303841))
+                        .text_color(rgb(0xaab4c0))
+                        .child(title)
+                        .into_any_element()
+                }
+            });
+            let content = tabs
+                .active_child()
+                .map(|child| render_layout_node(layout, child))
+                .unwrap_or_else(|| {
+                    div()
+                        .flex_1()
+                        .p_3()
+                        .text_color(rgb(0xaab4c0))
+                        .child("Пустая группа")
+                        .into_any_element()
+                });
+
+            div()
+                .flex()
+                .flex_col()
+                .flex_1()
+                .w_full()
+                .bg(rgb(0x292f37))
+                .border_b_1()
+                .border_color(rgb(0x414a55))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_1()
+                        .w_full()
+                        .px_2()
+                        .py_2()
+                        .bg(rgb(0x2b323a))
+                        .children(tab_headers),
+                )
+                .child(content)
+                .into_any_element()
+        }
+        Node::Panel(panel) => {
+            let title = layout
+                .panel_instance(panel.panel_id)
+                .map(|instance| panel_title(instance.key.as_str()))
+                .unwrap_or("Неизвестная панель");
+
+            div()
+                .flex()
+                .flex_col()
+                .flex_1()
+                .w_full()
+                .p_3()
+                .gap_2()
+                .text_color(rgb(0xe8ebef))
+                .child(div().text_color(rgb(0xf0f2f5)).child(title.to_owned()))
+                .child(
+                    div()
+                        .text_color(rgb(0xaab4c0))
+                        .child(format!("Содержимое панели «{title}»")),
+                )
+                .into_any_element()
+        }
+        Node::Split(split) => {
+            let container = match split.axis {
+                Axis::X => div().flex().flex_row(),
+                Axis::Y => div().flex().flex_col(),
+            };
+
+            container
+                .flex_1()
+                .size_full()
+                .gap_2()
+                .children(
+                    split
+                        .children
+                        .iter()
+                        .map(|child| render_layout_node(layout, *child)),
+                )
+                .into_any_element()
+        }
     }
 }
 
