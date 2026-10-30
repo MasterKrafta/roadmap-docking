@@ -71,7 +71,7 @@ mod tests {
     };
     use crate::dock::DockController;
     use dock_core::{
-        ColumnMode, DockCommand, DockSide, FloatingGroupId, Node, NodeId, PanelKey,
+        ColumnMode, DockCommand, FloatingGroupId, Node, NodeId, PanelKey,
         Point, Rect, Size,
     };
     use slotmap::Key;
@@ -188,11 +188,11 @@ mod tests {
         let mut controller = DockController::new_initial(&theme).unwrap();
         assert!(close_floating(controller.layout(), FloatingGroupId::null()).is_none());
 
-        let root = controller.layout().main_area(DockSide::Right).unwrap().root;
-        let group = match controller.layout().node(root) {
-            Some(Node::Column(column)) => column.groups[0],
-            _ => panic!("initial Photoshop dock should start with a Column"),
-        };
+        let group = controller
+            .layout()
+            .nodes()
+            .find_map(|(id, node)| matches!(node, Node::Tabs(_)).then_some(id))
+            .expect("initial Photoshop dock should contain a Tabs group");
         controller
             .apply(DockCommand::Float {
                 node: group,
