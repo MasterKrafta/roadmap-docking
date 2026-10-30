@@ -1,6 +1,6 @@
 //! Floating command dispatch, creation, docking, geometry, and stacking order.
 
-use super::helpers::{geometry_error_reason, normalized_ratios};
+use super::helpers::{geometry_error_reason, normalized_ratios, side_index};
 use super::*;
 use crate::AllowedArea;
 
@@ -331,6 +331,16 @@ impl Layout {
             {
                 self.dock_floating_stack_to_main_column(root, split, side, index, metrics)
             }
+            (Some(Node::Split(split)), DropTarget::MainColumn { side, index })
+                if split.axis == Axis::X
+                    && split.children.iter().all(|child| {
+                        matches!(self.nodes.get(*child), Some(Node::Column(_)))
+                    }) =>
+            {
+                self.dock_floating_composition_to_main_column(
+                    group_id, root, split, side, index,
+                )
+            }
             (Some(Node::Split(split)), DropTarget::RailSlot { column, index })
                 if split.axis == Axis::Y =>
             {
@@ -399,6 +409,136 @@ impl Layout {
             last_expanded_width: Some(metrics.default_column_width),
         }));
         self.insert_existing_column_at(side, index, column, None, metrics)
+    }
+
+    /// Moves every Column in a horizontal floating composition into a main dock.
+    ///
+    /// The existing Column and Tabs nodes remain intact. Only the floating
+    /// composition root is replaced with a main-dock Split(X) root.
+    fn dock_floating_composition_to_main_column(
+        &mut self,
+        floating_group_id: FloatingGroupId,
+        root: NodeId,
+        split: Split,
+        side: DockSide,
+        index: usize,
+    ) -> Result<(), CommandError> {
+        if split.axis != Axis::X
+            || split.children.is_empty()
+            || split
+                .children
+                .iter()
+                .any(|child| !matches!(self.nodes.get(*child), Some(Node::Column(_))))
+        {
+            return Err(CommandError::InvalidTarget {
+                reason: "floating main-dock composition must contain horizontal Columns",
+            });
+        }
+
+        let floating = self
+            .floating_groups
+            .get(floating_group_id)
+            .copied()
+            .ok_or(CommandError::MissingFloatingGroup {
+                group: floating_group_id,
+            })?;
+        let source_columns = split.children;
+        let source_ratios = normalized_ratios(split.ratios.into_iter().map(Some).collect());
+        let side_slot = side_index(side);
+        let Some(main_area) = self.main_area(side).copied() else {
+            if index != 0 {
+                return Err(CommandError::InvalidValue {
+                    field: "index",
+                    reason: "main-column insertion index is outside the empty dock",
+                });
+            }
+            self.detach_node(root)?;
+            let area_id = self
+                .dock_areas
+                .insert(crate::DockArea::main(side, root));
+            self.main_areas[side_slot] = Some(area_id);
+            return Ok(());
+        };
+
+        let main_root = main_area.root;
+        let main_columns = self.main_columns(side)?;
+        if index > main_columns.len() {
+            return Err(CommandError::InvalidValue {
+                field: "index",
+                reason: "main-column insertion index is outside the dock",
+            });
+        }
+        let (main_ratios, main_root_is_split) = match self.nodes.get(main_root) {
+            Some(Node::Column(_)) => (vec![1.0], false),
+            Some(Node::Split(main_split)) if main_split.axis == Axis::X => (
+                normalized_ratios(main_split.ratios.iter().copied().map(Some).collect()),
+                true,
+            ),
+            Some(_) => {
+                return Err(CommandError::InvalidTarget {
+                    reason: "main dock root must be a Column or Split(X) of Columns",
+                });
+            }
+            None => {
+                return Err(CommandError::InvalidTarget {
+                    reason: "main dock root is missing",
+                });
+            }
+        };
+
+        let main_width = main_columns
+            .iter()
+            .map(|column_id| match self.nodes.get(*column_id) {
+                Some(Node::Column(column)) => Ok(column.width),
+                _ => Err(CommandError::InvalidTarget {
+                    reason: "main horizontal split must contain only Column nodes",
+                }),
+            })
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .sum::<f32>();
+        let source_width = floating.bounds.size.width;
+        let combined_width = main_width + source_width;
+        if !combined_width.is_finite()
+            || main_width <= 0.0
+            || source_width <= 0.0
+            || !combined_width.is_finite()
+        {
+            return Err(CommandError::InvalidValue {
+                field: "width",
+                reason: "combined main and floating dock widths must be finite and positive",
+            });
+        }
+
+        let main_weight = main_width / combined_width;
+        let source_weight = source_width / combined_width;
+        let mut children = main_columns;
+        let mut ratios = main_ratios
+            .into_iter()
+            .map(|ratio| ratio * main_weight)
+            .collect::<Vec<_>>();
+        children.splice(index..index, source_columns);
+        ratios.splice(
+            index..index,
+            source_ratios
+                .into_iter()
+                .map(|ratio| ratio * source_weight),
+        );
+        let ratios = normalized_ratios(ratios.into_iter().map(Some).collect());
+
+        self.detach_node(root)?;
+        self.nodes.remove(root);
+        let new_root = self.nodes.insert(Node::Split(crate::Split {
+            axis: Axis::X,
+            children,
+            ratios,
+        }));
+        self.set_area_root(main_root, new_root)?;
+        if main_root_is_split {
+            self.nodes.remove(main_root);
+        }
+
+        Ok(())
     }
 
     pub(super) fn dock_floating_stack_to_rail_slot(
