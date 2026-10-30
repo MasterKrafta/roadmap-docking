@@ -1,11 +1,12 @@
 //! Minimal experimental docking application entry point.
 
 use dock_core::{
-    DockCommand, DockMetrics, DockSide, DropTarget, FloatingGroupId, Layout, Node, PanelConstraints,
-    PanelId, PanelKey, Point, Profile, Rect, Size,
+    Axis, DockCommand, DockMetrics, DockSide, DropTarget, FloatingGroupId, Layout, Node, NodeId,
+    PanelConstraints, PanelId, PanelKey, Point, Profile, Rect, Size,
 };
 use gpui::{
-    AppContext, Bounds, Context, IntoElement, Pixels, Render, Subscription, WeakEntity, Window,
+    AnyElement, AppContext, Bounds, Context, IntoElement, Pixels, Render, Subscription, WeakEntity,
+    Window,
     WindowBounds, WindowControlArea, WindowHandle, WindowKind, WindowOptions, WindowVisibility, div,
     px, rgb, size,
 };
@@ -500,9 +501,9 @@ impl Render for FloatingPanel {
                 }));
         }
 
-        let title = self
-            .owner
-            .upgrade()
+        let model = self.owner.upgrade();
+        let title = model
+            .as_ref()
             .and_then(|owner| {
                 owner
                     .read(cx)
@@ -511,6 +512,24 @@ impl Render for FloatingPanel {
                     .map(|instance| panel_title(instance.key.as_str()).to_owned())
             })
             .unwrap_or_else(|| "Панель".to_owned());
+        let content = model
+            .as_ref()
+            .and_then(|owner| {
+                let main = owner.read(cx);
+                render_floating_group(
+                    &main.layout,
+                    self.floating_group_id,
+                    self.owner.clone(),
+                )
+            })
+            .unwrap_or_else(|| {
+                div()
+                    .flex_1()
+                    .p_4()
+                    .text_color(rgb(0xf08a8a))
+                    .child("Дерево панели не найдено")
+                    .into_any_element()
+            });
 
         let owner = self.owner.clone();
         let panel_id = self.panel_id;
@@ -592,7 +611,188 @@ impl Render for FloatingPanel {
                             .child("×"),
                     ),
             )
-            .child(div().flex_1().w_full().p_4().child(title))
+            .child(content)
+    }
+}
+
+fn render_floating_group(
+    layout: &Layout,
+    group: FloatingGroupId,
+    owner: WeakEntity<MainWindow>,
+) -> Option<AnyElement> {
+    let root = layout
+        .floating_group(group)
+        .and_then(|floating| layout.dock_area(floating.area))
+        .map(|area| area.root)?;
+
+    Some(render_core_node(layout, root, owner))
+}
+
+fn render_core_node(
+    layout: &Layout,
+    node_id: NodeId,
+    owner: WeakEntity<MainWindow>,
+) -> AnyElement {
+    let Some(node) = layout.node(node_id) else {
+        return div()
+            .p_2()
+            .text_color(rgb(0xf08a8a))
+            .child("Узел дерева не найден")
+            .into_any_element();
+    };
+
+    match node {
+        Node::Column(column) => div()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .w_full()
+            .gap_2()
+            .p_2()
+            .bg(rgb(0x262c33))
+            .children(
+                column
+                    .groups
+                    .iter()
+                    .map(|child| render_core_node(layout, *child, owner.clone())),
+            )
+            .into_any_element(),
+        Node::Tabs(tabs) => {
+            let tab_headers = tabs.children.iter().enumerate().map(|(index, child)| {
+                let title = core_node_title(layout, *child);
+                let active = index == tabs.active_index;
+                let panel_id = match layout.node(*child) {
+                    Some(Node::Panel(panel)) => Some(panel.panel_id),
+                    _ => None,
+                };
+
+                let mut tab = div()
+                    .id(format!("core-tab-{node_id:?}-{index}"))
+                    .px_3()
+                    .py_1()
+                    .rounded_sm()
+                    .bg(if active {
+                        rgb(0x465260)
+                    } else {
+                        rgb(0x303841)
+                    })
+                    .text_color(if active {
+                        rgb(0xf0f2f5)
+                    } else {
+                        rgb(0xaab4c0)
+                    })
+                    .child(title);
+
+                if let Some(panel_id) = panel_id {
+                    let tab_owner = owner.clone();
+                    tab = tab
+                        .cursor_pointer()
+                        .hover(|style| style.bg(rgb(0x596777)))
+                        .on_click(move |_, _, cx| {
+                            match tab_owner.update(cx, |this, cx| {
+                                this.apply_layout_command(
+                                    DockCommand::ActivateTab {
+                                        group: node_id,
+                                        panel: panel_id,
+                                    },
+                                    cx,
+                                )
+                            }) {
+                                Ok(Ok(())) => {}
+                                Ok(Err(error)) => {
+                                    eprintln!("Could not activate dock tab: {error}");
+                                }
+                                Err(error) => {
+                                    eprintln!("Could not access the dock layout: {error:?}");
+                                }
+                            }
+                        });
+                }
+
+                tab
+            });
+
+            let header = div()
+                .flex()
+                .items_center()
+                .gap_1()
+                .w_full()
+                .px_2()
+                .py_2()
+                .bg(rgb(0x2b323a))
+                .children(tab_headers);
+
+            let content = tabs
+                .active_child()
+                .map(|child| render_core_node(layout, child, owner.clone()))
+                .unwrap_or_else(|| {
+                    div()
+                        .flex_1()
+                        .p_3()
+                        .text_color(rgb(0xaab4c0))
+                        .child("Пустая группа")
+                        .into_any_element()
+                });
+
+            div()
+                .flex()
+                .flex_col()
+                .flex_1()
+                .w_full()
+                .bg(rgb(0x292f37))
+                .border_b_1()
+                .border_color(rgb(0x414a55))
+                .child(header)
+                .child(content)
+                .into_any_element()
+        }
+        Node::Panel(panel) => {
+            let title = layout
+                .panel_instance(panel.panel_id)
+                .map(|instance| panel_title(instance.key.as_str()))
+                .unwrap_or("Неизвестная панель");
+
+            div()
+                .flex()
+                .flex_col()
+                .flex_1()
+                .w_full()
+                .p_3()
+                .text_color(rgb(0xe8ebef))
+                .child(title.to_owned())
+                .into_any_element()
+        }
+        Node::Split(split) => {
+            let container = match split.axis {
+                Axis::X => div().flex().flex_row(),
+                Axis::Y => div().flex().flex_col(),
+            };
+
+            container
+                .flex_1()
+                .size_full()
+                .gap_2()
+                .children(
+                    split
+                        .children
+                        .iter()
+                        .map(|child| render_core_node(layout, *child, owner.clone())),
+                )
+                .into_any_element()
+        }
+    }
+}
+
+fn core_node_title(layout: &Layout, node_id: NodeId) -> String {
+    match layout.node(node_id) {
+        Some(Node::Panel(panel)) => layout
+            .panel_instance(panel.panel_id)
+            .map(|instance| panel_title(instance.key.as_str()).to_owned())
+            .unwrap_or_else(|| "Неизвестная панель".to_owned()),
+        Some(Node::Tabs(_)) => "Группа".to_owned(),
+        Some(Node::Column(_)) => "Колонка".to_owned(),
+        Some(Node::Split(_)) => "Разделение".to_owned(),
+        None => "Неизвестный узел".to_owned(),
     }
 }
 
