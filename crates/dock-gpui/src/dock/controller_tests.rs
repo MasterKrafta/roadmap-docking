@@ -3,10 +3,43 @@ use crate::dock::resize_session::StartGeometry;
 use crate::requests::ResizeHandle;
 use dock_core::{
     Axis, ColumnMode, DockCommand, DockSide, DragDropAction, DragDropRequest, DragHandle,
-    DragPayload, DropTarget, Node, NodeId, Point, Rect, Size,
+    DragPayload, DropTarget, Node, NodeId, Point, Profile, Rect, Size,
 };
 use slotmap::Key;
 use ui::Theme;
+
+fn generic_controller() -> DockController {
+    let theme = Theme::default();
+    let metrics = *DockController::new_initial(&theme)
+        .expect("theme should produce valid metrics")
+        .metrics();
+    let descriptors = crate::panels::descriptors(&theme);
+    let layout = dock_core::create_initial_layout(Profile::Generic, &descriptors, metrics)
+        .expect("Generic baseline layout should be valid");
+    DockController::new_with_layout(&theme, layout)
+        .expect("Generic baseline layout should install in the controller")
+}
+
+fn generic_horizontal_split_controller() -> DockController {
+    let mut controller = generic_controller();
+    let root = controller
+        .layout()
+        .main_area(DockSide::Right)
+        .expect("Generic baseline should have a right dock")
+        .root;
+    let group = match controller.layout().node(root) {
+        Some(Node::Column(column)) => column.groups[0],
+        other => panic!("Generic baseline should start with a Column, got {other:?}"),
+    };
+    controller
+        .apply(DockCommand::MoveGroupToMainColumn {
+            group,
+            side: DockSide::Right,
+            index: 1,
+        })
+        .expect("moving one group should create a horizontal main split");
+    controller
+}
 
 fn horizontal_split_widths(controller: &DockController, split_id: NodeId) -> Vec<f32> {
     let Some(Node::Split(split)) = controller.layout().node(split_id) else {
@@ -543,7 +576,7 @@ fn horizontal_main_split_resize_commits_and_undoes_as_one_gesture() {
 
 #[test]
 fn floating_horizontal_split_resize_commits_and_undoes_as_one_gesture() {
-    let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+    let mut controller = generic_horizontal_split_controller();
     let owner = controller
         .layout()
         .main_area(DockSide::Right)
@@ -3528,59 +3561,111 @@ fn raising_floating_window_does_not_add_undo_or_clear_redo() {
 }
 
 #[test]
-fn closing_floating_column_closes_each_group_and_keeps_each_close_undoable() {
+fn closing_floating_stack_removes_all_groups_atomically_and_is_undoable() {
     let mut controller = DockController::new_initial(&Theme::default()).unwrap();
-    let (column_id, group_count) = controller
+    let groups: Vec<_> = controller
         .layout()
         .nodes()
-        .find_map(|(id, node)| match node {
-            Node::Column(column) if column.groups.len() > 1 => Some((id, column.groups.len())),
-            _ => None,
-        })
-        .expect("initial layout should contain a multi-group column");
+        .filter_map(|(id, node)| matches!(node, Node::Tabs(_)).then_some(id))
+        .take(2)
+        .collect();
+    assert_eq!(groups.len(), 2, "initial Photoshop layout should contain tab groups");
     let original_panel_count = controller.layout().panel_instances().count();
-    controller
-        .apply(DockCommand::Float {
-            node: column_id,
-            bounds: Rect::new(Point::new(60.0, 40.0), Size::new(560.0, 440.0)),
+    let floating_panel_count: usize = groups
+        .iter()
+        .map(|group| match controller.layout().node(*group) {
+            Some(Node::Tabs(tabs)) => tabs.children.len(),
+            other => panic!("floating stack child should be Tabs, got {other:?}"),
         })
-        .unwrap();
-    let (floating_id, root) = controller
+        .sum();
+
+    let bounds = Rect::new(Point::new(60.0, 40.0), Size::new(560.0, 440.0));
+    for group in &groups {
+        controller
+            .apply(DockCommand::Float {
+                node: *group,
+                bounds,
+            })
+            .unwrap();
+    }
+    let floating_id_for_root = |controller: &DockController, root: NodeId| {
+        controller.layout().floating_groups().find_map(|(id, floating)| {
+            controller
+                .layout()
+                .dock_area(floating.area)
+                .is_some_and(|area| area.root == root)
+                .then_some(id)
+        })
+    };
+    let first_floating = floating_id_for_root(&controller, groups[0])
+        .expect("first detached tab group should own a floating window");
+    let second_floating = floating_id_for_root(&controller, groups[1])
+        .expect("second detached tab group should own a floating window");
+
+    controller
+        .apply(DockCommand::DockFloating {
+            group: second_floating,
+            target: DropTarget::GroupEdge {
+                group: groups[0],
+                zone: dock_core::DropZone::Bottom,
+            },
+        })
+        .expect("the second floating group should join the first as a vertical stack");
+
+    assert_eq!(controller.layout().floating_groups().count(), 1);
+    let (floating_id, floating_root) = controller
         .layout()
         .floating_groups()
         .next()
         .map(|(id, floating)| {
-            let root = controller.layout().dock_area(floating.area).unwrap().root;
-            (id, root)
+            (
+                id,
+                controller.layout().dock_area(floating.area).unwrap().root,
+            )
         })
-        .expect("floating a column should create a floating group");
-    let Node::Column(column) = controller.layout().node(root).unwrap() else {
-        panic!("floating column should remain a Column root");
-    };
-    assert_eq!(column.groups.len(), group_count);
+        .expect("vertical stack should remain in one floating window");
+    assert_eq!(floating_id, first_floating);
+    assert!(matches!(
+        controller.layout().node(floating_root),
+        Some(Node::Split(split))
+            if split.axis == Axis::Y
+                && split.children == groups
+                && split.children.iter().all(|child| matches!(controller.layout().node(*child), Some(Node::Tabs(_))))
+    ));
 
-    // Exclude setup from the close-history assertions.
+    // Exclude stack construction from the close-history assertions.
     controller.workspace.history.clear();
     controller.close_floating(floating_id).unwrap();
 
     assert!(controller.layout().floating_groups().next().is_none());
-    assert!(controller.layout().panel_instances().count() < original_panel_count);
-    assert_eq!(controller.workspace.history.undo_len(), group_count);
+    assert_eq!(
+        controller.layout().panel_instances().count(),
+        original_panel_count - floating_panel_count
+    );
+    assert_eq!(controller.workspace.history.undo_len(), 1);
     assert_eq!(controller.workspace.history.redo_len(), 0);
     assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
 
-    for _ in 0..group_count {
-        assert!(controller.undo().unwrap());
-    }
+    assert!(controller.undo().unwrap());
     assert_eq!(controller.workspace.history.undo_len(), 0);
-    assert_eq!(controller.workspace.history.redo_len(), group_count);
+    assert_eq!(controller.workspace.history.redo_len(), 1);
     assert_eq!(controller.layout().floating_groups().count(), 1);
+    assert_eq!(controller.layout().panel_instances().count(), original_panel_count);
+    assert!(matches!(
+        controller
+            .layout()
+            .dock_area(controller.layout().floating_groups().next().unwrap().1.area)
+            .and_then(|area| controller.layout().node(area.root)),
+        Some(Node::Split(split)) if split.axis == Axis::Y && split.children.len() == 2
+    ));
     assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
 
-    for _ in 0..group_count {
-        assert!(controller.redo().unwrap());
-    }
+    assert!(controller.redo().unwrap());
     assert_eq!(controller.layout().floating_groups().count(), 0);
+    assert_eq!(
+        controller.layout().panel_instances().count(),
+        original_panel_count - floating_panel_count
+    );
     assert_eq!(controller.workspace.history.redo_len(), 0);
     assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
 }
@@ -3647,7 +3732,7 @@ fn rail_threshold_resize_is_one_undoable_action() {
 
 #[test]
 fn frame_prunes_scroll_handles_for_removed_columns() {
-    let mut controller = DockController::new_initial(&Theme::default()).unwrap();
+    let mut controller = generic_controller();
     let (column_id, _) = controller
         .layout()
         .nodes()
