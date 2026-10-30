@@ -134,6 +134,8 @@ pub(crate) struct MainWindow {
     visibility_subscription: Option<Subscription>,
     layout_subscription: Option<Subscription>,
     external_panel_drag: Option<ExternalPanelDrag>,
+    #[cfg(windows)]
+    docked_panel_drag: Option<DockedPanelDrag>,
     last_dock_viewport: Option<Rect>,
     last_window_bounds: Option<Bounds<Pixels>>,
     last_viewport_size: Option<gpui::Size<Pixels>>,
@@ -175,6 +177,22 @@ struct ExternalPanelDrag {
     native_window: NativeWindowHandle,
     #[cfg(windows)]
     cursor_offset: (i32, i32),
+}
+
+#[cfg(windows)]
+struct DockedPanelDrag {
+    panel_id: PanelId,
+    group: NodeId,
+    session: DragSession,
+    viewport: Rect,
+    layout_version: u64,
+}
+
+#[cfg(windows)]
+enum DockedPanelPoll {
+    Continue,
+    Stop,
+    Detached,
 }
 
 #[cfg(windows)]
@@ -253,6 +271,8 @@ impl MainWindow {
             visibility_subscription: None,
             layout_subscription: None,
             external_panel_drag: None,
+            #[cfg(windows)]
+            docked_panel_drag: None,
             last_dock_viewport: None,
             last_window_bounds: None,
             last_viewport_size: None,
@@ -406,7 +426,7 @@ impl MainWindow {
         kind: PanelKind,
         show_immediately: bool,
         cx: &mut Context<Self>,
-    ) {
+    ) -> Option<WindowHandle<FloatingPanel>> {
         let Some(binding) = self
             .panel_bindings
             .iter()
@@ -414,7 +434,7 @@ impl MainWindow {
             .copied()
         else {
             eprintln!("No dock-core tree is registered for panel '{}'", kind.key());
-            return;
+            return None;
         };
 
         if let Some(existing) = self
@@ -422,14 +442,13 @@ impl MainWindow {
             .iter()
             .find(|panel| panel.panel_id == binding.panel_id)
         {
+            let handle = existing.handle.clone();
             if show_immediately
-                && let Err(error) = existing
-                    .handle
-                    .update(cx, |_, window, _| window.activate_window())
+                && let Err(error) = handle.update(cx, |_, window, _| window.activate_window())
             {
                 eprintln!("Could not activate floating panel '{}': {error:?}", kind.key());
             }
-            return;
+            return Some(handle);
         }
 
         let floating_group_id = {
@@ -456,7 +475,7 @@ impl MainWindow {
             } else {
                 eprintln!("Panel '{}' is not present in the dock layout", kind.key());
             }
-            return;
+            return None;
         };
 
         if let Err(error) = self.apply_layout_command(
@@ -466,7 +485,7 @@ impl MainWindow {
             cx,
         ) {
             eprintln!("Could not raise floating panel '{}': {error}", kind.key());
-            return;
+            return None;
         }
 
         let options = WindowOptions {
@@ -508,11 +527,298 @@ impl MainWindow {
                 {
                     eprintln!("Could not show floating panel '{}': {error:?}", kind.key());
                 }
+                Some(handle)
             }
             Err(error) => {
                 eprintln!("Could not open floating panel '{}': {error}", kind.key());
+                None
             }
         }
+    }
+
+    #[cfg(windows)]
+    fn begin_docked_panel_drag(
+        &mut self,
+        group: NodeId,
+        panel_id: PanelId,
+        cx: &mut Context<Self>,
+    ) {
+        if self.external_panel_drag.is_some() || self.docked_panel_drag.is_some() {
+            return;
+        }
+
+        let Some(viewport) = self.last_dock_viewport else {
+            return;
+        };
+        let (cursor_x, cursor_y) = platform::windows::cursor_position();
+        let Some(pointer) = self.external_panel_pointer_from_screen(cursor_x, cursor_y) else {
+            return;
+        };
+
+        let is_valid_source = {
+            let layout = self.layout.read(cx);
+            matches!(
+                layout.node(group),
+                Some(Node::Tabs(tabs))
+                    if tabs.children.iter().any(|child| {
+                        matches!(layout.node(*child), Some(Node::Panel(panel)) if panel.panel_id == panel_id)
+                    })
+            ) && floating_group_for_panel(&layout, panel_id).is_none()
+        };
+        if !is_valid_source {
+            return;
+        }
+
+        // Select the tab immediately. If the pointer never crosses the drag
+        // threshold this remains an ordinary tab click.
+        if let Err(error) = self.apply_layout_command(
+            DockCommand::ActivateTab {
+                group,
+                panel: panel_id,
+            },
+            cx,
+        ) {
+            eprintln!("Could not activate the panel before dragging: {error}");
+            return;
+        }
+
+        let layout_version = self.layout.read(cx).version();
+        let mut session = match DragSession::new(&self.metrics) {
+            Ok(session) => session,
+            Err(error) => {
+                eprintln!("Could not create a docked panel drag session: {error}");
+                return;
+            }
+        };
+        if let Err(error) = session.pointer_down_with_handle(
+            DragPayload::Panel { panel: panel_id },
+            DragHandle::PanelTab,
+            pointer,
+        ) {
+            eprintln!("Could not begin a docked panel drag session: {error}");
+            return;
+        }
+
+        self.docked_panel_drag = Some(DockedPanelDrag {
+            panel_id,
+            group,
+            session,
+            viewport,
+            layout_version,
+        });
+
+        cx.spawn(async move |this, cx| loop {
+            cx.background_executor()
+                .timer(Duration::from_millis(4))
+                .await;
+
+            match this.update(cx, |main, cx| main.poll_docked_panel_drag(cx)) {
+                Ok(DockedPanelPoll::Continue) => {}
+                Ok(DockedPanelPoll::Stop | DockedPanelPoll::Detached) | Err(_) => break,
+            }
+        })
+        .detach();
+    }
+
+    #[cfg(windows)]
+    fn poll_docked_panel_drag(&mut self, cx: &mut Context<Self>) -> DockedPanelPoll {
+        let Some(drag) = self.docked_panel_drag.as_ref() else {
+            return DockedPanelPoll::Stop;
+        };
+        let panel_id = drag.panel_id;
+        let viewport = drag.viewport;
+        let layout_version = drag.layout_version;
+
+        if !platform::windows::left_button_down() {
+            self.docked_panel_drag = None;
+            return DockedPanelPoll::Stop;
+        }
+
+        let (cursor_x, cursor_y) = platform::windows::cursor_position();
+        let Some(pointer) = self.external_panel_pointer_from_screen(cursor_x, cursor_y) else {
+            self.docked_panel_drag = None;
+            return DockedPanelPoll::Stop;
+        };
+
+        if self.last_dock_viewport != Some(viewport)
+            || self.layout.read(cx).version() != layout_version
+        {
+            self.docked_panel_drag = None;
+            return DockedPanelPoll::Stop;
+        }
+
+        let pointer_error = match self.docked_panel_drag.as_mut() {
+            Some(drag) => drag.session.pointer_move(pointer).err(),
+            None => return DockedPanelPoll::Stop,
+        };
+        if let Some(error) = pointer_error {
+            eprintln!("Could not update the docked panel drag pointer: {error}");
+            self.docked_panel_drag = None;
+            return DockedPanelPoll::Stop;
+        }
+
+        let crossed_threshold = self.docked_panel_drag.as_ref().is_some_and(|drag| {
+            matches!(drag.session.state(), DragState::Dragging { .. })
+        });
+        if !crossed_threshold {
+            return DockedPanelPoll::Continue;
+        }
+
+        self.docked_panel_drag = None;
+        if self.detach_docked_panel_for_drag(panel_id, viewport, cx) {
+            DockedPanelPoll::Detached
+        } else {
+            DockedPanelPoll::Stop
+        }
+    }
+
+    #[cfg(windows)]
+    fn detach_docked_panel_for_drag(
+        &mut self,
+        panel_id: PanelId,
+        viewport: Rect,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(binding) = self
+            .panel_bindings
+            .iter()
+            .find(|binding| binding.panel_id == panel_id)
+            .copied()
+        else {
+            eprintln!("No floating-window binding exists for the dragged panel");
+            return false;
+        };
+
+        let source = {
+            let layout = self.layout.read(cx);
+            let Some(panel_node) = layout.nodes().find_map(|(node_id, node)| {
+                matches!(node, Node::Panel(panel) if panel.panel_id == panel_id)
+                    .then_some(node_id)
+            }) else {
+                eprintln!("Could not find the dragged panel node in dock-core");
+                return false;
+            };
+            let Some(column) = main_column_for_panel(&layout, panel_id) else {
+                eprintln!("Could not find the dock column containing the dragged panel");
+                return false;
+            };
+            let Ok(rects) = layout.compute_rects(viewport, &self.metrics) else {
+                eprintln!("Could not compute the source column bounds for undocking");
+                return false;
+            };
+            let Some(column_rect) = rects
+                .columns
+                .iter()
+                .find(|entry| entry.column == column)
+                .map(|entry| entry.rect)
+            else {
+                eprintln!("The source column has no computed bounds");
+                return false;
+            };
+
+            // A single-tab group can be detached as a whole. For a multi-tab
+            // group, detach only the tab that the user actually dragged.
+            let group = tabs_group_for_panel(&layout, column, panel_id);
+            let Some(group) = group else {
+                eprintln!("Could not find the tab group containing the dragged panel");
+                return false;
+            };
+            let node_to_float = match layout.node(group) {
+                Some(Node::Tabs(tabs)) if tabs.children.len() == 1 => group,
+                Some(Node::Tabs(_)) => panel_node,
+                _ => {
+                    eprintln!("The dragged panel is not inside a tab group");
+                    return false;
+                }
+            };
+            (node_to_float, column_rect)
+        };
+
+        let Some(parent_bounds) = self.last_window_bounds else {
+            return false;
+        };
+        let Some(parent_viewport) = self.last_viewport_size else {
+            return false;
+        };
+
+        let parent_chrome_height =
+            (parent_bounds.size.height.as_f32() - parent_viewport.height.as_f32()).max(0.0);
+        let window_bounds = Bounds::new(
+            gpui::Point::new(
+                parent_bounds.origin.x + px(source.1.origin.x),
+                parent_bounds.origin.y
+                    + px(parent_chrome_height + self.last_surface_top + source.1.origin.y),
+            ),
+            binding.window_bounds.size,
+        );
+        let floating_bounds = Rect::new(
+            Point::ZERO,
+            Size::new(
+                window_bounds.size.width.as_f32(),
+                window_bounds.size.height.as_f32(),
+            ),
+        );
+
+        if let Err(error) = self.layout.update(cx, |layout, layout_cx| {
+            layout.apply(
+                DockCommand::Float {
+                    node: source.0,
+                    bounds: floating_bounds,
+                },
+                &self.metrics,
+            )?;
+            layout_cx.notify();
+            Ok(())
+        }) {
+            eprintln!("Could not undock the dragged panel: {error}");
+            return false;
+        }
+
+        let floating_group_id = {
+            let layout = self.layout.read(cx);
+            floating_group_for_panel(&layout, panel_id)
+        };
+        let Some(floating_group_id) = floating_group_id else {
+            eprintln!("Dock-core did not create a floating group after undocking");
+            return false;
+        };
+
+        let kind = {
+            let Some(binding) = self
+                .panel_bindings
+                .iter_mut()
+                .find(|binding| binding.panel_id == panel_id)
+            else {
+                return false;
+            };
+            binding.floating_group_id = floating_group_id;
+            binding.window_bounds = window_bounds;
+            binding.kind
+        };
+
+        let Some(handle) = self.open_floating_panel(kind, true, cx) else {
+            eprintln!("Could not create the floating window for the dragged panel");
+            return false;
+        };
+        let native_window = match handle.update(cx, |_, window, _| {
+            NativeWindowHandle::from_window(window)
+        }) {
+            Ok(Some(native_window)) => native_window,
+            Ok(None) => {
+                eprintln!("Could not obtain a native handle for the undocked panel");
+                return false;
+            }
+            Err(error) => {
+                eprintln!("Could not access the undocked panel window: {error:?}");
+                return false;
+            }
+        };
+
+        // Continue the same physical mouse gesture using the existing native
+        // floating-window polling path.
+        self.begin_external_panel_drag(panel_id, native_window, cx);
+        cx.notify();
+        true
     }
 
     #[cfg(windows)]
@@ -1326,6 +1632,32 @@ fn tabs_group_for_panel(
     }
 }
 
+fn column_for_panel(layout: &Layout, node_id: NodeId, panel_id: PanelId) -> Option<NodeId> {
+    match layout.node(node_id)? {
+        Node::Column(column) => column
+            .groups
+            .iter()
+            .any(|group| node_contains_panel(layout, *group, panel_id))
+            .then_some(node_id),
+        Node::Tabs(tabs) => tabs
+            .children
+            .iter()
+            .find_map(|child| column_for_panel(layout, *child, panel_id)),
+        Node::Split(split) => split
+            .children
+            .iter()
+            .find_map(|child| column_for_panel(layout, *child, panel_id)),
+        Node::Panel(_) => None,
+    }
+}
+
+fn main_column_for_panel(layout: &Layout, panel_id: PanelId) -> Option<NodeId> {
+    [DockSide::Left, DockSide::Right]
+        .into_iter()
+        .filter_map(|side| layout.main_area(side).map(|area| area.root))
+        .find_map(|root| column_for_panel(layout, root, panel_id))
+}
+
 fn main_tabs_group_for_panel(layout: &Layout, panel_id: PanelId) -> Option<NodeId> {
     [DockSide::Left, DockSide::Right]
         .into_iter()
@@ -1498,6 +1830,18 @@ fn render_core_node(
                                 }
                             }
                         });
+
+                    #[cfg(windows)]
+                    {
+                        let drag_owner = owner.clone();
+                        tab = tab.on_mouse_down(MouseButton::Left, move |_, _, cx| {
+                            if let Err(error) = drag_owner.update(cx, |main, cx| {
+                                main.begin_docked_panel_drag(node_id, panel_id, cx);
+                            }) {
+                                eprintln!("Could not begin a docked panel drag: {error:?}");
+                            }
+                        });
+                    }
                 }
 
                 tab
