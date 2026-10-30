@@ -114,6 +114,7 @@ pub(crate) struct MainWindow {
     floating_panels: Vec<FloatingPanelWindow>,
     panels_minimized_by_main: Vec<WindowHandle<FloatingPanel>>,
     visibility_subscription: Option<Subscription>,
+    layout_subscription: Option<Subscription>,
     main_window_handle: Option<WindowHandle<MainWindow>>,
     #[cfg(windows)]
     native_owner: Option<NativeWindowHandle>,
@@ -205,6 +206,7 @@ impl MainWindow {
             floating_panels: Vec::new(),
             panels_minimized_by_main: Vec::new(),
             visibility_subscription: None,
+            layout_subscription: None,
             main_window_handle: None,
             #[cfg(windows)]
             native_owner: None,
@@ -397,6 +399,7 @@ impl MainWindow {
                 floating_group_id,
                 owner,
                 layout,
+                layout_subscription: None,
                 bounds_subscription: None,
             })
         }) {
@@ -516,6 +519,12 @@ impl Render for MainWindow {
             ));
         }
 
+        if self.layout_subscription.is_none() {
+            let layout = self.layout.clone();
+            self.layout_subscription =
+                Some(cx.observe(&layout, |_, _, cx| cx.notify()));
+        }
+
         let owner = cx.entity().downgrade();
         let layout = self.layout.read(cx);
         let left_dock = render_main_dock(
@@ -583,6 +592,7 @@ struct FloatingPanel {
     floating_group_id: FloatingGroupId,
     owner: WeakEntity<MainWindow>,
     layout: Entity<Layout>,
+    layout_subscription: Option<Subscription>,
     bounds_subscription: Option<Subscription>,
 }
 
@@ -613,6 +623,12 @@ impl Render for FloatingPanel {
                 Some(cx.observe_window_bounds(window, |this, window, cx| {
                     this.sync_native_bounds(window, cx);
                 }));
+        }
+
+        if self.layout_subscription.is_none() {
+            let layout = self.layout.clone();
+            self.layout_subscription =
+                Some(cx.observe(&layout, |_, _, cx| cx.notify()));
         }
 
         let layout = self.layout.read(cx);
