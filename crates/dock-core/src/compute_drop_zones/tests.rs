@@ -507,8 +507,11 @@ fn max_columns_hides_new_column_targets_when_the_source_column_cannot_collapse()
         .unwrap();
     assert!(!zones.iter().any(|zone| matches!(
         zone.target,
-        DropTarget::MainColumn { .. } if matches!(zone.zone, DropZone::ColumnLeft | DropZone::ColumnRight | DropZone::DockEdge)
-    )));
+        DropTarget::MainColumn {
+            side: DockSide::Left,
+            ..
+        } if matches!(zone.zone, DropZone::ColumnLeft | DropZone::ColumnRight | DropZone::DockEdge)
+    )), "the full left dock must not offer another column slot");
 }
 
 #[test]
@@ -722,7 +725,7 @@ fn floating_center_and_edges_resolve_to_tab_or_stack_targets() {
 #[test]
 fn floating_horizontal_composition_drop_zones_target_the_branch_under_pointer() {
     let metrics = DockMetrics::default();
-    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+    let mut builder = LayoutBuilder::new(Profile::Generic);
 
     let (source_panel, source_node) = builder.panel(key("float-x-source"), constraints());
     let source_group = builder.tabs(vec![source_node], 0, false);
