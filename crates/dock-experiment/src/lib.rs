@@ -1463,20 +1463,22 @@ impl MainWindow {
         target: DropTarget,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some((source_group, panel_ids)) = ({
+        let composition = {
             let layout = self.layout.read(cx);
-            let source_group = floating_group_for_panel(&layout, source_panel_id)?;
-            let root = floating_group_root(&layout, source_group)?;
-            matches!(
-                layout.node(root),
-                Some(Node::Split(split))
-                    if split.axis == Axis::X
-                        && split.children.iter().all(|child| {
-                            matches!(layout.node(*child), Some(Node::Column(_)))
-                        })
-            )
-            .then(|| (source_group, floating_group_panel_ids(&layout, source_group)))
-        }) else {
+            floating_group_for_panel(&layout, source_panel_id).and_then(|source_group| {
+                let root = floating_group_root(&layout, source_group)?;
+                matches!(
+                    layout.node(root),
+                    Some(Node::Split(split))
+                        if split.axis == Axis::X
+                            && split.children.iter().all(|child| {
+                                matches!(layout.node(*child), Some(Node::Column(_)))
+                            })
+                )
+                .then(|| (source_group, floating_group_panel_ids(&layout, source_group)))
+            })
+        };
+        let Some((source_group, panel_ids)) = composition else {
             return false;
         };
 
