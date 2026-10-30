@@ -1074,8 +1074,7 @@ dependencies = [
  "dock-core",
  "gpui",
  "gpui_platform",
- "raw-window-handle",
- "windows",
+ "platform",
 ]
 
 [[package]]
