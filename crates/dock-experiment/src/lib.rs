@@ -714,20 +714,26 @@ impl MainWindow {
                 return false;
             };
 
-            // A single-tab group can be detached as a whole. For a multi-tab
-            // group, detach only the tab that the user actually dragged.
-            let group = tabs_group_for_panel(&layout, column, panel_id);
-            let Some(group) = group else {
+            // Preserve the complete Column -> Tabs -> Panel composition when
+            // it contains only this panel. Otherwise detach either the whole
+            // one-tab group or just the tab the user actually dragged.
+            let Some(group) = tabs_group_for_panel(&layout, column, panel_id) else {
                 eprintln!("Could not find the tab group containing the dragged panel");
                 return false;
             };
-            let node_to_float = match layout.node(group) {
-                Some(Node::Tabs(tabs)) if tabs.children.len() == 1 => group,
-                Some(Node::Tabs(_)) => panel_node,
-                _ => {
-                    eprintln!("The dragged panel is not inside a tab group");
-                    return false;
-                }
+            let Some(Node::Tabs(tabs)) = layout.node(group) else {
+                eprintln!("The dragged panel is not inside a tab group");
+                return false;
+            };
+            let node_to_float = if tabs.children.len() > 1 {
+                panel_node
+            } else if matches!(
+                layout.node(column),
+                Some(Node::Column(column_node)) if column_node.groups.len() == 1
+            ) {
+                column
+            } else {
+                group
             };
             (node_to_float, column_rect)
         };
