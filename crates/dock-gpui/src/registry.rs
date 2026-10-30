@@ -198,7 +198,7 @@ mod tests {
         ));
     }
 
-    
+
     #[test]
     fn registry_rejects_invalid_constraints_without_inserting() {
         let mut registry = PanelRegistry::new();
