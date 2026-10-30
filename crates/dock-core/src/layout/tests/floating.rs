@@ -1039,3 +1039,163 @@ fn floating_vertical_stack_reserves_title_row_when_first_group_collapsed() {
     assert_eq!(top_rect.rect.origin.y, 30.0 + metrics.header_height);
     assert!(rects.groups.iter().any(|entry| entry.group == bottom_group));
 }
+
+#[test]
+fn dock_floating_columns_side_by_side_builds_a_single_horizontal_composition() {
+    let metrics = DockMetrics::default();
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+
+    let (source_panel, source_node) = builder.panel(
+        PanelKey::new("floating-compose-source").unwrap(),
+        descriptors()[0].1,
+    );
+    let source_tabs = builder.tabs(vec![source_node], 0, false);
+    let source_column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![source_tabs],
+        vec![1.0],
+    );
+    let source_floating = builder.floating_group(
+        source_column,
+        Rect::new(Point::new(40.0, 60.0), Size::new(300.0, 280.0)),
+        2,
+    );
+
+    let (target_panel, target_node) = builder.panel(
+        PanelKey::new("floating-compose-target").unwrap(),
+        descriptors()[0].1,
+    );
+    let target_tabs = builder.tabs(vec![target_node], 0, false);
+    let target_column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![target_tabs],
+        vec![1.0],
+    );
+    let target_floating = builder.floating_group(
+        target_column,
+        Rect::new(Point::new(420.0, 60.0), Size::new(420.0, 280.0)),
+        1,
+    );
+
+    let mut layout = builder.build();
+    assert_eq!(layout.validate(&metrics), Ok(()));
+
+    layout
+        .apply(
+            DockCommand::DockFloating {
+                group: source_floating,
+                target: DropTarget::GroupEdge {
+                    group: target_tabs,
+                    zone: DropZone::Left,
+                },
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    assert!(layout.floating_group(source_floating).is_none());
+    let target = layout.floating_group(target_floating).unwrap();
+    let root = layout.dock_area(target.area).unwrap().root;
+    assert!(matches!(
+        layout.node(root),
+        Some(Node::Split(split))
+            if split.axis == Axis::X
+                && split.children == vec![source_column, target_column]
+                && (split.ratios[0] - 300.0 / 720.0).abs() < 1.0e-4
+                && (split.ratios[1] - 420.0 / 720.0).abs() < 1.0e-4
+    ));
+    assert!(matches!(
+        layout.node(source_column),
+        Some(Node::Column(column)) if column.groups == vec![source_tabs]
+    ));
+    assert!(matches!(
+        layout.node(target_column),
+        Some(Node::Column(column)) if column.groups == vec![target_tabs]
+    ));
+    assert!(layout.panel_instance(source_panel).is_some());
+    assert!(layout.panel_instance(target_panel).is_some());
+    assert_eq!(layout.panel_instances().count(), 2);
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
+fn dock_floating_column_to_the_right_appends_after_the_existing_composition() {
+    let metrics = DockMetrics::default();
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, left_panel) =
+        builder.panel(PanelKey::new("floating-compose-left").unwrap(), descriptors()[0].1);
+    let left_tabs = builder.tabs(vec![left_panel], 0, false);
+    let left_column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![left_tabs],
+        vec![1.0],
+    );
+    let (_, right_panel) =
+        builder.panel(PanelKey::new("floating-compose-right").unwrap(), descriptors()[0].1);
+    let right_tabs = builder.tabs(vec![right_panel], 0, false);
+    let right_column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![right_tabs],
+        vec![1.0],
+    );
+    let existing_composition = builder.split(
+        Axis::X,
+        vec![left_column, right_column],
+        vec![0.4, 0.6],
+    );
+    let target_floating = builder.floating_group(
+        existing_composition,
+        Rect::new(Point::new(100.0, 80.0), Size::new(500.0, 300.0)),
+        1,
+    );
+
+    let (_, source_panel) =
+        builder.panel(PanelKey::new("floating-compose-new-right").unwrap(), descriptors()[0].1);
+    let source_tabs = builder.tabs(vec![source_panel], 0, false);
+    let source_column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![source_tabs],
+        vec![1.0],
+    );
+    let source_floating = builder.floating_group(
+        source_column,
+        Rect::new(Point::new(620.0, 80.0), Size::new(280.0, 300.0)),
+        2,
+    );
+
+    let mut layout = builder.build();
+    assert_eq!(layout.validate(&metrics), Ok(()));
+
+    layout
+        .apply(
+            DockCommand::DockFloating {
+                group: source_floating,
+                target: DropTarget::GroupEdge {
+                    group: right_tabs,
+                    zone: DropZone::Right,
+                },
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    assert!(layout.floating_group(source_floating).is_none());
+    let target = layout.floating_group(target_floating).unwrap();
+    let root = layout.dock_area(target.area).unwrap().root;
+    assert!(matches!(
+        layout.node(root),
+        Some(Node::Split(split))
+            if split.axis == Axis::X
+                && split.children == vec![left_column, right_column, source_column]
+                && split.ratios.len() == 3
+                && (split.ratios.iter().sum::<f32>() - 1.0).abs() < 1.0e-4
+    ));
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
