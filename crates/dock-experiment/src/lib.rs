@@ -161,6 +161,7 @@ struct FloatingPanelWindow {
     panel_id: PanelId,
     handle: WindowHandle<FloatingPanel>,
     visible: bool,
+    host: bool,
 }
 
 struct PanelDrag {
@@ -406,10 +407,10 @@ impl MainWindow {
                 })
         });
         if is_being_dragged {
-            if let Some(binding) = self
+            for binding in self
                 .panel_bindings
                 .iter_mut()
-                .find(|binding| binding.floating_group_id == Some(group))
+                .filter(|binding| binding.floating_group_id == Some(group))
             {
                 binding.window_bounds = native_bounds;
             }
@@ -448,10 +449,10 @@ impl MainWindow {
             Ok(())
         })?;
 
-        if let Some(binding) = self
+        for binding in self
             .panel_bindings
             .iter_mut()
-            .find(|binding| binding.floating_group_id == Some(group))
+            .filter(|binding| binding.floating_group_id == Some(group))
         {
             binding.window_bounds = native_bounds;
         }
@@ -516,19 +517,35 @@ impl MainWindow {
             return None;
         }
 
+        let composition_panel_ids = {
+            let layout = self.layout.read(cx);
+            floating_group_panel_ids(&layout, floating_group_id)
+        };
+        let host_panel_id = self
+            .floating_panels
+            .iter()
+            .find(|panel| panel.host && composition_panel_ids.contains(&panel.panel_id))
+            .or_else(|| {
+                self.floating_panels
+                    .iter()
+                    .find(|panel| composition_panel_ids.contains(&panel.panel_id))
+            })
+            .map(|panel| panel.panel_id)
+            .unwrap_or(binding.panel_id);
+
         if let Some(existing) = self
             .floating_panels
             .iter()
-            .find(|panel| panel.panel_id == binding.panel_id)
+            .find(|panel| panel.panel_id == host_panel_id)
         {
             let handle = existing.handle.clone();
             if show_immediately {
-                if let Some(panel) = self
+                for panel in self
                     .floating_panels
                     .iter_mut()
-                    .find(|panel| panel.panel_id == binding.panel_id)
+                    .filter(|panel| composition_panel_ids.contains(&panel.panel_id))
                 {
-                    panel.visible = true;
+                    panel.visible = panel.panel_id == host_panel_id;
                 }
             }
             if show_immediately
@@ -567,11 +584,17 @@ impl MainWindow {
                     platform::windows::hide_window(native_window);
                 }
 
-                let main_window = close_owner.update(app, |main, _cx| {
-                    if let Some(panel) = main
+                let main_window = close_owner.update(app, |main, cx| {
+                    let composition_panel_ids = {
+                        let layout = main.layout.read(cx);
+                        floating_group_for_panel(&layout, panel_id)
+                            .map(|group| floating_group_panel_ids(&layout, group))
+                            .unwrap_or_else(|| vec![panel_id])
+                    };
+                    for panel in main
                         .floating_panels
                         .iter_mut()
-                        .find(|panel| panel.panel_id == panel_id)
+                        .filter(|panel| composition_panel_ids.contains(&panel.panel_id))
                     {
                         panel.visible = false;
                     }
@@ -599,6 +622,7 @@ impl MainWindow {
                     panel_id,
                     handle: handle.clone(),
                     visible: show_immediately,
+                    host: true,
                 });
 
                 if show_immediately
@@ -888,8 +912,20 @@ impl MainWindow {
         if needs_resolver {
             let prepared = {
                 let layout = self.layout.read(cx);
-                prepare_external_panel_resolver(&layout, viewport, self.metrics, panel_id)
-                    .map(|(resolver, zones)| (layout.version(), resolver, zones))
+                let visible_floating_groups = self
+                    .floating_panels
+                    .iter()
+                    .filter(|panel| panel.visible)
+                    .filter_map(|panel| floating_group_for_panel(&layout, panel.panel_id))
+                    .collect::<HashSet<_>>();
+                prepare_external_panel_resolver(
+                    &layout,
+                    viewport,
+                    self.metrics,
+                    panel_id,
+                    &visible_floating_groups,
+                )
+                .map(|(resolver, zones)| (layout.version(), resolver, zones))
             };
             match prepared {
                 Ok((version, resolver, zones)) => {
@@ -1170,9 +1206,10 @@ impl MainWindow {
         let panel_id = drag.panel_id;
         let native_window = drag.native_window;
         let was_floating = drag.floating;
+        let target = drag.target;
         let request = match {
             let mut session = drag.session;
-            session.pointer_up(pointer, drag.target)
+            session.pointer_up(pointer, target)
         } {
             Ok(request) => request,
             Err(error) => {
@@ -1184,6 +1221,34 @@ impl MainWindow {
                 return false;
             }
         };
+
+        if was_floating
+            && request.is_some()
+            && let Some(DropTarget::GroupEdge {
+                group: target_node,
+                zone: zone @ (DropZone::Left | DropZone::Right),
+            }) = target
+        {
+            let joins_another_floating_group = {
+                let layout = self.layout.read(cx);
+                let source_group = floating_group_for_panel(&layout, panel_id);
+                let target_group = floating_group_for_node(&layout, target_node);
+                source_group.is_some() && target_group.is_some() && source_group != target_group
+            };
+            if joins_another_floating_group {
+                self.dock_floating_panel_to_composition(
+                    panel_id,
+                    native_window,
+                    DropTarget::GroupEdge {
+                        group: target_node,
+                        zone,
+                    },
+                    cx,
+                );
+                cx.notify();
+                return false;
+            }
+        }
 
         let metrics = self.metrics;
         let docked = match request {
@@ -1232,6 +1297,152 @@ impl MainWindow {
 
         cx.notify();
         docked
+    }
+
+    #[cfg(windows)]
+    fn dock_floating_panel_to_composition(
+        &mut self,
+        source_panel_id: PanelId,
+        source_native: NativeWindowHandle,
+        target: DropTarget,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let DropTarget::GroupEdge {
+            group: target_node,
+            zone: zone @ (DropZone::Left | DropZone::Right),
+        } = target
+        else {
+            return false;
+        };
+
+        let composition_members = {
+            let layout = self.layout.read(cx);
+            let Some(source_group) = floating_group_for_panel(&layout, source_panel_id) else {
+                return false;
+            };
+            let Some(target_group) = floating_group_for_node(&layout, target_node) else {
+                return false;
+            };
+            if source_group == target_group {
+                return false;
+            }
+            Some((
+                source_group,
+                target_group,
+                floating_group_panel_ids(&layout, source_group),
+                floating_group_panel_ids(&layout, target_group),
+            ))
+        };
+        let Some((source_group, target_group, source_panel_ids, target_panel_ids)) =
+            composition_members
+        else {
+            self.sync_floating_panel_after_drag(source_panel_id, cx);
+            return false;
+        };
+
+        let target_host = self
+            .floating_panels
+            .iter()
+            .find(|panel| {
+                panel.host && panel.visible && target_panel_ids.contains(&panel.panel_id)
+            })
+            .or_else(|| {
+                self.floating_panels.iter().find(|panel| {
+                    panel.visible && target_panel_ids.contains(&panel.panel_id)
+                })
+            })
+            .map(|panel| (panel.panel_id, panel.handle.clone()));
+        let Some((target_host_panel_id, target_handle)) = target_host else {
+            eprintln!("The target floating composition has no visible popup host");
+            self.sync_floating_panel_after_drag(source_panel_id, cx);
+            return false;
+        };
+
+        let target_native = match target_handle.update(cx, |_, window, _| {
+            NativeWindowHandle::from_window(window)
+        }) {
+            Ok(Some(handle)) => handle,
+            Ok(None) => {
+                eprintln!("Could not obtain the target composition's native handle");
+                self.sync_floating_panel_after_drag(source_panel_id, cx);
+                return false;
+            }
+            Err(error) => {
+                eprintln!("Could not access the target composition window: {error:?}");
+                self.sync_floating_panel_after_drag(source_panel_id, cx);
+                return false;
+            }
+        };
+        let Some((source_left, source_top, source_right, source_bottom)) =
+            platform::windows::window_rect(source_native)
+        else {
+            eprintln!("Could not read the dragged composition window bounds");
+            self.sync_floating_panel_after_drag(source_panel_id, cx);
+            return false;
+        };
+        let Some((target_left, target_top, target_right, target_bottom)) =
+            platform::windows::window_rect(target_native)
+        else {
+            eprintln!("Could not read the destination composition window bounds");
+            self.sync_floating_panel_after_drag(source_panel_id, cx);
+            return false;
+        };
+
+        if let Err(error) = self.apply_layout_command(
+            DockCommand::DockFloating {
+                group: source_group,
+                target,
+            },
+            cx,
+        ) {
+            eprintln!("Could not join the floating compositions: {error}");
+            self.sync_floating_panel_after_drag(source_panel_id, cx);
+            return false;
+        }
+
+        for binding in &mut self.panel_bindings {
+            if source_panel_ids.contains(&binding.panel_id)
+                || target_panel_ids.contains(&binding.panel_id)
+            {
+                binding.floating_group_id = Some(target_group);
+            }
+        }
+        for panel in &mut self.floating_panels {
+            if source_panel_ids.contains(&panel.panel_id) {
+                panel.visible = false;
+                panel.host = false;
+            } else if target_panel_ids.contains(&panel.panel_id) {
+                panel.host = panel.panel_id == target_host_panel_id;
+                panel.visible = panel.panel_id == target_host_panel_id;
+            }
+        }
+
+        let source_width = (source_right - source_left).max(1);
+        let source_height = (source_bottom - source_top).max(1);
+        let target_width = (target_right - target_left).max(1);
+        let target_height = (target_bottom - target_top).max(1);
+        let new_left = if zone == DropZone::Left {
+            target_left - source_width
+        } else {
+            target_left
+        };
+        let new_width = target_width.saturating_add(source_width);
+        let new_height = target_height.max(source_height);
+
+        if !platform::windows::move_window(target_native, new_left, target_top) {
+            eprintln!("Could not reposition the floating composition host");
+        }
+        if !platform::windows::resize_window(target_native, new_width, new_height) {
+            eprintln!("Could not resize the floating composition host");
+        }
+        platform::windows::hide_window(source_native);
+
+        if let Err(error) = target_handle.update(cx, |_, window, _| window.activate_window()) {
+            eprintln!("Could not activate the joined composition window: {error:?}");
+        }
+
+        cx.notify();
+        true
     }
 
     #[cfg(windows)]
@@ -1483,11 +1694,16 @@ impl Render for FloatingPanel {
         }
 
         let layout = self.layout.read(cx);
-        let title = layout
-            .panel_instance(self.panel_id)
-            .map(|instance| panel_title(instance.key.as_str()).to_owned())
+        let floating_group = floating_group_for_panel(&layout, self.panel_id);
+        let title = floating_group
+            .and_then(|group| floating_group_title(&layout, group))
+            .or_else(|| {
+                layout
+                    .panel_instance(self.panel_id)
+                    .map(|instance| panel_title(instance.key.as_str()).to_owned())
+            })
             .unwrap_or_else(|| "Панель".to_owned());
-        let content = floating_group_for_panel(&layout, self.panel_id)
+        let content = floating_group
             .and_then(|group| render_floating_group(&layout, group, self.owner.clone()))
             .unwrap_or_else(|| {
                 div()
@@ -1561,11 +1777,17 @@ impl Render for FloatingPanel {
                                 #[cfg(not(windows))]
                                 window.remove_window();
 
-                                let main_window = owner.update(cx, |this, _cx| {
-                                    if let Some(panel) = this
+                                let main_window = owner.update(cx, |this, cx| {
+                                    let composition_panel_ids = {
+                                        let layout = this.layout.read(cx);
+                                        floating_group_for_panel(&layout, panel_id)
+                                            .map(|group| floating_group_panel_ids(&layout, group))
+                                            .unwrap_or_else(|| vec![panel_id])
+                                    };
+                                    for panel in this
                                         .floating_panels
                                         .iter_mut()
-                                        .find(|panel| panel.panel_id == panel_id)
+                                        .filter(|panel| composition_panel_ids.contains(&panel.panel_id))
                                     {
                                         panel.visible = false;
                                     }
@@ -1631,10 +1853,49 @@ fn prepare_external_panel_resolver(
     viewport: Rect,
     metrics: DockMetrics,
     panel_id: PanelId,
+    visible_floating_groups: &HashSet<FloatingGroupId>,
 ) -> Result<(DropZoneResolver, Vec<DropZoneRect>), String> {
     let mut rects = layout
         .compute_rects(viewport, &metrics)
         .map_err(|error| format!("could not compute main dock geometry: {error}"))?;
+
+    let source_group = floating_group_for_panel(layout, panel_id);
+    let source_is_composition = source_group
+        .and_then(|group| floating_group_root(layout, group))
+        .is_some_and(|root| {
+            matches!(layout.node(root), Some(Node::Split(split)) if split.axis == Axis::X)
+        });
+    let mut peer_zones = Vec::new();
+    for floating_rect in rects.floating_groups.iter().copied() {
+        if Some(floating_rect.group) == source_group
+            || !visible_floating_groups.contains(&floating_rect.group)
+        {
+            continue;
+        }
+        let Some(root) = floating_group_root(layout, floating_rect.group) else {
+            continue;
+        };
+        for zone in [DropZone::Left, DropZone::Right] {
+            let Some(target_group) = floating_edge_group(layout, root, zone) else {
+                continue;
+            };
+            let Some(rect) = floating_group_edge_rect(
+                floating_rect.rect,
+                zone,
+                metrics.edge_drop_width,
+            ) else {
+                continue;
+            };
+            peer_zones.push(DropZoneRect::new(
+                DropTarget::GroupEdge {
+                    group: target_group,
+                    zone,
+                },
+                zone,
+                rect,
+            ));
+        }
+    }
 
     let mut floating_nodes = HashSet::new();
     for (_, floating) in layout.floating_groups() {
@@ -1668,12 +1929,13 @@ fn prepare_external_panel_resolver(
     let resolver = layout
         .prepare_drop_resolver(DropSource::Panel { panel: panel_id }, &rects, &metrics)
         .map_err(|error| format!("could not prepare dock-core drop zones: {error}"))?;
-    let zones = resolver
+    let mut zones = resolver
         .zones()
         .iter()
         .copied()
-        .filter(|zone| zone.zone == DropZone::DockEdge)
-        .collect();
+        .filter(|zone| zone.zone == DropZone::DockEdge && !source_is_composition)
+        .collect::<Vec<_>>();
+    zones.extend(peer_zones);
 
     Ok((resolver, zones))
 }
@@ -1683,6 +1945,13 @@ fn resolve_edge_drop_target(
     zones: &[DropZoneRect],
     pointer: Point,
 ) -> Option<DropTarget> {
+    if let Some(zone) = zones.iter().find(|zone| {
+        matches!(zone.zone, DropZone::Left | DropZone::Right)
+            && zone.rect.contains(pointer).unwrap_or(false)
+    }) {
+        return Some(zone.target);
+    }
+
     let target = resolver.resolve(pointer).ok().flatten()?;
     zones
         .iter()
@@ -1714,6 +1983,131 @@ fn floating_group_for_panel(layout: &Layout, panel_id: PanelId) -> Option<Floati
         let root = layout.dock_area(floating.area)?.root;
         node_contains_panel(layout, root, panel_id).then_some(group_id)
     })
+}
+
+fn floating_group_root(layout: &Layout, group_id: FloatingGroupId) -> Option<NodeId> {
+    let floating = layout.floating_group(group_id)?;
+    layout.dock_area(floating.area).map(|area| area.root)
+}
+
+fn node_contains_node(layout: &Layout, root: NodeId, target: NodeId) -> bool {
+    if root == target {
+        return true;
+    }
+    match layout.node(root) {
+        Some(Node::Column(column)) => column
+            .groups
+            .iter()
+            .any(|child| node_contains_node(layout, *child, target)),
+        Some(Node::Tabs(tabs)) => tabs
+            .children
+            .iter()
+            .any(|child| node_contains_node(layout, *child, target)),
+        Some(Node::Split(split)) => split
+            .children
+            .iter()
+            .any(|child| node_contains_node(layout, *child, target)),
+        Some(Node::Panel(_)) | None => false,
+    }
+}
+
+fn floating_group_for_node(layout: &Layout, node_id: NodeId) -> Option<FloatingGroupId> {
+    layout.floating_groups().find_map(|(group_id, floating)| {
+        let root = layout.dock_area(floating.area)?.root;
+        node_contains_node(layout, root, node_id).then_some(group_id)
+    })
+}
+
+fn collect_subtree_panel_ids(layout: &Layout, node_id: NodeId, panels: &mut Vec<PanelId>) {
+    match layout.node(node_id) {
+        Some(Node::Panel(panel)) => panels.push(panel.panel_id),
+        Some(Node::Column(column)) => {
+            for child in &column.groups {
+                collect_subtree_panel_ids(layout, *child, panels);
+            }
+        }
+        Some(Node::Tabs(tabs)) => {
+            for child in &tabs.children {
+                collect_subtree_panel_ids(layout, *child, panels);
+            }
+        }
+        Some(Node::Split(split)) => {
+            for child in &split.children {
+                collect_subtree_panel_ids(layout, *child, panels);
+            }
+        }
+        None => {}
+    }
+}
+
+fn floating_group_panel_ids(layout: &Layout, group_id: FloatingGroupId) -> Vec<PanelId> {
+    let Some(root) = floating_group_root(layout, group_id) else {
+        return Vec::new();
+    };
+    let mut panels = Vec::new();
+    collect_subtree_panel_ids(layout, root, &mut panels);
+    panels
+}
+
+fn floating_edge_group(layout: &Layout, root: NodeId, zone: DropZone) -> Option<NodeId> {
+    let column_id = match layout.node(root)? {
+        Node::Column(_) => root,
+        Node::Split(split) if split.axis == Axis::X => {
+            if zone == DropZone::Left {
+                *split.children.first()?
+            } else if zone == DropZone::Right {
+                *split.children.last()?
+            } else {
+                return None;
+            }
+        }
+        Node::Tabs(_) => return Some(root),
+        Node::Split(_) | Node::Panel(_) => return None,
+    };
+    match layout.node(column_id)? {
+        Node::Column(column) => column.groups.first().copied(),
+        _ => None,
+    }
+}
+
+fn floating_group_edge_rect(
+    bounds: Rect,
+    zone: DropZone,
+    edge_width: f32,
+) -> Option<Rect> {
+    let x_band = edge_width.min(bounds.size.width / 3.0);
+    let y_band = edge_width.min(bounds.size.height / 3.0);
+    let side_height = (bounds.size.height - 2.0 * y_band).max(0.0);
+    let rect = match zone {
+        DropZone::Left => Rect::new(
+            Point::new(bounds.origin.x, bounds.origin.y + y_band),
+            Size::new(x_band, side_height),
+        ),
+        DropZone::Right => Rect::new(
+            Point::new(
+                bounds.origin.x + bounds.size.width - x_band,
+                bounds.origin.y + y_band,
+            ),
+            Size::new(x_band, side_height),
+        ),
+        _ => return None,
+    };
+    rect.is_finite().then_some(rect)
+}
+
+fn floating_group_title(layout: &Layout, group_id: FloatingGroupId) -> Option<String> {
+    let panel_ids = floating_group_panel_ids(layout, group_id);
+    let mut titles = Vec::new();
+    for panel_id in panel_ids {
+        let Some(instance) = layout.panel_instance(panel_id) else {
+            continue;
+        };
+        let title = panel_title(instance.key.as_str()).to_owned();
+        if !titles.contains(&title) {
+            titles.push(title);
+        }
+    }
+    (!titles.is_empty()).then(|| titles.join("  |  "))
 }
 
 fn tabs_group_for_panel(
