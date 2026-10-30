@@ -13,7 +13,6 @@ ui = { path = "../ui" }
 
 [target.'cfg(windows)'.dependencies]
 gpui_platform.workspace = true
-platform = { path = "../platform" }
 
 [dev-dependencies]
 slotmap.workspace = true
