@@ -1767,25 +1767,26 @@ fn render_core_node(
                     .child(title);
 
                 #[cfg(windows)]
-                let header = if let Some((group, panel_id)) = column
-                    .groups
-                    .first()
-                    .copied()
-                    .and_then(|group| {
-                        core_node_active_panel_id(layout, group)
-                            .map(|panel_id| (group, panel_id))
-                    })
-                {
+                let header = {
+                    let drag_source = column
+                        .groups
+                        .first()
+                        .copied()
+                        .and_then(|group| {
+                            core_node_active_panel_id(layout, group)
+                                .map(|panel_id| (group, panel_id))
+                        });
                     let drag_owner = owner.clone();
                     header.on_mouse_down(MouseButton::Left, move |_, _, cx| {
+                        let Some((group, panel_id)) = drag_source else {
+                            return;
+                        };
                         if let Err(error) = drag_owner.update(cx, |main, cx| {
                             main.begin_docked_panel_drag(group, panel_id, cx);
                         }) {
                             eprintln!("Could not begin a column-header panel drag: {error:?}");
                         }
                     })
-                } else {
-                    header
                 };
 
                 column_view = column_view.child(header);
