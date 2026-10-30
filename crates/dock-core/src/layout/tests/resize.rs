@@ -811,7 +811,7 @@ fn resize_split_column_boundary_works_for_a_floating_tree() {
         Some(Size::new(500.0, 400.0)),
         false,
     );
-    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Generic);
     let (_, left_panel) = builder.panel(
         PanelKey::new("floating-split-boundary-left").unwrap(),
         left_constraints,
