@@ -182,7 +182,6 @@ struct ExternalPanelDrag {
 #[cfg(windows)]
 struct DockedPanelDrag {
     panel_id: PanelId,
-    group: NodeId,
     session: DragSession,
     viewport: Rect,
     layout_version: u64,
@@ -601,7 +600,6 @@ impl MainWindow {
 
         self.docked_panel_drag = Some(DockedPanelDrag {
             panel_id,
-            group,
             session,
             viewport,
             layout_version,
