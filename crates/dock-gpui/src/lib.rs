@@ -1,34 +1,20 @@
-//! Reusable GPUI docking surface, host integration contract, and a reference window entrypoint.
+//! Clean starting point for the GPUI docking adapter.
 //!
-//! Embedded applications provide their own [`host::DockHost`] to render domain-specific
-//! panel content. The bundled [`run`] window is a reference/demo integration; its panel
-//! bodies intentionally use the placeholder content in [`panels`]. See `docs/panel-rendering.md`.
-mod chrome_geometry;
-mod color;
-pub mod components;
-mod dock;
-mod entry;
-mod floating_window;
-mod frame;
-mod geometry;
-pub mod host;
-mod labels;
-mod layers;
-mod main_window;
-mod menus;
-mod metrics;
-pub mod panels;
-mod render;
-pub mod requests;
-pub mod surface;
-mod tree_query;
+//! The previous dock-gpui implementation was removed to rebuild the adapter
+//! around dock-core without keeping parallel state or rendering paths.
 
-pub use chrome_geometry::normalize_docked_group_geometry;
-pub use entry::{RunOptions, run};
-pub use frame::FrameGeometry;
-pub use geometry::union_rects;
-pub use host::{CommandClickHandler, DockHost, DragStartHandler, NoopHost, ResizeStartHandler};
-pub use metrics::dock_metrics_from_theme;
-pub use render::{render_frame_with_host, render_with_host};
-pub use requests::{DockMenuRequest, DragOverlay, ResizeHandle};
-pub use surface::DockSurface;
+use std::path::PathBuf;
+
+/// Options for starting the dock application.
+#[derive(Default)]
+pub struct RunOptions {
+    /// Optional workspace file to restore at startup.
+    pub workspace_path: Option<PathBuf>,
+}
+
+/// Temporary entry point retained so the application crate keeps compiling.
+///
+/// The actual GPUI window and docking host will be implemented in the new adapter.
+pub fn run(_options: RunOptions) {
+    tracing::warn!("dock-gpui is an empty scaffold; the application window is not implemented yet");
+}
