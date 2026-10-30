@@ -2059,36 +2059,8 @@ fn floating_vertical_stack_capture_uses_core_targets_and_docks_the_whole_window(
 
 #[test]
 fn generic_horizontal_floating_composition_capture_uses_core_main_column_target() {
-    let mut controller = generic_controller();
+    let mut controller = generic_horizontal_split_controller();
     let viewport = Rect::new(Point::ZERO, Size::new(2000.0, 1200.0));
-    let first_group = match controller
-        .layout()
-        .node(controller.layout().main_area(DockSide::Right).unwrap().root)
-    {
-        Some(Node::Column(column)) => column.groups[0],
-        other => panic!("Generic baseline should start with a Column, got {other:?}"),
-    };
-    controller
-        .apply(DockCommand::MoveGroupToMainColumn {
-            group: first_group,
-            side: DockSide::Left,
-            index: 0,
-        })
-        .expect("creating a left-side target dock should work");
-    let remaining_group = match controller
-        .layout()
-        .node(controller.layout().main_area(DockSide::Right).unwrap().root)
-    {
-        Some(Node::Column(column)) => column.groups[0],
-        other => panic!("the remaining Generic dock should be a Column, got {other:?}"),
-    };
-    controller
-        .apply(DockCommand::MoveGroupToMainColumn {
-            group: remaining_group,
-            side: DockSide::Right,
-            index: 1,
-        })
-        .expect("creating a horizontal right-side composition should work");
     let root = controller
         .layout()
         .main_area(DockSide::Right)
