@@ -1002,7 +1002,6 @@ impl Render for MainWindow {
                         .border_color(rgb(0x69c3ff)),
                 );
             }
-
         }
 
         div()
