@@ -477,10 +477,16 @@ impl FloatingPanel {
         let bounds = core_bounds(&native_bounds);
         let group = self.floating_group_id;
 
-        if let Err(error) = self.owner.update(cx, |main, cx| {
+        match self.owner.update(cx, |main, cx| {
             main.sync_floating_panel_bounds(group, native_bounds, bounds, cx)
         }) {
-            eprintln!("Could not synchronize floating panel bounds: {error:?}");
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                eprintln!("Could not synchronize floating panel bounds: {error}");
+            }
+            Err(error) => {
+                eprintln!("Could not access the dock layout for floating bounds: {error:?}");
+            }
         }
     }
 }
@@ -701,7 +707,6 @@ fn create_floating_panel_tree(
     })
 }
 
-#[cfg(windows)]
 fn core_bounds(bounds: &Bounds<Pixels>) -> Rect {
     Rect::new(
         Point::new(bounds.origin.x.as_f32(), bounds.origin.y.as_f32()),
