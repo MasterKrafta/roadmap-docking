@@ -630,8 +630,14 @@ fn render_layout_node(
             )
             .into_any_element(),
         Node::Tabs(tabs) => {
+            let collapsed = tabs.collapsed;
             let tab_headers = tabs.children.iter().enumerate().map(|(index, child)| {
                 let title = node_title(layout, *child);
+                let title = if collapsed && index == 0 {
+                    format!("▸ {title}")
+                } else {
+                    title
+                };
                 let active = index == tabs.active_index;
                 let panel_id = match layout.node(*child) {
                     Some(Node::Panel(panel)) => Some(panel.panel_id),
@@ -656,24 +662,30 @@ fn render_layout_node(
                     .child(title);
 
                 if let Some(panel_id) = panel_id {
-                    let activate_owner = owner.clone();
+                    let tab_owner = owner.clone();
                     let close_owner = owner.clone();
                     let tab = tab
                         .cursor_pointer()
                         .hover(|style| style.bg(rgb(0x596777)))
-                        .on_click(move |_, _, cx| {
-                            match activate_owner.update(cx, |this, cx| {
-                                this.apply_layout_command(
-                                    DockCommand::ActivateTab {
-                                        group: node_id,
-                                        panel: panel_id,
-                                    },
-                                    cx,
-                                )
+                        .on_click(move |event, _, cx| {
+                            let command = if event.click_count() >= 2 {
+                                DockCommand::CollapseGroup {
+                                    group: node_id,
+                                    collapsed: !collapsed,
+                                }
+                            } else {
+                                DockCommand::ActivateTab {
+                                    group: node_id,
+                                    panel: panel_id,
+                                }
+                            };
+
+                            match tab_owner.update(cx, |this, cx| {
+                                this.apply_layout_command(command, cx)
                             }) {
                                 Ok(Ok(())) => {}
                                 Ok(Err(error)) => {
-                                    eprintln!("Could not activate dock tab: {error}");
+                                    eprintln!("Could not update dock tab group: {error}");
                                 }
                                 Err(error) => {
                                     eprintln!("Could not access the dock layout: {error:?}");
@@ -718,39 +730,44 @@ fn render_layout_node(
                 }
             });
 
-            let content = tabs
-                .active_child()
-                .map(|child| render_layout_node(layout, child, owner.clone()))
-                .unwrap_or_else(|| {
-                    div()
-                        .flex_1()
-                        .p_3()
-                        .text_color(rgb(0xaab4c0))
-                        .child("Пустая группа")
-                        .into_any_element()
-                });
+            let header = div()
+                .flex()
+                .items_center()
+                .gap_1()
+                .w_full()
+                .px_2()
+                .py_2()
+                .bg(rgb(0x2b323a))
+                .children(tab_headers);
 
-            div()
+            let group = div()
                 .flex()
                 .flex_col()
-                .flex_1()
                 .w_full()
                 .bg(rgb(0x292f37))
                 .border_b_1()
                 .border_color(rgb(0x414a55))
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_1()
-                        .w_full()
-                        .px_2()
-                        .py_2()
-                        .bg(rgb(0x2b323a))
-                        .children(tab_headers),
-                )
-                .child(content)
-                .into_any_element()
+                .child(header);
+
+            let group = if collapsed { group } else { group.flex_1() };
+
+            if collapsed {
+                group.into_any_element()
+            } else {
+                let content = tabs
+                    .active_child()
+                    .map(|child| render_layout_node(layout, child, owner.clone()))
+                    .unwrap_or_else(|| {
+                        div()
+                            .flex_1()
+                            .p_3()
+                            .text_color(rgb(0xaab4c0))
+                            .child("Пустая группа")
+                            .into_any_element()
+                    });
+
+                group.child(content).into_any_element()
+            }
         }
         Node::Panel(panel) => {
             let title = layout
