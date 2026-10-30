@@ -1,11 +1,11 @@
 //! Minimal experimental docking application entry point.
 
 use dock_core::{
-    Axis, DockCommand, DockMetrics, FloatingGroupId, Layout, Node, NodeId, PanelId, Point, Rect,
-    Size,
+    Axis, DockCommand, DockMetrics, DockSide, DropTarget, FloatingGroupId, Layout, Node, NodeId,
+    PanelId, Point, Rect, Size,
 };
 #[cfg(windows)]
-use dock_core::{DockSide, DropTarget, PanelConstraints, PanelKey, Profile};
+use dock_core::{PanelConstraints, PanelKey, Profile};
 use gpui::{
     AnyElement, AppContext, Bounds, Context, Entity, IntoElement, Pixels, Render, Subscription,
     WeakEntity,
@@ -341,9 +341,36 @@ impl MainWindow {
             return;
         }
 
+        let floating_group_id = {
+            let layout = self.layout.read(cx);
+            floating_group_for_panel(&layout, binding.panel_id)
+        };
+
+        let Some(floating_group_id) = floating_group_id else {
+            let docked_group = {
+                let layout = self.layout.read(cx);
+                main_tabs_group_for_panel(&layout, binding.panel_id)
+            };
+
+            if let Some(group) = docked_group {
+                if let Err(error) = self.apply_layout_command(
+                    DockCommand::ActivateTab {
+                        group,
+                        panel: binding.panel_id,
+                    },
+                    cx,
+                ) {
+                    eprintln!("Could not activate docked panel '{}': {error}", kind.key());
+                }
+            } else {
+                eprintln!("Panel '{}' is not present in the dock layout", kind.key());
+            }
+            return;
+        };
+
         if let Err(error) = self.apply_layout_command(
             DockCommand::RaiseFloating {
-                group: binding.floating_group_id,
+                group: floating_group_id,
             },
             cx,
         ) {
@@ -364,7 +391,6 @@ impl MainWindow {
         let owner = cx.entity().downgrade();
         let layout = self.layout.clone();
         let panel_id = binding.panel_id;
-        let floating_group_id = binding.floating_group_id;
         match cx.open_window(options, move |_window, cx| {
             cx.new(|_| FloatingPanel {
                 panel_id,
@@ -394,6 +420,52 @@ impl MainWindow {
                 eprintln!("Could not open floating panel '{}': {error}", kind.key());
             }
         }
+    }
+
+    fn dock_panel_to_side(
+        &mut self,
+        panel_id: PanelId,
+        side: DockSide,
+        cx: &mut Context<Self>,
+    ) -> Result<Option<WindowHandle<MainWindow>>, dock_core::CommandError> {
+        let index = {
+            let layout = self.layout.read(cx);
+            if floating_group_for_panel(&layout, panel_id).is_none() {
+                return Err(dock_core::CommandError::InvalidTarget {
+                    reason: "only a floating panel can be docked from its floating window",
+                });
+            }
+
+            let column_count = main_column_count(&layout, side);
+            match side {
+                DockSide::Left => 0,
+                DockSide::Right => column_count,
+            }
+        };
+
+        self.apply_layout_command(
+            DockCommand::MovePanel {
+                panel: panel_id,
+                target: DropTarget::MainColumn { side, index },
+            },
+            cx,
+        )?;
+
+        let window_id = self
+            .floating_panels
+            .iter()
+            .find(|panel| panel.panel_id == panel_id)
+            .map(|panel| panel.handle.window_id());
+
+        self.floating_panels
+            .retain(|panel| panel.panel_id != panel_id);
+
+        if let Some(window_id) = window_id {
+            self.panels_minimized_by_main
+                .retain(|panel| panel.window_id() != window_id);
+        }
+
+        Ok(self.main_window_handle)
     }
 
     /// Closes every still-open panel before GPUI closes the main window.
@@ -445,6 +517,41 @@ impl Render for MainWindow {
         }
 
         let owner = cx.entity().downgrade();
+        let layout = self.layout.read(cx);
+        let left_dock = render_main_dock(
+            &layout,
+            DockSide::Left,
+            self.metrics,
+            owner.clone(),
+        );
+        let right_dock = render_main_dock(
+            &layout,
+            DockSide::Right,
+            self.metrics,
+            owner.clone(),
+        );
+
+        let mut workspace = div()
+            .flex()
+            .flex_row()
+            .flex_1()
+            .size_full()
+            .bg(rgb(0x20252b));
+
+        if let Some(left_dock) = left_dock {
+            workspace = workspace.child(left_dock);
+        }
+
+        workspace = workspace.child(
+            div()
+                .flex_1()
+                .size_full()
+                .bg(rgb(0x20252b)),
+        );
+
+        if let Some(right_dock) = right_dock {
+            workspace = workspace.child(right_dock);
+        }
 
         div()
             .flex()
@@ -463,16 +570,11 @@ impl Render for MainWindow {
                     .bg(rgb(0x2b323a))
                     .border_b_1()
                     .border_color(rgb(0x414a55))
-                    .child("Плавающие окна")
+                    .child("Панели")
                     .child(menu_button(PanelKind::Layers, owner.clone()))
                     .child(menu_button(PanelKind::Properties, owner.clone())),
             )
-            .child(
-                div()
-                    .flex_1()
-                    .size_full()
-                    .bg(rgb(0x20252b)),
-            )
+            .child(workspace)
     }
 }
 
@@ -563,6 +665,20 @@ impl Render for FloatingPanel {
                             .window_control_area(WindowControlArea::Drag)
                             .child(title.clone()),
                     )
+                    .child(dock_panel_button(
+                        "←",
+                        "dock-panel-left",
+                        DockSide::Left,
+                        owner.clone(),
+                        panel_id,
+                    ))
+                    .child(dock_panel_button(
+                        "→",
+                        "dock-panel-right",
+                        DockSide::Right,
+                        owner.clone(),
+                        panel_id,
+                    ))
                     .child(
                         div()
                             .id("close-panel")
@@ -614,6 +730,158 @@ impl Render for FloatingPanel {
             )
             .child(content)
     }
+}
+
+fn dock_panel_button(
+    label: &'static str,
+    id: &'static str,
+    side: DockSide,
+    owner: WeakEntity<MainWindow>,
+    panel_id: PanelId,
+) -> impl IntoElement {
+    div()
+        .id(id)
+        .flex()
+        .items_center()
+        .justify_center()
+        .size(px(28.0))
+        .rounded_sm()
+        .cursor_pointer()
+        .hover(|style| style.bg(rgb(0x596777)))
+        .occlude()
+        .on_click(move |_, window, cx| {
+            match owner.update(cx, |main, cx| main.dock_panel_to_side(panel_id, side, cx)) {
+                Ok(Ok(main_window)) => {
+                    if let Some(main_window) = main_window
+                        && let Err(error) = main_window.update(cx, |_, window, _| {
+                            window.activate_window();
+                        })
+                    {
+                        eprintln!("Could not activate the main window after docking: {error:?}");
+                    }
+                    window.remove_window();
+                }
+                Ok(Err(error)) => {
+                    eprintln!("Could not dock panel to {:?}: {error}", side);
+                }
+                Err(error) => {
+                    eprintln!("Could not access the main window while docking: {error:?}");
+                }
+            }
+        })
+        .child(label)
+}
+
+fn node_contains_panel(layout: &Layout, node_id: NodeId, panel_id: PanelId) -> bool {
+    match layout.node(node_id) {
+        Some(Node::Panel(panel)) => panel.panel_id == panel_id,
+        Some(Node::Column(column)) => column
+            .groups
+            .iter()
+            .any(|child| node_contains_panel(layout, *child, panel_id)),
+        Some(Node::Tabs(tabs)) => tabs
+            .children
+            .iter()
+            .any(|child| node_contains_panel(layout, *child, panel_id)),
+        Some(Node::Split(split)) => split
+            .children
+            .iter()
+            .any(|child| node_contains_panel(layout, *child, panel_id)),
+        None => false,
+    }
+}
+
+fn floating_group_for_panel(layout: &Layout, panel_id: PanelId) -> Option<FloatingGroupId> {
+    layout.floating_groups().find_map(|(group_id, floating)| {
+        let root = layout.dock_area(floating.area)?.root;
+        node_contains_panel(layout, root, panel_id).then_some(group_id)
+    })
+}
+
+fn tabs_group_for_panel(
+    layout: &Layout,
+    node_id: NodeId,
+    panel_id: PanelId,
+) -> Option<NodeId> {
+    match layout.node(node_id)? {
+        Node::Tabs(tabs) => tabs
+            .children
+            .iter()
+            .any(|child| node_contains_panel(layout, *child, panel_id))
+            .then_some(node_id),
+        Node::Column(column) => column
+            .groups
+            .iter()
+            .find_map(|child| tabs_group_for_panel(layout, *child, panel_id)),
+        Node::Split(split) => split
+            .children
+            .iter()
+            .find_map(|child| tabs_group_for_panel(layout, *child, panel_id)),
+        Node::Panel(_) => None,
+    }
+}
+
+fn main_tabs_group_for_panel(layout: &Layout, panel_id: PanelId) -> Option<NodeId> {
+    [DockSide::Left, DockSide::Right]
+        .into_iter()
+        .filter_map(|side| layout.main_area(side).map(|area| area.root))
+        .find_map(|root| tabs_group_for_panel(layout, root, panel_id))
+}
+
+fn main_column_count(layout: &Layout, side: DockSide) -> usize {
+    let Some(area) = layout.main_area(side) else {
+        return 0;
+    };
+
+    match layout.node(area.root) {
+        Some(Node::Column(_)) => 1,
+        Some(Node::Split(split)) if split.axis == Axis::X => split.children.len(),
+        _ => 0,
+    }
+}
+
+fn main_area_width(layout: &Layout, side: DockSide, metrics: DockMetrics) -> Option<f32> {
+    let area = layout.main_area(side)?;
+    match layout.node(area.root)? {
+        Node::Column(column) => Some(column.width),
+        Node::Split(split) if split.axis == Axis::X => {
+            let mut width = 0.0;
+            for child in &split.children {
+                let Some(Node::Column(column)) = layout.node(*child) else {
+                    return None;
+                };
+                width += column.width;
+            }
+            width += metrics.splitter_thickness * split.children.len().saturating_sub(1) as f32;
+            Some(width)
+        }
+        _ => None,
+    }
+}
+
+fn render_main_dock(
+    layout: &Layout,
+    side: DockSide,
+    metrics: DockMetrics,
+    owner: WeakEntity<MainWindow>,
+) -> Option<AnyElement> {
+    let root = layout.main_area(side)?.root;
+    let width = main_area_width(layout, side, metrics).unwrap_or(metrics.default_column_width);
+    let content = render_core_node(layout, root, owner);
+
+    let dock = div()
+        .flex()
+        .flex_col()
+        .h_full()
+        .w(px(width))
+        .bg(rgb(0x262c33));
+
+    let dock = match side {
+        DockSide::Left => dock.border_r_1().border_color(rgb(0x414a55)),
+        DockSide::Right => dock.border_l_1().border_color(rgb(0x414a55)),
+    };
+
+    Some(dock.child(content).into_any_element())
 }
 
 fn render_floating_group(
