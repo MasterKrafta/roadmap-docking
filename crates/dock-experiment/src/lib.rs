@@ -2451,6 +2451,8 @@ fn render_core_node(
                         .map(|(index, child)| {
                             let ratio = split.ratios.get(index).copied().unwrap_or(1.0);
                             div()
+                                .flex()
+                                .flex_col()
                                 .flex_1()
                                 .flex_grow(ratio)
                                 .child(render_core_node(
