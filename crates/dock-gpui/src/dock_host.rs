@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
 use dock_core::{
     ColumnMode, ComputeRectsError, DockSide, HitResult, Layout, Node, NodeId, Point, Rect,
@@ -10,7 +11,11 @@ use gpui::{
 };
 use ui::Theme;
 
-use crate::{DockController, main_dock_view::{MainDockView, scroll_adjusted_hit_test_point}};
+use crate::{
+    DockController,
+    group_view::{GroupMenuToggle, collect_group_presentations},
+    main_dock_view::{MainDockView, scroll_adjusted_hit_test_point},
+};
 
 /// Root composition for an application's docking workspace.
 ///
@@ -29,6 +34,8 @@ pub struct DockHost {
     canvas: Option<AnyView>,
     /// GPUI scroll positions are transient and keyed by the Core owner NodeId.
     column_scroll_handles: HashMap<NodeId, ScrollHandle>,
+    /// Currently opened group menu; menu visibility is adapter-only state.
+    open_group_menu: Option<NodeId>,
 }
 
 impl DockHost {
@@ -41,6 +48,7 @@ impl DockHost {
             options_bar: None,
             canvas: None,
             column_scroll_handles: HashMap::new(),
+            open_group_menu: None,
         }
     }
 
@@ -123,8 +131,16 @@ impl Render for DockHost {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // One read transaction produces the geometry snapshot plus the IDs/modes
         // needed by the main-dock presentation layer. The Layout remains Core-owned.
-        let (chrome, rects, main_node_ids, main_column_ids, main_column_groups, column_modes) =
-            self.controller.update(cx, |controller, _| {
+        let (
+            chrome,
+            rects,
+            main_node_ids,
+            main_column_ids,
+            main_column_groups,
+            column_modes,
+            group_presentations,
+            metrics,
+        ) = self.controller.update(cx, |controller, _| {
                 let rects = controller.geometry().cloned();
                 let layout = controller.layout();
                 let chrome = layout.chrome();
@@ -151,6 +167,9 @@ impl Render for DockHost {
                         _ => None,
                     })
                     .collect::<HashMap<_, _>>();
+                let group_presentations =
+                    collect_group_presentations(layout, controller.registry(), &main_node_ids);
+                let metrics = controller.metrics();
 
                 (
                     chrome,
@@ -159,6 +178,8 @@ impl Render for DockHost {
                     main_column_ids,
                     main_column_groups,
                     column_modes,
+                    group_presentations,
+                    metrics,
                 )
             });
         let rects = match rects {
@@ -188,6 +209,27 @@ impl Render for DockHost {
                     .or_insert_with(ScrollHandle::new);
             }
         }
+
+        if self
+            .open_group_menu
+            .is_some_and(|group| !group_presentations.contains_key(&group))
+        {
+            self.open_group_menu = None;
+        }
+
+        let host_entity = cx.entity().downgrade();
+        let toggle_group_menu: GroupMenuToggle = Rc::new(move |group, app| {
+            if let Some(host) = host_entity.upgrade() {
+                let _ = host.update(app, |host, host_cx| {
+                    host.open_group_menu = if host.open_group_menu == Some(group) {
+                        None
+                    } else {
+                        Some(group)
+                    };
+                    host_cx.notify();
+                });
+            }
+        });
 
         let theme = self.theme;
         let controller_for_measurement = self.controller.clone();
@@ -303,6 +345,12 @@ impl Render for DockHost {
             workspace = workspace.child(MainDockView::render(
                 &main_columns,
                 &rects.groups,
+                &rects.tab_strips,
+                &rects.tab_headers,
+                &group_presentations,
+                metrics,
+                self.open_group_menu,
+                toggle_group_menu,
                 &rects.splitters,
                 &rects.vertical_overflow,
                 &main_node_ids,

@@ -7,6 +7,7 @@
 
 pub mod controller;
 pub mod dock_host;
+pub mod group_view;
 pub mod main_dock_view;
 pub mod missing_panel;
 pub mod registry;
@@ -29,6 +30,7 @@ pub fn run(_options: RunOptions) {
 }
 
 pub use dock_host::DockHost;
+pub use group_view::{GroupView, TabStripView};
 pub use missing_panel::MissingPanelPlaceholder;
 
 pub use controller::{

@@ -1,8 +1,10 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::group_view::{GroupMenuToggle, GroupPresentation, GroupView};
+
 use dock_core::{
-    Axis, ColumnMode, ColumnRect, DockCommand, GroupRect, NodeId, Point, SplitterRect,
-    VerticalOverflow,
+    Axis, ColumnMode, ColumnRect, DockCommand, DockMetrics, GroupRect, NodeId, Point,
+    SplitterRect, TabHeaderRect, TabStripRect, VerticalOverflow,
 };
 use gpui::{
     Entity, IntoElement, ParentElement, ScrollHandle, Styled, div, px, rgb,
@@ -21,6 +23,12 @@ impl MainDockView {
     pub(crate) fn render(
         columns: &[ColumnRect],
         groups: &[GroupRect],
+        tab_strips: &[TabStripRect],
+        tab_headers: &[TabHeaderRect],
+        group_presentations: &HashMap<NodeId, GroupPresentation>,
+        metrics: DockMetrics,
+        menu_group: Option<NodeId>,
+        toggle_group_menu: GroupMenuToggle,
         splitters: &[SplitterRect],
         vertical_overflow: &[VerticalOverflow],
         main_node_ids: &HashSet<NodeId>,
@@ -67,6 +75,12 @@ impl MainDockView {
                 *column,
                 mode,
                 &group_rects,
+                tab_strips,
+                tab_headers,
+                group_presentations,
+                metrics,
+                menu_group,
+                toggle_group_menu.clone(),
                 &group_splitters,
                 overflow,
                 scroll_handle,
@@ -97,6 +111,12 @@ impl ColumnView {
         column: ColumnRect,
         mode: ColumnMode,
         groups: &[GroupRect],
+        tab_strips: &[TabStripRect],
+        tab_headers: &[TabHeaderRect],
+        group_presentations: &HashMap<NodeId, GroupPresentation>,
+        metrics: DockMetrics,
+        menu_group: Option<NodeId>,
+        toggle_group_menu: GroupMenuToggle,
         splitters: &[SplitterRect],
         overflow: Option<VerticalOverflow>,
         scroll_handle: Option<ScrollHandle>,
@@ -113,8 +133,42 @@ impl ColumnView {
             .h(px(content_extent.size.height));
 
         if mode == ColumnMode::Expanded {
-            for group in groups {
-                content = content.child(group_surface(*group, content_origin, theme));
+            let mut ordered_groups = groups.to_vec();
+            ordered_groups.sort_by_key(|group| menu_group == Some(group.group));
+            for group in &ordered_groups {
+                let strip = tab_strips
+                    .iter()
+                    .find(|strip| strip.group == group.group)
+                    .copied();
+                let presentation = group_presentations.get(&group.group);
+                if let (Some(strip), Some(presentation)) = (strip, presentation) {
+                    let headers = tab_headers
+                        .iter()
+                        .filter(|header| header.group == group.group)
+                        .copied()
+                        .collect::<Vec<_>>();
+                    let is_first_group = group.rect.origin.y == column.rect.origin.y;
+                    let reserved_grip_left = if is_first_group {
+                        metrics.group_control_button_width + 8.0
+                    } else {
+                        0.0
+                    };
+                    content = content.child(GroupView::render(
+                        *group,
+                        strip,
+                        &headers,
+                        presentation,
+                        content_origin,
+                        metrics,
+                        reserved_grip_left,
+                        controller.clone(),
+                        theme,
+                        menu_group == Some(group.group),
+                        toggle_group_menu.clone(),
+                    ));
+                } else {
+                    content = content.child(group_surface(*group, content_origin, theme));
+                }
             }
             for splitter in splitters {
                 content = content.child(splitter_surface(*splitter, content_origin, theme));
@@ -162,7 +216,7 @@ impl ColumnView {
             .id(format!("column-mode-{:?}", column.column))
             .absolute()
             .top(px(3.0))
-            .right(px(4.0))
+            .left(px(4.0))
             .w(px(28.0))
             .h(px(22.0))
             .flex()
