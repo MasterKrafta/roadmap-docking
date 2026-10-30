@@ -1789,6 +1789,8 @@ impl Render for FloatingPanel {
             .ok()
             .flatten();
 
+        let owner = self.owner.clone();
+        let panel_id = self.panel_id;
         let mut root = div()
             .relative()
             .flex()
@@ -1812,7 +1814,33 @@ impl Render for FloatingPanel {
             );
         }
 
-        root
+        let drag_zone = div()
+            .id("composition-drag-zone")
+            .absolute()
+            .left(px(0.0))
+            .top(px(0.0))
+            .w_full()
+            .h(px(8.0));
+
+        #[cfg(windows)]
+        let drag_zone = {
+            let drag_owner = owner;
+            drag_zone
+                .occlude()
+                .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                    let Some(native_window) = NativeWindowHandle::from_window(window) else {
+                        eprintln!("Could not obtain the composition window handle for dragging");
+                        return;
+                    };
+                    if let Err(error) = drag_owner.update(cx, |main, cx| {
+                        main.begin_floating_panel_drag(panel_id, native_window, cx);
+                    }) {
+                        eprintln!("Could not begin composition dragging: {error:?}");
+                    }
+                })
+        };
+
+        root.child(drag_zone)
     }
 }
 
@@ -2283,31 +2311,13 @@ fn render_core_node(
                 let panel_id: Option<PanelId> = None;
 
                 let drag_area = div()
-                    .id(format!("floating-column-drag-{node_id:?}"))
+                    .id(format!("floating-column-title-{node_id:?}"))
                     .flex()
                     .items_center()
                     .flex_1()
                     .h_full()
+                    .px_2()
                     .child(title);
-
-                #[cfg(windows)]
-                let drag_area = {
-                    let drag_owner = owner.clone();
-                    drag_area.on_mouse_down(MouseButton::Left, move |_, window, cx| {
-                        let Some(panel_id) = panel_id else {
-                            return;
-                        };
-                        let Some(native_window) = NativeWindowHandle::from_window(window) else {
-                            eprintln!("Could not obtain the composition window handle for dragging");
-                            return;
-                        };
-                        if let Err(error) = drag_owner.update(cx, |main, cx| {
-                            main.begin_floating_panel_drag(panel_id, native_window, cx);
-                        }) {
-                            eprintln!("Could not begin composition dragging: {error:?}");
-                        }
-                    })
-                };
 
                 let close_button = div()
                     .id(format!("close-floating-column-{node_id:?}"))
