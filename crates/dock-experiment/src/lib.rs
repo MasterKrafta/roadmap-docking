@@ -1,14 +1,15 @@
 //! Minimal experimental docking application entry point.
 
 use dock_core::{
-    Axis, DockCommand, DockMetrics, DockSide, DropTarget, FloatingGroupId, Layout, Node, NodeId,
-    PanelConstraints, PanelId, PanelKey, Point, Profile, Rect, Size,
+    Axis, DockCommand, DockMetrics, FloatingGroupId, Layout, Node, NodeId, PanelId, Point, Rect,
+    Size,
 };
+#[cfg(windows)]
+use dock_core::{DockSide, DropTarget, PanelConstraints, PanelKey, Profile};
 use gpui::{
     AnyElement, AppContext, Bounds, Context, IntoElement, Pixels, Render, Subscription, WeakEntity,
-    Window,
-    WindowBounds, WindowControlArea, WindowHandle, WindowKind, WindowOptions, WindowVisibility, div,
-    px, rgb, size,
+    Window, WindowBounds, WindowControlArea, WindowHandle, WindowKind, WindowOptions,
+    WindowVisibility, div, px, rgb, size,
 };
 use gpui::prelude::*;
 #[cfg(windows)]
@@ -917,6 +918,7 @@ fn core_bounds(bounds: &Bounds<Pixels>) -> Rect {
     )
 }
 
+#[cfg(windows)]
 fn panel_constraints() -> PanelConstraints {
     PanelConstraints::new(
         Size::new(120.0, 80.0),
