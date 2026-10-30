@@ -227,10 +227,17 @@ mod tests {
         let source_panel = panel_id_for(&layout, "color");
         let floating_panel = panel_id_for(&layout, "layers");
 
+        let floating_panel_node = layout
+            .nodes()
+            .find_map(|(node_id, node)| match node {
+                Node::Panel(panel) if panel.panel_id == floating_panel => Some(node_id),
+                _ => None,
+            })
+            .expect("baseline layout should contain the floating panel node");
         layout
             .apply(
-                DockCommand::FloatPanelAsGroup {
-                    panel: floating_panel,
+                DockCommand::Float {
+                    node: floating_panel_node,
                     bounds: Rect::new(Point::new(650.0, 120.0), Size::new(320.0, 300.0)),
                 },
                 &metrics,
@@ -245,13 +252,14 @@ mod tests {
             .dock_area(floating.area)
             .expect("floating group should own a dock area")
             .root;
-        let Node::Column(floating_column) = layout
+        let Node::Tabs(floating_tabs) = layout
             .node(floating_root)
             .expect("floating dock area should have a root")
         else {
-            panic!("detached Photoshop panel should have a single-column floating root");
+            panic!("detached Photoshop panel should have a Tabs floating root");
         };
-        let floating_tabs_group = floating_column.groups[0];
+        assert_eq!(floating_tabs.children.len(), 1);
+        let floating_tabs_group = floating_root;
 
         let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
         let frame = FrameGeometry::compute(&layout, viewport, &metrics).unwrap();
