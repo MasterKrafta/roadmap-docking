@@ -1630,6 +1630,7 @@ fn tabs_group_for_panel(
     }
 }
 
+#[cfg(windows)]
 fn column_for_panel(layout: &Layout, node_id: NodeId, panel_id: PanelId) -> Option<NodeId> {
     match layout.node(node_id)? {
         Node::Column(column) => column
@@ -1649,6 +1650,7 @@ fn column_for_panel(layout: &Layout, node_id: NodeId, panel_id: PanelId) -> Opti
     }
 }
 
+#[cfg(windows)]
 fn main_column_for_panel(layout: &Layout, panel_id: PanelId) -> Option<NodeId> {
     [DockSide::Left, DockSide::Right]
         .into_iter()
@@ -1940,6 +1942,7 @@ fn render_core_node(
     }
 }
 
+#[cfg(windows)]
 fn core_node_active_panel_id(layout: &Layout, node_id: NodeId) -> Option<PanelId> {
     match layout.node(node_id)? {
         Node::Panel(panel) => Some(panel.panel_id),
