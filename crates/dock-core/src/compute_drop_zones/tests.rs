@@ -541,10 +541,10 @@ fn column_limit_is_applied_independently_to_left_and_right_drop_zones() {
     assert!(
         zones.iter().any(|zone| {
             zone.target
-                == DropTarget::MainColumn {
+                == (DropTarget::MainColumn {
                     side: DockSide::Right,
                     index: 0,
-                }
+                })
                 && zone.zone == DropZone::DockEdge
         }),
         "the right dock must still accept its first column when the left dock is full"
