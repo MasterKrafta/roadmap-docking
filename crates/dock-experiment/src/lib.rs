@@ -8,16 +8,16 @@ use dock_core::{
 #[cfg(windows)]
 use dock_core::{PanelConstraints, PanelKey, Profile};
 use gpui::{
-    AnyElement, AppContext, Bounds, Context, Entity, IntoElement, MouseButton, Pixels, Render,
-    Subscription, WeakEntity, Window, WindowBounds, WindowHandle, WindowKind, WindowOptions,
-    WindowVisibility, div, px, rgb, size,
+    AnyElement, AppContext, Bounds, Context, Entity, IntoElement, Pixels, Render, Subscription,
+    WeakEntity, Window, WindowBounds, WindowHandle, WindowKind, WindowOptions, WindowVisibility,
+    div, px, rgb, size,
 };
 use gpui::prelude::*;
 use std::collections::HashSet;
 #[cfg(windows)]
 use std::time::Duration;
 #[cfg(windows)]
-use gpui::{App, TitlebarOptions};
+use gpui::{App, MouseButton, TitlebarOptions};
 #[cfg(windows)]
 use gpui_platform::application;
 #[cfg(windows)]
@@ -333,9 +333,9 @@ impl MainWindow {
         cx: &mut Context<Self>,
     ) -> Result<(), dock_core::CommandError> {
         let is_being_dragged = self.external_panel_drag.as_ref().is_some_and(|drag| {
-            self.panel_bindings
-                .iter()
-                .any(|binding| binding.panel_id == drag.panel_id && binding.floating_group_id == group)
+            self.panel_bindings.iter().any(|binding| {
+                binding.panel_id == drag.panel_id && binding.floating_group_id == group
+            })
         });
         if is_being_dragged {
             if let Some(binding) = self
@@ -1093,6 +1093,7 @@ impl Render for FloatingPanel {
         });
 
         let owner = self.owner.clone();
+        #[cfg(windows)]
         let drag_owner = owner.clone();
         let panel_id = self.panel_id;
         let drag_area = div()
