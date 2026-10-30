@@ -1,18 +1,20 @@
 //! Minimal experimental docking application entry point.
 
 use dock_core::{
-    Axis, DockCommand, DockMetrics, DockSide, DropTarget, FloatingGroupId, Layout, Node, NodeId,
-    PanelId, Point, Rect, Size,
+    Axis, DockCommand, DockMetrics, DragDropAction, DragHandle, DragPayload, DragSession,
+    DragState, DockSide, DropSource, DropTarget, DropZone, DropZoneRect, DropZoneResolver,
+    FloatingGroupId, Layout, Node, NodeId, PanelId, Point, Rect, Size,
 };
 #[cfg(windows)]
 use dock_core::{PanelConstraints, PanelKey, Profile};
 use gpui::{
-    AnyElement, AppContext, Bounds, Context, Entity, IntoElement, Pixels, Render, Subscription,
-    WeakEntity,
-    Window, WindowBounds, WindowControlArea, WindowHandle, WindowKind, WindowOptions,
+    AnyElement, AppContext, Bounds, Context, Entity, IntoElement, MouseButton, MouseMoveEvent,
+    MouseUpEvent, Pixels, Render, Subscription, WeakEntity, Window, WindowBounds,
+    WindowControlArea, WindowHandle, WindowKind, WindowOptions,
     WindowVisibility, div, px, rgb, size,
 };
 use gpui::prelude::*;
+use std::collections::HashSet;
 #[cfg(windows)]
 use gpui::{App, TitlebarOptions};
 #[cfg(windows)]
@@ -115,6 +117,11 @@ pub(crate) struct MainWindow {
     panels_minimized_by_main: Vec<WindowHandle<FloatingPanel>>,
     visibility_subscription: Option<Subscription>,
     layout_subscription: Option<Subscription>,
+    external_panel_drag: Option<ExternalPanelDrag>,
+    last_dock_viewport: Option<Rect>,
+    last_window_bounds: Option<Bounds<Pixels>>,
+    last_viewport_size: Option<gpui::Size<Pixels>>,
+    last_surface_top: f32,
     main_window_handle: Option<WindowHandle<MainWindow>>,
     #[cfg(windows)]
     native_owner: Option<NativeWindowHandle>,
@@ -137,6 +144,17 @@ struct PanelBinding {
 struct FloatingPanelWindow {
     panel_id: PanelId,
     handle: WindowHandle<FloatingPanel>,
+}
+
+struct ExternalPanelDrag {
+    panel_id: PanelId,
+    session: DragSession,
+    resolver: Option<DropZoneResolver>,
+    zones: Vec<DropZoneRect>,
+    target: Option<DropTarget>,
+    pointer: Point,
+    viewport: Rect,
+    layout_version: u64,
 }
 
 impl PanelKind {
@@ -207,6 +225,11 @@ impl MainWindow {
             panels_minimized_by_main: Vec::new(),
             visibility_subscription: None,
             layout_subscription: None,
+            external_panel_drag: None,
+            last_dock_viewport: None,
+            last_window_bounds: None,
+            last_viewport_size: None,
+            last_surface_top: 0.0,
             main_window_handle: None,
             #[cfg(windows)]
             native_owner: None,
@@ -425,50 +448,268 @@ impl MainWindow {
         }
     }
 
-    fn dock_panel_to_side(
+    fn begin_external_panel_drag(
         &mut self,
         panel_id: PanelId,
-        side: DockSide,
+        source_bounds: Bounds<Pixels>,
+        source_viewport: gpui::Size<Pixels>,
+        position: gpui::Point<Pixels>,
         cx: &mut Context<Self>,
-    ) -> Result<Option<WindowHandle<MainWindow>>, dock_core::CommandError> {
-        let index = {
+    ) {
+        let Some(viewport) = self.last_dock_viewport else {
+            return;
+        };
+        let Some(pointer) = self.external_panel_pointer(source_bounds, source_viewport, position)
+        else {
+            return;
+        };
+
+        let layout_version = {
             let layout = self.layout.read(cx);
             if floating_group_for_panel(&layout, panel_id).is_none() {
-                return Err(dock_core::CommandError::InvalidTarget {
-                    reason: "only a floating panel can be docked from its floating window",
-                });
+                eprintln!("Panel drag source is not inside a floating group");
+                return;
             }
+            layout.version()
+        };
 
-            let column_count = main_column_count(&layout, side);
-            match side {
-                DockSide::Left => 0,
-                DockSide::Right => column_count,
+        let mut session = match DragSession::new(&self.metrics) {
+            Ok(session) => session,
+            Err(error) => {
+                eprintln!("Could not create a panel drag session: {error}");
+                return;
+            }
+        };
+        if let Err(error) = session.pointer_down_with_handle(
+            DragPayload::Panel { panel: panel_id },
+            DragHandle::PanelTab,
+            pointer,
+        ) {
+            eprintln!("Could not begin a panel drag session: {error}");
+            return;
+        }
+
+        self.external_panel_drag = Some(ExternalPanelDrag {
+            panel_id,
+            session,
+            resolver: None,
+            zones: Vec::new(),
+            target: None,
+            pointer,
+            viewport,
+            layout_version,
+        });
+    }
+
+    fn handle_external_panel_mouse_move(
+        &mut self,
+        event: &MouseMoveEvent,
+        source_bounds: Bounds<Pixels>,
+        source_viewport: gpui::Size<Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        if event.pressed_button != Some(MouseButton::Left) {
+            if self.external_panel_drag.take().is_some() {
+                cx.notify();
+            }
+            return;
+        }
+
+        let Some(pointer) =
+            self.external_panel_pointer(source_bounds, source_viewport, event.position)
+        else {
+            return;
+        };
+        if native_window_contains_pointer(source_bounds, source_viewport, event.position) {
+            return;
+        }
+
+        let Some((panel_id, viewport, drag_version)) = self
+            .external_panel_drag
+            .as_ref()
+            .map(|drag| (drag.panel_id, drag.viewport, drag.layout_version))
+        else {
+            return;
+        };
+
+        if self.layout.read(cx).version() != drag_version {
+            self.external_panel_drag = None;
+            cx.notify();
+            return;
+        }
+
+        let pointer_update_error = match self.external_panel_drag.as_mut() {
+            Some(drag) => drag.session.pointer_move(pointer).err(),
+            None => return,
+        };
+        if let Some(error) = pointer_update_error {
+            eprintln!("Could not update the panel drag pointer: {error}");
+            self.external_panel_drag = None;
+            cx.notify();
+            return;
+        }
+
+        let needs_resolver = {
+            let Some(drag) = self.external_panel_drag.as_mut() else {
+                return;
+            };
+            drag.pointer = pointer;
+            matches!(drag.session.state(), DragState::Dragging { .. })
+                && drag.resolver.is_none()
+        };
+
+        if needs_resolver {
+            let prepared = {
+                let layout = self.layout.read(cx);
+                prepare_external_panel_resolver(&layout, viewport, self.metrics, panel_id)
+                    .map(|(resolver, zones)| (layout.version(), resolver, zones))
+            };
+            match prepared {
+                Ok((version, resolver, zones)) if version == drag_version => {
+                    if let Some(drag) = self.external_panel_drag.as_mut() {
+                        drag.resolver = Some(resolver);
+                        drag.zones = zones;
+                    }
+                }
+                Ok(_) => {
+                    self.external_panel_drag = None;
+                    cx.notify();
+                    return;
+                }
+                Err(error) => {
+                    eprintln!("Could not prepare Photoshop edge drop zones: {error}");
+                    self.external_panel_drag = None;
+                    cx.notify();
+                    return;
+                }
+            }
+        }
+
+        let Some(drag) = self.external_panel_drag.as_mut() else {
+            return;
+        };
+        let target = drag
+            .resolver
+            .as_ref()
+            .and_then(|resolver| resolve_edge_drop_target(resolver, &drag.zones, pointer));
+        let changed = drag.target != target;
+        drag.target = target;
+        if drag.resolver.is_some()
+            && let Err(error) = drag.session.set_drop_target(target)
+        {
+            eprintln!("Could not update the panel drag target: {error}");
+        }
+        if changed || drag.resolver.is_some() {
+            cx.notify();
+        }
+    }
+
+    fn handle_external_panel_mouse_up(
+        &mut self,
+        event: &MouseUpEvent,
+        source_bounds: Bounds<Pixels>,
+        source_viewport: gpui::Size<Pixels>,
+        cx: &mut Context<Self>,
+    ) -> Option<WindowHandle<MainWindow>> {
+        if event.button != MouseButton::Left {
+            return None;
+        }
+        let Some(drag) = self.external_panel_drag.take() else {
+            return None;
+        };
+        let Some(pointer) =
+            self.external_panel_pointer(source_bounds, source_viewport, event.position)
+        else {
+            cx.notify();
+            return None;
+        };
+        if native_window_contains_pointer(source_bounds, source_viewport, event.position) {
+            cx.notify();
+            return None;
+        }
+
+        let Some(resolver) = drag.resolver.as_ref() else {
+            cx.notify();
+            return None;
+        };
+        let target = resolve_edge_drop_target(resolver, &drag.zones, pointer);
+        let request = match {
+            let mut session = drag.session;
+            session.pointer_up(pointer, target)
+        } {
+            Ok(Some(request)) => request,
+            Ok(None) => {
+                cx.notify();
+                return None;
+            }
+            Err(error) => {
+                eprintln!("Could not finish the panel drag session: {error}");
+                cx.notify();
+                return None;
             }
         };
 
-        self.apply_layout_command(
-            DockCommand::MovePanel {
-                panel: panel_id,
-                target: DropTarget::MainColumn { side, index },
-            },
-            cx,
-        )?;
+        let panel_id = drag.panel_id;
+        let metrics = self.metrics;
+        let docked = match self.layout.update(cx, |layout, layout_cx| {
+            let action = layout.resolve_drag_drop(&request, &metrics)?;
+            match action {
+                DragDropAction::NoOp => Ok(false),
+                DragDropAction::Command(command) => {
+                    layout.apply(command, &metrics)?;
+                    layout_cx.notify();
+                    Ok(
+                        floating_group_for_panel(layout, panel_id).is_none()
+                            && main_tabs_group_for_panel(layout, panel_id).is_some(),
+                    )
+                }
+            }
+        }) {
+            Ok(Ok(docked)) => docked,
+            Ok(Err(error)) => {
+                eprintln!("Dock core rejected the panel drop: {error}");
+                false
+            }
+            Err(error) => {
+                eprintln!("Could not update the dock layout after a panel drop: {error:?}");
+                false
+            }
+        };
 
-        let window_id = self
-            .floating_panels
-            .iter()
-            .find(|panel| panel.panel_id == panel_id)
-            .map(|panel| panel.handle.window_id());
-
-        self.floating_panels
-            .retain(|panel| panel.panel_id != panel_id);
-
-        if let Some(window_id) = window_id {
-            self.panels_minimized_by_main
-                .retain(|panel| panel.window_id() != window_id);
+        if docked {
+            let window_id = self
+                .floating_panels
+                .iter()
+                .find(|panel| panel.panel_id == panel_id)
+                .map(|panel| panel.handle.window_id());
+            self.floating_panels
+                .retain(|panel| panel.panel_id != panel_id);
+            if let Some(window_id) = window_id {
+                self.panels_minimized_by_main
+                    .retain(|panel| panel.window_id() != window_id);
+            }
         }
+        cx.notify();
+        docked.then_some(self.main_window_handle).flatten()
+    }
 
-        Ok(self.main_window_handle)
+    fn external_panel_pointer(
+        &self,
+        source_bounds: Bounds<Pixels>,
+        source_viewport: gpui::Size<Pixels>,
+        position: gpui::Point<Pixels>,
+    ) -> Option<Point> {
+        let main_bounds = self.last_window_bounds?;
+        let main_viewport = self.last_viewport_size?;
+        let pointer = native_pointer_in_dock_surface(
+            source_bounds,
+            source_viewport,
+            position,
+            main_bounds,
+            main_viewport,
+            self.last_surface_top,
+        );
+        pointer.is_finite().then_some(pointer)
     }
 
     /// Closes every still-open panel before GPUI closes the main window.
@@ -525,6 +766,17 @@ impl Render for MainWindow {
                 Some(cx.observe(&layout, |_, _, cx| cx.notify()));
         }
 
+        let window_size = window.viewport_size();
+        let width = window_size.width.as_f32().max(1.0);
+        let height = window_size.height.as_f32().max(1.0);
+        let surface_top = 48.0;
+        let content_height = (height - surface_top).max(1.0);
+        let viewport = Rect::new(Point::ZERO, Size::new(width, content_height));
+        self.last_dock_viewport = Some(viewport);
+        self.last_window_bounds = Some(window.window_bounds().get_bounds());
+        self.last_viewport_size = Some(window_size);
+        self.last_surface_top = surface_top;
+
         let owner = cx.entity().downgrade();
         let layout = self.layout.read(cx);
         let left_dock = render_main_dock(
@@ -541,6 +793,7 @@ impl Render for MainWindow {
         );
 
         let mut workspace = div()
+            .relative()
             .flex()
             .flex_row()
             .flex_1()
@@ -560,6 +813,51 @@ impl Render for MainWindow {
 
         if let Some(right_dock) = right_dock {
             workspace = workspace.child(right_dock);
+        }
+
+        if let Some(drag) = self.external_panel_drag.as_ref()
+            && drag.resolver.is_some()
+        {
+            for zone in &drag.zones {
+                let active = drag.target == Some(zone.target);
+                workspace = workspace.child(
+                    div()
+                        .absolute()
+                        .left(px(zone.rect.origin.x))
+                        .top(px(zone.rect.origin.y))
+                        .w(px(zone.rect.size.width))
+                        .h(px(zone.rect.size.height))
+                        .bg(rgb(if active { 0x286b9e } else { 0x193d58 }))
+                        .border_2()
+                        .border_color(rgb(if active { 0x69c3ff } else { 0x3979a3 })),
+                );
+            }
+
+            let label = layout
+                .panel_instance(drag.panel_id)
+                .map(|instance| panel_title(instance.key.as_str()).to_owned())
+                .unwrap_or_else(|| "Панель".to_owned());
+            let ghost_width = 176.0_f32.min(width.max(1.0));
+            let ghost_height = 34.0_f32;
+            let ghost_x = (drag.pointer.x + 14.0).clamp(0.0, (width - ghost_width).max(0.0));
+            let ghost_y = (drag.pointer.y + 14.0)
+                .clamp(0.0, (content_height - ghost_height).max(0.0));
+            workspace = workspace.child(
+                div()
+                    .absolute()
+                    .left(px(ghost_x))
+                    .top(px(ghost_y))
+                    .w(px(ghost_width))
+                    .h(px(ghost_height))
+                    .px_3()
+                    .flex()
+                    .items_center()
+                    .bg(rgb(0x344c60))
+                    .border_1()
+                    .border_color(rgb(0x69c3ff))
+                    .text_color(rgb(0xf0f5fa))
+                    .child(label),
+            );
         }
 
         div()
@@ -652,6 +950,9 @@ impl Render for FloatingPanel {
 
         let owner = self.owner.clone();
         let panel_id = self.panel_id;
+        let move_owner = self.owner.clone();
+        let release_owner = self.owner.clone();
+        let release_out_owner = self.owner.clone();
 
         div()
             .flex()
@@ -681,20 +982,36 @@ impl Render for FloatingPanel {
                             .window_control_area(WindowControlArea::Drag)
                             .child(title.clone()),
                     )
-                    .child(dock_panel_button(
-                        "←",
-                        "dock-panel-left",
-                        DockSide::Left,
-                        owner.clone(),
-                        panel_id,
-                    ))
-                    .child(dock_panel_button(
-                        "→",
-                        "dock-panel-right",
-                        DockSide::Right,
-                        owner.clone(),
-                        panel_id,
-                    ))
+                    .child(
+                        div()
+                            .id("panel-dock-drag-handle")
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .size(px(28.0))
+                            .rounded_sm()
+                            .cursor_pointer()
+                            .hover(|style| style.bg(rgb(0x596777)))
+                            .child("⠿")
+                            .on_mouse_down(MouseButton::Left, {
+                                let owner = owner.clone();
+                                move |event, window, cx| {
+                                    let source_bounds = window.window_bounds().get_bounds();
+                                    let source_viewport = window.viewport_size();
+                                    if let Err(error) = owner.update(cx, |main, cx| {
+                                        main.begin_external_panel_drag(
+                                            panel_id,
+                                            source_bounds,
+                                            source_viewport,
+                                            event.position,
+                                            cx,
+                                        );
+                                    }) {
+                                        eprintln!("Could not begin panel docking drag: {error:?}");
+                                    }
+                                }
+                            }),
+                    )
                     .child(
                         div()
                             .id("close-panel")
@@ -745,47 +1062,200 @@ impl Render for FloatingPanel {
                     ),
             )
             .child(content)
+            .on_mouse_move(move |event: &MouseMoveEvent, window, cx| {
+                let source_bounds = window.window_bounds().get_bounds();
+                let source_viewport = window.viewport_size();
+                if let Err(error) = move_owner.update(cx, |main, cx| {
+                    main.handle_external_panel_mouse_move(
+                        event,
+                        source_bounds,
+                        source_viewport,
+                        cx,
+                    );
+                }) {
+                    eprintln!("Could not update panel docking drag: {error:?}");
+                }
+            })
+            .on_mouse_up(MouseButton::Left, move |event: &MouseUpEvent, window, cx| {
+                let source_bounds = window.window_bounds().get_bounds();
+                let source_viewport = window.viewport_size();
+                match release_owner.update(cx, |main, cx| {
+                    main.handle_external_panel_mouse_up(
+                        event,
+                        source_bounds,
+                        source_viewport,
+                        cx,
+                    )
+                }) {
+                    Ok(Some(main_window)) => {
+                        window.remove_window();
+                        if let Err(error) = main_window.update(cx, |_, main_window, _| {
+                            main_window.activate_window();
+                        }) {
+                            eprintln!("Could not activate the main window after docking: {error:?}");
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(error) => eprintln!("Could not finish panel docking drag: {error:?}"),
+                }
+            })
+            .on_mouse_up_out(MouseButton::Left, move |event: &MouseUpEvent, window, cx| {
+                let source_bounds = window.window_bounds().get_bounds();
+                let source_viewport = window.viewport_size();
+                match release_out_owner.update(cx, |main, cx| {
+                    main.handle_external_panel_mouse_up(
+                        event,
+                        source_bounds,
+                        source_viewport,
+                        cx,
+                    )
+                }) {
+                    Ok(Some(main_window)) => {
+                        window.remove_window();
+                        if let Err(error) = main_window.update(cx, |_, main_window, _| {
+                            main_window.activate_window();
+                        }) {
+                            eprintln!("Could not activate the main window after docking: {error:?}");
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(error) => eprintln!("Could not finish panel docking drag: {error:?}"),
+                }
+            })
     }
 }
 
-fn dock_panel_button(
-    label: &'static str,
-    id: &'static str,
-    side: DockSide,
-    owner: WeakEntity<MainWindow>,
-    panel_id: PanelId,
-) -> impl IntoElement {
-    div()
-        .id(id)
-        .flex()
-        .items_center()
-        .justify_center()
-        .size(px(28.0))
-        .rounded_sm()
-        .cursor_pointer()
-        .hover(|style| style.bg(rgb(0x596777)))
-        .occlude()
-        .on_click(move |_, window, cx| {
-            match owner.update(cx, |main, cx| main.dock_panel_to_side(panel_id, side, cx)) {
-                Ok(Ok(main_window)) => {
-                    if let Some(main_window) = main_window
-                        && let Err(error) = main_window.update(cx, |_, window, _| {
-                            window.activate_window();
-                        })
-                    {
-                        eprintln!("Could not activate the main window after docking: {error:?}");
-                    }
-                    window.remove_window();
-                }
-                Ok(Err(error)) => {
-                    eprintln!("Could not dock panel to {:?}: {error}", side);
-                }
-                Err(error) => {
-                    eprintln!("Could not access the main window while docking: {error:?}");
-                }
+fn collect_subtree_nodes(layout: &Layout, node_id: NodeId, nodes: &mut HashSet<NodeId>) {
+    if !nodes.insert(node_id) {
+        return;
+    }
+
+    match layout.node(node_id) {
+        Some(Node::Split(split)) => {
+            for child in &split.children {
+                collect_subtree_nodes(layout, *child, nodes);
             }
+        }
+        Some(Node::Column(column)) => {
+            for child in &column.groups {
+                collect_subtree_nodes(layout, *child, nodes);
+            }
+        }
+        Some(Node::Tabs(tabs)) => {
+            for child in &tabs.children {
+                collect_subtree_nodes(layout, *child, nodes);
+            }
+        }
+        Some(Node::Panel(_)) | None => {}
+    }
+}
+
+fn prepare_external_panel_resolver(
+    layout: &Layout,
+    viewport: Rect,
+    metrics: DockMetrics,
+    panel_id: PanelId,
+) -> Result<(DropZoneResolver, Vec<DropZoneRect>), String> {
+    let mut rects = layout
+        .compute_rects(viewport, &metrics)
+        .map_err(|error| format!("could not compute main dock geometry: {error}"))?;
+
+    let mut floating_nodes = HashSet::new();
+    for (_, floating) in layout.floating_groups() {
+        if let Some(area) = layout.dock_area(floating.area) {
+            collect_subtree_nodes(layout, area.root, &mut floating_nodes);
+        }
+    }
+    let floating_panels = floating_nodes
+        .iter()
+        .filter_map(|node| match layout.node(*node) {
+            Some(Node::Panel(panel)) => Some(panel.panel_id),
+            _ => None,
         })
-        .child(label)
+        .collect::<HashSet<_>>();
+
+    // Native floating windows are not part of the visible main-surface target map.
+    rects.columns.retain(|entry| !floating_nodes.contains(&entry.column));
+    rects.groups.retain(|entry| !floating_nodes.contains(&entry.group));
+    rects.tab_strips.retain(|entry| !floating_nodes.contains(&entry.group));
+    rects.tab_headers.retain(|entry| !floating_nodes.contains(&entry.group));
+    rects.tab_overflows.retain(|entry| !floating_nodes.contains(&entry.group));
+    rects.panels.retain(|entry| !floating_panels.contains(&entry.panel));
+    rects.splitters.retain(|entry| !floating_nodes.contains(&entry.owner));
+    rects
+        .vertical_overflow
+        .retain(|entry| !floating_nodes.contains(&entry.owner));
+    rects.floating_groups.clear();
+    rects.floating_resize_edges.clear();
+    rects.drop_zones.clear();
+
+    let resolver = layout
+        .prepare_drop_resolver(DropSource::Panel { panel: panel_id }, &rects, &metrics)
+        .map_err(|error| format!("could not prepare dock-core drop zones: {error}"))?;
+    let zones = resolver
+        .zones()
+        .iter()
+        .copied()
+        .filter(|zone| zone.zone == DropZone::DockEdge)
+        .collect();
+
+    Ok((resolver, zones))
+}
+
+fn resolve_edge_drop_target(
+    resolver: &DropZoneResolver,
+    zones: &[DropZoneRect],
+    pointer: Point,
+) -> Option<DropTarget> {
+    let target = resolver.resolve(pointer).ok().flatten()?;
+    zones
+        .iter()
+        .find(|zone| zone.target == target && zone.rect.contains(pointer).unwrap_or(false))
+        .map(|zone| zone.target)
+}
+
+fn native_window_contains_pointer(
+    window_bounds: Bounds<Pixels>,
+    viewport: gpui::Size<Pixels>,
+    position: gpui::Point<Pixels>,
+) -> bool {
+    let chrome_width = (window_bounds.size.width.as_f32() - viewport.width.as_f32()).max(0.0);
+    let chrome_height = (window_bounds.size.height.as_f32() - viewport.height.as_f32()).max(0.0);
+    let screen_x = window_bounds.origin.x.as_f32() + chrome_width + position.x.as_f32();
+    let screen_y = window_bounds.origin.y.as_f32() + chrome_height + position.y.as_f32();
+    let right = window_bounds.origin.x.as_f32() + window_bounds.size.width.as_f32();
+    let bottom = window_bounds.origin.y.as_f32() + window_bounds.size.height.as_f32();
+
+    screen_x >= window_bounds.origin.x.as_f32()
+        && screen_x < right
+        && screen_y >= window_bounds.origin.y.as_f32()
+        && screen_y < bottom
+}
+
+fn native_pointer_in_dock_surface(
+    source_bounds: Bounds<Pixels>,
+    source_viewport: gpui::Size<Pixels>,
+    position: gpui::Point<Pixels>,
+    main_bounds: Bounds<Pixels>,
+    main_viewport: gpui::Size<Pixels>,
+    surface_top: f32,
+) -> Point {
+    let source_chrome_width =
+        (source_bounds.size.width.as_f32() - source_viewport.width.as_f32()).max(0.0);
+    let source_chrome_height =
+        (source_bounds.size.height.as_f32() - source_viewport.height.as_f32()).max(0.0);
+    let main_chrome_width =
+        (main_bounds.size.width.as_f32() - main_viewport.width.as_f32()).max(0.0);
+    let main_chrome_height =
+        (main_bounds.size.height.as_f32() - main_viewport.height.as_f32()).max(0.0);
+
+    let screen_x = source_bounds.origin.x.as_f32() + source_chrome_width + position.x.as_f32();
+    let screen_y = source_bounds.origin.y.as_f32() + source_chrome_height + position.y.as_f32();
+
+    Point::new(
+        screen_x - main_bounds.origin.x.as_f32() - main_chrome_width,
+        screen_y - main_bounds.origin.y.as_f32() - main_chrome_height - surface_top,
+    )
 }
 
 fn node_contains_panel(layout: &Layout, node_id: NodeId, panel_id: PanelId) -> bool {
