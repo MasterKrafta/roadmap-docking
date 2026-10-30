@@ -350,7 +350,33 @@ impl MainWindow {
                 }
             }
             WindowVisibility::Visible => {
-                for panel in self.panels_minimized_by_main.drain(..) {
+                let minimized_window_ids = self
+                    .panels_minimized_by_main
+                    .drain(..)
+                    .map(|panel| panel.window_id())
+                    .collect::<HashSet<_>>();
+                let floating_panel_ids = {
+                    let layout = self.layout.read(cx);
+                    self.panel_bindings
+                        .iter()
+                        .filter_map(|binding| {
+                            floating_group_for_panel(&layout, binding.panel_id)
+                                .map(|_| binding.panel_id)
+                        })
+                        .collect::<HashSet<_>>()
+                };
+                let handles = self
+                    .floating_panels
+                    .iter()
+                    .filter(|panel| {
+                        panel.visible
+                            && floating_panel_ids.contains(&panel.panel_id)
+                            && minimized_window_ids.contains(&panel.handle.window_id())
+                    })
+                    .map(|panel| panel.handle.clone())
+                    .collect::<Vec<_>>();
+
+                for panel in handles {
                     if let Err(error) = panel.update(cx, |_, window, _| {
                         #[cfg(windows)]
                         if let Some(native_window) = NativeWindowHandle::from_window(window) {
@@ -1464,13 +1490,13 @@ impl Render for FloatingPanel {
         let content = floating_group_for_panel(&layout, self.panel_id)
             .and_then(|group| render_floating_group(&layout, group, self.owner.clone()))
             .unwrap_or_else(|| {
-            div()
-                .flex_1()
-                .p_4()
-                .text_color(rgb(0xf08a8a))
-                .child("Дерево панели не найдено")
-                .into_any_element()
-        });
+                div()
+                    .flex_1()
+                    .p_4()
+                    .text_color(rgb(0xf08a8a))
+                    .child("Дерево панели не найдено")
+                    .into_any_element()
+            });
 
         let owner = self.owner.clone();
         #[cfg(windows)]
