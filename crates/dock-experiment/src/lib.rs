@@ -160,6 +160,7 @@ struct PanelBinding {
 struct FloatingPanelWindow {
     panel_id: PanelId,
     handle: WindowHandle<FloatingPanel>,
+    visible: bool,
 }
 
 struct PanelDrag {
@@ -285,14 +286,21 @@ impl MainWindow {
 
     /// Shows the already-created panels after GPUI has rendered their first frame.
     pub(crate) fn show_floating_panels(&mut self, cx: &mut Context<Self>) {
-        let handles = {
+        let floating_panel_ids = {
             let layout = self.layout.read(cx);
             self.floating_panels
                 .iter()
                 .filter(|panel| floating_group_for_panel(&layout, panel.panel_id).is_some())
-                .map(|panel| panel.handle.clone())
-                .collect::<Vec<_>>()
+                .map(|panel| panel.panel_id)
+                .collect::<HashSet<_>>()
         };
+        let mut handles = Vec::new();
+        for panel in &mut self.floating_panels {
+            if floating_panel_ids.contains(&panel.panel_id) {
+                panel.visible = true;
+                handles.push(panel.handle.clone());
+            }
+        }
         for handle in handles {
             if let Err(error) = handle.update(cx, |_, window, _| {
                 #[cfg(windows)]
@@ -326,21 +334,15 @@ impl MainWindow {
                 };
 
                 for panel in &self.floating_panels {
-                    if !floating_panel_ids.contains(&panel.panel_id) {
+                    if !floating_panel_ids.contains(&panel.panel_id) || !panel.visible {
                         continue;
                     }
                     match panel.handle.update(cx, |_, window, _| {
-                        if window.is_visible() {
-                            window.minimize_window();
-                            true
-                        } else {
-                            false
-                        }
+                        window.minimize_window();
                     }) {
-                        Ok(true) => self
+                        Ok(()) => self
                             .panels_minimized_by_main
                             .push(panel.handle.clone()),
-                        Ok(false) => {}
                         Err(_error) => {
                             // The panel may already have been closed by the user.
                         }
@@ -349,9 +351,13 @@ impl MainWindow {
             }
             WindowVisibility::Visible => {
                 for panel in self.panels_minimized_by_main.drain(..) {
-                    if let Err(error) =
-                        panel.update(cx, |_, window, _| window.activate_window())
-                    {
+                    if let Err(error) = panel.update(cx, |_, window, _| {
+                        #[cfg(windows)]
+                        if let Some(native_window) = NativeWindowHandle::from_window(window) {
+                            platform::windows::show_window(native_window);
+                        }
+                        window.activate_window();
+                    }) {
                         eprintln!("Could not restore a floating panel: {error:?}");
                     }
                 }
@@ -490,6 +496,15 @@ impl MainWindow {
             .find(|panel| panel.panel_id == binding.panel_id)
         {
             let handle = existing.handle.clone();
+            if show_immediately {
+                if let Some(panel) = self
+                    .floating_panels
+                    .iter_mut()
+                    .find(|panel| panel.panel_id == binding.panel_id)
+                {
+                    panel.visible = true;
+                }
+            }
             if show_immediately
                 && let Err(error) = handle.update(cx, |_, window, _| {
                     #[cfg(windows)]
@@ -518,11 +533,26 @@ impl MainWindow {
         let owner = cx.entity().downgrade();
         let layout = self.layout.clone();
         let panel_id = binding.panel_id;
+        let close_owner = owner.clone();
         match cx.open_window(options, move |window, cx| {
             #[cfg(windows)]
-            window.on_window_should_close(cx, |window, _app| {
+            window.on_window_should_close(cx, move |window, app| {
                 if let Some(native_window) = NativeWindowHandle::from_window(window) {
                     platform::windows::hide_window(native_window);
+                }
+
+                let main_window = close_owner.update(app, |main, _cx| {
+                    if let Some(panel) = main
+                        .floating_panels
+                        .iter_mut()
+                        .find(|panel| panel.panel_id == panel_id)
+                    {
+                        panel.visible = false;
+                    }
+                    main.main_window_handle
+                });
+                if let Ok(Some(main_window)) = main_window {
+                    let _ = main_window.update(app, |_, window, _| window.activate_window());
                 }
                 false
             });
@@ -542,6 +572,7 @@ impl MainWindow {
                 self.floating_panels.push(FloatingPanelWindow {
                     panel_id,
                     handle: handle.clone(),
+                    visible: show_immediately,
                 });
 
                 if show_immediately
@@ -1069,6 +1100,13 @@ impl MainWindow {
             binding.floating_group_id = Some(floating_group_id);
             binding.window_bounds = window_bounds;
         }
+        if let Some(panel) = self
+            .floating_panels
+            .iter_mut()
+            .find(|panel| panel.panel_id == panel_id)
+        {
+            panel.visible = true;
+        }
 
         // Update the shared drag state before moving the native window so any
         // bounds observer sees this as an active drag and cannot invalidate it.
@@ -1153,6 +1191,13 @@ impl MainWindow {
                 .find(|binding| binding.panel_id == panel_id)
             {
                 binding.floating_group_id = None;
+            }
+            if let Some(panel) = self
+                .floating_panels
+                .iter_mut()
+                .find(|panel| panel.panel_id == panel_id)
+            {
+                panel.visible = false;
             }
             platform::windows::hide_window(native_window);
         } else if was_floating {
@@ -1491,6 +1536,13 @@ impl Render for FloatingPanel {
                                 window.remove_window();
 
                                 let main_window = owner.update(cx, |this, _cx| {
+                                    if let Some(panel) = this
+                                        .floating_panels
+                                        .iter_mut()
+                                        .find(|panel| panel.panel_id == panel_id)
+                                    {
+                                        panel.visible = false;
+                                    }
                                     this.main_window_handle
                                 });
                                 match main_window {
