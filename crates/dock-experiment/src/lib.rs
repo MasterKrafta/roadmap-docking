@@ -596,11 +596,13 @@ fn render_layout_node(
                     .child(title);
 
                 if let Some(panel_id) = panel_id {
-                    let tab_owner = owner.clone();
-                    tab.cursor_pointer()
+                    let activate_owner = owner.clone();
+                    let close_owner = owner.clone();
+                    let tab = tab
+                        .cursor_pointer()
                         .hover(|style| style.bg(rgb(0x596777)))
                         .on_click(move |_, _, cx| {
-                            match tab_owner.update(cx, |this, cx| {
+                            match activate_owner.update(cx, |this, cx| {
                                 this.apply_layout_command(
                                     DockCommand::ActivateTab {
                                         group: node_id,
@@ -617,7 +619,39 @@ fn render_layout_node(
                                     eprintln!("Could not access the dock layout: {error:?}");
                                 }
                             }
+                        });
+
+                    let close_button = div()
+                        .id(format!("close-core-tab-{node_id:?}-{index}"))
+                        .px_1()
+                        .rounded_sm()
+                        .text_color(rgb(0xaab4c0))
+                        .cursor_pointer()
+                        .hover(|style| style.bg(rgb(0x596777)).text_color(rgb(0xffffff)))
+                        .on_click(move |_, _, cx| {
+                            match close_owner.update(cx, |this, cx| {
+                                this.apply_layout_command(
+                                    DockCommand::ClosePanel { panel: panel_id },
+                                    cx,
+                                )
+                            }) {
+                                Ok(Ok(())) => {}
+                                Ok(Err(error)) => {
+                                    eprintln!("Could not close dock tab: {error}");
+                                }
+                                Err(error) => {
+                                    eprintln!("Could not access the dock layout: {error:?}");
+                                }
+                            }
                         })
+                        .child("×");
+
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_1()
+                        .child(tab)
+                        .child(close_button)
                         .into_any_element()
                 } else {
                     tab.into_any_element()
