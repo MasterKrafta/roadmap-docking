@@ -2071,6 +2071,24 @@ fn generic_horizontal_floating_composition_capture_uses_core_main_column_target(
         other => panic!("Generic source should be a horizontal Column composition, got {other:?}"),
     };
 
+    // Keep another main dock available as a legal destination after the
+    // entire horizontal composition is detached from the right side.
+    controller
+        .apply(DockCommand::OpenPanel {
+            key: dock_core::PanelKey::new("capture-target").unwrap(),
+            constraints: dock_core::PanelConstraints::new(
+                Size::new(80.0, 60.0),
+                Size::new(180.0, 140.0),
+                None,
+                false,
+            ),
+            target: Some(DropTarget::MainColumn {
+                side: DockSide::Left,
+                index: 0,
+            }),
+        })
+        .expect("Generic layout should be able to create a left-side capture target");
+
     controller
         .apply(DockCommand::Float {
             node: root,
