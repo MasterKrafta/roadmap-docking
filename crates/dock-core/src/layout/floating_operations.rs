@@ -282,7 +282,7 @@ impl Layout {
             .get(*group)
             .and_then(|floating| self.dock_areas.get(floating.area).map(|area| area.root))
             .ok_or(CommandError::MissingFloatingGroup { group: *group })?;
-        self.validate_drop_target(*target, metrics)?;
+        self.validate_floating_dock_target(root, *target, metrics)?;
         let panel_nodes = self.panel_nodes_in_subtree(root);
         let moving_panels = self.panel_ids_in_subtree(root);
         self.validate_panel_ids_allowed_for_target(&moving_panels, *target)?;
@@ -311,7 +311,7 @@ impl Layout {
                 reason: "floating group references a missing dock area",
             })?
             .root;
-        self.validate_drop_target(target, metrics)?;
+        self.validate_floating_dock_target(root, target, metrics)?;
         if target
             .referenced_node_id()
             .is_some_and(|node| self.is_descendant_or_same(root, node))
@@ -474,6 +474,108 @@ impl Layout {
         } else {
             return Err(CommandError::InvalidTarget {
                 reason: "tab target changed unexpectedly",
+            });
+        }
+        Ok(())
+    }
+
+    /// Validates a floating-group drop. Horizontal GroupEdge targets inside
+    /// floating areas are reserved for joining complete Photoshop compositions;
+    /// the general GroupEdge validator remains scoped to main-dock splits.
+    fn validate_floating_dock_target(
+        &self,
+        source_root: NodeId,
+        target: DropTarget,
+        metrics: &DockMetrics,
+    ) -> Result<(), CommandError> {
+        let source_is_column_composition = match self.nodes.get(source_root) {
+            Some(Node::Column(_)) => true,
+            Some(Node::Split(split)) => {
+                split.axis == Axis::X
+                    && split.children.iter().all(|child| {
+                        matches!(self.nodes.get(*child), Some(Node::Column(_)))
+                    })
+            }
+            _ => false,
+        };
+        if let DropTarget::GroupEdge {
+            group,
+            zone: zone @ (DropZone::Left | DropZone::Right),
+        } = target
+            && source_is_column_composition
+            && self.find_floating_root_containing(group).is_some()
+        {
+            return self.validate_floating_composition_edge_target(group, zone);
+        }
+
+        self.validate_drop_target(target, metrics)
+    }
+
+    fn validate_floating_composition_edge_target(
+        &self,
+        group: NodeId,
+        zone: DropZone,
+    ) -> Result<(), CommandError> {
+        if self.profile != Profile::Photoshop {
+            return Err(CommandError::UnsupportedForProfile {
+                profile: self.profile,
+                reason: "side-by-side floating composition docking is supported only by the Photoshop profile",
+            });
+        }
+        if !matches!(zone, DropZone::Left | DropZone::Right) {
+            return Err(CommandError::InvalidTarget {
+                reason: "floating composition docking requires a left or right edge",
+            });
+        }
+        if self.is_group_in_icon_rail(group) {
+            return Err(CommandError::InvalidTarget {
+                reason: "floating composition edge target cannot be an icon rail slot",
+            });
+        }
+        if !matches!(self.nodes.get(group), Some(Node::Tabs(_))) {
+            return Err(match self.nodes.get(group) {
+                Some(_) => CommandError::InvalidTarget {
+                    reason: "floating composition edge target must be a Tabs node",
+                },
+                None => CommandError::MissingNode { node: group },
+            });
+        }
+        let column = self
+            .find_owner_column(group)
+            .ok_or(CommandError::InvalidTarget {
+                reason: "floating composition edge target must belong to a Column",
+            })?;
+        let root = self
+            .find_floating_root_containing(group)
+            .ok_or(CommandError::InvalidTarget {
+                reason: "floating composition edge target must belong to another floating area",
+            })?;
+        let is_outer_edge = match self.nodes.get(root) {
+            Some(Node::Column(_)) => root == column,
+            Some(Node::Split(split))
+                if split.axis == Axis::X
+                    && split.children.iter().all(|child| {
+                        matches!(self.nodes.get(*child), Some(Node::Column(_)))
+                    }) =>
+            {
+                let index = split
+                    .children
+                    .iter()
+                    .position(|child| *child == column)
+                    .ok_or(CommandError::InvalidTarget {
+                        reason: "floating target column is not part of its composition",
+                    })?;
+                if zone == DropZone::Left {
+                    index == 0
+                } else {
+                    index + 1 == split.children.len()
+                }
+            }
+            _ => false,
+        };
+        if !is_outer_edge {
+            return Err(CommandError::InvalidTarget {
+                reason: "floating horizontal docking is allowed only at the outer left or right edge of a Column composition",
             });
         }
         Ok(())
