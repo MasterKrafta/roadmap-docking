@@ -1705,14 +1705,6 @@ impl Render for FloatingPanel {
 
         let layout = self.layout.read(cx);
         let floating_group = floating_group_for_panel(&layout, self.panel_id);
-        let title = floating_group
-            .and_then(|group| floating_group_title(&layout, group))
-            .or_else(|| {
-                layout
-                    .panel_instance(self.panel_id)
-                    .map(|instance| panel_title(instance.key.as_str()).to_owned())
-            })
-            .unwrap_or_else(|| "Панель".to_owned());
         let content = floating_group
             .and_then(|group| render_floating_group(&layout, group, self.owner.clone()))
             .unwrap_or_else(|| {
@@ -1729,13 +1721,10 @@ impl Render for FloatingPanel {
         let drag_owner = owner.clone();
         let panel_id = self.panel_id;
         let drag_area = div()
-            .id("panel-drag-area")
+            .id("composition-drag-area")
             .flex()
-            .items_center()
             .flex_1()
-            .h_full()
-            .px_2()
-            .child(title.clone());
+            .h_full();
         #[cfg(windows)]
         let drag_area = drag_area.on_mouse_down(MouseButton::Left, move |_event, window, cx| {
             let Some(native_window) = NativeWindowHandle::from_window(window) else {
@@ -1761,9 +1750,9 @@ impl Render for FloatingPanel {
                     .items_center()
                     .justify_between()
                     .w_full()
-                    .h(px(36.0))
-                    .px_2()
-                    .bg(rgb(0x2b323a))
+                    .h(px(22.0))
+                    .px_1()
+                    .bg(rgb(0x242a31))
                     .border_b_1()
                     .border_color(rgb(0x414a55))
                     .child(drag_area)
@@ -1773,7 +1762,7 @@ impl Render for FloatingPanel {
                             .flex()
                             .items_center()
                             .justify_center()
-                            .size(px(28.0))
+                            .size(px(20.0))
                             .rounded_sm()
                             .cursor_pointer()
                             .hover(|style| style.bg(rgb(0x596777)))
@@ -2105,21 +2094,6 @@ fn floating_group_edge_rect(
     rect.validate_non_empty().is_ok().then_some(rect)
 }
 
-fn floating_group_title(layout: &Layout, group_id: FloatingGroupId) -> Option<String> {
-    let panel_ids = floating_group_panel_ids(layout, group_id);
-    let mut titles = Vec::new();
-    for panel_id in panel_ids {
-        let Some(instance) = layout.panel_instance(panel_id) else {
-            continue;
-        };
-        let title = panel_title(instance.key.as_str()).to_owned();
-        if !titles.contains(&title) {
-            titles.push(title);
-        }
-    }
-    (!titles.is_empty()).then(|| titles.join("  |  "))
-}
-
 fn tabs_group_for_panel(
     layout: &Layout,
     node_id: NodeId,
@@ -2205,7 +2179,7 @@ fn render_main_dock(
 ) -> Option<AnyElement> {
     let root = layout.main_area(side)?.root;
     let width = main_area_width(layout, side, metrics).unwrap_or(metrics.default_column_width);
-    let content = render_core_node(layout, root, owner, true);
+    let content = render_core_node(layout, root, owner, true, true);
 
     let dock = div()
         .flex()
@@ -2232,7 +2206,7 @@ fn render_floating_group(
         .and_then(|floating| layout.dock_area(floating.area))
         .map(|area| area.root)?;
 
-    Some(render_core_node(layout, root, owner, false))
+    Some(render_core_node(layout, root, owner, true, false))
 }
 
 fn render_core_node(
@@ -2240,6 +2214,7 @@ fn render_core_node(
     node_id: NodeId,
     owner: WeakEntity<MainWindow>,
     show_column_headers: bool,
+    allow_column_header_drag: bool,
 ) -> AnyElement {
     let Some(node) = layout.node(node_id) else {
         return div()
@@ -2280,7 +2255,7 @@ fn render_core_node(
                     .child(title);
 
                 #[cfg(windows)]
-                let header = {
+                let header = if allow_column_header_drag {
                     let drag_source = column
                         .groups
                         .first()
@@ -2300,6 +2275,8 @@ fn render_core_node(
                             eprintln!("Could not begin a column-header panel drag: {error:?}");
                         }
                     })
+                } else {
+                    header
                 };
 
                 column_view = column_view.child(header);
@@ -2311,7 +2288,13 @@ fn render_core_node(
                         .groups
                         .iter()
                         .map(|child| {
-                            render_core_node(layout, *child, owner.clone(), show_column_headers)
+                            render_core_node(
+                                layout,
+                                *child,
+                                owner.clone(),
+                                show_column_headers,
+                                allow_column_header_drag,
+                            )
                         }),
                 )
                 .into_any_element()
@@ -2395,7 +2378,15 @@ fn render_core_node(
 
             let content = tabs
                 .active_child()
-                .map(|child| render_core_node(layout, child, owner.clone(), show_column_headers))
+                .map(|child| {
+                    render_core_node(
+                        layout,
+                        child,
+                        owner.clone(),
+                        show_column_headers,
+                        allow_column_header_drag,
+                    )
+                })
                 .unwrap_or_else(|| {
                     div()
                         .flex_1()
@@ -2438,31 +2429,46 @@ fn render_core_node(
                 Axis::X => div().flex().flex_row(),
                 Axis::Y => div().flex().flex_col(),
             };
+            let mut children = Vec::with_capacity(split.children.len().saturating_mul(2));
+
+            for (index, child) in split.children.iter().enumerate() {
+                if index > 0 {
+                    let separator = match split.axis {
+                        Axis::X => div()
+                            .w(px(3.0))
+                            .h_full()
+                            .bg(rgb(0x6689aa)),
+                        Axis::Y => div()
+                            .h(px(3.0))
+                            .w_full()
+                            .bg(rgb(0x6689aa)),
+                    };
+                    children.push(separator.into_any_element());
+                }
+
+                let ratio = split.ratios.get(index).copied().unwrap_or(1.0);
+                children.push(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .flex_1()
+                        .flex_grow(ratio)
+                        .child(render_core_node(
+                            layout,
+                            *child,
+                            owner.clone(),
+                            show_column_headers,
+                            allow_column_header_drag,
+                        ))
+                        .into_any_element(),
+                );
+            }
 
             container
                 .flex_1()
                 .size_full()
-                .gap_2()
-                .children(
-                    split
-                        .children
-                        .iter()
-                        .enumerate()
-                        .map(|(index, child)| {
-                            let ratio = split.ratios.get(index).copied().unwrap_or(1.0);
-                            div()
-                                .flex()
-                                .flex_col()
-                                .flex_1()
-                                .flex_grow(ratio)
-                                .child(render_core_node(
-                                    layout,
-                                    *child,
-                                    owner.clone(),
-                                    show_column_headers,
-                                ))
-                        }),
-                )
+                .gap_0()
+                .children(children)
                 .into_any_element()
         }
     }
