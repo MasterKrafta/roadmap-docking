@@ -518,7 +518,15 @@ impl MainWindow {
         let owner = cx.entity().downgrade();
         let layout = self.layout.clone();
         let panel_id = binding.panel_id;
-        match cx.open_window(options, move |_window, cx| {
+        match cx.open_window(options, move |window, cx| {
+            #[cfg(windows)]
+            window.on_window_should_close(cx, |window, _app| {
+                if let Some(native_window) = NativeWindowHandle::from_window(window) {
+                    platform::windows::hide_window(native_window);
+                }
+                false
+            });
+
             cx.new(|_| FloatingPanel {
                 panel_id,
                 owner,
@@ -1062,15 +1070,8 @@ impl MainWindow {
             binding.window_bounds = window_bounds;
         }
 
-        if !platform::windows::move_window(
-            native_window,
-            cursor_x - cursor_offset.0,
-            cursor_y - cursor_offset.1,
-        ) {
-            eprintln!("Could not position the persistent PopUp window after undocking");
-        }
-        platform::windows::show_window(native_window);
-
+        // Update the shared drag state before moving the native window so any
+        // bounds observer sees this as an active drag and cannot invalidate it.
         let layout_version = self.layout.read(cx).version();
         if let Some(drag) = self.panel_drag.as_mut() {
             drag.native_window = native_window;
@@ -1082,6 +1083,15 @@ impl MainWindow {
             drag.target = None;
             drag.pointer = pointer;
         }
+
+        if !platform::windows::move_window(
+            native_window,
+            cursor_x - cursor_offset.0,
+            cursor_y - cursor_offset.1,
+        ) {
+            eprintln!("Could not position the persistent PopUp window after undocking");
+        }
+        platform::windows::show_window(native_window);
 
         cx.notify();
         true
