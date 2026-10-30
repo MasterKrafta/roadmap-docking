@@ -402,6 +402,36 @@ impl MainWindow {
             return None;
         }
         let target = drag.target?;
+        let layout = self.layout.read(cx);
+
+        if matches!(target, DropTarget::MainColumn { .. }) {
+            let zone = drag.zones.iter().find(|zone| {
+                zone.target == target
+                    && zone.zone == DropZone::DockEdge
+                    && zone.rect.contains(drag.pointer).unwrap_or(false)
+            })?;
+            let source_group = floating_group_for_panel(&layout, drag.panel_id)?;
+            if floating_group_for_panel(&layout, panel_id) != Some(source_group) {
+                return None;
+            }
+            #[cfg(windows)]
+            {
+                let scale = platform::windows::scale_factor(drag.native_window).max(0.01);
+                let (offset_x, offset_y) = drag.cursor_offset?;
+                return Some(Rect::new(
+                    Point::new(
+                        zone.rect.origin.x - drag.pointer.x + offset_x as f32 / scale,
+                        zone.rect.origin.y - drag.pointer.y + offset_y as f32 / scale,
+                    ),
+                    zone.rect.size,
+                ));
+            }
+            #[cfg(not(windows))]
+            {
+                return None;
+            }
+        }
+
         let DropTarget::GroupEdge {
             group: target_node,
             zone: target_zone @ (DropZone::Left | DropZone::Right),
@@ -409,8 +439,6 @@ impl MainWindow {
         else {
             return None;
         };
-
-        let layout = self.layout.read(cx);
         let panel_group = floating_group_for_panel(&layout, panel_id)?;
         let target_group = floating_group_for_node(&layout, target_node)?;
         if panel_group != target_group {
@@ -1321,6 +1349,37 @@ impl MainWindow {
 
         if was_floating
             && request.is_some()
+            && let Some(target @ DropTarget::MainColumn { .. }) = target
+        {
+            let source_composition = {
+                let layout = self.layout.read(cx);
+                floating_group_for_panel(&layout, panel_id).is_some_and(|group| {
+                    floating_group_root(&layout, group).is_some_and(|root| {
+                        matches!(
+                            layout.node(root),
+                            Some(Node::Split(split))
+                                if split.axis == Axis::X
+                                    && split.children.iter().all(|child| {
+                                        matches!(layout.node(*child), Some(Node::Column(_)))
+                                    })
+                        )
+                    })
+                })
+            };
+            if source_composition {
+                let docked = self.dock_floating_composition_to_main_dock(
+                    panel_id,
+                    native_window,
+                    target,
+                    cx,
+                );
+                cx.notify();
+                return docked;
+            }
+        }
+
+        if was_floating
+            && request.is_some()
             && let Some(DropTarget::GroupEdge {
                 group: target_node,
                 zone: zone @ (DropZone::Left | DropZone::Right),
@@ -1394,6 +1453,59 @@ impl MainWindow {
 
         cx.notify();
         docked
+    }
+
+    #[cfg(windows)]
+    fn dock_floating_composition_to_main_dock(
+        &mut self,
+        source_panel_id: PanelId,
+        source_native: NativeWindowHandle,
+        target: DropTarget,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some((source_group, panel_ids)) = ({
+            let layout = self.layout.read(cx);
+            let source_group = floating_group_for_panel(&layout, source_panel_id)?;
+            let root = floating_group_root(&layout, source_group)?;
+            matches!(
+                layout.node(root),
+                Some(Node::Split(split))
+                    if split.axis == Axis::X
+                        && split.children.iter().all(|child| {
+                            matches!(layout.node(*child), Some(Node::Column(_)))
+                        })
+            )
+            .then(|| (source_group, floating_group_panel_ids(&layout, source_group)))
+        }) else {
+            return false;
+        };
+
+        if let Err(error) = self.apply_layout_command(
+            DockCommand::DockFloating {
+                group: source_group,
+                target,
+            },
+            cx,
+        ) {
+            eprintln!("Could not dock the floating composition to the main window: {error}");
+            self.sync_floating_panel_after_drag(source_panel_id, cx);
+            return false;
+        }
+
+        for binding in &mut self.panel_bindings {
+            if panel_ids.contains(&binding.panel_id) {
+                binding.floating_group_id = None;
+            }
+        }
+        for panel in &mut self.floating_panels {
+            if panel_ids.contains(&panel.panel_id) {
+                panel.visible = false;
+                panel.host = false;
+            }
+        }
+
+        platform::windows::hide_window(source_native);
+        true
     }
 
     #[cfg(windows)]
@@ -1956,11 +2068,6 @@ fn prepare_external_panel_resolver(
         .map_err(|error| format!("could not compute main dock geometry: {error}"))?;
 
     let source_group = floating_group_for_panel(layout, panel_id);
-    let source_is_composition = source_group
-        .and_then(|group| floating_group_root(layout, group))
-        .is_some_and(|root| {
-            matches!(layout.node(root), Some(Node::Split(split)) if split.axis == Axis::X)
-        });
     let mut peer_zones = Vec::new();
     for floating_rect in rects.floating_groups.iter().copied() {
         if Some(floating_rect.group) == source_group
@@ -2029,7 +2136,7 @@ fn prepare_external_panel_resolver(
         .zones()
         .iter()
         .copied()
-        .filter(|zone| zone.zone == DropZone::DockEdge && !source_is_composition)
+        .filter(|zone| zone.zone == DropZone::DockEdge)
         .collect::<Vec<_>>();
     zones.extend(peer_zones);
 
