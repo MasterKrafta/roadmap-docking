@@ -453,16 +453,27 @@ impl MainWindow {
     }
 
     #[cfg(windows)]
-    fn notify_floating_panel_windows(&self, cx: &mut Context<Self>) {
-        let handles = self
+    fn sync_floating_panel_drop_highlights(&self, cx: &mut Context<Self>) {
+        let panels = self
             .floating_panels
             .iter()
             .filter(|panel| panel.visible && panel.host)
-            .map(|panel| panel.handle.clone())
+            .map(|panel| {
+                (
+                    panel.handle.clone(),
+                    self.floating_drop_highlight(panel.panel_id, cx),
+                )
+            })
             .collect::<Vec<_>>();
-        for handle in handles {
-            if let Err(error) = handle.update(cx, |_, _, window_cx| window_cx.notify()) {
-                eprintln!("Could not refresh a floating panel drop target: {error:?}");
+
+        for (handle, highlight) in panels {
+            if let Err(error) = handle.update(cx, |panel, panel_cx| {
+                if panel.drop_highlight != highlight {
+                    panel.drop_highlight = highlight;
+                    panel_cx.notify();
+                }
+            }) {
+                eprintln!("Could not update a floating panel drop preview: {error:?}");
             }
         }
     }
@@ -687,6 +698,7 @@ impl MainWindow {
                 layout,
                 layout_subscription: None,
                 bounds_subscription: None,
+                drop_highlight: None,
             })
         }) {
             Ok(handle) => {
@@ -929,7 +941,7 @@ impl MainWindow {
 
         let Some(pointer) = self.external_panel_pointer_from_screen(cursor_x, cursor_y) else {
             let was_floating = self.panel_drag.take().is_some_and(|drag| drag.floating);
-            self.notify_floating_panel_windows(cx);
+            self.sync_floating_panel_drop_highlights(cx);
             if was_floating {
                 self.sync_floating_panel_after_drag(panel_id, cx);
             }
@@ -941,7 +953,7 @@ impl MainWindow {
             || self.layout.read(cx).version() != layout_version
         {
             let was_floating = self.panel_drag.take().is_some_and(|drag| drag.floating);
-            self.notify_floating_panel_windows(cx);
+            self.sync_floating_panel_drop_highlights(cx);
             if was_floating {
                 self.sync_floating_panel_after_drag(panel_id, cx);
             }
@@ -956,7 +968,7 @@ impl MainWindow {
         if let Some(error) = pointer_update_error {
             eprintln!("Could not update the panel drag pointer: {error}");
             let was_floating = self.panel_drag.take().is_some_and(|drag| drag.floating);
-            self.notify_floating_panel_windows(cx);
+            self.sync_floating_panel_drop_highlights(cx);
             if was_floating {
                 self.sync_floating_panel_after_drag(panel_id, cx);
             }
@@ -977,7 +989,7 @@ impl MainWindow {
             && !self.detach_docked_panel_for_drag(panel_id, pointer, cursor_x, cursor_y, cx)
         {
             self.panel_drag = None;
-            self.notify_floating_panel_windows(cx);
+            self.sync_floating_panel_drop_highlights(cx);
             cx.notify();
             return PanelDragPoll::Stop;
         }
@@ -1015,7 +1027,7 @@ impl MainWindow {
                         .unwrap_or_default();
                     if version != expected_version {
                         self.panel_drag = None;
-                        self.notify_floating_panel_windows(cx);
+                        self.sync_floating_panel_drop_highlights(cx);
                         self.sync_floating_panel_after_drag(panel_id, cx);
                         cx.notify();
                         return PanelDragPoll::Stop;
@@ -1029,7 +1041,7 @@ impl MainWindow {
                 Err(error) => {
                     eprintln!("Could not prepare panel drop zones: {error}");
                     self.panel_drag = None;
-                    self.notify_floating_panel_windows(cx);
+                    self.sync_floating_panel_drop_highlights(cx);
                     self.sync_floating_panel_after_drag(panel_id, cx);
                     cx.notify();
                     return PanelDragPoll::Stop;
@@ -1073,8 +1085,8 @@ impl MainWindow {
             eprintln!("Could not move the floating panel during the docking drag");
         }
 
-        if target_changed {
-            self.notify_floating_panel_windows(cx);
+        if pointer_changed || target_changed || resolver_created {
+            self.sync_floating_panel_drop_highlights(cx);
         }
         if pointer_changed || target_changed || resolver_created {
             cx.notify();
@@ -1286,7 +1298,7 @@ impl MainWindow {
         let Some(drag) = self.panel_drag.take() else {
             return false;
         };
-        self.notify_floating_panel_windows(cx);
+        self.sync_floating_panel_drop_highlights(cx);
 
         let panel_id = drag.panel_id;
         let native_window = drag.native_window;
@@ -1746,6 +1758,7 @@ struct FloatingPanel {
     layout: Entity<Layout>,
     layout_subscription: Option<Subscription>,
     bounds_subscription: Option<Subscription>,
+    drop_highlight: Option<Rect>,
 }
 
 impl FloatingPanel {
@@ -1802,11 +1815,7 @@ impl Render for FloatingPanel {
                     .into_any_element()
             });
 
-        let drop_highlight = self
-            .owner
-            .update(cx, |main, cx| main.floating_drop_highlight(self.panel_id, cx))
-            .ok()
-            .flatten();
+        let drop_highlight = self.drop_highlight;
 
         #[cfg(windows)]
         let owner = self.owner.clone();
