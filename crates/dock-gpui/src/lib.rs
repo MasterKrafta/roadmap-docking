@@ -5,10 +5,10 @@
 //! The controller owns one dock-core Layout. UI components translate input,
 //! dispatch semantic commands, and render geometry snapshots produced by Core.
 
+pub mod components;
 pub mod controller;
 pub mod dock_host;
-pub mod group_view;
-pub mod main_dock_view;
+pub mod input;
 pub mod missing_panel;
 pub mod registry;
 
@@ -29,8 +29,8 @@ pub fn run(_options: RunOptions) {
     tracing::warn!("dock-gpui host is not implemented yet");
 }
 
+pub use components::{ColumnView, GroupView, MainDockView, TabHeaderView, TabOverflow, TabStripView};
 pub use dock_host::DockHost;
-pub use group_view::{GroupView, TabHeaderView, TabOverflow, TabStripView};
 pub use missing_panel::MissingPanelPlaceholder;
 
 pub use controller::{

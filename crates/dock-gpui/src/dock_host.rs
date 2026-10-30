@@ -13,8 +13,10 @@ use ui::Theme;
 
 use crate::{
     DockController,
-    group_view::{GroupMenuToggle, TabOverflowToggle, collect_group_presentations},
-    main_dock_view::{MainDockView, scroll_adjusted_hit_test_point},
+    components::{
+        GroupMenuToggle, MainDockView, TabOverflowToggle, collect_group_presentations,
+    },
+    input::scroll_adjusted_hit_test_point,
 };
 
 /// Root composition for an application's docking workspace.

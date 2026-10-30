@@ -1,0 +1,17 @@
+use dock_core::DockCommand;
+use gpui::{App, Entity};
+
+use crate::DockController;
+
+/// Applies a semantic Core command and notifies the owning controller entity.
+pub(crate) fn dispatch_command(
+    controller: &Entity<DockController>,
+    command: DockCommand,
+    app: &mut App,
+) {
+    if let Err(error) = controller.update(app, |controller, controller_cx| {
+        controller.dispatch_in(command, controller_cx)
+    }) {
+        tracing::warn!(%error, "dock command dispatch failed");
+    }
+}

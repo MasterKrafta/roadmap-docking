@@ -1,12 +1,8 @@
-use std::collections::{HashMap, HashSet};
-
-use crate::group_view::{
-    GroupMenuToggle, GroupPresentation, GroupView, TabOverflowToggle,
-};
+use std::collections::HashMap;
 
 use dock_core::{
-    Axis, ColumnMode, ColumnRect, DockCommand, DockMetrics, GroupRect, NodeId, Point,
-    SplitterRect, TabHeaderRect, TabOverflowRect, TabStripRect, VerticalOverflow,
+    ColumnMode, ColumnRect, DockCommand, DockMetrics, GroupRect, NodeId, Point, SplitterRect,
+    TabHeaderRect, TabOverflowRect, TabStripRect, VerticalOverflow,
 };
 use gpui::{
     Entity, IntoElement, ParentElement, ScrollHandle, Styled, div, px, rgb,
@@ -16,100 +12,13 @@ use ui::Theme;
 
 use crate::DockController;
 
-/// Main-dock presentation layer. All geometry comes from a Core snapshot;
-/// this component stores no second copy of the docking tree.
-pub struct MainDockView;
-
-impl MainDockView {
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn render(
-        columns: &[ColumnRect],
-        groups: &[GroupRect],
-        tab_strips: &[TabStripRect],
-        tab_headers: &[TabHeaderRect],
-        tab_overflows: &[TabOverflowRect],
-        group_presentations: &HashMap<NodeId, GroupPresentation>,
-        metrics: DockMetrics,
-        menu_group: Option<NodeId>,
-        toggle_group_menu: GroupMenuToggle,
-        overflow_group: Option<NodeId>,
-        toggle_tab_overflow: TabOverflowToggle,
-        middle_click_closes_tabs: bool,
-        splitters: &[SplitterRect],
-        vertical_overflow: &[VerticalOverflow],
-        main_node_ids: &HashSet<NodeId>,
-        main_column_groups: &HashMap<NodeId, Vec<NodeId>>,
-        column_modes: &HashMap<NodeId, ColumnMode>,
-        scroll_handles: &HashMap<NodeId, ScrollHandle>,
-        controller: Entity<DockController>,
-        theme: Theme,
-    ) -> impl IntoElement {
-        let mut layer = div()
-            .absolute()
-            .top_0()
-            .left_0()
-            .size_full();
-
-        for column in columns {
-            let mode = column_modes
-                .get(&column.column)
-                .copied()
-                .unwrap_or(ColumnMode::Expanded);
-            let group_ids = main_column_groups
-                .get(&column.column)
-                .map(Vec::as_slice)
-                .unwrap_or(&[]);
-            let group_rects = groups
-                .iter()
-                .filter(|group| group_ids.contains(&group.group))
-                .copied()
-                .collect::<Vec<_>>();
-            let group_splitters = splitters
-                .iter()
-                .filter(|splitter| {
-                    splitter.owner == column.column && splitter.axis == Axis::Y
-                })
-                .copied()
-                .collect::<Vec<_>>();
-            let overflow = vertical_overflow
-                .iter()
-                .find(|overflow| overflow.owner == column.column)
-                .copied();
-            let scroll_handle = scroll_handles.get(&column.column).cloned();
-
-            layer = layer.child(ColumnView::render(
-                *column,
-                mode,
-                &group_rects,
-                tab_strips,
-                tab_headers,
-                tab_overflows,
-                group_presentations,
-                metrics,
-                menu_group,
-                toggle_group_menu.clone(),
-                overflow_group,
-                toggle_tab_overflow.clone(),
-                middle_click_closes_tabs,
-                &group_splitters,
-                overflow,
-                scroll_handle,
-                controller.clone(),
-                theme,
-            ));
-        }
-
-        // Axis::X represents vertical dividers between main-dock columns.
-        // They are painted after columns so the handles remain visible.
-        for splitter in splitters.iter().filter(|splitter| {
-            splitter.axis == Axis::X && main_node_ids.contains(&splitter.owner)
-        }) {
-            layer = layer.child(splitter_surface(*splitter, Point::ZERO, theme));
-        }
-
-        layer
-    }
-}
+use super::{
+    context_menu::GroupMenuToggle,
+    group::GroupView,
+    splitter::splitter_surface,
+    tab_overflow::TabOverflowToggle,
+    tab_strip::GroupPresentation,
+};
 
 /// One main-dock column. Core supplies the group rectangles and the scroll
 /// extent; GPUI supplies only the clipping and ephemeral scroll position.
@@ -117,7 +26,7 @@ pub struct ColumnView;
 
 impl ColumnView {
     #[allow(clippy::too_many_arguments)]
-    fn render(
+    pub(crate) fn render(
         column: ColumnRect,
         mode: ColumnMode,
         groups: &[GroupRect],
@@ -269,12 +178,6 @@ impl ColumnView {
     }
 }
 
-/// Converts a point in the visible column viewport to the unscrolled Core
-/// coordinate space. Core rectangles never move when GPUI scrolls the content.
-pub fn scroll_adjusted_hit_test_point(point: Point, scroll_offset_y: f32) -> Point {
-    Point::new(point.x, point.y + scroll_offset_y.max(0.0))
-}
-
 fn next_column_mode(mode: ColumnMode) -> ColumnMode {
     match mode {
         ColumnMode::Expanded => ColumnMode::IconsAndLabels,
@@ -291,7 +194,7 @@ fn column_mode_label(mode: ColumnMode) -> &'static str {
     }
 }
 
-fn group_surface(group: GroupRect, content_origin: Point, theme: Theme) -> impl IntoElement {
+pub(crate) fn group_surface(group: GroupRect, content_origin: Point, theme: Theme) -> impl IntoElement {
     let left = group.rect.origin.x - content_origin.x;
     let top = group.rect.origin.y - content_origin.y;
     let header_height = theme
@@ -320,42 +223,11 @@ fn group_surface(group: GroupRect, content_origin: Point, theme: Theme) -> impl 
         )
 }
 
-fn splitter_surface(
-    splitter: SplitterRect,
-    content_origin: Point,
-    theme: Theme,
-) -> impl IntoElement {
-    let hit_rect = splitter.rect;
-    let thickness = theme.metrics.splitter_thickness;
-    let (left, top, width, height) = match splitter.axis {
-        Axis::X => (
-            hit_rect.origin.x + (hit_rect.size.width - thickness) * 0.5 - content_origin.x,
-            hit_rect.origin.y - content_origin.y,
-            thickness,
-            hit_rect.size.height,
-        ),
-        Axis::Y => (
-            hit_rect.origin.x - content_origin.x,
-            hit_rect.origin.y + (hit_rect.size.height - thickness) * 0.5 - content_origin.y,
-            hit_rect.size.width,
-            thickness,
-        ),
-    };
-
-    div()
-        .absolute()
-        .left(px(left))
-        .top(px(top))
-        .w(px(width.max(0.0)))
-        .h(px(height.max(0.0)))
-        .bg(rgb(theme.colors.splitter_handle))
-}
-
 #[cfg(test)]
 mod tests {
-    use dock_core::{ColumnMode, Point};
+    use dock_core::ColumnMode;
 
-    use super::{next_column_mode, scroll_adjusted_hit_test_point};
+    use super::next_column_mode;
 
     #[test]
     fn column_mode_button_cycles_through_all_three_modes() {
@@ -373,19 +245,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn scroll_offset_maps_viewport_pointer_back_to_core_content_coordinates() {
-        assert_eq!(
-            scroll_adjusted_hit_test_point(Point::new(120.0, 180.0), 240.0),
-            Point::new(120.0, 420.0)
-        );
-    }
-
-    #[test]
-    fn negative_scroll_offsets_do_not_move_hit_test_points() {
-        assert_eq!(
-            scroll_adjusted_hit_test_point(Point::new(10.0, 20.0), -12.0),
-            Point::new(10.0, 20.0)
-        );
-    }
 }
