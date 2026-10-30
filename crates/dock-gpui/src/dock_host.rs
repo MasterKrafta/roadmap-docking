@@ -1,4 +1,4 @@
-use dock_core::{LayoutRects, Point, Rect, Size as CoreSize};
+use dock_core::{Point, Rect, Size as CoreSize};
 use gpui::{
     AnyView, App, AppContext, Bounds, Context, Entity, IntoElement, ParentElement, Pixels, Render,
     Styled, Window, canvas, div, px, rgb,
@@ -175,7 +175,9 @@ impl Render for DockHost {
                 .h(px(canvas_rect.size.height))
                 .bg(rgb(theme.colors.canvas_background));
             if let Some(canvas_view) = self.canvas.clone() {
-                canvas_surface = canvas_surface.child(canvas_view);
+                canvas_surface = canvas_surface.child(
+                    div().size_full().child(canvas_view),
+                );
             }
             workspace = workspace.child(canvas_surface);
         } else {
