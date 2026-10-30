@@ -1,9 +1,8 @@
 //! Minimal experimental docking application entry point.
 
-use dock_core::{
-    Axis, Column, DockMetrics, DockSide, Layout, Node, NodeId, Panel, PanelConstraints, PanelKey,
-    Profile, Size, create_initial_layout,
-};
+use dock_core::{Axis, DockSide, Layout, Node, NodeId, PanelKey};
+#[cfg(windows)]
+use dock_core::{create_initial_layout, DockMetrics, PanelConstraints, Profile, Size};
 use gpui::{
     AnyElement, AppContext, Bounds, Context, IntoElement, Render, Subscription, WeakEntity, Window,
     WindowBounds, WindowControlArea, WindowHandle, WindowKind, WindowOptions, WindowVisibility, div,
