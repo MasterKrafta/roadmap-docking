@@ -98,6 +98,7 @@ impl Render for FloatingWindow {
             rects: snapshot.frame.rects(),
             frame: Some(&snapshot.frame),
             theme: &snapshot.theme,
+            splitter_resize_enabled: false,
         };
         let elements = crate::layers::floating::render_group(
             &render_data,
