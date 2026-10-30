@@ -3629,7 +3629,7 @@ fn closing_floating_stack_removes_all_groups_atomically_and_is_undoable() {
         controller.layout().node(floating_root),
         Some(Node::Split(split))
             if split.axis == Axis::Y
-                && split.children == groups
+                && split.children.as_slice() == groups.as_slice()
                 && split.children.iter().all(|child| matches!(controller.layout().node(*child), Some(Node::Tabs(_))))
     ));
 
