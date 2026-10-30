@@ -361,7 +361,9 @@ impl Layout {
                     group: target_group,
                     zone: zone @ (DropZone::Left | DropZone::Right),
                 },
-            ) => self.dock_floating_composition_to_edge(group_id, root, target_group, zone),
+            ) if self.profile == Profile::Photoshop => {
+                self.dock_floating_composition_to_edge(group_id, root, target_group, zone)
+            }
             (Some(Node::Split(_)), _) => Err(CommandError::InvalidTarget {
                 reason: "floating split stacks can only be docked into a main column or icon rail",
             }),
@@ -502,6 +504,7 @@ impl Layout {
             group,
             zone: zone @ (DropZone::Left | DropZone::Right),
         } = target
+            && self.profile == Profile::Photoshop
             && source_is_column_composition
             && self.find_floating_root_containing(group).is_some()
         {
