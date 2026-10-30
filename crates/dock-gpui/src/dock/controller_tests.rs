@@ -1949,12 +1949,15 @@ fn floating_vertical_stack_capture_uses_core_targets_and_docks_the_whole_window(
     };
     assert_eq!(split.axis, Axis::Y);
     assert_eq!(split.children.as_slice(), source_groups.as_slice());
+    let representative_panel =
+        crate::tree_query::first_panel_in_subtree(controller.layout(), source_groups[0])
+            .expect("the upper Tabs group should contain a panel");
     assert_eq!(
         crate::tree_query::floating_capture_source(controller.layout(), root),
-        Some(dock_core::DropSource::Group {
-            group: source_groups[0],
+        Some(dock_core::DropSource::Panel {
+            panel: representative_panel,
         }),
-        "the upper Tabs group supplies hit-test geometry, not the drag payload"
+        "one panel supplies hit-test geometry, not the drag payload"
     );
 
     let frame = controller.frame(viewport).unwrap();
