@@ -467,7 +467,7 @@ impl MainWindow {
             .collect::<Vec<_>>();
 
         for (handle, highlight) in panels {
-            if let Err(error) = handle.update(cx, |panel, panel_cx| {
+            if let Err(error) = handle.update(cx, |panel, _window, panel_cx| {
                 if panel.drop_highlight != highlight {
                     panel.drop_highlight = highlight;
                     panel_cx.notify();
