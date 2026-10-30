@@ -327,6 +327,10 @@ fn existing_but_wrong_node_types_and_forbidden_targets_are_rejected_atomically()
     let panel_node = panel_node_and_id.0;
 
     let wrong_type_commands = vec![
+        DockCommand::Float {
+            node: column,
+            bounds: Rect::new(Point::new(20.0, 30.0), Size::new(320.0, 220.0)),
+        },
         DockCommand::CloseGroup { group: column },
         DockCommand::ActivateTab {
             group: column,
