@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use dock_core::{Axis, DockSide, DropTarget, Layout, Node, NodeId, PanelId, Tabs};
+use dock_core::{Axis, DockSide, DropSource, DropTarget, Layout, Node, NodeId, PanelId, Tabs};
 
 /// Finds one top Tabs group per vertical branch along the floating root's
 /// upper edge. A Column contributes its first group; a horizontal Split
@@ -20,6 +20,36 @@ pub(crate) fn floating_title_groups_in_tree(layout: &Layout, root: NodeId) -> Ve
             .map(|child| floating_title_groups_in_tree(layout, *child))
             .unwrap_or_default(),
         Some(Node::Panel(_)) | None => Vec::new(),
+    }
+}
+
+/// Selects representative source geometry for a floating-window capture drag.
+///
+/// The drag payload remains FloatingGroup, so Core moves the complete root.
+/// A Photoshop-style vertical stack uses its top Tabs group only as the geometry
+/// source; the adapter filters targets to the destinations accepted for Split(Y).
+pub(crate) fn floating_capture_source(layout: &Layout, root: NodeId) -> Option<DropSource> {
+    match layout.node(root) {
+        Some(Node::Panel(panel)) => Some(DropSource::Panel {
+            panel: panel.panel_id,
+        }),
+        Some(Node::Tabs(_)) => Some(DropSource::Group { group: root }),
+        Some(Node::Split(split))
+            if split.axis == Axis::Y
+                && split
+                    .children
+                    .iter()
+                    .all(|child| matches!(layout.node(*child), Some(Node::Tabs(_)))) =>
+        {
+            split
+                .children
+                .first()
+                .copied()
+                .map(|group| DropSource::Group { group })
+        }
+        // A Column or horizontal composition needs a different Core drop-source
+        // mapping. Do not expose a capture control that can only produce invalid drops.
+        _ => None,
     }
 }
 
