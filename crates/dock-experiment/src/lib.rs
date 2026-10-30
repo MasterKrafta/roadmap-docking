@@ -772,7 +772,7 @@ impl MainWindow {
                 &self.metrics,
             )?;
             layout_cx.notify();
-            Ok(())
+            Ok::<(), dock_core::CommandError>(())
         }) {
             eprintln!("Could not undock the dragged panel: {error}");
             return false;
