@@ -121,7 +121,7 @@ impl MainWindow {
                 Err(error) => {
                     tracing::warn!(
                         error = %error,
-                        "restored workspace could not be installed; using initial layout"
+                        "restored workspace could not be installed; using empty layout"
                     );
                     workspace_load_failed = true;
                     DockController::new_empty(&theme)?
