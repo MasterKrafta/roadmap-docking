@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
 use dock_core::{
-    CommandError, CommandOutcome, DockCommand, PanelId, PanelKey, WorkspaceDiagnostic,
-    WorkspaceFile, WorkspaceFileError, WorkspaceLoadOptions,
+    CommandError, CommandOutcome, DockCommand, InitialLayoutError, PanelId, PanelKey,
+    WorkspaceDiagnostic, WorkspaceFile, WorkspaceFileError, WorkspaceLoadOptions,
+    create_initial_layout,
 };
 use gpui::{AnyView, App, Context, Window};
 
@@ -186,10 +187,17 @@ impl DockController {
         Ok(diagnostics)
     }
 
-    /// Resets to an empty layout in the current profile.
-    pub fn reset_workspace(&mut self) {
-        let profile = self.layout.profile();
-        self.replace_layout(dock_core::Layout::new(profile));
+    /// Recreates the profile's baseline layout from the registered panel descriptors.
+    ///
+    /// For the Photoshop profile, dock-core requires the four baseline panel keys:
+    /// layers, color, properties, and history. The regular application startup can
+    /// still use an empty Layout; reset explicitly restores the baseline composition.
+    pub fn reset_workspace(&mut self) -> Result<(), InitialLayoutError> {
+        let descriptors = self.registry.descriptors_for_core();
+        let layout =
+            create_initial_layout(self.layout.profile(), &descriptors, self.metrics)?;
+        self.replace_layout(layout);
+        Ok(())
     }
 
     /// Returns a cloned cached view, creating it lazily on first access.

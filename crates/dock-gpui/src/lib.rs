@@ -34,6 +34,7 @@ pub use registry::{IconSource, PanelDescriptor, PanelRegistry, PanelRegistryErro
 pub use dock_core::{
     AllowedArea, Axis, CanvasState, ChromeMode, Column, ColumnDisplayItem, ColumnMode, ColumnRect,
     CommandError, CommandOutcome, CommandValue, ComputeRectsError, DEFAULT_UNDO_LIMIT, DockArea,
+    InitialLayoutError,
     DockAreaId, DockAreaKind, DockCommand, DockMetrics, DockSide, DragCancelReason, DragDropAction,
     DragDropRequest, DragHandle, DragPayload, DragPreview, DragSession, DragSessionError, DragState,
     DropSource, DropTarget, DropZone, DropZoneRect, DropZoneResolver, FloatingGroup,

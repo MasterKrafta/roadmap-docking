@@ -1,10 +1,31 @@
 use super::DockController;
 use dock_core::{
-    CommandError, DockCommand, DockMetrics, LayoutRects, PanelId, Point, Profile, Rect, Size,
+    CommandError, DockCommand, DockMetrics, InitialLayoutError, LayoutRects, PanelConstraints,
+    PanelId, PanelKey, Point, Profile, Rect, Size,
 };
 use slotmap::Key;
 
-use crate::registry::PanelRegistry;
+use crate::registry::{IconSource, PanelDescriptor, PanelRegistry};
+
+fn baseline_registry() -> PanelRegistry {
+    let mut registry = PanelRegistry::new();
+    for key in ["layers", "color", "properties", "history"] {
+        let descriptor = PanelDescriptor::new(
+            PanelKey::new(key).unwrap(),
+            key,
+            IconSource::None,
+            PanelConstraints::new(
+                Size::new(120.0, 80.0),
+                Size::new(280.0, 220.0),
+                None,
+                false,
+            ),
+            |_, _| unreachable!("panel factories are lazy"),
+        );
+        registry.register(descriptor).unwrap();
+    }
+    registry
+}
 
 fn controller() -> DockController {
     DockController::empty(
@@ -176,4 +197,58 @@ fn transient_dispatch_rejects_persistent_commands() {
 
     assert_eq!(controller.layout.version(), version);
     assert!(!controller.can_undo());
+}
+
+
+#[test]
+fn reset_workspace_restores_core_baseline_and_clears_history() {
+    let mut controller = DockController::empty(
+        Profile::Photoshop,
+        DockMetrics::default(),
+        baseline_registry(),
+        Rect::new(Point::ZERO, Size::new(1200.0, 800.0)),
+    )
+    .unwrap();
+    controller.geometry().unwrap();
+
+    controller
+        .dispatch(DockCommand::SetChrome {
+            mode: dock_core::ChromeMode::AllHidden,
+        })
+        .unwrap();
+    assert!(controller.can_undo());
+    controller.geometry().unwrap();
+
+    controller.reset_workspace().unwrap();
+
+    assert_eq!(controller.layout.panel_instances().count(), 4);
+    assert!(!controller.can_undo());
+    assert!(!controller.can_redo());
+    assert!(!controller.cached_geometry_is_current());
+
+    let rects = controller.geometry().unwrap();
+    assert_eq!(rects.columns.len(), 1);
+    assert_eq!(rects.groups.len(), 2);
+}
+
+#[test]
+fn reset_workspace_without_required_descriptors_keeps_current_layout() {
+    let mut controller = controller();
+    controller.geometry().unwrap();
+    let version = controller.layout.version();
+    let cached_ptr = controller.cached_geometry().unwrap() as *const LayoutRects;
+
+    let result = controller.reset_workspace();
+
+    assert!(matches!(
+        result,
+        Err(InitialLayoutError::MissingRequiredPanel { key: "layers" })
+    ));
+    assert_eq!(controller.layout.version(), version);
+    assert_eq!(controller.layout.panel_instances().count(), 0);
+    assert_eq!(
+        controller.cached_geometry().unwrap() as *const LayoutRects,
+        cached_ptr
+    );
+    assert!(controller.cached_geometry_is_current());
 }
