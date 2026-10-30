@@ -6,6 +6,7 @@
 //! dispatch semantic commands, and render geometry snapshots produced by Core.
 
 pub mod controller;
+pub mod dock_host;
 pub mod missing_panel;
 pub mod registry;
 
@@ -26,6 +27,7 @@ pub fn run(_options: RunOptions) {
     tracing::warn!("dock-gpui host is not implemented yet");
 }
 
+pub use dock_host::DockHost;
 pub use missing_panel::MissingPanelPlaceholder;
 
 pub use controller::{
