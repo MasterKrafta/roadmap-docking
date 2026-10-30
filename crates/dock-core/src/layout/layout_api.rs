@@ -61,12 +61,16 @@ impl Layout {
         }
     }
 
-    pub(crate) fn flyout_width(&self, key: &PanelKey) -> Option<f32> {
+    /// Returns the remembered width for a panel's rail flyout, if one was set.
+    ///
+    /// Flyout resizing is transient and does not advance Layout::version(), so
+    /// geometry adapters include this value in their snapshot cache key.
+    pub fn flyout_width(&self, key: &PanelKey) -> Option<f32> {
         self.flyout_widths.get(key).copied()
     }
 
     /// Validates once per persistent revision and metric set for render/drag hot paths.
-    /// Public `validate` always performs the full check for callers asking for diagnostics.
+    /// Public validate always performs the full check for callers asking for diagnostics.
     pub(crate) fn validate_cached(
         &self,
         metrics: &DockMetrics,
