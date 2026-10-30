@@ -1003,31 +1003,6 @@ impl Render for MainWindow {
                 );
             }
 
-            let label = layout
-                .panel_instance(drag.panel_id)
-                .map(|instance| panel_title(instance.key.as_str()).to_owned())
-                .unwrap_or_else(|| "Панель".to_owned());
-            let ghost_width = 176.0_f32.min(width.max(1.0));
-            let ghost_height = 34.0_f32;
-            let ghost_x = (drag.pointer.x + 14.0).clamp(0.0, (width - ghost_width).max(0.0));
-            let ghost_y = (drag.pointer.y + 14.0)
-                .clamp(0.0, (content_height - ghost_height).max(0.0));
-            workspace = workspace.child(
-                div()
-                    .absolute()
-                    .left(px(ghost_x))
-                    .top(px(ghost_y))
-                    .w(px(ghost_width))
-                    .h(px(ghost_height))
-                    .px_3()
-                    .flex()
-                    .items_center()
-                    .bg(rgb(0x344c60))
-                    .border_1()
-                    .border_color(rgb(0x69c3ff))
-                    .text_color(rgb(0xf0f5fa))
-                    .child(label),
-            );
         }
 
         div()
@@ -1386,7 +1361,7 @@ fn render_main_dock(
 ) -> Option<AnyElement> {
     let root = layout.main_area(side)?.root;
     let width = main_area_width(layout, side, metrics).unwrap_or(metrics.default_column_width);
-    let content = render_core_node(layout, root, owner);
+    let content = render_core_node(layout, root, owner, true);
 
     let dock = div()
         .flex()
@@ -1413,13 +1388,14 @@ fn render_floating_group(
         .and_then(|floating| layout.dock_area(floating.area))
         .map(|area| area.root)?;
 
-    Some(render_core_node(layout, root, owner))
+    Some(render_core_node(layout, root, owner, false))
 }
 
 fn render_core_node(
     layout: &Layout,
     node_id: NodeId,
     owner: WeakEntity<MainWindow>,
+    show_column_headers: bool,
 ) -> AnyElement {
     let Some(node) = layout.node(node_id) else {
         return div()
@@ -1430,21 +1406,49 @@ fn render_core_node(
     };
 
     match node {
-        Node::Column(column) => div()
-            .flex()
-            .flex_col()
-            .flex_1()
-            .w_full()
-            .gap_2()
-            .p_2()
-            .bg(rgb(0x262c33))
-            .children(
-                column
+        Node::Column(column) => {
+            let mut column_view = div()
+                .flex()
+                .flex_col()
+                .flex_1()
+                .w_full()
+                .gap_2()
+                .p_2()
+                .bg(rgb(0x262c33));
+
+            if show_column_headers {
+                let title = column
                     .groups
-                    .iter()
-                    .map(|child| render_core_node(layout, *child, owner.clone())),
-            )
-            .into_any_element(),
+                    .first()
+                    .and_then(|group| core_node_active_panel_title(layout, *group))
+                    .unwrap_or_else(|| "Колонка".to_owned());
+
+                let header = div()
+                    .flex()
+                    .items_center()
+                    .w_full()
+                    .h(px(36.0))
+                    .px_3()
+                    .bg(rgb(0x2b323a))
+                    .border_b_1()
+                    .border_color(rgb(0x414a55))
+                    .text_color(rgb(0xe8ebef))
+                    .child(title);
+
+                column_view = column_view.child(header);
+            }
+
+            column_view
+                .children(
+                    column
+                        .groups
+                        .iter()
+                        .map(|child| {
+                            render_core_node(layout, *child, owner.clone(), show_column_headers)
+                        }),
+                )
+                .into_any_element()
+        },
         Node::Tabs(tabs) => {
             let tab_headers = tabs.children.iter().enumerate().map(|(index, child)| {
                 let title = core_node_title(layout, *child);
@@ -1512,7 +1516,7 @@ fn render_core_node(
 
             let content = tabs
                 .active_child()
-                .map(|child| render_core_node(layout, child, owner.clone()))
+                .map(|child| render_core_node(layout, child, owner.clone(), show_column_headers))
                 .unwrap_or_else(|| {
                     div()
                         .flex_1()
@@ -1564,10 +1568,31 @@ fn render_core_node(
                     split
                         .children
                         .iter()
-                        .map(|child| render_core_node(layout, *child, owner.clone())),
+                        .map(|child| {
+                            render_core_node(layout, *child, owner.clone(), show_column_headers)
+                        }),
                 )
                 .into_any_element()
         }
+    }
+}
+
+fn core_node_active_panel_title(layout: &Layout, node_id: NodeId) -> Option<String> {
+    match layout.node(node_id)? {
+        Node::Panel(panel) => layout
+            .panel_instance(panel.panel_id)
+            .map(|instance| panel_title(instance.key.as_str()).to_owned()),
+        Node::Tabs(tabs) => tabs
+            .active_child()
+            .and_then(|child| core_node_active_panel_title(layout, child)),
+        Node::Column(column) => column
+            .groups
+            .first()
+            .and_then(|child| core_node_active_panel_title(layout, *child)),
+        Node::Split(split) => split
+            .children
+            .first()
+            .and_then(|child| core_node_active_panel_title(layout, *child)),
     }
 }
 
