@@ -197,4 +197,28 @@ mod tests {
             Err(PanelRegistryError::DuplicateKey { .. })
         ));
     }
+
+    
+    #[test]
+    fn registry_rejects_invalid_constraints_without_inserting() {
+        let mut registry = PanelRegistry::new();
+        let invalid = PanelDescriptor::new(
+            PanelKey::new("broken-panel").unwrap(),
+            "Broken panel",
+            IconSource::None,
+            PanelConstraints::new(
+                Size::new(320.0, 80.0),
+                Size::new(280.0, 220.0),
+                None,
+                false,
+            ),
+            |_, _| unreachable!("panel factories are lazy"),
+        );
+
+        assert!(matches!(
+            registry.register(invalid),
+            Err(PanelRegistryError::InvalidConstraints { .. })
+        ));
+        assert!(registry.is_empty());
+    }
 }

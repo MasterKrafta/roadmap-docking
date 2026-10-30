@@ -5,7 +5,7 @@ use dock_core::{
     WorkspaceDiagnostic, WorkspaceFile, WorkspaceFileError, WorkspaceLoadOptions,
     create_initial_layout,
 };
-use gpui::{AnyView, App, Context, Window};
+use gpui::{AnyView, App, AppContext, Context, Window};
 
 use super::{DockController, DockEvent, PanelCommandError};
 
@@ -202,8 +202,8 @@ impl DockController {
 
     /// Returns a cloned cached view, creating it lazily on first access.
     ///
-    /// None means the panel ID is no longer present or its key has no registered
-    /// factory. The host can render its missing-panel placeholder in that case.
+    /// An unknown panel key is represented by a cached MissingPanelPlaceholder.
+    /// None is reserved for a stale PanelId that is no longer in the Layout.
     pub fn panel_view(
         &mut self,
         panel: PanelId,
@@ -214,8 +214,14 @@ impl DockController {
             return Some(view.clone());
         }
         let key = self.layout.panel_instance(panel)?.key.clone();
-        let descriptor = self.registry.get(&key)?;
-        let view = descriptor.create_view(window, app);
+        let view: AnyView = match self.registry.get(&key) {
+            Some(descriptor) => descriptor.create_view(window, app),
+            None => {
+                let missing_key = key.clone();
+                app.new(|_| crate::MissingPanelPlaceholder::new(missing_key))
+                    .into()
+            }
+        };
         self.panel_views.insert(panel, view.clone());
         Some(view)
     }

@@ -6,6 +6,7 @@
 //! dispatch semantic commands, and render geometry snapshots produced by Core.
 
 pub mod controller;
+pub mod missing_panel;
 pub mod registry;
 
 /// The UI-independent docking model used by this adapter.
@@ -24,6 +25,8 @@ pub struct RunOptions {
 pub fn run(_options: RunOptions) {
     tracing::warn!("dock-gpui host is not implemented yet");
 }
+
+pub use missing_panel::MissingPanelPlaceholder;
 
 pub use controller::{
     DockController, DockControllerConfigError, DockEvent, DragController, PanelCommandError,

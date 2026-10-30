@@ -252,3 +252,82 @@ fn reset_workspace_without_required_descriptors_keeps_current_layout() {
     );
     assert!(controller.cached_geometry_is_current());
 }
+
+#[test]
+fn singleton_panel_is_reused_while_open_but_can_be_closed_and_reopened() {
+    let metrics = DockMetrics::default();
+    let mut registry = PanelRegistry::new();
+    for key in ["layers", "color", "properties", "history"] {
+        let constraints = PanelConstraints::new(
+            Size::new(120.0, 80.0),
+            Size::new(280.0, 220.0),
+            None,
+            key == "layers",
+        );
+        registry
+            .register(PanelDescriptor::new(
+                PanelKey::new(key).unwrap(),
+                key,
+                IconSource::None,
+                constraints,
+                |_, _| unreachable!("panel factories are lazy"),
+            ))
+            .unwrap();
+    }
+
+    let descriptors = registry.descriptors_for_core();
+    let layout = dock_core::create_initial_layout(Profile::Photoshop, &descriptors, metrics)
+        .expect("baseline layout should be valid");
+    let mut controller = DockController::new(
+        layout,
+        metrics,
+        registry,
+        Rect::new(Point::ZERO, Size::new(1200.0, 800.0)),
+    )
+    .expect("controller should accept the baseline layout");
+    let key = PanelKey::new("layers").unwrap();
+
+    let original_id = controller
+        .layout()
+        .panel_instances()
+        .find_map(|(id, instance)| (instance.key == key).then_some(id))
+        .expect("baseline layout should contain layers");
+
+    controller
+        .open_panel(&key)
+        .expect("opening an already-open singleton should focus/reuse it");
+
+    let open_layers = controller
+        .layout()
+        .panel_instances()
+        .filter(|(_, instance)| instance.key == key)
+        .count();
+    assert_eq!(open_layers, 1);
+    assert!(controller
+        .layout()
+        .panel_instance(original_id)
+        .is_some());
+
+    controller
+        .close_panel(original_id)
+        .expect("singleton panels must remain closable");
+    assert_eq!(
+        controller
+            .layout()
+            .panel_instances()
+            .filter(|(_, instance)| instance.key == key)
+            .count(),
+        0
+    );
+
+    controller
+        .open_panel(&key)
+        .expect("a closed singleton should be openable again");
+    let reopened_id = controller
+        .layout()
+        .panel_instances()
+        .find_map(|(id, instance)| (instance.key == key).then_some(id))
+        .expect("layers should be restored as a new runtime instance");
+
+    assert_ne!(reopened_id, original_id);
+}
