@@ -111,8 +111,8 @@ pub(crate) fn render_group(
 
     if mode == FloatingGroupRenderMode::NativeWindow {
         // Native title-bar movement is handled by the OS. The capture button
-        // always carries the complete FloatingGroup; a representative Tabs/Panel
-        // node is used only to calculate Core's legal drop zones.
+        // carries the complete FloatingGroup; a representative panel supplies
+        // hit-zone geometry, while Core validates targets against the full tree.
         let capture_drag = crate::tree_query::floating_capture_source(layout, area.root)
             .map(|_| {
                 (
