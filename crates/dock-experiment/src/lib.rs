@@ -37,6 +37,8 @@ pub fn run() {
 
 #[cfg(windows)]
 fn run_windows() {
+    platform::windows::begin_high_resolution_timer();
+
     application().run(|cx: &mut App| {
         let metrics = DockMetrics::default();
         let bounds = Bounds::centered(None, size(px(1200.0), px(800.0)), cx);
