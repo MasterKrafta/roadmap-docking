@@ -424,13 +424,32 @@ impl MainWindow {
                 && zone.rect.contains(drag.pointer).unwrap_or(false)
         })?;
 
-        Some(Rect::new(
+        let local_origin = if panel_group == target_group {
             Point::new(
                 zone.rect.origin.x - floating.bounds.origin.x,
                 zone.rect.origin.y - floating.bounds.origin.y,
-            ),
-            zone.rect.size,
-        ))
+            )
+        } else {
+            #[cfg(windows)]
+            {
+                let source_group = floating_group_for_panel(&layout, drag.panel_id)?;
+                if source_group != panel_group {
+                    return None;
+                }
+                let scale = platform::windows::scale_factor(drag.native_window).max(0.01);
+                let (offset_x, offset_y) = drag.cursor_offset?;
+                Point::new(
+                    zone.rect.origin.x - drag.pointer.x + offset_x as f32 / scale,
+                    zone.rect.origin.y - drag.pointer.y + offset_y as f32 / scale,
+                )
+            }
+            #[cfg(not(windows))]
+            {
+                return None;
+            }
+        };
+
+        Some(Rect::new(local_origin, zone.rect.size))
     }
 
     #[cfg(windows)]
