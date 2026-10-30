@@ -1181,6 +1181,10 @@ impl MainWindow {
     /// Closes every still-open panel before GPUI closes the main window.
     pub(crate) fn close_floating_panels(&mut self, cx: &mut Context<Self>) {
         self.external_panel_drag = None;
+        #[cfg(windows)]
+        {
+            self.docked_panel_drag = None;
+        }
         self.panels_minimized_by_main.clear();
 
         for panel in self.floating_panels.drain(..) {
