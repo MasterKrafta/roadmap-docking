@@ -1212,9 +1212,9 @@ fn menu_button(kind: PanelKind, owner: WeakEntity<MainWindow>) -> impl IntoEleme
         .cursor_pointer()
         .child(kind.title())
         .on_click(move |_, _, cx| {
-            if let Err(error) =
-                owner.update(cx, |this, cx| this.open_floating_panel(kind, true, cx))
-            {
+            if let Err(error) = owner.update(cx, |this, cx| {
+                let _ = this.open_floating_panel(kind, true, cx);
+            }) {
                 eprintln!("Could not access the main window to open a panel: {error:?}");
             }
         })
