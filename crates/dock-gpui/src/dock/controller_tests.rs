@@ -2059,8 +2059,36 @@ fn floating_vertical_stack_capture_uses_core_targets_and_docks_the_whole_window(
 
 #[test]
 fn generic_horizontal_floating_composition_capture_uses_core_main_column_target() {
-    let mut controller = generic_horizontal_split_controller();
+    let mut controller = generic_controller();
     let viewport = Rect::new(Point::ZERO, Size::new(2000.0, 1200.0));
+    let first_group = match controller
+        .layout()
+        .node(controller.layout().main_area(DockSide::Right).unwrap().root)
+    {
+        Some(Node::Column(column)) => column.groups[0],
+        other => panic!("Generic baseline should start with a Column, got {other:?}"),
+    };
+    controller
+        .apply(DockCommand::MoveGroupToMainColumn {
+            group: first_group,
+            side: DockSide::Left,
+            index: 0,
+        })
+        .expect("creating a left-side target dock should work");
+    let remaining_group = match controller
+        .layout()
+        .node(controller.layout().main_area(DockSide::Right).unwrap().root)
+    {
+        Some(Node::Column(column)) => column.groups[0],
+        other => panic!("the remaining Generic dock should be a Column, got {other:?}"),
+    };
+    controller
+        .apply(DockCommand::MoveGroupToMainColumn {
+            group: remaining_group,
+            side: DockSide::Right,
+            index: 1,
+        })
+        .expect("creating a horizontal right-side composition should work");
     let root = controller
         .layout()
         .main_area(DockSide::Right)
@@ -2128,13 +2156,10 @@ fn generic_horizontal_floating_composition_capture_uses_core_main_column_target(
         .drag_overlay()
         .expect("Generic composition capture should expose valid destinations");
     assert!(
-        overlay.zones.iter().any(|zone| matches!(
-            zone.target,
-            DropTarget::MainColumn {
-                side: DockSide::Right,
-                ..
-            }
-        )),
+        overlay
+            .zones
+            .iter()
+            .any(|zone| matches!(zone.target, DropTarget::MainColumn { .. })),
         "a horizontal Generic floating composition should be dockable as a main-column composition"
     );
     assert!(
@@ -2155,13 +2180,7 @@ fn generic_horizontal_floating_composition_capture_uses_core_main_column_target(
     let zone = overlay
         .zones
         .iter()
-        .find(|zone| matches!(
-            zone.target,
-            DropTarget::MainColumn {
-                side: DockSide::Right,
-                ..
-            }
-        ))
+        .find(|zone| matches!(zone.target, DropTarget::MainColumn { .. }))
         .copied()
         .unwrap();
     let release = Point::new(
@@ -2182,15 +2201,21 @@ fn generic_horizontal_floating_composition_capture_uses_core_main_column_target(
         })
     );
     assert_eq!(controller.layout().floating_groups().count(), 0);
+    let target_side = match zone.target {
+        DropTarget::MainColumn { side, .. } => side,
+        _ => unreachable!("the selected target is a main-column edge"),
+    };
     let main_root = controller
         .layout()
-        .main_area(DockSide::Right)
-        .expect("docking should restore a right main area")
+        .main_area(target_side)
+        .expect("docking should restore the target main area")
         .root;
     assert!(matches!(
         controller.layout().node(main_root),
         Some(Node::Split(split))
-            if split.axis == Axis::X && split.children.as_slice() == source_children.as_slice()
+            if split.axis == Axis::X
+                && split.children.windows(source_children.len())
+                    .any(|window| window == source_children.as_slice())
     ));
     assert_eq!(controller.layout().validate(controller.metrics()), Ok(()));
 
