@@ -512,6 +512,114 @@ fn max_columns_hides_new_column_targets_when_the_source_column_cannot_collapse()
 }
 
 #[test]
+fn column_limit_is_applied_independently_to_left_and_right_drop_zones() {
+    let metrics = DockMetrics {
+        max_columns: 1,
+        ..DockMetrics::default()
+    };
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+    let (source_panel, source_node) = builder.panel(key("per-side-limit-source"), constraints());
+    let (_, retained_node) = builder.panel(key("per-side-limit-retained"), constraints());
+    let source_group = builder.tabs(vec![source_node, retained_node], 0, false);
+    let left_column =
+        builder.column(280.0, ColumnMode::Expanded, vec![source_group], vec![1.0]);
+    builder.main_area(DockSide::Left, left_column);
+
+    let layout = builder.build();
+    let rects = layout.compute_rects(viewport(), &metrics).unwrap();
+    let zones = layout
+        .compute_drop_zones(
+            DropSource::Panel {
+                panel: source_panel,
+            },
+            &rects,
+            &metrics,
+        )
+        .unwrap();
+
+    assert!(
+        zones.iter().any(|zone| {
+            zone.target
+                == DropTarget::MainColumn {
+                    side: DockSide::Right,
+                    index: 0,
+                }
+                && zone.zone == DropZone::DockEdge
+        }),
+        "the right dock must still accept its first column when the left dock is full"
+    );
+    assert!(
+        !zones.iter().any(|zone| {
+            matches!(
+                zone.target,
+                DropTarget::MainColumn {
+                    side: DockSide::Left,
+                    ..
+                }
+            ) && matches!(
+                zone.zone,
+                DropZone::ColumnLeft | DropZone::ColumnRight | DropZone::DockEdge
+            )
+        }),
+        "the full left dock must not offer a new-column target"
+    );
+}
+
+#[test]
+fn moving_from_another_dock_does_not_free_a_full_destination_column_slot() {
+    let metrics = DockMetrics {
+        max_columns: 1,
+        ..DockMetrics::default()
+    };
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+    let (source_panel, source_node) =
+        builder.panel(key("per-side-limit-left-source"), constraints());
+    let (_, source_retained) =
+        builder.panel(key("per-side-limit-left-retained"), constraints());
+    let source_group = builder.tabs(vec![source_node, source_retained], 0, false);
+    let left_column =
+        builder.column(280.0, ColumnMode::Expanded, vec![source_group], vec![1.0]);
+    builder.main_area(DockSide::Left, left_column);
+
+    let (_, right_node) =
+        builder.panel(key("per-side-limit-right-target"), constraints());
+    let right_group = builder.tabs(vec![right_node], 0, false);
+    let right_column =
+        builder.column(280.0, ColumnMode::Expanded, vec![right_group], vec![1.0]);
+    builder.main_area(DockSide::Right, right_column);
+
+    let layout = builder.build();
+    let rects = layout.compute_rects(viewport(), &metrics).unwrap();
+    let zones = layout
+        .compute_drop_zones(
+            DropSource::Panel {
+                panel: source_panel,
+            },
+            &rects,
+            &metrics,
+        )
+        .unwrap();
+
+    assert!(
+        !zones.iter().any(|zone| {
+            matches!(
+                zone.target,
+                DropTarget::MainColumn {
+                    side: DockSide::Right,
+                    ..
+                }
+            ) && matches!(
+                zone.zone,
+                DropZone::ColumnLeft | DropZone::ColumnRight | DropZone::DockEdge
+            )
+        }),
+        "moving a panel from the left dock must not free a slot in the full right dock"
+    );
+}
+
+#[test]
 fn floating_center_and_edges_resolve_to_tab_or_stack_targets() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Generic);
