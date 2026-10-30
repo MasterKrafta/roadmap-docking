@@ -1,6 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
-use dock_core::{ColumnMode, DockSide, Layout, Node, NodeId, Point, Rect, Size as CoreSize};
+use dock_core::{
+    ColumnMode, ComputeRectsError, DockSide, HitResult, Layout, Node, NodeId, Point, Rect,
+    Size as CoreSize,
+};
 use gpui::{
     AnyView, App, Bounds, Context, Entity, IntoElement, ParentElement, Pixels, Render, ScrollHandle,
     Styled, Window, canvas, div, px, rgb,
@@ -88,6 +91,31 @@ impl DockHost {
             .map(|handle| handle.offset().y.as_f32())
             .unwrap_or(0.0);
         scroll_adjusted_hit_test_point(point, offset_y)
+    }
+
+    /// Hit-tests a pointer position after translating it out of a scrolled
+    /// main-column viewport and back into the immutable Core coordinate space.
+    pub fn hit_test(
+        &self,
+        point: Point,
+        app: &mut App,
+    ) -> Result<HitResult, ComputeRectsError> {
+        let overflow_owner = self.controller.update(app, |controller, _| {
+            controller.geometry().map(|rects| {
+                rects.vertical_overflow.iter().find_map(|overflow| {
+                    (self.column_scroll_handles.contains_key(&overflow.owner)
+                        && overflow.viewport.contains(point).unwrap_or(false))
+                    .then_some(overflow.owner)
+                })
+            })
+        })?;
+
+        let content_point = overflow_owner
+            .map(|owner| self.scroll_adjusted_hit_test_point(owner, point))
+            .unwrap_or(point);
+
+        self.controller
+            .update(app, |controller, _| controller.hit_test(content_point))
     }
 }
 
