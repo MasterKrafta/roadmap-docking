@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
 use dock_core::{
-    ColumnMode, ColumnRect, DockCommand, DockMetrics, GroupRect, NodeId, PanelRect, Point, SplitterRect,
-    TabHeaderRect, TabOverflowRect, TabStripRect, VerticalOverflow,
+    ColumnMode, ColumnRect, DockCommand, DockMetrics, GroupRect, NodeId, PanelRect, Point,
+    SplitterRect, TabHeaderRect, TabOverflowRect, TabStripRect, VerticalOverflow,
 };
-use gpui::{App, 
-    Entity, IntoElement, ParentElement, ScrollHandle, Styled, Window, div, px, rgb,
+use gpui::{
+    AnyView, Entity, IntoElement, ParentElement, ScrollHandle, Styled, div, px, rgb,
     prelude::InteractiveElement as _,
 };
 use ui::Theme;
@@ -31,7 +31,7 @@ impl ColumnView {
         column: ColumnRect,
         mode: ColumnMode,
         groups: &[GroupRect],
-        panels: &[PanelRect],
+        panels: &[(PanelRect, AnyView)],
         tab_strips: &[TabStripRect],
         tab_headers: &[TabHeaderRect],
         tab_overflows: &[TabOverflowRect],
@@ -46,8 +46,6 @@ impl ColumnView {
         overflow: Option<VerticalOverflow>,
         scroll_handle: Option<ScrollHandle>,
         controller: Entity<DockController>,
-        window: &mut Window,
-        app: &mut App,
         theme: Theme,
     ) -> impl IntoElement {
         let viewport = overflow.map_or(column.rect, |value| value.viewport);
@@ -112,13 +110,7 @@ impl ColumnView {
             // Mount active panel content inside the scrolling content tree. This
             // keeps panel views aligned with Core geometry and clipped by the
             // owning column's scroll viewport.
-            content = content.child(PanelHost::render(
-                panels,
-                content_origin,
-                controller.clone(),
-                window,
-                app,
-            ));
+            content = content.child(PanelHost::render(panels, content_origin));
         } else {
             // Rail entries and icons are implemented by §5.7 RailView.
             // Keep the Core-computed extent and scroll behavior ready for it.

@@ -218,17 +218,37 @@ impl Render for DockHost {
                     .and_then(|presentation| presentation.active_panel)
             })
             .collect::<HashSet<_>>();
-        let floating_panels = rects
+        // Resolve/cache each active AnyView before building the presentation
+        // tree. The returned elements then own their views and do not borrow
+        // Window or App across sibling columns.
+        let panel_views = rects
             .as_ref()
             .map(|rects| {
                 rects
                     .panels
                     .iter()
-                    .filter(|panel| !main_active_panels.contains(&panel.panel))
-                    .copied()
+                    .filter_map(|panel_rect| {
+                        let panel = panel_rect.panel;
+                        let rect = *panel_rect;
+                        self.controller.update(cx, |controller, panel_cx| {
+                            controller
+                                .panel_view(panel, window, panel_cx)
+                                .map(|view| (rect, view))
+                        })
+                    })
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
+        let main_panel_views = panel_views
+            .iter()
+            .filter(|(panel, _)| main_active_panels.contains(&panel.panel))
+            .cloned()
+            .collect::<Vec<_>>();
+        let floating_panel_views = panel_views
+            .iter()
+            .filter(|(panel, _)| !main_active_panels.contains(&panel.panel))
+            .cloned()
+            .collect::<Vec<_>>();
 
         // Keep scroll state only while its Column node still owns an overflow
         // region. Removing/replacing the Core node or resolving the overflow
@@ -411,7 +431,7 @@ impl Render for DockHost {
             workspace = workspace.child(MainDockView::render(
                 &main_columns,
                 &rects.groups,
-                &rects.panels,
+                &main_panel_views,
                 &rects.tab_strips,
                 &rects.tab_headers,
                 &rects.tab_overflows,
@@ -429,8 +449,6 @@ impl Render for DockHost {
                 &column_modes,
                 &self.column_scroll_handles,
                 self.controller.clone(),
-                window,
-                cx,
                 theme,
             ));
 
@@ -467,11 +485,8 @@ impl Render for DockHost {
             // Main panels live in their scrolling columns. Only floating panels
             // remain here, above the floating-window surfaces.
             workspace = workspace.child(PanelHost::render(
-                &floating_panels,
+                &floating_panel_views,
                 Point::ZERO,
-                self.controller.clone(),
-                window,
-                cx,
             ));
         }
 

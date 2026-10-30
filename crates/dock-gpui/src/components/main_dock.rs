@@ -1,10 +1,10 @@
 use std::collections::{HashMap, HashSet};
 
 use dock_core::{
-    Axis, ColumnMode, ColumnRect, DockMetrics, GroupRect, NodeId, PanelRect, Point, SplitterRect, TabHeaderRect,
-    TabOverflowRect, TabStripRect, VerticalOverflow,
+    Axis, ColumnMode, ColumnRect, DockMetrics, GroupRect, NodeId, PanelRect, Point,
+    SplitterRect, TabHeaderRect, TabOverflowRect, TabStripRect, VerticalOverflow,
 };
-use gpui::{App, Entity, IntoElement, ParentElement, ScrollHandle, Styled, Window, div};
+use gpui::{AnyView, Entity, IntoElement, ParentElement, ScrollHandle, Styled, div};
 use ui::Theme;
 
 use crate::DockController;
@@ -26,7 +26,7 @@ impl MainDockView {
     pub(crate) fn render(
         columns: &[ColumnRect],
         groups: &[GroupRect],
-        panels: &[PanelRect],
+        panels: &[(PanelRect, AnyView)],
         tab_strips: &[TabStripRect],
         tab_headers: &[TabHeaderRect],
         tab_overflows: &[TabOverflowRect],
@@ -44,8 +44,6 @@ impl MainDockView {
         column_modes: &HashMap<NodeId, ColumnMode>,
         scroll_handles: &HashMap<NodeId, ScrollHandle>,
         controller: Entity<DockController>,
-        window: &mut Window,
-        app: &mut App,
         theme: Theme,
     ) -> impl IntoElement {
         let mut layer = div()
@@ -90,8 +88,8 @@ impl MainDockView {
                 .collect::<HashSet<_>>();
             let column_panels = panels
                 .iter()
-                .filter(|panel| active_panels.contains(&panel.panel))
-                .copied()
+                .filter(|(panel, _)| active_panels.contains(&panel.panel))
+                .cloned()
                 .collect::<Vec<_>>();
 
             layer = layer.child(ColumnView::render(
@@ -113,8 +111,6 @@ impl MainDockView {
                 overflow,
                 scroll_handle,
                 controller.clone(),
-                window,
-                app,
                 theme,
             ));
         }
