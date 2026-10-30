@@ -23,34 +23,14 @@ pub(crate) fn floating_title_groups_in_tree(layout: &Layout, root: NodeId) -> Ve
     }
 }
 
-/// Selects representative source geometry for a floating-window capture drag.
+/// Selects one representative panel for calculating floating-capture hit zones.
 ///
-/// The drag payload remains FloatingGroup, so Core moves the complete root.
-/// A Photoshop-style vertical stack uses its top Tabs group only as the geometry
-/// source; the adapter filters targets to the destinations accepted for Split(Y).
+/// The payload remains FloatingGroup, so Core moves the complete root. The
+/// controller validates each candidate target by applying DockFloating to a
+/// temporary copy of the complete layout; source geometry never dictates the
+/// semantics of the eventual move.
 pub(crate) fn floating_capture_source(layout: &Layout, root: NodeId) -> Option<DropSource> {
-    match layout.node(root) {
-        Some(Node::Panel(panel)) => Some(DropSource::Panel {
-            panel: panel.panel_id,
-        }),
-        Some(Node::Tabs(_)) => Some(DropSource::Group { group: root }),
-        Some(Node::Split(split))
-            if split.axis == Axis::Y
-                && split
-                    .children
-                    .iter()
-                    .all(|child| matches!(layout.node(*child), Some(Node::Tabs(_)))) =>
-        {
-            split
-                .children
-                .first()
-                .copied()
-                .map(|group| DropSource::Group { group })
-        }
-        // A Column or horizontal composition needs a different Core drop-source
-        // mapping. Do not expose a capture control that can only produce invalid drops.
-        _ => None,
-    }
+    first_panel_in_subtree(layout, root).map(|panel| DropSource::Panel { panel })
 }
 
 pub(crate) fn drop_target_node(target: DropTarget) -> Option<NodeId> {
