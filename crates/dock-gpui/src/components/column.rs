@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
 use dock_core::{
-    App, ColumnMode, ColumnRect, DockCommand, DockMetrics, GroupRect, NodeId, PanelRect, Point, SplitterRect,
+    ColumnMode, ColumnRect, DockCommand, DockMetrics, GroupRect, NodeId, PanelRect, Point, SplitterRect,
     TabHeaderRect, TabOverflowRect, TabStripRect, VerticalOverflow,
 };
-use gpui::{
+use gpui::{App, 
     Entity, IntoElement, ParentElement, ScrollHandle, Styled, Window, div, px, rgb,
     prelude::InteractiveElement as _,
 };

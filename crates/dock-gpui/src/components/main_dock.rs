@@ -1,10 +1,10 @@
 use std::collections::{HashMap, HashSet};
 
 use dock_core::{
-    App, Axis, ColumnMode, ColumnRect, DockMetrics, GroupRect, NodeId, PanelRect, Point, SplitterRect, TabHeaderRect,
+    Axis, ColumnMode, ColumnRect, DockMetrics, GroupRect, NodeId, PanelRect, Point, SplitterRect, TabHeaderRect,
     TabOverflowRect, TabStripRect, VerticalOverflow,
 };
-use gpui::{Entity, IntoElement, ParentElement, ScrollHandle, Styled, Window, div};
+use gpui::{App, Entity, IntoElement, ParentElement, ScrollHandle, Styled, Window, div};
 use ui::Theme;
 
 use crate::DockController;
