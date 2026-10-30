@@ -1,7 +1,7 @@
 use super::*;
 
 impl Layout {
-    pub(super) fn main_columns(&self, side: DockSide) -> Result<Vec<NodeId>, CommandError> {
+    pub(crate) fn main_columns(&self, side: DockSide) -> Result<Vec<NodeId>, CommandError> {
         let Some(area) = self.main_area(side) else {
             return Ok(Vec::new());
         };
