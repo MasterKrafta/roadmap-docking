@@ -1165,9 +1165,16 @@ impl MainWindow {
                 eprintln!("The dragged panel is not inside a tab group");
                 return false;
             };
-            let Some(Node::Column(column_node)) = layout.node(column) else {
-                eprintln!("The dragged panel's owner is not a column");
-                return false;
+            let floating_node = if tabs.children.len() > 1 {
+                let Some(panel_node) = tabs.children.iter().copied().find(|child| {
+                    matches!(layout.node(*child), Some(Node::Panel(panel)) if panel.panel_id == panel_id)
+                }) else {
+                    eprintln!("Could not find the dragged panel node inside its tab group");
+                    return false;
+                };
+                panel_node
+            } else {
+                group
             };
             let Ok(rects) = layout.compute_rects(viewport, &self.metrics) else {
                 eprintln!("Could not compute the source column bounds for undocking");
@@ -1182,13 +1189,7 @@ impl MainWindow {
                 eprintln!("The source column has no computed bounds");
                 return false;
             };
-            (
-                column,
-                group,
-                tabs.children.len(),
-                column_node.groups.len(),
-                column_rect,
-            )
+            (floating_node, column_rect)
         };
 
         let Some(parent_bounds) = self.last_window_bounds else {
@@ -1201,9 +1202,9 @@ impl MainWindow {
             (parent_bounds.size.height.as_f32() - parent_viewport.height.as_f32()).max(0.0);
         let window_bounds = Bounds::new(
             gpui::Point::new(
-                parent_bounds.origin.x + px(source.4.origin.x),
+                parent_bounds.origin.x + px(source.1.origin.x),
                 parent_bounds.origin.y
-                    + px(parent_chrome_height + self.last_surface_top + source.4.origin.y),
+                    + px(parent_chrome_height + self.last_surface_top + source.1.origin.y),
             ),
             binding.window_bounds.size,
         );
@@ -1243,25 +1244,13 @@ impl MainWindow {
         };
         let scale = platform::windows::scale_factor(main_window).max(0.01);
         let cursor_offset = (
-            ((pointer.x - source.4.origin.x) * scale).round() as i32,
-            ((pointer.y - source.4.origin.y) * scale).round() as i32,
+            ((pointer.x - source.1.origin.x) * scale).round() as i32,
+            ((pointer.y - source.1.origin.y) * scale).round() as i32,
         );
 
-        let command = if source.2 > 1 {
-            DockCommand::FloatPanelAsGroup {
-                panel: panel_id,
-                bounds: floating_bounds,
-            }
-        } else if source.3 > 1 {
-            DockCommand::FloatGroupAsColumn {
-                group: source.1,
-                bounds: floating_bounds,
-            }
-        } else {
-            DockCommand::Float {
-                node: source.0,
-                bounds: floating_bounds,
-            }
+        let command = DockCommand::Float {
+            node: source.0,
+            bounds: floating_bounds,
         };
 
         if let Err(error) = self.apply_layout_command(command, cx) {
