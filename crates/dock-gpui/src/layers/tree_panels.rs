@@ -59,12 +59,16 @@ pub(crate) fn render(
         .iter()
         .filter(|entry| nodes.contains(&entry.owner))
     {
-        let handle = supported_splitter_handle(
-            layout,
-            splitter.owner,
-            splitter.boundary_index,
-            splitter.axis,
-        );
+        let handle = data.splitter_resize_enabled
+            .then(|| {
+                supported_splitter_handle(
+                    layout,
+                    splitter.owner,
+                    splitter.boundary_index,
+                    splitter.axis,
+                )
+            })
+            .flatten();
         elements.push(
             SplitterHandle {
                 id: format!(
