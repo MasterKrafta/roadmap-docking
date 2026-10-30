@@ -106,7 +106,6 @@ fn run_windows() {
 pub(crate) struct MainWindow {
     layout: Layout,
     metrics: DockMetrics,
-    panel_constraints: PanelConstraints,
     panel_bindings: [PanelBinding; 2],
     floating_panels: Vec<FloatingPanelWindow>,
     panels_minimized_by_main: Vec<WindowHandle<FloatingPanel>>,
@@ -132,7 +131,6 @@ struct PanelBinding {
 
 struct FloatingPanelWindow {
     panel_id: PanelId,
-    floating_group_id: FloatingGroupId,
     handle: WindowHandle<FloatingPanel>,
 }
 
@@ -199,7 +197,6 @@ impl MainWindow {
         Self {
             layout,
             metrics,
-            panel_constraints: panel_constraints(),
             panel_bindings,
             floating_panels: Vec::new(),
             panels_minimized_by_main: Vec::new(),
@@ -220,20 +217,6 @@ impl MainWindow {
         Ok(())
     }
 
-    fn open_dock_panel(
-        &mut self,
-        key: PanelKey,
-        cx: &mut Context<Self>,
-    ) -> Result<(), dock_core::CommandError> {
-        self.apply_layout_command(
-            DockCommand::OpenPanel {
-                key,
-                constraints: self.panel_constraints,
-                target: None,
-            },
-            cx,
-        )
-    }
 
     /// Opens the panels that should be visible when the experiment starts.
     pub(crate) fn open_startup_panels(&mut self, cx: &mut Context<Self>) {
@@ -271,7 +254,9 @@ impl MainWindow {
                             false
                         }
                     }) {
-                        Ok(true) => self.panels_minimized_by_main.push(panel.clone()),
+                        Ok(true) => self
+                            .panels_minimized_by_main
+                            .push(panel.handle.clone()),
                         Ok(false) => {}
                         Err(_error) => {
                             // The panel may already have been closed by the user.
@@ -289,6 +274,30 @@ impl MainWindow {
                 }
             }
         }
+    }
+
+    fn sync_floating_panel_bounds(
+        &mut self,
+        group: FloatingGroupId,
+        native_bounds: Bounds<Pixels>,
+        bounds: Rect,
+        cx: &mut Context<Self>,
+    ) -> Result<(), dock_core::CommandError> {
+        self.layout.apply(
+            DockCommand::ResizeFloatingBounds { group, bounds },
+            &self.metrics,
+        )?;
+
+        if let Some(binding) = self
+            .panel_bindings
+            .iter_mut()
+            .find(|binding| binding.floating_group_id == group)
+        {
+            binding.window_bounds = native_bounds;
+        }
+
+        cx.notify();
+        Ok(())
     }
 
     fn open_floating_panel(
@@ -359,7 +368,6 @@ impl MainWindow {
 
                 self.floating_panels.push(FloatingPanelWindow {
                     panel_id,
-                    floating_group_id,
                     handle: handle.clone(),
                 });
 
@@ -465,14 +473,12 @@ struct FloatingPanel {
 
 impl FloatingPanel {
     fn sync_native_bounds(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let bounds = core_bounds(&window.window_bounds().get_bounds());
+        let native_bounds = window.window_bounds().get_bounds();
+        let bounds = core_bounds(&native_bounds);
         let group = self.floating_group_id;
 
         if let Err(error) = self.owner.update(cx, |main, cx| {
-            main.apply_layout_command(
-                DockCommand::ResizeFloatingBounds { group, bounds },
-                cx,
-            )
+            main.sync_floating_panel_bounds(group, native_bounds, bounds, cx)
         }) {
             eprintln!("Could not synchronize floating panel bounds: {error:?}");
         }
