@@ -1199,3 +1199,148 @@ fn dock_floating_column_to_the_right_appends_after_the_existing_composition() {
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
 
+
+
+#[test]
+fn docking_floating_horizontal_composition_to_empty_main_edge_preserves_the_tree() {
+    let metrics = DockMetrics::default();
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, left_panel) =
+        builder.panel(PanelKey::new("dock-empty-main-left").unwrap(), descriptors()[0].1);
+    let left_group = builder.tabs(vec![left_panel], 0, false);
+    let left_column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![left_group],
+        vec![1.0],
+    );
+
+    let (_, right_panel) =
+        builder.panel(PanelKey::new("dock-empty-main-right").unwrap(), descriptors()[0].1);
+    let right_group = builder.tabs(vec![right_panel], 0, false);
+    let right_column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![right_group],
+        vec![1.0],
+    );
+
+    let composition = builder.split(
+        Axis::X,
+        vec![left_column, right_column],
+        vec![0.35, 0.65],
+    );
+    let floating = builder.floating_group(
+        composition,
+        Rect::new(Point::new(40.0, 60.0), Size::new(560.0, 320.0)),
+        1,
+    );
+    let mut layout = builder.build();
+    assert_eq!(layout.validate(&metrics), Ok(()));
+
+    layout
+        .apply(
+            DockCommand::DockFloating {
+                group: floating,
+                target: DropTarget::MainColumn {
+                    side: DockSide::Left,
+                    index: 0,
+                },
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    assert!(layout.floating_group(floating).is_none());
+    assert_eq!(
+        layout.main_area(DockSide::Left).map(|area| area.root),
+        Some(composition)
+    );
+    assert!(matches!(
+        layout.node(composition),
+        Some(Node::Split(split))
+            if split.axis == Axis::X
+                && split.children == vec![left_column, right_column]
+                && split.ratios == vec![0.35, 0.65]
+    ));
+    assert!(layout.main_area(DockSide::Right).is_none());
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
+fn docking_floating_horizontal_composition_before_existing_main_column_keeps_all_columns() {
+    let metrics = DockMetrics::default();
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, main_panel) =
+        builder.panel(PanelKey::new("dock-existing-main").unwrap(), descriptors()[0].1);
+    let main_group = builder.tabs(vec![main_panel], 0, false);
+    let main_column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![main_group],
+        vec![1.0],
+    );
+    builder.main_area(DockSide::Left, main_column);
+
+    let (_, source_left_panel) =
+        builder.panel(PanelKey::new("dock-existing-source-left").unwrap(), descriptors()[0].1);
+    let source_left_group = builder.tabs(vec![source_left_panel], 0, false);
+    let source_left_column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![source_left_group],
+        vec![1.0],
+    );
+
+    let (_, source_right_panel) =
+        builder.panel(PanelKey::new("dock-existing-source-right").unwrap(), descriptors()[0].1);
+    let source_right_group = builder.tabs(vec![source_right_panel], 0, false);
+    let source_right_column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![source_right_group],
+        vec![1.0],
+    );
+
+    let composition = builder.split(
+        Axis::X,
+        vec![source_left_column, source_right_column],
+        vec![0.4, 0.6],
+    );
+    let floating = builder.floating_group(
+        composition,
+        Rect::new(Point::new(400.0, 80.0), Size::new(560.0, 320.0)),
+        1,
+    );
+    let mut layout = builder.build();
+    assert_eq!(layout.validate(&metrics), Ok(()));
+
+    layout
+        .apply(
+            DockCommand::DockFloating {
+                group: floating,
+                target: DropTarget::MainColumn {
+                    side: DockSide::Left,
+                    index: 0,
+                },
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    assert!(layout.floating_group(floating).is_none());
+    let main_root = layout.main_area(DockSide::Left).unwrap().root;
+    assert!(matches!(
+        layout.node(main_root),
+        Some(Node::Split(split))
+            if split.axis == Axis::X
+                && split.children == vec![source_left_column, source_right_column, main_column]
+                && split.ratios.len() == 3
+                && (split.ratios[0] - (0.4 * 2.0 / 3.0)).abs() < 1.0e-4
+                && (split.ratios[1] - (0.6 * 2.0 / 3.0)).abs() < 1.0e-4
+                && (split.ratios[2] - (1.0 / 3.0)).abs() < 1.0e-4
+    ));
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
