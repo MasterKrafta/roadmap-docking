@@ -712,19 +712,19 @@ impl Layout {
         let source_weight = source_floating.bounds.size.width / combined_width;
         let target_weight = target_floating.bounds.size.width / combined_width;
 
-        let (mut children, mut ratios) = if zone == DropZone::Left {
-            (source_columns, Vec::new())
-        } else {
-            (target_columns.clone(), Vec::new())
-        };
+        let mut children =
+            Vec::with_capacity(source_columns.len() + target_columns.len());
+        let mut ratios = Vec::with_capacity(source_ratios.len() + target_ratios.len());
         if zone == DropZone::Left {
             ratios.extend(source_ratios.into_iter().map(|ratio| ratio * source_weight));
-            children.extend(target_columns);
+            children.extend(source_columns);
             ratios.extend(target_ratios.into_iter().map(|ratio| ratio * target_weight));
+            children.extend(target_columns);
         } else {
             ratios.extend(target_ratios.into_iter().map(|ratio| ratio * target_weight));
-            children.extend(source_columns);
+            children.extend(target_columns);
             ratios.extend(source_ratios.into_iter().map(|ratio| ratio * source_weight));
+            children.extend(source_columns);
         }
 
         // Detaching the source root unregisters its FloatingGroup and DockArea,
