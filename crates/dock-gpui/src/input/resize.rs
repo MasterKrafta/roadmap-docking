@@ -123,10 +123,15 @@ fn command_for_pointer(
                 point.x - interaction.origin.x,
                 side == DockSide::Left,
             );
-            Some(DockCommand::ResizeColumn {
-                column: owner,
-                width: interaction.start_width? + direction_delta,
-            })
+            let target_width = interaction.start_width? + direction_delta;
+            if interaction.actual_width == Some(target_width) {
+                None
+            } else {
+                Some(DockCommand::ResizeColumn {
+                    column: owner,
+                    width: target_width,
+                })
+            }
         }
         Axis::X => {
             let side = main_split_side(controller.layout(), owner);
