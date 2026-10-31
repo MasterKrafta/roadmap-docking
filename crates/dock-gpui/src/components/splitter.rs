@@ -1,4 +1,4 @@
-use dock_core::{Axis, DockMetrics, Point, SplitterRect};
+use dock_core::{Axis, DockCommand, DockMetrics, FloatingGroupId, Point, SplitterRect};
 use gpui::{
     Context, Entity, IntoElement, MouseButton, MouseDownEvent, MouseUpEvent, ParentElement,
     Render, Styled, Window, div, px, rgb,
@@ -8,7 +8,7 @@ use ui::Theme;
 
 use crate::{
     DockController,
-    input::{begin_resize, finish_resize, update_resize},
+    input::{begin_resize, dispatch_command, finish_resize, update_resize},
 };
 
 #[derive(Clone, Copy)]
@@ -33,6 +33,7 @@ impl SplitterView {
         controller: Entity<DockController>,
         metrics: DockMetrics,
         theme: Theme,
+        raise_floating: Option<FloatingGroupId>,
     ) -> impl IntoElement {
         let hit_rect = splitter.rect;
         let thickness = metrics.splitter_thickness;
@@ -75,6 +76,13 @@ impl SplitterView {
             .w(px(width))
             .h(px(height))
             .on_mouse_down(MouseButton::Left, move |event: &MouseDownEvent, _, app| {
+                if let Some(group) = raise_floating {
+                    dispatch_command(
+                        &controller_for_down,
+                        DockCommand::RaiseFloating { group },
+                        app,
+                    );
+                }
                 begin_resize(
                     &controller_for_down,
                     splitter,
