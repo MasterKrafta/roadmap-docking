@@ -2,8 +2,9 @@ use slotmap::Key;
 
 use crate::layout_builder::LayoutBuilder;
 use crate::{
-    Axis, ChromeMode, ColumnMode, DockCommand, DockMetrics, DockSide, DropTarget, Layout, Node,
-    PanelConstraints, PanelId, PanelKey, Point, Profile, Rect, Size, UndoRedoHistory,
+    Axis, ChromeMode, ColumnMode, DockCommand, DockMetrics, DockSide, DragCancelReason,
+    DragHandle, DragPayload, DragSession, DragState, DropTarget, Layout, Node, PanelConstraints,
+    PanelId, PanelKey, Point, Profile, Rect, Size, UndoRedoHistory,
 };
 
 fn key(value: &str) -> PanelKey {
@@ -1233,11 +1234,12 @@ fn resize_transaction_records_one_undo_checkpoint_for_many_frame_updates() {
 }
 
 
-fn floating_transfer_layout() -> (Layout, crate::NodeId, crate::NodeId) {
+fn floating_transfer_layout() -> (Layout, PanelId, crate::NodeId, crate::NodeId) {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(crate::Profile::Photoshop);
 
-    let (_, moving_panel) = builder.panel(key("history-floating-transfer-moving"), constraints());
+    let (moving_panel_id, moving_panel) =
+        builder.panel(key("history-floating-transfer-moving"), constraints());
     let (_, remaining_panel) = builder.panel(key("history-floating-transfer-remaining"), constraints());
     let source_group = builder.tabs(vec![moving_panel, remaining_panel], 0, false);
     let column = builder.column(
@@ -1256,7 +1258,7 @@ fn floating_transfer_layout() -> (Layout, crate::NodeId, crate::NodeId) {
         1,
     );
 
-    (builder.build(), moving_panel, target_group)
+    (builder.build(), moving_panel_id, moving_panel, target_group)
 }
 
 fn apply_floating_transfer_gesture(
@@ -1299,7 +1301,7 @@ fn apply_floating_transfer_gesture(
 #[test]
 fn floating_transfer_gesture_commits_as_one_undo_step() {
     let metrics = DockMetrics::default();
-    let (mut layout, moving_panel, target_group) = floating_transfer_layout();
+    let (mut layout, _moving_panel_id, moving_panel, target_group) = floating_transfer_layout();
     let before = persistent_shape(&layout);
     let mut history = UndoRedoHistory::new();
 
@@ -1327,9 +1329,21 @@ fn floating_transfer_gesture_commits_as_one_undo_step() {
 #[test]
 fn escape_cancels_the_entire_floating_transfer_gesture() {
     let metrics = DockMetrics::default();
-    let (mut layout, moving_panel, target_group) = floating_transfer_layout();
+    let (mut layout, moving_panel_id, moving_panel, target_group) = floating_transfer_layout();
     let before = persistent_shape(&layout);
     let mut history = UndoRedoHistory::new();
+    let mut drag = DragSession::new(&metrics).unwrap();
+
+    drag.pointer_down_with_handle(
+        DragPayload::Panel {
+            panel: moving_panel_id,
+        },
+        DragHandle::PanelTab,
+        Point::ZERO,
+    )
+    .unwrap();
+    drag.pointer_move(Point::new(5.0, 0.0)).unwrap();
+    assert!(matches!(drag.state(), DragState::Dragging { .. }));
 
     assert!(history.begin_transaction(&layout));
     apply_floating_transfer_gesture(
@@ -1342,6 +1356,14 @@ fn escape_cancels_the_entire_floating_transfer_gesture() {
     assert_ne!(persistent_shape(&layout), before);
     assert_eq!(history.undo_len(), 0);
 
+    drag.escape().unwrap();
+    assert!(matches!(
+        drag.state(),
+        DragState::Cancelled {
+            reason: DragCancelReason::Escape,
+            ..
+        }
+    ));
     assert!(history
         .cancel_transaction(&mut layout, &metrics)
         .unwrap());
