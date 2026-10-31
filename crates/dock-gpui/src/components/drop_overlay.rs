@@ -6,6 +6,7 @@ use dock_core::{
 };
 use gpui::{
     IntoElement, ParentElement, SharedString, Styled, div, img, px, rgb,
+    prelude::InteractiveElement as _,
 };
 use ui::Theme;
 
@@ -140,7 +141,8 @@ impl DropOverlay {
                     }
                     layer = layer.child(highlight_rect(zone.rect, theme, 0.36, false));
                 }
-                // CanvasSlot owns the FreeArea bounds preview.
+                // FreeArea moves/detaches a composition; CanvasSlot renders its bounds.
+                DropZone::FreeArea => {}
             }
         }
 

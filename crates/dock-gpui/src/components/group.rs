@@ -2,7 +2,7 @@ use dock_core::{
     DockCommand, FloatingGroupId, GroupRect, Point, TabHeaderRect, TabOverflowRect, TabStripRect,
 };
 use gpui::{
-    Entity, IntoElement, ParentElement, Styled, div, px, rgb,
+    Entity, IntoElement, ParentElement, StatefulInteractiveElement, Styled, div, px, rgb,
     prelude::InteractiveElement as _,
 };
 use ui::Theme;

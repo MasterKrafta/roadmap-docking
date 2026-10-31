@@ -344,6 +344,7 @@ fn render_entry(
             ),
         ContextMenuEntry::Item(item) => {
             let mut row = div()
+                .id(format!("dock-menu-item-{index}"))
                 .w_full()
                 .h(px(theme.metrics.popup_menu_row_height))
                 .flex()
@@ -415,6 +416,7 @@ fn render_entry(
         } => {
             let selected = open_submenu == Some(index);
             let mut row = div()
+                .id(format!("dock-menu-submenu-{index}"))
                 .w_full()
                 .h(px(theme.metrics.popup_menu_row_height))
                 .flex()
