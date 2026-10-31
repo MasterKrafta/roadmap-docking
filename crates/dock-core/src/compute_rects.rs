@@ -26,7 +26,7 @@ use crate::{
     Axis, Column, ColumnMode, ColumnRect, ComputeRectsError, DockMetrics, DockSide,
     FloatingGroupRect, FloatingResizeEdgeRect, FlyoutRect, GeometryError, GroupRect, Layout,
     LayoutRects, Node, NodeId, PanelRect, Point, Rect, ResizeEdge, Size, SplitterRect,
-    TabHeaderRect, TabOverflowRect, TabStripRect, Tabs,
+    TabHeaderRect, TabOverflowRect, TabStripRect, Tabs, OUTER_COLUMN_EDGE_BOUNDARY_INDEX,
 };
 
 #[cfg(test)]
@@ -190,6 +190,52 @@ impl Layout {
                 Size::new(right_width, viewport.size.height),
             );
             layout_node(self, root, area, metrics, &mut minimum_sizes, &mut output)?;
+        }
+
+        // Add a distinct hit target at each main dock's canvas-facing outer
+        // edge. Core remains responsible for identifying the owning Column;
+        // the sentinel index distinguishes this case from Split(X) boundaries.
+        for (side, root) in [
+            (DockSide::Left, left_root),
+            (DockSide::Right, right_root),
+        ] {
+            let Some(root) = root else { continue };
+            let edge_column = match self.node(root) {
+                Some(Node::Column(_)) => Some(root),
+                Some(Node::Split(split)) if split.axis == Axis::X => {
+                    let child = match side {
+                        DockSide::Left => split.children.last(),
+                        DockSide::Right => split.children.first(),
+                    };
+                    child.and_then(|id| {
+                        matches!(self.node(*id), Some(Node::Column(_))).then_some(*id)
+                    })
+                }
+                _ => None,
+            };
+            let Some(column) = edge_column else { continue };
+            let Some(column_rect) = output.columns.iter().find(|item| item.column == column) else {
+                continue;
+            };
+            if matches!(self.node(column), Some(Node::Column(value)) if value.mode.is_rail()) {
+                continue;
+            }
+            let edge_x = match side {
+                DockSide::Left => column_rect.rect.checked_right()
+                    .map_err(ComputeRectsError::Geometry)?,
+                DockSide::Right => column_rect.rect.origin.x,
+            };
+            let hit_rect = Rect::new(
+                Point::new(edge_x - metrics.splitter_hit_zone * 0.5, column_rect.rect.origin.y),
+                Size::new(metrics.splitter_hit_zone, column_rect.rect.size.height),
+            );
+            hit_rect.validate().map_err(ComputeRectsError::Geometry)?;
+            output.splitters.push(SplitterRect::new(
+                column,
+                OUTER_COLUMN_EDGE_BOUNDARY_INDEX,
+                Axis::X,
+                hit_rect,
+            ));
         }
 
         // A rail flyout belongs to the dock presentation. Keep its transient

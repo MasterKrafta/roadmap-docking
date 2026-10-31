@@ -106,7 +106,7 @@ pub use rect::Rect;
 pub use resize_edge::ResizeEdge;
 pub use size::Size;
 pub use split::Split;
-pub use splitter_rect::SplitterRect;
+pub use splitter_rect::{OUTER_COLUMN_EDGE_BOUNDARY_INDEX, SplitterRect};
 pub use tab_header_rect::TabHeaderRect;
 pub use tab_overflow_rect::TabOverflowRect;
 pub use tab_strip_rect::TabStripRect;

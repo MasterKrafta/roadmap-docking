@@ -25,6 +25,8 @@ pub struct UndoRedoHistory {
     redo: VecDeque<Layout>,
     limit: usize,
     owner: Option<Weak<()>>,
+    /// Checkpoint held open while a multi-frame UI gesture is in progress.
+    transaction: Option<Layout>,
 }
 
 impl Default for UndoRedoHistory {
@@ -49,7 +51,34 @@ impl UndoRedoHistory {
             redo: VecDeque::new(),
             limit,
             owner: None,
+            transaction: None,
         }
+    }
+
+    /// Begins one history transaction for an interactive gesture.
+    ///
+    /// Commands applied before commit mutate the live layout but do not add
+    /// individual checkpoints. The starting state is recorded once on commit.
+    pub fn begin_transaction(&mut self, layout: &Layout) -> bool {
+        self.synchronize_owner(layout);
+        if self.transaction.is_some() {
+            return false;
+        }
+        self.transaction = Some(layout.history_snapshot());
+        true
+    }
+
+    /// Commits the starting checkpoint of an interactive gesture, if the
+    /// layout changed. Returns false when no transaction was open.
+    pub fn commit_transaction(&mut self, layout: &Layout) -> bool {
+        let Some(checkpoint) = self.transaction.take() else {
+            return false;
+        };
+        if self.limit > 0 && checkpoint.version() != layout.version() {
+            Self::push_bounded(&mut self.undo, checkpoint, self.limit);
+            self.redo.clear();
+        }
+        true
     }
 
     pub const fn limit(&self) -> usize {
@@ -86,7 +115,8 @@ impl UndoRedoHistory {
         let prior_version = layout.version();
         // With history disabled, avoid cloning a full layout that will never
         // be recorded. Command execution still uses the normal Layout::apply path.
-        let checkpoint = (self.limit > 0).then(|| layout.history_snapshot());
+        let checkpoint = (self.transaction.is_none() && self.limit > 0)
+            .then(|| layout.history_snapshot());
         let outcome = layout.apply(command, metrics)?;
 
         if outcome.new_version != prior_version
@@ -116,8 +146,10 @@ impl UndoRedoHistory {
             return Ok(Vec::new());
         }
 
+        self.synchronize_owner(layout);
         let prior_version = layout.version();
-        let checkpoint = (self.limit > 0).then(|| layout.history_snapshot());
+        let checkpoint = (self.transaction.is_none() && self.limit > 0)
+            .then(|| layout.history_snapshot());
         let mut candidate = layout.clone();
         let mut outcomes = Vec::with_capacity(commands.len());
 
@@ -147,6 +179,7 @@ impl UndoRedoHistory {
         layout: &mut Layout,
         metrics: &DockMetrics,
     ) -> Result<bool, CommandError> {
+        self.commit_transaction(layout);
         if self.discard_if_foreign_layout(layout) {
             return Ok(false);
         }
@@ -170,6 +203,7 @@ impl UndoRedoHistory {
         layout: &mut Layout,
         metrics: &DockMetrics,
     ) -> Result<bool, CommandError> {
+        self.commit_transaction(layout);
         if self.discard_if_foreign_layout(layout) {
             return Ok(false);
         }
@@ -192,6 +226,7 @@ impl UndoRedoHistory {
         self.undo.clear();
         self.redo.clear();
         self.owner = None;
+        self.transaction = None;
     }
 
     fn synchronize_owner(&mut self, layout: &Layout) {
@@ -203,6 +238,7 @@ impl UndoRedoHistory {
         {
             self.undo.clear();
             self.redo.clear();
+            self.transaction = None;
             self.owner = None;
         }
         if self.owner.is_none() {
@@ -219,6 +255,7 @@ impl UndoRedoHistory {
         if foreign {
             self.undo.clear();
             self.redo.clear();
+            self.transaction = None;
             self.owner = None;
         }
         foreign

@@ -1143,3 +1143,42 @@ fn resize_groups_with_tab_chrome_supports_history_undo_and_redo_after_clamping()
     assert_heights(&layout, 340.0, 160.0);
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
+
+
+#[test]
+fn resize_transaction_records_one_undo_checkpoint_for_many_frame_updates() {
+    let metrics = DockMetrics::default();
+    let mut fixture = fixture();
+    let column = fixture.column;
+    let original_width = match fixture.layout.node(column) {
+        Some(Node::Column(value)) => value.width,
+        _ => panic!("fixture column must exist"),
+    };
+    let mut history = UndoRedoHistory::new();
+
+    assert!(history.begin_transaction(&fixture.layout));
+    history
+        .apply(
+            &mut fixture.layout,
+            DockCommand::ResizeColumn { column, width: 320.0 },
+            &metrics,
+        )
+        .unwrap();
+    history
+        .apply(
+            &mut fixture.layout,
+            DockCommand::ResizeColumn { column, width: 360.0 },
+            &metrics,
+        )
+        .unwrap();
+    assert_eq!(history.undo_len(), 0);
+    assert!(history.commit_transaction(&fixture.layout));
+    assert_eq!(history.undo_len(), 1);
+
+    assert!(history.undo(&mut fixture.layout, &metrics).unwrap());
+    let restored_width = match fixture.layout.node(column) {
+        Some(Node::Column(value)) => value.width,
+        _ => panic!("fixture column must exist after undo"),
+    };
+    assert_eq!(restored_width, original_width);
+}

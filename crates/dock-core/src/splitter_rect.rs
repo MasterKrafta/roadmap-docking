@@ -1,5 +1,9 @@
 use crate::{Axis, NodeId, Rect};
 
+/// Sentinel boundary index for the canvas-facing outer edge of a main column.
+/// Ordinary splitters use a zero-based index between two adjacent children.
+pub const OUTER_COLUMN_EDGE_BOUNDARY_INDEX: usize = usize::MAX;
+
 /// Geometry and semantic boundary for one splitter hit region.
 ///
 /// owner is the Split node for a tree split or the Column node for a vertical
