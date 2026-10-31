@@ -43,7 +43,7 @@ pub use dock_host::DockHost;
 pub use missing_panel::MissingPanelPlaceholder;
 pub use persistence::WorkspacePersistenceError;
 pub use theme::DockTheme;
-pub use workspace::{DockWorkspace, DockWorkspaceError, PanelDefinition};
+pub use workspace::{DockPanelMenu, DockWorkspace, DockWorkspaceError, PanelDefinition};
 
 pub use controller::{
     DockController, DockControllerConfigError, DockEvent, DragController, PanelCommandError,
