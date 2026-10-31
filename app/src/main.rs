@@ -8,7 +8,7 @@ use dock_gpui::{
     PanelKey, PanelRegistry, Point, Profile, Rect, Size,
 };
 use gpui::{
-    App, AppContext, AnyView, Bounds, Context, Entity, IntoElement, Render, TitlebarOptions,
+    App, AppContext, Bounds, Context, Entity, IntoElement, Render, TitlebarOptions,
     Window, WindowBounds, WindowOptions, div, px, rgb, size,
 };
 use gpui::prelude::*;
@@ -150,7 +150,7 @@ impl AppView {
                         .panel_instances()
                         .any(|(_, instance)| instance.key.as_str() == *id)
                 });
-                let panel_key = PanelKey::new(id).expect("the app panel ID is valid");
+                let panel_key = PanelKey::new(*id).expect("the app panel ID is valid");
                 let controller = self.controller.clone();
 
                 ContextMenuItem::new(*title, move |app| {
