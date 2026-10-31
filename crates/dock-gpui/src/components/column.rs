@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use dock_core::{
     ColumnDisplayItem, ColumnMode, ColumnRect, DockCommand, DockMetrics, DragPreview, DropZoneRect,
+    FloatingGroupId,
     FlyoutState, GroupRect, NodeId, PanelRect, Point, SplitterRect, TabHeaderRect, TabOverflowRect,
     TabStripRect, VerticalOverflow,
 };
@@ -53,6 +54,8 @@ impl ColumnView {
         scroll_handle: Option<ScrollHandle>,
         controller: Entity<DockController>,
         theme: Theme,
+        coordinate_origin: Point,
+        raise_floating: Option<FloatingGroupId>,
     ) -> impl IntoElement {
         let viewport = overflow.map_or(column.rect, |value| value.viewport);
         let content_extent = overflow.map_or(column.rect, |value| value.content_extent);
@@ -124,6 +127,7 @@ impl ColumnView {
                     controller.clone(),
                     metrics,
                     theme,
+                    raise_floating,
                 ));
             }
 
@@ -175,8 +179,8 @@ impl ColumnView {
         let mut root = div()
             .id(format!("dock-column-{:?}", column.column))
             .absolute()
-            .left(px(column.rect.origin.x))
-            .top(px(column.rect.origin.y))
+            .left(px(column.rect.origin.x - coordinate_origin.x))
+            .top(px(column.rect.origin.y - coordinate_origin.y))
             .w(px(column.rect.size.width))
             .h(px(column.rect.size.height))
             .overflow_hidden()
