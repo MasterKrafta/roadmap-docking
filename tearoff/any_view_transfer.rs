@@ -928,11 +928,6 @@ impl Render for MainWindowView {
             div().flex_1().p_3().child(self.panels.get(active_tab))
         };
 
-        let inactive_label = if floating_panel == Some(inactive_tab) {
-            format!("Вкладка {} (floating)", inactive_tab.label())
-        } else {
-            format!("Вкладка {}", inactive_tab.label())
-        };
         let extract_inactive_label = if floating_panel.is_some() || floating_hwnd == 0 {
             "Верните плавающую панель перед следующим переносом".to_string()
         } else {
