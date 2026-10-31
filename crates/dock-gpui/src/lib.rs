@@ -16,17 +16,16 @@ pub mod missing_panel;
 pub mod persistence;
 pub mod registry;
 pub mod theme;
+pub mod workspace;
 
 /// The UI-independent docking model used by this adapter.
 pub use dock_core;
-
-use std::path::PathBuf;
 
 /// Options for starting the dock application.
 #[derive(Default)]
 pub struct RunOptions {
     /// Optional workspace file to restore at startup.
-    pub workspace_path: Option<PathBuf>,
+    pub workspace_path: Option<std::path::PathBuf>,
 }
 
 /// Temporary entry point retained while the GPUI host is being implemented.
@@ -44,6 +43,7 @@ pub use dock_host::DockHost;
 pub use missing_panel::MissingPanelPlaceholder;
 pub use persistence::WorkspacePersistenceError;
 pub use theme::DockTheme;
+pub use workspace::{DockWorkspace, DockWorkspaceError, PanelDefinition};
 
 pub use controller::{
     DockController, DockControllerConfigError, DockEvent, DragController, PanelCommandError,
