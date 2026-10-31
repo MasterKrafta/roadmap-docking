@@ -3,7 +3,7 @@
 use std::ops::Range;
 
 use gpui::{
-    actions, black, div, fill, point, prelude::*, px, relative, rgb, rgba, size, white, App,
+    actions, div, fill, point, prelude::*, px, relative, rgb, rgba, size, white, App,
     AnyView, Bounds, ClipboardItem, Context, CursorStyle, Element, ElementId, ElementInputHandler,
     Entity, EntityInputHandler, FocusHandle, Focusable, GlobalElementId, KeyBinding, LayoutId,
     MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point,
@@ -30,8 +30,9 @@ actions!(
     ]
 );
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum PanelLocation {
+    #[default]
     Main,
     Floating,
 }
