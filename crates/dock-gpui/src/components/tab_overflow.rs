@@ -5,19 +5,14 @@ use gpui::{
 };
 use ui::Theme;
 
-use super::context_menu::{ContextMenuTarget, GroupMenuToggle};
 
 /// Overflow affordance. Hidden tab choices are presented by the shared ContextMenu.
 pub struct TabOverflow;
-
-/// Kept as a local alias for callers that pass the shared context-menu callback.
-pub(crate) type TabOverflowToggle = GroupMenuToggle;
 
 impl TabOverflow {
     pub(crate) fn render(
         strip_rect: dock_core::Rect,
         overflow: TabOverflowRect,
-        toggle_menu: TabOverflowToggle,
         theme: Theme,
     ) -> impl IntoElement {
         let left = overflow.button_rect.origin.x - strip_rect.origin.x;
@@ -40,16 +35,5 @@ impl TabOverflow {
             .hover(|style| style.bg(rgb(theme.colors.tab_overflow_button_hover)))
             .text_color(rgb(theme.colors.primary_text))
             .child("»»")
-            .on_click(move |event, _, app| {
-                (toggle_menu)(
-                    ContextMenuTarget::Overflow(overflow.group),
-                    match crate::geometry::point_from_gpui(event.position()) {
-                        Ok(anchor) => anchor,
-                        Err(_) => return,
-                    },
-                    app,
-                );
-                app.stop_propagation();
-            })
     }
 }

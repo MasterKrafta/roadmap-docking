@@ -23,7 +23,7 @@ use crate::{
         collect_group_presentations,
     },
     input::{
-        floating_bounds, map_hit_test_point, register_pointer_events,
+        floating_bounds, map_hit_test_point, register_pointer_events, PointerPress,
         scroll_adjusted_hit_test_point,
     },
 };
@@ -46,6 +46,8 @@ pub struct DockHost {
     column_scroll_handles: HashMap<NodeId, ScrollHandle>,
     /// Keeps the actual captured hitbox identity across DockHost rerenders.
     pointer_capture: Rc<Cell<Option<HitboxId>>>,
+    /// Semantic down-hit retained until the matching pointer-up event.
+    pointer_press: Rc<Cell<Option<PointerPress>>>,
     /// One transient menu can be open at a time; it never enters Core layout state.
     open_context_menu: Option<OpenContextMenu>,
     /// Whether middle-clicking a tab closes its panel instance.
@@ -75,6 +77,7 @@ impl DockHost {
             canvas: None,
             column_scroll_handles: HashMap::new(),
             pointer_capture: Rc::new(Cell::new(None)),
+            pointer_press: Rc::new(Cell::new(None)),
             open_context_menu: None,
             middle_click_closes_tabs: true,
             controller_observed: false,
@@ -177,6 +180,7 @@ impl Render for DockHost {
         if !self.focus_observed {
             let controller = self.controller.clone();
             let pointer_capture = self.pointer_capture.clone();
+            let pointer_press = self.pointer_press.clone();
             cx.on_focus_out(&focus_handle, window, move |_host, _event, window, app| {
                 let _ = controller.update(app, |controller, controller_cx| {
                     let result = controller.cancel_pointer_interaction();
@@ -187,6 +191,7 @@ impl Render for DockHost {
                 });
                 window.release_pointer();
                 pointer_capture.set(None);
+                pointer_press.set(None);
             })
             .detach();
             self.focus_observed = true;
@@ -526,6 +531,8 @@ impl Render for DockHost {
         let pointer_scroll_handles = self.column_scroll_handles.clone();
         let pointer_context_menu = toggle_context_menu.clone();
         let pointer_capture = self.pointer_capture.clone();
+        let pointer_press_for_measurement = self.pointer_press.clone();
+        let pointer_press_for_events = self.pointer_press.clone();
         let measurement = canvas(
             move |bounds, window, app| {
                 let (viewport, window_origin) =
@@ -540,6 +547,7 @@ impl Render for DockHost {
                 controller_for_measurement.update(app, |controller, controller_cx| {
                     match controller.set_viewport(viewport) {
                         Ok(true) => {
+                            pointer_press_for_measurement.set(None);
                             // geometry() performs a fresh valid calculation and updates
                             // Layout::canvas_bounds only when the measured Canvas rect changed.
                             if let Err(error) = controller.geometry() {
@@ -569,6 +577,7 @@ impl Render for DockHost {
                         pointer_scroll_handles.clone(),
                         pointer_context_menu.clone(),
                         pointer_capture.clone(),
+                        pointer_press_for_events.clone(),
                     );
                 }
                 // Apply the drag cursor at window level so child buttons and

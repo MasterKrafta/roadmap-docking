@@ -88,7 +88,6 @@ impl GroupView {
             controller.clone(),
             theme,
             raise_floating,
-            toggle_menu.clone(),
             middle_click_closes_tabs,
         ));
 

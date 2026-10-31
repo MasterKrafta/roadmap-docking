@@ -76,7 +76,7 @@ pub(crate) fn finish_resize(
     if !controller.update(app, |controller, _| controller.ensure_pointer_interaction_current()) {
         return;
     }
-    if click_count >= 2 {
+    if click_count == 2 {
         let reset = controller.update(app, |controller, _| {
             let interaction = controller.resize_interaction()?;
             reset_command_for_interaction(controller, interaction)

@@ -1,7 +1,8 @@
 use std::{cell::Cell, collections::HashMap, rc::Rc};
 
 use dock_core::{
-    DockCommand, DragHandle, DragPayload, DragState, HitResult, Node, NodeId, Point,
+    DockCommand, DragHandle, DragPayload, DragState, FloatingGroupId, HitResult, Layout, Node,
+    NodeId, PanelId, Point,
 };
 use gpui::{
     App, DispatchPhase, Entity, HitboxId, MouseButton, MouseDownEvent, MouseExitEvent,
@@ -20,13 +21,84 @@ use super::{
     scroll::map_hit_test_point,
 };
 
-/// Installs the DockHost-level mouse event pipeline.
-///
-/// A drag begins as a press. GPUI capture is requested after the Core drag
-/// threshold so a normal click still reaches the source control; resize capture
-/// is requested immediately on pointer-down. Once captured, move/up continue to
-/// the root hitbox outside the source element. Leaving the window or losing
-/// capture safely cancels the gesture.
+/// A semantic press retained until pointer-up so Click and Double-click are
+/// resolved from the same Core hit result that started the interaction.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct PointerPress {
+    hit: HitResult,
+    layout_version: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PointerDownIntent {
+    TabHeaderCandidate { group: NodeId, panel: PanelId },
+    GroupCandidate { group: NodeId },
+    FlyoutPanelCandidate { panel: PanelId },
+    FloatingTitleCandidate { group: FloatingGroupId },
+    Resize,
+    OverflowButton { group: NodeId },
+    RaiseFloating { group: FloatingGroupId },
+    RaiseFloatingForPanel { panel: PanelId },
+    DismissFlyout,
+    None,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PointerClickIntent {
+    ActivateTab { group: NodeId, panel: PanelId },
+    CollapseGroup { group: NodeId },
+    OpenOverflowMenu { group: NodeId },
+    None,
+}
+
+fn pointer_down_intent_for_hit(hit: HitResult) -> PointerDownIntent {
+    match hit {
+        HitResult::TabHeader { group, panel, .. } if click_count == 1 => {
+            PointerDownIntent::TabHeaderCandidate { group, panel }
+        }
+        HitResult::TabStrip { group } | HitResult::Group { group } => {
+            PointerDownIntent::GroupCandidate { group }
+        }
+        HitResult::TabOverflowButton { group } => PointerDownIntent::OverflowButton { group },
+        HitResult::Splitter { .. }
+        | HitResult::FloatingResizeEdge { .. }
+        | HitResult::FlyoutResizeEdge { .. } => PointerDownIntent::Resize,
+        HitResult::FlyoutPanel { panel, .. } => {
+            PointerDownIntent::FlyoutPanelCandidate { panel }
+        }
+        HitResult::FloatingTitle { group } => {
+            PointerDownIntent::FloatingTitleCandidate { group }
+        }
+        HitResult::FloatingGroup { group } => PointerDownIntent::RaiseFloating { group },
+        HitResult::Panel { panel } => PointerDownIntent::RaiseFloatingForPanel { panel },
+        HitResult::Canvas => PointerDownIntent::DismissFlyout,
+        HitResult::Column { .. } | HitResult::Miss | HitResult::DropZone { .. } => {
+            PointerDownIntent::None
+        }
+    }
+}
+
+fn pointer_click_intent_for_hit(hit: HitResult, click_count: usize) -> PointerClickIntent {
+    match hit {
+        HitResult::TabHeader { group, .. } if click_count == 2 => {
+            PointerClickIntent::CollapseGroup { group }
+        }
+        HitResult::TabHeader { group, panel, .. } => {
+            PointerClickIntent::ActivateTab { group, panel }
+        }
+        HitResult::TabStrip { group } if click_count == 2 => {
+            PointerClickIntent::CollapseGroup { group }
+        }
+        HitResult::TabOverflowButton { group } if click_count == 1 => {
+            PointerClickIntent::OpenOverflowMenu { group }
+        }
+        _ => PointerClickIntent::None,
+    }
+}
+
+/// Installs the DockHost-level mouse event pipeline. Core HitResult is the
+/// only source of dock gesture intent; components keep only explicit button
+/// actions that do not have a HitResult representation.
 pub(crate) fn register_pointer_events(
     window: &mut Window,
     root_hitbox: HitboxId,
@@ -35,12 +107,14 @@ pub(crate) fn register_pointer_events(
     scroll_handles: HashMap<NodeId, ScrollHandle>,
     toggle_context_menu: ContextMenuToggle,
     pointer_capture: Rc<Cell<Option<HitboxId>>>,
+    pointer_press: Rc<Cell<Option<PointerPress>>>,
 ) {
     window.on_mouse_event({
         let controller = controller.clone();
         let scroll_handles = scroll_handles.clone();
         let toggle_context_menu = toggle_context_menu.clone();
         let pointer_capture = pointer_capture.clone();
+        let pointer_press = pointer_press.clone();
         move |event: &MouseDownEvent, phase, window, app| {
             if phase != DispatchPhase::Capture
                 || !root_hitbox.is_hovered(window)
@@ -50,9 +124,8 @@ pub(crate) fn register_pointer_events(
                 return;
             }
 
-            let Ok(host_point) =
-                host_point_from_gpui_window(event.position, window_origin)
-            else {
+            pointer_press.set(None);
+            let Ok(host_point) = host_point_from_gpui_window(event.position, window_origin) else {
                 return;
             };
             let Some(core_point) =
@@ -74,21 +147,30 @@ pub(crate) fn register_pointer_events(
             if event.button != MouseButton::Left {
                 return;
             }
-
             let Some(hit) = hit else {
                 return;
             };
-            match pointer_handler_for_hit(hit) {
-                PointerHandler::PanelTabDrag => {
-                    if let HitResult::TabHeader { panel, group, .. } = hit
-                        && tab_header_drag_handle_contains(
-                            &controller,
-                            group,
-                            panel,
-                            core_point,
-                            app,
-                        )
-                    {
+
+            match pointer_down_intent_for_hit(hit) {
+                PointerDownIntent::TabHeaderCandidate { group, panel } => {
+                    if tab_header_clickable_contains(
+                        &controller,
+                        group,
+                        panel,
+                        core_point,
+                        app,
+                    ) {
+                        let layout_version =
+                            controller.update(app, |controller, _| controller.layout().version());
+                        pointer_press.set(Some(PointerPress { hit, layout_version }));
+                    }
+                    if tab_header_drag_handle_contains(
+                        &controller,
+                        group,
+                        panel,
+                        core_point,
+                        app,
+                    ) {
                         begin_drag_at(
                             &controller,
                             DragPayload::Panel { panel },
@@ -98,10 +180,13 @@ pub(crate) fn register_pointer_events(
                         );
                     }
                 }
-                PointerHandler::GroupDrag => {
-                    if let HitResult::Group { group } = hit
-                        && group_grip_contains(&controller, group, core_point, app)
-                    {
+                PointerDownIntent::GroupCandidate { group } => {
+                    if group_grip_contains(&controller, group, core_point, app) {
+                        if matches!(hit, HitResult::TabStrip { .. }) {
+                            let layout_version = controller
+                                .update(app, |controller, _| controller.layout().version());
+                            pointer_press.set(Some(PointerPress { hit, layout_version }));
+                        }
                         begin_drag_at(
                             &controller,
                             DragPayload::Group { group },
@@ -111,10 +196,8 @@ pub(crate) fn register_pointer_events(
                         );
                     }
                 }
-                PointerHandler::FlyoutDrag => {
-                    if let HitResult::FlyoutPanel { panel, .. } = hit
-                        && flyout_title_grip_contains(&controller, core_point, app)
-                    {
+                PointerDownIntent::FlyoutPanelCandidate { panel } => {
+                    if flyout_title_grip_contains(&controller, core_point, app) {
                         begin_drag_at(
                             &controller,
                             DragPayload::Panel { panel },
@@ -124,10 +207,11 @@ pub(crate) fn register_pointer_events(
                         );
                     }
                 }
-                PointerHandler::FloatingWindowMove => {
-                    if let HitResult::FloatingTitle { group } = hit
-                        && floating_title_grip_contains(&controller, group, core_point, app)
-                    {
+                PointerDownIntent::FloatingTitleCandidate { group } => {
+                    let drag_grip =
+                        floating_title_grip_contains(&controller, group, core_point, app);
+                    raise_floating_group(&controller, group, app);
+                    if drag_grip {
                         begin_drag_at(
                             &controller,
                             DragPayload::FloatingGroup { group },
@@ -137,15 +221,7 @@ pub(crate) fn register_pointer_events(
                         );
                     }
                 }
-                PointerHandler::Resize => {
-                    if let HitResult::FloatingResizeEdge { group, .. } = hit {
-                        let _ = controller.update(app, |controller, cx| {
-                            let _ = controller.dispatch_in(
-                                DockCommand::RaiseFloating { group },
-                                cx,
-                            );
-                        });
-                    }
+                PointerDownIntent::Resize => {
                     begin_resize_hit(&controller, hit, core_point, app);
                     let resize_started = controller
                         .update(app, |controller, _| controller.resize_interaction().is_some());
@@ -158,6 +234,7 @@ pub(crate) fn register_pointer_events(
                                 &controller,
                                 window,
                                 &pointer_capture,
+                                &pointer_press,
                                 app,
                             );
                             return;
@@ -165,7 +242,35 @@ pub(crate) fn register_pointer_events(
                         app.stop_propagation();
                     }
                 }
-                PointerHandler::None => {}
+                PointerDownIntent::OverflowButton { .. } => {
+                    let layout_version =
+                        controller.update(app, |controller, _| controller.layout().version());
+                    pointer_press.set(Some(PointerPress { hit, layout_version }));
+                }
+                PointerDownIntent::RaiseFloating { group } => {
+                    raise_floating_group(&controller, group, app);
+                }
+                PointerDownIntent::RaiseFloatingForPanel { panel } => {
+                    let group = controller.update(app, |controller, _| {
+                        floating_group_for_panel(controller.layout(), panel)
+                    });
+                    if let Some(group) = group {
+                        raise_floating_group(&controller, group, app);
+                    }
+                }
+                PointerDownIntent::DismissFlyout => {
+                    let flyout_is_open =
+                        controller.update(app, |controller, _| controller.layout().flyout().is_some());
+                    if flyout_is_open {
+                        let result = controller.update(app, |controller, cx| {
+                            controller.dispatch_transient_in(DockCommand::DismissFlyout, cx)
+                        });
+                        if let Err(error) = result {
+                            tracing::debug!(%error, "could not dismiss flyout from Canvas pointer-down");
+                        }
+                    }
+                }
+                PointerDownIntent::None => {}
             }
         }
     });
@@ -174,20 +279,28 @@ pub(crate) fn register_pointer_events(
         let controller = controller.clone();
         let scroll_handles = scroll_handles.clone();
         let pointer_capture = pointer_capture.clone();
+        let pointer_press = pointer_press.clone();
         move |event: &MouseMoveEvent, phase, window, app| {
             if phase != DispatchPhase::Capture {
                 return;
             }
 
             if !ensure_pointer_interaction_current(&controller, window, &pointer_capture, app) {
+                pointer_press.set(None);
                 return;
             }
-            let (drag_active, resize_active) = active_interactions(&controller, app);
+            let (drag_active, _, resize_active) = active_interactions(&controller, app);
             if !drag_active && !resize_active {
                 return;
             }
             if !event.dragging() {
-                cancel_pointer_interaction(&controller, window, &pointer_capture, app);
+                cancel_pointer_interaction(
+                    &controller,
+                    window,
+                    &pointer_capture,
+                    &pointer_press,
+                    app,
+                );
                 return;
             }
 
@@ -195,20 +308,36 @@ pub(crate) fn register_pointer_events(
                 .get()
                 .is_some_and(|captured| window.captured_hitbox() != Some(captured))
             {
-                cancel_pointer_interaction(&controller, window, &pointer_capture, app);
+                cancel_pointer_interaction(
+                    &controller,
+                    window,
+                    &pointer_capture,
+                    &pointer_press,
+                    app,
+                );
                 return;
             }
 
-            let Ok(host_point) =
-                host_point_from_gpui_window(event.position, window_origin)
-            else {
-                cancel_pointer_interaction(&controller, window, &pointer_capture, app);
+            let Ok(host_point) = host_point_from_gpui_window(event.position, window_origin) else {
+                cancel_pointer_interaction(
+                    &controller,
+                    window,
+                    &pointer_capture,
+                    &pointer_press,
+                    app,
+                );
                 return;
             };
             let Some(point) =
                 core_point_at_host_point(host_point, &controller, &scroll_handles, app)
             else {
-                cancel_pointer_interaction(&controller, window, &pointer_capture, app);
+                cancel_pointer_interaction(
+                    &controller,
+                    window,
+                    &pointer_capture,
+                    &pointer_press,
+                    app,
+                );
                 return;
             };
 
@@ -225,7 +354,13 @@ pub(crate) fn register_pointer_events(
                 if window.captured_hitbox() == Some(root_hitbox) {
                     pointer_capture.set(Some(root_hitbox));
                 } else {
-                    cancel_pointer_interaction(&controller, window, &pointer_capture, app);
+                    cancel_pointer_interaction(
+                        &controller,
+                        window,
+                        &pointer_capture,
+                        &pointer_press,
+                        app,
+                    );
                     return;
                 }
             }
@@ -252,45 +387,68 @@ pub(crate) fn register_pointer_events(
     window.on_mouse_event({
         let controller = controller.clone();
         let scroll_handles = scroll_handles.clone();
+        let toggle_context_menu = toggle_context_menu.clone();
         let pointer_capture = pointer_capture.clone();
+        let pointer_press = pointer_press.clone();
         move |event: &MouseUpEvent, phase, window, app| {
             if phase != DispatchPhase::Capture || event.button != MouseButton::Left {
                 return;
             }
 
             if !ensure_pointer_interaction_current(&controller, window, &pointer_capture, app) {
+                pointer_press.set(None);
                 return;
             }
-            let (drag_active, resize_active) = active_interactions(&controller, app);
+            let (drag_active, _, resize_active) = active_interactions(&controller, app);
             if pointer_capture
                 .get()
                 .is_some_and(|captured| window.captured_hitbox() != Some(captured))
             {
-                cancel_pointer_interaction(&controller, window, &pointer_capture, app);
+                cancel_pointer_interaction(
+                    &controller,
+                    window,
+                    &pointer_capture,
+                    &pointer_press,
+                    app,
+                );
                 return;
             }
-            if !drag_active && !resize_active {
+
+            let pending_press = pointer_press.get();
+            if !drag_active && !resize_active && pending_press.is_none() {
                 window.release_pointer();
                 pointer_capture.set(None);
                 return;
             }
 
-            let Ok(host_point) =
-                host_point_from_gpui_window(event.position, window_origin)
-            else {
-                cancel_pointer_interaction(&controller, window, &pointer_capture, app);
+            let Ok(host_point) = host_point_from_gpui_window(event.position, window_origin) else {
+                cancel_pointer_interaction(
+                    &controller,
+                    window,
+                    &pointer_capture,
+                    &pointer_press,
+                    app,
+                );
                 return;
             };
             let Some(point) =
                 core_point_at_host_point(host_point, &controller, &scroll_handles, app)
             else {
-                cancel_pointer_interaction(&controller, window, &pointer_capture, app);
+                cancel_pointer_interaction(
+                    &controller,
+                    window,
+                    &pointer_capture,
+                    &pointer_press,
+                    app,
+                );
                 return;
             };
 
-            if drag_active {
-                finish_drag_at(&controller, point, app);
-            }
+            let drag_was_started = if drag_active {
+                finish_drag_at(&controller, point, app)
+            } else {
+                false
+            };
             if resize_active {
                 controller.update(app, |controller, _| {
                     controller.clear_resize_frame_point();
@@ -299,20 +457,48 @@ pub(crate) fn register_pointer_events(
             }
             window.release_pointer();
             pointer_capture.set(None);
+
+            pointer_press.set(None);
+            if drag_was_started || resize_active {
+                return;
+            }
+
+            let Some(press) = pending_press else {
+                return;
+            };
+            let (layout_version, release_hit) = controller.update(app, |controller, _| {
+                (controller.layout().version(), controller.hit(point).ok())
+            });
+            if layout_version != press.layout_version || release_hit != Some(press.hit) {
+                return;
+            }
+
+            let intent = pointer_click_intent_for_hit(press.hit, event.click_count);
+            if dispatch_pointer_click(intent, &controller, host_point, &toggle_context_menu, app) {
+                app.stop_propagation();
+            }
         }
     });
 
     window.on_mouse_event({
         let controller = controller.clone();
         let pointer_capture = pointer_capture.clone();
+        let pointer_press = pointer_press.clone();
         move |_event: &MouseExitEvent, phase, window, app| {
             if phase != DispatchPhase::Capture {
                 return;
             }
+            pointer_press.set(None);
 
-            let (drag_active, resize_active) = active_interactions(&controller, app);
+            let (drag_active, _, resize_active) = active_interactions(&controller, app);
             if drag_active || resize_active || pointer_capture.get().is_some() {
-                cancel_pointer_interaction(&controller, window, &pointer_capture, app);
+                cancel_pointer_interaction(
+                    &controller,
+                    window,
+                    &pointer_capture,
+                    &pointer_press,
+                    app,
+                );
             }
         }
     });
@@ -327,9 +513,7 @@ pub(crate) fn register_pointer_events(
             if phase != DispatchPhase::Capture || !root_hitbox.should_handle_scroll(window) {
                 return;
             }
-            let Ok(host_point) =
-                host_point_from_gpui_window(event.position, window_origin)
-            else {
+            let Ok(host_point) = host_point_from_gpui_window(event.position, window_origin) else {
                 return;
             };
             if let Some(point) =
@@ -341,42 +525,84 @@ pub(crate) fn register_pointer_events(
     });
 }
 
-/// Central pointer-down dispatch table for the semantic Core hit results.
-///
-/// HitResult                         | Pointer handler
-/// TabHeader                         | Panel-tab drag
-/// Group                             | Group drag
-/// FlyoutPanel                       | Flyout-panel drag (title grip)
-/// FloatingTitle                     | Floating-window move
-/// Splitter / *ResizeEdge            | Resize
-/// All remaining semantic results   | No root pointer gesture
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum PointerHandler {
-    PanelTabDrag,
-    GroupDrag,
-    FlyoutDrag,
-    FloatingWindowMove,
-    Resize,
-    None,
+fn dispatch_pointer_click(
+    intent: PointerClickIntent,
+    controller: &Entity<DockController>,
+    anchor: Point,
+    toggle_context_menu: &ContextMenuToggle,
+    app: &mut App,
+) -> bool {
+    match intent {
+        PointerClickIntent::ActivateTab { group, panel } => {
+            let result = controller.update(app, |controller, cx| {
+                controller
+                    .dispatch_in(DockCommand::ActivateTab { group, panel }, cx)
+                    .map(|_| ())
+            });
+            if let Err(error) = result {
+                tracing::debug!(%error, "could not activate tab from pointer click");
+            }
+            true
+        }
+        PointerClickIntent::CollapseGroup { group } => {
+            let result = controller.update(app, |controller, cx| {
+                let collapsed = match controller.layout().node(group) {
+                    Some(Node::Tabs(tabs)) => !tabs.collapsed,
+                    _ => return Ok(()),
+                };
+                controller
+                    .dispatch_in(DockCommand::CollapseGroup { group, collapsed }, cx)
+                    .map(|_| ())
+            });
+            if let Err(error) = result {
+                tracing::debug!(%error, "could not toggle collapsed group from double-click");
+            }
+            true
+        }
+        PointerClickIntent::OpenOverflowMenu { group } => {
+            (toggle_context_menu)(ContextMenuTarget::Overflow(group), anchor, app);
+            true
+        }
+        PointerClickIntent::None => false,
+    }
 }
 
-fn pointer_handler_for_hit(hit: HitResult) -> PointerHandler {
-    match hit {
-        HitResult::TabHeader { .. } => PointerHandler::PanelTabDrag,
-        HitResult::Group { .. } => PointerHandler::GroupDrag,
-        HitResult::FlyoutPanel { .. } => PointerHandler::FlyoutDrag,
-        HitResult::FloatingTitle { .. } => PointerHandler::FloatingWindowMove,
-        HitResult::Splitter { .. }
-        | HitResult::FloatingResizeEdge { .. }
-        | HitResult::FlyoutResizeEdge { .. } => PointerHandler::Resize,
-        HitResult::Canvas
-        | HitResult::Miss
-        | HitResult::Column { .. }
-        | HitResult::TabStrip { .. }
-        | HitResult::TabOverflowButton { .. }
-        | HitResult::Panel { .. }
-        | HitResult::FloatingGroup { .. }
-        | HitResult::DropZone { .. } => PointerHandler::None,
+fn raise_floating_group(
+    controller: &Entity<DockController>,
+    group: FloatingGroupId,
+    app: &mut App,
+) {
+    let result = controller.update(app, |controller, cx| {
+        controller.dispatch_in(DockCommand::RaiseFloating { group }, cx)
+    });
+    if let Err(error) = result {
+        tracing::debug!(%error, "could not raise floating group from pointer-down");
+    }
+}
+
+fn floating_group_for_panel(layout: &Layout, panel: PanelId) -> Option<FloatingGroupId> {
+    layout.floating_groups().find_map(|(group, floating)| {
+        let root = layout.dock_area(floating.area)?.root;
+        subtree_contains_panel(layout, root, panel).then_some(group)
+    })
+}
+
+fn subtree_contains_panel(layout: &Layout, node: NodeId, panel: PanelId) -> bool {
+    match layout.node(node) {
+        Some(Node::Panel(candidate)) => candidate.panel_id == panel,
+        Some(Node::Split(split)) => split
+            .children
+            .iter()
+            .any(|child| subtree_contains_panel(layout, *child, panel)),
+        Some(Node::Column(column)) => column
+            .groups
+            .iter()
+            .any(|group| subtree_contains_panel(layout, *group, panel)),
+        Some(Node::Tabs(tabs)) => tabs
+            .children
+            .iter()
+            .any(|child| subtree_contains_panel(layout, *child, panel)),
+        None => false,
     }
 }
 
@@ -432,13 +658,18 @@ fn ensure_pointer_interaction_current(
     current
 }
 
-fn active_interactions(controller: &Entity<DockController>, app: &mut App) -> (bool, bool) {
+fn active_interactions(
+    controller: &Entity<DockController>,
+    app: &mut App,
+) -> (bool, bool, bool) {
     controller.update(app, |controller, _| {
+        let state = controller.drag().session().state();
         (
             matches!(
-                controller.drag().session().state(),
+                state,
                 DragState::Pressed { .. } | DragState::Dragging { .. }
             ),
+            matches!(state, DragState::Dragging { .. }),
             controller.resize_interaction().is_some(),
         )
     })
@@ -448,6 +679,7 @@ fn cancel_pointer_interaction(
     controller: &Entity<DockController>,
     window: &mut Window,
     pointer_capture: &Rc<Cell<Option<HitboxId>>>,
+    pointer_press: &Rc<Cell<Option<PointerPress>>>,
     app: &mut App,
 ) {
     if let Err(error) = controller.update(app, |controller, cx| {
@@ -459,6 +691,40 @@ fn cancel_pointer_interaction(
     }
     window.release_pointer();
     pointer_capture.set(None);
+    pointer_press.set(None);
+}
+
+fn tab_header_clickable_contains(
+    controller: &Entity<DockController>,
+    group: NodeId,
+    panel: PanelId,
+    point: Point,
+    app: &mut App,
+) -> bool {
+    controller.update(app, |controller, _| {
+        let Ok(rects) = controller.geometry() else {
+            return false;
+        };
+        let is_rail = rects.columns.iter().any(|column_rect| {
+            matches!(
+                controller.layout().node(column_rect.column),
+                Some(Node::Column(column))
+                    if column.mode.is_rail() && column.groups.contains(&group)
+            )
+        });
+        if is_rail {
+            return false;
+        }
+        let Some(header) = rects
+            .tab_headers
+            .iter()
+            .find(|header| header.group == group && header.panel == panel)
+        else {
+            return false;
+        };
+        let close_width = 18.0_f32.min(header.rect.size.width.max(0.0));
+        point.x < header.rect.origin.x + header.rect.size.width - close_width
+    })
 }
 
 fn tab_header_drag_handle_contains(
@@ -576,80 +842,147 @@ fn floating_title_grip_contains(
     })
 }
 
+
 #[cfg(test)]
 mod hit_dispatch_tests {
-    use dock_core::{Axis, HitResult, NodeId, PanelId, ResizeEdge};
+    use dock_core::{
+        Axis, FloatingGroupId, HitResult, NodeId, PanelId, ResizeEdge,
+    };
     use slotmap::Key;
 
-    use super::{PointerHandler, context_menu_target_for_hit, pointer_handler_for_hit};
+    use super::{
+        PointerClickIntent, PointerDownIntent, pointer_click_intent_for_hit,
+        pointer_down_intent_for_hit,
+    };
 
     #[test]
-    fn core_hit_results_select_the_central_pointer_handler() {
+    fn pointer_down_intents_follow_the_hitresult_table() {
+        let group = NodeId::null();
+        let panel = PanelId::null();
+        let floating = FloatingGroupId::null();
+
         assert_eq!(
-            pointer_handler_for_hit(HitResult::TabHeader {
-                group: NodeId::null(),
-                panel: PanelId::null(),
-                index: 0,
-            }),
-            PointerHandler::PanelTabDrag
+            pointer_down_intent_for_hit(HitResult::TabHeader { group, panel, index: 0 }),
+            PointerDownIntent::TabHeaderCandidate { group, panel }
         );
         assert_eq!(
-            pointer_handler_for_hit(HitResult::Group { group: NodeId::null() }),
-            PointerHandler::GroupDrag
+            pointer_down_intent_for_hit(HitResult::TabStrip { group }),
+            PointerDownIntent::GroupCandidate { group }
         );
         assert_eq!(
-            pointer_handler_for_hit(HitResult::FlyoutPanel {
-                column: NodeId::null(),
-                group: NodeId::null(),
-                panel: PanelId::null(),
-            }),
-            PointerHandler::FlyoutDrag
+            pointer_down_intent_for_hit(HitResult::TabOverflowButton { group }),
+            PointerDownIntent::OverflowButton { group }
         );
         assert_eq!(
-            pointer_handler_for_hit(HitResult::Splitter {
-                owner: NodeId::null(),
+            pointer_down_intent_for_hit(HitResult::Group { group }),
+            PointerDownIntent::GroupCandidate { group }
+        );
+        assert_eq!(
+            pointer_down_intent_for_hit(HitResult::Splitter {
+                owner: group,
                 boundary_index: 0,
                 axis: Axis::Y,
             }),
-            PointerHandler::Resize
+            PointerDownIntent::Resize
         );
         assert_eq!(
-            pointer_handler_for_hit(HitResult::FloatingTitle {
-                group: dock_core::FloatingGroupId::null(),
+            pointer_down_intent_for_hit(HitResult::FlyoutPanel {
+                column: group,
+                group,
+                panel,
             }),
-            PointerHandler::FloatingWindowMove
+            PointerDownIntent::FlyoutPanelCandidate { panel }
         );
         assert_eq!(
-            pointer_handler_for_hit(HitResult::FloatingResizeEdge {
-                group: dock_core::FloatingGroupId::null(),
-                edge: ResizeEdge::BottomRight,
-            }),
-            PointerHandler::Resize
-        );
-        assert_eq!(
-            pointer_handler_for_hit(HitResult::FlyoutResizeEdge {
-                column: NodeId::null(),
-                panel: PanelId::null(),
+            pointer_down_intent_for_hit(HitResult::FlyoutResizeEdge {
+                column: group,
+                panel,
                 edge: ResizeEdge::Left,
             }),
-            PointerHandler::Resize
+            PointerDownIntent::Resize
         );
         assert_eq!(
-            pointer_handler_for_hit(HitResult::Canvas),
-            PointerHandler::None
+            pointer_down_intent_for_hit(HitResult::FloatingTitle { group: floating }),
+            PointerDownIntent::FloatingTitleCandidate { group: floating }
+        );
+        assert_eq!(
+            pointer_down_intent_for_hit(HitResult::FloatingGroup { group: floating }),
+            PointerDownIntent::RaiseFloating { group: floating }
+        );
+        assert_eq!(
+            pointer_down_intent_for_hit(HitResult::Panel { panel }),
+            PointerDownIntent::RaiseFloatingForPanel { panel }
+        );
+        assert_eq!(
+            pointer_down_intent_for_hit(HitResult::FloatingResizeEdge {
+                group: floating,
+                edge: ResizeEdge::BottomRight,
+            }),
+            PointerDownIntent::Resize
+        );
+        assert_eq!(
+            pointer_down_intent_for_hit(HitResult::Canvas),
+            PointerDownIntent::DismissFlyout
+        );
+        assert_eq!(
+            pointer_down_intent_for_hit(HitResult::Miss),
+            PointerDownIntent::None
+        );
+        assert_eq!(
+            pointer_down_intent_for_hit(HitResult::Column { column: group }),
+            PointerDownIntent::None
         );
     }
 
     #[test]
-    fn context_menu_targets_are_also_selected_from_core_hit_results() {
-        assert!(context_menu_target_for_hit(HitResult::Group {
-            group: NodeId::null()
-        }).is_some());
-        assert!(context_menu_target_for_hit(HitResult::TabHeader {
-            group: NodeId::null(),
-            panel: PanelId::null(),
-            index: 0,
-        }).is_some());
-        assert!(context_menu_target_for_hit(HitResult::Canvas).is_none());
+    fn click_and_double_click_intents_follow_the_hitresult_table() {
+        let group = NodeId::null();
+        let panel = PanelId::null();
+
+        assert_eq!(
+            pointer_click_intent_for_hit(
+                HitResult::TabHeader { group, panel, index: 0 },
+                1,
+            ),
+            PointerClickIntent::ActivateTab { group, panel }
+        );
+        assert_eq!(
+            pointer_click_intent_for_hit(
+                HitResult::TabHeader { group, panel, index: 0 },
+                2,
+            ),
+            PointerClickIntent::CollapseGroup { group }
+        );
+        assert_eq!(
+            pointer_click_intent_for_hit(HitResult::TabStrip { group }, 1),
+            PointerClickIntent::None
+        );
+        assert_eq!(
+            pointer_click_intent_for_hit(HitResult::TabStrip { group }, 2),
+            PointerClickIntent::CollapseGroup { group }
+        );
+        assert_eq!(
+            pointer_click_intent_for_hit(HitResult::TabOverflowButton { group }, 1),
+            PointerClickIntent::OpenOverflowMenu { group }
+        );
+        assert_eq!(
+            pointer_click_intent_for_hit(HitResult::TabOverflowButton { group }, 2),
+            PointerClickIntent::None
+        );
+        assert_eq!(
+            pointer_click_intent_for_hit(
+                HitResult::TabHeader { group, panel, index: 0 },
+                3,
+            ),
+            PointerClickIntent::None
+        );
+        assert_eq!(
+            pointer_click_intent_for_hit(HitResult::Group { group }, 2),
+            PointerClickIntent::None
+        );
+        assert_eq!(
+            pointer_click_intent_for_hit(HitResult::Canvas, 1),
+            PointerClickIntent::None
+        );
     }
 }

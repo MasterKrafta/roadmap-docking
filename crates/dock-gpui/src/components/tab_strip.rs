@@ -13,7 +13,6 @@ use ui::Theme;
 use crate::{DockController, IconSource, PanelRegistry};
 
 use super::{
-    context_menu::GroupMenuToggle,
     tab_overflow::TabOverflow,
 };
 use crate::input::dispatch_command;
@@ -51,7 +50,6 @@ impl TabStripView {
         controller: Entity<DockController>,
         theme: Theme,
         raise_floating: Option<FloatingGroupId>,
-        toggle_context_menu: GroupMenuToggle,
         middle_click_closes_tabs: bool,
     ) -> impl IntoElement {
         let mut strip_root = div()
@@ -63,23 +61,7 @@ impl TabStripView {
             .h(px(strip.rect.size.height))
             .flex()
             .items_stretch()
-            .bg(rgb(theme.colors.tab_strip_background))
-            .on_click({
-                let controller = controller.clone();
-                let collapsed = presentation.collapsed;
-                move |event, _, app| {
-                    if event.click_count() > 1 {
-                        dispatch_command(
-                            &controller,
-                            DockCommand::CollapseGroup {
-                                group: group_id,
-                                collapsed: !collapsed,
-                            },
-                            app,
-                        );
-                    }
-                }
-            });
+            .bg(rgb(theme.colors.tab_strip_background));
 
         // Inactive tabs are painted first so the active tab remains in front.
         let mut ordered_headers = headers.to_vec();
@@ -102,11 +84,9 @@ impl TabStripView {
                 title,
                 icon,
                 active,
-                presentation.collapsed,
                 controller.clone(),
                 theme,
                 raise_floating,
-                toggle_context_menu.clone(),
                 middle_click_closes_tabs,
             ));
         }
@@ -115,7 +95,6 @@ impl TabStripView {
             strip_root = strip_root.child(TabOverflow::render(
                 strip.rect,
                 overflow,
-                toggle_context_menu,
                 theme,
             ));
         }
@@ -133,11 +112,9 @@ impl TabHeaderView {
         title: SharedString,
         icon: Option<SharedString>,
         active: bool,
-        collapsed: bool,
         controller: Entity<DockController>,
         theme: Theme,
         raise_floating: Option<FloatingGroupId>,
-        _toggle_context_menu: GroupMenuToggle,
         middle_click_closes_tabs: bool,
     ) -> impl IntoElement {
         let left = header.rect.origin.x - strip_rect.origin.x;
@@ -176,9 +153,6 @@ impl TabHeaderView {
                 .child(title),
         );
 
-        let tab_controller = controller.clone();
-        let tab_group = group_id;
-        let tab_panel = header.panel;
         let tab = div()
             .id(format!("tab-{:?}-{:?}", group_id, header.panel))
             .group(hover_group.clone())
@@ -198,30 +172,6 @@ impl TabHeaderView {
             .text_color(rgb(theme.colors.primary_text))
             .cursor_pointer()
             .child(title_row)
-            .on_click(move |event, _, app| {
-                if event.standard_click() {
-                    if event.click_count() > 1 {
-                        dispatch_command(
-                            &tab_controller,
-                            DockCommand::CollapseGroup {
-                                group: tab_group,
-                                collapsed: !collapsed,
-                            },
-                            app,
-                        );
-                    } else {
-                        dispatch_command(
-                            &tab_controller,
-                            DockCommand::ActivateTab {
-                                group: tab_group,
-                                panel: tab_panel,
-                            },
-                            app,
-                        );
-                    }
-                }
-                app.stop_propagation();
-            })
             .on_aux_click({
                 let controller = controller.clone();
                 let panel = header.panel;

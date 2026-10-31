@@ -27,7 +27,7 @@ pub(crate) fn update_drag_at(
     position: Point,
     app: &mut App,
 ) {
-    let _ = controller.update(app, |controller, cx| {
+    controller.update(app, |controller, cx| {
         let payload = match controller.drag().session().state() {
             DragState::Pressed { payload, .. } | DragState::Dragging { payload, .. } => payload,
             DragState::Idle | DragState::Dropped { .. } | DragState::Cancelled { .. } => return,
@@ -89,14 +89,14 @@ pub(crate) fn finish_drag_at(
     controller: &Entity<DockController>,
     position: Point,
     app: &mut App,
-) {
-    let _ = controller.update(app, |controller, cx| {
+) -> bool {
+    controller.update(app, |controller, cx| {
         let payload = match controller.drag().session().state() {
             DragState::Pressed { payload, .. } | DragState::Dragging { payload, .. } => payload,
             DragState::Idle | DragState::Dropped { .. } | DragState::Cancelled { .. } => {
                 controller.drag_mut().clear_resolver();
                 controller.drag_mut().clear_layout_version();
-                return;
+                return false;
             }
         };
 
@@ -104,10 +104,13 @@ pub(crate) fn finish_drag_at(
             .drag_mut()
             .session_mut()
             .pointer_move(position);
+        // The release coordinate itself may cross the Core drag threshold even
+        // when GPUI did not deliver an intermediate MouseMove event.
+        let drag_started = matches!(controller.drag().session().state(), DragState::Dragging { .. });
 
         let target = if matches!(payload, DragPayload::FloatingGroup { .. }) {
             None
-        } else if matches!(controller.drag().session().state(), DragState::Dragging { .. }) {
+        } else if drag_started {
             drop_source(controller, payload).and_then(|source| {
                 controller
                     .prepare_drop_resolver(source)
@@ -153,7 +156,8 @@ pub(crate) fn finish_drag_at(
         controller.drag_mut().clear_resolver();
         controller.drag_mut().clear_layout_version();
         cx.notify();
-    });
+        drag_started
+    })
 }
 
 fn drop_source(controller: &DockController, payload: DragPayload) -> Option<DropSource> {

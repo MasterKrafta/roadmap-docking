@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use dock_core::{DockCommand, FlyoutRect, ResizeEdge};
 use gpui::{
-    Animation, AnimationExt, AnyView, App, Entity, IntoElement, MouseButton, ParentElement,
+    Animation, AnimationExt, AnyView, App, Entity, IntoElement, ParentElement,
     SharedString, Styled, div, px, rgb,
     prelude::InteractiveElement as _,
 };
@@ -113,14 +113,6 @@ impl FlyoutView {
             .border_1()
             .border_color(rgb(theme.colors.group_frame_border))
             .shadow_lg()
-            .on_mouse_down_out({
-                let controller = controller.clone();
-                move |event, _, app| {
-                    if event.button == MouseButton::Left {
-                        dispatch_transient(&controller, DockCommand::DismissFlyout, app);
-                    }
-                }
-            })
             .child(header)
             .child(body);
 
