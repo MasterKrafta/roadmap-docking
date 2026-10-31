@@ -334,6 +334,20 @@ impl DockController {
         result
     }
 
+    /// Publishes a Core drop-resolution failure without applying a command.
+    ///
+    /// Resolution is pure; this records the error through the same controller
+    /// event/last-error path used by rejected command dispatches.
+    pub(crate) fn report_drop_resolution_error_in(
+        &mut self,
+        error: CommandError,
+        cx: &mut Context<Self>,
+    ) {
+        self.finish_failure(&error);
+        self.flush_events(cx);
+        cx.notify();
+    }
+
     fn panel_keys(&self) -> HashMap<PanelId, PanelKey> {
         self.layout
             .panel_instances()

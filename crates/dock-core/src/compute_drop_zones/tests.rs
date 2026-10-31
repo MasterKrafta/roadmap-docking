@@ -1368,3 +1368,49 @@ fn benchmark_compute_drop_zones_typical_and_large_layouts() {
         );
     }
 }
+
+#[test]
+fn resolver_exposes_the_exact_legal_zone_selected_for_a_pointer() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+    let (source_panel, source_node) = builder.panel(key("resolver-source"), constraints());
+    let (_, target_node) = builder.panel(key("resolver-target"), constraints());
+    let source_group = builder.tabs(vec![source_node], 0, false);
+    let target_group = builder.tabs(vec![target_node], 0, false);
+    let column = builder.column(
+        280.0,
+        ColumnMode::Expanded,
+        vec![source_group, target_group],
+        vec![0.5, 0.5],
+    );
+    builder.main_area(DockSide::Left, column);
+    let layout = builder.build();
+    let rects = layout.compute_rects(viewport(), &metrics).unwrap();
+    let resolver = layout
+        .prepare_drop_resolver(
+            DropSource::Panel { panel: source_panel },
+            &rects,
+            &metrics,
+        )
+        .unwrap();
+
+    // Resolve the center of an actual zone. The selected affordance must be
+    // copied directly from the resolver's authoritative list.
+    let candidate = resolver
+        .zones()
+        .first()
+        .copied()
+        .expect("fixture should emit legal drop zones");
+    let point = Point::new(
+        candidate.rect.origin.x + candidate.rect.size.width * 0.5,
+        candidate.rect.origin.y + candidate.rect.size.height * 0.5,
+    );
+    let resolved_zone = resolver
+        .resolve_zone(point)
+        .unwrap()
+        .expect("Core should return the winning legal affordance");
+
+    assert!(resolver.zones().contains(&resolved_zone));
+    assert_eq!(resolver.resolve(point).unwrap(), Some(resolved_zone.target));
+
+}

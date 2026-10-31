@@ -525,3 +525,27 @@ fn assert_tabs_state(layout: &Layout, group: NodeId, active_index: usize, collap
     assert_eq!(tabs.active_index, active_index);
     assert_eq!(tabs.collapsed, collapsed);
 }
+
+#[test]
+fn rejected_drag_drop_request_does_not_mutate_or_invalidate_layout() {
+    let metrics = DockMetrics::default();
+    let (layout, source, target, _) = group_layout();
+    let before = format!("{layout:?}");
+    let version = layout.version();
+    let request = DragDropRequest {
+        payload: DragPayload::Group { group: source },
+        handle: DragHandle::GroupGrip,
+        origin: Point::ZERO,
+        point: Point::new(12.0, 8.0),
+        target: Some(DropTarget::Tabs {
+            group: target,
+            index: 0,
+        }),
+        floating_bounds: None,
+    };
+
+    assert!(layout.resolve_drag_drop(&request, &metrics).is_err());
+    assert_eq!(format!("{layout:?}"), before);
+    assert_eq!(layout.version(), version);
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}

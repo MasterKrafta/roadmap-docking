@@ -430,11 +430,27 @@ impl DropZoneResolver {
     /// This performs only point validation and hit resolution; layout validation,
     /// target enumeration, and zone construction were done when the resolver was prepared.
     pub fn resolve(&self, point: Point) -> Result<Option<DropTarget>, ComputeRectsError> {
+        Ok(self.resolve_zone(point)?.map(|zone| zone.target))
+    }
+
+    /// Returns the exact legal affordance selected by Core for this point.
+    ///
+    /// Render adapters should use this result rather than independently scanning
+    /// `zones()` or duplicating hit priority. The returned value is copied from
+    /// the resolver's authoritative zone list.
+    pub fn resolve_zone(&self, point: Point) -> Result<Option<DropZoneRect>, ComputeRectsError> {
         point.validate().map_err(ComputeRectsError::Geometry)?;
-        self.resolve_validated(point)
+        self.resolve_zone_validated(point).map(|zone| zone.copied())
     }
 
     fn resolve_validated(&self, point: Point) -> Result<Option<DropTarget>, ComputeRectsError> {
+        Ok(self.resolve_zone_validated(point)?.map(|zone| zone.target))
+    }
+
+    fn resolve_zone_validated(
+        &self,
+        point: Point,
+    ) -> Result<Option<&DropZoneRect>, ComputeRectsError> {
         let mut topmost_floating: Option<&FloatingDropArea> = None;
         for floating in &self.floating_areas {
             if floating
@@ -472,12 +488,12 @@ impl DropZoneResolver {
     }
 }
 
-fn best_containing_zone(
-    zones: &[DropZoneRect],
+fn best_containing_zone<'a>(
+    zones: &'a [DropZoneRect],
     point: Point,
     include: impl Fn(&DropZoneRect) -> bool,
-) -> Result<Option<DropTarget>, ComputeRectsError> {
-    let mut best: Option<(u8, usize, DropTarget)> = None;
+) -> Result<Option<&'a DropZoneRect>, ComputeRectsError> {
+    let mut best: Option<(u8, usize)> = None;
     for (index, zone) in zones.iter().enumerate() {
         if !include(zone)
             || !zone
@@ -489,13 +505,13 @@ fn best_containing_zone(
         }
         let priority = zone_priority(zone.zone);
         if best
-            .map(|(best_priority, _, _)| priority < best_priority)
+            .map(|(best_priority, _)| priority < best_priority)
             .unwrap_or(true)
         {
-            best = Some((priority, index, zone.target));
+            best = Some((priority, index));
         }
     }
-    Ok(best.map(|(_, _, target)| target))
+    Ok(best.and_then(|(_, index)| zones.get(index)))
 }
 
 fn zone_priority(zone: DropZone) -> u8 {

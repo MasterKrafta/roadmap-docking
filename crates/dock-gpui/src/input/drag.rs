@@ -200,7 +200,7 @@ pub(crate) fn finish_drag_at(
                     }
                 }
                 Err(error) => {
-                    tracing::debug!(%error, "Core rejected the completed dock drag");
+                    controller.report_drop_resolution_error_in(error, cx);
                 }
             }
         }

@@ -3,8 +3,8 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use dock_core::{
-    ColumnDisplayItem, ColumnMode, ComputeRectsError, DockCommand, DockSide, DragPayload,
-    DropTarget, GeometryError, HitResult, Layout, LayoutRects, Node, NodeId, PanelId, Point,
+    ColumnDisplayItem, ColumnMode, ComputeRectsError, DockCommand, DockSide, DragHandle,
+    DragPayload, DropTarget, GeometryError, HitResult, Layout, LayoutRects, Node, NodeId, PanelId, Point,
 };
 use gpui::{
     AnyView, App, Context, Entity, FocusHandle, HitboxBehavior, HitboxId, IntoElement,
@@ -236,7 +236,9 @@ impl Render for DockHost {
             rail_display_orders,
             active_flyout,
             drag_preview,
+            drag_handle,
             drag_zones,
+            active_drop_zone,
             free_area_preview_bounds,
             metrics,
         ) = self.controller.update(cx, |controller, _| {
@@ -336,11 +338,18 @@ impl Render for DockHost {
                     .collect::<HashMap<_, _>>();
                 let active_flyout = layout.flyout();
                 let drag_preview = controller.drag().session().preview();
-                let drag_zones = controller
-                    .drag()
-                    .resolver()
+                let drag_handle = controller.drag().session().handle();
+                let resolver = controller.drag().resolver();
+                let drag_zones = resolver
                     .map(|resolver| resolver.zones().to_vec())
                     .unwrap_or_default();
+                let active_drop_zone = drag_preview.and_then(|preview| {
+                    let zone = resolver?
+                        .resolve_zone(preview.point)
+                        .ok()?
+                        .filter(|zone| preview.target == Some(zone.target))?;
+                    Some(zone)
+                });
                 let free_area_preview_bounds = drag_preview
                     .filter(|preview| preview.target == Some(DropTarget::FreeArea))
                     .and_then(|preview| {
@@ -365,7 +374,9 @@ impl Render for DockHost {
                     rail_display_orders,
                     active_flyout,
                     drag_preview,
+                    drag_handle,
                     drag_zones,
+                    active_drop_zone,
                     free_area_preview_bounds,
                     metrics,
                 )
@@ -532,9 +543,7 @@ impl Render for DockHost {
         let theme = self.theme;
         let context_menu_is_open = open_context_menu.is_some();
         let drag_cursor_style = drag_preview.map(|preview| {
-            if preview.target.is_some()
-                || matches!(preview.payload, DragPayload::FloatingGroup { .. })
-            {
+            if preview.target.is_some() || drag_handle == Some(DragHandle::FloatingTitle) {
                 gpui::CursorStyle::ClosedHand
             } else {
                 gpui::CursorStyle::OperationNotAllowed
@@ -653,9 +662,7 @@ impl Render for DockHost {
         // The current semantic target controls the cursor. A floating-title drag
         // intentionally has no drop target but is still a valid move gesture.
         if let Some(preview) = drag_preview {
-            workspace = if preview.target.is_some()
-                || matches!(preview.payload, DragPayload::FloatingGroup { .. })
-            {
+            workspace = if preview.target.is_some() || drag_handle == Some(DragHandle::FloatingTitle) {
                 workspace.cursor_grabbing()
             } else {
                 workspace.cursor_not_allowed()
@@ -894,7 +901,7 @@ impl Render for DockHost {
             // One overlay consumes the same resolver snapshot used by hit testing.
             // The ghost is a visual-only sibling and has no pointer listeners.
             workspace = workspace.child(DropOverlay::render(
-                &drag_zones,
+                active_drop_zone,
                 drag_preview,
                 &rects.groups,
                 &rects.tab_headers,
