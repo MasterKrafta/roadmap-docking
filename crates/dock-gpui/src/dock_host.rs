@@ -46,7 +46,7 @@ pub struct DockHost {
     column_scroll_handles: HashMap<NodeId, ScrollHandle>,
     /// Keeps the actual captured hitbox identity across DockHost rerenders.
     pointer_capture: Rc<Cell<Option<HitboxId>>>,
-    /// Semantic down-hit retained until the matching pointer-up event.
+    /// Semantic click candidate and layout revision retained until pointer-up.
     pointer_press: Rc<Cell<Option<PointerPress>>>,
     /// One transient menu can be open at a time; it never enters Core layout state.
     open_context_menu: Option<OpenContextMenu>,

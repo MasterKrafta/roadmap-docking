@@ -21,12 +21,19 @@ use super::{
     scroll::map_hit_test_point,
 };
 
-/// A semantic press retained until pointer-up so Click and Double-click are
-/// resolved from the same Core hit result that started the interaction.
+/// A click candidate derived from one Core hit-test result and retained until
+/// pointer-up. The release hit is recomputed; HitResult itself is never cached.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct PointerPress {
-    hit: HitResult,
+    target: PointerPressTarget,
     layout_version: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PointerPressTarget {
+    TabHeader { group: NodeId, panel: PanelId },
+    TabStrip { group: NodeId },
+    OverflowButton { group: NodeId },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -51,9 +58,22 @@ enum PointerClickIntent {
     None,
 }
 
+fn pointer_press_target_for_hit(hit: HitResult) -> Option<PointerPressTarget> {
+    match hit {
+        HitResult::TabHeader { group, panel, .. } => {
+            Some(PointerPressTarget::TabHeader { group, panel })
+        }
+        HitResult::TabStrip { group } => Some(PointerPressTarget::TabStrip { group }),
+        HitResult::TabOverflowButton { group } => {
+            Some(PointerPressTarget::OverflowButton { group })
+        }
+        _ => None,
+    }
+}
+
 fn pointer_down_intent_for_hit(hit: HitResult) -> PointerDownIntent {
     match hit {
-        HitResult::TabHeader { group, panel, .. } if click_count == 1 => {
+        HitResult::TabHeader { group, panel, .. } => {
             PointerDownIntent::TabHeaderCandidate { group, panel }
         }
         HitResult::TabStrip { group } | HitResult::Group { group } => {
@@ -83,7 +103,7 @@ fn pointer_click_intent_for_hit(hit: HitResult, click_count: usize) -> PointerCl
         HitResult::TabHeader { group, .. } if click_count == 2 => {
             PointerClickIntent::CollapseGroup { group }
         }
-        HitResult::TabHeader { group, panel, .. } => {
+        HitResult::TabHeader { group, panel, .. } if click_count == 1 => {
             PointerClickIntent::ActivateTab { group, panel }
         }
         HitResult::TabStrip { group } if click_count == 2 => {
@@ -162,7 +182,10 @@ pub(crate) fn register_pointer_events(
                     ) {
                         let layout_version =
                             controller.update(app, |controller, _| controller.layout().version());
-                        pointer_press.set(Some(PointerPress { hit, layout_version }));
+                        pointer_press.set(Some(PointerPress {
+                            target: PointerPressTarget::TabHeader { group, panel },
+                            layout_version,
+                        }));
                     }
                     if tab_header_drag_handle_contains(
                         &controller,
@@ -185,7 +208,10 @@ pub(crate) fn register_pointer_events(
                         if matches!(hit, HitResult::TabStrip { .. }) {
                             let layout_version = controller
                                 .update(app, |controller, _| controller.layout().version());
-                            pointer_press.set(Some(PointerPress { hit, layout_version }));
+                            pointer_press.set(Some(PointerPress {
+                                target: PointerPressTarget::TabStrip { group },
+                                layout_version,
+                            }));
                         }
                         begin_drag_at(
                             &controller,
@@ -242,10 +268,13 @@ pub(crate) fn register_pointer_events(
                         app.stop_propagation();
                     }
                 }
-                PointerDownIntent::OverflowButton { .. } => {
+                PointerDownIntent::OverflowButton { group } => {
                     let layout_version =
                         controller.update(app, |controller, _| controller.layout().version());
-                    pointer_press.set(Some(PointerPress { hit, layout_version }));
+                    pointer_press.set(Some(PointerPress {
+                        target: PointerPressTarget::OverflowButton { group },
+                        layout_version,
+                    }));
                 }
                 PointerDownIntent::RaiseFloating { group } => {
                     raise_floating_group(&controller, group, app);
@@ -469,11 +498,16 @@ pub(crate) fn register_pointer_events(
             let (layout_version, release_hit) = controller.update(app, |controller, _| {
                 (controller.layout().version(), controller.hit(point).ok())
             });
-            if layout_version != press.layout_version || release_hit != Some(press.hit) {
+            let Some(release_hit) = release_hit else {
+                return;
+            };
+            if layout_version != press.layout_version
+                || pointer_press_target_for_hit(release_hit) != Some(press.target)
+            {
                 return;
             }
 
-            let intent = pointer_click_intent_for_hit(press.hit, event.click_count);
+            let intent = pointer_click_intent_for_hit(release_hit, event.click_count);
             if dispatch_pointer_click(intent, &controller, host_point, &toggle_context_menu, app) {
                 app.stop_propagation();
             }
@@ -851,9 +885,32 @@ mod hit_dispatch_tests {
     use slotmap::Key;
 
     use super::{
-        PointerClickIntent, PointerDownIntent, pointer_click_intent_for_hit,
-        pointer_down_intent_for_hit,
+        PointerClickIntent, PointerDownIntent, PointerPressTarget,
+        pointer_click_intent_for_hit, pointer_down_intent_for_hit, pointer_press_target_for_hit,
     };
+
+    #[test]
+    fn click_candidates_keep_only_semantic_identity_not_hitresult() {
+        let group = NodeId::null();
+        let panel = PanelId::null();
+
+        assert_eq!(
+            pointer_press_target_for_hit(HitResult::TabHeader { group, panel, index: 0 }),
+            Some(PointerPressTarget::TabHeader { group, panel })
+        );
+        assert_eq!(
+            pointer_press_target_for_hit(HitResult::TabStrip { group }),
+            Some(PointerPressTarget::TabStrip { group })
+        );
+        assert_eq!(
+            pointer_press_target_for_hit(HitResult::TabOverflowButton { group }),
+            Some(PointerPressTarget::OverflowButton { group })
+        );
+        assert_eq!(
+            pointer_press_target_for_hit(HitResult::Canvas),
+            None
+        );
+    }
 
     #[test]
     fn pointer_down_intents_follow_the_hitresult_table() {
