@@ -1,6 +1,6 @@
 use dock_core::{
-    Axis, CommandValue, DockCommand, DockSide, HitResult, Node, NodeId, Point, SplitterRect,
-    OUTER_COLUMN_EDGE_BOUNDARY_INDEX,
+    Axis, CommandValue, DockCommand, DockSide, HitResult, Node, NodeId, Point, ResizeEdge,
+    Rect, SplitterRect, OUTER_COLUMN_EDGE_BOUNDARY_INDEX,
 };
 use gpui::{App, Entity};
 
@@ -13,15 +13,30 @@ pub(crate) fn begin_resize(
     point: Point,
     app: &mut App,
 ) {
-    let hit = HitResult::Splitter {
-        owner: splitter.owner,
-        boundary_index: splitter.boundary_index,
-        axis: splitter.axis,
-    };
+    begin_resize_hit(
+        controller,
+        HitResult::Splitter {
+            owner: splitter.owner,
+            boundary_index: splitter.boundary_index,
+            axis: splitter.axis,
+        },
+        point,
+        app,
+    );
+}
+
+/// Starts the same Core resize transaction from either a splitter or a
+/// floating-window edge/corner supplied by the geometry hit-test.
+pub(crate) fn begin_resize_hit(
+    controller: &Entity<DockController>,
+    hit: HitResult,
+    point: Point,
+    app: &mut App,
+) {
     if let Err(error) = controller.update(app, |controller, _| {
         controller.begin_resize_interaction(hit, point)
     }) {
-        tracing::debug!(%error, "could not begin splitter resize");
+        tracing::debug!(%error, "could not begin dock resize");
     }
 }
 
@@ -95,66 +110,125 @@ fn command_for_pointer(
     interaction: crate::ResizeInteraction,
     point: Point,
 ) -> Option<DockCommand> {
-    let HitResult::Splitter {
-        owner,
-        boundary_index,
-        axis,
-    } = interaction.hit
-    else {
-        return None;
-    };
-
-    let desired_total = match axis {
-        Axis::X => point.x - interaction.origin.x,
-        Axis::Y => point.y - interaction.origin.y,
+    let desired_total = match interaction.hit {
+        HitResult::Splitter { axis: Axis::X, .. } => point.x - interaction.origin.x,
+        HitResult::Splitter { axis: Axis::Y, .. } => point.y - interaction.origin.y,
+        HitResult::FloatingResizeEdge { .. } => 0.0,
+        _ => return None,
     };
     let delta = incremental_delta(desired_total, interaction.applied_delta);
 
-    match axis {
-        Axis::Y => Some(DockCommand::ResizeGroups {
-            column: owner,
-            boundary_index,
-            delta,
-            available_height: available_group_height(controller, owner)?,
-        }),
-        Axis::X if boundary_index == OUTER_COLUMN_EDGE_BOUNDARY_INDEX => {
-            let side = main_edge_side(controller.layout(), owner)?;
-            let direction_delta = signed_outer_width_delta(
-                point.x - interaction.origin.x,
-                side == DockSide::Left,
-            );
-            let target_width = interaction.start_width? + direction_delta;
-            if interaction.actual_width == Some(target_width) {
-                None
-            } else {
-                Some(DockCommand::ResizeColumn {
-                    column: owner,
-                    width: target_width,
-                })
-            }
+    match interaction.hit {
+        HitResult::FloatingResizeEdge { group, edge } => {
+            let dx = point.x - interaction.origin.x;
+            let dy = point.y - interaction.origin.y;
+            let bounds = resize_floating_bounds(interaction.start_bounds?, edge, dx, dy)?;
+            Some(DockCommand::ResizeFloatingBounds { group, bounds })
         }
-        Axis::X => {
-            let side = main_split_side(controller.layout(), owner);
-            if let Some(side) = side {
-                Some(DockCommand::ResizeColumnBoundary {
-                    side,
-                    boundary_index,
-                    delta,
-                })
-            } else if matches!(
-                controller.layout().node(owner),
-                Some(Node::Split(split)) if split.axis == Axis::X
-            ) {
-                Some(DockCommand::ResizeSplitColumnBoundary {
-                    split: owner,
-                    boundary_index,
-                    delta,
-                })
-            } else {
-                None
+        HitResult::Splitter {
+            owner,
+            boundary_index,
+            axis,
+        } => match axis {
+            Axis::Y => Some(DockCommand::ResizeGroups {
+                column: owner,
+                boundary_index,
+                delta,
+                available_height: available_group_height(controller, owner)?,
+            }),
+            Axis::X if boundary_index == OUTER_COLUMN_EDGE_BOUNDARY_INDEX => {
+                let side = main_edge_side(controller.layout(), owner)?;
+                let direction_delta = signed_outer_width_delta(
+                    point.x - interaction.origin.x,
+                    side == DockSide::Left,
+                );
+                let target_width = interaction.start_width? + direction_delta;
+                if interaction.actual_width == Some(target_width) {
+                    None
+                } else {
+                    Some(DockCommand::ResizeColumn {
+                        column: owner,
+                        width: target_width,
+                    })
+                }
             }
+            Axis::X => {
+                let side = main_split_side(controller.layout(), owner);
+                if let Some(side) = side {
+                    Some(DockCommand::ResizeColumnBoundary {
+                        side,
+                        boundary_index,
+                        delta,
+                    })
+                } else if matches!(
+                    controller.layout().node(owner),
+                    Some(Node::Split(split)) if split.axis == Axis::X
+                ) {
+                    Some(DockCommand::ResizeSplitColumnBoundary {
+                        split: owner,
+                        boundary_index,
+                        delta,
+                    })
+                } else {
+                    None
+                }
+            }
+        },
+        _ => None,
+    }
+}
+
+/// Applies an absolute pointer delta to the original floating bounds. The
+/// opposite edge remains fixed for left/top resizing; Core performs the final
+/// minimum-size and viewport clamping in its next geometry snapshot.
+fn resize_floating_bounds(
+    start: Rect,
+    edge: ResizeEdge,
+    dx: f32,
+    dy: f32,
+) -> Option<Rect> {
+    if !dx.is_finite() || !dy.is_finite() {
+        return None;
+    }
+
+    let original_left = start.origin.x;
+    let original_top = start.origin.y;
+    let original_right = original_left + start.size.width;
+    let original_bottom = original_top + start.size.height;
+
+    let mut left = original_left;
+    let mut top = original_top;
+    let mut right = original_right;
+    let mut bottom = original_bottom;
+
+    match edge {
+        ResizeEdge::Left => left = (original_left + dx).min(original_right - 1.0),
+        ResizeEdge::Right => right = (original_right + dx).max(original_left + 1.0),
+        ResizeEdge::Top => top = (original_top + dy).min(original_bottom - 1.0),
+        ResizeEdge::Bottom => bottom = (original_bottom + dy).max(original_top + 1.0),
+        ResizeEdge::TopLeft => {
+            left = (original_left + dx).min(original_right - 1.0);
+            top = (original_top + dy).min(original_bottom - 1.0);
+        }
+        ResizeEdge::TopRight => {
+            right = (original_right + dx).max(original_left + 1.0);
+            top = (original_top + dy).min(original_bottom - 1.0);
+        }
+        ResizeEdge::BottomLeft => {
+            left = (original_left + dx).min(original_right - 1.0);
+            bottom = (original_bottom + dy).max(original_top + 1.0);
+        }
+        ResizeEdge::BottomRight => {
+            right = (original_right + dx).max(original_left + 1.0);
+            bottom = (original_bottom + dy).max(original_top + 1.0);
         }
     }
+
+    let resized = Rect::new(
+        Point::new(left, top),
+        dock_core::Size::new(right - left, bottom - top),
+    );
+    resized.validate().ok().map(|_| resized)
 }
 
 fn reset_command_for_interaction(
