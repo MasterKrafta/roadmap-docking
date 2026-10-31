@@ -1,6 +1,6 @@
 use dock_core::{
-    ColumnDisplayItem, ColumnMode, ColumnRect, DockCommand, DragHandle,
-    DragPayload, DragPreview, DropTarget, DropZone, DropZoneRect, FlyoutState, Point,
+    ColumnDisplayItem, ColumnMode, ColumnRect, DockCommand, DragHandle, DragPayload, FlyoutState,
+    Point,
     TabHeaderRect,
 };
 use gpui::{
@@ -43,8 +43,6 @@ impl RailView {
         content_origin: Point,
         pointer_offset: Point,
         active_flyout: Option<FlyoutState>,
-        drag_preview: Option<DragPreview>,
-        drag_zones: &[DropZoneRect],
         controller: Entity<DockController>,
         theme: Theme,
     ) -> impl IntoElement {
@@ -231,45 +229,6 @@ impl RailView {
             rail = rail.child(icon_row);
         }
 
-        // The Core resolver owns target validity. The rail only paints the
-        // insertion affordance for the currently resolved RailSlot target.
-        if let Some(DragPreview {
-            target: Some(DropTarget::RailSlot { column: target_column, index }),
-            ..
-        }) = drag_preview
-            && target_column == column.column
-            && drag_zones.iter().any(|zone| {
-                zone.target == (DropTarget::RailSlot {
-                    column: target_column,
-                    index,
-                }) && zone.zone == DropZone::RailInsertion
-            })
-        {
-            let insertion_y = if items.is_empty() {
-                Some(0.0)
-            } else if index == 0 {
-                items
-                    .first()
-                    .and_then(|item| headers.iter().find(|header| header.group == item.group && header.panel == item.panel))
-                    .map(|header| header.rect.origin.y - content_origin.y)
-            } else {
-                items
-                    .get(index.saturating_sub(1))
-                    .and_then(|item| headers.iter().find(|header| header.group == item.group && header.panel == item.panel))
-                    .map(|header| header.rect.origin.y + header.rect.size.height - content_origin.y)
-            };
-            if let Some(y) = insertion_y {
-                rail = rail.child(
-                    div()
-                        .absolute()
-                        .left(px(2.0))
-                        .top(px(y - 1.0))
-                        .w(px((column.rect.size.width - 4.0).max(0.0)))
-                        .h(px(2.0))
-                        .bg(rgb(theme.colors.panel_tab_active)),
-                );
-            }
-        }
 
         rail
     }
