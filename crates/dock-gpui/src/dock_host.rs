@@ -438,6 +438,15 @@ impl Render for DockHost {
         let middle_click_closes_tabs = self.middle_click_closes_tabs;
         let overflow_group = self.open_tab_overflow;
         let theme = self.theme;
+        let drag_cursor_style = drag_preview.map(|preview| {
+            if preview.target.is_some()
+                || matches!(preview.payload, DragPayload::FloatingGroup { .. })
+            {
+                gpui::CursorStyle::ClosedHand
+            } else {
+                gpui::CursorStyle::OperationNotAllowed
+            }
+        });
         let controller_for_measurement = self.controller.clone();
         let measurement = canvas(
             move |bounds, _window, app| {
@@ -463,7 +472,13 @@ impl Render for DockHost {
                     }
                 });
             },
-            |_, _, _, _| {},
+            move |_, _, window, _| {
+                // Apply the drag cursor at window level so child buttons and
+                // tab headers cannot override grabbing/not-allowed feedback.
+                if let Some(style) = drag_cursor_style {
+                    window.set_window_cursor_style(style);
+                }
+            },
         )
         .absolute()
         .top_0()
