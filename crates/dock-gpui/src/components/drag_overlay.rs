@@ -2,14 +2,14 @@ use std::collections::HashMap;
 
 use dock_core::{
     DragPayload, DragPreview, DropTarget, DropZone, DropZoneRect, FloatingGroupId,
-    FloatingGroupRect, GroupRect, PanelId, Point, Rect, TabHeaderRect, TabStripRect,
+    FloatingGroupRect, GroupRect, Point, Rect, TabHeaderRect, TabStripRect,
 };
 use gpui::{
     IntoElement, ParentElement, SharedString, Styled, div, img, px, rgb,
 };
 use ui::Theme;
 
-use super::tab_strip::{GroupPresentation, TabPresentation};
+use super::tab_strip::GroupPresentation;
 
 /// Visual feedback for the current Core-resolved destination.
 ///
@@ -55,6 +55,16 @@ impl DropOverlay {
                     }
                 }
                 DropZone::TabInsertion => {
+                    if let Some(group) = target_group(target)
+                        .and_then(|id| groups.iter().find(|group| group.group == id))
+                    {
+                        layer = layer.child(highlight_rect(
+                            group.rect,
+                            theme,
+                            0.06,
+                            true,
+                        ));
+                    }
                     if let Some(line) = tab_insertion_rect(
                         target,
                         zone.rect,
@@ -245,7 +255,7 @@ fn ghost_presentation(
                 (
                     tab.title.clone(),
                     tab.icon.clone(),
-                    Some(SharedString::from("Panel")),
+                    None,
                     false,
                 )
             })
@@ -444,7 +454,7 @@ fn guide_rect(rect: Rect, theme: Theme) -> impl IntoElement {
         .top(px(rect.origin.y))
         .w(px(rect.size.width))
         .h(px(rect.size.height))
-        .bg(rgb(theme.colors.panel_tab_active))
+        .bg(rgb(theme.colors.drop_zone))
 }
 
 #[cfg(test)]
