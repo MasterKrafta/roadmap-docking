@@ -217,11 +217,11 @@ impl ContextMenu {
         let mut region_top = top;
         let mut region_right = left + width;
         let mut region_bottom = top + height;
-        if let Some((_, submenu_left, submenu_top, submenu_height)) = submenu_layout {
-            region_left = region_left.min(submenu_left);
-            region_top = region_top.min(submenu_top);
-            region_right = region_right.max(submenu_left + width);
-            region_bottom = region_bottom.max(submenu_top + submenu_height);
+        if let Some((_, submenu_left, submenu_top, submenu_height, _)) = &submenu_layout {
+            region_left = region_left.min(*submenu_left);
+            region_top = region_top.min(*submenu_top);
+            region_right = region_right.max(*submenu_left + width);
+            region_bottom = region_bottom.max(*submenu_top + *submenu_height);
         }
 
         let mut layer = div().id(id.into()).absolute().top_0().left_0().size_full();
