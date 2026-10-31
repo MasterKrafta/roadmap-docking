@@ -218,7 +218,7 @@ fn drop_source(controller: &DockController, payload: DragPayload) -> Option<Drop
     }
 }
 
-fn floating_bounds(
+pub(crate) fn floating_bounds(
     controller: &mut DockController,
     payload: DragPayload,
     pointer: Point,
