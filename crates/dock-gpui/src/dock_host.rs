@@ -2,8 +2,8 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use dock_core::{
-    ColumnMode, ComputeRectsError, DockSide, HitResult, Layout, Node, NodeId, Point, Rect,
-    Size as CoreSize,
+    ColumnDisplayItem, ColumnMode, ComputeRectsError, DockSide, DragPreview, DropZoneRect,
+    FlyoutState, HitResult, Layout, Node, NodeId, PanelRect, Point, Rect, Size as CoreSize,
 };
 use gpui::{
     AnyView, App, Bounds, Context, Entity, IntoElement, ParentElement, Pixels, Render, ScrollHandle,
@@ -156,6 +156,10 @@ impl Render for DockHost {
             main_column_groups,
             column_modes,
             group_presentations,
+            rail_display_orders,
+            active_flyout,
+            drag_preview,
+            drag_zones,
             metrics,
         ) = self.controller.update(cx, |controller, _| {
                 let rects = controller.geometry().cloned();
@@ -186,6 +190,23 @@ impl Render for DockHost {
                     .collect::<HashMap<_, _>>();
                 let group_presentations =
                     collect_group_presentations(layout, controller.registry(), &main_node_ids);
+                let rail_display_orders = column_modes
+                    .iter()
+                    .filter(|(_, mode)| mode.is_rail())
+                    .filter_map(|(column, _)| {
+                        layout
+                            .column_display_order(*column)
+                            .ok()
+                            .map(|order| (*column, order))
+                    })
+                    .collect::<HashMap<NodeId, Vec<ColumnDisplayItem>>>();
+                let active_flyout = layout.flyout();
+                let drag_preview = controller.drag().session().preview();
+                let drag_zones = controller
+                    .drag()
+                    .resolver()
+                    .map(|resolver| resolver.zones().to_vec())
+                    .unwrap_or_default();
                 let metrics = controller.metrics();
 
                 (
@@ -196,6 +217,10 @@ impl Render for DockHost {
                     main_column_groups,
                     column_modes,
                     group_presentations,
+                    rail_display_orders,
+                    active_flyout,
+                    drag_preview,
+                    drag_zones,
                     metrics,
                 )
             });
@@ -250,6 +275,20 @@ impl Render for DockHost {
             .filter(|(panel, _)| !main_active_panels.contains(&panel.panel))
             .cloned()
             .collect::<Vec<_>>();
+        let flyout_panel_view = rects
+            .as_ref()
+            .and_then(|rects| rects.flyout)
+            .and_then(|flyout_rect| {
+                active_flyout
+                    .filter(|flyout| flyout.panel == flyout_rect.panel)
+                    .and_then(|flyout| {
+                        self.controller.update(cx, |controller, panel_cx| {
+                            controller
+                                .panel_view(flyout.panel, window, panel_cx)
+                                .map(|view| (flyout, view))
+                        })
+                    })
+            });
 
         // Keep scroll state only while its Column node still owns an overflow
         // region. Removing/replacing the Core node or resolving the overflow
@@ -437,6 +476,10 @@ impl Render for DockHost {
                 &rects.tab_headers,
                 &rects.tab_overflows,
                 &group_presentations,
+                &rail_display_orders,
+                active_flyout,
+                drag_preview,
+                &drag_zones,
                 metrics,
                 self.open_group_menu,
                 toggle_group_menu,
@@ -464,6 +507,12 @@ impl Render for DockHost {
                         .h(px(flyout.rect.size.height))
                         .bg(rgb(theme.colors.panel_surface_background)),
                 );
+                if let Some((_, view)) = flyout_panel_view.clone() {
+                    workspace = workspace.child(PanelHost::render(
+                        vec![(PanelRect::new(flyout.panel, flyout.rect), view)],
+                        Point::ZERO,
+                    ));
+                }
             }
 
             // Later children paint above earlier ones; Core z_order is preserved.

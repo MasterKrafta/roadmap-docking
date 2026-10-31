@@ -1,8 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
 use dock_core::{
-    Axis, ColumnMode, ColumnRect, DockMetrics, GroupRect, NodeId, PanelRect, Point,
-    SplitterRect, TabHeaderRect, TabOverflowRect, TabStripRect, VerticalOverflow,
+    Axis, ColumnDisplayItem, ColumnMode, ColumnRect, DockMetrics, DragPreview, DropZoneRect,
+    FlyoutState, GroupRect, NodeId, PanelRect, Point, SplitterRect, TabHeaderRect, TabOverflowRect,
+    TabStripRect, VerticalOverflow,
 };
 use gpui::{AnyView, Entity, IntoElement, ParentElement, ScrollHandle, Styled, div};
 use ui::Theme;
@@ -31,6 +32,10 @@ impl MainDockView {
         tab_headers: &[TabHeaderRect],
         tab_overflows: &[TabOverflowRect],
         group_presentations: &HashMap<NodeId, GroupPresentation>,
+        rail_display_orders: &HashMap<NodeId, Vec<ColumnDisplayItem>>,
+        active_flyout: Option<FlyoutState>,
+        drag_preview: Option<DragPreview>,
+        drag_zones: &[DropZoneRect],
         metrics: DockMetrics,
         menu_group: Option<NodeId>,
         toggle_group_menu: GroupMenuToggle,
@@ -101,6 +106,13 @@ impl MainDockView {
                 tab_headers,
                 tab_overflows,
                 group_presentations,
+                rail_display_orders
+                    .get(&column.column)
+                    .map(Vec::as_slice)
+                    .unwrap_or(&[]),
+                active_flyout,
+                drag_preview,
+                drag_zones,
                 metrics,
                 menu_group,
                 toggle_group_menu.clone(),

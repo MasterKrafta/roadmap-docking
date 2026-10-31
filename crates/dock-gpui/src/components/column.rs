@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
 use dock_core::{
-    ColumnMode, ColumnRect, DockCommand, DockMetrics, GroupRect, NodeId, PanelRect, Point,
-    SplitterRect, TabHeaderRect, TabOverflowRect, TabStripRect, VerticalOverflow,
+    ColumnDisplayItem, ColumnMode, ColumnRect, DockCommand, DockMetrics, DragPreview, DropZoneRect,
+    FlyoutState, GroupRect, NodeId, PanelRect, Point, SplitterRect, TabHeaderRect, TabOverflowRect,
+    TabStripRect, VerticalOverflow,
 };
 use gpui::{
     AnyView, Entity, IntoElement, ParentElement, ScrollHandle, Styled, div, px, rgb,
@@ -16,6 +17,7 @@ use super::{
     context_menu::GroupMenuToggle,
     group::GroupView,
     panel_host::PanelHost,
+    rail::RailView,
     splitter::SplitterView,
     tab_overflow::TabOverflowToggle,
     tab_strip::GroupPresentation,
@@ -36,6 +38,10 @@ impl ColumnView {
         tab_headers: &[TabHeaderRect],
         tab_overflows: &[TabOverflowRect],
         group_presentations: &HashMap<NodeId, GroupPresentation>,
+        rail_items: &[ColumnDisplayItem],
+        active_flyout: Option<FlyoutState>,
+        drag_preview: Option<DragPreview>,
+        drag_zones: &[DropZoneRect],
         metrics: DockMetrics,
         menu_group: Option<NodeId>,
         toggle_group_menu: GroupMenuToggle,
@@ -126,8 +132,27 @@ impl ColumnView {
             // owning column's scroll viewport.
             content = content.child(PanelHost::render(panels, content_origin));
         } else {
-            // Rail entries and icons are implemented by §5.7 RailView.
-            // Keep the Core-computed extent and scroll behavior ready for it.
+            let pointer_offset = Point::new(
+                0.0,
+                scroll_handle
+                    .as_ref()
+                    .map(|handle| handle.offset().y.as_f32().max(0.0))
+                    .unwrap_or(0.0),
+            );
+            content = content.child(RailView::render(
+                column,
+                mode,
+                rail_items,
+                tab_headers,
+                group_presentations,
+                content_origin,
+                pointer_offset,
+                active_flyout,
+                drag_preview,
+                drag_zones,
+                controller.clone(),
+                theme,
+            ));
         }
 
         let mut scroll_viewport = div()
@@ -168,9 +193,9 @@ impl ColumnView {
             .id(format!("column-mode-{:?}", column.column))
             .absolute()
             .top(px(3.0))
-            .left(px(4.0))
-            .w(px(28.0))
-            .h(px(22.0))
+            .right(px(3.0))
+            .w(px(18.0))
+            .h(px(18.0))
             .flex()
             .items_center()
             .justify_center()
