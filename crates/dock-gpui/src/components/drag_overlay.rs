@@ -42,13 +42,7 @@ impl DropOverlay {
         // A semantic target may be represented by several different affordances
         // (for example Center and the tab insertion slot after the last tab).
         // Select only the zone under the pointer, using Core's exact priority order.
-        let Some(zone) = zones
-            .iter()
-            .filter(|zone| {
-                zone.target == target && zone.rect.contains(preview.point).unwrap_or(false)
-            })
-            .min_by_key(|zone| zone_priority(zone.zone))
-        else {
+        let Some(zone) = active_zone(zones, target, preview.point) else {
             return layer;
         };
 
@@ -156,6 +150,19 @@ impl DropOverlay {
 
         layer
     }
+}
+
+fn active_zone(
+    zones: &[DropZoneRect],
+    target: DropTarget,
+    point: Point,
+) -> Option<&DropZoneRect> {
+    zones
+        .iter()
+        .filter(|zone| {
+            zone.target == target && zone.rect.contains(point).unwrap_or(false)
+        })
+        .min_by_key(|zone| zone_priority(zone.zone))
 }
 
 fn zone_priority(zone: DropZone) -> u8 {
@@ -488,9 +495,12 @@ fn guide_rect(rect: Rect, theme: Theme) -> impl IntoElement {
 
 #[cfg(test)]
 mod tests {
-    use dock_core::{DropZone, Point, Rect, Size};
+    use dock_core::{
+        DropTarget, DropZone, DropZoneRect, NodeId, Point, Rect, Size,
+    };
+    use slotmap::Key;
 
-    use super::group_edge_half;
+    use super::{active_zone, group_edge_half};
 
     #[test]
     fn group_edge_preview_covers_half_of_the_target_group() {
@@ -504,5 +514,28 @@ mod tests {
             group_edge_half(rect, DropZone::Bottom),
             Rect::new(Point::new(10.0, 70.0), Size::new(200.0, 50.0))
         );
+    }
+
+    #[test]
+    fn overlapping_target_affordances_use_core_drop_priority() {
+        let target = DropTarget::Tabs {
+            group: NodeId::null(),
+            index: 1,
+        };
+        let zones = [
+            DropZoneRect::new(
+                target,
+                DropZone::Center,
+                Rect::new(Point::ZERO, Size::new(200.0, 100.0)),
+            ),
+            DropZoneRect::new(
+                target,
+                DropZone::TabInsertion,
+                Rect::new(Point::new(90.0, 0.0), Size::new(20.0, 20.0)),
+            ),
+        ];
+
+        let active = active_zone(&zones, target, Point::new(100.0, 10.0)).unwrap();
+        assert_eq!(active.zone, DropZone::TabInsertion);
     }
 }
