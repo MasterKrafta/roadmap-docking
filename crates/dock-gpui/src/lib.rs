@@ -35,7 +35,8 @@ pub fn run(_options: RunOptions) {
 }
 
 pub use components::{
-    CanvasSlot, ColumnView, ContextMenu, ContextMenuEntry, ContextMenuItem, DragGhost, DropOverlay,
+    CanvasSlot, ColumnView, ContextMenu, ContextMenuCallbacks, ContextMenuEntry, ContextMenuItem,
+    DragGhost, DropOverlay,
     FloatingWindowView, FlyoutView, GroupView, MainDockView, PanelHost, RailView, SplitterView,
     TabHeaderView, TabOverflow, TabStripView,
 };
