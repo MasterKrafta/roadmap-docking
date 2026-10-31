@@ -226,6 +226,7 @@ impl FloatingWindowView {
                 0.0,
                 controller.clone(),
                 theme,
+                Some(floating.group),
                 menu_group == Some(group.group),
                 toggle_group_menu.clone(),
                 overflow_group == Some(group.group),
