@@ -175,7 +175,7 @@ impl DockWorkspace {
         anchor: Point,
         on_dismiss: impl Fn(&mut App) + 'static,
         cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    ) -> impl IntoElement + 'static {
         let entries = self
             .panel_menu
             .iter()
