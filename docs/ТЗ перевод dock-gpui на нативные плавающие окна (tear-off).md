@@ -1,24 +1,32 @@
 # ТЗ: перевод dock-gpui на нативные плавающие окна (tear-off)
 Oct 31, 2026 · @master
-Плавающая группа панелей должна стать отдельным нативным окном Windows (как в `main.rs`), а не `div` с `position: absolute` внутри `DockHost`. Окно можно вынести за пределы главного окна и на другой монитор; панель отрывается от дока при перетаскивании заголовка и возвращается в док отпусканием над ним.
+Плавающая группа панелей должна стать отдельным нативным окном Windows, а не `div` с `position: absolute` внутри `DockHost`. Окно можно вынести за пределы главного окна и на другой монитор; панель отрывается от дока при перетаскивании заголовка и возвращается в док отпусканием над ним. Для запуска главного окна и стартовых floating-окон используется проверенная последовательность из `crates/dock-experiment/src/lib.rs`, а не порядок создания окон из `tearoff/main.rs`.
 ## 1. Цель и границы
-**Входит:** Windows (по образцу `tearoff_win` из `main.rs`), мультимонитор с разным DPI, отрыв панели/группы/всей плавающей группы, возврат в док, drop на другое плавающее окно, нативный resize, сохранение позиций в workspace.
+**Входит:** Windows (окна и startup lifecycle по образцу `crates/dock-experiment/src/lib.rs`; нативные операции Win32 — через платформенный слой), мультимонитор с разным DPI, отрыв панели/группы/всей плавающей группы, возврат в док, drop на другое плавающее окно, нативный resize, сохранение позиций в workspace.
 **Не входит:** macOS/Linux (оставляем трейт с заглушкой), перепроектирование дерева в `dock-core`, новые типы панелей.
-**Что берём из `main.rs` как есть:**
-- окно `WindowKind::PopUp`, `titlebar: None`, `show: false`, создаётся заранее скрытым и переиспользуется;
-- `owner` = главное окно: всегда поверх него, без кнопки на панели задач;
+**Startup и жизненный цикл окон — по `crates/dock-experiment/src/lib.rs`:**
+- главное окно создаётся с `show: false`, `focus: false`; оно ещё не появляется на экране;
+- после создания `MainWindow` и получения HWND главного окна стартовые плавающие окна открываются из `MainWindow` через `cx.open_window`, каждое с `WindowKind::PopUp`, `titlebar: None`, `show: false`, `focus: false`;
+- корневой `FloatingHost` создаётся в builder каждого окна. В закреплённой GPUI-ревизии `9cd14daad768fbfaeeac8789f515f9a5f67669a6` `App::open_window` вызывает `window.draw(cx)` до возврата из метода — первое GPUI-кадрирование окна выполняется ещё до его показа (`crates/gpui/src/app.rs`, `App::open_window`);
+- пока popup скрыт, ему назначается `owner` главного окна и снимается topmost. Это важно: Win32-бэкенд закреплённой GPUI-ревизии создаёт `WindowKind::PopUp` со стилями `WS_EX_TOOLWINDOW | WS_EX_TOPMOST`; в `dock-experiment` это обрабатывается в `configure_floating_window` через `set_owner` и `remove_topmost`;
+- только после того, как главное окно и все стартовые popup-окна созданы, получили root view и прошли первый draw, выполняется показ: сначала активируется главное окно, затем показываются и активируются плавающие окна (`show_floating_panels`);
+- сохраняются `WindowHandle` плавающих окон; окна скрываются, когда их панель пристыкована, и повторно показываются при возврате в floating. Для каждой плавающей композиции видимым остаётся один host;
+- тот же путь `cx.open_window` применяется к окнам, которые создаются позже при работе приложения: сначала скрытое создание и первый draw, затем настройка native owner и показ.
+
+**Нативное перемещение и resize:**
 - перетаскивание опросом `GetCursorPos` + `GetAsyncKeyState(VK_LBUTTON)` каждые 4 мс (`timeBeginPeriod(1)`), порог отрыва 2 px;
-- `SetWindowPos` с `SWP_NOACTIVATE`, показ через `SW_SHOWNOACTIVATE`;
+- перемещение через `SetWindowPos` с `SWP_NOACTIVATE`; при обычном drag окно не должно самопроизвольно перехватывать фокус;
 - попадание в док проверяется в экранных координатах, DPI берётся в момент проверки (`GetDpiForWindow`);
 - нативный resize через `WS_THICKFRAME`; верхние 8 px заголовка отданы рамке и не тянут окно;
-- принудительная перерисовка во время модального resize-цикла (`WM_GPUI_FORCE_UPDATE_WINDOW` по таймеру);
-- единое состояние в `Entity`, главное окно подписано через `cx.observe`.
+- принудительная перерисовка во время модального resize-цикла (`WM_GPUI_FORCE_UPDATE_WINDOW` по таймеру); это отдельная задача resize и не заменяет первый draw, который делает `cx.open_window`;
+- единое состояние в `Entity`, главное и плавающие окна подписаны через `cx.observe`.
 **Оговорка:** `dock-core` изначально не попал в архив; раздел 5 теперь сверен с его исходниками.
 ## 2. Было → стало
 Меняется всё, что связано с координатами, вводом и жизненным циклом окна; дерево и команды `dock-core` остаются.
 | Аспект | Сейчас (dock-gpui) | Должно быть |
 | --- | --- | --- |
 | Рендер floating | `FloatingWindowView::render` рисует `div().absolute()` внутри `DockHost`, клип по окну | Корневой view отдельного OS-окна (`FloatingHost`), содержимое в локальных координатах (0,0) |
+| Старт окон | Главное окно может стать видимым раньше, чем floating-окна подготовлены | Главное окно и стартовые `PopUp` создаются скрытыми; `cx.open_window` выполняет первый draw каждого окна до возврата; все окна показываются только после подготовки |
 | Координаты | Всё в viewport главного окна; Core при расчёте вписывает floating во viewport | Границы окна в экранных координатах, без вписывания во viewport главного окна |
 | Ввод | Один `register_pointer_events` на `DockHost`, `capture_pointer` на root hitbox | Свой набор обработчиков у каждого окна; перетаскивание ведёт опрос курсора (экранные координаты), а не capture |
 | Перенос окна | `DragHandle::FloatingTitle`: сдвиг через Core, в drop-цели не попадает | Окно двигает `SetWindowPos`; та же перетаскивающая сессия ищет drop-цель под курсором |
@@ -31,13 +39,13 @@ Oct 31, 2026 · @master
 | DPI | Один `scale_factor` | Свой масштаб у каждого окна, пересчёт при смене монитора |
 | Persistence | `WorkspaceFloatingGroup.bounds` во viewport | Экранная позиция + размер; при загрузке проверка, что окно попадает на существующий монитор |
 ## 3. Архитектура
-Основной принцип: **Core остаётся единственным источником правды, окна — его проекция.** В `main.rs` флаг `floating_visible` живёт в `DockState`; в dock-gpui такого флага нет: окно существует тогда и только тогда, когда в `Layout` есть `FloatingGroup`.
+Основной принцип: **Core остаётся единственным источником правды, окна — его проекция.** Окна создаются и показываются по startup-последовательности из `crates/dock-experiment/src/lib.rs`; флаг видимости в UI-адаптере отражает состояние native window, а существование плавающей композиции определяется `FloatingGroup` в общем `Layout`.
 ```text
 DockController (Entity, один) — Layout, history, DragSession
       ▲ observe / dispatch
 FloatingWindowManager (Entity, новый)
    ├─ reconcile(): Layout.floating_groups ↔ OS-окна
-   ├─ WindowPool: заранее созданные скрытые окна
+   ├─ WindowRegistry: `WindowHandle` для панелей/композиций; скрытое создание и повторное использование
    ├─ TearOffDriver: опрос курсора 4 мс, порог 2 px
    └─ NativeWindowOps (trait) → crate dock-native (unsafe, Win32)
 MainWindow:   DockHost      → док слева/справа, canvas, DropOverlay
@@ -48,7 +56,7 @@ FloatingWin:  FloatingHost  → одна floating group, шапка, DropOverlay
 2. **Координаты Core — оконные, логические.** Единое экранное пространство не подходит: при разном DPI мониторов логические пиксели не складываются. Экранные физические px используются только в `TearOffDriver`; перед обращением к Core они переводятся в локальные логические координаты окна под курсором (scale этого окна, как `scale_of(hwnd)` в `main.rs`).
 3. **Отрыв = реальная мутация Core.** При пороге 2 px вызывается команда Float, в которую сейчас превращается drop на `FreeArea`; жест продолжается как `DragPayload::FloatingGroup`. Всё внутри одной history-транзакции (`begin_transaction`, как в resize): Esc откатывает отрыв, отпускание даёт один шаг undo.
 4. **Перетаскивание floating-окна тоже ищет drop-цель.** Особый случай `DragHandle::FloatingTitle` («двигает себя и в цели не попадает») не используется: тянем с FloatingCapture (раздел 5, п. 3).
-5. **Окна переиспользуются.** Скрытый пул создаётся до главного окна (как `create_floating` в `main.rs`), `owner` назначается после (`attach_floating`).
+5. **Стартовые окна подготавливаются до первого показа, но не создаются раньше главного окна.** Сначала главное окно открывается с `show: false`; затем из его `MainWindow` создаются все стартовые floating-окна через `cx.open_window` с `show: false`. После каждого вызова GPUI уже выполнил первый draw root view. Затем каждому popup назначаются `owner` и корректный Z-order, и только после подготовки всех окон показываются главное окно и панели. Это повторяет `run_windows` → `open_startup_panels` → `show_floating_panels` из `dock-experiment`; схема `create_floating` до открытия главного окна из `tearoff/main.rs` для старта не используется.
 6. **Одна панель — один `AnyView`** (`panel_views` в контроллере). В `main.rs` для дока и floating созданы два разных `PanelView`; в dock-gpui так нельзя, иначе пропадёт состояние панели. Рендерится вид только в одном окне за раз.
 ## 4. Изменения в dock-gpui по файлам
 | Файл | Что сделать |
@@ -63,7 +71,7 @@ FloatingWin:  FloatingHost  → одна floating group, шапка, DropOverlay
 | `controller/commands.rs` | Из `is_resize_command` убрать `ResizeFloatingBounds`; не добавлять новую команду `SetFloatingBounds` — существующий ResizeFloatingBounds вызывается из OS-события в одной транзакции (раздел 5, п. 7). |
 | `components/drop_overlay.rs` | Зоны `FloatingCenter/Top/Bottom` рисуются в окне-цели в его локальных координатах; `floating_for_target` по `z_order` не нужен. |
 | `persistence.rs` | Загрузка: после `replace_layout` вызвать `reconcile()`. Сохранение: bounds в экранных координатах (раздел 5). |
-| новый `floating_manager.rs` | `FloatingWindowManager`: `WindowPool`, `reconcile()`, `TearOffDriver`, карта `FloatingGroupId → WindowHandle + HWND`. Подписан на `DockEvent::LayoutChanged`. |
+| новый `floating_manager.rs` | `FloatingWindowManager`: `WindowRegistry`, `reconcile()`, `TearOffDriver`, карта `FloatingGroupId → WindowHandle + HWND` и связь `PanelId → WindowHandle`. При старте открывает скрытые popup-окна после создания скрытого MainWindow; `open_window` выполняет первый draw до возврата. Подписан на `DockEvent::LayoutChanged`. |
 | новый крейт `dock-native` | Win32-операции из `tearoff_win` + трейт `NativeWindowOps` + заглушка для не-Windows. |
 **Зависимости:** в `Cargo.toml` `gpui_platform` подключён только под `cfg(windows)`. Для `dock-native` нужны `windows` и `raw-window-handle` (как в `main.rs`).
 ## 5. Требования к dock-core
@@ -91,10 +99,12 @@ FloatingWin:  FloatingHost  → одна floating group, шапка, DropOverlay
 10. **`RaiseFloating` и `z_order`.** Порядок окон теперь решает OS. `RaiseFloating` — persistent-команда, поэтому её не диспатчим при активации окна. `z_order` остаётся в модели и workspace как есть, на рендер не влияет.
 ## 6. Платформенный слой (Windows)
 `mod tearoff_win` из `main.rs` выносится в отдельный крейт `dock-native`. Причина: в `dock-gpui` стоит `#![forbid(unsafe_code)]`, а `forbid` нельзя ослабить через `#[allow]` внутри модуля. Также проверить `[workspace.lints]`.
-**Трейт `NativeWindowOps`** (всё принимает `NativeId = isize`, как HWND в `main.rs`):
+**Трейт `NativeWindowOps`** (всё принимает `NativeId = isize`):
 - `hwnd_of(window)`, `cursor_pos()`, `left_down()`, `key_down(Escape)`;
-- `window_rect`, `client_origin`, `scale_of`, `move_window`, `resize_window`, `show_no_activate`, `hide`;
-- `set_owner`, `enable_resize` (включая таймер перерисовки);
+- `window_rect`, `client_origin`, `scale_of`, `move_window`, `resize_window`, `show`, `show_no_activate`, `activate`, `hide`;
+- `set_owner`, `remove_topmost`, `enable_resize` (включая таймер перерисовки);
+- `show` используется после первичного скрытого draw и настройки owner; `show_no_activate` — для сценариев перемещения без смены активного окна;
+
 - **новое:** `window_from_point(screen_pt, exclude)` — какое из наших окон под курсором, без перетаскиваемого (обход по z-order через `GetWindow(GW_HWNDNEXT)` и `PtInRect` по списку наших HWND);
 - **новое:** `monitor_work_areas()` для проверки позиции при загрузке;
 - **новое:** `set_min_size`, если выбранный коммит gpui не даёт `window_min_size` в `WindowOptions`.
@@ -102,6 +112,7 @@ FloatingWin:  FloatingHost  → одна floating group, шапка, DropOverlay
 - Все `unsafe` только здесь, с комментарием `// SAFETY:` у каждого блока.
 - Для не-Windows — `StubOps`, который возвращает `Unsupported`; `FloatingWindowManager` тогда не работает, отрыв отключён (панели остаются в доке).
 - `begin_high_res_timer()` вызывается один раз в `run()`, парный `timeEndPeriod` при выходе.
+- Не добавлять отдельную задержку/таймер ради первичной отрисовки floating-окон: это обеспечивает `App::open_window` в закреплённой GPUI-ревизии. Таймер перерисовки нужен только для модального resize-цикла.
 - Таймер перерисовки (`SetTimer`, id 2, 8 мс) ставится на каждое floating-окно и снимается (`KillTimer`) при закрытии из пула. Сейчас в `main.rs` он не снимается.
 - `WM_GPUI_FORCE_UPDATE_WINDOW = WM_USER + 5` завязан на конкретный коммит `gpui_windows`. Зафиксировать версию gpui и добавить тест/проверку при её обновлении.
 ## 7. Сценарии, этапы, приёмка
@@ -120,9 +131,9 @@ FloatingWin:  FloatingHost  → одна floating group, шапка, DropOverlay
 | 10 | Сохранить и загрузить workspace | Окна восстанавливаются на тех же местах; если монитора больше нет — окно сдвигается в рабочую область основного |
 | 11 | Текстовое поле в панели, затем перенос панели док↔floating | Состояние панели (текст, scroll) сохраняется |
 ### Этапы
-1. **Крейт `dock-native`.** Вынести `tearoff_win`, трейт, заглушку; добавить `window_from_point`, `KillTimer`. Готово, когда `main.rs` работает на новом крейте без изменения поведения.
+1. **Платформенный слой.** Вынести Win32-операции из прототипов в `dock-native` (или согласованный платформенный crate), включая `set_owner`, `remove_topmost`, `show/hide`, перемещение, DPI, resize, `window_from_point`, `KillTimer`. Проверять его вместе с окном, созданным через GPUI `open_window`; startup-последовательность брать из `dock-experiment`, не из `tearoff/main.rs`.
 2. **Контракт `dock-core`** (раздел 5, пункты 1, 4, 5, 9): геометрия floating вне compute\_rects, Float возвращает id, FloatingCapture без цели. Покрыть unit-тестами без UI.
-3. **`FloatingHost` + `FloatingWindowManager`**: `reconcile()`, пул, привязка owner. Рестор из workspace, без drag. Сценарии 9, 10.
+3. **`FloatingHost` + `FloatingWindowManager`**: `reconcile()`, реестр `WindowHandle`, привязка owner. На старте: скрытый MainWindow → скрытые popup-окна через `cx.open_window` → первый draw каждого root view → `set_owner`/`remove_topmost` → показать главное окно и floating-окна. Рестор из workspace, без drag. Сценарии 9, 10.
 4. **`TearOffDriver`**: опрос курсора, порог, отрыв, возврат, Esc, одна транзакция undo. Сценарии 1–7.
 5. **Resize, DPI, min size, persistence.** Сценарии 2, 8, 10, 11.
 6. **Чистка.** Удалить `FloatingWindowView`, `DragGhost` для отрыва, resize-хэндлы, тесты старого floating (`controller_tests.rs`, `pointer.rs`, `resize.rs`), обновить документацию слоёв в `DockHost`.
