@@ -10,7 +10,10 @@ use dock_core::{
     DockMetrics, InitialLayoutError, PanelConstraints, PanelKey, PanelKeyError, Point, Profile,
     Rect, Size,
 };
-use gpui::{AnyView, App, AppContext, Context, Entity, IntoElement, Render, SharedString, Window};
+use gpui::{
+    AnyView, App, AppContext, Context, Entity, IntoElement, ParentElement, Render,
+    SharedString, Styled, Window, div,
+};
 use thiserror::Error;
 
 use crate::{
@@ -163,21 +166,76 @@ impl DockWorkspace {
         &self.controller
     }
 
-    /// Renders the library-owned panel visibility popup.
-    ///
-    /// The application supplies only the popup placement and a dismiss
-    /// callback. Each registered definition is reflected automatically, and
-    /// selecting an entry opens or closes that panel through DockController.
-    pub fn panel_menu(
+    /// Creates a separate library-owned menu view that can be mounted over
+    /// the application's menu bar. Returning an Entity avoids returning a
+    /// borrowed element out of Entity::update.
+    pub fn create_panel_menu(
         &self,
-        id: impl Into<SharedString>,
         viewport: Rect,
         anchor: Point,
-        on_dismiss: impl Fn(&mut App) + 'static,
         cx: &mut Context<Self>,
-    ) -> impl IntoElement + 'static {
+    ) -> Entity<DockPanelMenu> {
+        let controller = self.controller.clone();
+        let panels = self.panel_menu.clone();
+        cx.new(|_| DockPanelMenu {
+            controller,
+            panels,
+            viewport,
+            anchor,
+            open: false,
+        })
+    }
+}
+
+impl Render for DockWorkspace {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        self.host.clone()
+    }
+}
+
+/// Library-owned overlay for opening and closing registered panels.
+///
+/// The application mounts this entity above its main content and toggles it
+/// from the application's Window menu item. The list and all panel actions
+/// are built here from the definitions passed to DockWorkspace.
+pub struct DockPanelMenu {
+    controller: Entity<DockController>,
+    panels: Vec<PanelMenuDefinition>,
+    viewport: Rect,
+    anchor: Point,
+    open: bool,
+}
+
+impl DockPanelMenu {
+    /// Toggles the visibility of the popup menu.
+    pub fn toggle(&mut self, cx: &mut Context<Self>) {
+        self.open = !self.open;
+        cx.notify();
+    }
+
+    /// Explicitly sets the visibility of the popup menu.
+    pub fn set_open(&mut self, open: bool, cx: &mut Context<Self>) {
+        if self.open != open {
+            self.open = open;
+            cx.notify();
+        }
+    }
+
+    pub fn is_open(&self) -> bool {
+        self.open
+    }
+}
+
+impl Render for DockPanelMenu {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let mut root = div().absolute().top_0().left_0().size_full();
+
+        if !self.open {
+            return root;
+        }
+
         let entries = self
-            .panel_menu
+            .panels
             .iter()
             .map(|panel| {
                 let selected = self.controller.update(cx, |controller, _| {
@@ -203,23 +261,30 @@ impl DockWorkspace {
             })
             .collect::<Vec<_>>();
 
-        ContextMenu::render(
-            id,
-            viewport,
-            anchor,
+        let menu_entity = cx.entity().downgrade();
+        let on_dismiss: Rc<dyn Fn(&mut App)> = Rc::new(move |app| {
+            if let Some(menu) = menu_entity.upgrade() {
+                menu.update(app, |menu, menu_cx| {
+                    menu.open = false;
+                    menu_cx.notify();
+                });
+            }
+        });
+
+        root = root.child(ContextMenu::render(
+            "application-window-menu",
+            self.viewport,
+            self.anchor,
             entries,
             None,
             ContextMenuCallbacks {
                 on_submenu: Rc::new(|_, _| {}),
-                on_dismiss: Rc::new(on_dismiss),
+                on_dismiss,
             },
             DockTheme::default(),
-        )
+        ));
+
+        root
     }
 }
 
-impl Render for DockWorkspace {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        self.host.clone()
-    }
-}
