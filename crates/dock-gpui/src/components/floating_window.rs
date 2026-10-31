@@ -16,8 +16,8 @@ use ui::Theme;
 use crate::{
     DockController,
     input::{
-        begin_drag, begin_resize_hit, dispatch_command, finish_drag, finish_resize, update_drag,
-        update_resize,
+        begin_drag, begin_resize_hit, dispatch_command, finish_drag, finish_resize,
+        update_drag_at, update_resize,
     },
 };
 
@@ -34,6 +34,18 @@ use super::{
 struct FloatingResizeDragGhost;
 
 impl Render for FloatingResizeDragGhost {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        gpui::Empty
+    }
+}
+
+/// GPUI drag marker for moving a floating composition by its title bar.
+#[derive(Clone, Copy)]
+struct FloatingTitleDrag;
+
+struct FloatingTitleDragGhost;
+
+impl Render for FloatingTitleDragGhost {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         gpui::Empty
     }
@@ -328,9 +340,18 @@ impl FloatingWindowView {
                     app.stop_propagation();
                 }
             })
-            .on_mouse_move({
+            .on_drag(FloatingTitleDrag, |_, _, _, app| {
+                app.new(|_| FloatingTitleDragGhost)
+            })
+            .on_drag_move::<FloatingTitleDrag>({
                 let controller = controller.clone();
-                move |event, _, app| update_drag(&controller, event, app)
+                move |event, _, app| {
+                    update_drag_at(
+                        &controller,
+                        event_point(event.event.position),
+                        app,
+                    );
+                }
             })
             .on_mouse_up({
                 let controller = controller.clone();
