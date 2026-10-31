@@ -1,13 +1,14 @@
-use crate::{NodeId, Rect, Size};
+use crate::{FloatingGroupId, NodeId, Rect, Size};
 
-/// The effective value produced by a constrained resize command.
+/// Command-specific result data returned after a successful command.
 ///
-/// A resize may be clamped to panel, column, or window constraints; the command
-/// outcome reports the value that was actually accepted rather than the
-/// originally requested value.
+/// Values include identifiers created by structural commands and effective
+/// values accepted after panel, column, or window constraints.
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum CommandValue {
+    /// Identifier of the new floating composition created by a Float command.
+    FloatingGroup(FloatingGroupId),
     /// Effective width of a resized column, in logical pixels.
     ColumnWidth(f32),
     /// Effective signed movement of a main-column boundary, in logical pixels.
