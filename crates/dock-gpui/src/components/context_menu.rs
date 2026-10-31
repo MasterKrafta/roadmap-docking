@@ -153,11 +153,11 @@ impl ContextMenu {
         id: impl Into<SharedString>,
         viewport: Rect,
         anchor: Point,
-        entries: Vec<ContextMenuEntry>,
+        entries: &[ContextMenuEntry],
         open_submenu: Option<usize>,
         callbacks: ContextMenuCallbacks,
         theme: Theme,
-    ) -> impl IntoElement + 'static {
+    ) -> impl IntoElement {
         let ContextMenuCallbacks {
             on_submenu,
             on_dismiss,
@@ -167,7 +167,7 @@ impl ContextMenu {
             .popup_menu_width
             .min(viewport.size.width)
             .max(1.0);
-        let full_height = entries_height(&entries, theme.metrics.popup_menu_row_height);
+        let full_height = entries_height(entries, theme.metrics.popup_menu_row_height);
         let height = full_height.min(viewport.size.height.max(1.0));
         let max_x = (viewport.origin.x + viewport.size.width - width).max(viewport.origin.x);
         let max_y = (viewport.origin.y + viewport.size.height - height).max(viewport.origin.y);
@@ -201,13 +201,7 @@ impl ContextMenu {
             let submenu_top = row_top.min(
                 (viewport.origin.y + viewport.size.height - submenu_height).max(viewport.origin.y),
             );
-            Some((
-                index,
-                submenu_left,
-                submenu_top,
-                submenu_height,
-                submenu_entries.clone(),
-            ))
+            Some((index, submenu_left, submenu_top, submenu_height))
         });
 
         // One hitbox covers both the main menu and its submenu. GPUI's
@@ -217,11 +211,11 @@ impl ContextMenu {
         let mut region_top = top;
         let mut region_right = left + width;
         let mut region_bottom = top + height;
-        if let Some((_, submenu_left, submenu_top, submenu_height, _)) = &submenu_layout {
-            region_left = region_left.min(*submenu_left);
-            region_top = region_top.min(*submenu_top);
-            region_right = region_right.max(*submenu_left + width);
-            region_bottom = region_bottom.max(*submenu_top + *submenu_height);
+        if let Some((_, submenu_left, submenu_top, submenu_height)) = submenu_layout {
+            region_left = region_left.min(submenu_left);
+            region_top = region_top.min(submenu_top);
+            region_right = region_right.max(submenu_left + width);
+            region_bottom = region_bottom.max(submenu_top + submenu_height);
         }
 
         let mut layer = div().id(id.into()).absolute().top_0().left_0().size_full();
@@ -246,7 +240,7 @@ impl ContextMenu {
             });
 
         let mut menu = menu_surface(left - region_left, top - region_top, width, height, theme);
-        for (index, entry) in entries.into_iter().enumerate() {
+        for (index, entry) in entries.iter().enumerate() {
             menu = menu.child(render_entry(
                 entry,
                 index,
@@ -259,7 +253,13 @@ impl ContextMenu {
         }
         region = region.child(menu);
 
-        if let Some((_, submenu_left, submenu_top, submenu_height, submenu_entries)) = submenu_layout {
+        if let Some((index, submenu_left, submenu_top, submenu_height)) = submenu_layout
+            && let Some(ContextMenuEntry::Submenu {
+                entries: submenu_entries,
+                disabled: false,
+                ..
+            }) = entries.get(index)
+        {
             let mut submenu = menu_surface(
                 submenu_left - region_left,
                 submenu_top - region_top,
@@ -267,7 +267,7 @@ impl ContextMenu {
                 submenu_height,
                 theme,
             );
-            for (submenu_index, entry) in submenu_entries.into_iter().enumerate() {
+            for (submenu_index, entry) in submenu_entries.iter().enumerate() {
                 submenu = submenu.child(render_entry(
                     entry,
                     submenu_index,
@@ -323,14 +323,14 @@ fn entry_height(entry: &ContextMenuEntry, row_height: f32) -> f32 {
 }
 
 fn render_entry(
-    entry: ContextMenuEntry,
+    entry: &ContextMenuEntry,
     index: usize,
     open_submenu: Option<usize>,
     on_submenu: ContextMenuSubmenuToggle,
     on_dismiss: ContextMenuDismiss,
     theme: Theme,
     allow_submenu: bool,
-) -> impl IntoElement + 'static {
+) -> impl IntoElement {
     match entry {
         ContextMenuEntry::Separator => div()
             .id(format!("dock-menu-separator-{index}"))
@@ -365,7 +365,7 @@ fn render_entry(
                     theme.colors.popup_menu_background
                 }));
 
-            if let Some(icon) = item.icon {
+            if let Some(icon) = item.icon.clone() {
                 row = row.child(img(icon).size(px(14.0)).flex_none());
             } else if item.selected {
                 row = row.child(
@@ -384,10 +384,10 @@ fn render_entry(
                     .overflow_hidden()
                     .whitespace_nowrap()
                     .text_ellipsis()
-                    .child(item.label),
+                    .child(item.label.clone()),
             );
 
-            if let Some(hotkey) = item.hotkey {
+            if let Some(hotkey) = item.hotkey.clone() {
                 row = row.child(
                     div()
                         .flex_none()
@@ -398,7 +398,7 @@ fn render_entry(
 
             if item.disabled {
                 row.opacity(0.62).cursor_not_allowed()
-            } else if let Some(action) = item.action {
+            } else if let Some(action) = item.action.clone() {
                 let dismiss = on_dismiss.clone();
                 row.cursor_pointer()
                     .hover(|style| style.bg(rgb(theme.colors.popup_menu_hover)))
@@ -426,7 +426,7 @@ fn render_entry(
                 .items_center()
                 .gap(px(8.0))
                 .px(px(theme.metrics.popup_menu_horizontal_padding))
-                .text_color(rgb(if disabled {
+                .text_color(rgb(if *disabled {
                     theme.colors.muted_text
                 } else {
                     theme.colors.primary_text
@@ -443,10 +443,10 @@ fn render_entry(
                         .overflow_hidden()
                         .whitespace_nowrap()
                         .text_ellipsis()
-                        .child(label),
+                        .child(label.clone()),
                 );
 
-            if let Some(hotkey) = hotkey {
+            if let Some(hotkey) = hotkey.clone() {
                 row = row.child(
                     div()
                         .flex_none()
@@ -456,7 +456,7 @@ fn render_entry(
             }
             row = row.child("›");
 
-            if disabled || !allow_submenu {
+            if *disabled || !allow_submenu {
                 row.opacity(0.62).cursor_not_allowed()
             } else {
                 let toggle = on_submenu.clone();
