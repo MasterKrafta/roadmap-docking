@@ -3,14 +3,15 @@ use dock_core::{
     TabOverflowRect, TabStripRect,
 };
 use gpui::{
-    Entity, IntoElement, MouseButton, ParentElement, Styled, div, px, rgb,
+    Context, Entity, IntoElement, MouseButton, ParentElement, Render, Styled, Window, div, px,
+    rgb,
     prelude::InteractiveElement as _,
 };
 use ui::Theme;
 
 use crate::{
     DockController,
-    input::{begin_drag, dispatch_command, finish_drag, update_drag},
+    input::{begin_drag, dispatch_command, finish_drag, update_drag_at},
 };
 
 use super::{
@@ -18,6 +19,18 @@ use super::{
     tab_overflow::TabOverflowToggle,
     tab_strip::{GroupPresentation, TabStripView},
 };
+
+/// GPUI drag marker for the complete Tabs group grip.
+#[derive(Clone, Copy)]
+struct GroupGripDrag;
+
+struct GroupGripDragGhost;
+
+impl Render for GroupGripDragGhost {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        gpui::Empty
+    }
+}
 
 /// The group component: grip, tab strip, controls, and group context menu.
 pub struct GroupView;
@@ -93,9 +106,21 @@ impl GroupView {
                         app,
                     );
                 })
-                .on_mouse_move({
+                .on_drag(GroupGripDrag, |_, _, _, app| {
+                    app.new(|_| GroupGripDragGhost)
+                })
+                .on_drag_move::<GroupGripDrag>({
                     let controller = controller.clone();
-                    move |event, _, app| update_drag(&controller, event, app)
+                    move |event, _, app| {
+                        update_drag_at(
+                            &controller,
+                            Point::new(
+                                event.event.position.x.as_f32(),
+                                event.event.position.y.as_f32(),
+                            ),
+                            app,
+                        );
+                    }
                 })
                 .on_mouse_up({
                     let controller = controller.clone();
