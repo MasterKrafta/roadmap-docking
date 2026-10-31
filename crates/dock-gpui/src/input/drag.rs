@@ -82,6 +82,13 @@ pub(crate) fn update_drag_at(
             return;
         }
 
+        // Floating-group gestures originate from the title bar in this adapter.
+        // They move the window and must never create or resolve a docking target.
+        if matches!(payload, DragPayload::FloatingGroup { .. }) {
+            cx.notify();
+            return;
+        }
+
         let Some(source) = drop_source(controller, payload) else {
             let _ = controller.drag_mut().session_mut().set_drop_target(None);
             cx.notify();
@@ -146,7 +153,9 @@ pub(crate) fn finish_drag_at(
             .session_mut()
             .pointer_move(position);
 
-        let target = if matches!(controller.drag().session().state(), DragState::Dragging { .. }) {
+        let target = if matches!(payload, DragPayload::FloatingGroup { .. }) {
+            None
+        } else if matches!(controller.drag().session().state(), DragState::Dragging { .. }) {
             drop_source(controller, payload).and_then(|source| {
                 controller
                     .prepare_drop_resolver(source)
