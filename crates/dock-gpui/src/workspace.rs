@@ -12,7 +12,7 @@ use dock_core::{
 };
 use gpui::{
     AnyView, App, AppContext, Context, Entity, IntoElement, ParentElement, Render, SharedString,
-    Styled, Window, div, px, rgb,
+    StatefulInteractiveElement, Styled, Window, div, prelude::InteractiveElement as _, px, rgb,
 };
 use thiserror::Error;
 
