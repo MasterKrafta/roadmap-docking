@@ -326,7 +326,11 @@ fn signed_outer_width_delta(pointer_delta: f32, left_dock: bool) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{incremental_delta, signed_outer_width_delta};
+    use dock_core::{Point, Rect, ResizeEdge, Size};
+
+    use super::{
+        incremental_delta, resize_floating_bounds, signed_outer_width_delta,
+    };
 
     #[test]
     fn incremental_delta_tracks_the_effective_core_movement() {
@@ -339,5 +343,40 @@ mod tests {
     fn left_and_right_dock_edges_use_opposite_width_directions() {
         assert_eq!(signed_outer_width_delta(24.0, true), 24.0);
         assert_eq!(signed_outer_width_delta(24.0, false), -24.0);
+    }
+
+    #[test]
+    fn floating_top_left_resize_keeps_the_opposite_edges_fixed() {
+        let original = Rect::new(Point::new(100.0, 50.0), Size::new(300.0, 200.0));
+
+        assert_eq!(
+            resize_floating_bounds(original, ResizeEdge::TopLeft, 20.0, 30.0),
+            Some(Rect::new(
+                Point::new(120.0, 80.0),
+                Size::new(280.0, 170.0),
+            ))
+        );
+    }
+
+    #[test]
+    fn floating_bottom_right_resize_keeps_the_origin_fixed() {
+        let original = Rect::new(Point::new(100.0, 50.0), Size::new(300.0, 200.0));
+
+        assert_eq!(
+            resize_floating_bounds(original, ResizeEdge::BottomRight, 40.0, 50.0),
+            Some(Rect::new(
+                Point::new(100.0, 50.0),
+                Size::new(340.0, 250.0),
+            ))
+        );
+    }
+
+    #[test]
+    fn floating_resize_rejects_non_finite_pointer_deltas() {
+        let original = Rect::new(Point::new(100.0, 50.0), Size::new(300.0, 200.0));
+        assert_eq!(
+            resize_floating_bounds(original, ResizeEdge::Right, f32::NAN, 0.0),
+            None
+        );
     }
 }
