@@ -2,7 +2,7 @@ use dock_core::{
     DockCommand, DragDropAction, DragHandle, DragPayload, DragState, DropSource,
     DropTarget, Point, Rect, Size,
 };
-use gpui::{App, Entity, MouseDownEvent, MouseMoveEvent, MouseUpEvent};
+use gpui::{App, Entity, MouseDownEvent, MouseUpEvent};
 
 use crate::DockController;
 
@@ -39,22 +39,6 @@ pub(crate) fn begin_drag_at(
     }) {
         tracing::debug!(%error, "could not begin dock drag gesture");
     }
-}
-
-/// Updates the shared drag state machine and resolves a fresh target while moving.
-pub(crate) fn update_drag(
-    controller: &Entity<DockController>,
-    event: &MouseMoveEvent,
-    app: &mut App,
-) {
-    if !event.dragging() {
-        return;
-    }
-    update_drag_at(
-        controller,
-        event_point(event.position.x, event.position.y),
-        app,
-    );
 }
 
 /// Updates a drag using a host-local point, including points translated out of a rail scroll.
