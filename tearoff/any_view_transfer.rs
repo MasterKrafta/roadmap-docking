@@ -53,13 +53,6 @@ enum PanelId {
 }
 
 impl PanelId {
-    fn other(self) -> Self {
-        match self {
-            Self::A => Self::B,
-            Self::B => Self::A,
-        }
-    }
-
     fn label(self) -> &'static str {
         match self {
             Self::A => "A",
@@ -73,7 +66,6 @@ struct TransferState {
     // separate groups; docking moves a PanelId between these two vectors.
     groups: [Vec<PanelId>; 2],
     active_tabs: [Option<PanelId>; 2],
-    main_hwnd: isize,
     floating_hwnds: [isize; 2],
 }
 
@@ -82,7 +74,6 @@ impl Default for TransferState {
         Self {
             groups: [vec![PanelId::A], vec![PanelId::B]],
             active_tabs: [Some(PanelId::A), Some(PanelId::B)],
-            main_hwnd: 0,
             floating_hwnds: [0, 0],
         }
     }
@@ -861,12 +852,6 @@ impl PanelViews {
         }
     }
 
-    fn focus_handle(&self, panel: PanelId, cx: &App) -> FocusHandle {
-        match panel {
-            PanelId::A => self.a_entity.read(cx).focus_handle.clone(),
-            PanelId::B => self.b_entity.read(cx).focus_handle.clone(),
-        }
-    }
 }
 
 struct MainWindowView {
@@ -1065,8 +1050,7 @@ impl Render for FloatingWindowView {
         let mut actions = div()
             .w_full()
             .flex()
-            .flex_row()
-            .flex_wrap()
+            .flex_col()
             .gap_2()
             .p_3()
             .bg(rgb(0x22262b));
@@ -1202,8 +1186,6 @@ fn main() {
         let main_hwnd = main_window
             .update(cx, |_, window, _| tearoff_win::hwnd_of(window).unwrap_or(0))
             .unwrap_or(0);
-        state.update(cx, |state, _| state.main_hwnd = main_hwnd);
-
         // Create two separate native PopUp windows. They are independent roots,
         // each initially hosting a different panel.
         let state_a = state.clone();
