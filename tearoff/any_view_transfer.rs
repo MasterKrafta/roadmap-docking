@@ -1248,7 +1248,8 @@ fn main() {
         // Set the first input focus in panel A's own native window.
         floating_a
             .update(cx, |_, window, cx| {
-                window.focus(&panel_a.read(cx).focus_handle, cx);
+                let focus_handle = panel_a.read(cx).focus_handle.clone();
+                window.focus(&focus_handle, cx);
             })
             .expect("не удалось установить начальный фокус панели A");
     });
