@@ -1,5 +1,5 @@
 use dock_core::{
-    DockCommand, DragHandle, DragPayload, GroupRect, Point, TabHeaderRect,
+    DockCommand, DragHandle, DragPayload, FloatingGroupId, GroupRect, Point, TabHeaderRect,
     TabOverflowRect, TabStripRect,
 };
 use gpui::{
@@ -35,6 +35,7 @@ impl GroupView {
         reserved_grip_left: f32,
         controller: Entity<DockController>,
         theme: Theme,
+        raise_floating: Option<FloatingGroupId>,
         menu_open: bool,
         toggle_menu: GroupMenuToggle,
         overflow_open: bool,
@@ -116,6 +117,7 @@ impl GroupView {
             presentation,
             controller.clone(),
             theme,
+            raise_floating,
             overflow_open,
             toggle_overflow,
             middle_click_closes_tabs,
