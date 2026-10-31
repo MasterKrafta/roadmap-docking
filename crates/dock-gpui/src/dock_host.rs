@@ -502,6 +502,7 @@ impl Render for DockHost {
                     Point::ZERO,
                     Point::ZERO,
                     self.controller.clone(),
+                    metrics,
                     theme,
                 ));
             }

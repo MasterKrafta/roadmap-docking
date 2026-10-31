@@ -116,6 +116,7 @@ impl ColumnView {
                     content_origin,
                     pointer_offset,
                     controller.clone(),
+                    metrics,
                     theme,
                 ));
             }

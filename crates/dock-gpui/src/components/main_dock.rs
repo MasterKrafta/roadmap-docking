@@ -125,6 +125,7 @@ impl MainDockView {
                 Point::ZERO,
                 Point::ZERO,
                 controller.clone(),
+                metrics,
                 theme,
             ));
         }

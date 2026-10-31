@@ -1,4 +1,4 @@
-use dock_core::{Axis, Point, SplitterRect};
+use dock_core::{Axis, DockMetrics, Point, SplitterRect};
 use gpui::{
     Context, Entity, IntoElement, MouseButton, MouseDownEvent, MouseUpEvent, ParentElement,
     Render, Styled, Window, div, px, rgb,
@@ -31,10 +31,11 @@ impl SplitterView {
         content_origin: Point,
         pointer_offset: Point,
         controller: Entity<DockController>,
+        metrics: DockMetrics,
         theme: Theme,
     ) -> impl IntoElement {
         let hit_rect = splitter.rect;
-        let thickness = theme.metrics.splitter_thickness;
+        let thickness = metrics.splitter_thickness;
         let (left, top, width, height, line_left, line_top, line_width, line_height) =
             match splitter.axis {
                 Axis::X => (
