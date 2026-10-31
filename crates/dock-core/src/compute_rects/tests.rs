@@ -1,8 +1,8 @@
 use super::{ComputeRectsError, minimum_node_size, weighted_sizes};
 use crate::layout_builder::LayoutBuilder;
 use crate::{
-    Axis, ColumnMode, DockMetrics, DockSide, GeometryError, LayoutRects, Node, PanelConstraints,
-    PanelKey, Point, Profile, Rect, Size, OUTER_COLUMN_EDGE_BOUNDARY_INDEX,
+    Axis, ColumnMode, DockMetrics, DockSide, GeometryError, LayoutRects, Node,
+    OUTER_COLUMN_EDGE_BOUNDARY_INDEX, PanelConstraints, PanelKey, Point, Profile, Rect, Size,
 };
 
 const PIXEL_TOLERANCE: f32 = 1.0e-3;
@@ -119,11 +119,23 @@ fn columns_keep_model_width_and_canvas_receives_horizontal_remainder() {
     assert_eq!(first.splitters[0].owner, left_root);
     assert_eq!(first.splitters[0].axis, Axis::X);
     assert_eq!(first.splitters[1].owner, inner_column);
-    assert_eq!(first.splitters[1].boundary_index, OUTER_COLUMN_EDGE_BOUNDARY_INDEX);
-    assert_eq!(first.splitters[1].rect, Rect::new(Point::new(540.0, 0.0), Size::new(8.0, 700.0)));
+    assert_eq!(
+        first.splitters[1].boundary_index,
+        OUTER_COLUMN_EDGE_BOUNDARY_INDEX
+    );
+    assert_eq!(
+        first.splitters[1].rect,
+        Rect::new(Point::new(540.0, 0.0), Size::new(8.0, 700.0))
+    );
     assert_eq!(first.splitters[2].owner, right_column);
-    assert_eq!(first.splitters[2].boundary_index, OUTER_COLUMN_EDGE_BOUNDARY_INDEX);
-    assert_eq!(first.splitters[2].rect, Rect::new(Point::new(976.0, 0.0), Size::new(8.0, 700.0)));
+    assert_eq!(
+        first.splitters[2].boundary_index,
+        OUTER_COLUMN_EDGE_BOUNDARY_INDEX
+    );
+    assert_eq!(
+        first.splitters[2].rect,
+        Rect::new(Point::new(976.0, 0.0), Size::new(8.0, 700.0))
+    );
 }
 
 #[test]
@@ -713,7 +725,10 @@ fn golden_rects_for_single_left_column_are_exact_and_deterministic() {
     );
     assert_eq!(rects.splitters.len(), 1);
     assert_eq!(rects.splitters[0].owner, column);
-    assert_eq!(rects.splitters[0].boundary_index, OUTER_COLUMN_EDGE_BOUNDARY_INDEX);
+    assert_eq!(
+        rects.splitters[0].boundary_index,
+        OUTER_COLUMN_EDGE_BOUNDARY_INDEX
+    );
     assert_eq!(
         rects.splitters[0].rect,
         Rect::new(Point::new(276.0, 0.0), Size::new(8.0, 600.0))
@@ -809,14 +824,20 @@ fn golden_rects_for_1280_by_800_cover_both_docks_columns_groups_and_splitters() 
         Rect::new(Point::new(238.0, 0.0), Size::new(8.0, 800.0))
     );
     assert_eq!(rects.splitters[2].owner, second_column);
-    assert_eq!(rects.splitters[2].boundary_index, OUTER_COLUMN_EDGE_BOUNDARY_INDEX);
+    assert_eq!(
+        rects.splitters[2].boundary_index,
+        OUTER_COLUMN_EDGE_BOUNDARY_INDEX
+    );
     assert_eq!(rects.splitters[2].axis, Axis::X);
     assert_eq!(
         rects.splitters[2].rect,
         Rect::new(Point::new(540.0, 0.0), Size::new(8.0, 800.0))
     );
     assert_eq!(rects.splitters[3].owner, right_column);
-    assert_eq!(rects.splitters[3].boundary_index, OUTER_COLUMN_EDGE_BOUNDARY_INDEX);
+    assert_eq!(
+        rects.splitters[3].boundary_index,
+        OUTER_COLUMN_EDGE_BOUNDARY_INDEX
+    );
     assert_eq!(rects.splitters[3].axis, Axis::X);
     assert_eq!(
         rects.splitters[3].rect,
@@ -1001,7 +1022,10 @@ fn configurable_metrics_drive_header_strip_and_splitter_geometry() {
         Rect::new(Point::new(0.0, 245.5), Size::new(280.0, 9.0))
     );
     assert_eq!(rects.splitters[1].owner, column);
-    assert_eq!(rects.splitters[1].boundary_index, OUTER_COLUMN_EDGE_BOUNDARY_INDEX);
+    assert_eq!(
+        rects.splitters[1].boundary_index,
+        OUTER_COLUMN_EDGE_BOUNDARY_INDEX
+    );
     assert_eq!(
         rects.splitters[1].rect,
         Rect::new(Point::new(275.5, 0.0), Size::new(9.0, 500.0))

@@ -43,9 +43,7 @@ pub(crate) fn map_hit_test_point(
                 }
             }
         }
-        if covers_point
-            && active_floating.is_none_or(|active| floating.z_order > active.z_order)
-        {
+        if covers_point && active_floating.is_none_or(|active| floating.z_order > active.z_order) {
             active_floating = Some(*floating);
         }
     }

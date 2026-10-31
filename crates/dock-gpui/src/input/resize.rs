@@ -1,6 +1,6 @@
 use dock_core::{
-    Axis, DockCommand, DockSide, HitResult, Node, NodeId, Point, ResizeEdge, Rect, Size,
-    OUTER_COLUMN_EDGE_BOUNDARY_INDEX,
+    Axis, DockCommand, DockSide, HitResult, Node, NodeId, OUTER_COLUMN_EDGE_BOUNDARY_INDEX, Point,
+    Rect, ResizeEdge, Size,
 };
 use gpui::{App, Entity};
 
@@ -23,11 +23,7 @@ pub(crate) fn begin_resize_hit(
 
 /// Updates the transient preview point only. The Layout is not changed until
 /// pointer-up, so a complete gesture produces at most one resize command.
-pub(crate) fn update_resize(
-    controller: &Entity<DockController>,
-    point: Point,
-    app: &mut App,
-) {
+pub(crate) fn update_resize(controller: &Entity<DockController>, point: Point, app: &mut App) {
     controller.update(app, |controller, cx| {
         if !controller.ensure_pointer_interaction_current() {
             return;
@@ -94,18 +90,15 @@ fn command_for_pointer(
             };
             let start_width = interaction.start_width?;
             let width = start_width + direction * dx;
-            (width.is_finite() && width != start_width).then_some(
-                DockCommand::ResizeFlyout {
-                    panel,
-                    width: width.max(1.0),
-                },
-            )
+            (width.is_finite() && width != start_width).then_some(DockCommand::ResizeFlyout {
+                panel,
+                width: width.max(1.0),
+            })
         }
         HitResult::FloatingResizeEdge { group, edge } => {
             let start_bounds = interaction.start_bounds?;
             let bounds = resize_floating_bounds(start_bounds, edge, dx, dy)?;
-            (bounds != start_bounds)
-                .then_some(DockCommand::ResizeFloatingBounds { group, bounds })
+            (bounds != start_bounds).then_some(DockCommand::ResizeFloatingBounds { group, bounds })
         }
         HitResult::Splitter {
             owner,
@@ -169,12 +162,7 @@ fn command_for_pointer(
 /// Applies an absolute pointer delta to the original floating bounds. The
 /// opposite edge remains fixed for left/top resizing; Core performs the final
 /// minimum-size and viewport clamping in its next geometry snapshot.
-fn resize_floating_bounds(
-    start: Rect,
-    edge: ResizeEdge,
-    dx: f32,
-    dy: f32,
-) -> Option<Rect> {
+fn resize_floating_bounds(start: Rect, edge: ResizeEdge, dx: f32, dy: f32) -> Option<Rect> {
     if !dx.is_finite() || !dy.is_finite() {
         return None;
     }
@@ -249,9 +237,11 @@ fn reset_command_for_interaction(
 }
 
 fn main_split_side(layout: &dock_core::Layout, owner: NodeId) -> Option<DockSide> {
-    [DockSide::Left, DockSide::Right]
-        .into_iter()
-        .find(|side| layout.main_area(*side).is_some_and(|area| area.root == owner))
+    [DockSide::Left, DockSide::Right].into_iter().find(|side| {
+        layout
+            .main_area(*side)
+            .is_some_and(|area| area.root == owner)
+    })
 }
 
 fn main_edge_side(layout: &dock_core::Layout, owner: NodeId) -> Option<DockSide> {
@@ -312,7 +302,11 @@ fn pointer_delta_from_origin(origin: Point, current: Point, axis: Axis) -> f32 {
 }
 
 fn signed_outer_width_delta(pointer_delta: f32, left_dock: bool) -> f32 {
-    if left_dock { pointer_delta } else { -pointer_delta }
+    if left_dock {
+        pointer_delta
+    } else {
+        -pointer_delta
+    }
 }
 
 /// Visual-only geometry for the active resize. A splitter preview is a thin
@@ -438,10 +432,7 @@ mod tests {
 
         assert_eq!(
             splitter_preview_rect(original, Axis::X, 24.0, 0.0),
-            Some(Rect::new(
-                Point::new(222.5, 40.0),
-                Size::new(3.0, 300.0),
-            ))
+            Some(Rect::new(Point::new(222.5, 40.0), Size::new(3.0, 300.0),))
         );
     }
 
@@ -457,10 +448,7 @@ mod tests {
 
         assert_eq!(
             resize_floating_bounds(original, ResizeEdge::TopLeft, 20.0, 30.0),
-            Some(Rect::new(
-                Point::new(120.0, 80.0),
-                Size::new(280.0, 170.0),
-            ))
+            Some(Rect::new(Point::new(120.0, 80.0), Size::new(280.0, 170.0),))
         );
     }
 
@@ -470,10 +458,7 @@ mod tests {
 
         assert_eq!(
             resize_floating_bounds(original, ResizeEdge::BottomRight, 40.0, 50.0),
-            Some(Rect::new(
-                Point::new(100.0, 50.0),
-                Size::new(340.0, 250.0),
-            ))
+            Some(Rect::new(Point::new(100.0, 50.0), Size::new(340.0, 250.0),))
         );
     }
 

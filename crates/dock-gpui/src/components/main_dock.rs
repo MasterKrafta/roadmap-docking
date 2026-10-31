@@ -11,9 +11,7 @@ use ui::Theme;
 use crate::DockController;
 
 use super::{
-    column::ColumnView,
-    context_menu::GroupMenuToggle,
-    splitter::SplitterView,
+    column::ColumnView, context_menu::GroupMenuToggle, splitter::SplitterView,
     tab_strip::GroupPresentation,
 };
 
@@ -48,11 +46,7 @@ impl MainDockView {
         controller: Entity<DockController>,
         theme: Theme,
     ) -> impl IntoElement {
-        let mut layer = div()
-            .absolute()
-            .top_0()
-            .left_0()
-            .size_full();
+        let mut layer = div().absolute().top_0().left_0().size_full();
 
         for column in columns {
             let mode = column_modes
@@ -70,9 +64,7 @@ impl MainDockView {
                 .collect::<Vec<_>>();
             let group_splitters = splitters
                 .iter()
-                .filter(|splitter| {
-                    splitter.owner == column.column && splitter.axis == Axis::Y
-                })
+                .filter(|splitter| splitter.owner == column.column && splitter.axis == Axis::Y)
                 .copied()
                 .collect::<Vec<_>>();
             let overflow = vertical_overflow
@@ -126,9 +118,10 @@ impl MainDockView {
 
         // Axis::X represents vertical dividers between main-dock columns.
         // They are painted after columns so the handles remain visible.
-        for splitter in splitters.iter().filter(|splitter| {
-            splitter.axis == Axis::X && main_node_ids.contains(&splitter.owner)
-        }) {
+        for splitter in splitters
+            .iter()
+            .filter(|splitter| splitter.axis == Axis::X && main_node_ids.contains(&splitter.owner))
+        {
             layer = layer.child(SplitterView::render(
                 *splitter,
                 Point::ZERO,
@@ -143,4 +136,3 @@ impl MainDockView {
         layer
     }
 }
-

@@ -1,20 +1,18 @@
 use std::collections::{HashMap, HashSet};
 
 use dock_core::{
-    DockCommand, FloatingGroupId, Layout, Node, NodeId, PanelId, TabHeaderRect,
-    TabOverflowRect, TabStripRect,
+    DockCommand, FloatingGroupId, Layout, Node, NodeId, PanelId, TabHeaderRect, TabOverflowRect,
+    TabStripRect,
 };
 use gpui::{
     Entity, IntoElement, MouseButton, ParentElement, SharedString, StatefulInteractiveElement,
-    Styled, div, img, px, rgb, prelude::InteractiveElement as _,
+    Styled, div, img, prelude::InteractiveElement as _, px, rgb,
 };
 use ui::Theme;
 
 use crate::{DockController, IconSource, PanelRegistry};
 
-use super::{
-    tab_overflow::TabOverflow,
-};
+use super::tab_overflow::TabOverflow;
 use crate::actions::dispatch_command;
 
 #[derive(Clone)]
@@ -92,11 +90,7 @@ impl TabStripView {
         }
 
         if let Some(overflow) = overflow {
-            strip_root = strip_root.child(TabOverflow::render(
-                strip.rect,
-                overflow,
-                theme,
-            ));
+            strip_root = strip_root.child(TabOverflow::render(strip.rect, overflow, theme));
         }
 
         strip_root
@@ -137,11 +131,7 @@ impl TabHeaderView {
             .text_size(px(theme.typography.tab_size));
 
         if let Some(icon) = icon {
-            title_row = title_row.child(
-                img(icon)
-                    .size(px(14.0))
-                    .flex_none(),
-            );
+            title_row = title_row.child(img(icon).size(px(14.0)).flex_none());
         }
 
         title_row = title_row.child(
@@ -178,11 +168,7 @@ impl TabHeaderView {
                 move |event, _, app| {
                     // Singleton constrains opening multiplicity; it does not prevent closing.
                     if middle_click_closes_tabs && event.is_middle_click() {
-                        dispatch_command(
-                            &controller,
-                            DockCommand::ClosePanel { panel },
-                            app,
-                        );
+                        dispatch_command(&controller, DockCommand::ClosePanel { panel }, app);
                         app.stop_propagation();
                     }
                 }
@@ -212,11 +198,7 @@ impl TabHeaderView {
                     // The close control stops bubbling to avoid starting a tab drag,
                     // so it raises its owning floating composition explicitly.
                     if let Some(group) = raise_floating {
-                        dispatch_command(
-                            &controller,
-                            DockCommand::RaiseFloating { group },
-                            app,
-                        );
+                        dispatch_command(&controller, DockCommand::RaiseFloating { group }, app);
                     }
                     app.stop_propagation();
                 }
@@ -234,8 +216,6 @@ impl TabHeaderView {
         tab.child(close_button)
     }
 }
-
-
 
 /// Builds presentation metadata for Tabs nodes without retaining another tree.
 pub(crate) fn collect_group_presentations(
@@ -275,10 +255,12 @@ pub(crate) fn collect_group_presentations(
             })
             .collect();
 
-        let active_panel = tabs.active_child().and_then(|child| match layout.node(child) {
-            Some(Node::Panel(panel)) => Some(panel.panel_id),
-            _ => None,
-        });
+        let active_panel = tabs
+            .active_child()
+            .and_then(|child| match layout.node(child) {
+                Some(Node::Panel(panel)) => Some(panel.panel_id),
+                _ => None,
+            });
 
         groups.insert(
             *group,
@@ -291,8 +273,6 @@ pub(crate) fn collect_group_presentations(
     }
     groups
 }
-
-
 
 #[cfg(test)]
 mod tests {

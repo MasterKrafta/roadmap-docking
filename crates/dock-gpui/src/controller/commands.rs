@@ -7,10 +7,7 @@ use super::{DockController, DockEvent, PanelCommandError};
 
 impl DockController {
     /// Applies one persistent or transient command through the shared history facade.
-    pub fn dispatch(
-        &mut self,
-        command: DockCommand,
-    ) -> Result<CommandOutcome, CommandError> {
+    pub fn dispatch(&mut self, command: DockCommand) -> Result<CommandOutcome, CommandError> {
         self.dispatch_with_pointer_policy(command, false)
     }
 
@@ -18,10 +15,7 @@ impl DockController {
     ///
     /// Unlike ordinary external dispatch, this command is allowed to advance the
     /// active ResizeInteraction's expected Layout revision.
-    fn dispatch_resize(
-        &mut self,
-        command: DockCommand,
-    ) -> Result<CommandOutcome, CommandError> {
+    fn dispatch_resize(&mut self, command: DockCommand) -> Result<CommandOutcome, CommandError> {
         self.dispatch_with_pointer_policy(command, true)
     }
 
@@ -31,16 +25,14 @@ impl DockController {
         from_resize_pipeline: bool,
     ) -> Result<CommandOutcome, CommandError> {
         let is_resize = is_resize_command(&command);
-        let resize_owns_command =
-            from_resize_pipeline && self.interaction.is_some() && is_resize;
+        let resize_owns_command = from_resize_pipeline && self.interaction.is_some() && is_resize;
         if self.has_active_pointer_interaction()
             && !resize_owns_command
             && let Err(error) = self.cancel_pointer_interaction()
         {
             tracing::warn!(%error, "could not cancel stale dock interaction before command");
         }
-        let resize_owns_command =
-            from_resize_pipeline && self.interaction.is_some() && is_resize;
+        let resize_owns_command = from_resize_pipeline && self.interaction.is_some() && is_resize;
         let resize_hit = if is_resize {
             self.interaction.map(|interaction| interaction.hit)
         } else {
@@ -243,10 +235,7 @@ impl DockController {
         }
     }
 
-    pub fn open_panel(
-        &mut self,
-        key: &PanelKey,
-    ) -> Result<CommandOutcome, PanelCommandError> {
+    pub fn open_panel(&mut self, key: &PanelKey) -> Result<CommandOutcome, PanelCommandError> {
         let constraints = self
             .registry
             .get(key)
@@ -266,18 +255,13 @@ impl DockController {
 
     /// Closes one existing instance of key; otherwise opens a new instance.
     /// Use open_panel directly when a non-singleton panel should be duplicated.
-    pub fn toggle_panel(
-        &mut self,
-        key: &PanelKey,
-    ) -> Result<CommandOutcome, PanelCommandError> {
+    pub fn toggle_panel(&mut self, key: &PanelKey) -> Result<CommandOutcome, PanelCommandError> {
         let existing = self
             .layout
             .panel_instances()
             .find_map(|(id, instance)| (instance.key == *key).then_some(id));
         match existing {
-            Some(panel) => self
-                .close_panel(panel)
-                .map_err(PanelCommandError::Command),
+            Some(panel) => self.close_panel(panel).map_err(PanelCommandError::Command),
             None => self.open_panel(key),
         }
     }
@@ -470,4 +454,3 @@ fn is_resize_command(command: &DockCommand) -> bool {
             | DockCommand::ResetMainColumnRatios { .. }
     )
 }
-

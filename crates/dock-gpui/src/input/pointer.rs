@@ -10,9 +10,9 @@ use gpui::{
 };
 
 use crate::{
-    geometry::host_point_from_gpui_window,
     DockController,
     components::context_menu::{ContextMenuTarget, ContextMenuToggle},
+    geometry::host_point_from_gpui_window,
 };
 
 use super::{
@@ -83,12 +83,8 @@ fn pointer_down_intent_for_hit(hit: HitResult) -> PointerDownIntent {
         HitResult::Splitter { .. }
         | HitResult::FloatingResizeEdge { .. }
         | HitResult::FlyoutResizeEdge { .. } => PointerDownIntent::Resize,
-        HitResult::FlyoutPanel { panel, .. } => {
-            PointerDownIntent::FlyoutPanelCandidate { panel }
-        }
-        HitResult::FloatingTitle { group } => {
-            PointerDownIntent::FloatingTitleCandidate { group }
-        }
+        HitResult::FlyoutPanel { panel, .. } => PointerDownIntent::FlyoutPanelCandidate { panel },
+        HitResult::FloatingTitle { group } => PointerDownIntent::FloatingTitleCandidate { group },
         HitResult::FloatingGroup { group } => PointerDownIntent::RaiseFloating { group },
         HitResult::Panel { panel } => PointerDownIntent::RaiseFloatingForPanel { panel },
         HitResult::Canvas => PointerDownIntent::DismissFlyout,
@@ -387,8 +383,10 @@ pub(crate) fn register_pointer_events(
             }
 
             let capture_needed = controller.update(app, |controller, _| {
-                matches!(controller.drag().session().state(), DragState::Dragging { .. })
-                    || controller.resize_interaction().is_some()
+                matches!(
+                    controller.drag().session().state(),
+                    DragState::Dragging { .. }
+                ) || controller.resize_interaction().is_some()
             });
             if capture_needed && pointer_capture.get().is_none() {
                 window.capture_pointer(root_hitbox);
@@ -413,9 +411,8 @@ pub(crate) fn register_pointer_events(
                 if should_schedule {
                     let controller = controller.clone();
                     window.on_next_frame(move |_, app| {
-                        let point = controller.update(app, |controller, _| {
-                            controller.take_resize_frame_point()
-                        });
+                        let point = controller
+                            .update(app, |controller, _| controller.take_resize_frame_point());
                         if let Some(point) = point {
                             update_resize(&controller, point, app);
                         }
@@ -657,9 +654,7 @@ fn context_menu_target_for_hit(hit: HitResult) -> Option<ContextMenuTarget> {
         HitResult::Group { group } | HitResult::TabStrip { group } => {
             Some(ContextMenuTarget::Group(group))
         }
-        HitResult::TabHeader { group, panel, .. } => {
-            Some(ContextMenuTarget::Tab { group, panel })
-        }
+        HitResult::TabHeader { group, panel, .. } => Some(ContextMenuTarget::Tab { group, panel }),
         HitResult::Column { column } => Some(ContextMenuTarget::Column(column)),
         HitResult::TabOverflowButton { group } => Some(ContextMenuTarget::Overflow(group)),
         _ => None,
@@ -699,10 +694,7 @@ fn ensure_pointer_interaction_current(
     current
 }
 
-fn active_interactions(
-    controller: &Entity<DockController>,
-    app: &mut App,
-) -> (bool, bool, bool) {
+fn active_interactions(controller: &Entity<DockController>, app: &mut App) -> (bool, bool, bool) {
     controller.update(app, |controller, _| {
         let state = controller.drag().session().state();
         (
@@ -779,9 +771,11 @@ fn tab_header_drag_handle_contains(
         let Ok(rects) = controller.geometry().cloned() else {
             return false;
         };
-        let Some(header) = rects.tab_headers.iter().find(|header| {
-            header.group == group && header.panel == panel
-        }) else {
+        let Some(header) = rects
+            .tab_headers
+            .iter()
+            .find(|header| header.group == group && header.panel == panel)
+        else {
             return false;
         };
 
@@ -835,8 +829,7 @@ fn group_grip_contains(
         point.y >= group_rect.rect.origin.y
             && point.y < group_rect.rect.origin.y + header_height
             && point.x >= group_rect.rect.origin.x + reserved_grip_left
-            && point.x
-                < group_rect.rect.origin.x + group_rect.rect.size.width - 2.0 * control_width
+            && point.x < group_rect.rect.origin.x + group_rect.rect.size.width - 2.0 * control_width
     })
 }
 
@@ -872,7 +865,11 @@ fn floating_title_grip_contains(
         let Ok(rects) = controller.geometry() else {
             return false;
         };
-        let Some(floating) = rects.floating_groups.iter().find(|rect| rect.group == group) else {
+        let Some(floating) = rects
+            .floating_groups
+            .iter()
+            .find(|rect| rect.group == group)
+        else {
             return false;
         };
         let header_height = metrics.header_height.min(floating.rect.size.height);
@@ -883,17 +880,14 @@ fn floating_title_grip_contains(
     })
 }
 
-
 #[cfg(test)]
 mod hit_dispatch_tests {
-    use dock_core::{
-        Axis, FloatingGroupId, HitResult, NodeId, PanelId, ResizeEdge,
-    };
+    use dock_core::{Axis, FloatingGroupId, HitResult, NodeId, PanelId, ResizeEdge};
     use slotmap::Key;
 
     use super::{
-        PointerClickIntent, PointerDownIntent, PointerPressTarget,
-        pointer_click_intent_for_hit, pointer_down_intent_for_hit, pointer_press_target_for_hit,
+        PointerClickIntent, PointerDownIntent, PointerPressTarget, pointer_click_intent_for_hit,
+        pointer_down_intent_for_hit, pointer_press_target_for_hit,
     };
 
     #[test]
@@ -902,7 +896,11 @@ mod hit_dispatch_tests {
         let panel = PanelId::null();
 
         assert_eq!(
-            pointer_press_target_for_hit(HitResult::TabHeader { group, panel, index: 0 }),
+            pointer_press_target_for_hit(HitResult::TabHeader {
+                group,
+                panel,
+                index: 0
+            }),
             Some(PointerPressTarget::TabHeader { group, panel })
         );
         assert_eq!(
@@ -913,10 +911,7 @@ mod hit_dispatch_tests {
             pointer_press_target_for_hit(HitResult::TabOverflowButton { group }),
             Some(PointerPressTarget::OverflowButton { group })
         );
-        assert_eq!(
-            pointer_press_target_for_hit(HitResult::Canvas),
-            None
-        );
+        assert_eq!(pointer_press_target_for_hit(HitResult::Canvas), None);
     }
 
     #[test]
@@ -926,7 +921,11 @@ mod hit_dispatch_tests {
         let floating = FloatingGroupId::null();
 
         assert_eq!(
-            pointer_down_intent_for_hit(HitResult::TabHeader { group, panel, index: 0 }),
+            pointer_down_intent_for_hit(HitResult::TabHeader {
+                group,
+                panel,
+                index: 0
+            }),
             PointerDownIntent::TabHeaderCandidate { group, panel }
         );
         assert_eq!(
@@ -1005,14 +1004,22 @@ mod hit_dispatch_tests {
 
         assert_eq!(
             pointer_click_intent_for_hit(
-                HitResult::TabHeader { group, panel, index: 0 },
+                HitResult::TabHeader {
+                    group,
+                    panel,
+                    index: 0
+                },
                 1,
             ),
             PointerClickIntent::ActivateTab { group, panel }
         );
         assert_eq!(
             pointer_click_intent_for_hit(
-                HitResult::TabHeader { group, panel, index: 0 },
+                HitResult::TabHeader {
+                    group,
+                    panel,
+                    index: 0
+                },
                 2,
             ),
             PointerClickIntent::CollapseGroup { group }
@@ -1035,7 +1042,11 @@ mod hit_dispatch_tests {
         );
         assert_eq!(
             pointer_click_intent_for_hit(
-                HitResult::TabHeader { group, panel, index: 0 },
+                HitResult::TabHeader {
+                    group,
+                    panel,
+                    index: 0
+                },
                 3,
             ),
             PointerClickIntent::None

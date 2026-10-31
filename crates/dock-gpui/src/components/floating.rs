@@ -1,26 +1,22 @@
 use std::collections::{HashMap, HashSet};
 
 use dock_core::{
-    ColumnDisplayItem, ColumnMode, ColumnRect, DockCommand, DockMetrics, DragPreview,
-    DropZoneRect, FloatingGroupRect, FloatingResizeEdgeRect, FlyoutState, GroupRect, NodeId,
-    PanelId, PanelRect, Point, ResizeEdge, SplitterRect, TabHeaderRect, TabOverflowRect,
-    TabStripRect, VerticalOverflow,
+    ColumnDisplayItem, ColumnMode, ColumnRect, DockCommand, DockMetrics, DragPreview, DropZoneRect,
+    FloatingGroupRect, FloatingResizeEdgeRect, FlyoutState, GroupRect, NodeId, PanelId, PanelRect,
+    Point, ResizeEdge, SplitterRect, TabHeaderRect, TabOverflowRect, TabStripRect,
+    VerticalOverflow,
 };
 use gpui::{
     AnyView, Entity, IntoElement, ParentElement, ScrollHandle, StatefulInteractiveElement, Styled,
-    div, px, rgb, prelude::InteractiveElement as _,
+    div, prelude::InteractiveElement as _, px, rgb,
 };
 use ui::Theme;
 
 use crate::{DockController, actions::dispatch_command};
 
 use super::{
-    column::ColumnView,
-    context_menu::GroupMenuToggle,
-    group::GroupView,
-    panel_host::PanelHost,
-    splitter::SplitterView,
-    tab_strip::GroupPresentation,
+    column::ColumnView, context_menu::GroupMenuToggle, group::GroupView, panel_host::PanelHost,
+    splitter::SplitterView, tab_strip::GroupPresentation,
 };
 
 /// A floating composition rendered inside the DockHost's workspace.
@@ -84,8 +80,7 @@ impl FloatingWindowView {
             .bg(rgb(theme.colors.panel_surface_background))
             .border_1()
             .border_color(rgb(theme.colors.group_frame_border))
-            .shadow_lg()
-;
+            .shadow_lg();
 
         // Each Column remains a normal Core subtree. Its groups, tab strips,
         // panel views and internal vertical splitters use the same components
@@ -205,8 +200,7 @@ impl FloatingWindowView {
         // child surfaces. Column-owned Y splitters were already rendered by
         // ColumnView, where their scroll offset is available.
         for splitter in splitters.iter().filter(|splitter| {
-            !(splitter.axis == dock_core::Axis::Y
-                && column_groups.contains_key(&splitter.owner))
+            !(splitter.axis == dock_core::Axis::Y && column_groups.contains_key(&splitter.owner))
         }) {
             root = root.child(SplitterView::render(
                 *splitter,
@@ -232,8 +226,7 @@ impl FloatingWindowView {
                 // band. Keep its content below the floating title bar.
                 let title_bottom = origin.y + metrics.header_height.min(floating.rect.size.height);
                 if panel.rect.origin.y < title_bottom {
-                    let clipped = (title_bottom - panel.rect.origin.y)
-                        .min(panel.rect.size.height);
+                    let clipped = (title_bottom - panel.rect.origin.y).min(panel.rect.size.height);
                     panel.rect.origin.y += clipped;
                     panel.rect.size.height -= clipped;
                     if panel.rect.size.height <= 0.0 {
@@ -271,8 +264,7 @@ impl FloatingWindowView {
                     .whitespace_nowrap()
                     .text_ellipsis()
                     .child(title.to_owned()),
-            )
-;
+            );
 
         let close_button = div()
             .id(format!("floating-close-{:?}", floating.group))
@@ -322,15 +314,20 @@ impl FloatingWindowView {
 
         // Core emits the eight authoritative hit rectangles. The adapter only
         // translates them into the floating window's local coordinate space.
-        for resize in resize_edges.iter().filter(|edge| edge.group == floating.group) {
+        for resize in resize_edges
+            .iter()
+            .filter(|edge| edge.group == floating.group)
+        {
             let mut handle = div()
-                .id(format!("floating-resize-{:?}-{:?}", floating.group, resize.edge))
+                .id(format!(
+                    "floating-resize-{:?}-{:?}",
+                    floating.group, resize.edge
+                ))
                 .absolute()
                 .left(px(resize.rect.origin.x - origin.x))
                 .top(px(resize.rect.origin.y - origin.y))
                 .w(px(resize.rect.size.width))
-                .h(px(resize.rect.size.height))
-;
+                .h(px(resize.rect.size.height));
 
             handle = match resize.edge {
                 ResizeEdge::Left | ResizeEdge::Right => handle.cursor_col_resize(),
@@ -344,4 +341,3 @@ impl FloatingWindowView {
         root
     }
 }
-

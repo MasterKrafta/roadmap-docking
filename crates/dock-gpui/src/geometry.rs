@@ -37,9 +37,7 @@ mod tests {
     use dock_core::{GeometryError, Point, Rect, Size};
     use gpui::{Bounds, Point as GpuiPoint, Size as GpuiSize, px};
 
-    use super::{
-        host_geometry_from_gpui_bounds, host_point_from_gpui_window, point_from_gpui,
-    };
+    use super::{host_geometry_from_gpui_bounds, host_point_from_gpui_window, point_from_gpui};
 
     #[test]
     fn gpui_point_converts_to_logical_core_pixels_once() {

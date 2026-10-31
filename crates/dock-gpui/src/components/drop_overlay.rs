@@ -5,8 +5,8 @@ use dock_core::{
     FloatingGroupRect, GroupRect, Point, Rect, TabHeaderRect, TabStripRect,
 };
 use gpui::{
-    IntoElement, ParentElement, SharedString, Styled, div, img, px, rgb,
-    prelude::InteractiveElement as _,
+    IntoElement, ParentElement, SharedString, Styled, div, img, prelude::InteractiveElement as _,
+    px, rgb,
 };
 use ui::Theme;
 
@@ -53,31 +53,18 @@ impl DropOverlay {
                     if let Some(group) = target_group(target)
                         .and_then(|id| groups.iter().find(|group| group.group == id))
                     {
-                        layer = layer.child(highlight_rect(
-                            group.rect,
-                            theme,
-                            0.12,
-                            true,
-                        ));
+                        layer = layer.child(highlight_rect(group.rect, theme, 0.12, true));
                     }
                 }
                 DropZone::TabInsertion => {
                     if let Some(group) = target_group(target)
                         .and_then(|id| groups.iter().find(|group| group.group == id))
                     {
-                        layer = layer.child(highlight_rect(
-                            group.rect,
-                            theme,
-                            0.06,
-                            true,
-                        ));
+                        layer = layer.child(highlight_rect(group.rect, theme, 0.06, true));
                     }
-                    if let Some(line) = tab_insertion_rect(
-                        target,
-                        zone.rect,
-                        tab_headers,
-                        tab_strips,
-                    ) {
+                    if let Some(line) =
+                        tab_insertion_rect(target, zone.rect, tab_headers, tab_strips)
+                    {
                         layer = layer.child(guide_rect(line, theme));
                     }
                 }
@@ -113,31 +100,13 @@ impl DropOverlay {
                     }
                 }
                 DropZone::FloatingCenter => {
-                    if let Some(floating) = floating_for_target(
-                        target,
-                        groups,
-                        floating_groups,
-                    ) {
-                        layer = layer.child(highlight_rect(
-                            floating.rect,
-                            theme,
-                            0.20,
-                            true,
-                        ));
+                    if let Some(floating) = floating_for_target(target, groups, floating_groups) {
+                        layer = layer.child(highlight_rect(floating.rect, theme, 0.20, true));
                     }
                 }
                 DropZone::FloatingTop | DropZone::FloatingBottom => {
-                    if let Some(floating) = floating_for_target(
-                        target,
-                        groups,
-                        floating_groups,
-                    ) {
-                        layer = layer.child(highlight_rect(
-                            floating.rect,
-                            theme,
-                            0.08,
-                            true,
-                        ));
+                    if let Some(floating) = floating_for_target(target, groups, floating_groups) {
+                        layer = layer.child(highlight_rect(floating.rect, theme, 0.08, true));
                     }
                     layer = layer.child(highlight_rect(zone.rect, theme, 0.36, false));
                 }
@@ -249,28 +218,19 @@ fn ghost_presentation(
     payload: DragPayload,
     presentations: &HashMap<dock_core::NodeId, GroupPresentation>,
     floating_titles: &HashMap<FloatingGroupId, String>,
-) -> (SharedString, Option<SharedString>, Option<SharedString>, bool) {
+) -> (
+    SharedString,
+    Option<SharedString>,
+    Option<SharedString>,
+    bool,
+) {
     match payload {
         DragPayload::Panel { panel } => {
             let tab = presentations
                 .values()
                 .find_map(|group| group.tabs.iter().find(|tab| tab.panel == panel));
-            tab.map(|tab| {
-                (
-                    tab.title.clone(),
-                    tab.icon.clone(),
-                    None,
-                    false,
-                )
-            })
-            .unwrap_or_else(|| {
-                (
-                    SharedString::from("Panel"),
-                    None,
-                    None,
-                    false,
-                )
-            })
+            tab.map(|tab| (tab.title.clone(), tab.icon.clone(), None, false))
+                .unwrap_or_else(|| (SharedString::from("Panel"), None, None, false))
         }
         DragPayload::Group { group } => {
             let presentation = presentations.get(&group);
@@ -401,10 +361,7 @@ fn tab_insertion_rect(
     ))
 }
 
-fn rail_insertion_rect(
-    zone: &DropZoneRect,
-    headers: &[TabHeaderRect],
-) -> Option<Rect> {
+fn rail_insertion_rect(zone: &DropZoneRect, headers: &[TabHeaderRect]) -> Option<Rect> {
     let DropTarget::RailSlot { .. } = zone.target else {
         return None;
     };
@@ -415,26 +372,23 @@ fn rail_insertion_rect(
             && zone.rect.origin.y >= header.rect.origin.y
             && zone_bottom <= header_bottom
     });
-    let y = matching.map(|header| {
-        let header_middle = header.rect.origin.y + header.rect.size.height * 0.5;
-        if zone.rect.origin.y < header_middle {
-            header.rect.origin.y
-        } else {
-            header.rect.origin.y + header.rect.size.height
-        }
-    }).unwrap_or(zone.rect.origin.y + zone.rect.size.height * 0.5);
+    let y = matching
+        .map(|header| {
+            let header_middle = header.rect.origin.y + header.rect.size.height * 0.5;
+            if zone.rect.origin.y < header_middle {
+                header.rect.origin.y
+            } else {
+                header.rect.origin.y + header.rect.size.height
+            }
+        })
+        .unwrap_or(zone.rect.origin.y + zone.rect.size.height * 0.5);
     Some(Rect::new(
         Point::new(zone.rect.origin.x, y - 1.5),
         dock_core::Size::new(zone.rect.size.width, 3.0),
     ))
 }
 
-fn highlight_rect(
-    rect: Rect,
-    theme: Theme,
-    opacity: f32,
-    border: bool,
-) -> impl IntoElement {
+fn highlight_rect(rect: Rect, theme: Theme, opacity: f32, border: bool) -> impl IntoElement {
     let mut element = div()
         .absolute()
         .left(px(rect.origin.x))
@@ -480,5 +434,4 @@ mod tests {
             Rect::new(Point::new(10.0, 70.0), Size::new(200.0, 50.0))
         );
     }
-
 }

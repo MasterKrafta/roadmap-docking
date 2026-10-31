@@ -8,22 +8,21 @@ use dock_core::{
 };
 use gpui::{
     AnyView, App, Context, Entity, FocusHandle, HitboxBehavior, HitboxId, IntoElement,
-    ParentElement, Render, ScrollHandle,
-    Styled, Window, canvas, div, px, rgb,
-    prelude::InteractiveElement as _,
+    ParentElement, Render, ScrollHandle, Styled, Window, canvas, div,
+    prelude::InteractiveElement as _, px, rgb,
 };
 
 use crate::{
-    geometry::{point_from_gpui, host_geometry_from_gpui_bounds},
     DockController, DockTheme,
     components::{
         CanvasSlot, ContextMenu, ContextMenuEntry, ContextMenuItem, ContextMenuTarget,
         ContextMenuToggle, DragGhost, DropOverlay, FloatingWindowView, FlyoutView, MainDockView,
         collect_group_presentations,
     },
+    geometry::{host_geometry_from_gpui_bounds, point_from_gpui},
     input::{
-        floating_bounds, map_hit_test_point, register_pointer_events, resize_preview_for_interaction,
-        PointerPress, ResizePreview, ResizePreviewKind, scroll_adjusted_hit_test_point,
+        PointerPress, ResizePreview, ResizePreviewKind, floating_bounds, map_hit_test_point,
+        register_pointer_events, resize_preview_for_interaction, scroll_adjusted_hit_test_point,
     },
 };
 
@@ -149,11 +148,7 @@ impl DockHost {
 
     /// Hit-tests a pointer position after translating it out of a scrolled
     /// main-column viewport and back into the immutable Core coordinate space.
-    pub fn hit_test(
-        &self,
-        point: Point,
-        app: &mut App,
-    ) -> Result<HitResult, ComputeRectsError> {
+    pub fn hit_test(&self, point: Point, app: &mut App) -> Result<HitResult, ComputeRectsError> {
         let content_point = self.controller.update(app, |controller, _| {
             let floating_title_height = controller.metrics().header_height;
             let rects = controller.geometry()?;
@@ -243,149 +238,147 @@ impl Render for DockHost {
             resize_preview,
             metrics,
         ) = self.controller.update(cx, |controller, _| {
-                let rects = controller.geometry().cloned();
-                let layout = controller.layout();
-                let chrome = layout.chrome();
-                let mut main_node_ids = HashSet::new();
-                let mut main_column_ids = HashSet::new();
-                let mut main_column_groups = HashMap::new();
+            let rects = controller.geometry().cloned();
+            let layout = controller.layout();
+            let chrome = layout.chrome();
+            let mut main_node_ids = HashSet::new();
+            let mut main_column_ids = HashSet::new();
+            let mut main_column_groups = HashMap::new();
 
-                for side in [DockSide::Left, DockSide::Right] {
-                    if let Some(area) = layout.main_area(side) {
-                        collect_main_nodes(
-                            layout,
-                            area.root,
-                            &mut main_node_ids,
-                            &mut main_column_ids,
-                            &mut main_column_groups,
-                        );
-                    }
+            for side in [DockSide::Left, DockSide::Right] {
+                if let Some(area) = layout.main_area(side) {
+                    collect_main_nodes(
+                        layout,
+                        area.root,
+                        &mut main_node_ids,
+                        &mut main_column_ids,
+                        &mut main_column_groups,
+                    );
                 }
+            }
 
-                // Collect each floating root independently. The maps contain
-                // IDs only; Layout remains the single owner of every tree.
-                let mut floating_node_ids = HashMap::new();
-                let mut floating_column_ids = HashMap::new();
-                let mut floating_column_groups = HashMap::new();
-                let mut floating_panel_ids = HashMap::new();
-                let mut all_node_ids = main_node_ids.clone();
-                let mut all_column_ids = main_column_ids.clone();
+            // Collect each floating root independently. The maps contain
+            // IDs only; Layout remains the single owner of every tree.
+            let mut floating_node_ids = HashMap::new();
+            let mut floating_column_ids = HashMap::new();
+            let mut floating_column_groups = HashMap::new();
+            let mut floating_panel_ids = HashMap::new();
+            let mut all_node_ids = main_node_ids.clone();
+            let mut all_column_ids = main_column_ids.clone();
 
-                if let Ok(rects) = &rects {
-                    for floating_rect in &rects.floating_groups {
-                        let Some(floating) = layout.floating_group(floating_rect.group) else {
-                            continue;
-                        };
-                        let Some(area) = layout.dock_area(floating.area) else {
-                            continue;
-                        };
+            if let Ok(rects) = &rects {
+                for floating_rect in &rects.floating_groups {
+                    let Some(floating) = layout.floating_group(floating_rect.group) else {
+                        continue;
+                    };
+                    let Some(area) = layout.dock_area(floating.area) else {
+                        continue;
+                    };
 
-                        let mut nodes = HashSet::new();
-                        let mut columns = HashSet::new();
-                        let mut column_groups = HashMap::new();
-                        collect_main_nodes(
-                            layout,
-                            area.root,
-                            &mut nodes,
-                            &mut columns,
-                            &mut column_groups,
-                        );
-                        let mut panels = HashSet::new();
-                        collect_panel_ids(layout, area.root, &mut panels);
+                    let mut nodes = HashSet::new();
+                    let mut columns = HashSet::new();
+                    let mut column_groups = HashMap::new();
+                    collect_main_nodes(
+                        layout,
+                        area.root,
+                        &mut nodes,
+                        &mut columns,
+                        &mut column_groups,
+                    );
+                    let mut panels = HashSet::new();
+                    collect_panel_ids(layout, area.root, &mut panels);
 
-                        all_node_ids.extend(nodes.iter().copied());
-                        all_column_ids.extend(columns.iter().copied());
-                        floating_node_ids.insert(floating_rect.group, nodes);
-                        floating_column_ids.insert(floating_rect.group, columns);
-                        floating_column_groups.insert(floating_rect.group, column_groups);
-                        floating_panel_ids.insert(floating_rect.group, panels);
-                    }
+                    all_node_ids.extend(nodes.iter().copied());
+                    all_column_ids.extend(columns.iter().copied());
+                    floating_node_ids.insert(floating_rect.group, nodes);
+                    floating_column_ids.insert(floating_rect.group, columns);
+                    floating_column_groups.insert(floating_rect.group, column_groups);
+                    floating_panel_ids.insert(floating_rect.group, panels);
                 }
+            }
 
-                let column_modes = all_column_ids
-                    .iter()
-                    .filter_map(|id| match layout.node(*id) {
-                        Some(Node::Column(column)) => Some((*id, column.mode)),
-                        _ => None,
-                    })
-                    .collect::<HashMap<_, _>>();
-                let group_presentations =
-                    collect_group_presentations(layout, controller.registry(), &all_node_ids);
-                let rail_display_orders = column_modes
-                    .iter()
-                    .filter(|(_, mode)| mode.is_rail())
-                    .filter_map(|(column, _)| {
-                        layout
-                            .column_display_order(*column)
-                            .ok()
-                            .map(|order| (*column, order))
-                    })
-                    .collect::<HashMap<NodeId, Vec<ColumnDisplayItem>>>();
+            let column_modes = all_column_ids
+                .iter()
+                .filter_map(|id| match layout.node(*id) {
+                    Some(Node::Column(column)) => Some((*id, column.mode)),
+                    _ => None,
+                })
+                .collect::<HashMap<_, _>>();
+            let group_presentations =
+                collect_group_presentations(layout, controller.registry(), &all_node_ids);
+            let rail_display_orders = column_modes
+                .iter()
+                .filter(|(_, mode)| mode.is_rail())
+                .filter_map(|(column, _)| {
+                    layout
+                        .column_display_order(*column)
+                        .ok()
+                        .map(|order| (*column, order))
+                })
+                .collect::<HashMap<NodeId, Vec<ColumnDisplayItem>>>();
 
-                let floating_titles = floating_node_ids
-                    .keys()
-                    .filter_map(|floating_id| {
-                        let floating = layout.floating_group(*floating_id)?;
-                        let area = layout.dock_area(floating.area)?;
-                        let title = floating_root_title(
-                            layout,
-                            area.root,
-                            &group_presentations,
-                            controller.registry(),
-                        )
-                        .unwrap_or_else(|| "Floating panels".to_string());
-                        Some((*floating_id, title))
-                    })
-                    .collect::<HashMap<_, _>>();
-                let active_flyout = layout.flyout();
-                let drag_preview = controller.drag().session().preview();
-                let drag_handle = controller.drag().session().handle();
-                let resolver = controller.drag().resolver();
-                let drag_zones = resolver
-                    .map(|resolver| resolver.zones().to_vec())
-                    .unwrap_or_default();
-                let active_drop_zone = drag_preview.and_then(|preview| {
-                    let zone = resolver?
-                        .resolve_zone(preview.point)
-                        .ok()?
-                        .filter(|zone| preview.target == Some(zone.target))?;
-                    Some(zone)
-                });
-                let free_area_preview_bounds = drag_preview
-                    .filter(|preview| preview.target == Some(DropTarget::FreeArea))
-                    .and_then(|preview| {
-                        floating_bounds(controller, preview.payload, preview.point)
-                    });
-                let resize_preview = controller
-                    .resize_interaction()
-                    .and_then(resize_preview_for_interaction);
-                let metrics = controller.metrics();
-
-                (
-                    chrome,
-                    rects,
-                    main_node_ids,
-                    main_column_ids,
-                    main_column_groups,
-                    floating_node_ids,
-                    floating_column_ids,
-                    floating_column_groups,
-                    floating_panel_ids,
-                    floating_titles,
-                    all_column_ids,
-                    column_modes,
-                    group_presentations,
-                    rail_display_orders,
-                    active_flyout,
-                    drag_preview,
-                    drag_handle,
-                    drag_zones,
-                    active_drop_zone,
-                    free_area_preview_bounds,
-                    resize_preview,
-                    metrics,
-                )
+            let floating_titles = floating_node_ids
+                .keys()
+                .filter_map(|floating_id| {
+                    let floating = layout.floating_group(*floating_id)?;
+                    let area = layout.dock_area(floating.area)?;
+                    let title = floating_root_title(
+                        layout,
+                        area.root,
+                        &group_presentations,
+                        controller.registry(),
+                    )
+                    .unwrap_or_else(|| "Floating panels".to_string());
+                    Some((*floating_id, title))
+                })
+                .collect::<HashMap<_, _>>();
+            let active_flyout = layout.flyout();
+            let drag_preview = controller.drag().session().preview();
+            let drag_handle = controller.drag().session().handle();
+            let resolver = controller.drag().resolver();
+            let drag_zones = resolver
+                .map(|resolver| resolver.zones().to_vec())
+                .unwrap_or_default();
+            let active_drop_zone = drag_preview.and_then(|preview| {
+                let zone = resolver?
+                    .resolve_zone(preview.point)
+                    .ok()?
+                    .filter(|zone| preview.target == Some(zone.target))?;
+                Some(zone)
             });
+            let free_area_preview_bounds = drag_preview
+                .filter(|preview| preview.target == Some(DropTarget::FreeArea))
+                .and_then(|preview| floating_bounds(controller, preview.payload, preview.point));
+            let resize_preview = controller
+                .resize_interaction()
+                .and_then(resize_preview_for_interaction);
+            let metrics = controller.metrics();
+
+            (
+                chrome,
+                rects,
+                main_node_ids,
+                main_column_ids,
+                main_column_groups,
+                floating_node_ids,
+                floating_column_ids,
+                floating_column_groups,
+                floating_panel_ids,
+                floating_titles,
+                all_column_ids,
+                column_modes,
+                group_presentations,
+                rail_display_orders,
+                active_flyout,
+                drag_preview,
+                drag_handle,
+                drag_zones,
+                active_drop_zone,
+                free_area_preview_bounds,
+                resize_preview,
+                metrics,
+            )
+        });
         let rects = match rects {
             Ok(rects) => Some(rects),
             Err(error) => {
@@ -432,20 +425,21 @@ impl Render for DockHost {
             .filter(|(panel, _)| main_active_panels.contains(&panel.panel))
             .cloned()
             .collect::<Vec<_>>();
-        let flyout_panel_view = rects
-            .as_ref()
-            .and_then(|rects| rects.flyout)
-            .and_then(|flyout_rect| {
-                active_flyout
-                    .filter(|flyout| flyout.panel == flyout_rect.panel)
-                    .and_then(|flyout| {
-                        self.controller.update(cx, |controller, panel_cx| {
-                            controller
-                                .panel_view(flyout.panel, window, panel_cx)
-                                .map(|view| (flyout, view))
+        let flyout_panel_view =
+            rects
+                .as_ref()
+                .and_then(|rects| rects.flyout)
+                .and_then(|flyout_rect| {
+                    active_flyout
+                        .filter(|flyout| flyout.panel == flyout_rect.panel)
+                        .and_then(|flyout| {
+                            self.controller.update(cx, |controller, panel_cx| {
+                                controller
+                                    .panel_view(flyout.panel, window, panel_cx)
+                                    .map(|view| (flyout, view))
+                            })
                         })
-                    })
-            });
+                });
 
         // Keep scroll state only while its Column node still owns an overflow
         // region. Removing/replacing the Core node or resolving the overflow
@@ -461,9 +455,7 @@ impl Render for DockHost {
                 all_column_ids.contains(owner) && overflow_columns.contains(owner)
             });
             for owner in overflow_columns {
-                self.column_scroll_handles
-                    .entry(owner)
-                    .or_default();
+                self.column_scroll_handles.entry(owner).or_default();
             }
         }
 
@@ -479,27 +471,26 @@ impl Render for DockHost {
         }
 
         let menu_host_entity = cx.entity().downgrade();
-        let toggle_context_menu: ContextMenuToggle =
-            Rc::new(move |target, anchor, app| {
-                if let Some(host) = menu_host_entity.upgrade() {
-                    host.update(app, |host, host_cx| {
-                        host.open_context_menu = if host
-                            .open_context_menu
-                            .as_ref()
-                            .is_some_and(|open| open.target == target)
-                        {
-                            None
-                        } else {
-                            Some(OpenContextMenu {
-                                target,
-                                anchor,
-                                open_submenu: None,
-                            })
-                        };
-                        host_cx.notify();
-                    });
-                }
-            });
+        let toggle_context_menu: ContextMenuToggle = Rc::new(move |target, anchor, app| {
+            if let Some(host) = menu_host_entity.upgrade() {
+                host.update(app, |host, host_cx| {
+                    host.open_context_menu = if host
+                        .open_context_menu
+                        .as_ref()
+                        .is_some_and(|open| open.target == target)
+                    {
+                        None
+                    } else {
+                        Some(OpenContextMenu {
+                            target,
+                            anchor,
+                            open_submenu: None,
+                        })
+                    };
+                    host_cx.notify();
+                });
+            }
+        });
 
         let dismiss_host_entity = cx.entity().downgrade();
         let dismiss_context_menu: Rc<dyn Fn(&mut App)> = Rc::new(move |app| {
@@ -525,10 +516,12 @@ impl Render for DockHost {
             });
 
         let open_context_menu = self.open_context_menu.clone();
-        let menu_group = open_context_menu.as_ref().and_then(|open| match open.target {
-            ContextMenuTarget::Group(group) => Some(group),
-            _ => None,
-        });
+        let menu_group = open_context_menu
+            .as_ref()
+            .and_then(|open| match open.target {
+                ContextMenuTarget::Group(group) => Some(group),
+                _ => None,
+            });
         let context_menu_entries = open_context_menu
             .as_ref()
             .and_then(|open| {
@@ -564,14 +557,13 @@ impl Render for DockHost {
         let pointer_press_for_events = self.pointer_press.clone();
         let measurement = canvas(
             move |bounds, window, app| {
-                let (viewport, window_origin) =
-                    match host_geometry_from_gpui_bounds(bounds) {
-                        Ok(geometry) => geometry,
-                        Err(error) => {
-                            tracing::debug!(%error, "dock host rejected invalid GPUI bounds");
-                            return None;
-                        }
-                    };
+                let (viewport, window_origin) = match host_geometry_from_gpui_bounds(bounds) {
+                    Ok(geometry) => geometry,
+                    Err(error) => {
+                        tracing::debug!(%error, "dock host rejected invalid GPUI bounds");
+                        return None;
+                    }
+                };
 
                 controller_for_measurement.update(app, |controller, controller_cx| {
                     match controller.set_viewport(viewport) {
@@ -669,11 +661,12 @@ impl Render for DockHost {
         // The current semantic target controls the cursor. A floating-title drag
         // intentionally has no drop target but is still a valid move gesture.
         if let Some(preview) = drag_preview {
-            workspace = if preview.target.is_some() || drag_handle == Some(DragHandle::FloatingTitle) {
-                workspace.cursor_grabbing()
-            } else {
-                workspace.cursor_not_allowed()
-            };
+            workspace =
+                if preview.target.is_some() || drag_handle == Some(DragHandle::FloatingTitle) {
+                    workspace.cursor_grabbing()
+                } else {
+                    workspace.cursor_not_allowed()
+                };
         }
 
         // Escape first cancels an active pointer gesture. A flyout is dismissed
@@ -684,21 +677,20 @@ impl Render for DockHost {
             let pointer_capture_for_escape = self.pointer_capture.clone();
             let pointer_press_for_escape = self.pointer_press.clone();
             workspace = workspace.capture_key_down(move |event, window, app| {
-                if context_menu_is_open
-                    || !event.keystroke.key.eq_ignore_ascii_case("escape")
-                {
+                if context_menu_is_open || !event.keystroke.key.eq_ignore_ascii_case("escape") {
                     return;
                 }
 
                 let had_pointer_state = pointer_capture_for_escape.get().is_some()
                     || pointer_press_for_escape.get().is_some();
                 pointer_press_for_escape.set(None);
-                let (pointer_active, flyout_open) = controller_for_escape.update(app, |controller, _| {
-                    (
-                        controller.has_active_pointer_interaction(),
-                        controller.layout().flyout().is_some(),
-                    )
-                });
+                let (pointer_active, flyout_open) =
+                    controller_for_escape.update(app, |controller, _| {
+                        (
+                            controller.has_active_pointer_interaction(),
+                            controller.layout().flyout().is_some(),
+                        )
+                    });
 
                 let cancel_pointer = pointer_active || pointer_capture_for_escape.get().is_some();
                 if cancel_pointer {
@@ -714,10 +706,7 @@ impl Render for DockHost {
                     pointer_capture_for_escape.set(None);
                 } else if flyout_open {
                     let result = controller_for_escape.update(app, |controller, controller_cx| {
-                        controller.dispatch_transient_in(
-                            DockCommand::DismissFlyout,
-                            controller_cx,
-                        )
+                        controller.dispatch_transient_in(DockCommand::DismissFlyout, controller_cx)
                     });
                     if let Err(error) = result {
                         tracing::debug!(%error, "could not dismiss flyout with Escape");
@@ -786,9 +775,7 @@ impl Render for DockHost {
                             .map(|tab| tab.title.clone())
                     })
                     .unwrap_or_else(|| "Panel".into());
-                let panel_view = flyout_panel_view
-                    .as_ref()
-                    .map(|(_, view)| view.clone());
+                let panel_view = flyout_panel_view.as_ref().map(|(_, view)| view.clone());
                 workspace = workspace.child(FlyoutView::render(
                     flyout,
                     title,
@@ -969,9 +956,9 @@ fn render_resize_preview(preview: ResizePreview, theme: DockTheme) -> impl IntoE
         .h(px(rect.size.height));
 
     marker = match preview.kind {
-        ResizePreviewKind::SplitterLine => marker
-            .bg(rgb(theme.colors.drop_zone_border))
-            .opacity(0.96),
+        ResizePreviewKind::SplitterLine => {
+            marker.bg(rgb(theme.colors.drop_zone_border)).opacity(0.96)
+        }
         ResizePreviewKind::BoundsOutline => marker
             .bg(rgb(theme.colors.drop_zone))
             .opacity(0.14)
@@ -994,9 +981,10 @@ fn context_menu_target_exists(
             .is_some_and(|presentation| presentation.tabs.iter().any(|tab| tab.panel == panel)),
         ContextMenuTarget::Column(column) => columns.contains(&column),
         ContextMenuTarget::Overflow(group) => rects.is_some_and(|rects| {
-            rects.tab_overflows.iter().any(|overflow| {
-                overflow.group == group && !overflow.hidden_tabs.is_empty()
-            })
+            rects
+                .tab_overflows
+                .iter()
+                .any(|overflow| overflow.group == group && !overflow.hidden_tabs.is_empty())
         }),
     }
 }
@@ -1041,7 +1029,11 @@ fn build_context_menu_entries(
             }
             entries.push(ContextMenuEntry::separator());
             entries.push(command_menu_item(
-                if presentation.collapsed { "Развернуть" } else { "Свернуть" },
+                if presentation.collapsed {
+                    "Развернуть"
+                } else {
+                    "Свернуть"
+                },
                 DockCommand::CollapseGroup {
                     group: group_id,
                     collapsed: !presentation.collapsed,
@@ -1067,19 +1059,16 @@ fn build_context_menu_entries(
                 return Vec::new();
             };
             vec![
-                ContextMenuItem::new(
-                    format!("Активировать «{}»", tab.title),
-                    {
-                        let controller = controller.clone();
-                        move |app| {
-                            crate::actions::dispatch_command(
-                                &controller,
-                                DockCommand::ActivateTab { group, panel },
-                                app,
-                            );
-                        }
-                    },
-                )
+                ContextMenuItem::new(format!("Активировать «{}»", tab.title), {
+                    let controller = controller.clone();
+                    move |app| {
+                        crate::actions::dispatch_command(
+                            &controller,
+                            DockCommand::ActivateTab { group, panel },
+                            app,
+                        );
+                    }
+                })
                 .selected(presentation.active_panel == Some(panel))
                 .into(),
                 ContextMenuEntry::separator(),
@@ -1201,12 +1190,14 @@ fn floating_root_title(
     registry: &crate::PanelRegistry,
 ) -> Option<String> {
     match layout.node(root)? {
-        Node::Split(split) => split.children.iter().find_map(|child| {
-            floating_root_title(layout, *child, presentations, registry)
-        }),
-        Node::Column(column) => column.groups.iter().find_map(|group| {
-            floating_root_title(layout, *group, presentations, registry)
-        }),
+        Node::Split(split) => split
+            .children
+            .iter()
+            .find_map(|child| floating_root_title(layout, *child, presentations, registry)),
+        Node::Column(column) => column
+            .groups
+            .iter()
+            .find_map(|group| floating_root_title(layout, *group, presentations, registry)),
         Node::Tabs(_) => {
             let presentation = presentations.get(&root)?;
             let active_panel = presentation.active_panel?;

@@ -2,9 +2,8 @@ use std::time::Duration;
 
 use dock_core::{DockCommand, FlyoutRect, ResizeEdge};
 use gpui::{
-    Animation, AnimationExt, AnyView, App, Entity, IntoElement, ParentElement,
-    SharedString, StatefulInteractiveElement, Styled, div, px, rgb,
-    prelude::InteractiveElement as _,
+    Animation, AnimationExt, AnyView, App, Entity, IntoElement, ParentElement, SharedString,
+    StatefulInteractiveElement, Styled, div, prelude::InteractiveElement as _, px, rgb,
 };
 use ui::Theme;
 
@@ -50,8 +49,7 @@ impl FlyoutView {
                     .whitespace_nowrap()
                     .text_ellipsis()
                     .child(title),
-            )
-;
+            );
 
         let close_button = div()
             .id(format!("flyout-close-{:?}", flyout.panel))
@@ -137,7 +135,6 @@ impl FlyoutView {
                 .w(px(hit_width))
                 .h_full()
                 .cursor_col_resize()
-
                 .child(
                     div()
                         .absolute()
@@ -162,18 +159,12 @@ impl FlyoutView {
         surface.with_animation(
             format!("flyout-enter-{:?}", flyout.panel),
             Animation::new(Duration::from_millis(180)),
-            move |element, progress| {
-                element.left(px(origin_x + travel * (1.0 - progress)))
-            },
+            move |element, progress| element.left(px(origin_x + travel * (1.0 - progress))),
         )
     }
 }
 
-fn dispatch_transient(
-    controller: &Entity<DockController>,
-    command: DockCommand,
-    app: &mut App,
-) {
+fn dispatch_transient(controller: &Entity<DockController>, command: DockCommand, app: &mut App) {
     controller.update(app, |controller, cx| {
         if let Err(error) = controller.dispatch_transient_in(command, cx) {
             tracing::debug!(%error, "flyout transient command was rejected");

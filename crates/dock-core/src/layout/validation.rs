@@ -867,9 +867,11 @@ impl Layout {
                 Node::Tabs(_) => continue,
                 Node::Split(split) if split.axis == Axis::Y => continue,
                 Node::Column(column) => {
-                    if column.groups.iter().any(|child| {
-                        !matches!(self.nodes.get(*child), Some(Node::Tabs(_)))
-                    }) {
+                    if column
+                        .groups
+                        .iter()
+                        .any(|child| !matches!(self.nodes.get(*child), Some(Node::Tabs(_))))
+                    {
                         return Err(vec![ValidationError::InvalidFloatingRoot {
                             group: group_id,
                             root,
@@ -924,9 +926,7 @@ impl Layout {
                                 }]);
                             }
                             groups.push(tab_group);
-                            weights.push(
-                                column_ratios[column_index] * group_ratios[group_index],
-                            );
+                            weights.push(column_ratios[column_index] * group_ratios[group_index]);
                         }
                         wrappers.push(column_id);
                     }

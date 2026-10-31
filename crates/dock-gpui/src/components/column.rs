@@ -2,13 +2,12 @@ use std::collections::HashMap;
 
 use dock_core::{
     ColumnDisplayItem, ColumnMode, ColumnRect, DockCommand, DockMetrics, DragPreview, DropZoneRect,
-    FloatingGroupId,
-    FlyoutState, GroupRect, NodeId, PanelRect, Point, SplitterRect, TabHeaderRect, TabOverflowRect,
-    TabStripRect, VerticalOverflow,
+    FloatingGroupId, FlyoutState, GroupRect, NodeId, PanelRect, Point, SplitterRect, TabHeaderRect,
+    TabOverflowRect, TabStripRect, VerticalOverflow,
 };
 use gpui::{
     AnyView, Entity, IntoElement, ParentElement, ScrollHandle, StatefulInteractiveElement, Styled,
-    div, px, rgb, prelude::InteractiveElement as _,
+    div, prelude::InteractiveElement as _, px, rgb,
 };
 use ui::Theme;
 
@@ -237,10 +236,7 @@ impl ColumnView {
             .on_click(move |event, _, app| {
                 (menu_toggle)(
                     ContextMenuTarget::Column(column_id),
-                    Point::new(
-                        event.position().x.as_f32(),
-                        event.position().y.as_f32(),
-                    ),
+                    Point::new(event.position().x.as_f32(), event.position().y.as_f32()),
                     app,
                 );
             });
@@ -266,7 +262,11 @@ fn column_mode_label(mode: ColumnMode) -> &'static str {
     }
 }
 
-pub(crate) fn group_surface(group: GroupRect, content_origin: Point, theme: Theme) -> impl IntoElement {
+pub(crate) fn group_surface(
+    group: GroupRect,
+    content_origin: Point,
+    theme: Theme,
+) -> impl IntoElement {
     let left = group.rect.origin.x - content_origin.x;
     let top = group.rect.origin.y - content_origin.y;
     let header_height = theme
@@ -316,5 +316,4 @@ mod tests {
             ColumnMode::Expanded
         );
     }
-
 }

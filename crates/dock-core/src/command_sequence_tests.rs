@@ -2097,7 +2097,10 @@ fn floating_last_group_removes_its_empty_source_column() {
         .unwrap();
 
     let (_, floating) = layout.floating_groups().next().unwrap();
-    assert_eq!(layout.dock_area(floating.area).unwrap().root, retained_group);
+    assert_eq!(
+        layout.dock_area(floating.area).unwrap().root,
+        retained_group
+    );
     assert!(layout.node(column).is_none());
     assert!(matches!(layout.node(retained_group), Some(Node::Tabs(_))));
     assert_eq!(layout.validate(&metrics), Ok(()));

@@ -31,22 +31,23 @@ pub(crate) fn update_drag_at(
         let (payload, was_pressed) = match controller.drag().session().state() {
             DragState::Pressed { payload, .. } => (payload, true),
             DragState::Dragging { payload, .. } => (payload, false),
-            DragState::Idle | DragState::Dropped { .. } | DragState::Cancelled { .. } => return false,
+            DragState::Idle | DragState::Dropped { .. } | DragState::Cancelled { .. } => {
+                return false;
+            }
         };
         let handle = controller.drag().session().handle();
 
-        if let Err(error) = controller
-            .drag_mut()
-            .session_mut()
-            .pointer_move(position)
-        {
+        if let Err(error) = controller.drag_mut().session_mut().pointer_move(position) {
             tracing::debug!(%error, "dock drag pointer update failed");
             cancel_drag(controller);
             cx.notify();
             return false;
         }
 
-        if !matches!(controller.drag().session().state(), DragState::Dragging { .. }) {
+        if !matches!(
+            controller.drag().session().state(),
+            DragState::Dragging { .. }
+        ) {
             // Keep Pressed alive until Core's configured threshold is crossed.
             // No resolver or drag preview exists before this transition.
             return false;
@@ -77,11 +78,7 @@ pub(crate) fn update_drag_at(
                 return was_pressed;
             }
         };
-        if let Err(error) = controller
-            .drag_mut()
-            .session_mut()
-            .set_drop_target(target)
-        {
+        if let Err(error) = controller.drag_mut().session_mut().set_drop_target(target) {
             tracing::debug!(%error, "could not update dock drag target");
             cancel_drag(controller);
             cx.notify();
@@ -113,11 +110,7 @@ pub(crate) fn finish_drag_at(
         };
         let handle = controller.drag().session().handle();
 
-        if let Err(error) = controller
-            .drag_mut()
-            .session_mut()
-            .pointer_move(position)
-        {
+        if let Err(error) = controller.drag_mut().session_mut().pointer_move(position) {
             tracing::debug!(%error, "dock drag release position was rejected");
             cancel_drag(controller);
             cx.notify();
@@ -154,10 +147,7 @@ pub(crate) fn finish_drag_at(
         // before asking DragSession to finish the gesture.
         if drag_started
             && handle != Some(DragHandle::FloatingTitle)
-            && let Err(error) = controller
-                .drag_mut()
-                .session_mut()
-                .set_drop_target(target)
+            && let Err(error) = controller.drag_mut().session_mut().set_drop_target(target)
         {
             tracing::debug!(%error, "could not set final dock drop target");
             target = None;
@@ -238,7 +228,6 @@ fn cancel_drag(controller: &mut DockController) {
     }
 }
 
-
 fn drop_source(controller: &DockController, payload: DragPayload) -> Option<DropSource> {
     match payload {
         DragPayload::Panel { panel } => Some(DropSource::Panel { panel }),
@@ -263,9 +252,7 @@ pub(crate) fn floating_bounds(
 ) -> Option<Rect> {
     let (active_payload, origin) = match controller.drag().session().state() {
         DragState::Dragging {
-            payload,
-            origin,
-            ..
+            payload, origin, ..
         } => (payload, origin),
         _ => return None,
     };
@@ -328,11 +315,13 @@ fn floating_bounds_for_request(
     };
 
     let preferred_size = match request.payload {
-        DragPayload::Panel { panel } => controller
-            .layout()
-            .panel_instance(panel)?
-            .constraints
-            .preferred_size,
+        DragPayload::Panel { panel } => {
+            controller
+                .layout()
+                .panel_instance(panel)?
+                .constraints
+                .preferred_size
+        }
         DragPayload::Group { .. } => source_rect.size,
         DragPayload::FloatingGroup { group } => {
             controller.layout().floating_group(group)?.bounds.size

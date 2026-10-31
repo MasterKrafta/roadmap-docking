@@ -1,5 +1,7 @@
 use dock_core::{PanelRect, Point};
-use gpui::{AnyView, IntoElement, ParentElement, Styled, div, px, prelude::InteractiveElement as _};
+use gpui::{
+    AnyView, IntoElement, ParentElement, Styled, div, prelude::InteractiveElement as _, px,
+};
 
 /// Places cached panel views in the rectangles emitted by dock-core.
 ///

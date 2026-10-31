@@ -1,6 +1,5 @@
 use dock_core::{
-    ComputeRectsError, DockMetrics, DropSource, GeometryError, HitResult, LayoutRects, Point,
-    Rect,
+    ComputeRectsError, DockMetrics, DropSource, GeometryError, HitResult, LayoutRects, Point, Rect,
 };
 
 use super::{DockController, DockControllerConfigError, RectCacheKey};
@@ -84,10 +83,7 @@ impl DockController {
     }
 
     /// Replaces metrics atomically. Existing layout must remain valid under them.
-    pub fn set_metrics(
-        &mut self,
-        metrics: DockMetrics,
-    ) -> Result<bool, DockControllerConfigError> {
+    pub fn set_metrics(&mut self, metrics: DockMetrics) -> Result<bool, DockControllerConfigError> {
         metrics
             .validate()
             .map_err(DockControllerConfigError::InvalidMetrics)?;

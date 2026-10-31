@@ -2,8 +2,8 @@ use dock_core::{
     DockCommand, FloatingGroupId, GroupRect, Point, TabHeaderRect, TabOverflowRect, TabStripRect,
 };
 use gpui::{
-    Entity, IntoElement, ParentElement, StatefulInteractiveElement, Styled, div, px, rgb,
-    prelude::InteractiveElement as _,
+    Entity, IntoElement, ParentElement, StatefulInteractiveElement, Styled, div,
+    prelude::InteractiveElement as _, px, rgb,
 };
 use ui::Theme;
 
@@ -63,9 +63,10 @@ impl GroupView {
                 .absolute()
                 .top_0()
                 .left(px(reserved_grip_left))
-                .w(px(
-                    (group.rect.size.width - reserved_grip_left - 2.0 * control_width).max(0.0),
-                ))
+                .w(px((group.rect.size.width
+                    - reserved_grip_left
+                    - 2.0 * control_width)
+                    .max(0.0)))
                 .h(px(header_height))
                 .flex()
                 .items_center()
@@ -73,8 +74,7 @@ impl GroupView {
                 .cursor_pointer()
                 .bg(rgb(theme.colors.group_grip_background))
                 .text_color(rgb(theme.colors.primary_text))
-                .child("⠿")
-;
+                .child("⠿");
             root = root.child(grip);
         }
 

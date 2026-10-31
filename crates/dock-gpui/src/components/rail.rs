@@ -1,7 +1,9 @@
-use dock_core::{ColumnDisplayItem, ColumnMode, ColumnRect, DockCommand, FlyoutState, Point, TabHeaderRect};
+use dock_core::{
+    ColumnDisplayItem, ColumnMode, ColumnRect, DockCommand, FlyoutState, Point, TabHeaderRect,
+};
 use gpui::{
-    Entity, IntoElement, ParentElement, SharedString, StatefulInteractiveElement, Styled, div,
-    img, px, rgb, prelude::InteractiveElement as _,
+    Entity, IntoElement, ParentElement, SharedString, StatefulInteractiveElement, Styled, div, img,
+    prelude::InteractiveElement as _, px, rgb,
 };
 use ui::Theme;
 
@@ -87,11 +89,7 @@ impl RailView {
                 .text_color(rgb(theme.colors.primary_text));
 
             if let Some(icon) = icon {
-                icon_row = icon_row.child(
-                    img(icon)
-                        .size(px(icon_size))
-                        .flex_none(),
-                );
+                icon_row = icon_row.child(img(icon).size(px(icon_size)).flex_none());
             } else {
                 let fallback = title.chars().next().unwrap_or('?').to_string();
                 icon_row = icon_row.child(
@@ -123,16 +121,14 @@ impl RailView {
             }
 
             let click_controller = controller.clone();
-            icon_row = icon_row
-                .on_click(move |event, _, app| {
-                    if event.standard_click() {
-                        click_controller.update(app, |controller, controller_cx| {
-                            let selected = controller.layout().flyout().is_some_and(|flyout| {
-                                flyout.column == owner_column && flyout.panel == panel
-                            });
-                            let command = if selected
-                                && controller.layout().flyout_auto_collapse_enabled()
-                            {
+            icon_row = icon_row.on_click(move |event, _, app| {
+                if event.standard_click() {
+                    click_controller.update(app, |controller, controller_cx| {
+                        let selected = controller.layout().flyout().is_some_and(|flyout| {
+                            flyout.column == owner_column && flyout.panel == panel
+                        });
+                        let command =
+                            if selected && controller.layout().flyout_auto_collapse_enabled() {
                                 DockCommand::CloseFlyout
                             } else {
                                 DockCommand::OpenFlyout {
@@ -140,13 +136,13 @@ impl RailView {
                                     panel,
                                 }
                             };
-                            if let Err(error) = controller.dispatch_in(command, controller_cx) {
-                                tracing::warn!(%error, "could not toggle rail flyout");
-                            }
-                        });
-                    }
-                    app.stop_propagation();
-                });
+                        if let Err(error) = controller.dispatch_in(command, controller_cx) {
+                            tracing::warn!(%error, "could not toggle rail flyout");
+                        }
+                    });
+                }
+                app.stop_propagation();
+            });
 
             if group_changed {
                 rail = rail.child(
@@ -162,8 +158,6 @@ impl RailView {
             rail = rail.child(icon_row);
         }
 
-
         rail
     }
 }
-

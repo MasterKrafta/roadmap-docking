@@ -25,8 +25,8 @@ use split_layout::{layout_floating_root, layout_split, push_splitter};
 use crate::{
     Axis, Column, ColumnMode, ColumnRect, ComputeRectsError, DockMetrics, DockSide,
     FloatingGroupRect, FloatingResizeEdgeRect, FlyoutRect, GeometryError, GroupRect, Layout,
-    LayoutRects, Node, NodeId, PanelRect, Point, Rect, ResizeEdge, Size, SplitterRect,
-    TabHeaderRect, TabOverflowRect, TabStripRect, Tabs, OUTER_COLUMN_EDGE_BOUNDARY_INDEX,
+    LayoutRects, Node, NodeId, OUTER_COLUMN_EDGE_BOUNDARY_INDEX, PanelRect, Point, Rect,
+    ResizeEdge, Size, SplitterRect, TabHeaderRect, TabOverflowRect, TabStripRect, Tabs,
 };
 
 #[cfg(test)]
@@ -195,10 +195,7 @@ impl Layout {
         // Add a distinct hit target at each main dock's canvas-facing outer
         // edge. Core remains responsible for identifying the owning Column;
         // the sentinel index distinguishes this case from Split(X) boundaries.
-        for (side, root) in [
-            (DockSide::Left, left_root),
-            (DockSide::Right, right_root),
-        ] {
+        for (side, root) in [(DockSide::Left, left_root), (DockSide::Right, right_root)] {
             let Some(root) = root else { continue };
             let edge_column = match self.node(root) {
                 Some(Node::Column(_)) => Some(root),
@@ -221,12 +218,17 @@ impl Layout {
                 continue;
             }
             let edge_x = match side {
-                DockSide::Left => column_rect.rect.checked_right()
+                DockSide::Left => column_rect
+                    .rect
+                    .checked_right()
                     .map_err(ComputeRectsError::Geometry)?,
                 DockSide::Right => column_rect.rect.origin.x,
             };
             let hit_rect = Rect::new(
-                Point::new(edge_x - metrics.splitter_hit_zone * 0.5, column_rect.rect.origin.y),
+                Point::new(
+                    edge_x - metrics.splitter_hit_zone * 0.5,
+                    column_rect.rect.origin.y,
+                ),
                 Size::new(metrics.splitter_hit_zone, column_rect.rect.size.height),
             );
             hit_rect.validate().map_err(ComputeRectsError::Geometry)?;

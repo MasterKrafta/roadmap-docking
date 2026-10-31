@@ -12,8 +12,8 @@ pub mod dock_host;
 
 mod geometry;
 pub mod input;
-pub mod persistence;
 pub mod missing_panel;
+pub mod persistence;
 pub mod registry;
 pub mod theme;
 
@@ -40,9 +40,9 @@ pub use components::{
     TabHeaderView, TabOverflow, TabStripView,
 };
 pub use dock_host::DockHost;
+pub use missing_panel::MissingPanelPlaceholder;
 pub use persistence::WorkspacePersistenceError;
 pub use theme::DockTheme;
-pub use missing_panel::MissingPanelPlaceholder;
 
 pub use controller::{
     DockController, DockControllerConfigError, DockEvent, DragController, PanelCommandError,
@@ -53,15 +53,15 @@ pub use registry::{IconSource, PanelDescriptor, PanelRegistry, PanelRegistryErro
 pub use dock_core::{
     AllowedArea, Axis, CanvasState, ChromeMode, Column, ColumnDisplayItem, ColumnMode, ColumnRect,
     CommandError, CommandOutcome, CommandValue, ComputeRectsError, DEFAULT_UNDO_LIMIT, DockArea,
-    InitialLayoutError, DockAreaId, DockAreaKind, DockCommand, DockMetrics, DockSide,
-    DragCancelReason, DragDropAction, DragDropRequest, DragHandle, DragPayload, DragPreview,
-    DragSession, DragSessionError, DragState, DropSource, DropTarget, DropZone, DropZoneRect,
-    DropZoneResolver, FloatingGroup, FloatingGroupId, FloatingGroupRect, FloatingResizeEdgeRect,
-    FlyoutRect, FlyoutState, GeometryError, GroupRect, HitResult, LastDockLocation, Layout, Node,
-    NodeId, Panel, PanelConstraints, PanelId, PanelInstance, PanelKey, PanelKeyError, PanelRect,
-    PanelState, Point, Profile, Rect, ResizeEdge, Size, Split, SplitterRect, TabHeaderRect,
-    TabOverflowRect, TabStripRect, Tabs, UndoRedoHistory, ValidationError, ValidationReason,
-    VerticalOverflow, OUTER_COLUMN_EDGE_BOUNDARY_INDEX, WorkspaceDiagnostic, WorkspaceFile,
+    DockAreaId, DockAreaKind, DockCommand, DockMetrics, DockSide, DragCancelReason, DragDropAction,
+    DragDropRequest, DragHandle, DragPayload, DragPreview, DragSession, DragSessionError,
+    DragState, DropSource, DropTarget, DropZone, DropZoneRect, DropZoneResolver, FloatingGroup,
+    FloatingGroupId, FloatingGroupRect, FloatingResizeEdgeRect, FlyoutRect, FlyoutState,
+    GeometryError, GroupRect, HitResult, InitialLayoutError, LastDockLocation, Layout, Node,
+    NodeId, OUTER_COLUMN_EDGE_BOUNDARY_INDEX, Panel, PanelConstraints, PanelId, PanelInstance,
+    PanelKey, PanelKeyError, PanelRect, PanelState, Point, Profile, Rect, ResizeEdge, Size, Split,
+    SplitterRect, TabHeaderRect, TabOverflowRect, TabStripRect, Tabs, UndoRedoHistory,
+    ValidationError, ValidationReason, VerticalOverflow, WorkspaceDiagnostic, WorkspaceFile,
     WorkspaceFileError, WorkspaceFloatingGroup, WorkspaceLayout, WorkspaceLoadOptions,
     WorkspaceLoadResult, WorkspaceNode,
 };

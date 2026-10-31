@@ -64,8 +64,10 @@ fn photoshop_floating_roots_reject_columns_and_horizontal_compositions() {
     let metrics = DockMetrics::default();
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
 
-    let (_, first_panel) =
-        builder.panel(PanelKey::new("floating-invalid-column").unwrap(), descriptors()[0].1);
+    let (_, first_panel) = builder.panel(
+        PanelKey::new("floating-invalid-column").unwrap(),
+        descriptors()[0].1,
+    );
     let first_group = builder.tabs(vec![first_panel], 0, false);
     let first_column = builder.column(
         metrics.default_column_width,
@@ -79,8 +81,10 @@ fn photoshop_floating_roots_reject_columns_and_horizontal_compositions() {
         1,
     );
 
-    let (_, second_panel) =
-        builder.panel(PanelKey::new("floating-invalid-split-a").unwrap(), descriptors()[0].1);
+    let (_, second_panel) = builder.panel(
+        PanelKey::new("floating-invalid-split-a").unwrap(),
+        descriptors()[0].1,
+    );
     let second_group = builder.tabs(vec![second_panel], 0, false);
     let second_column = builder.column(
         metrics.default_column_width,
@@ -88,8 +92,10 @@ fn photoshop_floating_roots_reject_columns_and_horizontal_compositions() {
         vec![second_group],
         vec![1.0],
     );
-    let (_, third_panel) =
-        builder.panel(PanelKey::new("floating-invalid-split-b").unwrap(), descriptors()[0].1);
+    let (_, third_panel) = builder.panel(
+        PanelKey::new("floating-invalid-split-b").unwrap(),
+        descriptors()[0].1,
+    );
     let third_group = builder.tabs(vec![third_panel], 0, false);
     let third_column = builder.column(
         metrics.default_column_width,
@@ -97,11 +103,7 @@ fn photoshop_floating_roots_reject_columns_and_horizontal_compositions() {
         vec![third_group],
         vec![1.0],
     );
-    let horizontal = builder.split(
-        Axis::X,
-        vec![second_column, third_column],
-        vec![0.5, 0.5],
-    );
+    let horizontal = builder.split(Axis::X, vec![second_column, third_column], vec![0.5, 0.5]);
     builder.floating_group(
         horizontal,
         Rect::new(Point::new(420.0, 30.0), Size::new(600.0, 260.0)),
@@ -124,11 +126,15 @@ fn float_group_uses_existing_tabs_as_floating_root() {
     let metrics = DockMetrics::default();
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
 
-    let (_, floating_panel) =
-        builder.panel(PanelKey::new("float-group-root").unwrap(), descriptors()[0].1);
+    let (_, floating_panel) = builder.panel(
+        PanelKey::new("float-group-root").unwrap(),
+        descriptors()[0].1,
+    );
     let floating_tabs = builder.tabs(vec![floating_panel], 0, false);
-    let (_, remaining_panel) =
-        builder.panel(PanelKey::new("float-group-remaining").unwrap(), descriptors()[0].1);
+    let (_, remaining_panel) = builder.panel(
+        PanelKey::new("float-group-remaining").unwrap(),
+        descriptors()[0].1,
+    );
     let remaining_tabs = builder.tabs(vec![remaining_panel], 0, false);
     let column = builder.column(
         metrics.default_column_width,
@@ -160,10 +166,14 @@ fn float_panel_uses_one_tab_floating_root() {
     let metrics = DockMetrics::default();
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
 
-    let (_, moving_node) =
-        builder.panel(PanelKey::new("float-panel-root").unwrap(), descriptors()[0].1);
-    let (_, remaining_node) =
-        builder.panel(PanelKey::new("float-panel-remaining").unwrap(), descriptors()[0].1);
+    let (_, moving_node) = builder.panel(
+        PanelKey::new("float-panel-root").unwrap(),
+        descriptors()[0].1,
+    );
+    let (_, remaining_node) = builder.panel(
+        PanelKey::new("float-panel-remaining").unwrap(),
+        descriptors()[0].1,
+    );
     let source_group = builder.tabs(vec![moving_node, remaining_node], 0, false);
     let column = builder.column(
         metrics.default_column_width,
@@ -202,13 +212,19 @@ fn close_floating_group_removes_the_entire_area_atomically() {
     let metrics = DockMetrics::default();
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
 
-    let (_, first_panel) =
-        builder.panel(PanelKey::new("close-floating-first").unwrap(), descriptors()[0].1);
-    let (_, second_panel) =
-        builder.panel(PanelKey::new("close-floating-second").unwrap(), descriptors()[0].1);
+    let (_, first_panel) = builder.panel(
+        PanelKey::new("close-floating-first").unwrap(),
+        descriptors()[0].1,
+    );
+    let (_, second_panel) = builder.panel(
+        PanelKey::new("close-floating-second").unwrap(),
+        descriptors()[0].1,
+    );
     let first_group = builder.tabs(vec![first_panel, second_panel], 1, false);
-    let (_, third_panel) =
-        builder.panel(PanelKey::new("close-floating-third").unwrap(), descriptors()[0].1);
+    let (_, third_panel) = builder.panel(
+        PanelKey::new("close-floating-third").unwrap(),
+        descriptors()[0].1,
+    );
     let second_group = builder.tabs(vec![third_panel], 0, false);
     let root = builder.split(Axis::Y, vec![first_group, second_group], vec![0.6, 0.4]);
     let floating = builder.floating_group(
@@ -222,7 +238,10 @@ fn close_floating_group_removes_the_entire_area_atomically() {
     assert_eq!(layout.validate(&metrics), Ok(()));
 
     let outcome = layout
-        .apply(DockCommand::CloseFloatingGroup { group: floating }, &metrics)
+        .apply(
+            DockCommand::CloseFloatingGroup { group: floating },
+            &metrics,
+        )
         .unwrap();
 
     assert_eq!(outcome.new_version, 1);
@@ -1319,8 +1338,10 @@ fn dock_floating_column_to_the_right_appends_after_the_existing_composition() {
     let metrics = DockMetrics::default();
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Generic);
 
-    let (_, left_panel) =
-        builder.panel(PanelKey::new("floating-compose-left").unwrap(), descriptors()[0].1);
+    let (_, left_panel) = builder.panel(
+        PanelKey::new("floating-compose-left").unwrap(),
+        descriptors()[0].1,
+    );
     let left_tabs = builder.tabs(vec![left_panel], 0, false);
     let left_column = builder.column(
         metrics.default_column_width,
@@ -1328,8 +1349,10 @@ fn dock_floating_column_to_the_right_appends_after_the_existing_composition() {
         vec![left_tabs],
         vec![1.0],
     );
-    let (_, right_panel) =
-        builder.panel(PanelKey::new("floating-compose-right").unwrap(), descriptors()[0].1);
+    let (_, right_panel) = builder.panel(
+        PanelKey::new("floating-compose-right").unwrap(),
+        descriptors()[0].1,
+    );
     let right_tabs = builder.tabs(vec![right_panel], 0, false);
     let right_column = builder.column(
         metrics.default_column_width,
@@ -1337,19 +1360,18 @@ fn dock_floating_column_to_the_right_appends_after_the_existing_composition() {
         vec![right_tabs],
         vec![1.0],
     );
-    let existing_composition = builder.split(
-        Axis::X,
-        vec![left_column, right_column],
-        vec![0.4, 0.6],
-    );
+    let existing_composition =
+        builder.split(Axis::X, vec![left_column, right_column], vec![0.4, 0.6]);
     let target_floating = builder.floating_group(
         existing_composition,
         Rect::new(Point::new(100.0, 80.0), Size::new(500.0, 300.0)),
         1,
     );
 
-    let (_, source_panel) =
-        builder.panel(PanelKey::new("floating-compose-new-right").unwrap(), descriptors()[0].1);
+    let (_, source_panel) = builder.panel(
+        PanelKey::new("floating-compose-new-right").unwrap(),
+        descriptors()[0].1,
+    );
     let source_tabs = builder.tabs(vec![source_panel], 0, false);
     let source_column = builder.column(
         metrics.default_column_width,
@@ -1393,15 +1415,15 @@ fn dock_floating_column_to_the_right_appends_after_the_existing_composition() {
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
 
-
-
 #[test]
 fn docking_floating_horizontal_composition_to_empty_main_edge_preserves_the_tree() {
     let metrics = DockMetrics::default();
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Generic);
 
-    let (_, left_panel) =
-        builder.panel(PanelKey::new("dock-empty-main-left").unwrap(), descriptors()[0].1);
+    let (_, left_panel) = builder.panel(
+        PanelKey::new("dock-empty-main-left").unwrap(),
+        descriptors()[0].1,
+    );
     let left_group = builder.tabs(vec![left_panel], 0, false);
     let left_column = builder.column(
         metrics.default_column_width,
@@ -1410,8 +1432,10 @@ fn docking_floating_horizontal_composition_to_empty_main_edge_preserves_the_tree
         vec![1.0],
     );
 
-    let (_, right_panel) =
-        builder.panel(PanelKey::new("dock-empty-main-right").unwrap(), descriptors()[0].1);
+    let (_, right_panel) = builder.panel(
+        PanelKey::new("dock-empty-main-right").unwrap(),
+        descriptors()[0].1,
+    );
     let right_group = builder.tabs(vec![right_panel], 0, false);
     let right_column = builder.column(
         metrics.default_column_width,
@@ -1420,11 +1444,7 @@ fn docking_floating_horizontal_composition_to_empty_main_edge_preserves_the_tree
         vec![1.0],
     );
 
-    let composition = builder.split(
-        Axis::X,
-        vec![left_column, right_column],
-        vec![0.35, 0.65],
-    );
+    let composition = builder.split(Axis::X, vec![left_column, right_column], vec![0.35, 0.65]);
     let floating = builder.floating_group(
         composition,
         Rect::new(Point::new(40.0, 60.0), Size::new(560.0, 320.0)),
@@ -1467,8 +1487,10 @@ fn docking_floating_horizontal_composition_before_existing_main_column_keeps_all
     let metrics = DockMetrics::default();
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Generic);
 
-    let (_, main_panel) =
-        builder.panel(PanelKey::new("dock-existing-main").unwrap(), descriptors()[0].1);
+    let (_, main_panel) = builder.panel(
+        PanelKey::new("dock-existing-main").unwrap(),
+        descriptors()[0].1,
+    );
     let main_group = builder.tabs(vec![main_panel], 0, false);
     let main_column = builder.column(
         metrics.default_column_width,
@@ -1478,8 +1500,10 @@ fn docking_floating_horizontal_composition_before_existing_main_column_keeps_all
     );
     builder.main_area(DockSide::Left, main_column);
 
-    let (_, source_left_panel) =
-        builder.panel(PanelKey::new("dock-existing-source-left").unwrap(), descriptors()[0].1);
+    let (_, source_left_panel) = builder.panel(
+        PanelKey::new("dock-existing-source-left").unwrap(),
+        descriptors()[0].1,
+    );
     let source_left_group = builder.tabs(vec![source_left_panel], 0, false);
     let source_left_column = builder.column(
         metrics.default_column_width,
@@ -1488,8 +1512,10 @@ fn docking_floating_horizontal_composition_before_existing_main_column_keeps_all
         vec![1.0],
     );
 
-    let (_, source_right_panel) =
-        builder.panel(PanelKey::new("dock-existing-source-right").unwrap(), descriptors()[0].1);
+    let (_, source_right_panel) = builder.panel(
+        PanelKey::new("dock-existing-source-right").unwrap(),
+        descriptors()[0].1,
+    );
     let source_right_group = builder.tabs(vec![source_right_panel], 0, false);
     let source_right_column = builder.column(
         metrics.default_column_width,

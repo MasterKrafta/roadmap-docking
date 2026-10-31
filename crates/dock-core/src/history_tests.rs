@@ -1144,7 +1144,6 @@ fn resize_groups_with_tab_chrome_supports_history_undo_and_redo_after_clamping()
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
 
-
 #[test]
 fn cancelling_resize_transaction_restores_starting_layout_without_undo_checkpoint() {
     let metrics = DockMetrics::default();
@@ -1158,20 +1157,30 @@ fn cancelling_resize_transaction_restores_starting_layout_without_undo_checkpoin
     history
         .apply(
             &mut fixture.layout,
-            DockCommand::ResizeColumn { column, width: 320.0 },
+            DockCommand::ResizeColumn {
+                column,
+                width: 320.0,
+            },
             &metrics,
         )
         .unwrap();
     history
         .apply(
             &mut fixture.layout,
-            DockCommand::ResizeColumn { column, width: 360.0 },
+            DockCommand::ResizeColumn {
+                column,
+                width: 360.0,
+            },
             &metrics,
         )
         .unwrap();
 
     assert_ne!(persistent_shape(&fixture.layout), before);
-    assert!(history.cancel_transaction(&mut fixture.layout, &metrics).unwrap());
+    assert!(
+        history
+            .cancel_transaction(&mut fixture.layout, &metrics)
+            .unwrap()
+    );
     assert_eq!(persistent_shape(&fixture.layout), before);
     assert!(fixture.layout.version() > before_version);
     assert_eq!(history.undo_len(), 0);
@@ -1194,14 +1203,20 @@ fn resize_transaction_records_one_undo_checkpoint_for_many_frame_updates() {
     history
         .apply(
             &mut fixture.layout,
-            DockCommand::ResizeColumn { column, width: 320.0 },
+            DockCommand::ResizeColumn {
+                column,
+                width: 320.0,
+            },
             &metrics,
         )
         .unwrap();
     history
         .apply(
             &mut fixture.layout,
-            DockCommand::ResizeColumn { column, width: 360.0 },
+            DockCommand::ResizeColumn {
+                column,
+                width: 360.0,
+            },
             &metrics,
         )
         .unwrap();

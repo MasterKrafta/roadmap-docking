@@ -97,10 +97,7 @@ impl PanelRegistry {
     }
 
     /// Registers a descriptor after validating its constraints.
-    pub fn register(
-        &mut self,
-        descriptor: PanelDescriptor,
-    ) -> Result<(), PanelRegistryError> {
+    pub fn register(&mut self, descriptor: PanelDescriptor) -> Result<(), PanelRegistryError> {
         let key = descriptor.key.clone();
         if self.descriptors.contains_key(&key) {
             return Err(PanelRegistryError::DuplicateKey { key });
@@ -155,12 +152,7 @@ mod tests {
             PanelKey::new(key).unwrap(),
             key,
             IconSource::None,
-            PanelConstraints::new(
-                Size::new(120.0, 80.0),
-                Size::new(280.0, 220.0),
-                None,
-                true,
-            ),
+            PanelConstraints::new(Size::new(120.0, 80.0), Size::new(280.0, 220.0), None, true),
             |_, _| unreachable!("panel factories are lazy"),
         )
     }
@@ -198,7 +190,6 @@ mod tests {
         ));
     }
 
-
     #[test]
     fn registry_rejects_invalid_constraints_without_inserting() {
         let mut registry = PanelRegistry::new();
@@ -206,12 +197,7 @@ mod tests {
             PanelKey::new("broken-panel").unwrap(),
             "Broken panel",
             IconSource::None,
-            PanelConstraints::new(
-                Size::new(320.0, 80.0),
-                Size::new(280.0, 220.0),
-                None,
-                false,
-            ),
+            PanelConstraints::new(Size::new(320.0, 80.0), Size::new(280.0, 220.0), None, false),
             |_, _| unreachable!("panel factories are lazy"),
         );
 

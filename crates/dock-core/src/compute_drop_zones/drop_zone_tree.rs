@@ -261,7 +261,9 @@ pub(crate) fn can_add_column(
     side: DockSide,
     metrics: &DockMetrics,
 ) -> bool {
-    let current_column_count = layout.main_columns(side).map_or(usize::MAX, |columns| columns.len());
+    let current_column_count = layout
+        .main_columns(side)
+        .map_or(usize::MAX, |columns| columns.len());
     if layout.profile() != Profile::Photoshop || current_column_count < metrics.max_columns {
         return true;
     }

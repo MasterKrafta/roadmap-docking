@@ -1,13 +1,11 @@
 use std::collections::{HashMap, VecDeque};
 
 use dock_core::{
-    Axis, CommandError, CommandValue, DockCommand, DockMetrics, DragCancelReason, DragSession,
-    DragSessionError,
-    DragState, DragHandle, DragPayload, DropSource, DropZoneResolver, FlyoutState, GeometryError,
-    HitResult,
-    Layout, LayoutRects, Node, PanelId,
-    PanelKey, Point, Profile, Rect, ValidationError, WorkspaceDiagnostic,
-    OUTER_COLUMN_EDGE_BOUNDARY_INDEX,
+    Axis, CommandError, CommandValue, DockCommand, DockMetrics, DragCancelReason, DragHandle,
+    DragPayload, DragSession, DragSessionError, DragState, DropSource, DropZoneResolver,
+    FlyoutState, GeometryError, HitResult, Layout, LayoutRects, Node,
+    OUTER_COLUMN_EDGE_BOUNDARY_INDEX, PanelId, PanelKey, Point, Profile, Rect, ValidationError,
+    WorkspaceDiagnostic,
 };
 use gpui::{AnyView, EventEmitter};
 use thiserror::Error;
@@ -20,10 +18,21 @@ mod layout_cache;
 /// Events emitted by the controller entity after successful model operations.
 #[derive(Clone, Debug)]
 pub enum DockEvent {
-    LayoutChanged { version: u64 },
-    PanelOpened { panel: PanelId, key: PanelKey },
-    PanelClosed { panel: PanelId, key: PanelKey },
-    PanelActivated { group: dock_core::NodeId, panel: PanelId },
+    LayoutChanged {
+        version: u64,
+    },
+    PanelOpened {
+        panel: PanelId,
+        key: PanelKey,
+    },
+    PanelClosed {
+        panel: PanelId,
+        key: PanelKey,
+    },
+    PanelActivated {
+        group: dock_core::NodeId,
+        panel: PanelId,
+    },
     /// Effective values returned by Core after one resize operation.
     ResizeApplied {
         hit: Option<HitResult>,
@@ -31,7 +40,9 @@ pub enum DockEvent {
         version: u64,
     },
     CommandFailed(CommandError),
-    WorkspaceLoaded { diagnostics: Vec<WorkspaceDiagnostic> },
+    WorkspaceLoaded {
+        diagnostics: Vec<WorkspaceDiagnostic>,
+    },
 }
 
 impl EventEmitter<DockEvent> for DockController {}
@@ -113,12 +124,7 @@ impl DragController {
         self.resolver.as_ref()
     }
 
-    fn set_resolver(
-        &mut self,
-        resolver: DropZoneResolver,
-        key: RectCacheKey,
-        source: DropSource,
-    ) {
+    fn set_resolver(&mut self, resolver: DropZoneResolver, key: RectCacheKey, source: DropSource) {
         self.resolver = Some(resolver);
         self.resolver_key = Some(key);
         self.resolver_source = Some(source);
@@ -340,9 +346,9 @@ impl DockController {
         };
 
         if !version_is_current || !source_is_current {
-            if let Err(error) = self.cancel_pointer_interaction_with_reason(
-                DragCancelReason::Explicit,
-            ) {
+            if let Err(error) =
+                self.cancel_pointer_interaction_with_reason(DragCancelReason::Explicit)
+            {
                 tracing::warn!(%error, "could not cancel stale dock pointer interaction");
             }
             return false;
@@ -354,9 +360,9 @@ impl DockController {
         match payload {
             DragPayload::Panel { panel } => {
                 self.layout.panel_instance(panel).is_some()
-                    && self.layout.nodes().any(|(_, node)| {
-                        matches!(node, Node::Panel(value) if value.panel_id == panel)
-                    })
+                    && self.layout.nodes().any(
+                        |(_, node)| matches!(node, Node::Panel(value) if value.panel_id == panel),
+                    )
             }
             DragPayload::Group { group } => {
                 matches!(self.layout.node(group), Some(Node::Tabs(_)))
@@ -432,9 +438,7 @@ impl DockController {
                 Some(Node::Column(column)) => Some(column.width),
                 _ => None,
             },
-            HitResult::FlyoutResizeEdge { .. } => {
-                start_flyout_rect.map(|rect| rect.size.width)
-            }
+            HitResult::FlyoutResizeEdge { .. } => start_flyout_rect.map(|rect| rect.size.width),
             _ => None,
         };
         let start_bounds = match hit {
@@ -535,16 +539,12 @@ impl DockController {
     }
 
     /// Cancels the current pointer gesture because its input surface lost focus.
-    pub(crate) fn cancel_pointer_interaction_on_focus_loss(
-        &mut self,
-    ) -> Result<(), CommandError> {
+    pub(crate) fn cancel_pointer_interaction_on_focus_loss(&mut self) -> Result<(), CommandError> {
         self.cancel_pointer_interaction_with_reason(DragCancelReason::FocusLost)
     }
 
     /// Cancels the current pointer gesture because the user pressed Escape.
-    pub(crate) fn cancel_pointer_interaction_on_escape(
-        &mut self,
-    ) -> Result<(), CommandError> {
+    pub(crate) fn cancel_pointer_interaction_on_escape(&mut self) -> Result<(), CommandError> {
         self.cancel_pointer_interaction_with_reason(DragCancelReason::Escape)
     }
 
@@ -581,10 +581,9 @@ impl DockController {
         if let Some(interaction) = interaction
             && let (HitResult::FlyoutResizeEdge { panel, .. }, Some(width)) =
                 (interaction.hit, interaction.start_width)
-            && let Err(error) = self.layout.apply(
-                DockCommand::ResizeFlyout { panel, width },
-                &self.metrics,
-            )
+            && let Err(error) = self
+                .layout
+                .apply(DockCommand::ResizeFlyout { panel, width }, &self.metrics)
         {
             tracing::debug!(%error, "could not restore flyout width after pointer cancellation");
         }

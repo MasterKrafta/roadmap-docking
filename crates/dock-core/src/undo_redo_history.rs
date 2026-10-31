@@ -147,8 +147,8 @@ impl UndoRedoHistory {
         let prior_version = layout.version();
         // With history disabled, avoid cloning a full layout that will never
         // be recorded. Command execution still uses the normal Layout::apply path.
-        let checkpoint = (self.transaction.is_none() && self.limit > 0)
-            .then(|| layout.history_snapshot());
+        let checkpoint =
+            (self.transaction.is_none() && self.limit > 0).then(|| layout.history_snapshot());
         let outcome = layout.apply(command, metrics)?;
 
         if outcome.new_version != prior_version
@@ -180,8 +180,8 @@ impl UndoRedoHistory {
 
         self.synchronize_owner(layout);
         let prior_version = layout.version();
-        let checkpoint = (self.transaction.is_none() && self.limit > 0)
-            .then(|| layout.history_snapshot());
+        let checkpoint =
+            (self.transaction.is_none() && self.limit > 0).then(|| layout.history_snapshot());
         let mut candidate = layout.clone();
         let mut outcomes = Vec::with_capacity(commands.len());
 

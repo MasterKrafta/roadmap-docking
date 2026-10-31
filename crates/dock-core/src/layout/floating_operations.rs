@@ -39,13 +39,13 @@ impl Layout {
             .get(*group)
             .copied()
             .ok_or(CommandError::MissingFloatingGroup { group: *group })?;
-        let area = self
-            .dock_areas
-            .get(floating.area)
-            .copied()
-            .ok_or(CommandError::InvalidTarget {
-                reason: "floating group references a missing dock area",
-            })?;
+        let area =
+            self.dock_areas
+                .get(floating.area)
+                .copied()
+                .ok_or(CommandError::InvalidTarget {
+                    reason: "floating group references a missing dock area",
+                })?;
 
         self.remember_subtree_dock_locations(area.root);
         self.floating_groups.remove(*group);
@@ -183,13 +183,12 @@ impl Layout {
             }
             (Some(Node::Split(split)), DropTarget::MainColumn { side, index })
                 if split.axis == Axis::X
-                    && split.children.iter().all(|child| {
-                        matches!(self.nodes.get(*child), Some(Node::Column(_)))
-                    }) =>
+                    && split
+                        .children
+                        .iter()
+                        .all(|child| matches!(self.nodes.get(*child), Some(Node::Column(_)))) =>
             {
-                self.dock_floating_composition_to_main_column(
-                    group_id, root, split, side, index,
-                )
+                self.dock_floating_composition_to_main_column(group_id, root, split, side, index)
             }
             (Some(Node::Split(split)), DropTarget::RailSlot { column, index })
                 if split.axis == Axis::Y =>
@@ -288,13 +287,11 @@ impl Layout {
             });
         }
 
-        let floating = self
-            .floating_groups
-            .get(floating_group_id)
-            .copied()
-            .ok_or(CommandError::MissingFloatingGroup {
+        let floating = self.floating_groups.get(floating_group_id).copied().ok_or(
+            CommandError::MissingFloatingGroup {
                 group: floating_group_id,
-            })?;
+            },
+        )?;
         let source_columns = split.children;
         let source_ratios = normalized_ratios(split.ratios.into_iter().map(Some).collect());
         let side_slot = side_index(side);
@@ -306,9 +303,7 @@ impl Layout {
                 });
             }
             self.detach_node(root)?;
-            let area_id = self
-                .dock_areas
-                .insert(crate::DockArea::main(side, root));
+            let area_id = self.dock_areas.insert(crate::DockArea::main(side, root));
             self.main_areas[side_slot] = Some(area_id);
             return Ok(());
         };
@@ -369,9 +364,7 @@ impl Layout {
         children.splice(index..index, source_columns);
         ratios.splice(
             index..index,
-            source_ratios
-                .into_iter()
-                .map(|ratio| ratio * source_weight),
+            source_ratios.into_iter().map(|ratio| ratio * source_weight),
         );
         let ratios = normalized_ratios(ratios.into_iter().map(Some).collect());
 
@@ -538,18 +531,19 @@ impl Layout {
             .ok_or(CommandError::InvalidTarget {
                 reason: "floating composition edge target must belong to a Column",
             })?;
-        let root = self
-            .find_floating_root_containing(group)
-            .ok_or(CommandError::InvalidTarget {
-                reason: "floating composition edge target must belong to another floating area",
-            })?;
+        let root =
+            self.find_floating_root_containing(group)
+                .ok_or(CommandError::InvalidTarget {
+                    reason: "floating composition edge target must belong to another floating area",
+                })?;
         let is_outer_edge = match self.nodes.get(root) {
             Some(Node::Column(_)) => root == column,
             Some(Node::Split(split))
                 if split.axis == Axis::X
-                    && split.children.iter().all(|child| {
-                        matches!(self.nodes.get(*child), Some(Node::Column(_)))
-                    }) =>
+                    && split
+                        .children
+                        .iter()
+                        .all(|child| matches!(self.nodes.get(*child), Some(Node::Column(_)))) =>
             {
                 let index = split
                     .children
@@ -586,19 +580,16 @@ impl Layout {
         target_group: NodeId,
         zone: DropZone,
     ) -> Result<(), CommandError> {
-
-        let source_floating = self
-            .floating_groups
-            .get(source_group_id)
-            .copied()
-            .ok_or(CommandError::MissingFloatingGroup {
+        let source_floating = self.floating_groups.get(source_group_id).copied().ok_or(
+            CommandError::MissingFloatingGroup {
                 group: source_group_id,
-            })?;
-        let target_root = self
-            .find_floating_root_containing(target_group)
-            .ok_or(CommandError::InvalidTarget {
+            },
+        )?;
+        let target_root = self.find_floating_root_containing(target_group).ok_or(
+            CommandError::InvalidTarget {
                 reason: "side-by-side composition target must belong to another floating area",
-            })?;
+            },
+        )?;
         if target_root == source_root {
             return Ok(());
         }
@@ -614,54 +605,52 @@ impl Layout {
             .ok_or(CommandError::InvalidTarget {
                 reason: "side-by-side composition target has no floating window",
             })?;
-        let target_floating = self
-            .floating_groups
-            .get(target_group_id)
-            .copied()
-            .ok_or(CommandError::MissingFloatingGroup {
+        let target_floating = self.floating_groups.get(target_group_id).copied().ok_or(
+            CommandError::MissingFloatingGroup {
                 group: target_group_id,
-            })?;
+            },
+        )?;
 
-        let (source_columns, source_ratios, source_was_split) =
-            match self.nodes.get(source_root) {
-                Some(Node::Column(_)) => (vec![source_root], vec![1.0], false),
-                Some(Node::Split(split))
-                    if split.axis == Axis::X
-                        && split.children.iter().all(|child| {
-                            matches!(self.nodes.get(*child), Some(Node::Column(_)))
-                        }) =>
-                {
-                    (split.children.clone(), split.ratios.clone(), true)
-                }
-                _ => {
-                    return Err(CommandError::InvalidTarget {
-                        reason: "source floating area must be a Column or horizontal composition of Columns",
-                    });
-                }
-            };
-        let (target_columns, target_ratios, target_was_split) =
-            match self.nodes.get(target_root) {
-                Some(Node::Column(_)) => (vec![target_root], vec![1.0], false),
-                Some(Node::Split(split))
-                    if split.axis == Axis::X
-                        && split.children.iter().all(|child| {
-                            matches!(self.nodes.get(*child), Some(Node::Column(_)))
-                        }) =>
-                {
-                    (split.children.clone(), split.ratios.clone(), true)
-                }
-                _ => {
-                    return Err(CommandError::InvalidTarget {
-                        reason: "target floating area must be a Column or horizontal composition of Columns",
-                    });
-                }
-            };
+        let (source_columns, source_ratios, source_was_split) = match self.nodes.get(source_root) {
+            Some(Node::Column(_)) => (vec![source_root], vec![1.0], false),
+            Some(Node::Split(split))
+                if split.axis == Axis::X
+                    && split
+                        .children
+                        .iter()
+                        .all(|child| matches!(self.nodes.get(*child), Some(Node::Column(_)))) =>
+            {
+                (split.children.clone(), split.ratios.clone(), true)
+            }
+            _ => {
+                return Err(CommandError::InvalidTarget {
+                    reason: "source floating area must be a Column or horizontal composition of Columns",
+                });
+            }
+        };
+        let (target_columns, target_ratios, target_was_split) = match self.nodes.get(target_root) {
+            Some(Node::Column(_)) => (vec![target_root], vec![1.0], false),
+            Some(Node::Split(split))
+                if split.axis == Axis::X
+                    && split
+                        .children
+                        .iter()
+                        .all(|child| matches!(self.nodes.get(*child), Some(Node::Column(_)))) =>
+            {
+                (split.children.clone(), split.ratios.clone(), true)
+            }
+            _ => {
+                return Err(CommandError::InvalidTarget {
+                    reason: "target floating area must be a Column or horizontal composition of Columns",
+                });
+            }
+        };
 
-        let target_column = self
-            .find_owner_column(target_group)
-            .ok_or(CommandError::InvalidTarget {
-                reason: "target group is not inside a floating Column",
-            })?;
+        let target_column =
+            self.find_owner_column(target_group)
+                .ok_or(CommandError::InvalidTarget {
+                    reason: "target group is not inside a floating Column",
+                })?;
         let target_index = target_columns
             .iter()
             .position(|column| *column == target_column)
@@ -679,14 +668,9 @@ impl Layout {
             });
         }
 
-        let source_ratios = normalized_ratios(
-            source_ratios.into_iter().map(Some).collect(),
-        );
-        let target_ratios = normalized_ratios(
-            target_ratios.into_iter().map(Some).collect(),
-        );
-        let combined_width = source_floating.bounds.size.width
-            + target_floating.bounds.size.width;
+        let source_ratios = normalized_ratios(source_ratios.into_iter().map(Some).collect());
+        let target_ratios = normalized_ratios(target_ratios.into_iter().map(Some).collect());
+        let combined_width = source_floating.bounds.size.width + target_floating.bounds.size.width;
         if !combined_width.is_finite() || combined_width <= 0.0 {
             return Err(CommandError::InvalidValue {
                 field: "width",
@@ -696,8 +680,7 @@ impl Layout {
         let source_weight = source_floating.bounds.size.width / combined_width;
         let target_weight = target_floating.bounds.size.width / combined_width;
 
-        let mut children =
-            Vec::with_capacity(source_columns.len() + target_columns.len());
+        let mut children = Vec::with_capacity(source_columns.len() + target_columns.len());
         let mut ratios = Vec::with_capacity(source_ratios.len() + target_ratios.len());
         if zone == DropZone::Left {
             ratios.extend(source_ratios.into_iter().map(|ratio| ratio * source_weight));

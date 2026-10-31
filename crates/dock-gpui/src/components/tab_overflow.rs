@@ -1,10 +1,6 @@
 use dock_core::TabOverflowRect;
-use gpui::{
-    IntoElement, ParentElement, Styled, div, px, rgb,
-    prelude::InteractiveElement as _,
-};
+use gpui::{IntoElement, ParentElement, Styled, div, prelude::InteractiveElement as _, px, rgb};
 use ui::Theme;
-
 
 /// Overflow affordance. Hidden tab choices are presented by the shared ContextMenu.
 pub struct TabOverflow;

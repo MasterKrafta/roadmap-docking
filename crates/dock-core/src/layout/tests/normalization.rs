@@ -4,11 +4,15 @@ use super::*;
 fn normalize_migrates_legacy_floating_column_to_vertical_tabs_stack() {
     let metrics = DockMetrics::default();
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
-    let (_, first_panel) =
-        builder.panel(PanelKey::new("legacy-floating-column-a").unwrap(), descriptors()[0].1);
+    let (_, first_panel) = builder.panel(
+        PanelKey::new("legacy-floating-column-a").unwrap(),
+        descriptors()[0].1,
+    );
     let first_group = builder.tabs(vec![first_panel], 0, false);
-    let (_, second_panel) =
-        builder.panel(PanelKey::new("legacy-floating-column-b").unwrap(), descriptors()[0].1);
+    let (_, second_panel) = builder.panel(
+        PanelKey::new("legacy-floating-column-b").unwrap(),
+        descriptors()[0].1,
+    );
     let second_group = builder.tabs(vec![second_panel], 0, true);
     let legacy_root = builder.column(
         metrics.default_column_width,
@@ -46,8 +50,10 @@ fn normalize_migrates_legacy_horizontal_floating_composition_to_vertical_stack()
     let metrics = DockMetrics::default();
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
 
-    let (_, left_panel) =
-        builder.panel(PanelKey::new("legacy-floating-horizontal-left").unwrap(), descriptors()[0].1);
+    let (_, left_panel) = builder.panel(
+        PanelKey::new("legacy-floating-horizontal-left").unwrap(),
+        descriptors()[0].1,
+    );
     let left_group = builder.tabs(vec![left_panel], 0, false);
     let left_column = builder.column(
         metrics.default_column_width,
@@ -56,10 +62,14 @@ fn normalize_migrates_legacy_horizontal_floating_composition_to_vertical_stack()
         vec![1.0],
     );
 
-    let (_, right_a) =
-        builder.panel(PanelKey::new("legacy-floating-horizontal-right-a").unwrap(), descriptors()[0].1);
-    let (_, right_b) =
-        builder.panel(PanelKey::new("legacy-floating-horizontal-right-b").unwrap(), descriptors()[0].1);
+    let (_, right_a) = builder.panel(
+        PanelKey::new("legacy-floating-horizontal-right-a").unwrap(),
+        descriptors()[0].1,
+    );
+    let (_, right_b) = builder.panel(
+        PanelKey::new("legacy-floating-horizontal-right-b").unwrap(),
+        descriptors()[0].1,
+    );
     let right_group_a = builder.tabs(vec![right_a], 0, false);
     let right_group_b = builder.tabs(vec![right_b], 0, true);
     let right_column = builder.column(
@@ -69,11 +79,7 @@ fn normalize_migrates_legacy_horizontal_floating_composition_to_vertical_stack()
         vec![0.25, 0.75],
     );
 
-    let legacy_root = builder.split(
-        Axis::X,
-        vec![left_column, right_column],
-        vec![0.4, 0.6],
-    );
+    let legacy_root = builder.split(Axis::X, vec![left_column, right_column], vec![0.4, 0.6]);
     let floating = builder.floating_group(
         legacy_root,
         Rect::new(Point::new(70.0, 80.0), Size::new(640.0, 360.0)),

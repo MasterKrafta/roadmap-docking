@@ -313,11 +313,7 @@ fn photoshop_column_limit_is_independent_for_left_and_right_docks() {
                 vec![1.0],
             ));
         }
-        let root = builder.split(
-            Axis::X,
-            columns,
-            vec![ratio; metrics.max_columns],
-        );
+        let root = builder.split(Axis::X, columns, vec![ratio; metrics.max_columns]);
         builder.main_area(side, root);
     }
 

@@ -1,5 +1,7 @@
 use dock_core::{Axis, DockMetrics, FloatingGroupId, Point, SplitterRect};
-use gpui::{Entity, IntoElement, ParentElement, Styled, div, px, rgb, prelude::InteractiveElement as _};
+use gpui::{
+    Entity, IntoElement, ParentElement, Styled, div, prelude::InteractiveElement as _, px, rgb,
+};
 use ui::Theme;
 
 use crate::DockController;

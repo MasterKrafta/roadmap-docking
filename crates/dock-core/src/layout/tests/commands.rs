@@ -1050,13 +1050,7 @@ fn resize_flyout_reports_the_core_clamped_width() {
         .apply(DockCommand::OpenFlyout { column, panel }, &metrics)
         .unwrap();
     let outcome = layout
-        .apply(
-            DockCommand::ResizeFlyout {
-                panel,
-                width: 1.0,
-            },
-            &metrics,
-        )
+        .apply(DockCommand::ResizeFlyout { panel, width: 1.0 }, &metrics)
         .unwrap();
 
     assert_eq!(

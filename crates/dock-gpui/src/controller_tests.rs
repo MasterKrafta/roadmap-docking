@@ -2,8 +2,7 @@ use super::{DockController, DockEvent};
 use dock_core::{
     CommandError, DockCommand, DockMetrics, DragHandle, DragPayload, DragState, DropSource,
     HitResult, InitialLayoutError, LayoutRects, PanelConstraints, PanelId, PanelKey, Point,
-    Profile, Rect,
-    Size,
+    Profile, Rect, Size,
 };
 use slotmap::Key;
 
@@ -16,12 +15,7 @@ fn baseline_registry() -> PanelRegistry {
             PanelKey::new(key).unwrap(),
             key,
             IconSource::None,
-            PanelConstraints::new(
-                Size::new(120.0, 80.0),
-                Size::new(280.0, 220.0),
-                None,
-                false,
-            ),
+            PanelConstraints::new(Size::new(120.0, 80.0), Size::new(280.0, 220.0), None, false),
             |_, _| unreachable!("panel factories are lazy"),
         );
         registry.register(descriptor).unwrap();
@@ -71,12 +65,12 @@ fn canvas_bounds_update_is_idempotent_and_does_not_advance_layout_version() {
     let canvas = controller.geometry().unwrap().canvas.unwrap();
     let version = controller.layout.version();
 
-    assert_eq!(controller.layout.update_canvas_bounds(Some(canvas)), Ok(false));
-
-    let measured = Rect::new(
-        Point::new(10.0, 20.0),
-        Size::new(800.0, 600.0),
+    assert_eq!(
+        controller.layout.update_canvas_bounds(Some(canvas)),
+        Ok(false)
     );
+
+    let measured = Rect::new(Point::new(10.0, 20.0), Size::new(800.0, 600.0));
     assert_eq!(
         controller.layout.update_canvas_bounds(Some(measured)),
         Ok(true)
@@ -129,10 +123,7 @@ fn viewport_change_invalidates_geometry_without_mutating_layout() {
     let version = controller.layout.version();
 
     assert_eq!(
-        controller.set_viewport(Rect::new(
-            Point::ZERO,
-            Size::new(1280.0, 800.0),
-        )),
+        controller.set_viewport(Rect::new(Point::ZERO, Size::new(1280.0, 800.0),)),
         Ok(true)
     );
     assert!(!controller.cached_geometry_is_current());
@@ -191,16 +182,17 @@ fn transient_dispatch_rejects_persistent_commands() {
     let mut controller = controller();
     let version = controller.layout.version();
 
-    assert!(controller
-        .dispatch_transient(DockCommand::SetChrome {
-            mode: dock_core::ChromeMode::AllHidden,
-        })
-        .is_err());
+    assert!(
+        controller
+            .dispatch_transient(DockCommand::SetChrome {
+                mode: dock_core::ChromeMode::AllHidden,
+            })
+            .is_err()
+    );
 
     assert_eq!(controller.layout.version(), version);
     assert!(!controller.can_undo());
 }
-
 
 #[test]
 fn reset_workspace_restores_core_baseline_and_clears_history() {
@@ -305,10 +297,7 @@ fn singleton_panel_is_reused_while_open_but_can_be_closed_and_reopened() {
         .filter(|(_, instance)| instance.key == key)
         .count();
     assert_eq!(open_layers, 1);
-    assert!(controller
-        .layout()
-        .panel_instance(original_id)
-        .is_some());
+    assert!(controller.layout().panel_instance(original_id).is_some());
 
     controller
         .close_panel(original_id)
@@ -460,10 +449,7 @@ fn resize_preview_does_not_mutate_layout_until_pointer_up() {
     let version_before = controller.layout().version();
     controller.begin_resize_interaction(hit, origin).unwrap();
 
-    assert!(controller.set_resize_preview_point(Point::new(
-        origin.x + 64.0,
-        origin.y + 32.0,
-    )));
+    assert!(controller.set_resize_preview_point(Point::new(origin.x + 64.0, origin.y + 32.0,)));
     assert_eq!(format!("{:?}", controller.layout()), layout_before);
     assert_eq!(controller.layout().version(), version_before);
     assert_eq!(

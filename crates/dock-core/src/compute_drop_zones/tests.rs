@@ -525,8 +525,7 @@ fn column_limit_is_applied_independently_to_left_and_right_drop_zones() {
     let (source_panel, source_node) = builder.panel(key("per-side-limit-source"), constraints());
     let (_, retained_node) = builder.panel(key("per-side-limit-retained"), constraints());
     let source_group = builder.tabs(vec![source_node, retained_node], 0, false);
-    let left_column =
-        builder.column(280.0, ColumnMode::Expanded, vec![source_group], vec![1.0]);
+    let left_column = builder.column(280.0, ColumnMode::Expanded, vec![source_group], vec![1.0]);
     builder.main_area(DockSide::Left, left_column);
 
     let layout = builder.build();
@@ -579,18 +578,14 @@ fn moving_from_another_dock_does_not_free_a_full_destination_column_slot() {
 
     let (source_panel, source_node) =
         builder.panel(key("per-side-limit-left-source"), constraints());
-    let (_, source_retained) =
-        builder.panel(key("per-side-limit-left-retained"), constraints());
+    let (_, source_retained) = builder.panel(key("per-side-limit-left-retained"), constraints());
     let source_group = builder.tabs(vec![source_node, source_retained], 0, false);
-    let left_column =
-        builder.column(280.0, ColumnMode::Expanded, vec![source_group], vec![1.0]);
+    let left_column = builder.column(280.0, ColumnMode::Expanded, vec![source_group], vec![1.0]);
     builder.main_area(DockSide::Left, left_column);
 
-    let (_, right_node) =
-        builder.panel(key("per-side-limit-right-target"), constraints());
+    let (_, right_node) = builder.panel(key("per-side-limit-right-target"), constraints());
     let right_group = builder.tabs(vec![right_node], 0, false);
-    let right_column =
-        builder.column(280.0, ColumnMode::Expanded, vec![right_group], vec![1.0]);
+    let right_column = builder.column(280.0, ColumnMode::Expanded, vec![right_group], vec![1.0]);
     builder.main_area(DockSide::Right, right_column);
 
     let layout = builder.build();
@@ -1388,7 +1383,9 @@ fn resolver_exposes_the_exact_legal_zone_selected_for_a_pointer() {
     let rects = layout.compute_rects(viewport(), &metrics).unwrap();
     let resolver = layout
         .prepare_drop_resolver(
-            DropSource::Panel { panel: source_panel },
+            DropSource::Panel {
+                panel: source_panel,
+            },
             &rects,
             &metrics,
         )
@@ -1412,5 +1409,4 @@ fn resolver_exposes_the_exact_legal_zone_selected_for_a_pointer() {
 
     assert!(resolver.zones().contains(&resolved_zone));
     assert_eq!(resolver.resolve(point).unwrap(), Some(resolved_zone.target));
-
 }

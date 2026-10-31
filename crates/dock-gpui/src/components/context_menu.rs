@@ -2,8 +2,8 @@ use std::rc::Rc;
 
 use dock_core::{NodeId, PanelId, Point, Rect};
 use gpui::{
-    App, IntoElement, ParentElement, SharedString, StatefulInteractiveElement, Styled, div, img, px,
-    rgb, prelude::InteractiveElement as _,
+    App, IntoElement, ParentElement, SharedString, StatefulInteractiveElement, Styled, div, img,
+    prelude::InteractiveElement as _, px, rgb,
 };
 use ui::Theme;
 
@@ -17,8 +17,7 @@ pub(crate) enum ContextMenuTarget {
 }
 
 /// Opens or toggles one of the DockHost context menus.
-pub(crate) type ContextMenuToggle =
-    Rc<dyn Fn(ContextMenuTarget, Point, &mut App)>;
+pub(crate) type ContextMenuToggle = Rc<dyn Fn(ContextMenuTarget, Point, &mut App)>;
 
 /// Callback shared by the existing group and overflow component interfaces.
 pub(crate) type GroupMenuToggle = ContextMenuToggle;
@@ -51,10 +50,7 @@ pub struct ContextMenuItem {
 
 impl ContextMenuItem {
     /// Creates an enabled action item.
-    pub fn new(
-        label: impl Into<SharedString>,
-        action: impl Fn(&mut App) + 'static,
-    ) -> Self {
+    pub fn new(label: impl Into<SharedString>, action: impl Fn(&mut App) + 'static) -> Self {
         Self {
             label: label.into(),
             hotkey: None,
@@ -203,8 +199,7 @@ impl ContextMenu {
                 (left - width + 1.0).max(viewport.origin.x)
             };
             let submenu_top = row_top.min(
-                (viewport.origin.y + viewport.size.height - submenu_height)
-                    .max(viewport.origin.y),
+                (viewport.origin.y + viewport.size.height - submenu_height).max(viewport.origin.y),
             );
             Some((index, submenu_left, submenu_top, submenu_height))
         });
@@ -223,12 +218,7 @@ impl ContextMenu {
             region_bottom = region_bottom.max(submenu_top + submenu_height);
         }
 
-        let mut layer = div()
-            .id(id.into())
-            .absolute()
-            .top_0()
-            .left_0()
-            .size_full();
+        let mut layer = div().id(id.into()).absolute().top_0().left_0().size_full();
         let escape_dismiss = on_dismiss.clone();
         layer = layer.capture_key_down(move |event, _, app| {
             if event.keystroke.key.eq_ignore_ascii_case("escape") {
