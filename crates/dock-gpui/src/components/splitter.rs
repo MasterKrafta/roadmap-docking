@@ -23,7 +23,7 @@ struct SplitterDragGhost;
 
 impl Render for SplitterDragGhost {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        div().size_0()
+        gpui::Empty
     }
 }
 
@@ -75,6 +75,8 @@ impl SplitterView {
         let controller_for_drag = controller.clone();
         let controller_for_up = controller.clone();
         let controller_for_up_out = controller.clone();
+        let throttle_for_up = throttle.clone();
+        let throttle_for_up_out = throttle.clone();
 
         let mut hitbox = div()
             .id(format!(
@@ -96,6 +98,7 @@ impl SplitterView {
                 app.stop_propagation();
             })
             .on_mouse_up(MouseButton::Left, move |event: &MouseUpEvent, _, app| {
+                throttle_for_up.borrow_mut().latest = None;
                 finish_resize(
                     &controller_for_up,
                     event_point(event.position, pointer_offset),
@@ -105,6 +108,7 @@ impl SplitterView {
                 app.stop_propagation();
             })
             .on_mouse_up_out(MouseButton::Left, move |event: &MouseUpEvent, _, app| {
+                throttle_for_up_out.borrow_mut().latest = None;
                 finish_resize(
                     &controller_for_up_out,
                     event_point(event.position, pointer_offset),

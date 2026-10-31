@@ -90,7 +90,7 @@ impl DockController {
     }
 
     pub fn undo(&mut self) -> Result<bool, CommandError> {
-        self.end_resize_interaction();
+        let _ = self.end_resize_interaction();
         let before_panels = self.panel_keys();
         let previous_version = self.layout.version();
         match self.history.undo(&mut self.layout, &self.metrics) {
@@ -108,7 +108,7 @@ impl DockController {
     }
 
     pub fn redo(&mut self) -> Result<bool, CommandError> {
-        self.end_resize_interaction();
+        let _ = self.end_resize_interaction();
         let before_panels = self.panel_keys();
         let previous_version = self.layout.version();
         match self.history.redo(&mut self.layout, &self.metrics) {

@@ -1,7 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 
 use dock_core::{
-    Axis, CommandError, DockMetrics, DockSide, DragSession, DragSessionError, DropSource,
+    Axis, CommandError, DockMetrics, DragSession, DragSessionError, DropSource,
     DropZoneResolver, FlyoutState, GeometryError, HitResult, Layout, LayoutRects, Node, PanelId,
     PanelKey, Point, Profile, Rect, ValidationError, WorkspaceDiagnostic,
     OUTER_COLUMN_EDGE_BOUNDARY_INDEX,

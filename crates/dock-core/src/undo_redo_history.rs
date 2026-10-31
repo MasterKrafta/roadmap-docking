@@ -71,6 +71,9 @@ impl UndoRedoHistory {
     /// Commits the starting checkpoint of an interactive gesture, if the
     /// layout changed. Returns false when no transaction was open.
     pub fn commit_transaction(&mut self, layout: &Layout) -> bool {
+        // A checkpoint can only be committed back into the Layout lineage
+        // from which it was captured.
+        self.synchronize_owner(layout);
         let Some(checkpoint) = self.transaction.take() else {
             return false;
         };

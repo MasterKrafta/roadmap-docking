@@ -58,7 +58,7 @@ impl DockController {
         if self.viewport == viewport {
             return Ok(false);
         }
-        self.end_resize_interaction();
+        let _ = self.end_resize_interaction();
         self.viewport = viewport;
         self.rects_key = None;
         self.drag.clear_resolver();
@@ -85,7 +85,7 @@ impl DockController {
             .ok_or(DockControllerConfigError::MetricsRevisionOverflow)?;
         let drag = super::DragController::new(&metrics)?;
 
-        self.end_resize_interaction();
+        let _ = self.end_resize_interaction();
         self.metrics = metrics;
         self.metrics_revision = next_revision;
         self.drag = drag;
