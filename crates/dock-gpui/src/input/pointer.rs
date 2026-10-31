@@ -29,6 +29,7 @@ use super::{
 pub(crate) fn register_pointer_events(
     window: &mut Window,
     root_hitbox: HitboxId,
+    window_origin: Point,
     controller: Entity<DockController>,
     scroll_handles: HashMap<NodeId, ScrollHandle>,
     toggle_context_menu: ContextMenuToggle,
@@ -38,6 +39,7 @@ pub(crate) fn register_pointer_events(
         let controller = controller.clone();
         let scroll_handles = scroll_handles.clone();
         let toggle_context_menu = toggle_context_menu.clone();
+        let pointer_capture = pointer_capture.clone();
         move |event: &MouseDownEvent, phase, window, app| {
             if phase != DispatchPhase::Capture
                 || !root_hitbox.is_hovered(window)
@@ -47,9 +49,13 @@ pub(crate) fn register_pointer_events(
                 return;
             }
 
-            let raw_point = gpui_point(event.position);
+            let Some(host_point) =
+                host_point_from_window(gpui_point(event.position), window_origin)
+            else {
+                return;
+            };
             let Some(core_point) =
-                core_point_at_pointer(raw_point, &controller, &scroll_handles, app)
+                core_point_at_host_point(host_point, &controller, &scroll_handles, app)
             else {
                 return;
             };
@@ -72,7 +78,7 @@ pub(crate) fn register_pointer_events(
                     _ => None,
                 };
                 if let Some(target) = target {
-                    (toggle_context_menu)(target, raw_point, app);
+                    (toggle_context_menu)(target, host_point, app);
                     app.stop_propagation();
                 }
                 return;
@@ -139,6 +145,23 @@ pub(crate) fn register_pointer_events(
                         });
                     }
                     begin_resize_hit(&controller, resize_hit, core_point, app);
+                    let resize_started = controller
+                        .update(app, |controller, _| controller.resize_interaction().is_some());
+                    if resize_started {
+                        window.capture_pointer(root_hitbox);
+                        if window.captured_hitbox() == Some(root_hitbox) {
+                            pointer_capture.set(Some(root_hitbox));
+                        } else {
+                            cancel_pointer_interaction(
+                                &controller,
+                                window,
+                                &pointer_capture,
+                                app,
+                            );
+                            return;
+                        }
+                        app.stop_propagation();
+                    }
                 }
                 _ => {}
             }
@@ -148,6 +171,7 @@ pub(crate) fn register_pointer_events(
     window.on_mouse_event({
         let controller = controller.clone();
         let scroll_handles = scroll_handles.clone();
+        let pointer_capture = pointer_capture.clone();
         move |event: &MouseMoveEvent, phase, window, app| {
             if phase != DispatchPhase::Capture {
                 return;
@@ -155,6 +179,10 @@ pub(crate) fn register_pointer_events(
 
             let (drag_active, resize_active) = active_interactions(&controller, app);
             if !drag_active && !resize_active {
+                return;
+            }
+            if !event.dragging() {
+                cancel_pointer_interaction(&controller, window, &pointer_capture, app);
                 return;
             }
 
@@ -166,12 +194,15 @@ pub(crate) fn register_pointer_events(
                 return;
             }
 
-            let Some(point) = core_point_at_pointer(
-                gpui_point(event.position),
-                &controller,
-                &scroll_handles,
-                app,
-            ) else {
+            let Some(host_point) =
+                host_point_from_window(gpui_point(event.position), window_origin)
+            else {
+                cancel_pointer_interaction(&controller, window, &pointer_capture, app);
+                return;
+            };
+            let Some(point) =
+                core_point_at_host_point(host_point, &controller, &scroll_handles, app)
+            else {
                 cancel_pointer_interaction(&controller, window, &pointer_capture, app);
                 return;
             };
@@ -216,6 +247,7 @@ pub(crate) fn register_pointer_events(
     window.on_mouse_event({
         let controller = controller.clone();
         let scroll_handles = scroll_handles.clone();
+        let pointer_capture = pointer_capture.clone();
         move |event: &MouseUpEvent, phase, window, app| {
             if phase != DispatchPhase::Capture || event.button != MouseButton::Left {
                 return;
@@ -235,12 +267,15 @@ pub(crate) fn register_pointer_events(
                 return;
             }
 
-            let Some(point) = core_point_at_pointer(
-                gpui_point(event.position),
-                &controller,
-                &scroll_handles,
-                app,
-            ) else {
+            let Some(host_point) =
+                host_point_from_window(gpui_point(event.position), window_origin)
+            else {
+                cancel_pointer_interaction(&controller, window, &pointer_capture, app);
+                return;
+            };
+            let Some(point) =
+                core_point_at_host_point(host_point, &controller, &scroll_handles, app)
+            else {
                 cancel_pointer_interaction(&controller, window, &pointer_capture, app);
                 return;
             };
@@ -261,6 +296,7 @@ pub(crate) fn register_pointer_events(
 
     window.on_mouse_event({
         let controller = controller.clone();
+        let pointer_capture = pointer_capture.clone();
         move |_event: &MouseExitEvent, phase, window, app| {
             if phase != DispatchPhase::Capture {
                 return;
@@ -276,13 +312,23 @@ pub(crate) fn register_pointer_events(
     // GPUI's ScrollHandle still applies the native scroll delta. This root
     // listener observes and hit-tests the scroll position without stopping
     // the event, so child scroll containers retain their normal behavior.
-    window.on_mouse_event(move |event: &ScrollWheelEvent, phase, window, app| {
-        if phase != DispatchPhase::Capture || !root_hitbox.should_handle_scroll(window) {
-            return;
-        }
-        let raw_point = gpui_point(event.position);
-        if let Some(point) = core_point_at_pointer(raw_point, &controller, &scroll_handles, app) {
-            let _ = controller.update(app, |controller, _| controller.hit_test(point));
+    window.on_mouse_event({
+        let controller = controller.clone();
+        let scroll_handles = scroll_handles.clone();
+        move |event: &ScrollWheelEvent, phase, window, app| {
+            if phase != DispatchPhase::Capture || !root_hitbox.should_handle_scroll(window) {
+                return;
+            }
+            let Some(host_point) =
+                host_point_from_window(gpui_point(event.position), window_origin)
+            else {
+                return;
+            };
+            if let Some(point) =
+                core_point_at_host_point(host_point, &controller, &scroll_handles, app)
+            {
+                let _ = controller.update(app, |controller, _| controller.hit_test(point));
+            }
         }
     });
 }
@@ -291,7 +337,16 @@ fn gpui_point(position: gpui::Point<gpui::Pixels>) -> Point {
     Point::new(position.x.as_f32(), position.y.as_f32())
 }
 
-fn core_point_at_pointer(
+fn host_point_from_window(window_point: Point, window_origin: Point) -> Option<Point> {
+    let host_point = Point::new(
+        window_point.x - window_origin.x,
+        window_point.y - window_origin.y,
+    );
+    host_point.validate().ok()?;
+    Some(host_point)
+}
+
+fn core_point_at_host_point(
     point: Point,
     controller: &Entity<DockController>,
     scroll_handles: &HashMap<NodeId, ScrollHandle>,
@@ -333,11 +388,13 @@ fn cancel_pointer_interaction(
     pointer_capture: &Rc<Cell<Option<HitboxId>>>,
     app: &mut App,
 ) {
-    controller.update(app, |controller, _| {
-        controller.drag_mut().cancel_gesture();
-        controller.end_resize_interaction();
-        controller.clear_resize_frame_point();
-    });
+    if let Err(error) = controller.update(app, |controller, cx| {
+        let result = controller.cancel_pointer_interaction();
+        cx.notify();
+        result
+    }) {
+        tracing::debug!(%error, "could not cancel pointer interaction");
+    }
     window.release_pointer();
     pointer_capture.set(None);
 }

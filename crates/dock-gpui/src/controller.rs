@@ -384,6 +384,33 @@ impl DockController {
         interaction
     }
 
+    /// Cancels the current pointer gesture, rolling a resize back to pointer-down.
+    pub fn cancel_pointer_interaction(&mut self) -> Result<(), CommandError> {
+        self.drag.cancel_gesture();
+
+        let cancel_result = if self.interaction.is_some() {
+            self.history
+                .cancel_transaction(&mut self.layout, &self.metrics)
+        } else {
+            Ok(false)
+        };
+
+        self.interaction = None;
+        self.resize_frame.latest = None;
+        self.resize_frame.scheduled = false;
+        self.rects = None;
+        self.rects_key = None;
+        self.drag.clear_resolver();
+
+        if let Err(error) = cancel_result {
+            // Never leave an open history transaction after capture is lost.
+            self.history.commit_transaction(&self.layout);
+            return Err(error);
+        }
+
+        Ok(())
+    }
+
     pub fn last_error(&self) -> Option<&CommandError> {
         self.last_error.as_ref()
     }

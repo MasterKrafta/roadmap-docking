@@ -497,9 +497,8 @@ impl Render for DockHost {
         let measurement = canvas(
             move |bounds, window, app| {
                 let viewport = viewport_from_bounds(bounds);
-                if viewport.validate_non_empty().is_err() {
-                    return None;
-                }
+                viewport.validate_non_empty().ok()?;
+                let window_origin = window_origin_from_bounds(bounds)?;
 
                 controller_for_measurement.update(app, |controller, controller_cx| {
                     match controller.set_viewport(viewport) {
@@ -518,13 +517,17 @@ impl Render for DockHost {
                     }
                 });
 
-                Some(window.insert_hitbox(bounds, HitboxBehavior::Normal).id)
+                Some((
+                    window.insert_hitbox(bounds, HitboxBehavior::Normal).id,
+                    window_origin,
+                ))
             },
-            move |_, root_hitbox, window, _| {
-                if let Some(root_hitbox) = root_hitbox {
+            move |_, root_surface, window, _| {
+                if let Some((root_hitbox, window_origin)) = root_surface {
                     register_pointer_events(
                         window,
                         root_hitbox,
+                        window_origin,
                         pointer_controller.clone(),
                         pointer_scroll_handles.clone(),
                         pointer_context_menu.clone(),
@@ -1113,11 +1116,25 @@ fn viewport_from_bounds(bounds: Bounds<Pixels>) -> Rect {
     )
 }
 
+/// Returns the GPUI window-space origin of DockHost after validating it.
+///
+/// Pointer events are translated from window coordinates to this host-local
+/// origin once in the pointer adapter. Core's viewport intentionally remains
+/// anchored at (0, 0).
+fn window_origin_from_bounds(bounds: Bounds<Pixels>) -> Option<Point> {
+    let origin = Point::new(
+        bounds.origin.x.as_f32(),
+        bounds.origin.y.as_f32(),
+    );
+    origin.validate().ok()?;
+    Some(origin)
+}
+
 #[cfg(test)]
 mod tests {
     use gpui::{Bounds, Point as GpuiPoint, Size as GpuiSize, px};
 
-    use super::viewport_from_bounds;
+    use super::{viewport_from_bounds, window_origin_from_bounds};
     use dock_core::{Point, Rect, Size};
 
     #[test]
@@ -1131,5 +1148,33 @@ mod tests {
             viewport_from_bounds(bounds),
             Rect::new(Point::ZERO, Size::new(960.0, 640.0))
         );
+        assert_eq!(
+            window_origin_from_bounds(bounds),
+            Some(Point::new(18.0, 32.0))
+        );
+    }
+
+    #[test]
+    fn rejects_non_finite_window_origin() {
+        let bounds = Bounds {
+            origin: GpuiPoint::new(px(f32::NAN), px(32.0)),
+            size: GpuiSize::new(px(960.0), px(640.0)),
+        };
+        assert!(window_origin_from_bounds(bounds).is_none());
+    }
+
+    #[test]
+    fn rejects_invalid_viewport_size_before_core() {
+        for size in [
+            GpuiSize::new(px(-1.0), px(640.0)),
+            GpuiSize::new(px(960.0), px(f32::INFINITY)),
+            GpuiSize::new(px(0.0), px(640.0)),
+        ] {
+            let bounds = Bounds {
+                origin: GpuiPoint::new(px(18.0), px(32.0)),
+                size,
+            };
+            assert!(viewport_from_bounds(bounds).validate_non_empty().is_err());
+        }
     }
 }

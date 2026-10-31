@@ -1146,6 +1146,40 @@ fn resize_groups_with_tab_chrome_supports_history_undo_and_redo_after_clamping()
 
 
 #[test]
+fn cancelling_resize_transaction_restores_starting_layout_without_undo_checkpoint() {
+    let metrics = DockMetrics::default();
+    let mut fixture = fixture();
+    let column = fixture.column;
+    let before = persistent_shape(&fixture.layout);
+    let before_version = fixture.layout.version();
+    let mut history = UndoRedoHistory::new();
+
+    assert!(history.begin_transaction(&fixture.layout));
+    history
+        .apply(
+            &mut fixture.layout,
+            DockCommand::ResizeColumn { column, width: 320.0 },
+            &metrics,
+        )
+        .unwrap();
+    history
+        .apply(
+            &mut fixture.layout,
+            DockCommand::ResizeColumn { column, width: 360.0 },
+            &metrics,
+        )
+        .unwrap();
+
+    assert_ne!(persistent_shape(&fixture.layout), before);
+    assert!(history.cancel_transaction(&mut fixture.layout, &metrics).unwrap());
+    assert_eq!(persistent_shape(&fixture.layout), before);
+    assert!(fixture.layout.version() > before_version);
+    assert_eq!(history.undo_len(), 0);
+    assert!(!history.can_undo());
+    assert!(!history.commit_transaction(&fixture.layout));
+}
+
+#[test]
 fn resize_transaction_records_one_undo_checkpoint_for_many_frame_updates() {
     let metrics = DockMetrics::default();
     let mut fixture = fixture();

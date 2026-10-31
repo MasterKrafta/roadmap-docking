@@ -84,6 +84,28 @@ impl UndoRedoHistory {
         true
     }
 
+    /// Cancels an in-progress gesture transaction and restores its starting layout.
+    ///
+    /// Unlike `commit_transaction`, cancellation never creates an undo checkpoint.
+    /// The transaction is retained when restoring the snapshot fails.
+    pub fn cancel_transaction(
+        &mut self,
+        layout: &mut Layout,
+        metrics: &DockMetrics,
+    ) -> Result<bool, CommandError> {
+        self.synchronize_owner(layout);
+        let Some(checkpoint) = self.transaction.take() else {
+            return Ok(false);
+        };
+
+        if let Err(error) = layout.restore_history_snapshot(&checkpoint, metrics) {
+            self.transaction = Some(checkpoint);
+            return Err(error);
+        }
+
+        Ok(true)
+    }
+
     pub const fn limit(&self) -> usize {
         self.limit
     }
