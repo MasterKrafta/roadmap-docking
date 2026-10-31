@@ -1084,7 +1084,7 @@ mod windows_demo {
                 &main.main_node_ids,
                 &main.main_column_groups,
                 &main.column_modes,
-                &HashMap::new(),
+                &main_scroll_handles,
                 self.main.clone(),
                 theme,
             );
