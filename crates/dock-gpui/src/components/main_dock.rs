@@ -124,6 +124,8 @@ impl MainDockView {
                 scroll_handle,
                 controller.clone(),
                 theme,
+                Point::ZERO,
+                None,
             ));
         }
 
@@ -139,6 +141,7 @@ impl MainDockView {
                 controller.clone(),
                 metrics,
                 theme,
+                None,
             ));
         }
 
