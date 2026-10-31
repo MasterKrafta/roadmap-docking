@@ -909,11 +909,11 @@ impl MainWindowView {
 
 impl Render for MainWindowView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let state = self.state.read(cx);
-        let active_tab = state.active_tab;
-        let floating_panel = state.floating_panel;
+        let (active_tab, floating_panel, floating_hwnd) = {
+            let state = self.state.read(cx);
+            (state.active_tab, state.floating_panel, state.floating_hwnd)
+        };
         let inactive_tab = active_tab.other();
-        let floating_hwnd = state.floating_hwnd;
         let active_content = if floating_panel == Some(active_tab) {
             div()
                 .flex_1()
@@ -1009,6 +1009,15 @@ impl Render for MainWindowView {
                                 cx.listener(Self::extract_active),
                             )
                             .child("Извлечь активную"),
+                    ),
+            )
+            .child(
+                div()
+                    .px_3()
+                    .py_2()
+                    .text_color(rgb(0xa8b0ba))
+                    .child(
+                        "Проверка: измени текст/счётчик B → выбери A → извлеки неактивную B. Верни B и открой вкладку снова.",
                     ),
             )
             .child(active_content)
