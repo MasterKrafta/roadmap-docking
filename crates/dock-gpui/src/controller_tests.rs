@@ -1,7 +1,8 @@
 use super::DockController;
 use dock_core::{
     CommandError, DockCommand, DockMetrics, DragHandle, DragPayload, DragState, DropSource,
-    InitialLayoutError, LayoutRects, PanelConstraints, PanelId, PanelKey, Point, Profile, Rect,
+    HitResult, InitialLayoutError, LayoutRects, PanelConstraints, PanelId, PanelKey, Point,
+    Profile, Rect,
     Size,
 };
 use slotmap::Key;
@@ -426,4 +427,52 @@ fn viewport_change_cancels_drag_and_discards_resolver() {
     );
     assert_eq!(controller.drag().session().state(), DragState::Idle);
     assert!(controller.drag().resolver().is_none());
+}
+
+#[test]
+fn resize_preview_does_not_mutate_layout_until_pointer_up() {
+    let metrics = DockMetrics::default();
+    let registry = baseline_registry();
+    let descriptors = registry.descriptors_for_core();
+    let layout = dock_core::create_initial_layout(Profile::Photoshop, &descriptors, metrics)
+        .expect("baseline layout should be valid");
+    let mut controller = DockController::new(
+        layout,
+        metrics,
+        registry,
+        Rect::new(Point::ZERO, Size::new(1200.0, 800.0)),
+    )
+    .expect("controller should accept the baseline layout");
+    let splitter = *controller
+        .geometry()
+        .unwrap()
+        .splitters
+        .first()
+        .expect("baseline layout should contain a splitter");
+    let origin = Point::new(
+        splitter.rect.origin.x + splitter.rect.size.width * 0.5,
+        splitter.rect.origin.y + splitter.rect.size.height * 0.5,
+    );
+    let hit = controller.hit(origin).unwrap();
+    assert!(matches!(hit, HitResult::Splitter { .. }));
+
+    let layout_before = format!("{:?}", controller.layout());
+    let version_before = controller.layout().version();
+    controller.begin_resize_interaction(hit, origin).unwrap();
+
+    assert!(controller.set_resize_preview_point(Point::new(
+        origin.x + 64.0,
+        origin.y + 32.0,
+    )));
+    assert_eq!(format!("{:?}", controller.layout()), layout_before);
+    assert_eq!(controller.layout().version(), version_before);
+    assert_eq!(
+        controller.resize_interaction().unwrap().preview_point,
+        Some(Point::new(origin.x + 64.0, origin.y + 32.0))
+    );
+
+    controller.cancel_pointer_interaction().unwrap();
+    assert_eq!(format!("{:?}", controller.layout()), layout_before);
+    assert_eq!(controller.layout().version(), version_before);
+    assert!(controller.resize_interaction().is_none());
 }

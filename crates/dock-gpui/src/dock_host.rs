@@ -23,8 +23,8 @@ use crate::{
         collect_group_presentations,
     },
     input::{
-        floating_bounds, map_hit_test_point, register_pointer_events, PointerPress,
-        scroll_adjusted_hit_test_point,
+        floating_bounds, map_hit_test_point, register_pointer_events, resize_preview_for_interaction,
+        PointerPress, ResizePreview, ResizePreviewKind, scroll_adjusted_hit_test_point,
     },
 };
 
@@ -240,6 +240,7 @@ impl Render for DockHost {
             drag_zones,
             active_drop_zone,
             free_area_preview_bounds,
+            resize_preview,
             metrics,
         ) = self.controller.update(cx, |controller, _| {
                 let rects = controller.geometry().cloned();
@@ -355,6 +356,9 @@ impl Render for DockHost {
                     .and_then(|preview| {
                         floating_bounds(controller, preview.payload, preview.point)
                     });
+                let resize_preview = controller
+                    .resize_interaction()
+                    .and_then(resize_preview_for_interaction);
                 let metrics = controller.metrics();
 
                 (
@@ -378,6 +382,7 @@ impl Render for DockHost {
                     drag_zones,
                     active_drop_zone,
                     free_area_preview_bounds,
+                    resize_preview,
                     metrics,
                 )
             });
@@ -918,6 +923,18 @@ impl Render for DockHost {
             ));
         }
 
+        if let Some(mut preview) = resize_preview {
+            if let Some(owner) = preview.scroll_owner {
+                let scroll_offset = self
+                    .column_scroll_handles
+                    .get(&owner)
+                    .map(|handle| handle.offset().y.as_f32().max(0.0))
+                    .unwrap_or(0.0);
+                preview.rect.origin.y -= scroll_offset;
+            }
+            workspace = workspace.child(render_resize_preview(preview, theme));
+        }
+
         if let (Some(open), Some(viewport)) = (
             open_context_menu.as_ref(),
             rects.as_ref().and_then(|rects| rects.viewport),
@@ -936,6 +953,28 @@ impl Render for DockHost {
 
         root.child(workspace)
     }
+}
+
+fn render_resize_preview(preview: ResizePreview, theme: Theme) -> impl IntoElement {
+    let rect = preview.rect;
+    let mut marker = div()
+        .absolute()
+        .left(px(rect.origin.x))
+        .top(px(rect.origin.y))
+        .w(px(rect.size.width))
+        .h(px(rect.size.height));
+
+    marker = match preview.kind {
+        ResizePreviewKind::SplitterLine => marker
+            .bg(rgb(theme.colors.drop_zone_border))
+            .opacity(0.96),
+        ResizePreviewKind::BoundsOutline => marker
+            .bg(rgb(theme.colors.drop_zone))
+            .opacity(0.14)
+            .border_1()
+            .border_color(rgb(theme.colors.drop_zone_border)),
+    };
+    marker
 }
 
 fn context_menu_target_exists(

@@ -153,21 +153,23 @@ impl DragController {
     }
 }
 
-/// The semantic target and pointer origin captured at the start of one resize.
+/// The target, pointer origin, and source geometry captured at pointer-down.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ResizeInteraction {
     pub hit: HitResult,
     pub origin: Point,
+    /// Latest pointer position used only to render a visual preview.
+    pub preview_point: Option<Point>,
     pub layout_version: u64,
     pub metrics_revision: u64,
-    /// Sum of effective boundary movement accepted by Core so far.
-    pub applied_delta: f32,
-    /// Requested width at pointer-down for a canvas-facing main-dock edge.
+    /// Requested width captured at pointer-down for column/flyout resizing.
     pub start_width: Option<f32>,
-    /// Most recent effective absolute width returned by Core.
-    pub actual_width: Option<f32>,
     /// Visible floating bounds captured at pointer-down for edge/corner resizing.
     pub start_bounds: Option<Rect>,
+    /// Original splitter rectangle, captured before the gesture moves it.
+    pub start_splitter_rect: Option<Rect>,
+    /// Original flyout rectangle, captured before the gesture moves it.
+    pub start_flyout_rect: Option<Rect>,
 }
 
 /// Invalid attempts to begin a resize interaction.
@@ -385,6 +387,35 @@ impl DockController {
         ) {
             return Err(ResizeInteractionError::NotResizeHandle);
         }
+        // Snapshot only the geometry values needed by this gesture. No second
+        // Dock tree is created; Layout stays the single model owner.
+        let rects = self.geometry().ok().cloned();
+        let start_splitter_rect = match hit {
+            HitResult::Splitter {
+                owner,
+                boundary_index,
+                axis,
+            } => rects.as_ref().and_then(|rects| {
+                rects
+                    .splitters
+                    .iter()
+                    .find(|splitter| {
+                        splitter.owner == owner
+                            && splitter.boundary_index == boundary_index
+                            && splitter.axis == axis
+                    })
+                    .map(|splitter| splitter.rect)
+            }),
+            _ => None,
+        };
+        let start_flyout_rect = match hit {
+            HitResult::FlyoutResizeEdge { panel, .. } => rects
+                .as_ref()
+                .and_then(|rects| rects.flyout)
+                .filter(|flyout| flyout.panel == panel)
+                .map(|flyout| flyout.rect),
+            _ => None,
+        };
         let start_width = match hit {
             HitResult::Splitter {
                 owner,
@@ -394,31 +425,30 @@ impl DockController {
                 Some(Node::Column(column)) => Some(column.width),
                 _ => None,
             },
-            HitResult::FlyoutResizeEdge { panel, .. } => self
-                .geometry()
-                .ok()
-                .and_then(|rects| rects.flyout)
-                .filter(|flyout| flyout.panel == panel)
-                .map(|flyout| flyout.rect.size.width),
+            HitResult::FlyoutResizeEdge { .. } => {
+                start_flyout_rect.map(|rect| rect.size.width)
+            }
             _ => None,
         };
         let start_bounds = match hit {
-            HitResult::FloatingResizeEdge { group, .. } => self
-                .geometry()
-                .ok()
-                .and_then(|rects| {
-                    rects
-                        .floating_groups
-                        .iter()
-                        .find(|floating| floating.group == group)
-                        .map(|floating| floating.rect)
-                }),
+            HitResult::FloatingResizeEdge { group, .. } => rects.as_ref().and_then(|rects| {
+                rects
+                    .floating_groups
+                    .iter()
+                    .find(|floating| floating.group == group)
+                    .map(|floating| floating.rect)
+            }),
             _ => None,
         };
+        if matches!(hit, HitResult::Splitter { .. }) && start_splitter_rect.is_none() {
+            return Err(ResizeInteractionError::NotResizeHandle);
+        }
         if matches!(hit, HitResult::FloatingResizeEdge { .. }) && start_bounds.is_none() {
             return Err(ResizeInteractionError::NotResizeHandle);
         }
-        if matches!(hit, HitResult::FlyoutResizeEdge { .. }) && start_width.is_none() {
+        if matches!(hit, HitResult::FlyoutResizeEdge { .. })
+            && (start_width.is_none() || start_flyout_rect.is_none())
+        {
             return Err(ResizeInteractionError::NotResizeHandle);
         }
         if !self.history.begin_transaction(&self.layout) {
@@ -429,32 +459,30 @@ impl DockController {
         self.interaction = Some(ResizeInteraction {
             hit,
             origin,
+            preview_point: None,
             layout_version: self.layout.version(),
             metrics_revision: self.metrics_revision,
-            applied_delta: 0.0,
             start_width,
-            actual_width: start_width,
             start_bounds,
+            start_splitter_rect,
+            start_flyout_rect,
         });
         Ok(())
     }
 
-    /// Records an effective boundary movement returned by a Core resize command.
-    pub fn record_resize_applied_delta(&mut self, delta: f32) {
-        if delta.is_finite()
-            && let Some(interaction) = self.interaction.as_mut()
-        {
-            interaction.applied_delta += delta;
+    /// Updates only transient preview state; the Dock Layout remains untouched.
+    pub(crate) fn set_resize_preview_point(&mut self, point: Point) -> bool {
+        if point.validate().is_err() {
+            return false;
         }
-    }
-
-    /// Records the effective width returned by an absolute column resize.
-    pub fn record_resize_actual_width(&mut self, width: f32) {
-        if width.is_finite()
-            && let Some(interaction) = self.interaction.as_mut()
-        {
-            interaction.actual_width = Some(width);
+        let Some(interaction) = self.interaction.as_mut() else {
+            return false;
+        };
+        if interaction.preview_point == Some(point) {
+            return false;
         }
+        interaction.preview_point = Some(point);
+        true
     }
 
     /// Stores the latest pointer position and reports whether the caller
