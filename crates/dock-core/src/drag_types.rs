@@ -48,7 +48,7 @@ pub struct DragDropRequest {
     pub handle: DragHandle,
     pub origin: Point,
     pub point: Point,
-    /// Absent for FloatingTitle: releasing a title drag moves the window and needs no dock target.
+    /// Absent for FloatingTitle and for FloatingCapture released outside a dock target.
     pub target: Option<DropTarget>,
     /// Optional bounds supplied by the adapter for a FreeArea/Float request.
     /// DragSession leaves this empty because it does not own render geometry.
@@ -73,7 +73,8 @@ pub enum DragHandle {
     /// A floating window title bar; moves window bounds, never docks it.
     FloatingTitle,
     /// An explicit floating-window capture affordance; may dock/stack the
-    /// entire floating root using the resolved DropTarget.
+    /// entire floating root using the resolved DropTarget. With no target, the
+    /// window remains floating and the gesture completes without a layout change.
     FloatingCapture,
 }
 
@@ -175,7 +176,8 @@ pub enum DragState {
         position: Point,
         target: Option<DropTarget>,
     },
-    /// A valid target was present when the pointer was released.
+    /// The gesture completed. The target may be absent for FloatingTitle or
+    /// FloatingCapture, both of which can validly finish without a dock target.
     Dropped {
         payload: DragPayload,
         origin: Point,
