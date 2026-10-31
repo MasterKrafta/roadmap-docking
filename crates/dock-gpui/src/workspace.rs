@@ -160,8 +160,8 @@ impl DockWorkspace {
 
     /// Returns the underlying controller for advanced application integration.
     ///
-    /// Most applications do not need this: use panel_menu for visibility
-    /// toggles and mount DockWorkspace as a normal GPUI view.
+    /// Most applications do not need this: create a DockPanelMenu entity
+    /// for visibility toggles and mount DockWorkspace as a normal GPUI view.
     pub fn controller(&self) -> &Entity<DockController> {
         &self.controller
     }
