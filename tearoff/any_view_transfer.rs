@@ -1015,8 +1015,16 @@ impl Render for MainWindowView {
         }
 
         let can_extract = floating_panel.is_none() && floating_hwnd != 0;
-        let inactive_label = format!("Извлечь {} из группы", inactive_tab.label());
-        let active_label = format!("Извлечь {} из группы", active_tab.label());
+        let inactive_label = format!(
+            "Извлечь {} из группы с {}",
+            inactive_tab.label(),
+            active_tab.label()
+        );
+        let active_label = format!(
+            "Извлечь {} из группы с {}",
+            active_tab.label(),
+            inactive_tab.label()
+        );
 
         header = header.child(
             div()
@@ -1058,7 +1066,7 @@ impl Render for MainWindowView {
                     .py_2()
                     .text_color(rgb(0xa8b0ba))
                     .child(
-                        "B находится вкладкой в общей группе с A. Извлеки активную или неактивную вкладку; возврат добавляет её обратно в эту же группу.",
+                        "A и B состыкованы в одной tab-группе. Извлеки одну панель из группы с другой; возврат вкладывает её обратно к оставшейся панели.",
                     ),
             )
             .child(active_content)
@@ -1105,14 +1113,15 @@ impl Render for FloatingWindowView {
         let title = floating_panel
             .map(|panel| {
                 format!(
-                    "FLOATING WINDOW — {} (ИЗ ГРУППЫ A + B)",
-                    panel.label()
+                    "FLOATING WINDOW — {} (ИЗ ГРУППЫ С {})",
+                    panel.label(),
+                    panel.other().label()
                 )
             })
             .unwrap_or_else(|| "FLOATING WINDOW — EMPTY".to_string());
 
         let return_label = floating_panel
-            .map(|panel| format!("Вложить {} обратно в группу A + B", panel.label()))
+            .map(|panel| format!("Вложить {} обратно к {}", panel.label(), panel.other().label()))
             .unwrap_or_else(|| "Группа уже восстановлена".to_string());
 
         div()
