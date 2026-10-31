@@ -5,7 +5,7 @@ use std::{
 
 use dock_core::{Axis, Point, SplitterRect};
 use gpui::{
-    App, Context, Entity, IntoElement, MouseButton, MouseDownEvent, MouseUpEvent, ParentElement,
+    Context, Entity, IntoElement, MouseButton, MouseDownEvent, MouseUpEvent, ParentElement,
     Render, Styled, Window, div, px, rgb,
     prelude::{InteractiveElement as _, StatefulInteractiveElement as _},
 };
