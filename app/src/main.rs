@@ -117,7 +117,7 @@ impl Render for AppView {
 
         if self.menu_open {
             let app_view = cx.entity();
-            let menu = self.workspace.update(cx, |workspace, app| {
+            let menu = self.workspace.update(cx, |workspace, workspace_cx| {
                 workspace.panel_menu(
                     "application-window-menu",
                     Rect::new(
@@ -131,7 +131,7 @@ impl Render for AppView {
                             cx.notify();
                         });
                     },
-                    app,
+                    workspace_cx,
                 )
             });
             root = root.child(menu);
