@@ -3,7 +3,7 @@ use std::time::Duration;
 use dock_core::{DockCommand, FlyoutRect, ResizeEdge};
 use gpui::{
     Animation, AnimationExt, AnyView, App, Entity, IntoElement, ParentElement,
-    SharedString, Styled, div, px, rgb,
+    SharedString, StatefulInteractiveElement, Styled, div, px, rgb,
     prelude::InteractiveElement as _,
 };
 use ui::Theme;

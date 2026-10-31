@@ -1,7 +1,7 @@
 use dock_core::{ColumnDisplayItem, ColumnMode, ColumnRect, DockCommand, FlyoutState, Point, TabHeaderRect};
 use gpui::{
-    Entity, IntoElement, ParentElement, SharedString, Styled, div, img, px, rgb,
-    prelude::InteractiveElement as _,
+    Entity, IntoElement, ParentElement, SharedString, StatefulInteractiveElement, Styled, div,
+    img, px, rgb, prelude::InteractiveElement as _,
 };
 use ui::Theme;
 

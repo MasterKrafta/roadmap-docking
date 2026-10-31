@@ -289,7 +289,7 @@ fn menu_surface(
     width: f32,
     max_height: f32,
     theme: Theme,
-) -> gpui::Div {
+) -> impl IntoElement + ParentElement {
     div()
         .id(format!("dock-menu-{left}-{top}-{width}"))
         .absolute()
