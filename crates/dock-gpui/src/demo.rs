@@ -19,14 +19,14 @@ mod windows_demo {
 
     use dock_core::{
         Axis, ColumnDisplayItem, ColumnMode, ColumnRect, DockCommand, DockMetrics, DockSide,
-        DragPayload, DragPreview, DropSource, DropZone, DropZoneRect, FloatingGroupId,
-        FloatingGroupRect, FlyoutRect, FlyoutState, GroupRect, Layout, Node, NodeId, PanelConstraints,
-        PanelId, PanelKey, PanelRect, Point, Profile, Rect, Size, SplitterRect, TabHeaderRect,
-        TabOverflowRect, TabStripRect, VerticalOverflow, create_initial_layout,
+        DragPayload, DragPreview, DropSource, DropZone, DropZoneRect, FloatingGroupId, FlyoutState,
+        Layout, Node, NodeId, PanelConstraints, PanelId, PanelKey, PanelRect, Point, Profile, Rect,
+        Size, TabOverflowRect, create_initial_layout,
     };
     use gpui::{
         AnyView, App, AppContext, Bounds, Context, Entity, IntoElement, Render, ScrollHandle,
-        SharedString, TitlebarOptions, Window, WindowBounds, WindowOptions, div, px, rgb, size,
+        SharedString, StatefulInteractiveElement, TitlebarOptions, Window, WindowBounds,
+        WindowOptions, div, px, rgb, size,
     };
     use gpui::prelude::*;
     use gpui_platform::application;
@@ -39,7 +39,7 @@ mod windows_demo {
             column::ColumnView,
             context_menu::{
                 ContextMenu, ContextMenuCallbacks, ContextMenuEntry, ContextMenuItem,
-                ContextMenuTarget, GroupMenuToggle,
+                GroupMenuToggle,
             },
             drop_overlay::{DragGhost, DropOverlay},
             floating::FloatingWindowView,
@@ -256,7 +256,6 @@ mod windows_demo {
         active_flyout: Option<FlyoutState>,
         floating_titles: HashMap<FloatingGroupId, String>,
         floating_root: Option<NodeId>,
-        floating_node_ids: HashSet<NodeId>,
         floating_panel_ids: HashSet<PanelId>,
         drop_zone: Option<DropZoneRect>,
         drag_preview: Option<DragPreview>,
@@ -284,7 +283,6 @@ mod windows_demo {
                 main_columns,
                 active_flyout,
                 floating_root,
-                floating_node_ids,
                 floating_panel_ids,
                 drop_zone,
                 drag_preview,
@@ -407,7 +405,6 @@ mod windows_demo {
                     main_columns,
                     layout.flyout(),
                     floating_root,
-                    floating_node_ids,
                     floating_panel_ids,
                     drop_zone,
                     drag_preview,
@@ -448,7 +445,6 @@ mod windows_demo {
                 active_flyout,
                 floating_titles,
                 floating_root,
-                floating_node_ids,
                 floating_panel_ids,
                 drop_zone,
                 drag_preview,
@@ -534,7 +530,7 @@ mod windows_demo {
             .child(
                 div()
                     .relative()
-                    .w(px(DEMO_WIDTH - 28.0))
+                    .w(px(DEMO_WIDTH))
                     .h(px(preview_height))
                     .overflow_hidden()
                     .bg(rgb(theme.colors.window_background))
