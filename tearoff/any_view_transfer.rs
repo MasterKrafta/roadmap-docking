@@ -30,18 +30,17 @@ actions!(
     ]
 );
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PanelLocation {
-    #[default]
-    Main,
-    Floating,
+    FloatingA,
+    FloatingB,
 }
 
 impl PanelLocation {
     fn label(self) -> &'static str {
         match self {
-            Self::Main => "главное окно",
-            Self::Floating => "плавающее окно",
+            Self::FloatingA => "плавающее окно A",
+            Self::FloatingB => "плавающее окно B",
         }
     }
 }
@@ -69,20 +68,32 @@ impl PanelId {
     }
 }
 
-#[derive(Default)]
 struct TransferState {
-    active_tab: PanelId,
-    floating_panel: Option<PanelId>,
+    // Each floating window owns one tab group. Initially A and B are in
+    // separate groups; docking moves a PanelId between these two vectors.
+    groups: [Vec<PanelId>; 2],
+    active_tabs: [Option<PanelId>; 2],
     main_hwnd: isize,
-    floating_hwnd: isize,
+    floating_hwnds: [isize; 2],
+}
+
+impl Default for TransferState {
+    fn default() -> Self {
+        Self {
+            groups: [vec![PanelId::A], vec![PanelId::B]],
+            active_tabs: [Some(PanelId::A), Some(PanelId::B)],
+            main_hwnd: 0,
+            floating_hwnds: [0, 0],
+        }
+    }
 }
 
 impl TransferState {
     fn location(&self, panel: PanelId) -> PanelLocation {
-        if self.floating_panel == Some(panel) {
-            PanelLocation::Floating
+        if self.groups[0].contains(&panel) {
+            PanelLocation::FloatingA
         } else {
-            PanelLocation::Main
+            PanelLocation::FloatingB
         }
     }
 }
@@ -860,115 +871,167 @@ impl PanelViews {
 
 struct MainWindowView {
     state: Entity<TransferState>,
-    panels: PanelViews,
-}
-
-impl MainWindowView {
-    fn activate_tab(&mut self, panel: PanelId, cx: &mut Context<Self>) {
-        let floating_hwnd = self.state.update(cx, |state, cx| {
-            if state.floating_panel == Some(panel) {
-                state.floating_hwnd
-            } else {
-                state.active_tab = panel;
-                cx.notify();
-                0
-            }
-        });
-
-        if floating_hwnd != 0 {
-            tearoff_win::activate_window(floating_hwnd);
-        }
-    }
-
-    fn activate_a(&mut self, _: &MouseUpEvent, _: &mut Window, cx: &mut Context<Self>) {
-        self.activate_tab(PanelId::A, cx);
-    }
-
-    fn activate_b(&mut self, _: &MouseUpEvent, _: &mut Window, cx: &mut Context<Self>) {
-        self.activate_tab(PanelId::B, cx);
-    }
-
-    fn extract_panel(
-        &mut self,
-        panel: PanelId,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let (hwnd, next_active) = self.state.update(cx, |state, cx| {
-            if state.floating_panel.is_some() || state.floating_hwnd == 0 {
-                return (0, None);
-            }
-
-            state.floating_panel = Some(panel);
-
-            // If the active tab leaves the group, activate the remaining tab.
-            // When the panel returns, it is added back as an inactive tab.
-            let next_active = if state.active_tab == panel {
-                let remaining = panel.other();
-                state.active_tab = remaining;
-                Some(remaining)
-            } else {
-                None
-            };
-
-            cx.notify();
-            (state.floating_hwnd, next_active)
-        });
-
-        if hwnd == 0 {
-            return;
-        }
-
-        if let Some(panel) = next_active {
-            let focus_handle = self.panels.focus_handle(panel, cx);
-            window.focus(&focus_handle, cx);
-        }
-
-        tearoff_win::show_window(hwnd);
-        tearoff_win::activate_window(hwnd);
-    }
-
-    fn extract_inactive(
-        &mut self,
-        _: &MouseUpEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let inactive_panel = self.state.read(cx).active_tab.other();
-        self.extract_panel(inactive_panel, window, cx);
-    }
-
-    fn extract_active(
-        &mut self,
-        _: &MouseUpEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let active_panel = self.state.read(cx).active_tab;
-        self.extract_panel(active_panel, window, cx);
-    }
 }
 
 impl Render for MainWindowView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let (active_tab, floating_panel, floating_hwnd) = {
+        let (group_a, group_b) = {
             let state = self.state.read(cx);
-            (state.active_tab, state.floating_panel, state.floating_hwnd)
+            (state.groups[0].clone(), state.groups[1].clone())
         };
-        let inactive_tab = active_tab.other();
 
-        let active_content = if floating_panel == Some(active_tab) {
-            div()
-                .flex_1()
-                .items_center()
-                .justify_center()
-                .text_color(rgb(0x888888))
-                .child("В группе временно нет активной вкладки")
+        let describe_group = |panels: &[PanelId]| {
+            if panels.is_empty() {
+                "пусто".to_string()
+            } else {
+                panels
+                    .iter()
+                    .map(|panel| panel.label())
+                    .collect::<Vec<_>>()
+                    .join(" + ")
+            }
+        };
+
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .p_4()
+            .bg(rgb(0x1b1e22))
+            .text_color(white())
+            .child("MAIN WINDOW")
+            .child("Главное окно остаётся отдельной рабочей областью.")
+            .child("Плавающие панели — два самостоятельных нативных окна.")
+            .child(format!("Floating window A: {}", describe_group(&group_a)))
+            .child(format!("Floating window B: {}", describe_group(&group_b)))
+            .child(
+                div()
+                    .mt_3()
+                    .p_3()
+                    .bg(rgb(0x292d32))
+                    .child(
+                        "Проверка: в окне A нажми «Присоединить B сюда». Окно B скроется, а A покажет вкладки A и B. Затем извлеки B обратно — окно B появится снова.",
+                    ),
+            )
+    }
+}
+
+struct FloatingWindowView {
+    slot: usize,
+    state: Entity<TransferState>,
+    panels: PanelViews,
+}
+
+impl FloatingWindowView {
+    fn slot_label(&self) -> &'static str {
+        if self.slot == 0 { "A" } else { "B" }
+    }
+
+    fn other_slot(&self) -> usize {
+        1 - self.slot
+    }
+
+    fn activate_tab(&mut self, panel: PanelId, cx: &mut Context<Self>) {
+        self.state.update(cx, |state, cx| {
+            if state.groups[self.slot].contains(&panel) {
+                state.active_tabs[self.slot] = Some(panel);
+                cx.notify();
+            }
+        });
+    }
+
+    fn merge_other_window(&mut self, _: &MouseUpEvent, _: &mut Window, cx: &mut Context<Self>) {
+        let other = self.other_slot();
+        let (other_hwnd, this_hwnd, merged) = self.state.update(cx, |state, cx| {
+            // This operation models dropping the other floating panel into this
+            // floating window. Both source and target must currently be single-panel groups.
+            if state.groups[self.slot].len() != 1 || state.groups[other].len() != 1 {
+                return (0, 0, false);
+            }
+
+            let incoming = state.groups[other].remove(0);
+            state.groups[self.slot].push(incoming);
+            state.active_tabs[other] = None;
+
+            let other_hwnd = state.floating_hwnds[other];
+            let this_hwnd = state.floating_hwnds[self.slot];
+            cx.notify();
+            (other_hwnd, this_hwnd, true)
+        });
+
+        if merged {
+            // The source window is now empty; its native window is hidden but
+            // retained so the extracted panel can return to this exact host.
+            if other_hwnd != 0 {
+                tearoff_win::hide_window(other_hwnd);
+            }
+            if this_hwnd != 0 {
+                tearoff_win::activate_window(this_hwnd);
+            }
+        }
+    }
+
+    fn extract_panel(&mut self, panel: PanelId, cx: &mut Context<Self>) {
+        let other = self.other_slot();
+        let (target_hwnd, extracted) = self.state.update(cx, |state, cx| {
+            if state.groups[self.slot].len() != 2
+                || !state.groups[self.slot].contains(&panel)
+                || !state.groups[other].is_empty()
+            {
+                return (0, false);
+            }
+
+            state.groups[self.slot].retain(|candidate| *candidate != panel);
+            let remaining = state.groups[self.slot][0];
+
+            if state.active_tabs[self.slot] == Some(panel) {
+                state.active_tabs[self.slot] = Some(remaining);
+            }
+
+            state.groups[other].push(panel);
+            state.active_tabs[other] = Some(panel);
+
+            let target_hwnd = state.floating_hwnds[other];
+            cx.notify();
+            (target_hwnd, true)
+        });
+
+        if extracted && target_hwnd != 0 {
+            // The same AnyView is removed from this host before its window is
+            // shown in the other slot.
+            tearoff_win::show_window(target_hwnd);
+            tearoff_win::activate_window(target_hwnd);
+        }
+    }
+}
+
+impl Render for FloatingWindowView {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let (group, active_tab, other_group) = {
+            let state = self.state.read(cx);
+            (
+                state.groups[self.slot].clone(),
+                state.active_tabs[self.slot],
+                state.groups[self.other_slot()].clone(),
+            )
+        };
+
+        let title = if group.is_empty() {
+            format!("FLOATING WINDOW {}", self.slot_label())
         } else {
-            div().flex_1().p_3().child(self.panels.get(active_tab))
+            format!(
+                "FLOATING WINDOW {} — {}",
+                self.slot_label(),
+                group
+                    .iter()
+                    .map(|panel| panel.label())
+                    .collect::<Vec<_>>()
+                    .join(" + ")
+            )
         };
 
-        let mut header = div()
+        let mut tabs = div()
             .h(px(42.))
             .w_full()
             .flex()
@@ -978,128 +1041,76 @@ impl Render for MainWindowView {
             .px_3()
             .bg(rgb(0x30363d))
             .text_color(white())
-            .child("MAIN WINDOW · ГРУППА A + B");
+            .child(title);
 
-        // A floating panel is removed from the tab strip. It is inserted back
-        // into this same group by the button in the floating window.
-        if floating_panel != Some(PanelId::A) {
-            header = header.child(
+        for panel in group.iter().copied() {
+            tabs = tabs.child(
                 div()
                     .px_3()
                     .py_1()
-                    .bg(if active_tab == PanelId::A {
+                    .bg(if active_tab == Some(panel) {
                         rgb(0x43566d)
                     } else {
                         rgb(0x252a30)
                     })
                     .cursor_pointer()
-                    .on_mouse_up(MouseButton::Left, cx.listener(Self::activate_a))
-                    .child("A"),
+                    .on_mouse_up(
+                        MouseButton::Left,
+                        cx.listener(move |this, _, _, cx| this.activate_tab(panel, cx)),
+                    )
+                    .child(panel.label()),
             );
         }
 
-        if floating_panel != Some(PanelId::B) {
-            header = header.child(
-                div()
-                    .px_3()
-                    .py_1()
-                    .bg(if active_tab == PanelId::B {
-                        rgb(0x43566d)
-                    } else {
-                        rgb(0x252a30)
-                    })
-                    .cursor_pointer()
-                    .on_mouse_up(MouseButton::Left, cx.listener(Self::activate_b))
-                    .child("B"),
-            );
-        }
-
-        let can_extract = floating_panel.is_none() && floating_hwnd != 0;
-        let inactive_label = format!(
-            "Извлечь {} из группы с {}",
-            inactive_tab.label(),
-            active_tab.label()
-        );
-        let active_label = format!(
-            "Извлечь {} из группы с {}",
-            active_tab.label(),
-            inactive_tab.label()
-        );
-
-        header = header.child(
-            div()
-                .ml_auto()
-                .px_2()
-                .py_1()
-                .bg(rgb(0x43566d))
-                .cursor_pointer()
-                .on_mouse_up(MouseButton::Left, cx.listener(Self::extract_inactive))
-                .child(if can_extract {
-                    inactive_label
-                } else {
-                    "Сначала верните плавающую панель".to_string()
-                }),
-        );
-        header = header.child(
-            div()
-                .px_2()
-                .py_1()
-                .bg(rgb(0x43566d))
-                .cursor_pointer()
-                .on_mouse_up(MouseButton::Left, cx.listener(Self::extract_active))
-                .child(if can_extract {
-                    active_label
-                } else {
-                    "Недоступно".to_string()
-                }),
-        );
-
-        div()
-            .size_full()
+        let mut actions = div()
+            .w_full()
             .flex()
-            .flex_col()
-            .bg(rgb(0x1b1e22))
-            .child(header)
-            .child(
+            .flex_row()
+            .flex_wrap()
+            .gap_2()
+            .p_3()
+            .bg(rgb(0x22262b));
+
+        if group.len() == 1 && other_group.len() == 1 {
+            let incoming = other_group[0];
+            actions = actions.child(
                 div()
                     .px_3()
                     .py_2()
-                    .text_color(rgb(0xa8b0ba))
-                    .child(
-                        "A и B состыкованы в одной tab-группе. Извлеки одну панель из группы с другой; возврат вкладывает её обратно к оставшейся панели.",
-                    ),
-            )
-            .child(active_content)
-    }
-}
+                    .bg(rgb(0x43566d))
+                    .cursor_pointer()
+                    .on_mouse_up(MouseButton::Left, cx.listener(Self::merge_other_window))
+                    .child(format!(
+                        "Присоединить {} сюда из окна {}",
+                        incoming.label(),
+                        if self.slot == 0 { "B" } else { "A" }
+                    )),
+            );
+        }
 
-struct FloatingWindowView {
-    state: Entity<TransferState>,
-    panels: PanelViews,
-}
-
-impl FloatingWindowView {
-    fn move_to_main(&mut self, _: &MouseUpEvent, _: &mut Window, cx: &mut Context<Self>) {
-        let (floating_hwnd, main_hwnd) = self.state.update(cx, |state, cx| {
-            if state.floating_panel.take().is_some() {
-                cx.notify();
+        if group.len() == 2 {
+            for panel in group.iter().copied() {
+                let destination = if self.slot == 0 { "B" } else { "A" };
+                actions = actions.child(
+                    div()
+                        .px_3()
+                        .py_2()
+                        .bg(rgb(0x43566d))
+                        .cursor_pointer()
+                        .on_mouse_up(
+                            MouseButton::Left,
+                            cx.listener(move |this, _, _, cx| this.extract_panel(panel, cx)),
+                        )
+                        .child(format!(
+                            "Извлечь {} в отдельное окно {}",
+                            panel.label(),
+                            destination
+                        )),
+                );
             }
-            (state.floating_hwnd, state.main_hwnd)
-        });
-
-        if floating_hwnd != 0 {
-            tearoff_win::hide_window(floating_hwnd);
         }
-        if main_hwnd != 0 {
-            tearoff_win::activate_window(main_hwnd);
-        }
-    }
-}
 
-impl Render for FloatingWindowView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let floating_panel = self.state.read(cx).floating_panel;
-        let content = if let Some(panel) = floating_panel {
+        let content = if let Some(panel) = active_tab.filter(|panel| group.contains(panel)) {
             div().flex_1().p_3().child(self.panels.get(panel))
         } else {
             div()
@@ -1107,54 +1118,34 @@ impl Render for FloatingWindowView {
                 .items_center()
                 .justify_center()
                 .text_color(rgb(0x888888))
-                .child("Сейчас нет извлечённой панели")
+                .child("Окно свободно: панель пристыкована к другому floating-окну")
         };
-
-        let title = floating_panel
-            .map(|panel| {
-                format!(
-                    "FLOATING WINDOW — {} (ИЗ ГРУППЫ С {})",
-                    panel.label(),
-                    panel.other().label()
-                )
-            })
-            .unwrap_or_else(|| "FLOATING WINDOW — EMPTY".to_string());
-
-        let return_label = floating_panel
-            .map(|panel| format!("Вложить {} обратно к {}", panel.label(), panel.other().label()))
-            .unwrap_or_else(|| "Группа уже восстановлена".to_string());
 
         div()
             .size_full()
             .flex()
             .flex_col()
             .bg(rgb(0x1b1e22))
-            .child(
-                div()
-                    .h(px(42.))
-                    .w_full()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .px_3()
-                    .bg(rgb(0x30363d))
-                    .text_color(white())
-                    .child(title)
-                    .child(
-                        div()
-                            .ml_auto()
-                            .px_2()
-                            .py_1()
-                            .bg(rgb(0x43566d))
-                            .cursor_pointer()
-                            .on_mouse_up(
-                                MouseButton::Left,
-                                cx.listener(Self::move_to_main),
-                            )
-                            .child(return_label),
-                    ),
-            )
+            .child(tabs)
+            .child(actions)
             .child(content)
+    }
+}
+
+fn floating_window_options(origin_x: f32) -> WindowOptions {
+    WindowOptions {
+        titlebar: None,
+        kind: WindowKind::PopUp,
+        show: false,
+        focus: false,
+        is_resizable: true,
+        is_minimizable: false,
+        is_movable: false,
+        window_bounds: Some(WindowBounds::Windowed(Bounds {
+            origin: point(px(origin_x), px(180.0)),
+            size: size(px(440.0), px(360.0)),
+        })),
+        ..Default::default()
     }
 }
 
@@ -1177,8 +1168,9 @@ fn main() {
 
         let state = cx.new(|_| TransferState::default());
 
-        // Keep both panel views in the shared registry for the entire experiment.
-        // The inactive tab is not rendered, but its Entity/AnyView remains alive.
+        // There is one Entity and one AnyView per panel. The two independent
+        // floating hosts share these handles and only mount the panels in the
+        // group that currently owns each PanelId.
         let panel_a = cx.new(|cx| TransferPanel::new(PanelId::A, state.clone(), cx));
         let panel_b = cx.new(|cx| TransferPanel::new(PanelId::B, state.clone(), cx));
         let panels = PanelViews {
@@ -1188,63 +1180,21 @@ fn main() {
             b_entity: panel_b.clone(),
         };
 
-        let floating_options = WindowOptions {
-            titlebar: None,
-            kind: WindowKind::PopUp,
-            show: false,
-            focus: false,
-            is_resizable: true,
-            is_minimizable: false,
-            is_movable: false,
-            window_bounds: Some(WindowBounds::Windowed(Bounds {
-                origin: point(px(1040.0), px(180.0)),
-                size: size(px(440.0), px(340.0)),
-            })),
-            ..Default::default()
-        };
-
-        let floating_state = state.clone();
-        let floating_panels = panels.clone();
-        let floating_window = cx
-            .open_window(floating_options, move |_, cx| {
-                cx.new(|cx| {
-                    cx.observe(&floating_state, |_, _, cx| cx.notify())
-                        .detach();
-                    FloatingWindowView {
-                        state: floating_state,
-                        panels: floating_panels,
-                    }
-                })
-            })
-            .expect("не удалось создать скрытое floating-окно");
-
-        let floating_hwnd = floating_window
-            .update(cx, |_, window, _| tearoff_win::hwnd_of(window).unwrap_or(0))
-            .unwrap_or(0);
-        if floating_hwnd != 0 {
-            tearoff_win::hide_window(floating_hwnd);
-        }
-
-        state.update(cx, |state, _| state.floating_hwnd = floating_hwnd);
-
+        // Main application window remains present and independent from both
+        // floating panel windows.
         let main_options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds {
-                origin: point(px(160.0), px(120.0)),
-                size: size(px(1000.0), px(620.0)),
+                origin: point(px(100.0), px(100.0)),
+                size: size(px(700.0), px(560.0)),
             })),
             ..Default::default()
         };
-
         let main_state = state.clone();
-        let main_panels = panels.clone();
         let main_window = cx
             .open_window(main_options, move |_, cx| {
                 cx.new(|cx| {
                     cx.observe(&main_state, |_, _, cx| cx.notify()).detach();
-                    MainWindowView {
-                        state: main_state,
-                        panels: main_panels,
-                    }
+                    MainWindowView { state: main_state }
                 })
             })
             .expect("не удалось создать главное окно");
@@ -1252,23 +1202,77 @@ fn main() {
         let main_hwnd = main_window
             .update(cx, |_, window, _| tearoff_win::hwnd_of(window).unwrap_or(0))
             .unwrap_or(0);
-
         state.update(cx, |state, _| state.main_hwnd = main_hwnd);
 
-        if floating_hwnd != 0 && main_hwnd != 0 {
-            tearoff_win::set_owner(floating_hwnd, main_hwnd);
+        // Create two separate native PopUp windows. They are independent roots,
+        // each initially hosting a different panel.
+        let state_a = state.clone();
+        let panels_a = panels.clone();
+        let floating_a = cx
+            .open_window(floating_window_options(850.0), move |_, cx| {
+                cx.new(|cx| {
+                    cx.observe(&state_a, |_, _, cx| cx.notify()).detach();
+                    FloatingWindowView {
+                        slot: 0,
+                        state: state_a,
+                        panels: panels_a,
+                    }
+                })
+            })
+            .expect("не удалось создать floating-окно A");
+
+        let state_b = state.clone();
+        let panels_b = panels.clone();
+        let floating_b = cx
+            .open_window(floating_window_options(1320.0), move |_, cx| {
+                cx.new(|cx| {
+                    cx.observe(&state_b, |_, _, cx| cx.notify()).detach();
+                    FloatingWindowView {
+                        slot: 1,
+                        state: state_b,
+                        panels: panels_b,
+                    }
+                })
+            })
+            .expect("не удалось создать floating-окно B");
+
+        let floating_a_hwnd = floating_a
+            .update(cx, |_, window, _| tearoff_win::hwnd_of(window).unwrap_or(0))
+            .unwrap_or(0);
+        let floating_b_hwnd = floating_b
+            .update(cx, |_, window, _| tearoff_win::hwnd_of(window).unwrap_or(0))
+            .unwrap_or(0);
+
+        state.update(cx, |state, _| {
+            state.floating_hwnds = [floating_a_hwnd, floating_b_hwnd];
+        });
+
+        if main_hwnd != 0 {
+            if floating_a_hwnd != 0 {
+                tearoff_win::set_owner(floating_a_hwnd, main_hwnd);
+            }
+            if floating_b_hwnd != 0 {
+                tearoff_win::set_owner(floating_b_hwnd, main_hwnd);
+            }
         }
 
-        // Start with panel A focused. Panel B stays alive in PanelViews while
-        // inactive, so extracting B exercises a view that was not mounted.
-        main_window
-            .update(cx, |_, window, cx| {
-                let focus_handle = panel_a.read(cx).focus_handle.clone();
-                window.focus(&focus_handle, cx);
-            })
-            .expect("не удалось установить начальный фокус");
-
+        // Initially show both floating panels. The empty host is hidden after
+        // docking; it is reused when that panel is extracted again.
         cx.activate(true);
+        if floating_b_hwnd != 0 {
+            tearoff_win::show_window(floating_b_hwnd);
+        }
+        if floating_a_hwnd != 0 {
+            tearoff_win::show_window(floating_a_hwnd);
+            tearoff_win::activate_window(floating_a_hwnd);
+        }
+
+        // Set the first input focus in panel A's own native window.
+        floating_a
+            .update(cx, |_, window, cx| {
+                window.focus(&panel_a.read(cx).focus_handle, cx);
+            })
+            .expect("не удалось установить начальный фокус панели A");
     });
 }
 
