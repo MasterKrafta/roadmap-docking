@@ -225,6 +225,7 @@ mod windows_demo {
         rail: Entity<DockController>,
         floating: Entity<DockController>,
         scroll: ScrollHandle,
+        observed: bool,
     }
 
     impl DemoView {
@@ -238,6 +239,7 @@ mod windows_demo {
                 rail,
                 floating,
                 scroll: ScrollHandle::new(),
+                observed: false,
             }
         }
     }
@@ -501,6 +503,7 @@ mod windows_demo {
         theme: Theme,
     ) -> impl IntoElement {
         div()
+            .id(format!("dock-demo-section-{title}"))
             .w_full()
             .flex()
             .flex_col()
@@ -540,6 +543,13 @@ mod windows_demo {
 
     impl Render for DemoView {
         fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            if !self.observed {
+                cx.observe(&self.main, |_, _, cx| cx.notify()).detach();
+                cx.observe(&self.rail, |_, _, cx| cx.notify()).detach();
+                cx.observe(&self.floating, |_, _, cx| cx.notify()).detach();
+                self.observed = true;
+            }
+
             let main = capture_snapshot(&self.main, window, cx);
             let rail = capture_snapshot(&self.rail, window, cx);
             let floating = capture_snapshot(&self.floating, window, cx);
