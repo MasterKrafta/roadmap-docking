@@ -116,9 +116,14 @@ impl Layout {
             *node
         };
         let area_id = self.dock_areas.insert(DockArea::floating(root));
-        self.floating_groups
+        let floating_group = self
+            .floating_groups
             .insert(FloatingGroup::new(area_id, *bounds, next_z));
-        Ok(CommandApplication::persistent())
+        Ok(CommandApplication {
+            actual_value: Some(CommandValue::FloatingGroup(floating_group)),
+            inverse: None,
+            persistent: true,
+        })
     }
 
     pub(super) fn apply_dock_floating_command(
