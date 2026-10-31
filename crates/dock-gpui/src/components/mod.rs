@@ -3,6 +3,7 @@
 pub mod column;
 pub mod context_menu;
 pub mod group;
+pub mod flyout;
 pub mod main_dock;
 pub mod panel_host;
 pub mod rail;
@@ -12,6 +13,7 @@ pub mod tab_strip;
 
 pub use column::ColumnView;
 pub use group::GroupView;
+pub use flyout::FlyoutView;
 pub use main_dock::MainDockView;
 pub use panel_host::PanelHost;
 pub use rail::RailView;

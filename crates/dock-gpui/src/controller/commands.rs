@@ -59,6 +59,18 @@ impl DockController {
         self.dispatch(command)
     }
 
+    /// Dispatches a Core-declared transient command and notifies the owning GPUI entity.
+    pub fn dispatch_transient_in(
+        &mut self,
+        command: DockCommand,
+        cx: &mut Context<Self>,
+    ) -> Result<CommandOutcome, CommandError> {
+        let result = self.dispatch_transient(command);
+        self.flush_events(cx);
+        cx.notify();
+        result
+    }
+
     /// Applies several commands atomically as one history step.
     pub fn dispatch_sequence(
         &mut self,

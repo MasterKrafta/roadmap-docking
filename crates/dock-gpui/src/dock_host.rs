@@ -2,20 +2,21 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use dock_core::{
-    ColumnDisplayItem, ColumnMode, ComputeRectsError, DockSide, HitResult, Layout, Node,
-    NodeId, PanelRect, Point, Rect, Size as CoreSize,
+    ColumnDisplayItem, ColumnMode, ComputeRectsError, DockCommand, DockSide, HitResult, Layout,
+    Node, NodeId, Point, Rect, Size as CoreSize,
 };
 use gpui::{
     AnyView, App, Bounds, Context, Entity, IntoElement, ParentElement, Pixels, Render, ScrollHandle,
     Styled, Window, canvas, div, px, rgb,
+    prelude::InteractiveElement as _,
 };
 use ui::Theme;
 
 use crate::{
     DockController,
     components::{
-        GroupMenuToggle, MainDockView, PanelHost, SplitterView, TabOverflowToggle,
-        collect_group_presentations,
+        FlyoutView, GroupMenuToggle, MainDockView, PanelHost, SplitterView,
+        TabOverflowToggle, collect_group_presentations,
     },
     input::scroll_adjusted_hit_test_point,
 };
@@ -437,6 +438,24 @@ impl Render for DockHost {
             .overflow_hidden()
             .child(measurement);
 
+        // Escape dismisses the transient flyout without changing persistent layout state.
+        if active_flyout.is_some() {
+            let controller_for_escape = self.controller.clone();
+            workspace = workspace.capture_key_down(move |event, _, app| {
+                if event.keystroke.key.eq_ignore_ascii_case("escape") {
+                    let _ = controller_for_escape.update(app, |controller, controller_cx| {
+                        if let Err(error) = controller.dispatch_transient_in(
+                            DockCommand::DismissFlyout,
+                            controller_cx,
+                        ) {
+                            tracing::debug!(%error, "could not dismiss flyout with Escape");
+                        }
+                    });
+                    app.stop_propagation();
+                }
+            });
+        }
+
         // Base canvas surface prevents an uninitialized/empty workspace from
         // exposing an undefined background while the first geometry pass runs.
         if let Some(canvas_rect) = rects.as_ref().and_then(|rects| rects.canvas) {
@@ -505,23 +524,28 @@ impl Render for DockHost {
                 theme,
             ));
 
-            // Flyout is painted above the Canvas and main dock surfaces.
+            // Flyout is an interactive overlay above the Canvas and main dock.
             if let Some(flyout) = rects.flyout {
-                workspace = workspace.child(
-                    div()
-                        .absolute()
-                        .left(px(flyout.rect.origin.x))
-                        .top(px(flyout.rect.origin.y))
-                        .w(px(flyout.rect.size.width))
-                        .h(px(flyout.rect.size.height))
-                        .bg(rgb(theme.colors.panel_surface_background)),
-                );
-                if let Some((_, view)) = flyout_panel_view.clone() {
-                    workspace = workspace.child(PanelHost::render(
-                        vec![(PanelRect::new(flyout.panel, flyout.rect), view)],
-                        Point::ZERO,
-                    ));
-                }
+                let title = active_flyout
+                    .and_then(|state| group_presentations.get(&state.group))
+                    .and_then(|presentation| {
+                        presentation
+                            .tabs
+                            .iter()
+                            .find(|tab| tab.panel == flyout.panel)
+                            .map(|tab| tab.title.clone())
+                    })
+                    .unwrap_or_else(|| "Panel".into());
+                let panel_view = flyout_panel_view
+                    .as_ref()
+                    .map(|(_, view)| view.clone());
+                workspace = workspace.child(FlyoutView::render(
+                    flyout,
+                    title,
+                    panel_view,
+                    self.controller.clone(),
+                    theme,
+                ));
             }
 
             // Later children paint above earlier ones; Core z_order is preserved.
