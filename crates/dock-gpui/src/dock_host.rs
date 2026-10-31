@@ -932,7 +932,7 @@ impl Render for DockHost {
                 "dock-context-menu",
                 viewport,
                 open.anchor,
-                &context_menu_entries,
+                context_menu_entries,
                 open.open_submenu,
                 crate::components::context_menu::ContextMenuCallbacks {
                     on_submenu: toggle_context_submenu,
