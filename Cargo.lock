@@ -4501,6 +4501,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tearoff"
+version = "0.1.0"
+dependencies = [
+ "gpui",
+ "gpui_platform",
+ "raw-window-handle",
+ "windows",
+]
+
+[[package]]
 name = "tempfile"
 version = "3.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
