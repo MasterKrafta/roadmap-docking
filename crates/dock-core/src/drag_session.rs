@@ -202,8 +202,9 @@ impl DragSession {
 
 impl DragSession {
     /// Releases the pointer using the target freshly resolved for the release
-    /// point. A valid drag produces exactly one request; a click or a release
-    /// without a target is cancelled and produces no request.
+    /// point. A valid drag produces exactly one request. Ordinary docking drags
+    /// without a target are cancelled; FloatingTitle and FloatingCapture may
+    /// complete without a target because their windows remain where they are.
     ///
     /// The caller should pass `None` when the pointer was released outside any
     /// valid target. The returned request does not mutate Layout; an adapter
@@ -339,21 +340,24 @@ impl DragSession {
         target: Option<DropTarget>,
         state: &mut DragState,
     ) -> Option<DragDropRequest> {
-        // A title drag is a window move, not a docking operation, so it emits
-        // a request even when the pointer is released over no DropTarget.
-        let target = if handle == DragHandle::FloatingTitle {
-            None
-        } else {
-            let Some(target) = target else {
-                *state = DragState::Cancelled {
-                    payload,
-                    origin,
-                    position,
-                    reason: DragCancelReason::NoValidTarget,
+        // A title drag moves the native window, while a capture drag moves the
+        // floating composition as a whole. Releasing either outside a dock target
+        // is still a completed gesture: the composition remains floating.
+        let target = match handle {
+            DragHandle::FloatingTitle => None,
+            DragHandle::FloatingCapture => target,
+            DragHandle::PanelTab | DragHandle::FlyoutPanel | DragHandle::GroupGrip => {
+                let Some(target) = target else {
+                    *state = DragState::Cancelled {
+                        payload,
+                        origin,
+                        position,
+                        reason: DragCancelReason::NoValidTarget,
+                    };
+                    return None;
                 };
-                return None;
-            };
-            Some(target)
+                Some(target)
+            }
         };
 
         *state = DragState::Dropped {
