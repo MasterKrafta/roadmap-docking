@@ -142,6 +142,8 @@ pub struct ResizeInteraction {
     pub start_width: Option<f32>,
     /// Most recent effective absolute width returned by Core.
     pub actual_width: Option<f32>,
+    /// Visible floating bounds captured at pointer-down for edge/corner resizing.
+    pub start_bounds: Option<Rect>,
 }
 
 /// Invalid attempts to begin a resize interaction.
@@ -285,6 +287,22 @@ impl DockController {
             },
             _ => None,
         };
+        let start_bounds = match hit {
+            HitResult::FloatingResizeEdge { group, .. } => self
+                .geometry()
+                .ok()
+                .and_then(|rects| {
+                    rects
+                        .floating_groups
+                        .iter()
+                        .find(|floating| floating.group == group)
+                        .map(|floating| floating.rect)
+                }),
+            _ => None,
+        };
+        if matches!(hit, HitResult::FloatingResizeEdge { .. }) && start_bounds.is_none() {
+            return Err(ResizeInteractionError::NotResizeHandle);
+        }
         if !self.history.begin_transaction(&self.layout) {
             return Err(ResizeInteractionError::AlreadyActive);
         }
@@ -298,6 +316,7 @@ impl DockController {
             applied_delta: 0.0,
             start_width,
             actual_width: start_width,
+            start_bounds,
         });
         Ok(())
     }
