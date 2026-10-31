@@ -1,4 +1,4 @@
-use dock_core::{Point, TabOverflowRect};
+use dock_core::TabOverflowRect;
 use gpui::{
     IntoElement, ParentElement, Styled, div, px, rgb,
     prelude::InteractiveElement as _,
@@ -43,10 +43,10 @@ impl TabOverflow {
             .on_click(move |event, _, app| {
                 (toggle_menu)(
                     ContextMenuTarget::Overflow(overflow.group),
-                    Point::new(
-                        event.position().x.as_f32(),
-                        event.position().y.as_f32(),
-                    ),
+                    match crate::geometry::point_from_gpui(event.position()) {
+                        Ok(anchor) => anchor,
+                        Err(_) => return,
+                    },
                     app,
                 );
                 app.stop_propagation();

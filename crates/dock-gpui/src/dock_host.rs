@@ -4,25 +4,28 @@ use std::rc::Rc;
 
 use dock_core::{
     ColumnDisplayItem, ColumnMode, ComputeRectsError, DockCommand, DockSide, DragPayload,
-    DropTarget, HitResult, Layout, LayoutRects, Node, NodeId, PanelId, Point, Rect,
-    Size as CoreSize,
+    DropTarget, GeometryError, HitResult, Layout, LayoutRects, Node, NodeId, PanelId, Point,
 };
 use gpui::{
-    AnyView, App, Bounds, Context, Entity, HitboxBehavior, HitboxId, IntoElement, ParentElement,
-    Pixels, Render, ScrollHandle,
+    AnyView, App, Context, Entity, HitboxBehavior, HitboxId, IntoElement, ParentElement,
+    Render, ScrollHandle,
     Styled, Window, canvas, div, px, rgb,
     prelude::InteractiveElement as _,
 };
 use ui::Theme;
 
 use crate::{
+    geometry::{point_from_gpui, host_geometry_from_gpui_bounds},
     DockController,
     components::{
         CanvasSlot, ContextMenu, ContextMenuEntry, ContextMenuItem, ContextMenuTarget,
         ContextMenuToggle, DragGhost, DropOverlay, FloatingWindowView, FlyoutView, MainDockView,
         collect_group_presentations,
     },
-    input::{floating_bounds, register_pointer_events, scroll_adjusted_hit_test_point},
+    input::{
+        floating_bounds, map_hit_test_point, register_pointer_events,
+        scroll_adjusted_hit_test_point,
+    },
 };
 
 /// Root composition for an application's docking workspace.
@@ -123,11 +126,16 @@ impl DockHost {
     ///
     /// Call this before DockController::hit_test for points inside the given
     /// column. The layout rectangles themselves remain unchanged.
-    pub fn scroll_adjusted_hit_test_point(&self, column: NodeId, point: Point) -> Point {
+    pub fn scroll_adjusted_hit_test_point(
+        &self,
+        column: NodeId,
+        point: Point,
+    ) -> Result<Point, GeometryError> {
         let offset_y = self
             .column_scroll_handles
             .get(&column)
-            .map(|handle| handle.offset().y.as_f32())
+            .map(|handle| point_from_gpui(handle.offset()).map(|offset| offset.y))
+            .transpose()?
             .unwrap_or(0.0);
         scroll_adjusted_hit_test_point(point, offset_y)
     }
@@ -139,19 +147,16 @@ impl DockHost {
         point: Point,
         app: &mut App,
     ) -> Result<HitResult, ComputeRectsError> {
-        let overflow_owner = self.controller.update(app, |controller, _| {
-            controller.geometry().map(|rects| {
-                rects.vertical_overflow.iter().find_map(|overflow| {
-                    (self.column_scroll_handles.contains_key(&overflow.owner)
-                        && overflow.viewport.contains(point).unwrap_or(false))
-                    .then_some(overflow.owner)
-                })
-            })
+        let content_point = self.controller.update(app, |controller, _| {
+            let rects = controller.geometry()?;
+            map_hit_test_point(
+                point,
+                rects,
+                &self.column_scroll_handles,
+                controller.metrics().header_height,
+            )
+            .map_err(ComputeRectsError::Geometry)
         })?;
-
-        let content_point = overflow_owner
-            .map(|owner| self.scroll_adjusted_hit_test_point(owner, point))
-            .unwrap_or(point);
 
         self.controller
             .update(app, |controller, _| controller.hit_test(content_point))
@@ -496,9 +501,14 @@ impl Render for DockHost {
         let pointer_capture = self.pointer_capture.clone();
         let measurement = canvas(
             move |bounds, window, app| {
-                let viewport = viewport_from_bounds(bounds);
-                viewport.validate_non_empty().ok()?;
-                let window_origin = window_origin_from_bounds(bounds)?;
+                let (viewport, window_origin) =
+                    match host_geometry_from_gpui_bounds(bounds) {
+                        Ok(geometry) => geometry,
+                        Err(error) => {
+                            tracing::debug!(%error, "dock host rejected invalid GPUI bounds");
+                            return None;
+                        }
+                    };
 
                 controller_for_measurement.update(app, |controller, controller_cx| {
                     match controller.set_viewport(viewport) {
@@ -1099,82 +1109,5 @@ fn collect_panel_ids(layout: &Layout, id: NodeId, panels: &mut HashSet<PanelId>)
             panels.insert(panel.panel_id);
         }
         None => {}
-    }
-}
-
-/// Converts GPUI's logical bounds to the host-local Core viewport.
-///
-/// Core geometry is expressed relative to the DockHost, so the GPUI window
-/// origin is intentionally not copied into the viewport origin.
-fn viewport_from_bounds(bounds: Bounds<Pixels>) -> Rect {
-    Rect::new(
-        Point::ZERO,
-        CoreSize::new(
-            bounds.size.width.as_f32(),
-            bounds.size.height.as_f32(),
-        ),
-    )
-}
-
-/// Returns the GPUI window-space origin of DockHost after validating it.
-///
-/// Pointer events are translated from window coordinates to this host-local
-/// origin once in the pointer adapter. Core's viewport intentionally remains
-/// anchored at (0, 0).
-fn window_origin_from_bounds(bounds: Bounds<Pixels>) -> Option<Point> {
-    let origin = Point::new(
-        bounds.origin.x.as_f32(),
-        bounds.origin.y.as_f32(),
-    );
-    origin.validate().ok()?;
-    Some(origin)
-}
-
-#[cfg(test)]
-mod tests {
-    use gpui::{Bounds, Point as GpuiPoint, Size as GpuiSize, px};
-
-    use super::{viewport_from_bounds, window_origin_from_bounds};
-    use dock_core::{Point, Rect, Size};
-
-    #[test]
-    fn viewport_uses_host_local_origin_and_logical_size() {
-        let bounds = Bounds {
-            origin: GpuiPoint::new(px(18.0), px(32.0)),
-            size: GpuiSize::new(px(960.0), px(640.0)),
-        };
-
-        assert_eq!(
-            viewport_from_bounds(bounds),
-            Rect::new(Point::ZERO, Size::new(960.0, 640.0))
-        );
-        assert_eq!(
-            window_origin_from_bounds(bounds),
-            Some(Point::new(18.0, 32.0))
-        );
-    }
-
-    #[test]
-    fn rejects_non_finite_window_origin() {
-        let bounds = Bounds {
-            origin: GpuiPoint::new(px(f32::NAN), px(32.0)),
-            size: GpuiSize::new(px(960.0), px(640.0)),
-        };
-        assert!(window_origin_from_bounds(bounds).is_none());
-    }
-
-    #[test]
-    fn rejects_invalid_viewport_size_before_core() {
-        for size in [
-            GpuiSize::new(px(-1.0), px(640.0)),
-            GpuiSize::new(px(960.0), px(f32::INFINITY)),
-            GpuiSize::new(px(0.0), px(640.0)),
-        ] {
-            let bounds = Bounds {
-                origin: GpuiPoint::new(px(18.0), px(32.0)),
-                size,
-            };
-            assert!(viewport_from_bounds(bounds).validate_non_empty().is_err());
-        }
     }
 }

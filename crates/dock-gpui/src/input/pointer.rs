@@ -9,6 +9,7 @@ use gpui::{
 };
 
 use crate::{
+    geometry::host_point_from_gpui_window,
     DockController,
     components::context_menu::{ContextMenuTarget, ContextMenuToggle},
 };
@@ -16,7 +17,7 @@ use crate::{
 use super::{
     drag::{begin_drag_at, finish_drag_at, update_drag_at},
     resize::{begin_resize_hit, finish_resize, update_resize},
-    scroll::scroll_adjusted_hit_test_point,
+    scroll::map_hit_test_point,
 };
 
 /// Installs the DockHost-level mouse event pipeline.
@@ -49,8 +50,8 @@ pub(crate) fn register_pointer_events(
                 return;
             }
 
-            let Some(host_point) =
-                host_point_from_window(gpui_point(event.position), window_origin)
+            let Ok(host_point) =
+                host_point_from_gpui_window(event.position, window_origin)
             else {
                 return;
             };
@@ -194,8 +195,8 @@ pub(crate) fn register_pointer_events(
                 return;
             }
 
-            let Some(host_point) =
-                host_point_from_window(gpui_point(event.position), window_origin)
+            let Ok(host_point) =
+                host_point_from_gpui_window(event.position, window_origin)
             else {
                 cancel_pointer_interaction(&controller, window, &pointer_capture, app);
                 return;
@@ -267,8 +268,8 @@ pub(crate) fn register_pointer_events(
                 return;
             }
 
-            let Some(host_point) =
-                host_point_from_window(gpui_point(event.position), window_origin)
+            let Ok(host_point) =
+                host_point_from_gpui_window(event.position, window_origin)
             else {
                 cancel_pointer_interaction(&controller, window, &pointer_capture, app);
                 return;
@@ -319,8 +320,8 @@ pub(crate) fn register_pointer_events(
             if phase != DispatchPhase::Capture || !root_hitbox.should_handle_scroll(window) {
                 return;
             }
-            let Some(host_point) =
-                host_point_from_window(gpui_point(event.position), window_origin)
+            let Ok(host_point) =
+                host_point_from_gpui_window(event.position, window_origin)
             else {
                 return;
             };
@@ -333,43 +334,22 @@ pub(crate) fn register_pointer_events(
     });
 }
 
-fn gpui_point(position: gpui::Point<gpui::Pixels>) -> Point {
-    Point::new(position.x.as_f32(), position.y.as_f32())
-}
-
-fn host_point_from_window(window_point: Point, window_origin: Point) -> Option<Point> {
-    window_point.validate().ok()?;
-    window_origin.validate().ok()?;
-    let host_point = Point::new(
-        window_point.x - window_origin.x,
-        window_point.y - window_origin.y,
-    );
-    host_point.validate().ok()?;
-    Some(host_point)
-}
-
 fn core_point_at_host_point(
     point: Point,
     controller: &Entity<DockController>,
     scroll_handles: &HashMap<NodeId, ScrollHandle>,
     app: &mut App,
 ) -> Option<Point> {
-    let scroll_offset = controller.update(app, |controller, _| {
-        controller.geometry().ok().and_then(|rects| {
-            rects.vertical_overflow.iter().find_map(|overflow| {
-                let handle = scroll_handles.get(&overflow.owner)?;
-                let inside = overflow.viewport.contains(point).ok()?;
-                inside.then(|| handle.offset().y.as_f32())
-            })
-        })
-    });
-    let offset = scroll_offset.unwrap_or(0.0);
-    if !offset.is_finite() {
-        return None;
-    }
-    let point = scroll_adjusted_hit_test_point(point, offset);
-    point.validate().ok()?;
-    Some(point)
+    controller.update(app, |controller, _| {
+        let rects = controller.geometry().ok()?;
+        map_hit_test_point(
+            point,
+            rects,
+            scroll_handles,
+            controller.metrics().header_height,
+        )
+        .ok()
+    })
 }
 
 fn active_interactions(controller: &Entity<DockController>, app: &mut App) -> (bool, bool) {
@@ -514,32 +494,4 @@ fn floating_title_grip_contains(
             && point.y < floating.rect.origin.y + header_height
             && point.x < floating.rect.origin.x + floating.rect.size.width - close_width
     })
-}
-
-
-#[cfg(test)]
-mod tests {
-    use dock_core::Point;
-
-    use super::host_point_from_window;
-
-    #[test]
-    fn translates_window_coordinates_to_host_local_coordinates_once() {
-        assert_eq!(
-            host_point_from_window(Point::new(42.0, 75.0), Point::new(12.0, 35.0)),
-            Some(Point::new(30.0, 40.0))
-        );
-    }
-
-    #[test]
-    fn rejects_non_finite_window_or_origin_coordinates() {
-        assert!(host_point_from_window(Point::new(f32::NAN, 1.0), Point::ZERO).is_none());
-        assert!(
-            host_point_from_window(
-                Point::new(1.0, 1.0),
-                Point::new(0.0, f32::INFINITY)
-            )
-            .is_none()
-        );
-    }
 }

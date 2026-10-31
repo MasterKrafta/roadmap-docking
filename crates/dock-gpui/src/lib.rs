@@ -8,6 +8,8 @@
 pub mod components;
 pub mod controller;
 pub mod dock_host;
+
+mod geometry;
 pub mod input;
 pub mod missing_panel;
 pub mod registry;

@@ -123,10 +123,10 @@ impl GroupView {
             .on_click(move |event, _, app| {
                 (menu_toggle)(
                     ContextMenuTarget::Group(group.group),
-                    Point::new(
-                        event.position().x.as_f32(),
-                        event.position().y.as_f32(),
-                    ),
+                    match crate::geometry::point_from_gpui(event.position()) {
+                        Ok(anchor) => anchor,
+                        Err(_) => return,
+                    },
                     app,
                 );
             });
