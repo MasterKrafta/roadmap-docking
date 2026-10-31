@@ -29,7 +29,6 @@ impl DropOverlay {
         tab_headers: &[TabHeaderRect],
         tab_strips: &[TabStripRect],
         floating_groups: &[FloatingGroupRect],
-        free_area_bounds: Option<Rect>,
         theme: Theme,
     ) -> impl IntoElement {
         let mut layer = div().absolute().top_0().left_0().size_full();
@@ -140,11 +139,7 @@ impl DropOverlay {
                     }
                     layer = layer.child(highlight_rect(zone.rect, theme, 0.36, false));
                 }
-                DropZone::FreeArea => {
-                    if let Some(bounds) = free_area_bounds {
-                        layer = layer.child(highlight_rect(bounds, theme, 0.10, true));
-                    }
-                }
+                // CanvasSlot owns the FreeArea bounds preview.
             }
         }
 

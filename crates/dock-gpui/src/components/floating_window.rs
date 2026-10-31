@@ -27,7 +27,6 @@ use super::{
     group::GroupView,
     panel_host::PanelHost,
     splitter::SplitterView,
-    tab_overflow::TabOverflowToggle,
     tab_strip::GroupPresentation,
 };
 
@@ -81,9 +80,7 @@ impl FloatingWindowView {
         metrics: DockMetrics,
         title: &str,
         menu_group: Option<NodeId>,
-        toggle_group_menu: GroupMenuToggle,
-        overflow_group: Option<NodeId>,
-        toggle_tab_overflow: TabOverflowToggle,
+        context_menu: GroupMenuToggle,
         middle_click_closes_tabs: bool,
         controller: Entity<DockController>,
         theme: Theme,
@@ -188,9 +185,7 @@ impl FloatingWindowView {
                 drag_zones,
                 metrics,
                 menu_group,
-                toggle_group_menu.clone(),
-                overflow_group,
-                toggle_tab_overflow.clone(),
+                context_menu.clone(),
                 middle_click_closes_tabs,
                 &column_splitters,
                 overflow,
@@ -239,10 +234,7 @@ impl FloatingWindowView {
                 controller.clone(),
                 theme,
                 Some(floating.group),
-                menu_group == Some(group.group),
-                toggle_group_menu.clone(),
-                overflow_group == Some(group.group),
-                toggle_tab_overflow.clone(),
+                context_menu.clone(),
                 middle_click_closes_tabs,
             ));
         }

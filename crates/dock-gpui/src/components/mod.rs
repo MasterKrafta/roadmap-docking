@@ -1,5 +1,6 @@
 //! Stateless GPUI presentation components for dock-core geometry snapshots.
 
+pub mod canvas_slot;
 pub mod column;
 pub mod context_menu;
 pub mod drag_overlay;
@@ -13,6 +14,8 @@ pub mod splitter;
 pub mod tab_overflow;
 pub mod tab_strip;
 
+pub use canvas_slot::CanvasSlot;
+pub use context_menu::{ContextMenu, ContextMenuEntry, ContextMenuItem};
 pub use column::ColumnView;
 pub use drag_overlay::{DragGhost, DropOverlay};
 pub use group::GroupView;
@@ -25,6 +28,5 @@ pub use tab_overflow::TabOverflow;
 pub use splitter::SplitterView;
 pub use tab_strip::{TabHeaderView, TabStripView};
 
-pub(crate) use context_menu::GroupMenuToggle;
-pub(crate) use tab_overflow::TabOverflowToggle;
+pub(crate) use context_menu::{ContextMenuTarget, ContextMenuToggle, GroupMenuToggle};
 pub(crate) use tab_strip::collect_group_presentations;

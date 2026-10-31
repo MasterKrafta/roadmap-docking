@@ -15,12 +15,11 @@ use ui::Theme;
 use crate::DockController;
 
 use super::{
-    context_menu::GroupMenuToggle,
+    context_menu::{ContextMenuTarget, GroupMenuToggle},
     group::GroupView,
     panel_host::PanelHost,
     rail::RailView,
     splitter::SplitterView,
-    tab_overflow::TabOverflowToggle,
     tab_strip::GroupPresentation,
 };
 
@@ -46,8 +45,6 @@ impl ColumnView {
         metrics: DockMetrics,
         menu_group: Option<NodeId>,
         toggle_group_menu: GroupMenuToggle,
-        overflow_group: Option<NodeId>,
-        toggle_tab_overflow: TabOverflowToggle,
         middle_click_closes_tabs: bool,
         splitters: &[SplitterRect],
         overflow: Option<VerticalOverflow>,
@@ -103,10 +100,7 @@ impl ColumnView {
                         controller.clone(),
                         theme,
                         raise_floating,
-                        menu_group == Some(group.group),
                         toggle_group_menu.clone(),
-                        overflow_group == Some(group.group),
-                        toggle_tab_overflow.clone(),
                         middle_click_closes_tabs,
                     ));
                 } else {
@@ -222,7 +216,35 @@ impl ColumnView {
                 });
             });
 
-        root = root.child(mode_button);
+        let menu_toggle = toggle_group_menu.clone();
+        let menu_button = div()
+            .id(format!("column-menu-{:?}", column.column))
+            .absolute()
+            .top(px(3.0))
+            .right(px(24.0))
+            .w(px(18.0))
+            .h(px(18.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_pointer()
+            .bg(rgb(theme.colors.column_mode_button))
+            .border_1()
+            .border_color(rgb(theme.colors.group_frame_border))
+            .text_color(rgb(theme.colors.primary_text))
+            .child("⋮")
+            .on_click(move |event, _, app| {
+                (menu_toggle)(
+                    ContextMenuTarget::Column(column_id),
+                    Point::new(
+                        event.position().x.as_f32(),
+                        event.position().y.as_f32(),
+                    ),
+                    app,
+                );
+            });
+
+        root = root.child(mode_button).child(menu_button);
         root
     }
 }

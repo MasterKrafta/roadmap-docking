@@ -14,7 +14,10 @@ use ui::Theme;
 
 use crate::{DockController, IconSource, PanelRegistry};
 
-use super::tab_overflow::{TabOverflow, TabOverflowToggle};
+use super::{
+    context_menu::{ContextMenuTarget, GroupMenuToggle},
+    tab_overflow::TabOverflow,
+};
 use crate::input::{begin_drag, dispatch_command, finish_drag, update_drag_at};
 
 #[derive(Clone)]
@@ -62,8 +65,7 @@ impl TabStripView {
         controller: Entity<DockController>,
         theme: Theme,
         raise_floating: Option<FloatingGroupId>,
-        overflow_open: bool,
-        toggle_overflow: TabOverflowToggle,
+        toggle_context_menu: GroupMenuToggle,
         middle_click_closes_tabs: bool,
     ) -> impl IntoElement {
         let mut strip_root = div()
@@ -118,32 +120,17 @@ impl TabStripView {
                 controller.clone(),
                 theme,
                 raise_floating,
+                toggle_context_menu.clone(),
                 middle_click_closes_tabs,
             ));
         }
 
         if let Some(overflow) = overflow {
-            let hidden_tabs = overflow
-                .hidden_tabs
-                .iter()
-                .filter_map(|panel| {
-                    presentation
-                        .tabs
-                        .iter()
-                        .find(|tab| tab.panel == *panel)
-                        .cloned()
-                })
-                .collect::<Vec<_>>();
             strip_root = strip_root.child(TabOverflow::render(
-                group_rect,
                 strip.rect,
                 overflow,
-                &hidden_tabs,
-                presentation.active_panel,
-                controller,
+                toggle_context_menu,
                 theme,
-                overflow_open,
-                toggle_overflow,
             ));
         }
 
@@ -164,6 +151,7 @@ impl TabHeaderView {
         controller: Entity<DockController>,
         theme: Theme,
         raise_floating: Option<FloatingGroupId>,
+        toggle_context_menu: GroupMenuToggle,
         middle_click_closes_tabs: bool,
     ) -> impl IntoElement {
         let left = header.rect.origin.x - strip_rect.origin.x;
@@ -234,6 +222,23 @@ impl TabHeaderView {
                         event,
                         app,
                     )
+                }
+            })
+            .on_mouse_down(MouseButton::Right, {
+                let menu_toggle = toggle_context_menu.clone();
+                move |event, _, app| {
+                    (menu_toggle)(
+                        ContextMenuTarget::Tab {
+                            group: tab_group,
+                            panel: tab_panel,
+                        },
+                        Point::new(
+                            event.position.x.as_f32(),
+                            event.position.y.as_f32(),
+                        ),
+                        app,
+                    );
+                    app.stop_propagation();
                 }
             })
             .on_drag(PanelTabDrag, |_, _, _, app| {

@@ -15,8 +15,7 @@ use crate::{
 };
 
 use super::{
-    context_menu::{GroupContextMenu, GroupMenuToggle},
-    tab_overflow::TabOverflowToggle,
+    context_menu::{ContextMenuTarget, GroupMenuToggle},
     tab_strip::{GroupPresentation, TabStripView},
 };
 
@@ -49,10 +48,7 @@ impl GroupView {
         controller: Entity<DockController>,
         theme: Theme,
         raise_floating: Option<FloatingGroupId>,
-        menu_open: bool,
         toggle_menu: GroupMenuToggle,
-        overflow_open: bool,
-        toggle_overflow: TabOverflowToggle,
         middle_click_closes_tabs: bool,
     ) -> impl IntoElement {
         let left = group.rect.origin.x - content_origin.x;
@@ -115,8 +111,8 @@ impl GroupView {
                         update_drag_at(
                             &controller,
                             Point::new(
-                                event.event.position.x.as_f32(),
-                                event.event.position.y.as_f32(),
+                                event.event.position().x.as_f32(),
+                                event.event.position().y.as_f32(),
                             ),
                             app,
                         );
@@ -143,8 +139,7 @@ impl GroupView {
             controller.clone(),
             theme,
             raise_floating,
-            overflow_open,
-            toggle_overflow,
+            toggle_menu.clone(),
             middle_click_closes_tabs,
         ));
 
@@ -176,7 +171,16 @@ impl GroupView {
             .bg(rgb(theme.colors.group_menu_button))
             .text_color(rgb(theme.colors.primary_text))
             .child("⋮")
-            .on_click(move |_, _, app| (menu_toggle)(group.group, app));
+            .on_click(move |event, _, app| {
+                (menu_toggle)(
+                    ContextMenuTarget::Group(group.group),
+                    Point::new(
+                        event.position().x.as_f32(),
+                        event.position().y.as_f32(),
+                    ),
+                    app,
+                );
+            });
         root = root.child(menu_button);
 
         let collapse_controller = controller.clone();
@@ -207,22 +211,6 @@ impl GroupView {
                 );
             });
         root = root.child(collapse_button);
-
-        if menu_open {
-            root = root.child(GroupContextMenu::render(
-                group,
-                presentation.collapsed,
-                presentation.active_panel,
-                if presentation.collapsed {
-                    controls_top + strip.rect.size.height
-                } else {
-                    header_height
-                },
-                controller,
-                toggle_menu,
-                theme,
-            ));
-        }
 
         root
     }

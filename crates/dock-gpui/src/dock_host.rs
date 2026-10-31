@@ -3,7 +3,8 @@ use std::rc::Rc;
 
 use dock_core::{
     ColumnDisplayItem, ColumnMode, ComputeRectsError, DockCommand, DockSide, DragPayload,
-    DropTarget, HitResult, Layout, Node, NodeId, PanelId, Point, Rect, Size as CoreSize,
+    DropTarget, HitResult, Layout, LayoutRects, Node, NodeId, PanelId, Point, Rect,
+    Size as CoreSize,
 };
 use gpui::{
     AnyView, App, Bounds, Context, Entity, IntoElement, ParentElement, Pixels, Render, ScrollHandle,
@@ -15,8 +16,9 @@ use ui::Theme;
 use crate::{
     DockController,
     components::{
-        DragGhost, DropOverlay, FloatingWindowView, FlyoutView, GroupMenuToggle, MainDockView,
-        TabOverflowToggle, collect_group_presentations,
+        CanvasSlot, ContextMenu, ContextMenuEntry, ContextMenuItem, ContextMenuTarget,
+        ContextMenuToggle, DragGhost, DropOverlay, FloatingWindowView, FlyoutView, MainDockView,
+        collect_group_presentations,
     },
     input::{floating_bounds, scroll_adjusted_hit_test_point},
 };
@@ -27,9 +29,8 @@ use crate::{
 /// Options bar, and document canvas are supplied by the application as GPUI
 /// views; their visibility follows the current Core chrome mode.
 ///
-/// Layer order is deliberate: canvas, main dock surfaces, flyout, then
-/// floating groups in ascending Core z-order. DropOverlay, DragGhost, and
-/// context-menu layers are added after the corresponding components land.
+/// Layer order is deliberate: CanvasSlot, main dock surfaces, flyout, floating
+/// groups in ascending Core z-order, drag feedback, then the universal ContextMenu.
 pub struct DockHost {
     controller: Entity<DockController>,
     theme: Theme,
@@ -38,14 +39,19 @@ pub struct DockHost {
     canvas: Option<AnyView>,
     /// GPUI scroll positions are transient and keyed by the Core owner NodeId.
     column_scroll_handles: HashMap<NodeId, ScrollHandle>,
-    /// Currently opened group menu; menu visibility is adapter-only state.
-    open_group_menu: Option<NodeId>,
-    /// Currently opened list of tabs hidden by a tab-strip overflow button.
-    open_tab_overflow: Option<NodeId>,
+    /// One transient menu can be open at a time; it never enters Core layout state.
+    open_context_menu: Option<OpenContextMenu>,
     /// Whether middle-clicking a tab closes its panel instance.
     middle_click_closes_tabs: bool,
     /// Keeps this host reactive to controller-owned layout and drag-state changes.
     controller_observed: bool,
+}
+
+#[derive(Clone)]
+struct OpenContextMenu {
+    target: ContextMenuTarget,
+    anchor: Point,
+    open_submenu: Option<usize>,
 }
 
 impl DockHost {
@@ -58,8 +64,7 @@ impl DockHost {
             options_bar: None,
             canvas: None,
             column_scroll_handles: HashMap::new(),
-            open_group_menu: None,
-            open_tab_overflow: None,
+            open_context_menu: None,
             middle_click_closes_tabs: true,
             controller_observed: false,
         }
@@ -85,7 +90,7 @@ impl DockHost {
 
     /// Supplies the user-owned document canvas slot.
     ///
-    /// When omitted, the canvas region remains a neutral theme surface.
+    /// When omitted, the canvas slot remains empty and paints no adapter background.
     pub fn canvas(mut self, view: impl Into<AnyView>) -> Self {
         self.canvas = Some(view.into());
         self
@@ -390,54 +395,86 @@ impl Render for DockHost {
             }
         }
 
-        if self
-            .open_group_menu
-            .is_some_and(|group| !group_presentations.contains_key(&group))
-        {
-            self.open_group_menu = None;
-        }
-        if self.open_tab_overflow.is_some_and(|group| {
-            !group_presentations.contains_key(&group)
-                || !rects.as_ref().is_some_and(|rects| {
-                    rects.tab_overflows.iter().any(|overflow| overflow.group == group)
-                })
+        if self.open_context_menu.as_ref().is_some_and(|open| {
+            !context_menu_target_exists(
+                open.target,
+                &group_presentations,
+                &all_column_ids,
+                rects.as_ref(),
+            )
         }) {
-            self.open_tab_overflow = None;
+            self.open_context_menu = None;
         }
 
-        let host_entity = cx.entity().downgrade();
-        let toggle_group_menu: GroupMenuToggle = Rc::new(move |group, app| {
-            if let Some(host) = host_entity.upgrade() {
+        let menu_host_entity = cx.entity().downgrade();
+        let toggle_context_menu: ContextMenuToggle =
+            Rc::new(move |target, anchor, app| {
+                if let Some(host) = menu_host_entity.upgrade() {
+                    let _ = host.update(app, |host, host_cx| {
+                        host.open_context_menu = if host
+                            .open_context_menu
+                            .as_ref()
+                            .is_some_and(|open| open.target == target)
+                        {
+                            None
+                        } else {
+                            Some(OpenContextMenu {
+                                target,
+                                anchor,
+                                open_submenu: None,
+                            })
+                        };
+                        host_cx.notify();
+                    });
+                }
+            });
+
+        let dismiss_host_entity = cx.entity().downgrade();
+        let dismiss_context_menu: Rc<dyn Fn(&mut App)> = Rc::new(move |app| {
+            if let Some(host) = dismiss_host_entity.upgrade() {
                 let _ = host.update(app, |host, host_cx| {
-                    host.open_group_menu = if host.open_group_menu == Some(group) {
-                        None
-                    } else {
-                        host.open_tab_overflow = None;
-                        Some(group)
-                    };
+                    host.open_context_menu = None;
                     host_cx.notify();
                 });
             }
         });
 
-        let overflow_host_entity = cx.entity().downgrade();
-        let toggle_tab_overflow: TabOverflowToggle = Rc::new(move |group, app| {
-            if let Some(host) = overflow_host_entity.upgrade() {
-                let _ = host.update(app, |host, host_cx| {
-                    host.open_tab_overflow = if host.open_tab_overflow == Some(group) {
-                        None
-                    } else {
-                        host.open_group_menu = None;
-                        Some(group)
-                    };
-                    host_cx.notify();
-                });
-            }
+        let submenu_host_entity = cx.entity().downgrade();
+        let toggle_context_submenu: Rc<dyn Fn(Option<usize>, &mut App)> =
+            Rc::new(move |index, app| {
+                if let Some(host) = submenu_host_entity.upgrade() {
+                    let _ = host.update(app, |host, host_cx| {
+                        if let Some(open) = host.open_context_menu.as_mut() {
+                            open.open_submenu = index;
+                            host_cx.notify();
+                        }
+                    });
+                }
+            });
+
+        let open_context_menu = self.open_context_menu.clone();
+        let menu_group = open_context_menu.as_ref().and_then(|open| match open.target {
+            ContextMenuTarget::Group(group) => Some(group),
+            _ => None,
         });
+        let context_menu_entries = open_context_menu
+            .as_ref()
+            .and_then(|open| {
+                rects.as_ref().map(|rects| {
+                    build_context_menu_entries(
+                        open.target,
+                        rects,
+                        &group_presentations,
+                        &column_modes,
+                        self.controller.clone(),
+                    )
+                })
+            })
+            .unwrap_or_default();
 
         let middle_click_closes_tabs = self.middle_click_closes_tabs;
-        let overflow_group = self.open_tab_overflow;
         let theme = self.theme;
+        let context_menu_is_open = open_context_menu.is_some();
         let drag_cursor_style = drag_preview.map(|preview| {
             if preview.target.is_some()
                 || matches!(preview.payload, DragPayload::FloatingGroup { .. })
@@ -539,7 +576,9 @@ impl Render for DockHost {
         if active_flyout.is_some() {
             let controller_for_escape = self.controller.clone();
             workspace = workspace.capture_key_down(move |event, _, app| {
-                if event.keystroke.key.eq_ignore_ascii_case("escape") {
+                if !context_menu_is_open
+                    && event.keystroke.key.eq_ignore_ascii_case("escape")
+                {
                     let _ = controller_for_escape.update(app, |controller, controller_cx| {
                         if let Err(error) = controller.dispatch_transient_in(
                             DockCommand::DismissFlyout,
@@ -553,35 +592,13 @@ impl Render for DockHost {
             });
         }
 
-        // Base canvas surface prevents an uninitialized/empty workspace from
-        // exposing an undefined background while the first geometry pass runs.
         if let Some(canvas_rect) = rects.as_ref().and_then(|rects| rects.canvas) {
-            let mut canvas_surface = div()
-                .absolute()
-                .left(px(canvas_rect.origin.x))
-                .top(px(canvas_rect.origin.y))
-                .w(px(canvas_rect.size.width))
-                .h(px(canvas_rect.size.height))
-                .bg(rgb(theme.colors.canvas_background));
-            if let Some(canvas_view) = self.canvas.clone() {
-                canvas_surface = canvas_surface.child(
-                    div().size_full().child(canvas_view),
-                );
-            }
-            workspace = workspace.child(canvas_surface);
-        } else {
-            let mut canvas_surface = div()
-                .absolute()
-                .top_0()
-                .left_0()
-                .size_full()
-                .bg(rgb(theme.colors.canvas_background));
-            if let Some(canvas_view) = self.canvas.clone() {
-                canvas_surface = canvas_surface.child(
-                    div().size_full().child(canvas_view),
-                );
-            }
-            workspace = workspace.child(canvas_surface);
+            workspace = workspace.child(CanvasSlot::render(
+                canvas_rect,
+                self.canvas.clone(),
+                free_area_preview_bounds,
+                theme,
+            ));
         }
 
         if chrome.dock_visible()
@@ -606,10 +623,8 @@ impl Render for DockHost {
                 drag_preview,
                 &drag_zones,
                 metrics,
-                self.open_group_menu,
-                toggle_group_menu,
-                overflow_group,
-                toggle_tab_overflow,
+                menu_group,
+                toggle_context_menu.clone(),
                 middle_click_closes_tabs,
                 &rects.splitters,
                 &rects.vertical_overflow,
@@ -744,10 +759,8 @@ impl Render for DockHost {
                         .get(&floating.group)
                         .map(String::as_str)
                         .unwrap_or("Floating panels"),
-                    self.open_group_menu,
-                    toggle_group_menu.clone(),
-                    overflow_group,
-                    toggle_tab_overflow.clone(),
+                    menu_group,
+                    toggle_context_menu.clone(),
                     middle_click_closes_tabs,
                     self.controller.clone(),
                     theme,
@@ -763,7 +776,6 @@ impl Render for DockHost {
                 &rects.tab_headers,
                 &rects.tab_strips,
                 &rects.floating_groups,
-                free_area_preview_bounds,
                 theme,
             ));
             workspace = workspace.child(DragGhost::render(
@@ -775,7 +787,200 @@ impl Render for DockHost {
             ));
         }
 
+        if let (Some(open), Some(viewport)) = (
+            open_context_menu.as_ref(),
+            rects.as_ref().and_then(|rects| rects.viewport),
+        ) {
+            workspace = workspace.child(ContextMenu::render(
+                "dock-context-menu",
+                viewport,
+                open.anchor,
+                &context_menu_entries,
+                open.open_submenu,
+                toggle_context_submenu,
+                dismiss_context_menu,
+                theme,
+            ));
+        }
+
         root.child(workspace)
+    }
+}
+
+fn context_menu_target_exists(
+    target: ContextMenuTarget,
+    presentations: &HashMap<NodeId, crate::components::tab_strip::GroupPresentation>,
+    columns: &HashSet<NodeId>,
+    rects: Option<&LayoutRects>,
+) -> bool {
+    match target {
+        ContextMenuTarget::Group(group) => presentations.contains_key(&group),
+        ContextMenuTarget::Tab { group, panel } => presentations
+            .get(&group)
+            .is_some_and(|presentation| presentation.tabs.iter().any(|tab| tab.panel == panel)),
+        ContextMenuTarget::Column(column) => columns.contains(&column),
+        ContextMenuTarget::Overflow(group) => rects.is_some_and(|rects| {
+            rects.tab_overflows.iter().any(|overflow| {
+                overflow.group == group && !overflow.hidden_tabs.is_empty()
+            })
+        }),
+    }
+}
+
+fn command_menu_item(
+    label: impl Into<gpui::SharedString>,
+    command: DockCommand,
+    controller: Entity<DockController>,
+) -> ContextMenuEntry {
+    ContextMenuItem::new(label, move |app| {
+        crate::input::dispatch_command(&controller, command.clone(), app);
+    })
+    .into()
+}
+
+fn build_context_menu_entries(
+    target: ContextMenuTarget,
+    rects: &LayoutRects,
+    presentations: &HashMap<NodeId, crate::components::tab_strip::GroupPresentation>,
+    column_modes: &HashMap<NodeId, ColumnMode>,
+    controller: Entity<DockController>,
+) -> Vec<ContextMenuEntry> {
+    match target {
+        ContextMenuTarget::Group(group_id) => {
+            let Some(group) = rects.groups.iter().find(|group| group.group == group_id) else {
+                return Vec::new();
+            };
+            let Some(presentation) = presentations.get(&group_id) else {
+                return Vec::new();
+            };
+            let mut entries = vec![command_menu_item(
+                "Закрыть группу",
+                DockCommand::CloseGroup { group: group_id },
+                controller.clone(),
+            )];
+            if let Some(panel) = presentation.active_panel {
+                entries.push(command_menu_item(
+                    "Закрыть активную вкладку",
+                    DockCommand::ClosePanel { panel },
+                    controller.clone(),
+                ));
+            }
+            entries.push(ContextMenuEntry::separator());
+            entries.push(command_menu_item(
+                if presentation.collapsed { "Развернуть" } else { "Свернуть" },
+                DockCommand::CollapseGroup {
+                    group: group_id,
+                    collapsed: !presentation.collapsed,
+                },
+                controller.clone(),
+            ));
+            entries.push(ContextMenuEntry::separator());
+            entries.push(command_menu_item(
+                "Вынести в плавающее окно",
+                DockCommand::Float {
+                    node: group_id,
+                    bounds: group.rect,
+                },
+                controller,
+            ));
+            entries
+        }
+        ContextMenuTarget::Tab { group, panel } => {
+            let Some(presentation) = presentations.get(&group) else {
+                return Vec::new();
+            };
+            let Some(tab) = presentation.tabs.iter().find(|tab| tab.panel == panel) else {
+                return Vec::new();
+            };
+            vec![
+                ContextMenuItem::new(
+                    format!("Активировать «{}»", tab.title),
+                    {
+                        let controller = controller.clone();
+                        move |app| {
+                            crate::input::dispatch_command(
+                                &controller,
+                                DockCommand::ActivateTab { group, panel },
+                                app,
+                            );
+                        }
+                    },
+                )
+                .selected(presentation.active_panel == Some(panel))
+                .into(),
+                ContextMenuEntry::separator(),
+                command_menu_item(
+                    "Закрыть вкладку",
+                    DockCommand::ClosePanel { panel },
+                    controller.clone(),
+                ),
+                command_menu_item(
+                    "Закрыть группу",
+                    DockCommand::CloseGroup { group },
+                    controller,
+                ),
+            ]
+        }
+        ContextMenuTarget::Column(column) => {
+            let Some(current_mode) = column_modes.get(&column).copied() else {
+                return Vec::new();
+            };
+            let modes = [
+                (ColumnMode::Expanded, "Развернутая"),
+                (ColumnMode::IconsAndLabels, "Иконки и подписи"),
+                (ColumnMode::IconsOnly, "Только иконки"),
+            ];
+            let submenu = modes
+                .into_iter()
+                .map(|(mode, label)| {
+                    ContextMenuItem::new(label, {
+                        let controller = controller.clone();
+                        move |app| {
+                            crate::input::dispatch_command(
+                                &controller,
+                                DockCommand::SetColumnMode { column, mode },
+                                app,
+                            );
+                        }
+                    })
+                    .selected(current_mode == mode)
+                    .into()
+                })
+                .collect();
+            vec![ContextMenuEntry::submenu("Режим колонки", None, submenu)]
+        }
+        ContextMenuTarget::Overflow(group) => {
+            let Some(overflow) = rects.tab_overflows.iter().find(|item| item.group == group) else {
+                return Vec::new();
+            };
+            let Some(presentation) = presentations.get(&group) else {
+                return Vec::new();
+            };
+            let mut entries = Vec::new();
+            for panel in &overflow.hidden_tabs {
+                let Some(tab) = presentation.tabs.iter().find(|tab| tab.panel == *panel) else {
+                    continue;
+                };
+                let controller = controller.clone();
+                let panel = *panel;
+                let mut item = ContextMenuItem::new(tab.title.clone(), move |app| {
+                    crate::input::dispatch_command(
+                        &controller,
+                        DockCommand::ActivateTab { group, panel },
+                        app,
+                    );
+                })
+                .selected(presentation.active_panel == Some(panel));
+                if let Some(icon) = tab.icon.clone() {
+                    item = item.with_icon(icon);
+                }
+                entries.push(item.into());
+            }
+            if entries.is_empty() {
+                entries.push(ContextMenuItem::disabled("Нет скрытых вкладок").into());
+            }
+            entries
+        }
     }
 }
 

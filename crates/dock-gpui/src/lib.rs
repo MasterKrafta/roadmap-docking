@@ -29,7 +29,11 @@ pub fn run(_options: RunOptions) {
     tracing::warn!("dock-gpui host is not implemented yet");
 }
 
-pub use components::{ColumnView, DragGhost, DropOverlay, FloatingWindowView, FlyoutView, GroupView, MainDockView, PanelHost, RailView, SplitterView, TabHeaderView, TabOverflow, TabStripView};
+pub use components::{
+    CanvasSlot, ColumnView, ContextMenu, ContextMenuEntry, ContextMenuItem, DragGhost, DropOverlay,
+    FloatingWindowView, FlyoutView, GroupView, MainDockView, PanelHost, RailView, SplitterView,
+    TabHeaderView, TabOverflow, TabStripView,
+};
 pub use dock_host::DockHost;
 pub use missing_panel::MissingPanelPlaceholder;
 
@@ -42,16 +46,15 @@ pub use registry::{IconSource, PanelDescriptor, PanelRegistry, PanelRegistryErro
 pub use dock_core::{
     AllowedArea, Axis, CanvasState, ChromeMode, Column, ColumnDisplayItem, ColumnMode, ColumnRect,
     CommandError, CommandOutcome, CommandValue, ComputeRectsError, DEFAULT_UNDO_LIMIT, DockArea,
-    InitialLayoutError,
-    DockAreaId, DockAreaKind, DockCommand, DockMetrics, DockSide, DragCancelReason, DragDropAction,
-    DragDropRequest, DragHandle, DragPayload, DragPreview, DragSession, DragSessionError, DragState,
-    DropSource, DropTarget, DropZone, DropZoneRect, DropZoneResolver, FloatingGroup,
-    FloatingGroupId, FloatingGroupRect, FloatingResizeEdgeRect, FlyoutRect, FlyoutState,
-    GeometryError, GroupRect, HitResult, LastDockLocation, Layout, LayoutRects, Node, NodeId, Panel,
-    PanelConstraints, PanelId, PanelInstance, PanelKey, PanelKeyError, PanelRect, PanelState, Point,
-    Profile, Rect, ResizeEdge, Size, Split, SplitterRect, TabHeaderRect, TabOverflowRect,
-    TabStripRect, Tabs, UndoRedoHistory, ValidationError, ValidationReason, VerticalOverflow,
-    OUTER_COLUMN_EDGE_BOUNDARY_INDEX,
-    WorkspaceDiagnostic, WorkspaceFile, WorkspaceFileError, WorkspaceFloatingGroup,
-    WorkspaceLayout, WorkspaceLoadOptions, WorkspaceLoadResult, WorkspaceNode,
+    InitialLayoutError, DockAreaId, DockAreaKind, DockCommand, DockMetrics, DockSide,
+    DragCancelReason, DragDropAction, DragDropRequest, DragHandle, DragPayload, DragPreview,
+    DragSession, DragSessionError, DragState, DropSource, DropTarget, DropZone, DropZoneRect,
+    DropZoneResolver, FloatingGroup, FloatingGroupId, FloatingGroupRect, FloatingResizeEdgeRect,
+    FlyoutRect, FlyoutState, GeometryError, GroupRect, HitResult, LastDockLocation, Layout, Node,
+    NodeId, Panel, PanelConstraints, PanelId, PanelInstance, PanelKey, PanelKeyError, PanelRect,
+    PanelState, Point, Profile, Rect, ResizeEdge, Size, Split, SplitterRect, TabHeaderRect,
+    TabOverflowRect, TabStripRect, Tabs, UndoRedoHistory, ValidationError, ValidationReason,
+    VerticalOverflow, OUTER_COLUMN_EDGE_BOUNDARY_INDEX, WorkspaceDiagnostic, WorkspaceFile,
+    WorkspaceFileError, WorkspaceFloatingGroup, WorkspaceLayout, WorkspaceLoadOptions,
+    WorkspaceLoadResult, WorkspaceNode,
 };
