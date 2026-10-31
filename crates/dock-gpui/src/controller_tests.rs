@@ -1,7 +1,8 @@
 use super::DockController;
 use dock_core::{
-    CommandError, DockCommand, DockMetrics, InitialLayoutError, LayoutRects, PanelConstraints,
-    PanelId, PanelKey, Point, Profile, Rect, Size,
+    CommandError, DockCommand, DockMetrics, DragHandle, DragPayload, DragState, DropSource,
+    InitialLayoutError, LayoutRects, PanelConstraints, PanelId, PanelKey, Point, Profile, Rect,
+    Size,
 };
 use slotmap::Key;
 
@@ -330,4 +331,99 @@ fn singleton_panel_is_reused_while_open_but_can_be_closed_and_reopened() {
         .expect("layers should be restored as a new runtime instance");
 
     assert_ne!(reopened_id, original_id);
+}
+
+#[test]
+fn stale_layout_revision_cancels_drag_and_discards_resolver() {
+    let metrics = DockMetrics::default();
+    let registry = baseline_registry();
+    let descriptors = registry.descriptors_for_core();
+    let layout = dock_core::create_initial_layout(Profile::Photoshop, &descriptors, metrics)
+        .expect("baseline layout should be valid");
+    let mut controller = DockController::new(
+        layout,
+        metrics,
+        registry,
+        Rect::new(Point::ZERO, Size::new(1200.0, 800.0)),
+    )
+    .expect("controller should accept the baseline layout");
+    let panel = controller
+        .layout()
+        .panel_instances()
+        .next()
+        .map(|(panel, _)| panel)
+        .expect("baseline layout contains panels");
+
+    controller
+        .begin_drag_interaction(
+            DragPayload::Panel { panel },
+            DragHandle::PanelTab,
+            Point::ZERO,
+        )
+        .unwrap();
+    controller
+        .drag_mut()
+        .session_mut()
+        .pointer_move(Point::new(8.0, 0.0))
+        .unwrap();
+    controller
+        .prepare_drop_resolver(DropSource::Panel { panel })
+        .unwrap();
+    assert!(controller.drag().resolver().is_some());
+
+    controller
+        .layout
+        .apply(DockCommand::ClosePanel { panel }, &metrics)
+        .unwrap();
+    assert!(!controller.ensure_pointer_interaction_current());
+    assert_eq!(controller.drag().session().state(), DragState::Idle);
+    assert!(controller.drag().resolver().is_none());
+    assert!(controller.layout().panel_instance(panel).is_none());
+}
+
+#[test]
+fn viewport_change_cancels_drag_and_discards_resolver() {
+    let metrics = DockMetrics::default();
+    let registry = baseline_registry();
+    let descriptors = registry.descriptors_for_core();
+    let layout = dock_core::create_initial_layout(Profile::Photoshop, &descriptors, metrics)
+        .expect("baseline layout should be valid");
+    let mut controller = DockController::new(
+        layout,
+        metrics,
+        registry,
+        Rect::new(Point::ZERO, Size::new(1200.0, 800.0)),
+    )
+    .expect("controller should accept the baseline layout");
+    let panel = controller
+        .layout()
+        .panel_instances()
+        .next()
+        .map(|(panel, _)| panel)
+        .expect("baseline layout contains panels");
+
+    controller
+        .begin_drag_interaction(
+            DragPayload::Panel { panel },
+            DragHandle::PanelTab,
+            Point::ZERO,
+        )
+        .unwrap();
+    controller
+        .drag_mut()
+        .session_mut()
+        .pointer_move(Point::new(8.0, 0.0))
+        .unwrap();
+    controller
+        .prepare_drop_resolver(DropSource::Panel { panel })
+        .unwrap();
+    assert!(controller.drag().resolver().is_some());
+
+    assert!(
+        controller
+            .set_viewport(Rect::new(Point::ZERO, Size::new(1280.0, 800.0)))
+            .unwrap()
+    );
+    assert_eq!(controller.drag().session().state(), DragState::Idle);
+    assert!(controller.drag().resolver().is_none());
 }

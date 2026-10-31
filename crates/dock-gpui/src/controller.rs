@@ -1,8 +1,9 @@
 use std::collections::{HashMap, VecDeque};
 
 use dock_core::{
-    Axis, CommandError, DockCommand, DockMetrics, DragSession, DragSessionError, DragState,
-    DragHandle, DragPayload, DropSource, DropZoneResolver, FlyoutState, GeometryError, HitResult,
+    Axis, CommandError, DockCommand, DockMetrics, DragCancelReason, DragSession, DragSessionError,
+    DragState, DragHandle, DragPayload, DropSource, DropZoneResolver, FlyoutState, GeometryError,
+    HitResult,
     Layout, LayoutRects, Node, PanelId,
     PanelKey, Point, Profile, Rect, ValidationError, WorkspaceDiagnostic,
     OUTER_COLUMN_EDGE_BOUNDARY_INDEX,
@@ -126,12 +127,26 @@ impl DragController {
         self.layout_version = None;
     }
 
-    /// Cancels any active gesture and clears the resolver snapshot.
+    /// Cancels any active gesture and clears its resolver snapshot.
     ///
-    /// Used when the controller replaces its Layout lineage, because runtime
-    /// IDs carried by an in-progress drag must never cross into a new Layout.
+    /// The adapter selects the reason so Escape, focus loss, and model/viewport
+    /// invalidation remain distinguishable in Core's terminal state.
     pub fn cancel_gesture(&mut self) {
-        let _ = self.session.focus_lost();
+        self.cancel_gesture_with_reason(DragCancelReason::Explicit);
+    }
+
+    fn cancel_gesture_with_reason(&mut self, reason: DragCancelReason) {
+        match reason {
+            DragCancelReason::Escape => {
+                let _ = self.session.escape();
+            }
+            DragCancelReason::FocusLost => {
+                let _ = self.session.focus_lost();
+            }
+            _ => {
+                let _ = self.session.cancel();
+            }
+        }
         let _ = self.session.reset();
         self.clear_resolver();
         self.clear_layout_version();
@@ -295,24 +310,54 @@ impl DockController {
     /// Resize commands issued by the active resize pipeline advance the stored
     /// revision explicitly; any other revision change invalidates the gesture.
     pub(crate) fn ensure_pointer_interaction_current(&mut self) -> bool {
-        let expected_version = if let Some(interaction) = self.interaction {
-            Some(interaction.layout_version)
-        } else if matches!(
-            self.drag.session().state(),
-            DragState::Pressed { .. } | DragState::Dragging { .. }
-        ) {
-            self.drag.layout_version
-        } else {
-            None
+        let active_payload = match self.drag.session().state() {
+            DragState::Pressed { payload, .. } | DragState::Dragging { payload, .. } => {
+                Some(payload)
+            }
+            DragState::Idle | DragState::Dropped { .. } | DragState::Cancelled { .. } => None,
+        };
+        let expected_version = self
+            .interaction
+            .map(|interaction| interaction.layout_version)
+            .or_else(|| active_payload.and(self.drag.layout_version));
+
+        let version_is_current = match expected_version {
+            Some(version) => version == self.layout.version(),
+            None => active_payload.is_none() && self.interaction.is_none(),
+        };
+        let source_is_current = match active_payload {
+            Some(payload) => self.drag_payload_source_exists(payload),
+            None => true,
         };
 
-        if expected_version.is_some_and(|version| version != self.layout.version()) {
-            if let Err(error) = self.cancel_pointer_interaction() {
+        if !version_is_current || !source_is_current {
+            if let Err(error) = self.cancel_pointer_interaction_with_reason(
+                DragCancelReason::Explicit,
+            ) {
                 tracing::warn!(%error, "could not cancel stale dock pointer interaction");
             }
             return false;
         }
         true
+    }
+
+    fn drag_payload_source_exists(&self, payload: DragPayload) -> bool {
+        match payload {
+            DragPayload::Panel { panel } => {
+                self.layout.panel_instance(panel).is_some()
+                    && self.layout.nodes().any(|(_, node)| {
+                        matches!(node, Node::Panel(value) if value.panel_id == panel)
+                    })
+            }
+            DragPayload::Group { group } => {
+                matches!(self.layout.node(group), Some(Node::Tabs(_)))
+            }
+            DragPayload::FloatingGroup { group } => self
+                .layout
+                .floating_group(group)
+                .and_then(|floating| self.layout.dock_area(floating.area))
+                .is_some_and(|area| self.layout.node(area.root).is_some()),
+        }
     }
 
     /// Called only after a resize command owned by the active interaction succeeds.
@@ -449,9 +494,30 @@ impl DockController {
         interaction
     }
 
-    /// Cancels the current pointer gesture, rolling a resize back to pointer-down.
+    /// Cancels the current pointer gesture as an explicit adapter/model cancellation.
     pub fn cancel_pointer_interaction(&mut self) -> Result<(), CommandError> {
-        self.drag.cancel_gesture();
+        self.cancel_pointer_interaction_with_reason(DragCancelReason::Explicit)
+    }
+
+    /// Cancels the current pointer gesture because its input surface lost focus.
+    pub(crate) fn cancel_pointer_interaction_on_focus_loss(
+        &mut self,
+    ) -> Result<(), CommandError> {
+        self.cancel_pointer_interaction_with_reason(DragCancelReason::FocusLost)
+    }
+
+    /// Cancels the current pointer gesture because the user pressed Escape.
+    pub(crate) fn cancel_pointer_interaction_on_escape(
+        &mut self,
+    ) -> Result<(), CommandError> {
+        self.cancel_pointer_interaction_with_reason(DragCancelReason::Escape)
+    }
+
+    fn cancel_pointer_interaction_with_reason(
+        &mut self,
+        reason: DragCancelReason,
+    ) -> Result<(), CommandError> {
+        self.drag.cancel_gesture_with_reason(reason);
         let interaction = self.interaction;
 
         let cancel_result = if interaction.is_some() {

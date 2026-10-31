@@ -183,7 +183,7 @@ impl Render for DockHost {
             let pointer_press = self.pointer_press.clone();
             cx.on_focus_out(&focus_handle, window, move |_host, _event, window, app| {
                 let _ = controller.update(app, |controller, controller_cx| {
-                    let result = controller.cancel_pointer_interaction();
+                    let result = controller.cancel_pointer_interaction_on_focus_loss();
                     controller_cx.notify();
                     if let Err(error) = result {
                         tracing::warn!(%error, "could not cancel dock interaction on focus loss");
@@ -195,6 +195,20 @@ impl Render for DockHost {
             })
             .detach();
             self.focus_observed = true;
+        }
+
+        // A model command may cancel a captured gesture from outside the
+        // pointer pipeline. The controller observer schedules this render;
+        // release any capture whose interaction has already terminated.
+        if self.pointer_capture.get().is_some() {
+            let interaction_active = self.controller.update(cx, |controller, _| {
+                controller.has_active_pointer_interaction()
+            });
+            if !interaction_active {
+                window.release_pointer();
+                self.pointer_capture.set(None);
+                self.pointer_press.set(None);
+            }
         }
 
         if !self.controller_observed {
@@ -530,6 +544,7 @@ impl Render for DockHost {
         let pointer_controller = self.controller.clone();
         let pointer_scroll_handles = self.column_scroll_handles.clone();
         let pointer_context_menu = toggle_context_menu.clone();
+        let pointer_capture_for_measurement = self.pointer_capture.clone();
         let pointer_capture = self.pointer_capture.clone();
         let pointer_press_for_measurement = self.pointer_press.clone();
         let pointer_press_for_events = self.pointer_press.clone();
@@ -548,6 +563,10 @@ impl Render for DockHost {
                     match controller.set_viewport(viewport) {
                         Ok(true) => {
                             pointer_press_for_measurement.set(None);
+                            if pointer_capture_for_measurement.get().is_some() {
+                                window.release_pointer();
+                                pointer_capture_for_measurement.set(None);
+                            }
                             // geometry() performs a fresh valid calculation and updates
                             // Layout::canvas_bounds only when the measured Canvas rect changed.
                             if let Err(error) = controller.geometry() {
@@ -643,21 +662,55 @@ impl Render for DockHost {
             };
         }
 
-        // Escape dismisses the transient flyout without changing persistent layout state.
-        if active_flyout.is_some() {
+        // Escape first cancels an active pointer gesture. A flyout is dismissed
+        // only when there is no drag/resize to cancel, so cancelling a flyout drag
+        // leaves its source panel visible in the rail.
+        {
             let controller_for_escape = self.controller.clone();
-            workspace = workspace.capture_key_down(move |event, _, app| {
-                if !context_menu_is_open
-                    && event.keystroke.key.eq_ignore_ascii_case("escape")
+            let pointer_capture_for_escape = self.pointer_capture.clone();
+            let pointer_press_for_escape = self.pointer_press.clone();
+            workspace = workspace.capture_key_down(move |event, window, app| {
+                if context_menu_is_open
+                    || !event.keystroke.key.eq_ignore_ascii_case("escape")
                 {
-                    let _ = controller_for_escape.update(app, |controller, controller_cx| {
-                        if let Err(error) = controller.dispatch_transient_in(
+                    return;
+                }
+
+                let had_pointer_state = pointer_capture_for_escape.get().is_some()
+                    || pointer_press_for_escape.get().is_some();
+                pointer_press_for_escape.set(None);
+                let (pointer_active, flyout_open) = controller_for_escape.update(app, |controller, _| {
+                    (
+                        controller.has_active_pointer_interaction(),
+                        controller.layout().flyout().is_some(),
+                    )
+                });
+
+                let cancel_pointer = pointer_active || pointer_capture_for_escape.get().is_some();
+                if cancel_pointer {
+                    let result = controller_for_escape.update(app, |controller, controller_cx| {
+                        let result = controller.cancel_pointer_interaction_on_escape();
+                        controller_cx.notify();
+                        result
+                    });
+                    if let Err(error) = result {
+                        tracing::debug!(%error, "could not cancel dock interaction with Escape");
+                    }
+                    window.release_pointer();
+                    pointer_capture_for_escape.set(None);
+                } else if flyout_open {
+                    let result = controller_for_escape.update(app, |controller, controller_cx| {
+                        controller.dispatch_transient_in(
                             DockCommand::DismissFlyout,
                             controller_cx,
-                        ) {
-                            tracing::debug!(%error, "could not dismiss flyout with Escape");
-                        }
+                        )
                     });
+                    if let Err(error) = result {
+                        tracing::debug!(%error, "could not dismiss flyout with Escape");
+                    }
+                }
+
+                if cancel_pointer || flyout_open || had_pointer_state {
                     app.stop_propagation();
                 }
             });

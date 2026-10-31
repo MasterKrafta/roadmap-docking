@@ -105,6 +105,7 @@ pub(crate) fn finish_drag_at(
             DragState::Pressed { payload, .. } => (payload, true),
             DragState::Dragging { payload, .. } => (payload, false),
             DragState::Idle | DragState::Dropped { .. } | DragState::Cancelled { .. } => {
+                let _ = controller.drag_mut().session_mut().reset();
                 controller.drag_mut().clear_resolver();
                 controller.drag_mut().clear_layout_version();
                 return false;
@@ -179,7 +180,7 @@ pub(crate) fn finish_drag_at(
                 // These are desired model-space bounds, not a viewport-clamped
                 // result. Core validates the source/area constraints and applies
                 // floating-size and viewport fitting in its geometry pipeline.
-                let desired_bounds = floating_bounds(controller, &request);
+                let desired_bounds = floating_bounds_for_request(controller, &request);
                 request.floating_bounds = desired_bounds;
             }
 
@@ -253,7 +254,37 @@ fn drop_source(controller: &DockController, payload: DragPayload) -> Option<Drop
     }
 }
 
+/// Calculates the FreeArea preview using the active session's original press point.
+/// Keeps the DockHost presentation API independent from DragDropRequest construction.
 pub(crate) fn floating_bounds(
+    controller: &mut DockController,
+    payload: DragPayload,
+    pointer: Point,
+) -> Option<Rect> {
+    let (active_payload, origin) = match controller.drag().session().state() {
+        DragState::Dragging {
+            payload,
+            origin,
+            ..
+        } => (payload, origin),
+        _ => return None,
+    };
+    if active_payload != payload {
+        return None;
+    }
+
+    let request = DragDropRequest {
+        payload,
+        handle: controller.drag().session().handle()?,
+        origin,
+        point: pointer,
+        target: Some(DropTarget::FreeArea),
+        floating_bounds: None,
+    };
+    floating_bounds_for_request(controller, &request)
+}
+
+fn floating_bounds_for_request(
     controller: &mut DockController,
     request: &DragDropRequest,
 ) -> Option<Rect> {
