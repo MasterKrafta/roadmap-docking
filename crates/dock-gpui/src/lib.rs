@@ -29,7 +29,7 @@ pub fn run(_options: RunOptions) {
     tracing::warn!("dock-gpui host is not implemented yet");
 }
 
-pub use components::{ColumnView, FlyoutView, GroupView, MainDockView, PanelHost, RailView, SplitterView, TabHeaderView, TabOverflow, TabStripView};
+pub use components::{ColumnView, FloatingWindowView, FlyoutView, GroupView, MainDockView, PanelHost, RailView, SplitterView, TabHeaderView, TabOverflow, TabStripView};
 pub use dock_host::DockHost;
 pub use missing_panel::MissingPanelPlaceholder;
 
