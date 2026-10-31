@@ -6,6 +6,8 @@ rust-version.workspace = true
 
 [dependencies]
 dock-gpui = { path = "../crates/dock-gpui" }
+gpui.workspace = true
+gpui_platform.workspace = true
 
 [lints]
 workspace = true
