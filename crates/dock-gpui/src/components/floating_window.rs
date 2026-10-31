@@ -321,13 +321,8 @@ impl FloatingWindowView {
             .on_mouse_down(MouseButton::Left, {
                 let controller = controller.clone();
                 move |event, _, app| {
-                    dispatch_command(
-                        &controller,
-                        DockCommand::RaiseFloating {
-                            group: floating.group,
-                        },
-                        app,
-                    );
+                    // The event bubbles to the floating root, which raises it.
+                    // Keep propagation alive so GPUI can establish its drag marker.
                     begin_drag(
                         &controller,
                         DragPayload::FloatingGroup {
@@ -337,7 +332,6 @@ impl FloatingWindowView {
                         event,
                         app,
                     );
-                    app.stop_propagation();
                 }
             })
             .on_drag(FloatingTitleDrag, |_, _, _, app| {
