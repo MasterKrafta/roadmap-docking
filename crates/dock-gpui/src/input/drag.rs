@@ -1,5 +1,5 @@
 use dock_core::{
-    ComputeRectsError, DockCommand, DragDropAction, DragHandle, DragPayload, DragState,
+    ComputeRectsError, DragDropAction, DragDropRequest, DragHandle, DragPayload, DragState,
     DropSource, DropTarget, Point, Rect, Size,
 };
 use gpui::{App, Entity};
@@ -162,33 +162,44 @@ pub(crate) fn finish_drag_at(
             }
         }
 
-        let request = controller
+        let request = match controller
             .drag_mut()
             .session_mut()
             .pointer_up(position, target)
-            .ok()
-            .flatten();
+        {
+            Ok(request) => request,
+            Err(error) => {
+                tracing::debug!(%error, "dock drag release did not produce a request");
+                None
+            }
+        };
 
         if let Some(mut request) = request {
             if request.target == Some(DropTarget::FreeArea) {
-                request.floating_bounds = floating_bounds(controller, payload, position);
+                // These are desired model-space bounds, not a viewport-clamped
+                // result. Core validates the source/area constraints and applies
+                // floating-size and viewport fitting in its geometry pipeline.
+                let desired_bounds = floating_bounds(controller, &request);
+                request.floating_bounds = desired_bounds;
             }
 
-            if request.target != Some(DropTarget::FreeArea) || request.floating_bounds.is_some() {
-                let action = {
-                    let metrics = controller.metrics();
-                    controller.layout().resolve_drag_drop(&request, &metrics)
-                };
-                match action {
-                    Ok(DragDropAction::NoOp) => {}
-                    Ok(DragDropAction::Command(command)) => {
-                        if let Err(error) = controller.dispatch_in(command, cx) {
-                            tracing::debug!(%error, "dock drop command was rejected");
-                        }
+            // Resolve every completed request in Core. NoOp is deliberately not
+            // dispatched; Command carries the one and only mutation for this drop.
+            let action = {
+                let metrics = controller.metrics();
+                controller.layout().resolve_drag_drop(&request, &metrics)
+            };
+            match action {
+                Ok(DragDropAction::NoOp) => {}
+                Ok(DragDropAction::Command(command)) => {
+                    // dispatch_in delegates to exactly one dispatch and then
+                    // publishes the resulting events to the GPUI entity.
+                    if let Err(error) = controller.dispatch_in(command, cx) {
+                        tracing::debug!(%error, "dock drop command was rejected");
                     }
-                    Err(error) => {
-                        tracing::debug!(%error, "Core rejected the completed dock drag");
-                    }
+                }
+                Err(error) => {
+                    tracing::debug!(%error, "Core rejected the completed dock drag");
                 }
             }
         }
@@ -244,52 +255,127 @@ fn drop_source(controller: &DockController, payload: DragPayload) -> Option<Drop
 
 pub(crate) fn floating_bounds(
     controller: &mut DockController,
-    payload: DragPayload,
-    pointer: Point,
+    request: &DragDropRequest,
 ) -> Option<Rect> {
-    let preferred = match payload {
+    // Capture the source rectangle from the same Core geometry used by the
+    // drag hit-testing pipeline. The press point then gives us the cursor's
+    // offset within the dragged element.
+    let source_rect = {
+        let rects = controller.geometry().ok()?;
+        match (request.handle, request.payload) {
+            (DragHandle::PanelTab, DragPayload::Panel { panel }) => rects
+                .tab_headers
+                .iter()
+                .find(|header| header.panel == panel)
+                .map(|header| header.rect)?,
+            (DragHandle::FlyoutPanel, DragPayload::Panel { panel }) => rects
+                .flyout
+                .filter(|flyout| flyout.panel == panel)
+                .map(|flyout| flyout.rect)
+                .or_else(|| {
+                    rects
+                        .panels
+                        .iter()
+                        .find(|panel_rect| panel_rect.panel == panel)
+                        .map(|panel_rect| panel_rect.rect)
+                })?,
+            (DragHandle::GroupGrip, DragPayload::Group { group }) => rects
+                .groups
+                .iter()
+                .find(|group_rect| group_rect.group == group)
+                .map(|group_rect| group_rect.rect)?,
+            (
+                DragHandle::FloatingCapture | DragHandle::FloatingTitle,
+                DragPayload::FloatingGroup { group },
+            ) => rects
+                .floating_groups
+                .iter()
+                .find(|floating| floating.group == group)
+                .map(|floating| floating.rect)?,
+            _ => return None,
+        }
+    };
+
+    let preferred_size = match request.payload {
         DragPayload::Panel { panel } => controller
             .layout()
             .panel_instance(panel)?
             .constraints
             .preferred_size,
-        DragPayload::Group { group } => controller
-            .geometry()
-            .ok()?
-            .groups
-            .iter()
-            .find(|rect| rect.group == group)?
-            .rect
-            .size,
+        DragPayload::Group { .. } => source_rect.size,
         DragPayload::FloatingGroup { group } => {
-            let floating = controller.layout().floating_group(group)?;
-            floating.bounds.size
+            controller.layout().floating_group(group)?.bounds.size
         }
     };
 
-    let viewport = controller.viewport();
-    let min_size = match payload {
-        DragPayload::Panel { panel } => controller
-            .layout()
-            .panel_instance(panel)?
-            .constraints
-            .min_size,
-        DragPayload::Group { .. } | DragPayload::FloatingGroup { .. } => Size::new(1.0, 1.0),
-    };
-    if viewport.size.width < min_size.width || viewport.size.height < min_size.height {
-        return None;
-    }
-
-    let size = Size::new(
-        preferred.width.min(viewport.size.width).max(min_size.width),
-        preferred.height.min(viewport.size.height).max(min_size.height),
-    );
-    let right = viewport.checked_right().ok()?;
-    let bottom = viewport.checked_bottom().ok()?;
-    let origin = Point::new(
-        (pointer.x - size.width * 0.5).clamp(viewport.origin.x, right - size.width),
-        (pointer.y - size.height * 0.5).clamp(viewport.origin.y, bottom - size.height),
-    );
-    Some(Rect::new(origin, size))
+    desired_floating_bounds(source_rect, preferred_size, request.origin, request.point)
 }
 
+/// Builds an adapter-side bounds proposal without applying viewport or
+/// panel-constraint normalization. Core owns those decisions.
+fn desired_floating_bounds(
+    source_rect: Rect,
+    preferred_size: Size,
+    press_origin: Point,
+    pointer: Point,
+) -> Option<Rect> {
+    source_rect.validate_non_empty().ok()?;
+    preferred_size.validate_positive().ok()?;
+    press_origin.validate().ok()?;
+    pointer.validate().ok()?;
+
+    let grab_offset_x = (press_origin.x - source_rect.origin.x)
+        .clamp(0.0, source_rect.size.width)
+        .min(preferred_size.width);
+    let grab_offset_y = (press_origin.y - source_rect.origin.y)
+        .clamp(0.0, source_rect.size.height)
+        .min(preferred_size.height);
+
+    let bounds = Rect::new(
+        Point::new(pointer.x - grab_offset_x, pointer.y - grab_offset_y),
+        preferred_size,
+    );
+    bounds.validate_non_empty().ok()?;
+    Some(bounds)
+}
+
+#[cfg(test)]
+mod floating_bounds_tests {
+    use dock_core::{Point, Rect, Size};
+
+    use super::desired_floating_bounds;
+
+    #[test]
+    fn desired_bounds_preserve_the_cursor_offset_without_viewport_clamping() {
+        let source = Rect::new(Point::new(100.0, 200.0), Size::new(300.0, 180.0));
+        let bounds = desired_floating_bounds(
+            source,
+            Size::new(640.0, 480.0),
+            Point::new(140.0, 225.0),
+            Point::new(1_400.0, 950.0),
+        )
+        .unwrap();
+
+        assert_eq!(
+            bounds,
+            Rect::new(Point::new(1_360.0, 925.0), Size::new(640.0, 480.0))
+        );
+    }
+
+    #[test]
+    fn desired_bounds_keep_the_grab_point_inside_a_smaller_floating_item() {
+        let source = Rect::new(Point::new(10.0, 20.0), Size::new(400.0, 300.0));
+        let bounds = desired_floating_bounds(
+            source,
+            Size::new(160.0, 100.0),
+            Point::new(390.0, 290.0),
+            Point::new(700.0, 600.0),
+        )
+        .unwrap();
+
+        assert_eq!(
+            bounds,
+            Rect::new(Point::new(540.0, 500.0), Size::new(160.0, 100.0))
+        );
+    }
+}
