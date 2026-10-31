@@ -840,8 +840,6 @@ impl Render for TransferPanel {
 struct PanelViews {
     a: AnyView,
     b: AnyView,
-    a_entity: Entity<TransferPanel>,
-    b_entity: Entity<TransferPanel>,
 }
 
 impl PanelViews {
@@ -1160,8 +1158,6 @@ fn main() {
         let panels = PanelViews {
             a: AnyView::from(panel_a.clone()),
             b: AnyView::from(panel_b.clone()),
-            a_entity: panel_a.clone(),
-            b_entity: panel_b.clone(),
         };
 
         // Main application window remains present and independent from both
