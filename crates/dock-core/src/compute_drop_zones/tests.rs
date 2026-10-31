@@ -431,6 +431,15 @@ fn generic_floating_group_exposes_horizontal_split_targets() {
     let zones = layout
         .compute_drop_zones(DropSource::Group { group: source_group }, &rects, &metrics)
         .unwrap();
+    assert!(
+        !zones.iter().any(|zone| {
+            matches!(
+                zone.target,
+                DropTarget::MainColumn { .. } | DropTarget::FreeArea
+            ) || matches!(zone.zone, DropZone::DockEdge)
+        }),
+        "a floating-window snapshot must not expose main-window dock edges or free Canvas"
+    );
 
     for (zone_kind, edge) in [
         (DropZone::Left, DropZone::Left),

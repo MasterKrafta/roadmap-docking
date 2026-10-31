@@ -332,7 +332,9 @@ impl Layout {
         } = *context;
         // The two outside viewport edges open/extend a dock. A whole group uses
         // its edge operation when a neighbouring column exists; panels use an exact slot.
-        if source_allows(self, source_panels, AllowedArea::MAIN_DOCK) {
+        if rects.canvas.is_some()
+            && source_allows(self, source_panels, AllowedArea::MAIN_DOCK)
+        {
             let edge_width = metrics.edge_drop_width.min(viewport.size.width / 3.0);
             for (side, columns, zone, is_left) in [
                 (DockSide::Left, left_columns, DropZone::DockEdge, true),
