@@ -2,7 +2,7 @@ use dock_core::{
     DockCommand, DragDropAction, DragHandle, DragPayload, DragState, DropSource,
     DropTarget, Point, Rect, Size,
 };
-use gpui::{App, Context, Entity, MouseDownEvent, MouseMoveEvent, MouseUpEvent};
+use gpui::{App, Entity, MouseDownEvent, MouseMoveEvent, MouseUpEvent};
 
 use crate::DockController;
 

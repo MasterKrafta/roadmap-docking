@@ -2,8 +2,8 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use dock_core::{
-    ColumnDisplayItem, ColumnMode, ComputeRectsError, DockSide, DragPreview, DropZoneRect,
-    FlyoutState, HitResult, Layout, Node, NodeId, PanelRect, Point, Rect, Size as CoreSize,
+    ColumnDisplayItem, ColumnMode, ComputeRectsError, DockSide, HitResult, Layout, Node,
+    NodeId, PanelRect, Point, Rect, Size as CoreSize,
 };
 use gpui::{
     AnyView, App, Bounds, Context, Entity, IntoElement, ParentElement, Pixels, Render, ScrollHandle,

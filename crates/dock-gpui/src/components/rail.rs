@@ -6,7 +6,7 @@ use dock_core::{
 use gpui::{
     Context, Entity, IntoElement, MouseButton, MouseDownEvent, MouseUpEvent, ParentElement, Render,
     SharedString, Styled, Window, div, img, px, rgb,
-    prelude::InteractiveElement as _,
+    prelude::{InteractiveElement as _, StatefulInteractiveElement as _},
 };
 use ui::Theme;
 
