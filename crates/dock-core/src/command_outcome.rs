@@ -8,7 +8,8 @@ pub struct CommandOutcome {
     pub changed_nodes: Vec<NodeId>,
     /// Layout version after the successful command.
     pub new_version: u64,
-    /// Effective value when a requested resize was constrained.
+    /// Command-specific result data, such as a created floating-group ID or
+    /// an effective value accepted after constraints.
     pub actual_value: Option<CommandValue>,
     /// Best-effort inverse command for consumers that use command-based undo.
     /// Session UndoRedoHistory instead records full persistent-state checkpoints,
