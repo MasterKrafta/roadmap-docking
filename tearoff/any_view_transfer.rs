@@ -46,14 +46,49 @@ impl PanelLocation {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum PanelId {
+    #[default]
+    A,
+    B,
+}
+
+impl PanelId {
+    fn other(self) -> Self {
+        match self {
+            Self::A => Self::B,
+            Self::B => Self::A,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::A => "A",
+            Self::B => "B",
+        }
+    }
+}
+
 #[derive(Default)]
 struct TransferState {
-    location: PanelLocation,
+    active_tab: PanelId,
+    floating_panel: Option<PanelId>,
     main_hwnd: isize,
     floating_hwnd: isize,
 }
 
+impl TransferState {
+    fn location(&self, panel: PanelId) -> PanelLocation {
+        if self.floating_panel == Some(panel) {
+            PanelLocation::Floating
+        } else {
+            PanelLocation::Main
+        }
+    }
+}
+
 struct TransferPanel {
+    id: PanelId,
     state: Entity<TransferState>,
     focus_handle: FocusHandle,
     content: SharedString,
@@ -68,11 +103,16 @@ struct TransferPanel {
 }
 
 impl TransferPanel {
-    fn new(state: Entity<TransferState>, cx: &mut Context<Self>) -> Self {
-        let content: SharedString = "Проверь перенос: набери текст здесь".into();
+    fn new(id: PanelId, state: Entity<TransferState>, cx: &mut Context<Self>) -> Self {
+        let initial_text = match id {
+            PanelId::A => "Панель A: введи здесь свой текст",
+            PanelId::B => "Панель B: введи другой текст",
+        };
+        let content: SharedString = initial_text.into();
         let end = content.len();
 
         Self {
+            id,
             state,
             focus_handle: cx.focus_handle(),
             content,
@@ -701,7 +741,7 @@ impl Element for TextElement {
 
 impl Render for TransferPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let location = self.state.read(cx).location;
+        let location = self.state.read(cx).location(self.id);
         let focused = self.focus_handle.is_focused(window);
         let entity_id = cx.entity().entity_id();
 
@@ -730,7 +770,8 @@ impl Render for TransferPanel {
             .p_3()
             .bg(rgb(0x292d32))
             .text_color(rgb(0xe5e7eb))
-            .child("Одна и та же Entity / AnyView")
+            .child(format!("Панель {}", self.id.label()))
+            .child("Один и тот же Entity / AnyView при переносе")
             .child(format!("EntityId: {entity_label}"))
             .child(format!("Текущий host: {}", location.label()))
             .child(format!(
@@ -793,37 +834,109 @@ impl Render for TransferPanel {
     }
 }
 
+#[derive(Clone)]
+struct PanelViews {
+    a: AnyView,
+    b: AnyView,
+}
+
+impl PanelViews {
+    fn get(&self, panel: PanelId) -> AnyView {
+        match panel {
+            PanelId::A => self.a.clone(),
+            PanelId::B => self.b.clone(),
+        }
+    }
+}
+
 struct MainWindowView {
     state: Entity<TransferState>,
-    panel: AnyView,
+    panels: PanelViews,
 }
 
 impl MainWindowView {
-    fn move_to_floating(&mut self, _: &MouseUpEvent, _: &mut Window, cx: &mut Context<Self>) {
+    fn activate_tab(&mut self, panel: PanelId, cx: &mut Context<Self>) {
+        let floating_hwnd = self.state.update(cx, |state, cx| {
+            if state.floating_panel == Some(panel) {
+                state.floating_hwnd
+            } else {
+                state.active_tab = panel;
+                cx.notify();
+                0
+            }
+        });
+
+        if floating_hwnd != 0 {
+            tearoff_win::activate_window(floating_hwnd);
+        }
+    }
+
+    fn activate_a(&mut self, _: &MouseUpEvent, _: &mut Window, cx: &mut Context<Self>) {
+        self.activate_tab(PanelId::A, cx);
+    }
+
+    fn activate_b(&mut self, _: &MouseUpEvent, _: &mut Window, cx: &mut Context<Self>) {
+        self.activate_tab(PanelId::B, cx);
+    }
+
+    fn extract_panel(&mut self, panel: PanelId, cx: &mut Context<Self>) {
         let hwnd = self.state.update(cx, |state, cx| {
-            state.location = PanelLocation::Floating;
+            if state.floating_panel.is_some() || state.floating_hwnd == 0 {
+                return 0;
+            }
+
+            state.floating_panel = Some(panel);
             cx.notify();
             state.floating_hwnd
         });
 
         if hwnd != 0 {
             tearoff_win::show_window(hwnd);
+            tearoff_win::activate_window(hwnd);
         }
+    }
+
+    fn extract_inactive(&mut self, _: &MouseUpEvent, _: &mut Window, cx: &mut Context<Self>) {
+        let inactive_panel = self.state.read(cx).active_tab.other();
+        self.extract_panel(inactive_panel, cx);
+    }
+
+    fn extract_active(&mut self, _: &MouseUpEvent, _: &mut Window, cx: &mut Context<Self>) {
+        let active_panel = self.state.read(cx).active_tab;
+        self.extract_panel(active_panel, cx);
     }
 }
 
 impl Render for MainWindowView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let panel_is_here = self.state.read(cx).location == PanelLocation::Main;
-        let content = if panel_is_here {
-            div().flex_1().p_3().child(self.panel.clone())
-        } else {
+        let state = self.state.read(cx);
+        let active_tab = state.active_tab;
+        let floating_panel = state.floating_panel;
+        let inactive_tab = active_tab.other();
+        let floating_hwnd = state.floating_hwnd;
+        let active_content = if floating_panel == Some(active_tab) {
             div()
                 .flex_1()
                 .items_center()
                 .justify_center()
                 .text_color(rgb(0x888888))
-                .child("Панель находится в отдельном floating-окне")
+                .child(format!(
+                    "Панель {} находится в плавающем окне",
+                    active_tab.label()
+                ))
+        } else {
+            div().flex_1().p_3().child(self.panels.get(active_tab))
+        };
+
+        let inactive_label = if floating_panel == Some(inactive_tab) {
+            format!("Вкладка {} (floating)", inactive_tab.label())
+        } else {
+            format!("Вкладка {}", inactive_tab.label())
+        };
+        let extract_inactive_label = if floating_panel.is_some() || floating_hwnd == 0 {
+            "Верните плавающую панель перед следующим переносом".to_string()
+        } else {
+            format!("Извлечь неактивную {}", inactive_tab.label())
         };
 
         div()
@@ -838,11 +951,58 @@ impl Render for MainWindowView {
                     .flex()
                     .flex_row()
                     .items_center()
-                    .gap_3()
+                    .gap_2()
                     .px_3()
                     .bg(rgb(0x30363d))
                     .text_color(white())
                     .child("MAIN WINDOW")
+                    .child(
+                        div()
+                            .px_3()
+                            .py_1()
+                            .bg(if active_tab == PanelId::A {
+                                rgb(0x43566d)
+                            } else {
+                                rgb(0x252a30)
+                            })
+                            .cursor_pointer()
+                            .on_mouse_up(MouseButton::Left, cx.listener(Self::activate_a))
+                            .child(if floating_panel == Some(PanelId::A) {
+                                "A · floating"
+                            } else {
+                                "A"
+                            }),
+                    )
+                    .child(
+                        div()
+                            .px_3()
+                            .py_1()
+                            .bg(if active_tab == PanelId::B {
+                                rgb(0x43566d)
+                            } else {
+                                rgb(0x252a30)
+                            })
+                            .cursor_pointer()
+                            .on_mouse_up(MouseButton::Left, cx.listener(Self::activate_b))
+                            .child(if floating_panel == Some(PanelId::B) {
+                                "B · floating"
+                            } else {
+                                "B"
+                            }),
+                    )
+                    .child(
+                        div()
+                            .ml_auto()
+                            .px_2()
+                            .py_1()
+                            .bg(rgb(0x43566d))
+                            .cursor_pointer()
+                            .on_mouse_up(
+                                MouseButton::Left,
+                                cx.listener(Self::extract_inactive),
+                            )
+                            .child(extract_inactive_label),
+                    )
                     .child(
                         div()
                             .px_2()
@@ -851,25 +1011,26 @@ impl Render for MainWindowView {
                             .cursor_pointer()
                             .on_mouse_up(
                                 MouseButton::Left,
-                                cx.listener(Self::move_to_floating),
+                                cx.listener(Self::extract_active),
                             )
-                            .child("Перенести панель во floating"),
+                            .child("Извлечь активную"),
                     ),
             )
-            .child(content)
+            .child(active_content)
     }
 }
 
 struct FloatingWindowView {
     state: Entity<TransferState>,
-    panel: AnyView,
+    panels: PanelViews,
 }
 
 impl FloatingWindowView {
     fn move_to_main(&mut self, _: &MouseUpEvent, _: &mut Window, cx: &mut Context<Self>) {
         let (floating_hwnd, main_hwnd) = self.state.update(cx, |state, cx| {
-            state.location = PanelLocation::Main;
-            cx.notify();
+            if state.floating_panel.take().is_some() {
+                cx.notify();
+            }
             (state.floating_hwnd, state.main_hwnd)
         });
 
@@ -884,17 +1045,21 @@ impl FloatingWindowView {
 
 impl Render for FloatingWindowView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let panel_is_here = self.state.read(cx).location == PanelLocation::Floating;
-        let content = if panel_is_here {
-            div().flex_1().p_3().child(self.panel.clone())
+        let floating_panel = self.state.read(cx).floating_panel;
+        let content = if let Some(panel) = floating_panel {
+            div().flex_1().p_3().child(self.panels.get(panel))
         } else {
             div()
                 .flex_1()
                 .items_center()
                 .justify_center()
                 .text_color(rgb(0x888888))
-                .child("Панель находится в главном окне")
+                .child("Сейчас нет извлечённой панели")
         };
+
+        let title = floating_panel
+            .map(|panel| format!("FLOATING WINDOW — PANEL {}", panel.label()))
+            .unwrap_or_else(|| "FLOATING WINDOW — EMPTY".to_string());
 
         div()
             .size_full()
@@ -911,7 +1076,7 @@ impl Render for FloatingWindowView {
                     .px_3()
                     .bg(rgb(0x30363d))
                     .text_color(white())
-                    .child("FLOATING WINDOW")
+                    .child(title)
                     .child(
                         div()
                             .ml_auto()
@@ -949,10 +1114,14 @@ fn main() {
 
         let state = cx.new(|_| TransferState::default());
 
-        // This is the only panel Entity. Both window roots receive clones of this
-        // same type-erased AnyView; their location flag ensures only one mounts it.
-        let panel = cx.new(|cx| TransferPanel::new(state.clone(), cx));
-        let panel_view = AnyView::from(panel.clone());
+        // Keep both panel views in the shared registry for the entire experiment.
+        // The inactive tab is not rendered, but its Entity/AnyView remains alive.
+        let panel_a = cx.new(|cx| TransferPanel::new(PanelId::A, state.clone(), cx));
+        let panel_b = cx.new(|cx| TransferPanel::new(PanelId::B, state.clone(), cx));
+        let panels = PanelViews {
+            a: AnyView::from(panel_a.clone()),
+            b: AnyView::from(panel_b.clone()),
+        };
 
         let floating_options = WindowOptions {
             titlebar: None,
@@ -970,7 +1139,7 @@ fn main() {
         };
 
         let floating_state = state.clone();
-        let floating_panel = panel_view.clone();
+        let floating_panels = panels.clone();
         let floating_window = cx
             .open_window(floating_options, move |_, cx| {
                 cx.new(|cx| {
@@ -978,7 +1147,7 @@ fn main() {
                         .detach();
                     FloatingWindowView {
                         state: floating_state,
-                        panel: floating_panel,
+                        panels: floating_panels,
                     }
                 })
             })
@@ -1002,14 +1171,14 @@ fn main() {
         };
 
         let main_state = state.clone();
-        let main_panel = panel_view.clone();
+        let main_panels = panels.clone();
         let main_window = cx
             .open_window(main_options, move |_, cx| {
                 cx.new(|cx| {
                     cx.observe(&main_state, |_, _, cx| cx.notify()).detach();
                     MainWindowView {
                         state: main_state,
-                        panel: main_panel,
+                        panels: main_panels,
                     }
                 })
             })
@@ -1025,11 +1194,11 @@ fn main() {
             tearoff_win::set_owner(floating_hwnd, main_hwnd);
         }
 
-        // Start with the input focused in the main window. After transfer the
-        // focus indicator tells whether GPUI carried that focus to the target.
+        // Start with panel A focused. Panel B stays alive in PanelViews while
+        // inactive, so extracting B exercises a view that was not mounted.
         main_window
             .update(cx, |_, window, cx| {
-                let focus_handle = panel.read(cx).focus_handle.clone();
+                let focus_handle = panel_a.read(cx).focus_handle.clone();
                 window.focus(&focus_handle, cx);
             })
             .expect("не удалось установить начальный фокус");
