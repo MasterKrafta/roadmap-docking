@@ -111,8 +111,8 @@ impl GroupView {
                         update_drag_at(
                             &controller,
                             Point::new(
-                                event.event.position().x.as_f32(),
-                                event.event.position().y.as_f32(),
+                                event.event.position.x.as_f32(),
+                                event.event.position.y.as_f32(),
                             ),
                             app,
                         );

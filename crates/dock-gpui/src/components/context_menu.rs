@@ -280,7 +280,6 @@ impl ContextMenu {
         }
 
         layer.child(region)
-        layer
     }
 }
 
