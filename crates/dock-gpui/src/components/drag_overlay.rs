@@ -203,7 +203,7 @@ impl DragGhost {
                 div()
                     .w_full()
                     .text_size(px((theme.typography.tab_size - 2.0).max(9.0)))
-                    .text_color(rgb(theme.colors.secondary_text))
+                    .text_color(rgb(theme.colors.muted_text))
                     .child(subtitle),
             );
         }
@@ -427,12 +427,12 @@ fn highlight_rect(
         .top(px(rect.origin.y))
         .w(px(rect.size.width))
         .h(px(rect.size.height))
-        .bg(rgb(theme.colors.panel_tab_active))
+        .bg(rgb(theme.colors.drop_zone))
         .opacity(opacity);
     if border {
         element = element
             .border_1()
-            .border_color(rgb(theme.colors.panel_tab_active));
+            .border_color(rgb(theme.colors.drop_zone_border));
     }
     element
 }
