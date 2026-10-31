@@ -207,7 +207,7 @@ impl DockWorkspace {
             id,
             viewport,
             anchor,
-            &entries,
+            entries,
             None,
             ContextMenuCallbacks {
                 on_submenu: Rc::new(|_, _| {}),
