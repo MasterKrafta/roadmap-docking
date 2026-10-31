@@ -285,6 +285,12 @@ impl DockController {
                 Some(Node::Column(column)) => Some(column.width),
                 _ => None,
             },
+            HitResult::FlyoutResizeEdge { panel, .. } => self
+                .geometry()
+                .ok()
+                .and_then(|rects| rects.flyout)
+                .filter(|flyout| flyout.panel == panel)
+                .map(|flyout| flyout.rect.size.width),
             _ => None,
         };
         let start_bounds = match hit {
@@ -301,6 +307,9 @@ impl DockController {
             _ => None,
         };
         if matches!(hit, HitResult::FloatingResizeEdge { .. }) && start_bounds.is_none() {
+            return Err(ResizeInteractionError::NotResizeHandle);
+        }
+        if matches!(hit, HitResult::FlyoutResizeEdge { .. }) && start_width.is_none() {
             return Err(ResizeInteractionError::NotResizeHandle);
         }
         if !self.history.begin_transaction(&self.layout) {

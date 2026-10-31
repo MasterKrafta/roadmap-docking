@@ -1,35 +1,18 @@
 use dock_core::{
-    DockCommand, DragHandle, DragPayload, FloatingGroupId, GroupRect, Point, TabHeaderRect,
-    TabOverflowRect, TabStripRect,
+    DockCommand, FloatingGroupId, GroupRect, Point, TabHeaderRect, TabOverflowRect, TabStripRect,
 };
 use gpui::{
-    Context, Entity, IntoElement, MouseButton, ParentElement, Render, Styled, Window, div, px,
-    rgb,
+    Entity, IntoElement, ParentElement, Styled, div, px, rgb,
     prelude::InteractiveElement as _,
 };
 use ui::Theme;
 
-use crate::{
-    DockController,
-    input::{begin_drag, dispatch_command, finish_drag, update_drag_at},
-};
+use crate::{DockController, input::dispatch_command};
 
 use super::{
     context_menu::{ContextMenuTarget, GroupMenuToggle},
     tab_strip::{GroupPresentation, TabStripView},
 };
-
-/// GPUI drag marker for the complete Tabs group grip.
-#[derive(Clone, Copy)]
-struct GroupGripDrag;
-
-struct GroupGripDragGhost;
-
-impl Render for GroupGripDragGhost {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        gpui::Empty
-    }
-}
 
 /// The group component: grip, tab strip, controls, and group context menu.
 pub struct GroupView;
@@ -75,8 +58,6 @@ impl GroupView {
             .border_color(rgb(theme.colors.group_frame_border));
 
         if header_height > 0.0 {
-            let grip_controller = controller.clone();
-            let grip_group = group.group;
             let grip = div()
                 .id(format!("group-grip-{:?}", group.group))
                 .absolute()
@@ -93,39 +74,7 @@ impl GroupView {
                 .bg(rgb(theme.colors.group_grip_background))
                 .text_color(rgb(theme.colors.primary_text))
                 .child("⠿")
-                .on_mouse_down(MouseButton::Left, move |event, _, app| {
-                    begin_drag(
-                        &grip_controller,
-                        DragPayload::Group { group: grip_group },
-                        DragHandle::GroupGrip,
-                        event,
-                        app,
-                    );
-                })
-                .on_drag(GroupGripDrag, |_, _, _, app| {
-                    app.new(|_| GroupGripDragGhost)
-                })
-                .on_drag_move::<GroupGripDrag>({
-                    let controller = controller.clone();
-                    move |event, _, app| {
-                        update_drag_at(
-                            &controller,
-                            Point::new(
-                                event.event.position.x.as_f32(),
-                                event.event.position.y.as_f32(),
-                            ),
-                            app,
-                        );
-                    }
-                })
-                .on_mouse_up({
-                    let controller = controller.clone();
-                    move |event, _, app| finish_drag(&controller, event, app)
-                })
-                .on_mouse_up_out(MouseButton::Left, {
-                    let controller = controller.clone();
-                    move |event, _, app| finish_drag(&controller, event, app)
-                });
+;
             root = root.child(grip);
         }
 

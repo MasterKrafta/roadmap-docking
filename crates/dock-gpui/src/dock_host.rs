@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
@@ -7,7 +8,8 @@ use dock_core::{
     Size as CoreSize,
 };
 use gpui::{
-    AnyView, App, Bounds, Context, Entity, IntoElement, ParentElement, Pixels, Render, ScrollHandle,
+    AnyView, App, Bounds, Context, Entity, HitboxBehavior, HitboxId, IntoElement, ParentElement,
+    Pixels, Render, ScrollHandle,
     Styled, Window, canvas, div, px, rgb,
     prelude::InteractiveElement as _,
 };
@@ -20,7 +22,7 @@ use crate::{
         ContextMenuToggle, DragGhost, DropOverlay, FloatingWindowView, FlyoutView, MainDockView,
         collect_group_presentations,
     },
-    input::{floating_bounds, scroll_adjusted_hit_test_point},
+    input::{floating_bounds, register_pointer_events, scroll_adjusted_hit_test_point},
 };
 
 /// Root composition for an application's docking workspace.
@@ -39,6 +41,8 @@ pub struct DockHost {
     canvas: Option<AnyView>,
     /// GPUI scroll positions are transient and keyed by the Core owner NodeId.
     column_scroll_handles: HashMap<NodeId, ScrollHandle>,
+    /// Keeps the actual captured hitbox identity across DockHost rerenders.
+    pointer_capture: Rc<Cell<Option<HitboxId>>>,
     /// One transient menu can be open at a time; it never enters Core layout state.
     open_context_menu: Option<OpenContextMenu>,
     /// Whether middle-clicking a tab closes its panel instance.
@@ -64,6 +68,7 @@ impl DockHost {
             options_bar: None,
             canvas: None,
             column_scroll_handles: HashMap::new(),
+            pointer_capture: Rc::new(Cell::new(None)),
             open_context_menu: None,
             middle_click_closes_tabs: true,
             controller_observed: false,
@@ -485,11 +490,15 @@ impl Render for DockHost {
             }
         });
         let controller_for_measurement = self.controller.clone();
+        let pointer_controller = self.controller.clone();
+        let pointer_scroll_handles = self.column_scroll_handles.clone();
+        let pointer_context_menu = toggle_context_menu.clone();
+        let pointer_capture = self.pointer_capture.clone();
         let measurement = canvas(
-            move |bounds, _window, app| {
+            move |bounds, window, app| {
                 let viewport = viewport_from_bounds(bounds);
                 if viewport.validate_non_empty().is_err() {
-                    return;
+                    return None;
                 }
 
                 controller_for_measurement.update(app, |controller, controller_cx| {
@@ -508,8 +517,20 @@ impl Render for DockHost {
                         }
                     }
                 });
+
+                Some(window.insert_hitbox(bounds, HitboxBehavior::Normal).id)
             },
-            move |_, _, window, _| {
+            move |_, root_hitbox, window, _| {
+                if let Some(root_hitbox) = root_hitbox {
+                    register_pointer_events(
+                        window,
+                        root_hitbox,
+                        pointer_controller.clone(),
+                        pointer_scroll_handles.clone(),
+                        pointer_context_menu.clone(),
+                        pointer_capture.clone(),
+                    );
+                }
                 // Apply the drag cursor at window level so child buttons and
                 // tab headers cannot override grabbing/not-allowed feedback.
                 if let Some(style) = drag_cursor_style {

@@ -1,32 +1,13 @@
-use dock_core::{
-    ColumnDisplayItem, ColumnMode, ColumnRect, DockCommand, DragHandle, DragPayload, FlyoutState,
-    Point,
-    TabHeaderRect,
-};
+use dock_core::{ColumnDisplayItem, ColumnMode, ColumnRect, DockCommand, FlyoutState, Point, TabHeaderRect};
 use gpui::{
-    Context, Entity, IntoElement, MouseButton, MouseDownEvent, MouseUpEvent, ParentElement, Render,
-    SharedString, Styled, Window, div, img, px, rgb,
-    prelude::{InteractiveElement as _, StatefulInteractiveElement as _},
+    Entity, IntoElement, ParentElement, SharedString, Styled, div, img, px, rgb,
+    prelude::InteractiveElement as _,
 };
 use ui::Theme;
 
-use crate::{
-    DockController,
-    input::{begin_drag_at, finish_drag_at, update_drag_at},
-};
+use crate::DockController;
 
 use super::tab_strip::GroupPresentation;
-
-#[derive(Clone, Copy)]
-struct RailPanelDrag;
-
-struct RailPanelDragGhost;
-
-impl Render for RailPanelDragGhost {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        gpui::Empty
-    }
-}
 
 /// Flattened icon-rail presentation. The item order and rectangles are supplied
 /// by dock-core; this component never traverses or changes the model tree.
@@ -41,7 +22,7 @@ impl RailView {
         headers: &[TabHeaderRect],
         presentations: &std::collections::HashMap<dock_core::NodeId, GroupPresentation>,
         content_origin: Point,
-        pointer_offset: Point,
+        _pointer_offset: Point,
         active_flyout: Option<FlyoutState>,
         controller: Entity<DockController>,
         theme: Theme,
@@ -82,9 +63,6 @@ impl RailView {
             let icon_size = if is_label_mode { 16.0 } else { 20.0 };
             let panel = item.panel;
             let owner_column = column.column;
-            let pointer_offset_for_down = pointer_offset;
-            let pointer_offset_for_move = pointer_offset;
-            let pointer_offset_for_up = pointer_offset;
             let mut icon_row = div()
                 .id(format!("rail-item-{:?}-{:?}", owner_column, panel))
                 .absolute()
@@ -146,51 +124,6 @@ impl RailView {
 
             let click_controller = controller.clone();
             icon_row = icon_row
-                .on_mouse_down(MouseButton::Left, {
-                    let controller = controller.clone();
-                    move |event: &MouseDownEvent, _, app| {
-                        begin_drag_at(
-                            &controller,
-                            DragPayload::Panel { panel },
-                            DragHandle::PanelTab,
-                            event_point(event.position, pointer_offset_for_down),
-                            app,
-                        );
-                    }
-                })
-                .on_drag(RailPanelDrag, |_, _, _, app| {
-                    app.new(|_| RailPanelDragGhost)
-                })
-                .on_drag_move::<RailPanelDrag>({
-                    let controller = controller.clone();
-                    move |event, _, app| {
-                        update_drag_at(
-                            &controller,
-                            event_point(event.event.position, pointer_offset_for_move),
-                            app,
-                        );
-                    }
-                })
-                .on_mouse_up({
-                    let controller = controller.clone();
-                    move |event: &MouseUpEvent, _, app| {
-                        finish_drag_at(
-                            &controller,
-                            event_point(event.position, pointer_offset_for_up),
-                            app,
-                        );
-                    }
-                })
-                .on_mouse_up_out(MouseButton::Left, {
-                    let controller = controller.clone();
-                    move |event: &MouseUpEvent, _, app| {
-                        finish_drag_at(
-                            &controller,
-                            event_point(event.position, pointer_offset),
-                            app,
-                        );
-                    }
-                })
                 .on_click(move |event, _, app| {
                     if event.standard_click() {
                         let _ = click_controller.update(app, |controller, controller_cx| {
@@ -234,6 +167,3 @@ impl RailView {
     }
 }
 
-fn event_point(point: gpui::Point<gpui::Pixels>, offset: Point) -> Point {
-    Point::new(point.x.as_f32(), point.y.as_f32() + offset.y)
-}

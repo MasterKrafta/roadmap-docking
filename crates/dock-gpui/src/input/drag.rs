@@ -2,26 +2,9 @@ use dock_core::{
     DockCommand, DragDropAction, DragHandle, DragPayload, DragState, DropSource,
     DropTarget, Point, Rect, Size,
 };
-use gpui::{App, Entity, MouseDownEvent, MouseUpEvent};
+use gpui::{App, Entity};
 
 use crate::DockController;
-
-/// Begins a Core drag session from a semantic panel or group source.
-pub(crate) fn begin_drag(
-    controller: &Entity<DockController>,
-    payload: DragPayload,
-    handle: DragHandle,
-    event: &MouseDownEvent,
-    app: &mut App,
-) {
-    begin_drag_at(
-        controller,
-        payload,
-        handle,
-        event_point(event.position.x, event.position.y),
-        app,
-    );
-}
 
 /// Begins a drag from an adapter-provided point in Core's host-local coordinates.
 pub(crate) fn begin_drag_at(
@@ -100,19 +83,6 @@ pub(crate) fn update_drag_at(
         }
         cx.notify();
     });
-}
-
-/// Ends a gesture and applies the single Core-resolved command, if the drop is valid.
-pub(crate) fn finish_drag(
-    controller: &Entity<DockController>,
-    event: &MouseUpEvent,
-    app: &mut App,
-) {
-    finish_drag_at(
-        controller,
-        event_point(event.position.x, event.position.y),
-        app,
-    );
 }
 
 /// Ends a drag from a host-local release point. A resolver is rebuilt/reused for
@@ -251,9 +221,5 @@ pub(crate) fn floating_bounds(
         (pointer.y - size.height * 0.5).clamp(viewport.origin.y, bottom - size.height),
     );
     Some(Rect::new(origin, size))
-}
-
-fn event_point(x: gpui::Pixels, y: gpui::Pixels) -> Point {
-    Point::new(x.as_f32(), y.as_f32())
 }
 

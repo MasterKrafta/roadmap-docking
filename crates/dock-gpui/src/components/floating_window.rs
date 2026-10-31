@@ -1,25 +1,18 @@
 use std::collections::{HashMap, HashSet};
 
 use dock_core::{
-    ColumnDisplayItem, ColumnMode, ColumnRect, DockCommand, DockMetrics, DragHandle, DragPayload,
-    DragPreview, DropZoneRect, FloatingGroupRect, FloatingResizeEdgeRect, FlyoutState, GroupRect,
-    HitResult, NodeId, PanelId, PanelRect, Point, ResizeEdge, SplitterRect, TabHeaderRect,
-    TabOverflowRect, TabStripRect, VerticalOverflow,
+    ColumnDisplayItem, ColumnMode, ColumnRect, DockCommand, DockMetrics, DragPreview,
+    DropZoneRect, FloatingGroupRect, FloatingResizeEdgeRect, FlyoutState, GroupRect, NodeId,
+    PanelId, PanelRect, Point, ResizeEdge, SplitterRect, TabHeaderRect, TabOverflowRect,
+    TabStripRect, VerticalOverflow,
 };
 use gpui::{
-    AnyView, Context, Entity, IntoElement, MouseButton, ParentElement, Render, ScrollHandle,
-    Styled, Window, div, px, rgb,
+    AnyView, Entity, IntoElement, ParentElement, ScrollHandle, Styled, div, px, rgb,
     prelude::InteractiveElement as _,
 };
 use ui::Theme;
 
-use crate::{
-    DockController,
-    input::{
-        begin_drag, begin_resize_hit, dispatch_command, finish_drag, finish_resize,
-        update_drag_at, update_resize,
-    },
-};
+use crate::{DockController, input::dispatch_command};
 
 use super::{
     column::ColumnView,
@@ -29,26 +22,6 @@ use super::{
     splitter::SplitterView,
     tab_strip::GroupPresentation,
 };
-
-struct FloatingResizeDragGhost;
-
-impl Render for FloatingResizeDragGhost {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        gpui::Empty
-    }
-}
-
-/// GPUI drag marker for moving a floating composition by its title bar.
-#[derive(Clone, Copy)]
-struct FloatingTitleDrag;
-
-struct FloatingTitleDragGhost;
-
-impl Render for FloatingTitleDragGhost {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        gpui::Empty
-    }
-}
 
 /// A floating composition rendered inside the DockHost's workspace.
 ///
@@ -310,43 +283,7 @@ impl FloatingWindowView {
                     .text_ellipsis()
                     .child(title.to_owned()),
             )
-            .on_mouse_down(MouseButton::Left, {
-                let controller = controller.clone();
-                move |event, _, app| {
-                    // The event bubbles to the floating root, which raises it.
-                    // Keep propagation alive so GPUI can establish its drag marker.
-                    begin_drag(
-                        &controller,
-                        DragPayload::FloatingGroup {
-                            group: floating.group,
-                        },
-                        DragHandle::FloatingTitle,
-                        event,
-                        app,
-                    );
-                }
-            })
-            .on_drag(FloatingTitleDrag, |_, _, _, app| {
-                app.new(|_| FloatingTitleDragGhost)
-            })
-            .on_drag_move::<FloatingTitleDrag>({
-                let controller = controller.clone();
-                move |event, _, app| {
-                    update_drag_at(
-                        &controller,
-                        event_point(event.event.position),
-                        app,
-                    );
-                }
-            })
-            .on_mouse_up({
-                let controller = controller.clone();
-                move |event, _, app| finish_drag(&controller, event, app)
-            })
-            .on_mouse_up_out(MouseButton::Left, {
-                let controller = controller.clone();
-                move |event, _, app| finish_drag(&controller, event, app)
-            });
+;
 
         let close_button = div()
             .id(format!("floating-close-{:?}", floating.group))
@@ -397,10 +334,6 @@ impl FloatingWindowView {
         // Core emits the eight authoritative hit rectangles. The adapter only
         // translates them into the floating window's local coordinate space.
         for resize in resize_edges.iter().filter(|edge| edge.group == floating.group) {
-            let hit = HitResult::FloatingResizeEdge {
-                group: floating.group,
-                edge: resize.edge,
-            };
             let mut handle = div()
                 .id(format!("floating-resize-{:?}-{:?}", floating.group, resize.edge))
                 .absolute()
@@ -408,55 +341,7 @@ impl FloatingWindowView {
                 .top(px(resize.rect.origin.y - origin.y))
                 .w(px(resize.rect.size.width))
                 .h(px(resize.rect.size.height))
-                .on_mouse_down(MouseButton::Left, {
-                    let controller = controller.clone();
-                    move |event, _, app| {
-                        dispatch_command(
-                            &controller,
-                            DockCommand::RaiseFloating {
-                                group: floating.group,
-                            },
-                            app,
-                        );
-                        begin_resize_hit(&controller, hit, event_point(event.position), app);
-                        app.stop_propagation();
-                    }
-                })
-                .on_drag(FloatingResizeDrag, |_, _, _, app| {
-                    app.new(|_| FloatingResizeDragGhost)
-                })
-                .on_drag_move::<FloatingResizeDrag>({
-                    let controller = controller.clone();
-                    move |event, _, app| {
-                        update_resize(
-                            &controller,
-                            event_point(event.event.position),
-                            app,
-                        );
-                    }
-                })
-                .on_mouse_up(MouseButton::Left, {
-                    let controller = controller.clone();
-                    move |event, _, app| {
-                        finish_resize(
-                            &controller,
-                            event_point(event.position),
-                            event.click_count as usize,
-                            app,
-                        );
-                    }
-                })
-                .on_mouse_up_out(MouseButton::Left, {
-                    let controller = controller.clone();
-                    move |event, _, app| {
-                        finish_resize(
-                            &controller,
-                            event_point(event.position),
-                            event.click_count as usize,
-                            app,
-                        );
-                    }
-                });
+;
 
             handle = match resize.edge {
                 ResizeEdge::Left | ResizeEdge::Right => handle.cursor_col_resize(),
@@ -471,6 +356,3 @@ impl FloatingWindowView {
     }
 }
 
-fn event_point(point: gpui::Point<gpui::Pixels>) -> Point {
-    Point::new(point.x.as_f32(), point.y.as_f32())
-}

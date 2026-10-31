@@ -1,29 +1,10 @@
 use dock_core::{
     Axis, CommandValue, DockCommand, DockSide, HitResult, Node, NodeId, Point, ResizeEdge,
-    Rect, SplitterRect, OUTER_COLUMN_EDGE_BOUNDARY_INDEX,
+    Rect, OUTER_COLUMN_EDGE_BOUNDARY_INDEX,
 };
 use gpui::{App, Entity};
 
 use crate::DockController;
-
-/// Starts one pointer gesture and its matching single-step history transaction.
-pub(crate) fn begin_resize(
-    controller: &Entity<DockController>,
-    splitter: SplitterRect,
-    point: Point,
-    app: &mut App,
-) {
-    begin_resize_hit(
-        controller,
-        HitResult::Splitter {
-            owner: splitter.owner,
-            boundary_index: splitter.boundary_index,
-            axis: splitter.axis,
-        },
-        point,
-        app,
-    );
-}
 
 /// Starts the same Core resize transaction from either a splitter or a
 /// floating-window edge/corner supplied by the geometry hit-test.
@@ -57,7 +38,11 @@ pub(crate) fn update_resize(
     };
 
     let result = controller.update(app, |controller, cx| {
-        let result = controller.dispatch_in(command, cx);
+        let result = if matches!(&command, DockCommand::ResizeFlyout { .. }) {
+            controller.dispatch_transient_in(command, cx)
+        } else {
+            controller.dispatch_in(command, cx)
+        };
         if let Ok(outcome) = &result {
             match outcome.actual_value.as_ref() {
                 Some(CommandValue::GroupBoundaryDelta(delta))
@@ -113,12 +98,25 @@ fn command_for_pointer(
     let desired_total = match interaction.hit {
         HitResult::Splitter { axis: Axis::X, .. } => point.x - interaction.origin.x,
         HitResult::Splitter { axis: Axis::Y, .. } => point.y - interaction.origin.y,
-        HitResult::FloatingResizeEdge { .. } => 0.0,
+        HitResult::FloatingResizeEdge { .. } | HitResult::FlyoutResizeEdge { .. } => 0.0,
         _ => return None,
     };
     let delta = incremental_delta(desired_total, interaction.applied_delta);
 
     match interaction.hit {
+        HitResult::FlyoutResizeEdge { panel, edge, .. } => {
+            let direction = match edge {
+                ResizeEdge::Left => -1.0,
+                ResizeEdge::Right => 1.0,
+                _ => return None,
+            };
+            let width = interaction.start_width?
+                + direction * (point.x - interaction.origin.x);
+            width.is_finite().then_some(DockCommand::ResizeFlyout {
+                panel,
+                width: width.max(1.0),
+            })
+        }
         HitResult::FloatingResizeEdge { group, edge } => {
             let dx = point.x - interaction.origin.x;
             let dy = point.y - interaction.origin.y;

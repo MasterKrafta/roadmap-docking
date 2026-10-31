@@ -1,13 +1,11 @@
 use std::collections::{HashMap, HashSet};
 
 use dock_core::{
-    DockCommand, DragHandle, DragPayload, FloatingGroupId, Layout, Node, NodeId, PanelId, Point,
-    TabHeaderRect,
+    DockCommand, FloatingGroupId, Layout, Node, NodeId, PanelId, TabHeaderRect,
     TabOverflowRect, TabStripRect,
 };
 use gpui::{
-    Context, Entity, IntoElement, MouseButton, ParentElement, Render, SharedString, Styled,
-    Window, div, img, px, rgb,
+    Entity, IntoElement, MouseButton, ParentElement, SharedString, Styled, div, img, px, rgb,
     prelude::InteractiveElement as _,
 };
 use ui::Theme;
@@ -15,10 +13,10 @@ use ui::Theme;
 use crate::{DockController, IconSource, PanelRegistry};
 
 use super::{
-    context_menu::{ContextMenuTarget, GroupMenuToggle},
+    context_menu::GroupMenuToggle,
     tab_overflow::TabOverflow,
 };
-use crate::input::{begin_drag, dispatch_command, finish_drag, update_drag_at};
+use crate::input::dispatch_command;
 
 #[derive(Clone)]
 pub(crate) struct TabPresentation {
@@ -37,18 +35,6 @@ pub(crate) struct GroupPresentation {
 
 /// Tab-strip surface and tab headers for one Tabs group.
 pub struct TabStripView;
-
-/// GPUI drag marker for a panel tab. The visible ghost is rendered by DockHost.
-#[derive(Clone, Copy)]
-struct PanelTabDrag;
-
-struct PanelTabDragGhost;
-
-impl Render for PanelTabDragGhost {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        gpui::Empty
-    }
-}
 
 /// One visible tab header, including its close affordance and drag gesture.
 pub struct TabHeaderView;
@@ -151,7 +137,7 @@ impl TabHeaderView {
         controller: Entity<DockController>,
         theme: Theme,
         raise_floating: Option<FloatingGroupId>,
-        toggle_context_menu: GroupMenuToggle,
+        _toggle_context_menu: GroupMenuToggle,
         middle_click_closes_tabs: bool,
     ) -> impl IntoElement {
         let left = header.rect.origin.x - strip_rect.origin.x;
@@ -212,59 +198,6 @@ impl TabHeaderView {
             .text_color(rgb(theme.colors.primary_text))
             .cursor_pointer()
             .child(title_row)
-            .on_mouse_down(MouseButton::Left, {
-                let controller = controller.clone();
-                move |event, _, app| {
-                    begin_drag(
-                        &controller,
-                        DragPayload::Panel { panel: tab_panel },
-                        DragHandle::PanelTab,
-                        event,
-                        app,
-                    )
-                }
-            })
-            .on_mouse_down(MouseButton::Right, {
-                let menu_toggle = toggle_context_menu.clone();
-                move |event, _, app| {
-                    (menu_toggle)(
-                        ContextMenuTarget::Tab {
-                            group: tab_group,
-                            panel: tab_panel,
-                        },
-                        Point::new(
-                            event.position.x.as_f32(),
-                            event.position.y.as_f32(),
-                        ),
-                        app,
-                    );
-                    app.stop_propagation();
-                }
-            })
-            .on_drag(PanelTabDrag, |_, _, _, app| {
-                app.new(|_| PanelTabDragGhost)
-            })
-            .on_drag_move::<PanelTabDrag>({
-                let controller = controller.clone();
-                move |event, _, app| {
-                    update_drag_at(
-                        &controller,
-                        Point::new(
-                            event.event.position.x.as_f32(),
-                            event.event.position.y.as_f32(),
-                        ),
-                        app,
-                    );
-                }
-            })
-            .on_mouse_up({
-                let controller = controller.clone();
-                move |event, _, app| finish_drag(&controller, event, app)
-            })
-            .on_mouse_up_out(MouseButton::Left, {
-                let controller = controller.clone();
-                move |event, _, app| finish_drag(&controller, event, app)
-            })
             .on_click(move |event, _, app| {
                 if event.standard_click() {
                     if event.click_count() > 1 {
