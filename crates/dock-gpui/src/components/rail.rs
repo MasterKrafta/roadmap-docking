@@ -126,7 +126,7 @@ impl RailView {
             icon_row = icon_row
                 .on_click(move |event, _, app| {
                     if event.standard_click() {
-                        let _ = click_controller.update(app, |controller, controller_cx| {
+                        click_controller.update(app, |controller, controller_cx| {
                             let selected = controller.layout().flyout().is_some_and(|flyout| {
                                 flyout.column == owner_column && flyout.panel == panel
                             });

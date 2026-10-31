@@ -29,6 +29,15 @@ pub type ContextMenuDismiss = Rc<dyn Fn(&mut App)>;
 /// Updates the single open first-level submenu.
 pub type ContextMenuSubmenuToggle = Rc<dyn Fn(Option<usize>, &mut App)>;
 
+type ContextMenuAction = Rc<dyn Fn(&mut App)>;
+
+/// Callbacks owned by the host while a context menu is open.
+#[derive(Clone)]
+pub struct ContextMenuCallbacks {
+    pub on_submenu: ContextMenuSubmenuToggle,
+    pub on_dismiss: ContextMenuDismiss,
+}
+
 /// A reusable action row in a context menu.
 #[derive(Clone)]
 pub struct ContextMenuItem {
@@ -37,7 +46,7 @@ pub struct ContextMenuItem {
     icon: Option<SharedString>,
     disabled: bool,
     selected: bool,
-    action: Option<Rc<dyn Fn(&mut App)>>,
+    action: Option<ContextMenuAction>,
 }
 
 impl ContextMenuItem {
@@ -150,10 +159,13 @@ impl ContextMenu {
         anchor: Point,
         entries: &[ContextMenuEntry],
         open_submenu: Option<usize>,
-        on_submenu: ContextMenuSubmenuToggle,
-        on_dismiss: ContextMenuDismiss,
+        callbacks: ContextMenuCallbacks,
         theme: Theme,
     ) -> impl IntoElement {
+        let ContextMenuCallbacks {
+            on_submenu,
+            on_dismiss,
+        } = callbacks;
         let width = theme
             .metrics
             .popup_menu_width

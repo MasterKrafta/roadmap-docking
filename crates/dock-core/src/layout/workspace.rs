@@ -170,8 +170,7 @@ impl Layout {
         let mut notes = Vec::new();
 
         // The document defines the limit per DockArea, not across left and right.
-        for side_index in 0..2 {
-            let side_columns = &columns_by_side[side_index];
+        for (side_index, side_columns) in columns_by_side.iter().enumerate() {
             if side_columns.len() <= max_columns {
                 continue;
             }

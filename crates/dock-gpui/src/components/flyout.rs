@@ -174,7 +174,7 @@ fn dispatch_transient(
     command: DockCommand,
     app: &mut App,
 ) {
-    let _ = controller.update(app, |controller, cx| {
+    controller.update(app, |controller, cx| {
         if let Err(error) = controller.dispatch_transient_in(command, cx) {
             tracing::debug!(%error, "flyout transient command was rejected");
         }

@@ -488,11 +488,11 @@ impl DropZoneResolver {
     }
 }
 
-fn best_containing_zone<'a>(
-    zones: &'a [DropZoneRect],
+fn best_containing_zone(
+    zones: &[DropZoneRect],
     point: Point,
     include: impl Fn(&DropZoneRect) -> bool,
-) -> Result<Option<&'a DropZoneRect>, ComputeRectsError> {
+) -> Result<Option<&DropZoneRect>, ComputeRectsError> {
     let mut best: Option<(u8, usize)> = None;
     for (index, zone) in zones.iter().enumerate() {
         if !include(zone)

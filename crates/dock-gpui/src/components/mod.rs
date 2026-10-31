@@ -15,7 +15,7 @@ pub mod tab_overflow;
 pub mod tab_strip;
 
 pub use canvas_slot::CanvasSlot;
-pub use context_menu::{ContextMenu, ContextMenuEntry, ContextMenuItem};
+pub use context_menu::{ContextMenu, ContextMenuCallbacks, ContextMenuEntry, ContextMenuItem};
 pub use column::ColumnView;
 pub use drop_overlay::{DragGhost, DropOverlay};
 pub use group::GroupView;

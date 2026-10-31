@@ -945,8 +945,10 @@ impl Render for DockHost {
                 open.anchor,
                 &context_menu_entries,
                 open.open_submenu,
-                toggle_context_submenu,
-                dismiss_context_menu,
+                crate::components::context_menu::ContextMenuCallbacks {
+                    on_submenu: toggle_context_submenu,
+                    on_dismiss: dismiss_context_menu,
+                },
                 theme,
             ));
         }

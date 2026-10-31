@@ -33,10 +33,11 @@ impl DockController {
         let is_resize = is_resize_command(&command);
         let resize_owns_command =
             from_resize_pipeline && self.interaction.is_some() && is_resize;
-        if self.has_active_pointer_interaction() && !resize_owns_command {
-            if let Err(error) = self.cancel_pointer_interaction() {
-                tracing::warn!(%error, "could not cancel stale dock interaction before command");
-            }
+        if self.has_active_pointer_interaction()
+            && !resize_owns_command
+            && let Err(error) = self.cancel_pointer_interaction()
+        {
+            tracing::warn!(%error, "could not cancel stale dock interaction before command");
         }
         let resize_owns_command =
             from_resize_pipeline && self.interaction.is_some() && is_resize;
