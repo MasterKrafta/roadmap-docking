@@ -338,6 +338,8 @@ fn gpui_point(position: gpui::Point<gpui::Pixels>) -> Point {
 }
 
 fn host_point_from_window(window_point: Point, window_origin: Point) -> Option<Point> {
+    window_point.validate().ok()?;
+    window_origin.validate().ok()?;
     let host_point = Point::new(
         window_point.x - window_origin.x,
         window_point.y - window_origin.y,
@@ -512,4 +514,32 @@ fn floating_title_grip_contains(
             && point.y < floating.rect.origin.y + header_height
             && point.x < floating.rect.origin.x + floating.rect.size.width - close_width
     })
+}
+
+
+#[cfg(test)]
+mod tests {
+    use dock_core::Point;
+
+    use super::host_point_from_window;
+
+    #[test]
+    fn translates_window_coordinates_to_host_local_coordinates_once() {
+        assert_eq!(
+            host_point_from_window(Point::new(42.0, 75.0), Point::new(12.0, 35.0)),
+            Some(Point::new(30.0, 40.0))
+        );
+    }
+
+    #[test]
+    fn rejects_non_finite_window_or_origin_coordinates() {
+        assert!(host_point_from_window(Point::new(f32::NAN, 1.0), Point::ZERO).is_none());
+        assert!(
+            host_point_from_window(
+                Point::new(1.0, 1.0),
+                Point::new(0.0, f32::INFINITY)
+            )
+            .is_none()
+        );
+    }
 }

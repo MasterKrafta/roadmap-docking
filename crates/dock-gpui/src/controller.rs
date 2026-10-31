@@ -1,7 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 
 use dock_core::{
-    Axis, CommandError, DockMetrics, DragSession, DragSessionError, DropSource,
+    Axis, CommandError, DockCommand, DockMetrics, DragSession, DragSessionError, DropSource,
     DropZoneResolver, FlyoutState, GeometryError, HitResult, Layout, LayoutRects, Node, PanelId,
     PanelKey, Point, Profile, Rect, ValidationError, WorkspaceDiagnostic,
     OUTER_COLUMN_EDGE_BOUNDARY_INDEX,
@@ -387,8 +387,9 @@ impl DockController {
     /// Cancels the current pointer gesture, rolling a resize back to pointer-down.
     pub fn cancel_pointer_interaction(&mut self) -> Result<(), CommandError> {
         self.drag.cancel_gesture();
+        let interaction = self.interaction;
 
-        let cancel_result = if self.interaction.is_some() {
+        let cancel_result = if interaction.is_some() {
             self.history
                 .cancel_transaction(&mut self.layout, &self.metrics)
         } else {
@@ -406,6 +407,20 @@ impl DockController {
             // Never leave an open history transaction after capture is lost.
             self.history.commit_transaction(&self.layout);
             return Err(error);
+        }
+
+        // Flyout width is transient session state and is intentionally omitted
+        // from persistent history snapshots. Restore its pointer-down width
+        // explicitly when a flyout resize is cancelled.
+        if let Some(interaction) = interaction
+            && let (HitResult::FlyoutResizeEdge { panel, .. }, Some(width)) =
+                (interaction.hit, interaction.start_width)
+            && let Err(error) = self.layout.apply(
+                DockCommand::ResizeFlyout { panel, width },
+                &self.metrics,
+            )
+        {
+            tracing::debug!(%error, "could not restore flyout width after pointer cancellation");
         }
 
         Ok(())
