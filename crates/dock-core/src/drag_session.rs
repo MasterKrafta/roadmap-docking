@@ -42,6 +42,11 @@ impl DragSession {
         self.state
     }
 
+    /// Returns the interaction surface that owns the current gesture, if any.
+    pub fn handle(&self) -> Option<DragHandle> {
+        self.handle
+    }
+
     /// Returns the threshold snapshot used by this session.
     pub fn threshold(&self) -> f32 {
         self.threshold

@@ -370,8 +370,10 @@ pub(crate) fn register_pointer_events(
                 return;
             };
 
-            if drag_active {
-                update_drag_at(&controller, point, app);
+            if drag_active && update_drag_at(&controller, point, app) {
+                // Once Core crosses the drag threshold, this press can no
+                // longer be dispatched as a tab click if the gesture is cancelled.
+                pointer_press.set(None);
             }
 
             let capture_needed = controller.update(app, |controller, _| {

@@ -33,11 +33,19 @@ impl DockController {
         self.hit(point)
     }
 
-    /// Builds or reuses the resolver snapshot for one drag source and current geometry.
+    /// Builds or reuses a resolver for an active docking drag after its threshold.
+    /// FloatingTitle is a window move and is rejected without preparing dock zones.
     pub fn prepare_drop_resolver(
         &mut self,
         source: DropSource,
     ) -> Result<&dock_core::DropZoneResolver, ComputeRectsError> {
+        if !matches!(
+            self.drag.session().state(),
+            dock_core::DragState::Dragging { .. }
+        ) || self.drag.session().handle() == Some(dock_core::DragHandle::FloatingTitle)
+        {
+            return Err(ComputeRectsError::InvalidLayoutState);
+        }
         self.ensure_geometry()?;
         let key = self.rect_cache_key();
         let resolver_is_current = self.drag.resolver.is_some()

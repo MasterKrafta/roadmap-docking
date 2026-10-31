@@ -1,6 +1,6 @@
 use dock_core::{
-    DockCommand, DragDropAction, DragHandle, DragPayload, DragState, DropSource,
-    DropTarget, Point, Rect, Size,
+    ComputeRectsError, DockCommand, DragDropAction, DragHandle, DragPayload, DragState,
+    DropSource, DropTarget, Point, Rect, Size,
 };
 use gpui::{App, Entity};
 
@@ -26,12 +26,14 @@ pub(crate) fn update_drag_at(
     controller: &Entity<DockController>,
     position: Point,
     app: &mut App,
-) {
+) -> bool {
     controller.update(app, |controller, cx| {
-        let payload = match controller.drag().session().state() {
-            DragState::Pressed { payload, .. } | DragState::Dragging { payload, .. } => payload,
-            DragState::Idle | DragState::Dropped { .. } | DragState::Cancelled { .. } => return,
+        let (payload, was_pressed) = match controller.drag().session().state() {
+            DragState::Pressed { payload, .. } => (payload, true),
+            DragState::Dragging { payload, .. } => (payload, false),
+            DragState::Idle | DragState::Dropped { .. } | DragState::Cancelled { .. } => return false,
         };
+        let handle = controller.drag().session().handle();
 
         if let Err(error) = controller
             .drag_mut()
@@ -39,36 +41,40 @@ pub(crate) fn update_drag_at(
             .pointer_move(position)
         {
             tracing::debug!(%error, "dock drag pointer update failed");
-            return;
+            cancel_drag(controller);
+            cx.notify();
+            return false;
         }
 
         if !matches!(controller.drag().session().state(), DragState::Dragging { .. }) {
-            return;
+            // Keep Pressed alive until Core's configured threshold is crossed.
+            // No resolver or drag preview exists before this transition.
+            return false;
         }
 
-        // Floating-group gestures originate from the title bar in this adapter.
-        // They move the window and must never create or resolve a docking target.
-        if matches!(payload, DragPayload::FloatingGroup { .. }) {
+        // A floating title moves its own window. It never enters dock target
+        // resolution and therefore never owns a DropZoneResolver.
+        if handle == Some(DragHandle::FloatingTitle) {
             cx.notify();
-            return;
+            return was_pressed;
         }
 
         let Some(source) = drop_source(controller, payload) else {
-            let _ = controller.drag_mut().session_mut().set_drop_target(None);
+            tracing::debug!("dock drag source no longer exists");
+            cancel_drag(controller);
             cx.notify();
-            return;
+            return was_pressed;
         };
-        let target = match controller.prepare_drop_resolver(source) {
-            Ok(resolver) => match resolver.resolve(position) {
-                Ok(target) => target,
-                Err(error) => {
-                    tracing::debug!(%error, "could not resolve dock drag target");
-                    None
-                }
-            },
+
+        // Prepare exactly once: on the Pressed -> Dragging transition. All
+        // later pointer moves reuse the resolver captured for this gesture.
+        let target = match resolve_drop_target(controller, source, position, was_pressed) {
+            Ok(target) => target,
             Err(error) => {
-                tracing::debug!(%error, "could not prepare dock drag resolver");
-                None
+                tracing::debug!(%error, "could not resolve dock drag target");
+                cancel_drag(controller);
+                cx.notify();
+                return was_pressed;
             }
         };
         if let Err(error) = controller
@@ -77,49 +83,84 @@ pub(crate) fn update_drag_at(
             .set_drop_target(target)
         {
             tracing::debug!(%error, "could not update dock drag target");
+            cancel_drag(controller);
+            cx.notify();
+            return was_pressed;
         }
         cx.notify();
-    });
+        was_pressed
+    })
 }
 
-/// Ends a drag from a host-local release point. A resolver is rebuilt/reused for
-/// that exact point, and Core revalidates the resulting request before one command
-/// is dispatched. A cancelled or invalid drop leaves the Layout untouched.
+/// Ends a drag from a host-local release point. It prepares a resolver only when
+/// this release itself crosses the Core threshold; otherwise it reuses the
+/// resolver captured at that transition. Core revalidates before one command.
 pub(crate) fn finish_drag_at(
     controller: &Entity<DockController>,
     position: Point,
     app: &mut App,
 ) -> bool {
     controller.update(app, |controller, cx| {
-        let payload = match controller.drag().session().state() {
-            DragState::Pressed { payload, .. } | DragState::Dragging { payload, .. } => payload,
+        let (payload, was_pressed) = match controller.drag().session().state() {
+            DragState::Pressed { payload, .. } => (payload, true),
+            DragState::Dragging { payload, .. } => (payload, false),
             DragState::Idle | DragState::Dropped { .. } | DragState::Cancelled { .. } => {
                 controller.drag_mut().clear_resolver();
                 controller.drag_mut().clear_layout_version();
                 return false;
             }
         };
+        let handle = controller.drag().session().handle();
 
-        let _ = controller
+        if let Err(error) = controller
             .drag_mut()
             .session_mut()
-            .pointer_move(position);
-        // The release coordinate itself may cross the Core drag threshold even
-        // when GPUI did not deliver an intermediate MouseMove event.
-        let drag_started = matches!(controller.drag().session().state(), DragState::Dragging { .. });
+            .pointer_move(position)
+        {
+            tracing::debug!(%error, "dock drag release position was rejected");
+            cancel_drag(controller);
+            cx.notify();
+            return false;
+        }
 
-        let target = if matches!(payload, DragPayload::FloatingGroup { .. }) {
+        // The release coordinate itself may cross the Core threshold even if
+        // GPUI did not deliver an intermediate MouseMove event.
+        let drag_started = matches!(
+            controller.drag().session().state(),
+            DragState::Dragging { .. }
+        );
+        let mut target = if !drag_started || handle == Some(DragHandle::FloatingTitle) {
             None
-        } else if drag_started {
-            drop_source(controller, payload).and_then(|source| {
-                controller
-                    .prepare_drop_resolver(source)
-                    .ok()
-                    .and_then(|resolver| resolver.resolve(position).ok().flatten())
-            })
         } else {
-            None
+            match drop_source(controller, payload) {
+                Some(source) => {
+                    match resolve_drop_target(controller, source, position, was_pressed) {
+                        Ok(target) => target,
+                        Err(error) => {
+                            tracing::debug!(%error, "could not resolve dock drag release target");
+                            None
+                        }
+                    }
+                }
+                None => {
+                    tracing::debug!("dock drag source no longer exists at release");
+                    None
+                }
+            }
         };
+
+        // Keep DragPreview.target synchronized with the final pointer position
+        // before asking DragSession to finish the gesture.
+        if drag_started && handle != Some(DragHandle::FloatingTitle) {
+            if let Err(error) = controller
+                .drag_mut()
+                .session_mut()
+                .set_drop_target(target)
+            {
+                tracing::debug!(%error, "could not set final dock drop target");
+                target = None;
+            }
+        }
 
         let request = controller
             .drag_mut()
@@ -159,6 +200,32 @@ pub(crate) fn finish_drag_at(
         drag_started
     })
 }
+
+fn resolve_drop_target(
+    controller: &mut DockController,
+    source: DropSource,
+    point: Point,
+    prepare_on_transition: bool,
+) -> Result<Option<DropTarget>, ComputeRectsError> {
+    if prepare_on_transition {
+        // This calls Layout::prepare_drop_resolver(source, &rects, &metrics)
+        // and stores the owned resolver in DragController for this gesture.
+        controller.prepare_drop_resolver(source)?.resolve(point)
+    } else {
+        controller
+            .drag()
+            .resolver()
+            .ok_or(ComputeRectsError::InvalidLayoutState)?
+            .resolve(point)
+    }
+}
+
+fn cancel_drag(controller: &mut DockController) {
+    if let Err(error) = controller.cancel_pointer_interaction() {
+        tracing::debug!(%error, "could not cancel invalid dock drag");
+    }
+}
+
 
 fn drop_source(controller: &DockController, payload: DragPayload) -> Option<DropSource> {
     match payload {

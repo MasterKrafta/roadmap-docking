@@ -1,4 +1,4 @@
-use slotmap::SlotMap;
+use slotmap::{Key, SlotMap};
 
 use super::DragSession;
 use crate::{
@@ -16,6 +16,44 @@ fn panel_payload() -> DragPayload {
 
 fn session() -> DragSession {
     DragSession::new(&DockMetrics::default()).expect("default drag metrics are valid")
+}
+
+#[test]
+fn exposes_the_active_handle_and_clears_it_after_reset() {
+    let mut session = session();
+    assert_eq!(session.handle(), None);
+
+    session
+        .pointer_down_with_handle(
+            panel_payload(),
+            DragHandle::FlyoutPanel,
+            Point::new(2.0, 3.0),
+        )
+        .unwrap();
+    assert_eq!(session.handle(), Some(DragHandle::FlyoutPanel));
+
+    session.pointer_move(Point::new(20.0, 3.0)).unwrap();
+    assert_eq!(session.handle(), Some(DragHandle::FlyoutPanel));
+
+    session
+        .pointer_up(Point::new(20.0, 3.0), Some(DropTarget::FreeArea))
+        .unwrap();
+    session.reset().unwrap();
+    assert_eq!(session.handle(), None);
+
+    session
+        .pointer_down_with_handle(
+            DragPayload::FloatingGroup {
+                group: FloatingGroupId::null(),
+            },
+            DragHandle::FloatingTitle,
+            Point::new(4.0, 5.0),
+        )
+        .unwrap();
+    assert_eq!(session.handle(), Some(DragHandle::FloatingTitle));
+    session.pointer_up(Point::new(8.0, 5.0), None).unwrap();
+    session.reset().unwrap();
+    assert_eq!(session.handle(), None);
 }
 
 fn test_layout() -> Layout {

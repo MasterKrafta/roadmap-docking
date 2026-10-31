@@ -285,6 +285,7 @@ impl DockController {
         self.drag
             .session_mut()
             .pointer_down_with_handle(payload, handle, point)?;
+        self.drag.clear_resolver();
         self.drag.layout_version = Some(self.layout.version());
         Ok(())
     }
