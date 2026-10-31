@@ -225,7 +225,7 @@ pub(crate) fn register_pointer_events(
                 }
             }
 
-            if resizing {
+            if resize_active {
                 let should_schedule = controller.update(app, |controller, _| {
                     controller.queue_resize_frame_point(point)
                 });
