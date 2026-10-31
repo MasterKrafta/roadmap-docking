@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use dock_core::{
-    DockCommand, DragHandle, DragPayload, Layout, Node, NodeId, PanelId, TabHeaderRect,
+    DockCommand, DragHandle, DragPayload, FloatingGroupId, Layout, Node, NodeId, PanelId, TabHeaderRect,
     TabOverflowRect, TabStripRect,
 };
 use gpui::{
@@ -47,6 +47,7 @@ impl TabStripView {
         presentation: &GroupPresentation,
         controller: Entity<DockController>,
         theme: Theme,
+        raise_floating: Option<FloatingGroupId>,
         overflow_open: bool,
         toggle_overflow: TabOverflowToggle,
         middle_click_closes_tabs: bool,
@@ -102,6 +103,7 @@ impl TabStripView {
                 presentation.collapsed,
                 controller.clone(),
                 theme,
+                raise_floating,
                 middle_click_closes_tabs,
             ));
         }
@@ -147,6 +149,7 @@ impl TabHeaderView {
         collapsed: bool,
         controller: Entity<DockController>,
         theme: Theme,
+        raise_floating: Option<FloatingGroupId>,
         middle_click_closes_tabs: bool,
     ) -> impl IntoElement {
         let left = header.rect.origin.x - strip_rect.origin.x;
@@ -289,9 +292,20 @@ impl TabHeaderView {
             .hover(|style| style.bg(rgb(theme.colors.icon_button_hover)))
             .text_color(rgb(theme.colors.primary_text))
             .child("×")
-            .on_mouse_down(MouseButton::Left, |_, _, app| {
-                // Do not let a close-button press also begin a tab drag.
-                app.stop_propagation();
+            .on_mouse_down(MouseButton::Left, {
+                let controller = controller.clone();
+                move |_, _, app| {
+                    // The close control stops bubbling to avoid starting a tab drag,
+                    // so it raises its owning floating composition explicitly.
+                    if let Some(group) = raise_floating {
+                        dispatch_command(
+                            &controller,
+                            DockCommand::RaiseFloating { group },
+                            app,
+                        );
+                    }
+                    app.stop_propagation();
+                }
             })
             .on_click(move |_, _, app| {
                 dispatch_command(
