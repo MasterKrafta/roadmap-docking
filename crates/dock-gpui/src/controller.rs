@@ -15,7 +15,7 @@ use thiserror::Error;
 use crate::registry::PanelRegistry;
 
 mod commands;
-mod geometry;
+mod layout_cache;
 
 /// Events emitted by the controller entity after successful model operations.
 #[derive(Clone, Debug)]
@@ -598,6 +598,12 @@ impl DockController {
 
     pub fn clear_last_error(&mut self) {
         self.last_error = None;
+    }
+
+    /// Queues workspace-load diagnostics for subscribers of the controller entity.
+    pub(crate) fn queue_workspace_loaded(&mut self, diagnostics: Vec<WorkspaceDiagnostic>) {
+        self.pending_events
+            .push_back(DockEvent::WorkspaceLoaded { diagnostics });
     }
 
     pub fn can_undo(&self) -> bool {

@@ -1,3 +1,8 @@
+//! Application-facing GPUI action dispatch helpers.
+//!
+//! Keyboard action registration and default key bindings are added here when
+//! the host exposes the corresponding keyboard interaction contract.
+
 use dock_core::DockCommand;
 use gpui::{App, Entity};
 

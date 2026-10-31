@@ -1,10 +1,6 @@
 use std::collections::HashMap;
 
-use dock_core::{
-    CommandError, CommandOutcome, DockCommand, InitialLayoutError, PanelId, PanelKey,
-    WorkspaceDiagnostic, WorkspaceFile, WorkspaceFileError, WorkspaceLoadOptions,
-    create_initial_layout,
-};
+use dock_core::{CommandError, CommandOutcome, DockCommand, PanelId, PanelKey};
 use gpui::{AnyView, App, AppContext, Context, Window};
 
 use super::{DockController, DockEvent, PanelCommandError};
@@ -285,44 +281,6 @@ impl DockController {
         }
     }
 
-    /// Serializes the current core layout using the versioned workspace format.
-    pub fn save_workspace(&self) -> Result<String, WorkspaceFileError> {
-        WorkspaceFile::from_layout(&self.layout, &self.metrics)?.to_json_pretty()
-    }
-
-    /// Loads a validated workspace and starts a fresh history/cache lineage.
-    pub fn load_workspace(
-        &mut self,
-        json: &str,
-    ) -> Result<Vec<WorkspaceDiagnostic>, WorkspaceFileError> {
-        let descriptors = self.registry.descriptors_for_core();
-        let loaded = WorkspaceFile::load_json(
-            json,
-            &descriptors,
-            &self.metrics,
-            WorkspaceLoadOptions::new(Some(self.viewport)),
-        )?;
-        let diagnostics = loaded.diagnostics;
-        self.replace_layout(loaded.layout);
-        self.pending_events.push_back(DockEvent::WorkspaceLoaded {
-            diagnostics: diagnostics.clone(),
-        });
-        Ok(diagnostics)
-    }
-
-    /// Recreates the profile's baseline layout from the registered panel descriptors.
-    ///
-    /// For the Photoshop profile, dock-core requires the four baseline panel keys:
-    /// layers, color, properties, and history. The regular application startup can
-    /// still use an empty Layout; reset explicitly restores the baseline composition.
-    pub fn reset_workspace(&mut self) -> Result<(), InitialLayoutError> {
-        let descriptors = self.registry.descriptors_for_core();
-        let layout =
-            create_initial_layout(self.layout.profile(), &descriptors, self.metrics)?;
-        self.replace_layout(layout);
-        Ok(())
-    }
-
     /// Returns a cloned cached view, creating it lazily on first access.
     ///
     /// An unknown panel key is represented by a cached MissingPanelPlaceholder.
@@ -467,7 +425,7 @@ impl DockController {
         tracing::warn!(error = %error, "dock controller command failed");
     }
 
-    fn replace_layout(&mut self, layout: dock_core::Layout) {
+    pub(crate) fn replace_layout(&mut self, layout: dock_core::Layout) {
         let before_panels = self.panel_keys();
         self.layout = layout;
         let after_panels = self.panel_keys();

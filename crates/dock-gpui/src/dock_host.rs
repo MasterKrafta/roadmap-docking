@@ -12,11 +12,10 @@ use gpui::{
     Styled, Window, canvas, div, px, rgb,
     prelude::InteractiveElement as _,
 };
-use ui::Theme;
 
 use crate::{
     geometry::{point_from_gpui, host_geometry_from_gpui_bounds},
-    DockController,
+    DockController, DockTheme,
     components::{
         CanvasSlot, ContextMenu, ContextMenuEntry, ContextMenuItem, ContextMenuTarget,
         ContextMenuToggle, DragGhost, DropOverlay, FloatingWindowView, FlyoutView, MainDockView,
@@ -38,7 +37,7 @@ use crate::{
 /// groups in ascending Core z-order, drag feedback, then the universal ContextMenu.
 pub struct DockHost {
     controller: Entity<DockController>,
-    theme: Theme,
+    theme: DockTheme,
     toolbar: Option<AnyView>,
     options_bar: Option<AnyView>,
     canvas: Option<AnyView>,
@@ -68,7 +67,7 @@ struct OpenContextMenu {
 
 impl DockHost {
     /// Starts a host around the application's single DockController entity.
-    pub fn new(controller: Entity<DockController>, theme: Theme) -> Self {
+    pub fn new(controller: Entity<DockController>, theme: DockTheme) -> Self {
         Self {
             controller,
             theme,
@@ -126,7 +125,7 @@ impl DockHost {
     }
 
     /// Returns the theme currently used by the host and its base surfaces.
-    pub fn theme(&self) -> Theme {
+    pub fn theme(&self) -> DockTheme {
         self.theme
     }
 
@@ -955,7 +954,7 @@ impl Render for DockHost {
     }
 }
 
-fn render_resize_preview(preview: ResizePreview, theme: Theme) -> impl IntoElement {
+fn render_resize_preview(preview: ResizePreview, theme: DockTheme) -> impl IntoElement {
     let rect = preview.rect;
     let mut marker = div()
         .absolute()
@@ -1003,7 +1002,7 @@ fn command_menu_item(
     controller: Entity<DockController>,
 ) -> ContextMenuEntry {
     ContextMenuItem::new(label, move |app| {
-        crate::input::dispatch_command(&controller, command.clone(), app);
+        crate::actions::dispatch_command(&controller, command.clone(), app);
     })
     .into()
 }
@@ -1068,7 +1067,7 @@ fn build_context_menu_entries(
                     {
                         let controller = controller.clone();
                         move |app| {
-                            crate::input::dispatch_command(
+                            crate::actions::dispatch_command(
                                 &controller,
                                 DockCommand::ActivateTab { group, panel },
                                 app,
@@ -1106,7 +1105,7 @@ fn build_context_menu_entries(
                     ContextMenuItem::new(label, {
                         let controller = controller.clone();
                         move |app| {
-                            crate::input::dispatch_command(
+                            crate::actions::dispatch_command(
                                 &controller,
                                 DockCommand::SetColumnMode { column, mode },
                                 app,
@@ -1134,7 +1133,7 @@ fn build_context_menu_entries(
                 let controller = controller.clone();
                 let panel = *panel;
                 let mut item = ContextMenuItem::new(tab.title.clone(), move |app| {
-                    crate::input::dispatch_command(
+                    crate::actions::dispatch_command(
                         &controller,
                         DockCommand::ActivateTab { group, panel },
                         app,

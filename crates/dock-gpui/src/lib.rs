@@ -5,14 +5,17 @@
 //! The controller owns one dock-core Layout. UI components translate input,
 //! dispatch semantic commands, and render geometry snapshots produced by Core.
 
+pub mod actions;
 pub mod components;
 pub mod controller;
 pub mod dock_host;
 
 mod geometry;
 pub mod input;
+pub mod persistence;
 pub mod missing_panel;
 pub mod registry;
+pub mod theme;
 
 /// The UI-independent docking model used by this adapter.
 pub use dock_core;
@@ -37,6 +40,8 @@ pub use components::{
     TabHeaderView, TabOverflow, TabStripView,
 };
 pub use dock_host::DockHost;
+pub use persistence::WorkspacePersistenceError;
+pub use theme::DockTheme;
 pub use missing_panel::MissingPanelPlaceholder;
 
 pub use controller::{
