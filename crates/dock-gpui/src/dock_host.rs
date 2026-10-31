@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use dock_core::{
-    ColumnDisplayItem, ColumnMode, ComputeRectsError, DockCommand, DockSide, FloatingGroupId,
+    ColumnDisplayItem, ColumnMode, ComputeRectsError, DockCommand, DockSide,
     HitResult, Layout, Node, NodeId, PanelId, Point, Rect, Size as CoreSize,
 };
 use gpui::{
@@ -258,36 +258,20 @@ impl Render for DockHost {
                     .collect::<HashMap<NodeId, Vec<ColumnDisplayItem>>>();
 
                 let floating_titles = floating_node_ids
-                    .iter()
-                    .map(|(floating, nodes)| {
-                        let title = nodes
-                            .iter()
-                            .find_map(|node| {
-                                let presentation = group_presentations.get(node)?;
-                                let active_panel = presentation.active_panel?;
-                                presentation
-                                    .tabs
-                                    .iter()
-                                    .find(|tab| tab.panel == active_panel)
-                                    .map(|tab| tab.title.to_string())
-                            })
-                            .or_else(|| {
-                                floating_panel_ids.get(floating).and_then(|panels| {
-                                    panels.iter().find_map(|panel| {
-                                        let instance = layout.panel_instance(*panel)?;
-                                        controller
-                                            .registry()
-                                            .get(&instance.key)
-                                            .map(|descriptor| descriptor.title().to_string())
-                                            .or_else(|| Some(instance.key.to_string()))
-                                    })
-                                })
-                            })
-                            .unwrap_or_else(|| "Floating panels".to_string());
-                        (*floating, title)
+                    .keys()
+                    .filter_map(|floating_id| {
+                        let floating = layout.floating_group(*floating_id)?;
+                        let area = layout.dock_area(floating.area)?;
+                        let title = floating_root_title(
+                            layout,
+                            area.root,
+                            &group_presentations,
+                            controller.registry(),
+                        )
+                        .unwrap_or_else(|| "Floating panels".to_string());
+                        Some((*floating_id, title))
                     })
                     .collect::<HashMap<_, _>>();
-                let all_column_ids = all_column_ids;
                 let active_flyout = layout.flyout();
                 let drag_preview = controller.drag().session().preview();
                 let drag_zones = controller
@@ -774,6 +758,39 @@ fn collect_main_nodes(
             }
         }
         Some(Node::Panel(_)) | None => {}
+    }
+}
+
+/// Returns the first active tab title in deterministic tree order.
+fn floating_root_title(
+    layout: &Layout,
+    root: NodeId,
+    presentations: &HashMap<NodeId, crate::components::tab_strip::GroupPresentation>,
+    registry: &crate::PanelRegistry,
+) -> Option<String> {
+    match layout.node(root)? {
+        Node::Split(split) => split.children.iter().find_map(|child| {
+            floating_root_title(layout, *child, presentations, registry)
+        }),
+        Node::Column(column) => column.groups.iter().find_map(|group| {
+            floating_root_title(layout, *group, presentations, registry)
+        }),
+        Node::Tabs(_) => {
+            let presentation = presentations.get(&root)?;
+            let active_panel = presentation.active_panel?;
+            presentation
+                .tabs
+                .iter()
+                .find(|tab| tab.panel == active_panel)
+                .map(|tab| tab.title.to_string())
+        }
+        Node::Panel(panel) => {
+            let instance = layout.panel_instance(panel.panel_id)?;
+            registry
+                .get(&instance.key)
+                .map(|descriptor| descriptor.title().to_string())
+                .or_else(|| Some(instance.key.to_string()))
+        }
     }
 }
 
