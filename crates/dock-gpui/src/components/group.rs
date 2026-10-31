@@ -7,7 +7,7 @@ use gpui::{
 };
 use ui::Theme;
 
-use crate::{DockController, input::dispatch_command};
+use crate::{DockController, actions::dispatch_command};
 
 use super::{
     context_menu::{ContextMenuTarget, GroupMenuToggle},

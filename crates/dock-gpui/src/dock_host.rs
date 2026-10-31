@@ -155,12 +155,13 @@ impl DockHost {
         app: &mut App,
     ) -> Result<HitResult, ComputeRectsError> {
         let content_point = self.controller.update(app, |controller, _| {
+            let floating_title_height = controller.metrics().header_height;
             let rects = controller.geometry()?;
             map_hit_test_point(
                 point,
                 rects,
                 &self.column_scroll_handles,
-                controller.metrics().header_height,
+                floating_title_height,
             )
             .map_err(ComputeRectsError::Geometry)
         })?;

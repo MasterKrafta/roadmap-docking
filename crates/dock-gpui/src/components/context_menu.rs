@@ -2,8 +2,8 @@ use std::rc::Rc;
 
 use dock_core::{NodeId, PanelId, Point, Rect};
 use gpui::{
-    App, IntoElement, ParentElement, SharedString, Styled, div, img, px, rgb,
-    prelude::InteractiveElement as _,
+    App, IntoElement, ParentElement, SharedString, StatefulInteractiveElement, Styled, div, img, px,
+    rgb, prelude::InteractiveElement as _,
 };
 use ui::Theme;
 
@@ -291,6 +291,7 @@ fn menu_surface(
     theme: Theme,
 ) -> gpui::Div {
     div()
+        .id(format!("dock-menu-{left}-{top}-{width}"))
         .absolute()
         .left(px(left))
         .top(px(top))

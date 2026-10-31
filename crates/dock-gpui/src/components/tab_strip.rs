@@ -5,8 +5,8 @@ use dock_core::{
     TabOverflowRect, TabStripRect,
 };
 use gpui::{
-    Entity, IntoElement, MouseButton, ParentElement, SharedString, Styled, div, img, px, rgb,
-    prelude::InteractiveElement as _,
+    Entity, IntoElement, MouseButton, ParentElement, SharedString, StatefulInteractiveElement,
+    Styled, div, img, px, rgb, prelude::InteractiveElement as _,
 };
 use ui::Theme;
 
@@ -15,7 +15,7 @@ use crate::{DockController, IconSource, PanelRegistry};
 use super::{
     tab_overflow::TabOverflow,
 };
-use crate::input::dispatch_command;
+use crate::actions::dispatch_command;
 
 #[derive(Clone)]
 pub(crate) struct TabPresentation {
