@@ -603,7 +603,7 @@ impl Element for TextElement {
             len: display_text.len(),
             font: style.font(),
             color: if is_placeholder {
-                rgb(0x888888)
+                rgb(0x888888).into()
             } else {
                 style.color
             },
