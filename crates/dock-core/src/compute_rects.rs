@@ -258,7 +258,8 @@ impl Layout {
     ///
     /// The saved window size is raised only when it is smaller than the
     /// composition's content minimum. It is never clamped to the main viewport
-    /// or to another floating window.
+    /// or to another floating window. When dock chrome is hidden, this returns
+    /// an empty snapshot so the adapter can hide the corresponding native window.
     pub fn compute_floating_rects(
         &self,
         group: crate::FloatingGroupId,
@@ -276,6 +277,11 @@ impl Layout {
         let area = self
             .dock_area(floating.area)
             .ok_or(ComputeRectsError::InvalidLayoutState)?;
+
+        if !self.chrome().dock_visible() {
+            return Ok(LayoutRects::default());
+        }
+
         let mut minimum_sizes = HashMap::new();
         let bounds = floating_window_rect_with_cache(
             self,
