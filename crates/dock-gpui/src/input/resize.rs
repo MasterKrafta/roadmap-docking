@@ -384,6 +384,9 @@ pub(crate) fn resize_preview_for_interaction(
                 scroll_owner: None,
             })
         }
+        // Only splitter, floating-edge, and flyout-edge hits can start a resize.
+        // Keep the preview API exhaustive as HitResult grows with new hit kinds.
+        _ => None,
     }
 }
 

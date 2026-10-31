@@ -663,14 +663,9 @@ fn core_point_at_host_point(
     app: &mut App,
 ) -> Option<Point> {
     controller.update(app, |controller, _| {
+        let floating_title_height = controller.metrics().header_height;
         let rects = controller.geometry().ok()?;
-        map_hit_test_point(
-            point,
-            rects,
-            scroll_handles,
-            controller.metrics().header_height,
-        )
-        .ok()
+        map_hit_test_point(point, rects, scroll_handles, floating_title_height).ok()
     })
 }
 
@@ -738,7 +733,7 @@ fn tab_header_clickable_contains(
     app: &mut App,
 ) -> bool {
     controller.update(app, |controller, _| {
-        let Ok(rects) = controller.geometry() else {
+        let Ok(rects) = controller.geometry().cloned() else {
             return false;
         };
         let is_rail = rects.columns.iter().any(|column_rect| {
@@ -771,7 +766,7 @@ fn tab_header_drag_handle_contains(
     app: &mut App,
 ) -> bool {
     controller.update(app, |controller, _| {
-        let Ok(rects) = controller.geometry() else {
+        let Ok(rects) = controller.geometry().cloned() else {
             return false;
         };
         let Some(header) = rects.tab_headers.iter().find(|header| {
@@ -804,7 +799,7 @@ fn group_grip_contains(
 ) -> bool {
     controller.update(app, |controller, _| {
         let metrics = controller.metrics();
-        let Ok(rects) = controller.geometry() else {
+        let Ok(rects) = controller.geometry().cloned() else {
             return false;
         };
         let Some(group_rect) = rects.groups.iter().find(|rect| rect.group == group) else {
