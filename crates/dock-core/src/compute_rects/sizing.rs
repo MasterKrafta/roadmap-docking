@@ -67,6 +67,7 @@ pub(super) fn floating_window_rect_with_cache(
     Ok(result)
 }
 
+#[cfg(any(test, feature = "serde"))]
 pub(super) fn clamp_floating_bounds_with_cache(
     layout: &Layout,
     root: NodeId,

@@ -2,9 +2,8 @@ use super::*;
 use crate::layout_builder::LayoutBuilder;
 use crate::{
     AllowedArea, ColumnMode, DockCommand, DockMetrics, DockSide, DropSource, DropTarget, DropZone,
-    PanelConstraints, PanelKey, Point, Profile, Rect, Size,
+    Axis, PanelConstraints, PanelKey, Point, Profile, Rect, Size,
 };
-use slotmap::Key;
 
 fn key(name: &str) -> PanelKey {
     PanelKey::new(name).unwrap()
@@ -947,7 +946,7 @@ fn photoshop_suppresses_horizontal_group_splits_inside_a_floating_stack() {
         Rect::new(Point::new(500.0, 120.0), Size::new(420.0, 320.0)),
         2,
     );
-    let layout = builder.build();
+    let mut layout = builder.build();
 
     let floating_rects = layout.compute_floating_rects(source_float, &metrics).unwrap();
     let floating_zones = layout
