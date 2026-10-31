@@ -1,7 +1,7 @@
 use std::{cell::Cell, collections::HashMap, rc::Rc};
 
 use dock_core::{
-    DockCommand, DragHandle, DragPayload, DragState, HitResult, Node, NodeId, Point, ResizeEdge,
+    DockCommand, DragHandle, DragPayload, DragState, HitResult, Node, NodeId, Point,
 };
 use gpui::{
     App, DispatchPhase, Entity, HitboxId, MouseButton, MouseDownEvent, MouseExitEvent,
@@ -21,11 +21,11 @@ use super::{
 
 /// Installs the DockHost-level mouse event pipeline.
 ///
-/// A drag begins as a press. GPUI pointer capture is requested only after the
-/// Core drag threshold has been crossed, so a normal click still reaches the
-/// original tab/rail control. Once captured, move/up continue to the root
-/// hitbox even outside the source element. Leaving the native window or losing
-/// capture cancels the active gesture instead of leaving it stuck.
+/// A drag begins as a press. GPUI capture is requested after the Core drag
+/// threshold so a normal click still reaches the source control; resize capture
+/// is requested immediately on pointer-down. Once captured, move/up continue to
+/// the root hitbox outside the source element. Leaving the window or losing
+/// capture safely cancels the gesture.
 pub(crate) fn register_pointer_events(
     window: &mut Window,
     root_hitbox: HitboxId,
