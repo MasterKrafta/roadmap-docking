@@ -2,6 +2,7 @@
 
 pub mod column;
 pub mod context_menu;
+pub mod drag_overlay;
 pub mod group;
 pub mod flyout;
 pub mod floating_window;
@@ -13,6 +14,7 @@ pub mod tab_overflow;
 pub mod tab_strip;
 
 pub use column::ColumnView;
+pub use drag_overlay::{DragGhost, DropOverlay};
 pub use group::GroupView;
 pub use flyout::FlyoutView;
 pub use floating_window::FloatingWindowView;
