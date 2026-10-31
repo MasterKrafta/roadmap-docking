@@ -157,7 +157,7 @@ impl ContextMenu {
         open_submenu: Option<usize>,
         callbacks: ContextMenuCallbacks,
         theme: Theme,
-    ) -> impl IntoElement {
+    ) -> impl IntoElement + 'static {
         let ContextMenuCallbacks {
             on_submenu,
             on_dismiss,
@@ -201,7 +201,13 @@ impl ContextMenu {
             let submenu_top = row_top.min(
                 (viewport.origin.y + viewport.size.height - submenu_height).max(viewport.origin.y),
             );
-            Some((index, submenu_left, submenu_top, submenu_height))
+            Some((
+                index,
+                submenu_left,
+                submenu_top,
+                submenu_height,
+                submenu_entries.clone(),
+            ))
         });
 
         // One hitbox covers both the main menu and its submenu. GPUI's
@@ -240,7 +246,7 @@ impl ContextMenu {
             });
 
         let mut menu = menu_surface(left - region_left, top - region_top, width, height, theme);
-        for (index, entry) in entries.iter().enumerate() {
+        for (index, entry) in entries.into_iter().enumerate() {
             menu = menu.child(render_entry(
                 entry,
                 index,
@@ -253,13 +259,7 @@ impl ContextMenu {
         }
         region = region.child(menu);
 
-        if let Some((index, submenu_left, submenu_top, submenu_height)) = submenu_layout
-            && let Some(ContextMenuEntry::Submenu {
-                entries: submenu_entries,
-                disabled: false,
-                ..
-            }) = entries.get(index)
-        {
+        if let Some((_, submenu_left, submenu_top, submenu_height, submenu_entries)) = submenu_layout {
             let mut submenu = menu_surface(
                 submenu_left - region_left,
                 submenu_top - region_top,
@@ -267,7 +267,7 @@ impl ContextMenu {
                 submenu_height,
                 theme,
             );
-            for (submenu_index, entry) in submenu_entries.iter().enumerate() {
+            for (submenu_index, entry) in submenu_entries.into_iter().enumerate() {
                 submenu = submenu.child(render_entry(
                     entry,
                     submenu_index,
@@ -323,14 +323,14 @@ fn entry_height(entry: &ContextMenuEntry, row_height: f32) -> f32 {
 }
 
 fn render_entry(
-    entry: &ContextMenuEntry,
+    entry: ContextMenuEntry,
     index: usize,
     open_submenu: Option<usize>,
     on_submenu: ContextMenuSubmenuToggle,
     on_dismiss: ContextMenuDismiss,
     theme: Theme,
     allow_submenu: bool,
-) -> impl IntoElement {
+) -> impl IntoElement + 'static {
     match entry {
         ContextMenuEntry::Separator => div()
             .id(format!("dock-menu-separator-{index}"))
@@ -365,7 +365,7 @@ fn render_entry(
                     theme.colors.popup_menu_background
                 }));
 
-            if let Some(icon) = item.icon.clone() {
+            if let Some(icon) = item.icon {
                 row = row.child(img(icon).size(px(14.0)).flex_none());
             } else if item.selected {
                 row = row.child(
@@ -384,10 +384,10 @@ fn render_entry(
                     .overflow_hidden()
                     .whitespace_nowrap()
                     .text_ellipsis()
-                    .child(item.label.clone()),
+                    .child(item.label),
             );
 
-            if let Some(hotkey) = item.hotkey.clone() {
+            if let Some(hotkey) = item.hotkey {
                 row = row.child(
                     div()
                         .flex_none()
@@ -398,7 +398,7 @@ fn render_entry(
 
             if item.disabled {
                 row.opacity(0.62).cursor_not_allowed()
-            } else if let Some(action) = item.action.clone() {
+            } else if let Some(action) = item.action {
                 let dismiss = on_dismiss.clone();
                 row.cursor_pointer()
                     .hover(|style| style.bg(rgb(theme.colors.popup_menu_hover)))
@@ -426,7 +426,7 @@ fn render_entry(
                 .items_center()
                 .gap(px(8.0))
                 .px(px(theme.metrics.popup_menu_horizontal_padding))
-                .text_color(rgb(if *disabled {
+                .text_color(rgb(if disabled {
                     theme.colors.muted_text
                 } else {
                     theme.colors.primary_text
@@ -443,10 +443,10 @@ fn render_entry(
                         .overflow_hidden()
                         .whitespace_nowrap()
                         .text_ellipsis()
-                        .child(label.clone()),
+                        .child(label),
                 );
 
-            if let Some(hotkey) = hotkey.clone() {
+            if let Some(hotkey) = hotkey {
                 row = row.child(
                     div()
                         .flex_none()
@@ -456,7 +456,7 @@ fn render_entry(
             }
             row = row.child("›");
 
-            if *disabled || !allow_submenu {
+            if disabled || !allow_submenu {
                 row.opacity(0.62).cursor_not_allowed()
             } else {
                 let toggle = on_submenu.clone();
