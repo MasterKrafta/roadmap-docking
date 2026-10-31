@@ -1,17 +1,15 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
-use dock_gpui::{DockPanelMenu, DockWorkspace, PanelDefinition, Point, Rect, Size};
+use dock_gpui::{DockWorkspace, PanelDefinition};
 use gpui::{
     App, AppContext, AnyView, Bounds, Context, Entity, IntoElement, Render, TitlebarOptions,
-    Window, WindowBounds, WindowOptions, div, px, rgb, size,
+    Window, WindowBounds, WindowOptions, div, px, size,
 };
 use gpui::prelude::*;
 use gpui_platform::application;
 
 const APP_WIDTH: f32 = 1280.0;
 const APP_HEIGHT: f32 = 800.0;
-const MENU_BAR_HEIGHT: f32 = 36.0;
-const WORKSPACE_HEIGHT: f32 = APP_HEIGHT - MENU_BAR_HEIGHT;
 
 fn main() {
     application().run(|cx: &mut App| {
@@ -33,141 +31,57 @@ fn main() {
 }
 
 struct AppView {
-    workspace: Entity<DockWorkspace>,
-    panel_menu: Entity<DockPanelMenu>,
+    dock: Entity<DockWorkspace>,
 }
 
 impl AppView {
     fn new(cx: &mut Context<Self>) -> Self {
-        // Add another panel by adding one PanelDefinition::new(...) line here.
-        // Its entry appears in the library-owned Window menu automatically.
-        let panels = vec![
-            PanelDefinition::new("layers", "Слои", layers_factory)
-                .expect("the layers panel key is valid"),
-            PanelDefinition::new("color", "Цвет", color_factory)
-                .expect("the color panel key is valid"),
-            PanelDefinition::new("properties", "Свойства", properties_factory)
-                .expect("the properties panel key is valid"),
-            PanelDefinition::new("history", "История", history_factory)
-                .expect("the history panel key is valid"),
+        let panels = [
+            PanelDefinition::new("layers", "Слои", layers_factory),
+            PanelDefinition::new("color", "Цвет", color_factory),
+            PanelDefinition::new("properties", "Свойства", properties_factory),
+            PanelDefinition::new("history", "История", history_factory),
         ];
 
-        let viewport = Rect::new(
-            Point::ZERO,
-            Size::new(APP_WIDTH, WORKSPACE_HEIGHT),
-        );
-        let workspace = cx.new(|cx| {
-            DockWorkspace::new(panels, viewport, cx)
-                .expect("the app must provide the four baseline panel definitions")
-        });
-        let panel_menu = workspace.update(cx, |workspace, workspace_cx| {
-            workspace.create_panel_menu(
-                Rect::new(Point::ZERO, Size::new(APP_WIDTH, APP_HEIGHT)),
-                Point::new(92.0, MENU_BAR_HEIGHT),
-                workspace_cx,
-            )
-        });
+        let dock = DockWorkspace::new(panels);
+        let dock = cx.new(|_| dock);
 
-        Self {
-            workspace,
-            panel_menu,
-        }
+        Self { dock }
     }
 }
 
 impl Render for AppView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let menu_button = div()
-            .id("window-menu-button")
-            .h(px(MENU_BAR_HEIGHT))
-            .px(px(12.0))
-            .flex()
-            .items_center()
-            .cursor_pointer()
-            .text_color(rgb(0xE8E8E8))
-            .hover(|style| style.bg(rgb(0x454545)))
-            .child("Окно")
-            .on_click(cx.listener(|view, _, _, cx| {
-                view.panel_menu.update(cx, |menu, menu_cx| {
-                    menu.toggle(menu_cx);
-                });
-            }));
-
-        let menu_bar = div()
-            .id("application-menu-bar")
-            .w_full()
-            .h(px(MENU_BAR_HEIGHT))
-            .flex()
-            .items_center()
-            .gap(px(4.0))
-            .px(px(6.0))
-            .bg(rgb(0x303030))
-            .text_color(rgb(0xE8E8E8))
-            .child(div().px(px(12.0)).child("Файл"))
-            .child(div().px(px(12.0)).child("Правка"))
-            .child(menu_button);
-
-        div()
-            .id("application-root")
-            .size_full()
-            .relative()
-            .flex()
-            .flex_col()
-            .bg(rgb(0x252525))
-            .child(menu_bar)
-            .child(
-                div()
-                    .id("dock-workspace")
-                    .flex_1()
-                    .min_h_0()
-                    .child(self.workspace.clone()),
-            )
-            .child(self.panel_menu.clone())
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        div().size_full().child(self.dock.clone())
     }
 }
 
-// These factories are application-owned. Replace their placeholder views with
-// real panel implementations without changing DockWorkspace or dock-gpui.
+// These application factories intentionally return empty panel content.
+// DockHost places the resulting views through the library's PanelHost.
 fn layers_factory(_window: &mut Window, cx: &mut App) -> AnyView {
-    panel_placeholder(cx, "layers", "Слои", 0x40566F)
+    empty_panel_factory(cx)
 }
 
 fn color_factory(_window: &mut Window, cx: &mut App) -> AnyView {
-    panel_placeholder(cx, "color", "Цвет", 0x65506F)
+    empty_panel_factory(cx)
 }
 
 fn properties_factory(_window: &mut Window, cx: &mut App) -> AnyView {
-    panel_placeholder(cx, "properties", "Свойства", 0x526B5C)
+    empty_panel_factory(cx)
 }
 
 fn history_factory(_window: &mut Window, cx: &mut App) -> AnyView {
-    panel_placeholder(cx, "history", "История", 0x725C4B)
+    empty_panel_factory(cx)
 }
 
-fn panel_placeholder(cx: &mut App, id: &'static str, title: &'static str, color: u32) -> AnyView {
-    cx.new(|_| PanelPlaceholder { id, title, color }).into()
+fn empty_panel_factory(cx: &mut App) -> AnyView {
+    cx.new(|_| EmptyPanel).into()
 }
 
-/// Deliberately simple application-provided panel content.
-struct PanelPlaceholder {
-    id: &'static str,
-    title: &'static str,
-    color: u32,
-}
+struct EmptyPanel;
 
-impl Render for PanelPlaceholder {
+impl Render for EmptyPanel {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .justify_center()
-            .gap(px(8.0))
-            .p(px(16.0))
-            .bg(rgb(self.color))
-            .text_color(rgb(0xFFFFFF))
-            .child(self.title)
-            .child(format!("Panel ID: {}", self.id))
-            .child("Application panel placeholder")
+        div().size_full()
     }
 }
