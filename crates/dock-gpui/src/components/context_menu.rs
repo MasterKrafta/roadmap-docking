@@ -153,7 +153,7 @@ impl ContextMenu {
         id: impl Into<SharedString>,
         viewport: Rect,
         anchor: Point,
-        entries: &[ContextMenuEntry],
+        entries: Vec<ContextMenuEntry>,
         open_submenu: Option<usize>,
         callbacks: ContextMenuCallbacks,
         theme: Theme,
@@ -167,7 +167,7 @@ impl ContextMenu {
             .popup_menu_width
             .min(viewport.size.width)
             .max(1.0);
-        let full_height = entries_height(entries, theme.metrics.popup_menu_row_height);
+        let full_height = entries_height(&entries, theme.metrics.popup_menu_row_height);
         let height = full_height.min(viewport.size.height.max(1.0));
         let max_x = (viewport.origin.x + viewport.size.width - width).max(viewport.origin.x);
         let max_y = (viewport.origin.y + viewport.size.height - height).max(viewport.origin.y);
