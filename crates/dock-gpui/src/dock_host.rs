@@ -2,8 +2,8 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use dock_core::{
-    ColumnDisplayItem, ColumnMode, ComputeRectsError, DockCommand, DockSide, HitResult, Layout,
-    Node, NodeId, Point, Rect, Size as CoreSize,
+    ColumnDisplayItem, ColumnMode, ComputeRectsError, DockCommand, DockSide, FloatingGroupId,
+    HitResult, Layout, Node, NodeId, PanelId, Point, Rect, Size as CoreSize,
 };
 use gpui::{
     AnyView, App, Bounds, Context, Entity, IntoElement, ParentElement, Pixels, Render, ScrollHandle,
@@ -15,8 +15,8 @@ use ui::Theme;
 use crate::{
     DockController,
     components::{
-        FlyoutView, GroupMenuToggle, MainDockView, PanelHost, SplitterView,
-        TabOverflowToggle, collect_group_presentations,
+        FloatingWindowView, FlyoutView, GroupMenuToggle, MainDockView, TabOverflowToggle,
+        collect_group_presentations,
     },
     input::scroll_adjusted_hit_test_point,
 };
@@ -164,6 +164,12 @@ impl Render for DockHost {
             main_node_ids,
             main_column_ids,
             main_column_groups,
+            floating_node_ids,
+            floating_column_ids,
+            floating_column_groups,
+            floating_panel_ids,
+            floating_titles,
+            all_column_ids,
             column_modes,
             group_presentations,
             rail_display_orders,
@@ -191,7 +197,47 @@ impl Render for DockHost {
                     }
                 }
 
-                let column_modes = main_column_ids
+                // Collect each floating root independently. The maps contain
+                // IDs only; Layout remains the single owner of every tree.
+                let mut floating_node_ids = HashMap::new();
+                let mut floating_column_ids = HashMap::new();
+                let mut floating_column_groups = HashMap::new();
+                let mut floating_panel_ids = HashMap::new();
+                let mut all_node_ids = main_node_ids.clone();
+                let mut all_column_ids = main_column_ids.clone();
+
+                if let Ok(rects) = &rects {
+                    for floating_rect in &rects.floating_groups {
+                        let Some(floating) = layout.floating_group(floating_rect.group) else {
+                            continue;
+                        };
+                        let Some(area) = layout.dock_area(floating.area) else {
+                            continue;
+                        };
+
+                        let mut nodes = HashSet::new();
+                        let mut columns = HashSet::new();
+                        let mut column_groups = HashMap::new();
+                        collect_main_nodes(
+                            layout,
+                            area.root,
+                            &mut nodes,
+                            &mut columns,
+                            &mut column_groups,
+                        );
+                        let mut panels = HashSet::new();
+                        collect_panel_ids(layout, area.root, &mut panels);
+
+                        all_node_ids.extend(nodes.iter().copied());
+                        all_column_ids.extend(columns.iter().copied());
+                        floating_node_ids.insert(floating_rect.group, nodes);
+                        floating_column_ids.insert(floating_rect.group, columns);
+                        floating_column_groups.insert(floating_rect.group, column_groups);
+                        floating_panel_ids.insert(floating_rect.group, panels);
+                    }
+                }
+
+                let column_modes = all_column_ids
                     .iter()
                     .filter_map(|id| match layout.node(*id) {
                         Some(Node::Column(column)) => Some((*id, column.mode)),
@@ -199,7 +245,7 @@ impl Render for DockHost {
                     })
                     .collect::<HashMap<_, _>>();
                 let group_presentations =
-                    collect_group_presentations(layout, controller.registry(), &main_node_ids);
+                    collect_group_presentations(layout, controller.registry(), &all_node_ids);
                 let rail_display_orders = column_modes
                     .iter()
                     .filter(|(_, mode)| mode.is_rail())
@@ -210,6 +256,38 @@ impl Render for DockHost {
                             .map(|order| (*column, order))
                     })
                     .collect::<HashMap<NodeId, Vec<ColumnDisplayItem>>>();
+
+                let floating_titles = floating_node_ids
+                    .iter()
+                    .map(|(floating, nodes)| {
+                        let title = nodes
+                            .iter()
+                            .find_map(|node| {
+                                let presentation = group_presentations.get(node)?;
+                                let active_panel = presentation.active_panel?;
+                                presentation
+                                    .tabs
+                                    .iter()
+                                    .find(|tab| tab.panel == active_panel)
+                                    .map(|tab| tab.title.to_string())
+                            })
+                            .or_else(|| {
+                                floating_panel_ids.get(floating).and_then(|panels| {
+                                    panels.iter().find_map(|panel| {
+                                        let instance = layout.panel_instance(*panel)?;
+                                        controller
+                                            .registry()
+                                            .get(&instance.key)
+                                            .map(|descriptor| descriptor.title().to_string())
+                                            .or_else(|| Some(instance.key.to_string()))
+                                    })
+                                })
+                            })
+                            .unwrap_or_else(|| "Floating panels".to_string());
+                        (*floating, title)
+                    })
+                    .collect::<HashMap<_, _>>();
+                let all_column_ids = all_column_ids;
                 let active_flyout = layout.flyout();
                 let drag_preview = controller.drag().session().preview();
                 let drag_zones = controller
@@ -225,6 +303,12 @@ impl Render for DockHost {
                     main_node_ids,
                     main_column_ids,
                     main_column_groups,
+                    floating_node_ids,
+                    floating_column_ids,
+                    floating_column_groups,
+                    floating_panel_ids,
+                    floating_titles,
+                    all_column_ids,
                     column_modes,
                     group_presentations,
                     rail_display_orders,
@@ -243,8 +327,8 @@ impl Render for DockHost {
         };
 
         // Main-column panels are mounted by ColumnView so their content moves
-        // with that column's own scroll handle. The remaining panel rectangles
-        // belong to floating compositions and are mounted in workspace space.
+        // with that column's own scroll handle. Floating panel views are selected
+        // per floating root below and mounted inside that composition.
         let main_active_panels = main_column_groups
             .values()
             .flat_map(|groups| groups.iter())
@@ -280,11 +364,6 @@ impl Render for DockHost {
             .filter(|(panel, _)| main_active_panels.contains(&panel.panel))
             .cloned()
             .collect::<Vec<_>>();
-        let floating_panel_views = panel_views
-            .iter()
-            .filter(|(panel, _)| !main_active_panels.contains(&panel.panel))
-            .cloned()
-            .collect::<Vec<_>>();
         let flyout_panel_view = rects
             .as_ref()
             .and_then(|rects| rects.flyout)
@@ -307,11 +386,11 @@ impl Render for DockHost {
             let overflow_columns = rects
                 .vertical_overflow
                 .iter()
-                .filter(|overflow| main_column_ids.contains(&overflow.owner))
+                .filter(|overflow| all_column_ids.contains(&overflow.owner))
                 .map(|overflow| overflow.owner)
                 .collect::<HashSet<_>>();
             self.column_scroll_handles.retain(|owner, _| {
-                main_column_ids.contains(owner) && overflow_columns.contains(owner)
+                all_column_ids.contains(owner) && overflow_columns.contains(owner)
             });
             for owner in overflow_columns {
                 self.column_scroll_handles
@@ -552,42 +631,111 @@ impl Render for DockHost {
             let mut floating_groups = rects.floating_groups.clone();
             floating_groups.sort_by_key(|group| group.z_order);
             for floating in floating_groups {
-                workspace = workspace.child(
-                    div()
-                        .absolute()
-                        .left(px(floating.rect.origin.x))
-                        .top(px(floating.rect.origin.y))
-                        .w(px(floating.rect.size.width))
-                        .h(px(floating.rect.size.height))
-                        .bg(rgb(theme.colors.panel_surface_background))
-                        .border_1()
-                        .border_color(rgb(theme.colors.group_frame_border)),
-                );
-            }
+                let node_ids = floating_node_ids
+                    .get(&floating.group)
+                    .cloned()
+                    .unwrap_or_default();
+                let column_ids = floating_column_ids
+                    .get(&floating.group)
+                    .cloned()
+                    .unwrap_or_default();
+                let empty_column_groups = HashMap::new();
+                let column_group_map = floating_column_groups
+                    .get(&floating.group)
+                    .unwrap_or(&empty_column_groups);
+                let panel_ids = floating_panel_ids
+                    .get(&floating.group)
+                    .cloned()
+                    .unwrap_or_default();
 
-            // Main panels live in their scrolling columns. Only floating panels
-            // remain here, above the floating-window surfaces.
-            workspace = workspace.child(PanelHost::render(
-                floating_panel_views,
-                Point::ZERO,
-            ));
+                let floating_columns = rects
+                    .columns
+                    .iter()
+                    .filter(|column| column_ids.contains(&column.column))
+                    .copied()
+                    .collect::<Vec<_>>();
+                let floating_group_rects = rects
+                    .groups
+                    .iter()
+                    .filter(|group| node_ids.contains(&group.group))
+                    .copied()
+                    .collect::<Vec<_>>();
+                let floating_tab_strips = rects
+                    .tab_strips
+                    .iter()
+                    .filter(|strip| node_ids.contains(&strip.group))
+                    .copied()
+                    .collect::<Vec<_>>();
+                let floating_tab_headers = rects
+                    .tab_headers
+                    .iter()
+                    .filter(|header| node_ids.contains(&header.group))
+                    .copied()
+                    .collect::<Vec<_>>();
+                let floating_tab_overflows = rects
+                    .tab_overflows
+                    .iter()
+                    .filter(|overflow| node_ids.contains(&overflow.group))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                let floating_splitters = rects
+                    .splitters
+                    .iter()
+                    .filter(|splitter| node_ids.contains(&splitter.owner))
+                    .copied()
+                    .collect::<Vec<_>>();
+                let floating_resize_edges = rects
+                    .floating_resize_edges
+                    .iter()
+                    .filter(|edge| edge.group == floating.group)
+                    .copied()
+                    .collect::<Vec<_>>();
+                let floating_overflow = rects
+                    .vertical_overflow
+                    .iter()
+                    .filter(|overflow| column_ids.contains(&overflow.owner))
+                    .copied()
+                    .collect::<Vec<_>>();
+                let floating_panel_views = panel_views
+                    .iter()
+                    .filter(|(panel, _)| panel_ids.contains(&panel.panel))
+                    .cloned()
+                    .collect::<Vec<_>>();
 
-            // Splitters owned by nodes outside the two main dock roots belong
-            // to floating compositions and use workspace coordinates.
-            for splitter in rects
-                .splitters
-                .iter()
-                .filter(|splitter| !main_node_ids.contains(&splitter.owner))
-            {
-                workspace = workspace.child(SplitterView::render(
-                    *splitter,
-                    Point::ZERO,
-                    Point::ZERO,
-                    self.controller.clone(),
+                workspace = workspace.child(FloatingWindowView::render(
+                    floating,
+                    &floating_resize_edges,
+                    &floating_columns,
+                    &floating_group_rects,
+                    floating_panel_views,
+                    &floating_tab_strips,
+                    &floating_tab_headers,
+                    &floating_tab_overflows,
+                    &group_presentations,
+                    column_group_map,
+                    &column_modes,
+                    &rail_display_orders,
+                    &floating_splitters,
+                    &floating_overflow,
+                    &self.column_scroll_handles,
+                    active_flyout,
+                    drag_preview,
+                    &drag_zones,
                     metrics,
+                    floating_titles
+                        .get(&floating.group)
+                        .map(String::as_str)
+                        .unwrap_or("Floating panels"),
+                    self.open_group_menu,
+                    toggle_group_menu.clone(),
+                    overflow_group,
+                    toggle_tab_overflow.clone(),
+                    middle_click_closes_tabs,
+                    self.controller.clone(),
                     theme,
                 ));
             }
+
         }
 
         root.child(workspace)
@@ -626,6 +774,32 @@ fn collect_main_nodes(
             }
         }
         Some(Node::Panel(_)) | None => {}
+    }
+}
+
+/// Collects panel IDs reachable from one tree root. Geometry emits only
+/// rectangles for active panels, so this set can safely include inactive tabs.
+fn collect_panel_ids(layout: &Layout, id: NodeId, panels: &mut HashSet<PanelId>) {
+    match layout.node(id) {
+        Some(Node::Split(split)) => {
+            for child in &split.children {
+                collect_panel_ids(layout, *child, panels);
+            }
+        }
+        Some(Node::Column(column)) => {
+            for group in &column.groups {
+                collect_panel_ids(layout, *group, panels);
+            }
+        }
+        Some(Node::Tabs(tabs)) => {
+            for child in &tabs.children {
+                collect_panel_ids(layout, *child, panels);
+            }
+        }
+        Some(Node::Panel(panel)) => {
+            panels.insert(panel.panel_id);
+        }
+        None => {}
     }
 }
 
