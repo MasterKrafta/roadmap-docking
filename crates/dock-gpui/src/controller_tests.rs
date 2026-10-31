@@ -1,4 +1,4 @@
-use super::DockController;
+use super::{DockController, DockEvent};
 use dock_core::{
     CommandError, DockCommand, DockMetrics, DragHandle, DragPayload, DragState, DropSource,
     HitResult, InitialLayoutError, LayoutRects, PanelConstraints, PanelId, PanelKey, Point,
@@ -475,4 +475,103 @@ fn resize_preview_does_not_mutate_layout_until_pointer_up() {
     assert_eq!(format!("{:?}", controller.layout()), layout_before);
     assert_eq!(controller.layout().version(), version_before);
     assert!(controller.resize_interaction().is_none());
+}
+
+#[test]
+fn resize_sequence_uses_core_actual_values_and_one_undo_checkpoint() {
+    let metrics = DockMetrics::default();
+    let registry = baseline_registry();
+    let descriptors = registry.descriptors_for_core();
+    let layout = dock_core::create_initial_layout(Profile::Photoshop, &descriptors, metrics)
+        .expect("baseline layout should be valid");
+    let mut controller = DockController::new(
+        layout,
+        metrics,
+        registry,
+        Rect::new(Point::ZERO, Size::new(1200.0, 800.0)),
+    )
+    .expect("controller should accept the baseline layout");
+
+    let rects = controller.geometry().unwrap().clone();
+    let splitter = *rects
+        .splitters
+        .first()
+        .expect("baseline layout should contain a splitter");
+    let origin = Point::new(
+        splitter.rect.origin.x + splitter.rect.size.width * 0.5,
+        splitter.rect.origin.y + splitter.rect.size.height * 0.5,
+    );
+    let hit = controller.hit(origin).unwrap();
+    assert!(matches!(hit, HitResult::Splitter { .. }));
+
+    let (column, group_count) = controller
+        .layout()
+        .nodes()
+        .find_map(|(id, node)| match node {
+            dock_core::Node::Column(column) if column.groups.len() >= 2 => {
+                Some((id, column.groups.len()))
+            }
+            _ => None,
+        })
+        .expect("baseline layout should contain a multi-group column");
+    let total_height = rects
+        .vertical_overflow
+        .iter()
+        .find(|overflow| overflow.owner == column)
+        .map(|overflow| overflow.content_extent.size.height)
+        .or_else(|| {
+            rects
+                .columns
+                .iter()
+                .find(|rect| rect.column == column)
+                .map(|rect| rect.rect.size.height)
+        })
+        .expect("column geometry should be available");
+    let available_height =
+        total_height - metrics.splitter_thickness * group_count.saturating_sub(1) as f32;
+    let ratios_before = match controller.layout().node(column).unwrap() {
+        dock_core::Node::Column(value) => value.group_ratios.clone(),
+        _ => unreachable!(),
+    };
+    let version_before = controller.layout().version();
+
+    controller.begin_resize_interaction(hit, origin).unwrap();
+    let outcomes = controller
+        .dispatch_sequence(vec![
+            DockCommand::ResizeGroups {
+                column,
+                boundary_index: 0,
+                delta: 4.0,
+                available_height,
+            },
+            DockCommand::ResizeGroups {
+                column,
+                boundary_index: 0,
+                delta: 3.0,
+                available_height,
+            },
+        ])
+        .expect("resize-only sequence should remain owned by the gesture");
+
+    assert_eq!(outcomes.len(), 2);
+    assert!(outcomes.iter().all(|outcome| matches!(
+        outcome.actual_value,
+        Some(dock_core::CommandValue::GroupBoundaryDelta(delta)) if delta > 0.0
+    )));
+    assert!(controller.ensure_pointer_interaction_current());
+    assert_eq!(controller.layout().version(), version_before + 2);
+    assert!(controller.pending_events.iter().any(|event| matches!(
+        event,
+        DockEvent::ResizeApplied { hit: Some(event_hit), actual_values, .. }
+            if *event_hit == hit && actual_values.len() == 2
+    )));
+
+    controller.end_resize_interaction();
+    assert!(controller.can_undo());
+    controller.undo().unwrap();
+    assert!(!controller.can_undo());
+    assert!(matches!(
+        controller.layout().node(column),
+        Some(dock_core::Node::Column(value)) if value.group_ratios == ratios_before
+    ));
 }

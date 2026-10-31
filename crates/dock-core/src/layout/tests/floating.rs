@@ -403,6 +403,26 @@ fn c46_move_resize_raise_and_center_dock_floating_preserve_source_active_tab() {
         Size::new(420.0, 300.0)
     );
 
+    let resized_bounds = layout
+        .apply(
+            DockCommand::ResizeFloatingBounds {
+                group: source_floating,
+                bounds: Rect::new(Point::new(140.0, 150.0), Size::new(10.0, 10.0)),
+            },
+            &metrics,
+        )
+        .unwrap();
+    assert_eq!(
+        resized_bounds.actual_value,
+        Some(CommandValue::FloatingBounds(Rect::new(
+            Point::new(140.0, 150.0),
+            Size::new(120.0, 80.0),
+        )))
+    );
+    layout
+        .apply(resized_bounds.inverse.unwrap(), &metrics)
+        .unwrap();
+
     layout
         .apply(
             DockCommand::RaiseFloating {

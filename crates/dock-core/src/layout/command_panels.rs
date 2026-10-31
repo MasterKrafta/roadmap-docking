@@ -607,7 +607,11 @@ impl Layout {
                         self.flyout_widths.remove(&expired);
                     }
                 }
-                Ok(CommandApplication::transient())
+                Ok(CommandApplication {
+                    actual_value: Some(CommandValue::FlyoutWidth(actual_width)),
+                    inverse: None,
+                    persistent: false,
+                })
             }
             _ => Err(CommandError::InvalidTarget {
                 reason: "flyout dispatcher received an unsupported command",

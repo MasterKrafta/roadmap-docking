@@ -1,4 +1,4 @@
-use crate::Size;
+use crate::{NodeId, Rect, Size};
 
 /// The effective value produced by a constrained resize command.
 ///
@@ -16,6 +16,12 @@ pub enum CommandValue {
     GroupBoundaryDelta(f32),
     /// Ratios of groups after a constrained resize or reset.
     GroupRatios(Vec<f32>),
+    /// Effective widths of each column after a multi-column resize/reset.
+    ColumnWidths(Vec<(NodeId, f32)>),
+    /// Effective floating-window bounds after minimum-size constraints.
+    FloatingBounds(Rect),
+    /// Effective flyout width after the panel's min/max width constraints.
+    FlyoutWidth(f32),
     /// Effective floating-window size after constraints.
     FloatingSize(Size),
 }
@@ -42,6 +48,10 @@ mod tests {
         assert_eq!(
             CommandValue::FloatingSize(Size::new(400.0, 300.0)),
             CommandValue::FloatingSize(Size::new(400.0, 300.0))
+        );
+        assert_eq!(
+            CommandValue::FlyoutWidth(280.0),
+            CommandValue::FlyoutWidth(280.0)
         );
     }
 

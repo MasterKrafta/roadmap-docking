@@ -254,7 +254,7 @@ fn main_column_ratios_reset_visible_widths() {
     let mut layout = builder.build();
     assert_eq!(layout.validate(&metrics), Ok(()));
 
-    layout
+    let reset = layout
         .apply(
             DockCommand::ResetMainColumnRatios {
                 side: DockSide::Left,
@@ -262,6 +262,13 @@ fn main_column_ratios_reset_visible_widths() {
             &metrics,
         )
         .unwrap();
+    assert_eq!(
+        reset.actual_value,
+        Some(CommandValue::ColumnWidths(vec![
+            (first_column, 280.0),
+            (second_column, 280.0),
+        ]))
+    );
 
     let (first_width, second_width) = match (layout.node(first_column), layout.node(second_column))
     {
@@ -1018,4 +1025,46 @@ fn moving_panel_to_own_group_edge_is_a_no_op() {
         matches!(layout.node(group), Some(Node::Tabs(tabs)) if tabs.collapsed && tabs.children == vec![panel_node,sibling_node])
     );
     assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
+fn resize_flyout_reports_the_core_clamped_width() {
+    let metrics = DockMetrics::default();
+    let constraints = descriptors()[0].1;
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+    let (panel, panel_node) = builder.panel(
+        PanelKey::new("resize-flyout-actual-width").unwrap(),
+        constraints,
+    );
+    let group = builder.tabs(vec![panel_node], 0, false);
+    let column = builder.column(
+        metrics.rail_width,
+        crate::ColumnMode::IconsOnly,
+        vec![group],
+        vec![1.0],
+    );
+    builder.main_area(DockSide::Left, column);
+    let mut layout = builder.build();
+
+    layout
+        .apply(DockCommand::OpenFlyout { column, panel }, &metrics)
+        .unwrap();
+    let outcome = layout
+        .apply(
+            DockCommand::ResizeFlyout {
+                panel,
+                width: 1.0,
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    assert_eq!(
+        outcome.actual_value,
+        Some(CommandValue::FlyoutWidth(constraints.min_size.width))
+    );
+    assert_eq!(
+        layout.flyout_width(&PanelKey::new("resize-flyout-actual-width").unwrap()),
+        Some(constraints.min_size.width)
+    );
 }

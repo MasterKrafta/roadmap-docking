@@ -420,10 +420,16 @@ impl Layout {
         &mut self,
         side: DockSide,
         metrics: &DockMetrics,
-    ) -> Result<(), CommandError> {
+    ) -> Result<Vec<(NodeId, f32)>, CommandError> {
         let columns = self.main_columns(side)?;
         if columns.len() < 2 {
-            return Ok(());
+            return Ok(columns
+                .into_iter()
+                .filter_map(|id| match self.nodes.get(id) {
+                    Some(Node::Column(column)) => Some((id, column.width)),
+                    _ => None,
+                })
+                .collect());
         }
 
         let current_widths = self.main_column_widths_for_reset(&columns)?;
@@ -443,7 +449,7 @@ impl Layout {
         )?;
         let widths = Self::equalized_main_column_widths(total_width, &minimums, &maximums)?;
 
-        for (id, width) in columns.into_iter().zip(widths) {
+        for (id, width) in columns.iter().copied().zip(widths) {
             if let Some(Node::Column(column)) = self.nodes.get_mut(id)
                 && !column.mode.is_rail()
             {
@@ -451,7 +457,13 @@ impl Layout {
                 column.last_expanded_width = Some(width);
             }
         }
-        Ok(())
+        Ok(columns
+            .into_iter()
+            .filter_map(|id| match self.nodes.get(id) {
+                Some(Node::Column(column)) => Some((id, column.width)),
+                _ => None,
+            })
+            .collect())
     }
 
     fn main_column_widths_for_reset(&self, columns: &[NodeId]) -> Result<Vec<f32>, CommandError> {
@@ -838,11 +850,19 @@ impl Layout {
         metrics: &DockMetrics,
     ) -> Result<CommandApplication, CommandError> {
         let Some(area) = self.main_area(*side).copied() else {
-            return Ok(CommandApplication::persistent());
+            return Ok(CommandApplication {
+                actual_value: Some(CommandValue::ColumnWidths(Vec::new())),
+                inverse: None,
+                persistent: true,
+            });
         };
         let root = self.nodes.get(area.root).cloned();
         match root {
-            Some(Node::Column(_)) => Ok(CommandApplication::persistent()),
+            Some(Node::Column(column)) => Ok(CommandApplication {
+                actual_value: Some(CommandValue::ColumnWidths(vec![(area.root, column.width)])),
+                inverse: None,
+                persistent: true,
+            }),
             Some(Node::Split(split)) if split.axis == Axis::X => {
                 if split
                     .children
@@ -861,9 +881,13 @@ impl Layout {
                         .ok_or(CommandError::InvalidTarget {
                             reason: "main horizontal split has no columns",
                         })?;
-                self.reset_main_column_widths(*side, metrics)?;
+                let widths = self.reset_main_column_widths(*side, metrics)?;
                 self.sync_main_column_ratios(first_column)?;
-                Ok(CommandApplication::persistent())
+                Ok(CommandApplication {
+                    actual_value: Some(CommandValue::ColumnWidths(widths)),
+                    inverse: None,
+                    persistent: true,
+                })
             }
             Some(_) => Err(CommandError::InvalidTarget {
                 reason: "main dock root is not a horizontal column split",

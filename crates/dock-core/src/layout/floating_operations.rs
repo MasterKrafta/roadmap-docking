@@ -878,13 +878,17 @@ impl Layout {
                 reason: geometry_error_reason(error),
             })?;
         if actual_bounds == floating.bounds {
-            return Ok(CommandApplication::persistent());
+            return Ok(CommandApplication {
+                actual_value: Some(CommandValue::FloatingBounds(actual_bounds)),
+                inverse: None,
+                persistent: true,
+            });
         }
         if let Some(value) = self.floating_groups.get_mut(group) {
             value.bounds = actual_bounds;
         }
         Ok(CommandApplication {
-            actual_value: None,
+            actual_value: Some(CommandValue::FloatingBounds(actual_bounds)),
             inverse: Some(DockCommand::ResizeFloatingBounds {
                 group,
                 bounds: floating.bounds,

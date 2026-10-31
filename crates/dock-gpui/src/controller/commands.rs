@@ -34,17 +34,21 @@ impl DockController {
         command: DockCommand,
         from_resize_pipeline: bool,
     ) -> Result<CommandOutcome, CommandError> {
-        let resize_owns_command = from_resize_pipeline
-            && self.interaction.is_some()
-            && is_resize_command(&command);
+        let is_resize = is_resize_command(&command);
+        let resize_owns_command =
+            from_resize_pipeline && self.interaction.is_some() && is_resize;
         if self.has_active_pointer_interaction() && !resize_owns_command {
             if let Err(error) = self.cancel_pointer_interaction() {
                 tracing::warn!(%error, "could not cancel stale dock interaction before command");
             }
         }
-        let resize_owns_command = from_resize_pipeline
-            && self.interaction.is_some()
-            && is_resize_command(&command);
+        let resize_owns_command =
+            from_resize_pipeline && self.interaction.is_some() && is_resize;
+        let resize_hit = if is_resize {
+            self.interaction.map(|interaction| interaction.hit)
+        } else {
+            None
+        };
         let before_panels = self.panel_keys();
         let previous_version = self.layout.version();
         let activated = match &command {
@@ -57,6 +61,9 @@ impl DockController {
                 self.finish_success(before_panels, previous_version, activated.into_iter());
                 if resize_owns_command {
                     self.record_resize_layout_version();
+                }
+                if is_resize {
+                    self.publish_resize_outcomes(resize_hit, std::slice::from_ref(&outcome));
                 }
                 Ok(outcome)
             }
@@ -136,7 +143,18 @@ impl DockController {
         &mut self,
         commands: Vec<DockCommand>,
     ) -> Result<Vec<CommandOutcome>, CommandError> {
+        if commands.is_empty() {
+            return Ok(Vec::new());
+        }
+        let is_resize_sequence = commands.iter().all(is_resize_command);
+        let resize_hit = if is_resize_sequence {
+            self.interaction.map(|interaction| interaction.hit)
+        } else {
+            None
+        };
+        let owns_resize_gesture = is_resize_sequence && resize_hit.is_some();
         if self.has_active_pointer_interaction()
+            && !owns_resize_gesture
             && let Err(error) = self.cancel_pointer_interaction()
         {
             tracing::warn!(%error, "could not cancel dock interaction before command sequence");
@@ -157,6 +175,12 @@ impl DockController {
         {
             Ok(outcomes) => {
                 self.finish_success(before_panels, previous_version, activated.into_iter());
+                if owns_resize_gesture {
+                    self.record_resize_layout_version();
+                }
+                if is_resize_sequence {
+                    self.publish_resize_outcomes(resize_hit, &outcomes);
+                }
                 Ok(outcomes)
             }
             Err(error) => {
@@ -164,6 +188,18 @@ impl DockController {
                 Err(error)
             }
         }
+    }
+
+    /// Dispatches a sequence and publishes its events to GPUI subscribers.
+    pub fn dispatch_sequence_in(
+        &mut self,
+        commands: Vec<DockCommand>,
+        cx: &mut Context<Self>,
+    ) -> Result<Vec<CommandOutcome>, CommandError> {
+        let result = self.dispatch_sequence(commands);
+        self.flush_events(cx);
+        cx.notify();
+        result
     }
 
     pub fn undo(&mut self) -> Result<bool, CommandError> {
@@ -393,6 +429,35 @@ impl DockController {
         self.panel_views
             .retain(|panel, _| after_panels.contains_key(panel));
         self.last_error = None;
+    }
+
+    fn publish_resize_outcomes(
+        &mut self,
+        hit: Option<dock_core::HitResult>,
+        outcomes: &[CommandOutcome],
+    ) {
+        let actual_values = outcomes
+            .iter()
+            .filter_map(|outcome| outcome.actual_value.clone())
+            .collect::<Vec<_>>();
+        if actual_values.is_empty() {
+            return;
+        }
+        let version = outcomes
+            .last()
+            .map(|outcome| outcome.new_version)
+            .unwrap_or_else(|| self.layout.version());
+        tracing::debug!(
+            ?hit,
+            ?actual_values,
+            version,
+            "dock resize applied with Core-constrained values"
+        );
+        self.pending_events.push_back(DockEvent::ResizeApplied {
+            hit,
+            actual_values,
+            version,
+        });
     }
 
     fn finish_failure(&mut self, error: &CommandError) {

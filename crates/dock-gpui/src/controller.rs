@@ -1,7 +1,8 @@
 use std::collections::{HashMap, VecDeque};
 
 use dock_core::{
-    Axis, CommandError, DockCommand, DockMetrics, DragCancelReason, DragSession, DragSessionError,
+    Axis, CommandError, CommandValue, DockCommand, DockMetrics, DragCancelReason, DragSession,
+    DragSessionError,
     DragState, DragHandle, DragPayload, DropSource, DropZoneResolver, FlyoutState, GeometryError,
     HitResult,
     Layout, LayoutRects, Node, PanelId,
@@ -23,6 +24,12 @@ pub enum DockEvent {
     PanelOpened { panel: PanelId, key: PanelKey },
     PanelClosed { panel: PanelId, key: PanelKey },
     PanelActivated { group: dock_core::NodeId, panel: PanelId },
+    /// Effective values returned by Core after one resize operation.
+    ResizeApplied {
+        hit: Option<HitResult>,
+        actual_values: Vec<CommandValue>,
+        version: u64,
+    },
     CommandFailed(CommandError),
     WorkspaceLoaded { diagnostics: Vec<WorkspaceDiagnostic> },
 }
