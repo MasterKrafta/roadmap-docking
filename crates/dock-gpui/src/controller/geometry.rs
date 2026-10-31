@@ -15,14 +15,22 @@ impl DockController {
             .ok_or(ComputeRectsError::InvalidLayoutState)
     }
 
-    /// Resolves a logical-pixel point against the current cached geometry.
-    pub fn hit_test(&mut self, point: Point) -> Result<HitResult, ComputeRectsError> {
+    /// Resolves one pointer event against the current geometry snapshot.
+    ///
+    /// The semantic result is returned by value and is never retained as
+    /// controller state; callers must request a fresh hit for each event.
+    pub fn hit(&mut self, point: Point) -> Result<HitResult, ComputeRectsError> {
         self.ensure_geometry()?;
         let rects = self
             .rects
             .as_ref()
             .ok_or(ComputeRectsError::InvalidLayoutState)?;
         self.layout.hit_test(point, rects, &self.metrics)
+    }
+
+    /// Backwards-compatible name for callers that predate the event-scoped hit API.
+    pub fn hit_test(&mut self, point: Point) -> Result<HitResult, ComputeRectsError> {
+        self.hit(point)
     }
 
     /// Builds or reuses the resolver snapshot for one drag source and current geometry.
@@ -58,7 +66,9 @@ impl DockController {
         if self.viewport == viewport {
             return Ok(false);
         }
-        let _ = self.end_resize_interaction();
+        if let Err(error) = self.cancel_pointer_interaction() {
+            tracing::warn!(%error, "could not cancel dock interaction before viewport change");
+        }
         self.viewport = viewport;
         self.rects_key = None;
         self.drag.clear_resolver();
@@ -76,6 +86,9 @@ impl DockController {
         if self.metrics == metrics {
             return Ok(false);
         }
+        if let Err(error) = self.cancel_pointer_interaction() {
+            tracing::warn!(%error, "could not cancel dock interaction before metrics change");
+        }
         self.layout
             .validate(&metrics)
             .map_err(DockControllerConfigError::InvalidLayout)?;
@@ -84,8 +97,6 @@ impl DockController {
             .checked_add(1)
             .ok_or(DockControllerConfigError::MetricsRevisionOverflow)?;
         let drag = super::DragController::new(&metrics)?;
-
-        let _ = self.end_resize_interaction();
         self.metrics = metrics;
         self.metrics_revision = next_revision;
         self.drag = drag;

@@ -1,8 +1,9 @@
 use std::collections::{HashMap, VecDeque};
 
 use dock_core::{
-    Axis, CommandError, DockCommand, DockMetrics, DragSession, DragSessionError, DropSource,
-    DropZoneResolver, FlyoutState, GeometryError, HitResult, Layout, LayoutRects, Node, PanelId,
+    Axis, CommandError, DockCommand, DockMetrics, DragSession, DragSessionError, DragState,
+    DragHandle, DragPayload, DropSource, DropZoneResolver, FlyoutState, GeometryError, HitResult,
+    Layout, LayoutRects, Node, PanelId,
     PanelKey, Point, Profile, Rect, ValidationError, WorkspaceDiagnostic,
     OUTER_COLUMN_EDGE_BOUNDARY_INDEX,
 };
@@ -77,6 +78,8 @@ pub struct DragController {
     resolver: Option<DropZoneResolver>,
     resolver_key: Option<RectCacheKey>,
     resolver_source: Option<DropSource>,
+    /// Layout revision captured when the current drag press began.
+    layout_version: Option<u64>,
 }
 
 impl DragController {
@@ -86,6 +89,7 @@ impl DragController {
             resolver: None,
             resolver_key: None,
             resolver_source: None,
+            layout_version: None,
         })
     }
 
@@ -118,6 +122,10 @@ impl DragController {
         self.resolver_source = None;
     }
 
+    pub(crate) fn clear_layout_version(&mut self) {
+        self.layout_version = None;
+    }
+
     /// Cancels any active gesture and clears the resolver snapshot.
     ///
     /// Used when the controller replaces its Layout lineage, because runtime
@@ -126,6 +134,7 @@ impl DragController {
         let _ = self.session.focus_lost();
         let _ = self.session.reset();
         self.clear_resolver();
+        self.clear_layout_version();
     }
 }
 
@@ -258,13 +267,67 @@ impl DockController {
         self.interaction
     }
 
+    pub(crate) fn has_active_pointer_interaction(&self) -> bool {
+        self.interaction.is_some()
+            || matches!(
+                self.drag.session().state(),
+                DragState::Pressed { .. } | DragState::Dragging { .. }
+            )
+    }
+
+    /// Begins a drag and remembers the Layout revision that owns its model IDs.
+    pub(crate) fn begin_drag_interaction(
+        &mut self,
+        payload: DragPayload,
+        handle: DragHandle,
+        point: Point,
+    ) -> Result<(), DragSessionError> {
+        self.drag
+            .session_mut()
+            .pointer_down_with_handle(payload, handle, point)?;
+        self.drag.layout_version = Some(self.layout.version());
+        Ok(())
+    }
+
+    /// Cancels an active gesture if its model lineage has changed externally.
+    ///
+    /// Resize commands issued by the active resize pipeline advance the stored
+    /// revision explicitly; any other revision change invalidates the gesture.
+    pub(crate) fn ensure_pointer_interaction_current(&mut self) -> bool {
+        let expected_version = if let Some(interaction) = self.interaction {
+            Some(interaction.layout_version)
+        } else if matches!(
+            self.drag.session().state(),
+            DragState::Pressed { .. } | DragState::Dragging { .. }
+        ) {
+            self.drag.layout_version
+        } else {
+            None
+        };
+
+        if expected_version.is_some_and(|version| version != self.layout.version()) {
+            if let Err(error) = self.cancel_pointer_interaction() {
+                tracing::warn!(%error, "could not cancel stale dock pointer interaction");
+            }
+            return false;
+        }
+        true
+    }
+
+    /// Called only after a resize command owned by the active interaction succeeds.
+    pub(crate) fn record_resize_layout_version(&mut self) {
+        if let Some(interaction) = self.interaction.as_mut() {
+            interaction.layout_version = self.layout.version();
+        }
+    }
+
     /// Starts tracking a resize from a Core hit-test result.
     pub fn begin_resize_interaction(
         &mut self,
         hit: HitResult,
         origin: Point,
     ) -> Result<(), ResizeInteractionError> {
-        if self.interaction.is_some() {
+        if self.has_active_pointer_interaction() {
             return Err(ResizeInteractionError::AlreadyActive);
         }
         origin.validate()?;
@@ -381,6 +444,7 @@ impl DockController {
         if interaction.is_some() {
             self.history.commit_transaction(&self.layout);
         }
+        self.drag.clear_layout_version();
         interaction
     }
 

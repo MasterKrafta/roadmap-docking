@@ -7,8 +7,8 @@ use dock_core::{
     DropTarget, GeometryError, HitResult, Layout, LayoutRects, Node, NodeId, PanelId, Point,
 };
 use gpui::{
-    AnyView, App, Context, Entity, HitboxBehavior, HitboxId, IntoElement, ParentElement,
-    Render, ScrollHandle,
+    AnyView, App, Context, Entity, FocusHandle, HitboxBehavior, HitboxId, IntoElement,
+    ParentElement, Render, ScrollHandle,
     Styled, Window, canvas, div, px, rgb,
     prelude::InteractiveElement as _,
 };
@@ -52,6 +52,9 @@ pub struct DockHost {
     middle_click_closes_tabs: bool,
     /// Keeps this host reactive to controller-owned layout and drag-state changes.
     controller_observed: bool,
+    /// Root focus boundary used to cancel gestures when this window loses focus.
+    root_focus_handle: Option<FocusHandle>,
+    focus_observed: bool,
 }
 
 #[derive(Clone)]
@@ -75,6 +78,8 @@ impl DockHost {
             open_context_menu: None,
             middle_click_closes_tabs: true,
             controller_observed: false,
+            root_focus_handle: None,
+            focus_observed: false,
         }
     }
 
@@ -159,12 +164,34 @@ impl DockHost {
         })?;
 
         self.controller
-            .update(app, |controller, _| controller.hit_test(content_point))
+            .update(app, |controller, _| controller.hit(content_point))
     }
 }
 
 impl Render for DockHost {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let focus_handle = self
+            .root_focus_handle
+            .get_or_insert_with(|| cx.focus_handle())
+            .clone();
+        if !self.focus_observed {
+            let controller = self.controller.clone();
+            let pointer_capture = self.pointer_capture.clone();
+            cx.on_focus_out(&focus_handle, window, move |_host, _event, window, app| {
+                let _ = controller.update(app, |controller, controller_cx| {
+                    let result = controller.cancel_pointer_interaction();
+                    controller_cx.notify();
+                    if let Err(error) = result {
+                        tracing::warn!(%error, "could not cancel dock interaction on focus loss");
+                    }
+                });
+                window.release_pointer();
+                pointer_capture.set(None);
+            })
+            .detach();
+            self.focus_observed = true;
+        }
+
         if !self.controller_observed {
             cx.observe(&self.controller, |_, _, host_cx| host_cx.notify())
                 .detach();
@@ -557,6 +584,7 @@ impl Render for DockHost {
         .size_full();
 
         let mut root = div()
+            .track_focus(&focus_handle)
             .flex()
             .flex_col()
             .size_full()

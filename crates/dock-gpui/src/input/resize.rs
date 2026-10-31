@@ -30,6 +30,9 @@ pub(crate) fn update_resize(
     app: &mut App,
 ) {
     let command = controller.update(app, |controller, _| {
+        if !controller.ensure_pointer_interaction_current() {
+            return None;
+        }
         let interaction = controller.resize_interaction()?;
         command_for_pointer(controller, interaction, point)
     });
@@ -39,9 +42,9 @@ pub(crate) fn update_resize(
 
     let result = controller.update(app, |controller, cx| {
         let result = if matches!(&command, DockCommand::ResizeFlyout { .. }) {
-            controller.dispatch_transient_in(command, cx)
+            controller.dispatch_resize_transient_in(command, cx)
         } else {
-            controller.dispatch_in(command, cx)
+            controller.dispatch_resize_in(command, cx)
         };
         if let Ok(outcome) = &result {
             match outcome.actual_value.as_ref() {
@@ -70,6 +73,9 @@ pub(crate) fn finish_resize(
     click_count: usize,
     app: &mut App,
 ) {
+    if !controller.update(app, |controller, _| controller.ensure_pointer_interaction_current()) {
+        return;
+    }
     if click_count >= 2 {
         let reset = controller.update(app, |controller, _| {
             let interaction = controller.resize_interaction()?;
@@ -77,7 +83,7 @@ pub(crate) fn finish_resize(
         });
         if let Some(command) = reset {
             let result = controller.update(app, |controller, cx| {
-                controller.dispatch_in(command, cx)
+                controller.dispatch_resize_in(command, cx)
             });
             if let Err(error) = result {
                 tracing::debug!(%error, "could not reset splitter sizes");

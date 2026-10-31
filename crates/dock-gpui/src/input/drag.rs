@@ -15,10 +15,7 @@ pub(crate) fn begin_drag_at(
     app: &mut App,
 ) {
     if let Err(error) = controller.update(app, |controller, _| {
-        controller
-            .drag_mut()
-            .session_mut()
-            .pointer_down_with_handle(payload, handle, position)
+        controller.begin_drag_interaction(payload, handle, position)
     }) {
         tracing::debug!(%error, "could not begin dock drag gesture");
     }
@@ -98,6 +95,7 @@ pub(crate) fn finish_drag_at(
             DragState::Pressed { payload, .. } | DragState::Dragging { payload, .. } => payload,
             DragState::Idle | DragState::Dropped { .. } | DragState::Cancelled { .. } => {
                 controller.drag_mut().clear_resolver();
+                controller.drag_mut().clear_layout_version();
                 return;
             }
         };
@@ -153,6 +151,7 @@ pub(crate) fn finish_drag_at(
 
         let _ = controller.drag_mut().session_mut().reset();
         controller.drag_mut().clear_resolver();
+        controller.drag_mut().clear_layout_version();
         cx.notify();
     });
 }

@@ -15,6 +15,36 @@ impl DockController {
         &mut self,
         command: DockCommand,
     ) -> Result<CommandOutcome, CommandError> {
+        self.dispatch_with_pointer_policy(command, false)
+    }
+
+    /// Applies a resize command owned by the active pointer-resize pipeline.
+    ///
+    /// Unlike ordinary external dispatch, this command is allowed to advance the
+    /// active ResizeInteraction's expected Layout revision.
+    fn dispatch_resize(
+        &mut self,
+        command: DockCommand,
+    ) -> Result<CommandOutcome, CommandError> {
+        self.dispatch_with_pointer_policy(command, true)
+    }
+
+    fn dispatch_with_pointer_policy(
+        &mut self,
+        command: DockCommand,
+        from_resize_pipeline: bool,
+    ) -> Result<CommandOutcome, CommandError> {
+        let resize_owns_command = from_resize_pipeline
+            && self.interaction.is_some()
+            && is_resize_command(&command);
+        if self.has_active_pointer_interaction() && !resize_owns_command {
+            if let Err(error) = self.cancel_pointer_interaction() {
+                tracing::warn!(%error, "could not cancel stale dock interaction before command");
+            }
+        }
+        let resize_owns_command = from_resize_pipeline
+            && self.interaction.is_some()
+            && is_resize_command(&command);
         let before_panels = self.panel_keys();
         let previous_version = self.layout.version();
         let activated = match &command {
@@ -25,6 +55,9 @@ impl DockController {
         match self.history.apply(&mut self.layout, command, &self.metrics) {
             Ok(outcome) => {
                 self.finish_success(before_panels, previous_version, activated.into_iter());
+                if resize_owns_command {
+                    self.record_resize_layout_version();
+                }
                 Ok(outcome)
             }
             Err(error) => {
@@ -71,11 +104,43 @@ impl DockController {
         result
     }
 
+    /// Dispatches a flyout-resize command from the active pointer-resize handler.
+    pub(crate) fn dispatch_resize_transient_in(
+        &mut self,
+        command: DockCommand,
+        cx: &mut Context<Self>,
+    ) -> Result<CommandOutcome, CommandError> {
+        if !matches!(command, DockCommand::ResizeFlyout { .. }) {
+            return self.dispatch_transient_in(command, cx);
+        }
+        let result = self.dispatch_resize(command);
+        self.flush_events(cx);
+        cx.notify();
+        result
+    }
+
+    /// Dispatches a persistent resize command from the active pointer-resize handler.
+    pub(crate) fn dispatch_resize_in(
+        &mut self,
+        command: DockCommand,
+        cx: &mut Context<Self>,
+    ) -> Result<CommandOutcome, CommandError> {
+        let result = self.dispatch_resize(command);
+        self.flush_events(cx);
+        cx.notify();
+        result
+    }
+
     /// Applies several commands atomically as one history step.
     pub fn dispatch_sequence(
         &mut self,
         commands: Vec<DockCommand>,
     ) -> Result<Vec<CommandOutcome>, CommandError> {
+        if self.has_active_pointer_interaction()
+            && let Err(error) = self.cancel_pointer_interaction()
+        {
+            tracing::warn!(%error, "could not cancel dock interaction before command sequence");
+        }
         let before_panels = self.panel_keys();
         let previous_version = self.layout.version();
         let activated = commands
@@ -102,7 +167,11 @@ impl DockController {
     }
 
     pub fn undo(&mut self) -> Result<bool, CommandError> {
-        let _ = self.end_resize_interaction();
+        if self.has_active_pointer_interaction()
+            && let Err(error) = self.cancel_pointer_interaction()
+        {
+            tracing::warn!(%error, "could not cancel dock interaction before undo");
+        }
         let before_panels = self.panel_keys();
         let previous_version = self.layout.version();
         match self.history.undo(&mut self.layout, &self.metrics) {
@@ -120,7 +189,11 @@ impl DockController {
     }
 
     pub fn redo(&mut self) -> Result<bool, CommandError> {
-        let _ = self.end_resize_interaction();
+        if self.has_active_pointer_interaction()
+            && let Err(error) = self.cancel_pointer_interaction()
+        {
+            tracing::warn!(%error, "could not cancel dock interaction before redo");
+        }
         let before_panels = self.panel_keys();
         let previous_version = self.layout.version();
         match self.history.redo(&mut self.layout, &self.metrics) {
@@ -345,3 +418,18 @@ impl DockController {
         });
     }
 }
+
+fn is_resize_command(command: &DockCommand) -> bool {
+    matches!(
+        command,
+        DockCommand::ResizeGroups { .. }
+            | DockCommand::ResizeColumn { .. }
+            | DockCommand::ResizeColumnBoundary { .. }
+            | DockCommand::ResizeSplitColumnBoundary { .. }
+            | DockCommand::ResizeFloatingBounds { .. }
+            | DockCommand::ResizeFlyout { .. }
+            | DockCommand::ResetColumnRatios { .. }
+            | DockCommand::ResetMainColumnRatios { .. }
+    )
+}
+
