@@ -1,5 +1,5 @@
 use dock_core::Rect;
-use gpui::{AnyView, IntoElement, ParentElement, Styled, div, px, rgb};
+use gpui::{AnyView, IntoElement, ParentElement, Styled, div, px, rgb, prelude::InteractiveElement as _};
 use ui::Theme;
 
 /// Positions the application's view in the remaining Core-computed canvas.

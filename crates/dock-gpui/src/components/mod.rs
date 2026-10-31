@@ -28,5 +28,5 @@ pub use tab_overflow::TabOverflow;
 pub use splitter::SplitterView;
 pub use tab_strip::{TabHeaderView, TabStripView};
 
-pub(crate) use context_menu::{ContextMenuTarget, ContextMenuToggle, GroupMenuToggle};
+pub(crate) use context_menu::{ContextMenuTarget, ContextMenuToggle};
 pub(crate) use tab_strip::collect_group_presentations;

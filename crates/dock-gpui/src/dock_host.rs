@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use dock_core::{
     ColumnDisplayItem, ColumnMode, ComputeRectsError, DockCommand, DockSide, DragHandle,
-    DragPayload, DropTarget, GeometryError, HitResult, Layout, LayoutRects, Node, NodeId, PanelId, Point,
+    DropTarget, GeometryError, HitResult, Layout, LayoutRects, Node, NodeId, PanelId, Point,
 };
 use gpui::{
     AnyView, App, Context, Entity, FocusHandle, HitboxBehavior, HitboxId, IntoElement,

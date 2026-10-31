@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use dock_core::{
-    WorkspaceDiagnostic, WorkspaceFile, WorkspaceFileError,
+    InitialLayoutError, WorkspaceDiagnostic, WorkspaceFile, WorkspaceFileError,
     WorkspaceLoadOptions, create_initial_layout,
 };
 use thiserror::Error;

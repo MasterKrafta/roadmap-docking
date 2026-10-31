@@ -153,6 +153,7 @@ impl ColumnView {
         }
 
         let mut scroll_viewport = div()
+            .id(format!("dock-column-scroll-{:?}", column.column))
             .absolute()
             .top_0()
             .left_0()

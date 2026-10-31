@@ -159,7 +159,7 @@ impl DragGhost {
         theme: Theme,
     ) -> impl IntoElement {
         let Some(preview) = preview else {
-            return div();
+            return div().id("dock-drag-ghost");
         };
 
         let (title, icon, subtitle, is_group) =

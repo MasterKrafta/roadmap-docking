@@ -331,6 +331,7 @@ fn render_entry(
 ) -> impl IntoElement {
     match entry {
         ContextMenuEntry::Separator => div()
+            .id(format!("dock-menu-separator-{index}"))
             .w_full()
             .h(px(7.0))
             .flex()
