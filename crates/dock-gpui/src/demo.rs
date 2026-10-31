@@ -576,6 +576,9 @@ mod windows_demo {
                 theme,
             ));
 
+            // Keep the empty scroll-handle map alive while MainDockView's
+            // element is stored in the section below (Rust 2024 RPIT capture).
+            let main_scroll_handles: HashMap<NodeId, ScrollHandle> = HashMap::new();
             let main_dock = MainDockView::render(
                 &main.main_columns,
                 &main.rects.groups,
@@ -597,7 +600,7 @@ mod windows_demo {
                 &main.main_node_ids,
                 &main.main_column_groups,
                 &main.column_modes,
-                &HashMap::new(),
+                &main_scroll_handles,
                 self.main.clone(),
                 theme,
             );
@@ -1019,6 +1022,12 @@ mod windows_demo {
                 .collect::<Vec<_>>();
             let floating_presentations =
                 HashMap::from([(floating_root, floating_presentation.clone())]);
+            // Keep these empty maps alive for the lifetime of the returned element.
+            let floating_column_groups: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
+            let floating_column_modes: HashMap<NodeId, ColumnMode> = HashMap::new();
+            let floating_rail_display_orders: HashMap<NodeId, Vec<ColumnDisplayItem>> =
+                HashMap::new();
+            let floating_scroll_handles: HashMap<NodeId, ScrollHandle> = HashMap::new();
             let floating_view = FloatingWindowView::render(
                 floating_rect,
                 &floating_edges,
@@ -1029,12 +1038,12 @@ mod windows_demo {
                 &floating_headers,
                 &floating_overflows,
                 &floating_presentations,
-                &HashMap::new(),
-                &HashMap::new(),
-                &HashMap::new(),
+                &floating_column_groups,
+                &floating_column_modes,
+                &floating_rail_display_orders,
                 &[],
                 &[],
-                &HashMap::new(),
+                &floating_scroll_handles,
                 None,
                 None,
                 &[],
