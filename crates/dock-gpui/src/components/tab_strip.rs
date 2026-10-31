@@ -1,11 +1,13 @@
 use std::collections::{HashMap, HashSet};
 
 use dock_core::{
-    DockCommand, DragHandle, DragPayload, FloatingGroupId, Layout, Node, NodeId, PanelId, TabHeaderRect,
+    DockCommand, DragHandle, DragPayload, FloatingGroupId, Layout, Node, NodeId, PanelId, Point,
+    TabHeaderRect,
     TabOverflowRect, TabStripRect,
 };
 use gpui::{
-    Entity, IntoElement, MouseButton, ParentElement, SharedString, Styled, div, img, px, rgb,
+    Context, Entity, IntoElement, MouseButton, ParentElement, Render, SharedString, Styled,
+    Window, div, img, px, rgb,
     prelude::InteractiveElement as _,
 };
 use ui::Theme;
@@ -13,7 +15,7 @@ use ui::Theme;
 use crate::{DockController, IconSource, PanelRegistry};
 
 use super::tab_overflow::{TabOverflow, TabOverflowToggle};
-use crate::input::{begin_drag, dispatch_command, finish_drag, update_drag};
+use crate::input::{begin_drag, dispatch_command, finish_drag, update_drag_at};
 
 #[derive(Clone)]
 pub(crate) struct TabPresentation {
@@ -32,6 +34,18 @@ pub(crate) struct GroupPresentation {
 
 /// Tab-strip surface and tab headers for one Tabs group.
 pub struct TabStripView;
+
+/// GPUI drag marker for a panel tab. The visible ghost is rendered by DockHost.
+#[derive(Clone, Copy)]
+struct PanelTabDrag;
+
+struct PanelTabDragGhost;
+
+impl Render for PanelTabDragGhost {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        gpui::Empty
+    }
+}
 
 /// One visible tab header, including its close affordance and drag gesture.
 pub struct TabHeaderView;
@@ -222,9 +236,21 @@ impl TabHeaderView {
                     )
                 }
             })
-            .on_mouse_move({
+            .on_drag(PanelTabDrag, |_, _, _, app| {
+                app.new(|_| PanelTabDragGhost)
+            })
+            .on_drag_move::<PanelTabDrag>({
                 let controller = controller.clone();
-                move |event, _, app| update_drag(&controller, event, app)
+                move |event, _, app| {
+                    update_drag_at(
+                        &controller,
+                        Point::new(
+                            event.event.position.x.as_f32(),
+                            event.event.position.y.as_f32(),
+                        ),
+                        app,
+                    );
+                }
             })
             .on_mouse_up({
                 let controller = controller.clone();
