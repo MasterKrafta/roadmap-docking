@@ -16,7 +16,7 @@ use super::{
     context_menu::GroupMenuToggle,
     group::GroupView,
     panel_host::PanelHost,
-    splitter::splitter_surface,
+    splitter::SplitterView,
     tab_overflow::TabOverflowToggle,
     tab_strip::GroupPresentation,
 };
@@ -103,8 +103,21 @@ impl ColumnView {
                     content = content.child(group_surface(*group, content_origin, theme));
                 }
             }
+            let pointer_offset = Point::new(
+                0.0,
+                scroll_handle
+                    .as_ref()
+                    .map(|handle| handle.offset().y.as_f32())
+                    .unwrap_or(0.0),
+            );
             for splitter in splitters {
-                content = content.child(splitter_surface(*splitter, content_origin, theme));
+                content = content.child(SplitterView::render(
+                    *splitter,
+                    content_origin,
+                    pointer_offset,
+                    controller.clone(),
+                    theme,
+                ));
             }
 
             // Mount active panel content inside the scrolling content tree. This

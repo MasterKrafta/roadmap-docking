@@ -14,7 +14,8 @@ use ui::Theme;
 use crate::{
     DockController,
     components::{
-        GroupMenuToggle, MainDockView, PanelHost, TabOverflowToggle, collect_group_presentations,
+        GroupMenuToggle, MainDockView, PanelHost, SplitterView, TabOverflowToggle,
+        collect_group_presentations,
     },
     input::scroll_adjusted_hit_test_point,
 };
@@ -488,6 +489,22 @@ impl Render for DockHost {
                 floating_panel_views,
                 Point::ZERO,
             ));
+
+            // Splitters owned by nodes outside the two main dock roots belong
+            // to floating compositions and use workspace coordinates.
+            for splitter in rects
+                .splitters
+                .iter()
+                .filter(|splitter| !main_node_ids.contains(&splitter.owner))
+            {
+                workspace = workspace.child(SplitterView::render(
+                    *splitter,
+                    Point::ZERO,
+                    Point::ZERO,
+                    self.controller.clone(),
+                    theme,
+                ));
+            }
         }
 
         root.child(workspace)

@@ -12,7 +12,7 @@ use crate::DockController;
 use super::{
     column::ColumnView,
     context_menu::GroupMenuToggle,
-    splitter::splitter_surface,
+    splitter::SplitterView,
     tab_overflow::TabOverflowToggle,
     tab_strip::GroupPresentation,
 };
@@ -120,7 +120,13 @@ impl MainDockView {
         for splitter in splitters.iter().filter(|splitter| {
             splitter.axis == Axis::X && main_node_ids.contains(&splitter.owner)
         }) {
-            layer = layer.child(splitter_surface(*splitter, Point::ZERO, theme));
+            layer = layer.child(SplitterView::render(
+                *splitter,
+                Point::ZERO,
+                Point::ZERO,
+                controller.clone(),
+                theme,
+            ));
         }
 
         layer

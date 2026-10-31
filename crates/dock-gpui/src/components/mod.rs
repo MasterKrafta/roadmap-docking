@@ -14,6 +14,7 @@ pub use group::GroupView;
 pub use main_dock::MainDockView;
 pub use panel_host::PanelHost;
 pub use tab_overflow::TabOverflow;
+pub use splitter::SplitterView;
 pub use tab_strip::{TabHeaderView, TabStripView};
 
 pub(crate) use context_menu::GroupMenuToggle;

@@ -1,9 +1,10 @@
 use std::collections::{HashMap, VecDeque};
 
 use dock_core::{
-    CommandError, DockMetrics, DragSession, DragSessionError, DropSource, DropZoneResolver,
-    FlyoutState, GeometryError, HitResult, Layout, LayoutRects, PanelId, PanelKey, Point, Profile,
-    Rect, ValidationError, WorkspaceDiagnostic,
+    Axis, CommandError, DockMetrics, DockSide, DragSession, DragSessionError, DropSource,
+    DropZoneResolver, FlyoutState, GeometryError, HitResult, Layout, LayoutRects, Node, PanelId,
+    PanelKey, Point, Profile, Rect, ValidationError, WorkspaceDiagnostic,
+    OUTER_COLUMN_EDGE_BOUNDARY_INDEX,
 };
 use gpui::{AnyView, EventEmitter};
 use thiserror::Error;
@@ -135,6 +136,12 @@ pub struct ResizeInteraction {
     pub origin: Point,
     pub layout_version: u64,
     pub metrics_revision: u64,
+    /// Sum of effective boundary movement accepted by Core so far.
+    pub applied_delta: f32,
+    /// Requested width at pointer-down for a canvas-facing main-dock edge.
+    pub start_width: Option<f32>,
+    /// Most recent effective absolute width returned by Core.
+    pub actual_width: Option<f32>,
 }
 
 /// Invalid attempts to begin a resize interaction.
@@ -259,19 +266,58 @@ impl DockController {
         ) {
             return Err(ResizeInteractionError::NotResizeHandle);
         }
+        let start_width = match hit {
+            HitResult::Splitter {
+                owner,
+                boundary_index: OUTER_COLUMN_EDGE_BOUNDARY_INDEX,
+                axis: Axis::X,
+            } => match self.layout.node(owner) {
+                Some(Node::Column(column)) => Some(column.width),
+                _ => None,
+            },
+            _ => None,
+        };
+        if !self.history.begin_transaction(&self.layout) {
+            return Err(ResizeInteractionError::AlreadyActive);
+        }
         self.drag.clear_resolver();
         self.interaction = Some(ResizeInteraction {
             hit,
             origin,
             layout_version: self.layout.version(),
             metrics_revision: self.metrics_revision,
+            applied_delta: 0.0,
+            start_width,
+            actual_width: start_width,
         });
         Ok(())
     }
 
-    /// Ends the active resize and returns its captured start data.
+    /// Records an effective boundary movement returned by a Core resize command.
+    pub fn record_resize_applied_delta(&mut self, delta: f32) {
+        if delta.is_finite()
+            && let Some(interaction) = self.interaction.as_mut()
+        {
+            interaction.applied_delta += delta;
+        }
+    }
+
+    /// Records the effective width returned by an absolute column resize.
+    pub fn record_resize_actual_width(&mut self, width: f32) {
+        if width.is_finite()
+            && let Some(interaction) = self.interaction.as_mut()
+        {
+            interaction.actual_width = Some(width);
+        }
+    }
+
+    /// Ends the active resize and commits its single history checkpoint.
     pub fn end_resize_interaction(&mut self) -> Option<ResizeInteraction> {
-        self.interaction.take()
+        let interaction = self.interaction.take();
+        if interaction.is_some() {
+            self.history.commit_transaction(&self.layout);
+        }
+        interaction
     }
 
     pub fn last_error(&self) -> Option<&CommandError> {

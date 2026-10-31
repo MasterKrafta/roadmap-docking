@@ -29,7 +29,7 @@ pub fn run(_options: RunOptions) {
     tracing::warn!("dock-gpui host is not implemented yet");
 }
 
-pub use components::{ColumnView, GroupView, MainDockView, PanelHost, TabHeaderView, TabOverflow, TabStripView};
+pub use components::{ColumnView, GroupView, MainDockView, PanelHost, SplitterView, TabHeaderView, TabOverflow, TabStripView};
 pub use dock_host::DockHost;
 pub use missing_panel::MissingPanelPlaceholder;
 
@@ -51,6 +51,7 @@ pub use dock_core::{
     PanelConstraints, PanelId, PanelInstance, PanelKey, PanelKeyError, PanelRect, PanelState, Point,
     Profile, Rect, ResizeEdge, Size, Split, SplitterRect, TabHeaderRect, TabOverflowRect,
     TabStripRect, Tabs, UndoRedoHistory, ValidationError, ValidationReason, VerticalOverflow,
+    OUTER_COLUMN_EDGE_BOUNDARY_INDEX,
     WorkspaceDiagnostic, WorkspaceFile, WorkspaceFileError, WorkspaceFloatingGroup,
     WorkspaceLayout, WorkspaceLoadOptions, WorkspaceLoadResult, WorkspaceNode,
 };
