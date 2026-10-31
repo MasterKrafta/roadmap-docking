@@ -8,6 +8,10 @@ rust-version.workspace = true
 name = "tearoff"
 path = "main.rs"
 
+[[bin]]
+name = "any_view_transfer"
+path = "any_view_transfer.rs"
+
 [dependencies]
 gpui.workspace = true
 
