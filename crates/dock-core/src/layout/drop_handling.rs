@@ -91,9 +91,13 @@ impl Layout {
         group: FloatingGroupId,
         metrics: &DockMetrics,
     ) -> Result<DragDropAction, CommandError> {
-        let target = request.target.ok_or(CommandError::InvalidTarget {
-            reason: "floating capture drag requires a resolved dock/stack target",
-        })?;
+        let Some(target) = request.target else {
+            return if self.floating_group(group).is_some() {
+                Ok(DragDropAction::NoOp)
+            } else {
+                Err(CommandError::MissingFloatingGroup { group })
+            };
+        };
         if matches!(target, DropTarget::FreeArea) {
             return Err(CommandError::InvalidTarget {
                 reason: "a floating capture drag requires a dock/stack target",
