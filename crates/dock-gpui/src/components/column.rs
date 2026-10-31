@@ -102,6 +102,7 @@ impl ColumnView {
                         reserved_grip_left,
                         controller.clone(),
                         theme,
+                        raise_floating,
                         menu_group == Some(group.group),
                         toggle_group_menu.clone(),
                         overflow_group == Some(group.group),
