@@ -157,6 +157,12 @@ pub enum ResizeInteractionError {
     InvalidPointer(#[from] GeometryError),
 }
 
+#[derive(Default)]
+struct ResizeFrameThrottle {
+    latest: Option<Point>,
+    scheduled: bool,
+}
+
 /// Owns the sole dock-core layout and the adapter state needed to operate it.
 ///
 /// DockController is intended to live inside a GPUI Entity. It contains no
@@ -171,6 +177,7 @@ pub struct DockController {
     rects_key: Option<RectCacheKey>,
     drag: DragController,
     interaction: Option<ResizeInteraction>,
+    resize_frame: ResizeFrameThrottle,
     registry: PanelRegistry,
     panel_views: HashMap<PanelId, AnyView>,
     last_error: Option<CommandError>,
@@ -203,6 +210,7 @@ impl DockController {
             rects: None,
             rects_key: None,
             interaction: None,
+            resize_frame: ResizeFrameThrottle::default(),
             registry,
             panel_views: HashMap::new(),
             last_error: None,
@@ -280,6 +288,7 @@ impl DockController {
         if !self.history.begin_transaction(&self.layout) {
             return Err(ResizeInteractionError::AlreadyActive);
         }
+        self.resize_frame.latest = None;
         self.drag.clear_resolver();
         self.interaction = Some(ResizeInteraction {
             hit,
@@ -311,8 +320,35 @@ impl DockController {
         }
     }
 
+    /// Stores the latest pointer position and reports whether the caller
+    /// should schedule the single frame callback for the active gesture.
+    pub(crate) fn queue_resize_frame_point(&mut self, point: Point) -> bool {
+        if self.interaction.is_none() {
+            return false;
+        }
+        self.resize_frame.latest = Some(point);
+        if self.resize_frame.scheduled {
+            false
+        } else {
+            self.resize_frame.scheduled = true;
+            true
+        }
+    }
+
+    /// Takes the most recent pointer position and frees the frame slot.
+    pub(crate) fn take_resize_frame_point(&mut self) -> Option<Point> {
+        self.resize_frame.scheduled = false;
+        self.resize_frame.latest.take()
+    }
+
+    /// Drops a pending pointer position when the gesture is explicitly finished.
+    pub(crate) fn clear_resize_frame_point(&mut self) {
+        self.resize_frame.latest = None;
+    }
+
     /// Ends the active resize and commits its single history checkpoint.
     pub fn end_resize_interaction(&mut self) -> Option<ResizeInteraction> {
+        self.resize_frame.latest = None;
         let interaction = self.interaction.take();
         if interaction.is_some() {
             self.history.commit_transaction(&self.layout);

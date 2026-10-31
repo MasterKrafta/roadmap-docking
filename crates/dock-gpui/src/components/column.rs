@@ -107,7 +107,7 @@ impl ColumnView {
                 0.0,
                 scroll_handle
                     .as_ref()
-                    .map(|handle| handle.offset().y.as_f32())
+                    .map(|handle| handle.offset().y.as_f32().max(0.0))
                     .unwrap_or(0.0),
             );
             for splitter in splitters {

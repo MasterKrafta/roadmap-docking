@@ -1,8 +1,3 @@
-use std::{
-    cell::RefCell,
-    rc::Rc,
-};
-
 use dock_core::{Axis, Point, SplitterRect};
 use gpui::{
     Context, Entity, IntoElement, MouseButton, MouseDownEvent, MouseUpEvent, ParentElement,
@@ -25,12 +20,6 @@ impl Render for SplitterDragGhost {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         gpui::Empty
     }
-}
-
-#[derive(Default)]
-struct FrameThrottle {
-    latest: Option<Point>,
-    scheduled: bool,
 }
 
 /// Interactive splitter hit target and its visible, centered handle line.
@@ -70,14 +59,10 @@ impl SplitterView {
                 ),
             };
 
-        let throttle = Rc::new(RefCell::new(FrameThrottle::default()));
         let controller_for_down = controller.clone();
         let controller_for_drag = controller.clone();
         let controller_for_up = controller.clone();
         let controller_for_up_out = controller.clone();
-        let throttle_for_up = throttle.clone();
-        let throttle_for_up_out = throttle.clone();
-
         let mut hitbox = div()
             .id(format!(
                 "splitter-{:?}-{}-{:?}",
@@ -98,7 +83,9 @@ impl SplitterView {
                 app.stop_propagation();
             })
             .on_mouse_up(MouseButton::Left, move |event: &MouseUpEvent, _, app| {
-                throttle_for_up.borrow_mut().latest = None;
+                let _ = controller_for_up.update(app, |controller, _| {
+                    controller.clear_resize_frame_point();
+                });
                 finish_resize(
                     &controller_for_up,
                     event_point(event.position, pointer_offset),
@@ -108,7 +95,9 @@ impl SplitterView {
                 app.stop_propagation();
             })
             .on_mouse_up_out(MouseButton::Left, move |event: &MouseUpEvent, _, app| {
-                throttle_for_up_out.borrow_mut().latest = None;
+                let _ = controller_for_up_out.update(app, |controller, _| {
+                    controller.clear_resize_frame_point();
+                });
                 finish_resize(
                     &controller_for_up_out,
                     event_point(event.position, pointer_offset),
@@ -119,30 +108,19 @@ impl SplitterView {
             })
             .on_drag(SplitterDrag, |_, _, _, app| app.new(|_| SplitterDragGhost))
             .on_drag_move::<SplitterDrag>({
-                let throttle = throttle.clone();
                 let controller = controller_for_drag.clone();
-                move |event, window, _app| {
+                move |event, window, app| {
                     let point = event_point(event.event.position, pointer_offset);
-                    let should_schedule = {
-                        let mut state = throttle.borrow_mut();
-                        state.latest = Some(point);
-                        if state.scheduled {
-                            false
-                        } else {
-                            state.scheduled = true;
-                            true
-                        }
-                    };
+                    let should_schedule = controller.update(app, |controller, _| {
+                        controller.queue_resize_frame_point(point)
+                    });
 
                     if should_schedule {
-                        let throttle = throttle.clone();
                         let controller = controller.clone();
                         window.on_next_frame(move |_, app| {
-                            let point = {
-                                let mut state = throttle.borrow_mut();
-                                state.scheduled = false;
-                                state.latest.take()
-                            };
+                            let point = controller.update(app, |controller, _| {
+                                controller.take_resize_frame_point()
+                            });
                             if let Some(point) = point {
                                 update_resize(&controller, point, app);
                             }

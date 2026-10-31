@@ -325,6 +325,7 @@ impl DockController {
         self.panel_views.clear();
         self.drag.cancel_gesture();
         self.interaction = None;
+        self.resize_frame.latest = None;
         self.rects_key = None;
         self.last_error = None;
         self.pending_events.push_back(DockEvent::LayoutChanged {
