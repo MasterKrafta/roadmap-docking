@@ -115,7 +115,7 @@ impl FloatingWindowView {
             .border_1()
             .border_color(rgb(theme.colors.group_frame_border))
             .shadow_lg()
-            .on_mouse_down(MouseButton::Left, {
+            .capture_any_mouse_down({
                 let controller = controller.clone();
                 move |_, _, app| {
                     dispatch_command(
