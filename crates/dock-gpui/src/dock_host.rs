@@ -2,8 +2,8 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use dock_core::{
-    ColumnDisplayItem, ColumnMode, ComputeRectsError, DockCommand, DockSide,
-    HitResult, Layout, Node, NodeId, PanelId, Point, Rect, Size as CoreSize,
+    ColumnDisplayItem, ColumnMode, ComputeRectsError, DockCommand, DockSide, DragPayload,
+    DropTarget, HitResult, Layout, Node, NodeId, PanelId, Point, Rect, Size as CoreSize,
 };
 use gpui::{
     AnyView, App, Bounds, Context, Entity, IntoElement, ParentElement, Pixels, Render, ScrollHandle,
@@ -15,10 +15,10 @@ use ui::Theme;
 use crate::{
     DockController,
     components::{
-        FloatingWindowView, FlyoutView, GroupMenuToggle, MainDockView, TabOverflowToggle,
-        collect_group_presentations,
+        DragGhost, DropOverlay, FloatingWindowView, FlyoutView, GroupMenuToggle, MainDockView,
+        TabOverflowToggle, collect_group_presentations,
     },
-    input::scroll_adjusted_hit_test_point,
+    input::{floating_bounds, scroll_adjusted_hit_test_point},
 };
 
 /// Root composition for an application's docking workspace.
@@ -176,6 +176,7 @@ impl Render for DockHost {
             active_flyout,
             drag_preview,
             drag_zones,
+            free_area_preview_bounds,
             metrics,
         ) = self.controller.update(cx, |controller, _| {
                 let rects = controller.geometry().cloned();
@@ -279,6 +280,11 @@ impl Render for DockHost {
                     .resolver()
                     .map(|resolver| resolver.zones().to_vec())
                     .unwrap_or_default();
+                let free_area_preview_bounds = drag_preview
+                    .filter(|preview| preview.target == Some(DropTarget::FreeArea))
+                    .and_then(|preview| {
+                        floating_bounds(controller, preview.payload, preview.point)
+                    });
                 let metrics = controller.metrics();
 
                 (
@@ -299,6 +305,7 @@ impl Render for DockHost {
                     active_flyout,
                     drag_preview,
                     drag_zones,
+                    free_area_preview_bounds,
                     metrics,
                 )
             });
@@ -500,6 +507,18 @@ impl Render for DockHost {
             .bg(rgb(theme.colors.window_background))
             .overflow_hidden()
             .child(measurement);
+
+        // The current semantic target controls the cursor. A floating-title drag
+        // intentionally has no drop target but is still a valid move gesture.
+        if let Some(preview) = drag_preview {
+            workspace = if preview.target.is_some()
+                || matches!(preview.payload, DragPayload::FloatingGroup { .. })
+            {
+                workspace.cursor_grabbing()
+            } else {
+                workspace.cursor_not_allowed()
+            };
+        }
 
         // Escape dismisses the transient flyout without changing persistent layout state.
         if active_flyout.is_some() {
@@ -720,6 +739,25 @@ impl Render for DockHost {
                 ));
             }
 
+            // One overlay consumes the same resolver snapshot used by hit testing.
+            // The ghost is a visual-only sibling and has no pointer listeners.
+            workspace = workspace.child(DropOverlay::render(
+                &drag_zones,
+                drag_preview,
+                &rects.groups,
+                &rects.tab_headers,
+                &rects.tab_strips,
+                &rects.floating_groups,
+                free_area_preview_bounds,
+                theme,
+            ));
+            workspace = workspace.child(DragGhost::render(
+                drag_preview,
+                &group_presentations,
+                &floating_titles,
+                rects.viewport,
+                theme,
+            ));
         }
 
         root.child(workspace)
