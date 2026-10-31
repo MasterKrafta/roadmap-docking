@@ -10,7 +10,7 @@ use dock_core::{
     DockMetrics, InitialLayoutError, PanelConstraints, PanelKey, PanelKeyError, Point, Profile,
     Rect, Size,
 };
-use gpui::{AnyView, App, Context, Entity, IntoElement, Render, SharedString, Window};
+use gpui::{AnyView, App, AppContext, Context, Entity, IntoElement, Render, SharedString, Window};
 use thiserror::Error;
 
 use crate::{
