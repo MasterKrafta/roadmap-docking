@@ -116,6 +116,12 @@ fn pointer_click_intent_for_hit(hit: HitResult, click_count: usize) -> PointerCl
     }
 }
 
+/// Shared pointer state retained by DockHost across rerenders.
+pub(crate) struct PointerEventState {
+    pub(crate) pointer_capture: Rc<Cell<Option<HitboxId>>>,
+    pub(crate) pointer_press: Rc<Cell<Option<PointerPress>>>,
+}
+
 /// Installs the DockHost-level mouse event pipeline. Core HitResult is the
 /// only source of dock gesture intent; components keep only explicit button
 /// actions that do not have a HitResult representation.
@@ -126,9 +132,13 @@ pub(crate) fn register_pointer_events(
     controller: Entity<DockController>,
     scroll_handles: HashMap<NodeId, ScrollHandle>,
     toggle_context_menu: ContextMenuToggle,
-    pointer_capture: Rc<Cell<Option<HitboxId>>>,
-    pointer_press: Rc<Cell<Option<PointerPress>>>,
+    pointer_state: PointerEventState,
 ) {
+    let PointerEventState {
+        pointer_capture,
+        pointer_press,
+    } = pointer_state;
+
     window.on_mouse_event({
         let controller = controller.clone();
         let scroll_handles = scroll_handles.clone();

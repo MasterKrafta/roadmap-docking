@@ -28,7 +28,7 @@ pub(crate) fn update_resize(
     point: Point,
     app: &mut App,
 ) {
-    let _ = controller.update(app, |controller, cx| {
+    controller.update(app, |controller, cx| {
         if !controller.ensure_pointer_interaction_current() {
             return;
         }
@@ -71,7 +71,7 @@ pub(crate) fn finish_resize(
         }
     }
 
-    let _ = controller.update(app, |controller, cx| {
+    controller.update(app, |controller, cx| {
         controller.end_resize_interaction();
         cx.notify();
     });

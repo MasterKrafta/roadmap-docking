@@ -182,7 +182,7 @@ impl Render for DockHost {
             let pointer_capture = self.pointer_capture.clone();
             let pointer_press = self.pointer_press.clone();
             cx.on_focus_out(&focus_handle, window, move |_host, _event, window, app| {
-                let _ = controller.update(app, |controller, controller_cx| {
+                controller.update(app, |controller, controller_cx| {
                     let result = controller.cancel_pointer_interaction_on_focus_loss();
                     controller_cx.notify();
                     if let Err(error) = result {
@@ -463,7 +463,7 @@ impl Render for DockHost {
             for owner in overflow_columns {
                 self.column_scroll_handles
                     .entry(owner)
-                    .or_insert_with(ScrollHandle::new);
+                    .or_default();
             }
         }
 
@@ -482,7 +482,7 @@ impl Render for DockHost {
         let toggle_context_menu: ContextMenuToggle =
             Rc::new(move |target, anchor, app| {
                 if let Some(host) = menu_host_entity.upgrade() {
-                    let _ = host.update(app, |host, host_cx| {
+                    host.update(app, |host, host_cx| {
                         host.open_context_menu = if host
                             .open_context_menu
                             .as_ref()
@@ -504,7 +504,7 @@ impl Render for DockHost {
         let dismiss_host_entity = cx.entity().downgrade();
         let dismiss_context_menu: Rc<dyn Fn(&mut App)> = Rc::new(move |app| {
             if let Some(host) = dismiss_host_entity.upgrade() {
-                let _ = host.update(app, |host, host_cx| {
+                host.update(app, |host, host_cx| {
                     host.open_context_menu = None;
                     host_cx.notify();
                 });
@@ -512,10 +512,10 @@ impl Render for DockHost {
         });
 
         let submenu_host_entity = cx.entity().downgrade();
-        let toggle_context_submenu: Rc<dyn Fn(Option<usize>, &mut App)> =
+        let toggle_context_submenu: crate::components::context_menu::ContextMenuSubmenuToggle =
             Rc::new(move |index, app| {
                 if let Some(host) = submenu_host_entity.upgrade() {
-                    let _ = host.update(app, |host, host_cx| {
+                    host.update(app, |host, host_cx| {
                         if let Some(open) = host.open_context_menu.as_mut() {
                             open.open_submenu = index;
                             host_cx.notify();
@@ -609,8 +609,10 @@ impl Render for DockHost {
                         pointer_controller.clone(),
                         pointer_scroll_handles.clone(),
                         pointer_context_menu.clone(),
-                        pointer_capture.clone(),
-                        pointer_press_for_events.clone(),
+                        crate::input::PointerEventState {
+                            pointer_capture: pointer_capture.clone(),
+                            pointer_press: pointer_press_for_events.clone(),
+                        },
                     );
                 }
                 // Apply the drag cursor at window level so child buttons and

@@ -152,15 +152,15 @@ pub(crate) fn finish_drag_at(
 
         // Keep DragPreview.target synchronized with the final pointer position
         // before asking DragSession to finish the gesture.
-        if drag_started && handle != Some(DragHandle::FloatingTitle) {
-            if let Err(error) = controller
+        if drag_started
+            && handle != Some(DragHandle::FloatingTitle)
+            && let Err(error) = controller
                 .drag_mut()
                 .session_mut()
                 .set_drop_target(target)
-            {
-                tracing::debug!(%error, "could not set final dock drop target");
-                target = None;
-            }
+        {
+            tracing::debug!(%error, "could not set final dock drop target");
+            target = None;
         }
 
         let request = match controller
