@@ -98,6 +98,13 @@ impl UndoRedoHistory {
             return Ok(false);
         };
 
+        // Preview-only gestures do not advance the persistent layout revision.
+        // Avoid restoring an unchanged checkpoint, which would invalidate the
+        // current revision even though the gesture never changed persistent state.
+        if checkpoint.version() == layout.version() {
+            return Ok(true);
+        }
+
         if let Err(error) = layout.restore_history_snapshot(&checkpoint, metrics) {
             self.transaction = Some(checkpoint);
             return Err(error);

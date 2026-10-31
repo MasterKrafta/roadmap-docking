@@ -136,7 +136,7 @@ mod tests {
             Err(GeometryError::NonFinite)
         );
         assert_eq!(
-            scroll_adjusted_hit_test_point(Point::new(f32::MAX, 20.0), f32::MAX),
+            scroll_adjusted_hit_test_point(Point::new(10.0, f32::MAX), f32::MAX),
             Err(GeometryError::ArithmeticOverflow)
         );
     }
