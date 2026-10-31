@@ -39,8 +39,20 @@ impl DropOverlay {
         let Some(target) = preview.target else {
             return layer;
         };
+        // A semantic target may be represented by several different affordances
+        // (for example Center and the tab insertion slot after the last tab).
+        // Select only the zone under the pointer, using Core's exact priority order.
+        let Some(zone) = zones
+            .iter()
+            .filter(|zone| {
+                zone.target == target && zone.rect.contains(preview.point).unwrap_or(false)
+            })
+            .min_by_key(|zone| zone_priority(zone.zone))
+        else {
+            return layer;
+        };
 
-        for zone in zones.iter().filter(|zone| zone.target == target) {
+        {
             match zone.zone {
                 DropZone::Center => {
                     if let Some(group) = target_group(target)
@@ -143,6 +155,23 @@ impl DropOverlay {
         }
 
         layer
+    }
+}
+
+fn zone_priority(zone: DropZone) -> u8 {
+    // Keep in sync with dock-core::compute_drop_zones::zone_priority.
+    match zone {
+        DropZone::RailInsertion => 0,
+        DropZone::TabInsertion => 1,
+        DropZone::DockEdge => 2,
+        DropZone::ColumnLeft | DropZone::ColumnRight => 3,
+        DropZone::ColumnEnd => 4,
+        DropZone::FloatingTop | DropZone::FloatingBottom => 5,
+        DropZone::Top | DropZone::Bottom => 6,
+        DropZone::Left | DropZone::Right => 7,
+        DropZone::FloatingCenter => 8,
+        DropZone::Center => 9,
+        DropZone::FreeArea => 10,
     }
 }
 
