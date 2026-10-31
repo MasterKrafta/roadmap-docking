@@ -431,7 +431,7 @@ impl Render for DockHost {
             workspace = workspace.child(MainDockView::render(
                 &main_columns,
                 &rects.groups,
-                &main_panel_views,
+                main_panel_views,
                 &rects.tab_strips,
                 &rects.tab_headers,
                 &rects.tab_overflows,
@@ -485,7 +485,7 @@ impl Render for DockHost {
             // Main panels live in their scrolling columns. Only floating panels
             // remain here, above the floating-window surfaces.
             workspace = workspace.child(PanelHost::render(
-                &floating_panel_views,
+                floating_panel_views,
                 Point::ZERO,
             ));
         }

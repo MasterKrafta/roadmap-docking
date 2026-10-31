@@ -31,7 +31,7 @@ impl ColumnView {
         column: ColumnRect,
         mode: ColumnMode,
         groups: &[GroupRect],
-        panels: &[(PanelRect, AnyView)],
+        panels: Vec<(PanelRect, AnyView)>,
         tab_strips: &[TabStripRect],
         tab_headers: &[TabHeaderRect],
         tab_overflows: &[TabOverflowRect],

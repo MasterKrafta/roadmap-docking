@@ -14,7 +14,7 @@ pub struct PanelHost;
 
 impl PanelHost {
     pub(crate) fn render(
-        panels: &[(PanelRect, AnyView)],
+        panels: Vec<(PanelRect, AnyView)>,
         coordinate_origin: Point,
     ) -> impl IntoElement {
         let mut layer = div().absolute().top_0().left_0().size_full();
@@ -32,7 +32,7 @@ impl PanelHost {
                     .w(px(rect.size.width))
                     .h(px(rect.size.height))
                     .overflow_hidden()
-                    .child(div().size_full().child(view.clone())),
+                    .child(div().size_full().child(view)),
             );
         }
 
