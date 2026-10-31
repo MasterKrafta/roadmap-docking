@@ -1231,3 +1231,123 @@ fn resize_transaction_records_one_undo_checkpoint_for_many_frame_updates() {
     };
     assert_eq!(restored_width, original_width);
 }
+
+
+fn floating_transfer_layout() -> (Layout, crate::NodeId, crate::NodeId) {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(crate::Profile::Photoshop);
+
+    let (_, moving_panel) = builder.panel(key("history-floating-transfer-moving"), constraints());
+    let (_, remaining_panel) = builder.panel(key("history-floating-transfer-remaining"), constraints());
+    let source_group = builder.tabs(vec![moving_panel, remaining_panel], 0, false);
+    let column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![source_group],
+        vec![1.0],
+    );
+    builder.main_area(DockSide::Left, column);
+
+    let (_, target_panel) = builder.panel(key("history-floating-transfer-target"), constraints());
+    let target_group = builder.tabs(vec![target_panel], 0, false);
+    builder.floating_group(
+        target_group,
+        Rect::new(Point::new(520.0, 80.0), Size::new(420.0, 320.0)),
+        1,
+    );
+
+    (builder.build(), moving_panel, target_group)
+}
+
+fn apply_floating_transfer_gesture(
+    history: &mut UndoRedoHistory,
+    layout: &mut Layout,
+    moving_panel: crate::NodeId,
+    target_group: crate::NodeId,
+    metrics: &DockMetrics,
+) {
+    let float_outcome = history
+        .apply(
+            layout,
+            DockCommand::Float {
+                node: moving_panel,
+                bounds: Rect::new(Point::new(40.0, 50.0), Size::new(420.0, 320.0)),
+            },
+            metrics,
+        )
+        .unwrap();
+    let floating = match float_outcome.actual_value {
+        Some(crate::CommandValue::FloatingGroup(group)) => group,
+        other => panic!("Float must return the new floating group ID, got {other:?}"),
+    };
+
+    history
+        .apply(
+            layout,
+            DockCommand::DockFloating {
+                group: floating,
+                target: DropTarget::GroupTabs {
+                    group: target_group,
+                    index: 1,
+                },
+            },
+            metrics,
+        )
+        .unwrap();
+}
+
+#[test]
+fn floating_transfer_gesture_commits_as_one_undo_step() {
+    let metrics = DockMetrics::default();
+    let (mut layout, moving_panel, target_group) = floating_transfer_layout();
+    let before = persistent_shape(&layout);
+    let mut history = UndoRedoHistory::new();
+
+    assert!(history.begin_transaction(&layout));
+    apply_floating_transfer_gesture(
+        &mut history,
+        &mut layout,
+        moving_panel,
+        target_group,
+        &metrics,
+    );
+    let after = persistent_shape(&layout);
+    assert_ne!(after, before);
+    assert_eq!(history.undo_len(), 0);
+
+    assert!(history.commit_transaction(&layout));
+    assert_eq!(history.undo_len(), 1);
+    assert!(history.undo(&mut layout, &metrics).unwrap());
+    assert_eq!(persistent_shape(&layout), before);
+    assert!(history.redo(&mut layout, &metrics).unwrap());
+    assert_eq!(persistent_shape(&layout), after);
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
+fn escape_cancels_the_entire_floating_transfer_gesture() {
+    let metrics = DockMetrics::default();
+    let (mut layout, moving_panel, target_group) = floating_transfer_layout();
+    let before = persistent_shape(&layout);
+    let mut history = UndoRedoHistory::new();
+
+    assert!(history.begin_transaction(&layout));
+    apply_floating_transfer_gesture(
+        &mut history,
+        &mut layout,
+        moving_panel,
+        target_group,
+        &metrics,
+    );
+    assert_ne!(persistent_shape(&layout), before);
+    assert_eq!(history.undo_len(), 0);
+
+    assert!(history
+        .cancel_transaction(&mut layout, &metrics)
+        .unwrap());
+    assert_eq!(persistent_shape(&layout), before);
+    assert_eq!(history.undo_len(), 0);
+    assert!(!history.can_undo());
+    assert_eq!(layout.floating_groups().count(), 1);
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
