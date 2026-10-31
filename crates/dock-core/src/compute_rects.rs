@@ -4,7 +4,7 @@ use std::collections::HashMap;
 mod sizing;
 #[cfg(any(test, feature = "serde"))]
 pub(crate) use sizing::clamp_floating_bounds;
-use sizing::{clamp_floating_bounds_with_cache, minimum_node_size, preferred_width};
+use sizing::{floating_window_rect_with_cache, minimum_node_size, preferred_width};
 
 #[path = "compute_rects/stack_allocation.rs"]
 mod stack_allocation;
@@ -12,7 +12,7 @@ use stack_allocation::{allocate_stack_heights, push_vertical_overflow, weighted_
 
 #[path = "compute_rects/overlay_geometry.rs"]
 mod overlay_geometry;
-use overlay_geometry::{append_floating_geometry, compute_flyout_rect, push_resize_edges};
+use overlay_geometry::{compute_flyout_rect, push_resize_edges};
 
 #[path = "compute_rects/node_layout.rs"]
 mod node_layout;
@@ -111,8 +111,8 @@ impl Layout {
     /// The Canvas receives the remaining horizontal space. If that remainder is
     /// below min_canvas_width, computation fails instead of silently compressing
     /// columns or the Canvas. Vertical content that cannot fit is reported with
-    /// a scroll extent. Floating bounds are clamped in this snapshot only; the
-    /// persistent Layout and CanvasState are not mutated.
+    /// a scroll extent. Floating compositions are computed separately with
+    /// `compute_floating_rects`.
     pub fn compute_rects(
         &self,
         viewport: Rect,
@@ -248,57 +248,59 @@ impl Layout {
             output.flyout = Some(compute_flyout_rect(self, flyout, viewport, &output)?);
         }
 
-        // Floating windows are part of the dock chrome presentation too.
-        // Their model bounds and roots stay in Layout while hidden, but neither
-        // window geometry nor child-panel geometry is emitted in hidden modes.
-        if self.chrome().dock_visible() {
-            // Preserve deterministic back-to-front order in the geometry snapshot.
-            // A single floating window may not fit the current client area. Build
-            // its geometry separately so a local failure cannot discard the main
-            // dock or leave partially emitted rectangles for that window.
-            for (id, floating) in self.floating_groups_in_paint_order() {
-                let area = self
-                    .dock_area(floating.area)
-                    .ok_or(ComputeRectsError::InvalidLayoutState)?;
-                let mut floating_output = LayoutRects::default();
-                let result = (|| {
-                    let bounds = clamp_floating_bounds_with_cache(
-                        self,
-                        area.root,
-                        floating.bounds,
-                        viewport,
-                        metrics,
-                        &mut minimum_sizes,
-                    )?;
-                    floating_output.floating_groups.push(FloatingGroupRect::new(
-                        id,
-                        bounds,
-                        floating.z_order,
-                    ));
-                    push_resize_edges(id, bounds, metrics, &mut floating_output)?;
-                    layout_floating_root(
-                        self,
-                        area.root,
-                        bounds,
-                        metrics,
-                        &mut minimum_sizes,
-                        &mut floating_output,
-                    )?;
-                    Ok::<(), ComputeRectsError>(())
-                })();
 
-                match result {
-                    Ok(()) => append_floating_geometry(&mut output, floating_output),
-                    Err(error) => {
-                        tracing::warn!(
-                            floating_group = ?id,
-                            error = %error,
-                            "omitting floating group from geometry snapshot"
-                        );
-                    }
-                }
-            }
-        }
+        Ok(output)
+    }
+
+    /// Resolves one floating composition into geometry in that window's local
+    /// logical-pixel coordinates. Its stored screen-space origin is owned by the
+    /// platform adapter; the returned snapshot always starts at (0, 0).
+    ///
+    /// The saved window size is raised only when it is smaller than the
+    /// composition's content minimum. It is never clamped to the main viewport
+    /// or to another floating window.
+    pub fn compute_floating_rects(
+        &self,
+        group: crate::FloatingGroupId,
+        metrics: &DockMetrics,
+    ) -> Result<LayoutRects, ComputeRectsError> {
+        metrics
+            .validate()
+            .map_err(|reason| ComputeRectsError::InvalidMetrics { reason })?;
+        self.validate_cached(metrics)
+            .map_err(|errors| ComputeRectsError::InvalidLayout { errors })?;
+
+        let floating = self
+            .floating_group(group)
+            .ok_or(ComputeRectsError::InvalidLayoutState)?;
+        let area = self
+            .dock_area(floating.area)
+            .ok_or(ComputeRectsError::InvalidLayoutState)?;
+        let mut minimum_sizes = HashMap::new();
+        let bounds = floating_window_rect_with_cache(
+            self,
+            area.root,
+            floating.bounds,
+            metrics,
+            &mut minimum_sizes,
+        )?;
+
+        let mut output = LayoutRects {
+            viewport: Some(bounds),
+            ..LayoutRects::default()
+        };
+        output
+            .floating_groups
+            .push(FloatingGroupRect::new(group, bounds, floating.z_order));
+        push_resize_edges(group, bounds, metrics, &mut output)?;
+        layout_floating_root(
+            self,
+            area.root,
+            bounds,
+            metrics,
+            &mut minimum_sizes,
+            &mut output,
+        )?;
 
         Ok(output)
     }

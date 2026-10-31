@@ -1,21 +1,5 @@
 use super::*;
 
-pub(super) fn append_floating_geometry(output: &mut LayoutRects, floating: LayoutRects) {
-    output.columns.extend(floating.columns);
-    output.groups.extend(floating.groups);
-    output.tab_strips.extend(floating.tab_strips);
-    output.tab_headers.extend(floating.tab_headers);
-    output.tab_overflows.extend(floating.tab_overflows);
-    output.panels.extend(floating.panels);
-    output.splitters.extend(floating.splitters);
-    output.floating_groups.extend(floating.floating_groups);
-    output
-        .floating_resize_edges
-        .extend(floating.floating_resize_edges);
-    output.drop_zones.extend(floating.drop_zones);
-    output.vertical_overflow.extend(floating.vertical_overflow);
-}
-
 pub(super) fn push_resize_edges(
     group: crate::FloatingGroupId,
     rect: Rect,

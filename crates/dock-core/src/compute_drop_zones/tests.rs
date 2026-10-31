@@ -203,6 +203,7 @@ fn a_group_cannot_drop_onto_itself_or_a_noop_neighbor_slot() {
     }));
 }
 
+
 #[test]
 fn allowed_areas_hide_disallowed_main_dock_targets_but_keep_floating_and_free_area() {
     let metrics = DockMetrics::default();
@@ -223,38 +224,38 @@ fn allowed_areas_hide_disallowed_main_dock_targets_but_keep_floating_and_free_ar
         1,
     );
     let layout = builder.build();
-    let rects = layout.compute_rects(viewport(), &metrics).unwrap();
-    let zones = layout
+
+    let main_rects = layout.compute_rects(viewport(), &metrics).unwrap();
+    let main_zones = layout
         .compute_drop_zones(
-            DropSource::Panel {
-                panel: source_panel,
-            },
-            &rects,
+            DropSource::Panel { panel: source_panel },
+            &main_rects,
             &metrics,
         )
         .unwrap();
-
-    assert!(!zones.iter().any(|zone| matches!(
+    assert!(!main_zones.iter().any(|zone| matches!(
         zone.target,
         DropTarget::Tabs { group, .. } | DropTarget::GroupEdge { group, .. }
             if group == source_group
     )));
-    assert!(zones.iter().any(|zone| {
-        zone.target
-            == DropTarget::Tabs {
-                group: float_tabs,
-                index: 1,
-            }
+    assert!(main_zones.iter().any(|zone| {
+        zone.target == DropTarget::FreeArea && zone.zone == DropZone::FreeArea
+    }));
+
+    let floating_rects = layout.compute_floating_rects(float_id, &metrics).unwrap();
+    let floating_zones = layout
+        .compute_drop_zones(
+            DropSource::Panel { panel: source_panel },
+            &floating_rects,
+            &metrics,
+        )
+        .unwrap();
+    assert!(floating_zones.iter().any(|zone| {
+        zone.target == DropTarget::Tabs { group: float_tabs, index: 1 }
             && zone.zone == DropZone::FloatingCenter
     }));
-    assert!(
-        zones
-            .iter()
-            .any(|zone| zone.target == DropTarget::FreeArea && zone.zone == DropZone::FreeArea)
-    );
     assert!(layout.floating_group(float_id).is_some());
 }
-
 #[test]
 fn command_application_revalidates_allowed_area_even_for_forged_targets() {
     let metrics = DockMetrics::default();
@@ -408,6 +409,7 @@ fn command_application_revalidates_stale_target_ids() {
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
 
+
 #[test]
 fn generic_floating_group_exposes_horizontal_split_targets() {
     let metrics = DockMetrics::default();
@@ -418,22 +420,16 @@ fn generic_floating_group_exposes_horizontal_split_targets() {
 
     let (_, target_node) = builder.panel(key("generic-floating-target"), constraints());
     let target_group = builder.tabs(vec![target_node], 0, false);
-    builder.floating_group(
+    let floating = builder.floating_group(
         target_group,
         Rect::new(Point::new(500.0, 120.0), Size::new(420.0, 320.0)),
         1,
     );
 
     let layout = builder.build();
-    let rects = layout.compute_rects(viewport(), &metrics).unwrap();
+    let rects = layout.compute_floating_rects(floating, &metrics).unwrap();
     let zones = layout
-        .compute_drop_zones(
-            DropSource::Group {
-                group: source_group,
-            },
-            &rects,
-            &metrics,
-        )
+        .compute_drop_zones(DropSource::Group { group: source_group }, &rects, &metrics)
         .unwrap();
 
     for (zone_kind, edge) in [
@@ -442,11 +438,7 @@ fn generic_floating_group_exposes_horizontal_split_targets() {
     ] {
         assert!(zones.iter().any(|zone| {
             zone.zone == zone_kind
-                && zone.target
-                    == DropTarget::GroupEdge {
-                        group: target_group,
-                        zone: edge,
-                    }
+                && zone.target == DropTarget::GroupEdge { group: target_group, zone: edge }
         }));
     }
     let left = zones
@@ -454,10 +446,7 @@ fn generic_floating_group_exposes_horizontal_split_targets() {
         .find(|zone| {
             zone.zone == DropZone::Left
                 && zone.target
-                    == DropTarget::GroupEdge {
-                        group: target_group,
-                        zone: DropZone::Left,
-                    }
+                    == DropTarget::GroupEdge { group: target_group, zone: DropZone::Left }
         })
         .unwrap();
     let point = Point::new(
@@ -468,20 +457,14 @@ fn generic_floating_group_exposes_horizontal_split_targets() {
         layout
             .resolve_drop(
                 point,
-                DropSource::Group {
-                    group: source_group
-                },
+                DropSource::Group { group: source_group },
                 &rects,
-                &metrics
+                &metrics,
             )
             .unwrap(),
-        Some(DropTarget::GroupEdge {
-            group: target_group,
-            zone: DropZone::Left
-        })
+        Some(DropTarget::GroupEdge { group: target_group, zone: DropZone::Left })
     );
 }
-
 #[test]
 fn max_columns_hides_new_column_targets_when_the_source_column_cannot_collapse() {
     let metrics = DockMetrics {
@@ -617,6 +600,7 @@ fn moving_from_another_dock_does_not_free_a_full_destination_column_slot() {
     );
 }
 
+
 #[test]
 fn floating_center_and_edges_resolve_to_tab_or_stack_targets() {
     let metrics = DockMetrics::default();
@@ -628,14 +612,12 @@ fn floating_center_and_edges_resolve_to_tab_or_stack_targets() {
     let (_, float_node) = builder.panel(key("float-drop-target"), constraints());
     let float_group = builder.tabs(vec![float_node], 0, false);
     let bounds = Rect::new(Point::new(500.0, 120.0), Size::new(420.0, 320.0));
-    builder.floating_group(float_group, bounds, 4);
+    let floating = builder.floating_group(float_group, bounds, 4);
     let layout = builder.build();
-    let rects = layout.compute_rects(viewport(), &metrics).unwrap();
+    let rects = layout.compute_floating_rects(floating, &metrics).unwrap();
     let zones = layout
         .compute_drop_zones(
-            DropSource::Panel {
-                panel: source_panel,
-            },
+            DropSource::Panel { panel: source_panel },
             &rects,
             &metrics,
         )
@@ -643,33 +625,20 @@ fn floating_center_and_edges_resolve_to_tab_or_stack_targets() {
 
     assert!(zones.iter().any(|zone| {
         zone.zone == DropZone::FloatingCenter
-            && zone.target
-                == DropTarget::Tabs {
-                    group: float_group,
-                    index: 1,
-                }
+            && zone.target == DropTarget::Tabs { group: float_group, index: 1 }
     }));
     assert!(zones.iter().any(|zone| {
         zone.zone == DropZone::FloatingTop
             && zone.target
-                == DropTarget::GroupEdge {
-                    group: float_group,
-                    zone: DropZone::Top,
-                }
+                == DropTarget::GroupEdge { group: float_group, zone: DropZone::Top }
     }));
     assert!(zones.iter().any(|zone| {
         zone.zone == DropZone::FloatingBottom
             && zone.target
-                == DropTarget::GroupEdge {
-                    group: float_group,
-                    zone: DropZone::Bottom,
-                }
+                == DropTarget::GroupEdge { group: float_group, zone: DropZone::Bottom }
     }));
 
-    let center = zones
-        .iter()
-        .find(|zone| zone.zone == DropZone::FloatingCenter)
-        .unwrap();
+    let center = zones.iter().find(|zone| zone.zone == DropZone::FloatingCenter).unwrap();
     let center_point = Point::new(
         center.rect.origin.x + center.rect.size.width / 2.0,
         center.rect.origin.y + center.rect.size.height / 2.0,
@@ -678,23 +647,15 @@ fn floating_center_and_edges_resolve_to_tab_or_stack_targets() {
         layout
             .resolve_drop(
                 center_point,
-                DropSource::Panel {
-                    panel: source_panel
-                },
+                DropSource::Panel { panel: source_panel },
                 &rects,
-                &metrics
+                &metrics,
             )
             .unwrap(),
-        Some(DropTarget::Tabs {
-            group: float_group,
-            index: 1
-        })
+        Some(DropTarget::Tabs { group: float_group, index: 1 })
     );
 
-    let top = zones
-        .iter()
-        .find(|zone| zone.zone == DropZone::FloatingTop)
-        .unwrap();
+    let top = zones.iter().find(|zone| zone.zone == DropZone::FloatingTop).unwrap();
     let top_point = Point::new(
         top.rect.origin.x + top.rect.size.width / 2.0,
         top.rect.origin.y + top.rect.size.height / 2.0,
@@ -703,17 +664,12 @@ fn floating_center_and_edges_resolve_to_tab_or_stack_targets() {
         layout
             .resolve_drop(
                 top_point,
-                DropSource::Panel {
-                    panel: source_panel
-                },
+                DropSource::Panel { panel: source_panel },
                 &rects,
-                &metrics
+                &metrics,
             )
             .unwrap(),
-        Some(DropTarget::GroupEdge {
-            group: float_group,
-            zone: DropZone::Top
-        })
+        Some(DropTarget::GroupEdge { group: float_group, zone: DropZone::Top })
     );
 }
 
@@ -735,31 +691,23 @@ fn floating_horizontal_composition_drop_zones_target_the_branch_under_pointer() 
     let right_group = builder.tabs(vec![right_panel_node], 0, false);
     let right_column = builder.column(300.0, ColumnMode::Expanded, vec![right_group], vec![1.0]);
 
-    let root = builder.split(
-        crate::Axis::X,
-        vec![left_column, right_column],
-        vec![0.5, 0.5],
+    let root = builder.split(Axis::X, vec![left_column, right_column], vec![0.5, 0.5]);
+    let floating = builder.floating_group(
+        root,
+        Rect::new(Point::new(500.0, 120.0), Size::new(604.0, 320.0)),
+        4,
     );
-    let bounds = Rect::new(Point::new(500.0, 120.0), Size::new(604.0, 320.0));
-    let floating_id = builder.floating_group(root, bounds, 4);
     let layout = builder.build();
-    let rects = layout.compute_rects(viewport(), &metrics).unwrap();
+    let rects = layout.compute_floating_rects(floating, &metrics).unwrap();
     let zones = layout
         .compute_drop_zones(
-            DropSource::Panel {
-                panel: source_panel,
-            },
+            DropSource::Panel { panel: source_panel },
             &rects,
             &metrics,
         )
         .unwrap();
 
-    let right_group_rect = rects
-        .groups
-        .iter()
-        .find(|entry| entry.group == right_group)
-        .unwrap()
-        .rect;
+    let right_group_rect = rects.groups.iter().find(|entry| entry.group == right_group).unwrap().rect;
     let right_center = Point::new(
         right_group_rect.origin.x + right_group_rect.size.width / 2.0,
         right_group_rect.origin.y + metrics.header_height + metrics.tab_strip_height + 40.0,
@@ -768,72 +716,35 @@ fn floating_horizontal_composition_drop_zones_target_the_branch_under_pointer() 
         layout
             .resolve_drop(
                 right_center,
-                DropSource::Panel {
-                    panel: source_panel
-                },
+                DropSource::Panel { panel: source_panel },
                 &rects,
                 &metrics,
             )
             .unwrap(),
-        Some(DropTarget::Tabs {
-            group: right_group,
-            index: 1,
-        })
+        Some(DropTarget::Tabs { group: right_group, index: 1 })
     );
 
     for (x, expected_group, edge, zone) in [
         (
-            rects
-                .columns
-                .iter()
-                .find(|entry| entry.column == left_column)
-                .unwrap()
-                .rect
-                .origin
-                .x
-                + 100.0,
+            rects.columns.iter().find(|entry| entry.column == left_column).unwrap().rect.origin.x + 100.0,
             left_group,
             DropZone::Top,
             DropZone::FloatingTop,
         ),
         (
-            rects
-                .columns
-                .iter()
-                .find(|entry| entry.column == right_column)
-                .unwrap()
-                .rect
-                .origin
-                .x
-                + 100.0,
+            rects.columns.iter().find(|entry| entry.column == right_column).unwrap().rect.origin.x + 100.0,
             right_group,
             DropZone::Top,
             DropZone::FloatingTop,
         ),
         (
-            rects
-                .columns
-                .iter()
-                .find(|entry| entry.column == left_column)
-                .unwrap()
-                .rect
-                .origin
-                .x
-                + 100.0,
+            rects.columns.iter().find(|entry| entry.column == left_column).unwrap().rect.origin.x + 100.0,
             left_group,
             DropZone::Bottom,
             DropZone::FloatingBottom,
         ),
         (
-            rects
-                .columns
-                .iter()
-                .find(|entry| entry.column == right_column)
-                .unwrap()
-                .rect
-                .origin
-                .x
-                + 100.0,
+            rects.columns.iter().find(|entry| entry.column == right_column).unwrap().rect.origin.x + 100.0,
             right_group,
             DropZone::Bottom,
             DropZone::FloatingBottom,
@@ -844,37 +755,25 @@ fn floating_horizontal_composition_drop_zones_target_the_branch_under_pointer() 
             .find(|entry| {
                 entry.zone == zone
                     && entry.target
-                        == DropTarget::GroupEdge {
-                            group: expected_group,
-                            zone: edge,
-                        }
+                        == DropTarget::GroupEdge { group: expected_group, zone: edge }
             })
             .expect("each horizontal branch should have its own floating edge target");
-        let point = Point::new(
-            x,
-            edge_zone.rect.origin.y + edge_zone.rect.size.height / 2.0,
-        );
+        let point = Point::new(x, edge_zone.rect.origin.y + edge_zone.rect.size.height / 2.0);
         assert_eq!(
             layout
                 .resolve_drop(
                     point,
-                    DropSource::Panel {
-                        panel: source_panel
-                    },
+                    DropSource::Panel { panel: source_panel },
                     &rects,
                     &metrics,
                 )
                 .unwrap(),
-            Some(DropTarget::GroupEdge {
-                group: expected_group,
-                zone: edge,
-            })
+            Some(DropTarget::GroupEdge { group: expected_group, zone: edge })
         );
     }
 
-    assert!(layout.floating_group(floating_id).is_some());
+    assert!(layout.floating_group(floating).is_some());
 }
-
 #[test]
 fn icon_rail_targets_flattened_insertion_order() {
     let metrics = DockMetrics::default();
@@ -970,84 +869,57 @@ fn labeled_rail_targets_flattened_insertion_order() {
     }));
 }
 
+
 #[test]
-fn resolver_prefers_tab_insertion_and_blocks_click_through_a_front_float() {
+fn resolver_uses_only_the_supplied_floating_window_snapshot() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
     let (source_panel, source_node) = builder.panel(key("resolve-source"), constraints());
     let source_group = builder.tabs(vec![source_node], 0, false);
-    let column = builder.column(280.0, ColumnMode::Expanded, vec![source_group], vec![1.0]);
-    builder.main_area(DockSide::Left, column);
+    let source_column = builder.column(280.0, ColumnMode::Expanded, vec![source_group], vec![1.0]);
+    builder.main_area(DockSide::Left, source_column);
 
     let (_, lower_node) = builder.panel(key("resolve-lower"), constraints());
     let lower_group = builder.tabs(vec![lower_node], 0, false);
     let bounds = Rect::new(Point::new(420.0, 120.0), Size::new(400.0, 300.0));
-    builder.floating_group(lower_group, bounds, 1);
+    let lower = builder.floating_group(lower_group, bounds, 1);
 
     let (_, upper_node) = builder.panel(key("resolve-upper"), constraints());
     let upper_group = builder.tabs(vec![upper_node], 0, false);
-    builder.floating_group(upper_group, bounds, 2);
+    let upper = builder.floating_group(upper_group, bounds, 2);
 
-    let mut layout = builder.build();
-    let rects = layout.compute_rects(viewport(), &metrics).unwrap();
-    let inside = Point::new(600.0, 405.0);
+    let layout = builder.build();
+    let upper_rects = layout.compute_floating_rects(upper, &metrics).unwrap();
+    let inside = Point::new(180.0, 285.0);
+    let source = DropSource::Panel { panel: source_panel };
     let resolved = layout
-        .resolve_drop(
-            inside,
-            DropSource::Panel {
-                panel: source_panel,
-            },
-            &rects,
-            &metrics,
-        )
+        .resolve_drop(inside, source, &upper_rects, &metrics)
         .unwrap();
     assert!(matches!(
         resolved,
         Some(DropTarget::GroupEdge { group, zone: DropZone::Bottom }) if group == upper_group
     ));
+
     let prepared = layout
-        .prepare_drop_resolver(
-            DropSource::Panel {
-                panel: source_panel,
-            },
-            &rects,
-            &metrics,
-        )
+        .prepare_drop_resolver(source, &upper_rects, &metrics)
         .unwrap();
     assert_eq!(prepared.resolve(inside).unwrap(), resolved);
     for _ in 0..4 {
-        assert_eq!(
-            prepared.resolve(inside).unwrap(),
-            resolved,
-            "cached drop resolution must be deterministic for identical geometry and input"
-        );
+        assert_eq!(prepared.resolve(inside).unwrap(), resolved);
     }
 
-    // The resolver owns its prepared data, so it can live in adapter state instead
-    // of borrowing the Layout/geometry across GPUI callbacks. The adapter must still
-    // invalidate it before using it against a changed live layout or viewport.
-    assert!(
+    let lower_rects = layout.compute_floating_rects(lower, &metrics).unwrap();
+    assert_eq!(
         layout
-            .update_canvas_bounds(Some(Rect::new(
-                Point::new(20.0, 20.0),
-                Size::new(800.0, 600.0),
-            )))
-            .unwrap()
+            .resolve_drop(inside, source, &lower_rects, &metrics)
+            .unwrap(),
+        Some(DropTarget::GroupEdge {
+            group: lower_group,
+            zone: DropZone::Bottom
+        })
     );
-    assert_eq!(prepared.resolve(inside).unwrap(), resolved);
     assert_ne!(lower_group, upper_group);
-    assert!(
-        layout
-            .resolve_drop(
-                Point::new(f32::NAN, 0.0),
-                DropSource::Panel {
-                    panel: source_panel
-                },
-                &rects,
-                &metrics
-            )
-            .is_err()
-    );
+    assert_ne!(lower, upper);
 }
 
 #[test]
@@ -1066,32 +938,42 @@ fn photoshop_suppresses_horizontal_group_splits_inside_a_floating_stack() {
         Rect::new(Point::new(500.0, 120.0), Size::new(420.0, 320.0)),
         2,
     );
-    let mut layout = builder.build();
-    let rects = layout.compute_rects(viewport(), &metrics).unwrap();
-    let zones = layout
+    let layout = builder.build();
+
+    let floating_rects = layout.compute_floating_rects(source_float, &metrics).unwrap();
+    let floating_zones = layout
         .compute_drop_zones(
-            DropSource::Panel {
-                panel: source_panel,
-            },
-            &rects,
+            DropSource::Panel { panel: source_panel },
+            &floating_rects,
             &metrics,
         )
         .unwrap();
-    assert!(!zones.iter().any(|zone| {
-        matches!(zone.target, DropTarget::GroupEdge { group, zone: DropZone::Left | DropZone::Right } if group == source_group)
+    assert!(!floating_zones.iter().any(|zone| {
+        matches!(
+            zone.target,
+            DropTarget::GroupEdge {
+                group,
+                zone: DropZone::Left | DropZone::Right
+            } if group == source_group
+        )
     }));
-    assert!(zones.iter().any(|zone| {
+
+    let main_rects = layout.compute_rects(viewport(), &metrics).unwrap();
+    let main_zones = layout
+        .compute_drop_zones(
+            DropSource::Panel { panel: source_panel },
+            &main_rects,
+            &metrics,
+        )
+        .unwrap();
+    assert!(main_zones.iter().any(|zone| {
         zone.zone == DropZone::ColumnLeft
             && matches!(
                 zone.target,
                 DropTarget::MainColumn { .. }
-                    | DropTarget::GroupEdge {
-                        zone: DropZone::Left,
-                        ..
-                    }
+                    | DropTarget::GroupEdge { zone: DropZone::Left, .. }
             )
     }));
-    assert_ne!(source_float, crate::FloatingGroupId::null());
 
     let before = format!("{layout:?}");
     let version = layout.version();
@@ -1104,14 +986,13 @@ fn photoshop_suppresses_horizontal_group_splits_inside_a_floating_stack() {
                     zone: DropZone::Left,
                     ratio: 0.5,
                 },
-                &metrics
+                &metrics,
             )
             .is_err()
     );
     assert_eq!(format!("{layout:?}"), before);
     assert_eq!(layout.version(), version);
 }
-
 #[test]
 fn group_center_merge_resolves_and_preserves_panel_instances() {
     let metrics = DockMetrics::default();

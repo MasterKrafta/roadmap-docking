@@ -39,6 +39,34 @@ pub(crate) fn clamp_floating_bounds(
     )
 }
 
+
+/// Creates the local client rectangle for a native floating window.
+/// Core owns the composition's minimum content size, but not its screen position
+/// or the viewport of the main application window.
+pub(super) fn floating_window_rect_with_cache(
+    layout: &Layout,
+    root: NodeId,
+    bounds: Rect,
+    metrics: &DockMetrics,
+    minimum_sizes: &mut HashMap<NodeId, Size>,
+) -> Result<Rect, ComputeRectsError> {
+    bounds
+        .validate_non_empty()
+        .map_err(ComputeRectsError::Geometry)?;
+    let minimum = minimum_floating_size(layout, root, metrics, minimum_sizes)?;
+    let result = Rect::new(
+        Point::ZERO,
+        Size::new(
+            bounds.size.width.max(minimum.width),
+            bounds.size.height.max(minimum.height),
+        ),
+    );
+    result
+        .validate_non_empty()
+        .map_err(ComputeRectsError::Geometry)?;
+    Ok(result)
+}
+
 pub(super) fn clamp_floating_bounds_with_cache(
     layout: &Layout,
     root: NodeId,

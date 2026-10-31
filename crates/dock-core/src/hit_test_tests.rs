@@ -22,6 +22,7 @@ fn viewport(width: f32, height: f32) -> Rect {
     Rect::new(Point::ZERO, Size::new(width, height))
 }
 
+
 fn large_floating_fixture() -> (
     crate::Layout,
     crate::LayoutRects,
@@ -34,8 +35,6 @@ fn large_floating_fixture() -> (
     const TABS_PER_GROUP: usize = 8;
 
     let metrics = DockMetrics::default();
-    // This fixture deliberately uses a horizontal split of columns inside each
-    // floating window. The Photoshop profile forbids that floating-root shape.
     let mut builder = LayoutBuilder::new(Profile::Generic);
     let mut top_floating = None;
     let mut top_panel = None;
@@ -85,13 +84,12 @@ fn large_floating_fixture() -> (
     }
 
     let layout = builder.build();
-    let rects = layout
-        .compute_rects(viewport(1600.0, 1000.0), &metrics)
-        .unwrap();
+    let top_floating = top_floating.expect("fixture must contain a floating window");
+    let rects = layout.compute_floating_rects(top_floating, &metrics).unwrap();
     (
         layout,
         rects,
-        top_floating.expect("fixture must contain a frontmost floating window"),
+        top_floating,
         top_panel.expect("fixture must contain a frontmost panel"),
     )
 }
@@ -112,13 +110,12 @@ fn hit_test_preserves_metric_validation_reason() {
     );
 }
 
+
 #[test]
 fn blank_space_in_frontmost_floating_window_does_not_leak_through() {
     let metrics = DockMetrics::default();
     let (layout, rects, top_floating, _) = large_floating_fixture();
-    // The floating root is a horizontal split of two 280px columns inside
-    // an 800px window, leaving an intentional blank region on the right.
-    let blank_point = Point::new(900.0, 250.0);
+    let blank_point = Point::new(700.0, 250.0);
     let floating_rect = rects
         .floating_groups
         .iter()
@@ -129,12 +126,9 @@ fn blank_space_in_frontmost_floating_window_does_not_leak_through() {
 
     assert_eq!(
         layout.hit_test(blank_point, &rects, &metrics).unwrap(),
-        HitResult::FloatingGroup {
-            group: top_floating
-        }
+        HitResult::FloatingGroup { group: top_floating }
     );
 }
-
 /// Manual release-mode benchmark for hit-testing large floating subtrees.
 ///
 /// Run with one test thread:
@@ -171,9 +165,9 @@ fn benchmark_hit_test_multiple_floating_subtrees() {
         HitResult::Panel { panel: top_panel },
     );
     measure(
-        "outside-floating",
+        "outside-floating-window",
         Point::new(1500.0, 900.0),
-        HitResult::Canvas,
+        HitResult::Miss,
     );
     assert!(
         rects
@@ -182,6 +176,7 @@ fn benchmark_hit_test_multiple_floating_subtrees() {
             .any(|item| item.group == top_floating)
     );
 }
+
 
 #[test]
 fn every_floating_resize_zone_beats_title_drag() {
@@ -192,39 +187,32 @@ fn every_floating_resize_zone_beats_title_drag() {
     let bounds = Rect::new(Point::new(100.0, 100.0), Size::new(300.0, 200.0));
     let floating = builder.floating_group(group, bounds, 1);
     let layout = builder.build();
-    let rects = layout
-        .compute_rects(viewport(1000.0, 700.0), &metrics)
-        .unwrap();
+    let rects = layout.compute_floating_rects(floating, &metrics).unwrap();
 
     for (point, expected) in [
-        (Point::new(250.0, 102.0), ResizeEdge::Top),
-        (Point::new(397.0, 102.0), ResizeEdge::TopRight),
-        (Point::new(398.0, 200.0), ResizeEdge::Right),
-        (Point::new(397.0, 298.0), ResizeEdge::BottomRight),
-        (Point::new(250.0, 298.0), ResizeEdge::Bottom),
-        (Point::new(102.0, 298.0), ResizeEdge::BottomLeft),
-        (Point::new(102.0, 200.0), ResizeEdge::Left),
-        (Point::new(102.0, 102.0), ResizeEdge::TopLeft),
+        (Point::new(150.0, 2.0), ResizeEdge::Top),
+        (Point::new(297.0, 2.0), ResizeEdge::TopRight),
+        (Point::new(298.0, 100.0), ResizeEdge::Right),
+        (Point::new(297.0, 198.0), ResizeEdge::BottomRight),
+        (Point::new(150.0, 198.0), ResizeEdge::Bottom),
+        (Point::new(2.0, 198.0), ResizeEdge::BottomLeft),
+        (Point::new(2.0, 100.0), ResizeEdge::Left),
+        (Point::new(2.0, 2.0), ResizeEdge::TopLeft),
     ] {
         assert_eq!(
             layout.hit_test(point, &rects, &metrics).unwrap(),
-            HitResult::FloatingResizeEdge {
-                group: floating,
-                edge: expected
-            }
+            HitResult::FloatingResizeEdge { group: floating, edge: expected }
         );
     }
 
     assert_eq!(
-        layout
-            .hit_test(Point::new(140.0, 112.0), &rects, &metrics)
-            .unwrap(),
+        layout.hit_test(Point::new(40.0, 12.0), &rects, &metrics).unwrap(),
         HitResult::FloatingTitle { group: floating }
     );
 }
 
 #[test]
-fn frontmost_floating_window_wins_overlap_and_zone_hits_do_not_leak() {
+fn floating_window_hit_testing_and_drop_zones_use_its_local_snapshot() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
     let (lower_panel, lower_node) = builder.panel(key("lower-window"), constraints());
@@ -237,48 +225,49 @@ fn frontmost_floating_window_wins_overlap_and_zone_hits_do_not_leak() {
     let upper = builder.floating_group(upper_group, bounds, 2);
 
     let layout = builder.build();
-    let rects = layout
-        .compute_rects(viewport(1000.0, 700.0), &metrics)
-        .unwrap();
+    let upper_rects = layout.compute_floating_rects(upper, &metrics).unwrap();
 
     assert_eq!(
-        rects
-            .floating_groups
-            .iter()
-            .map(|group| group.z_order)
-            .collect::<Vec<_>>(),
-        vec![1, 2]
-    );
-    assert_eq!(
-        layout
-            .hit_test(Point::new(180.0, 170.0), &rects, &metrics)
-            .unwrap(),
+        layout.hit_test(Point::new(80.0, 90.0), &upper_rects, &metrics).unwrap(),
         HitResult::Panel { panel: upper_panel }
     );
     assert_ne!(lower_panel, upper_panel);
 
-    // Drop zones are contextual: compute them for the dragged panel and
-    // keep the front window's target from leaking through to the lower one.
     let drop_zones = layout
-        .compute_drop_zones(DropSource::Panel { panel: lower_panel }, &rects, &metrics)
+        .compute_drop_zones(DropSource::Panel { panel: lower_panel }, &upper_rects, &metrics)
         .unwrap();
-    let mut drag_rects = rects.clone();
+    assert!(drop_zones.iter().any(|zone| {
+        zone.zone == DropZone::FloatingBottom
+            && zone.target
+                == DropTarget::GroupEdge { group: upper_group, zone: DropZone::Bottom }
+    }));
+    assert!(!drop_zones.iter().any(|zone| {
+        matches!(
+            zone.target,
+            DropTarget::Tabs { group, .. } | DropTarget::GroupEdge { group, .. }
+                if group == lower_group
+        )
+    }));
+
+    let mut drag_rects = upper_rects.clone();
     drag_rects.drop_zones = drop_zones;
     assert_eq!(
-        layout
-            .hit_test(Point::new(390.0, 280.0), &drag_rects, &metrics)
-            .unwrap(),
+        layout.hit_test(Point::new(250.0, 200.0), &drag_rects, &metrics).unwrap(),
         HitResult::DropZone {
             target: DropTarget::GroupEdge {
                 group: upper_group,
-                zone: crate::DropZone::Bottom
+                zone: DropZone::Bottom
             },
-            zone: crate::DropZone::FloatingBottom,
+            zone: DropZone::FloatingBottom,
         }
     );
-    assert_ne!(lower, upper);
-}
 
+    let lower_rects = layout.compute_floating_rects(lower, &metrics).unwrap();
+    assert_eq!(
+        layout.hit_test(Point::new(80.0, 90.0), &lower_rects, &metrics).unwrap(),
+        HitResult::Panel { panel: lower_panel }
+    );
+}
 #[test]
 fn drop_zone_precedence_makes_tab_insertions_and_group_edges_reachable() {
     let metrics = DockMetrics::default();

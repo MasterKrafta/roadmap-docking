@@ -240,6 +240,7 @@ fn active_tab_gets_panel_bounds_and_all_tabs_get_header_rectangles() {
     assert!(rects.drop_zones.is_empty());
 }
 
+
 #[test]
 fn floating_geometry_preserves_bounds_z_order_and_resize_handles() {
     let metrics = DockMetrics::default();
@@ -250,27 +251,23 @@ fn floating_geometry_preserves_bounds_z_order_and_resize_handles() {
     let floating = builder.floating_group(group, model_bounds, 9);
     let layout = builder.build();
 
-    let rects = layout
-        .compute_rects(viewport(1000.0, 700.0), &metrics)
-        .unwrap();
+    let rects = layout.compute_floating_rects(floating, &metrics).unwrap();
+    let expected_bounds = Rect::new(Point::ZERO, Size::new(360.0, 260.0));
 
-    let expected_bounds = Rect::new(Point::new(0.0, 45.0), Size::new(360.0, 260.0));
+    assert_eq!(rects.viewport, Some(expected_bounds));
     assert_eq!(rects.floating_groups.len(), 1);
     assert_eq!(rects.floating_groups[0].group, floating);
     assert_eq!(rects.floating_groups[0].rect, expected_bounds);
     assert_eq!(rects.floating_groups[0].z_order, 9);
     assert_eq!(rects.floating_resize_edges.len(), 8);
+    assert_eq!(rects.panels.len(), 1);
     assert_eq!(rects.panels[0].panel, panel);
-    assert_eq!(rects.panels[0].rect.origin.x, expected_bounds.origin.x);
+    assert_eq!(rects.panels[0].rect.origin.x, 0.0);
     assert_eq!(
         rects.panels[0].rect.origin.y,
-        expected_bounds.origin.y + metrics.header_height + metrics.tab_strip_height
+        metrics.header_height + metrics.tab_strip_height
     );
-    // Viewport clamping applies to geometry output, not persistent model bounds.
-    assert_eq!(
-        layout.floating_group(floating).unwrap().bounds,
-        model_bounds
-    );
+    assert_eq!(layout.floating_group(floating).unwrap().bounds, model_bounds);
 }
 
 #[test]
@@ -281,12 +278,10 @@ fn single_group_floating_column_keeps_standalone_group_geometry() {
     let group = builder.tabs(vec![panel_node], 0, true);
     let column = builder.column(300.0, ColumnMode::Expanded, vec![group], vec![1.0]);
     let bounds = Rect::new(Point::new(40.0, 50.0), Size::new(300.0, 260.0));
-    builder.floating_group(column, bounds, 1);
+    let floating = builder.floating_group(column, bounds, 1);
     let layout = builder.build();
 
-    let rects = layout
-        .compute_rects(viewport(1000.0, 700.0), &metrics)
-        .unwrap();
+    let rects = layout.compute_floating_rects(floating, &metrics).unwrap();
     let group_rect = rects
         .groups
         .iter()
@@ -294,8 +289,8 @@ fn single_group_floating_column_keeps_standalone_group_geometry() {
         .unwrap()
         .rect;
 
-    assert_eq!(rects.floating_groups[0].rect, bounds);
-    assert_eq!(group_rect.origin.y, bounds.origin.y);
+    assert_eq!(rects.floating_groups[0].rect, Rect::new(Point::ZERO, bounds.size));
+    assert_eq!(group_rect.origin, Point::ZERO);
     assert_eq!(
         group_rect.size.height,
         metrics.effective_collapsed_group_height()
@@ -322,37 +317,17 @@ fn floating_column_reserves_window_title_before_allocating_a_collapsed_first_gro
         vec![0.5, 0.5],
     );
     let bounds = Rect::new(Point::new(40.0, 50.0), Size::new(300.0, 400.0));
-    builder.floating_group(column, bounds, 1);
+    let floating = builder.floating_group(column, bounds, 1);
     let layout = builder.build();
 
-    let rects = layout
-        .compute_rects(viewport(1000.0, 700.0), &metrics)
-        .unwrap();
-    let first = rects
-        .groups
-        .iter()
-        .find(|entry| entry.group == collapsed_group)
-        .unwrap()
-        .rect;
-    let second = rects
-        .groups
-        .iter()
-        .find(|entry| entry.group == expanded_group)
-        .unwrap()
-        .rect;
-    let splitter = rects
-        .splitters
-        .iter()
-        .find(|entry| entry.owner == column)
-        .unwrap()
-        .rect;
+    let rects = layout.compute_floating_rects(floating, &metrics).unwrap();
+    let first = rects.groups.iter().find(|entry| entry.group == collapsed_group).unwrap().rect;
+    let second = rects.groups.iter().find(|entry| entry.group == expanded_group).unwrap().rect;
+    let splitter = rects.splitters.iter().find(|entry| entry.owner == column).unwrap().rect;
 
-    assert_eq!(rects.floating_groups[0].rect, bounds);
-    assert_eq!(first.origin.y, bounds.origin.y + metrics.header_height);
-    assert_eq!(
-        first.size.height,
-        metrics.effective_collapsed_group_height()
-    );
+    assert_eq!(rects.floating_groups[0].rect, Rect::new(Point::ZERO, bounds.size));
+    assert_eq!(first.origin.y, metrics.header_height);
+    assert_eq!(first.size.height, metrics.effective_collapsed_group_height());
     assert!(
         second.origin.y >= first.origin.y + first.size.height + metrics.splitter_thickness,
         "the expanded sibling must begin after the collapsed row and splitter"
@@ -361,10 +336,7 @@ fn floating_column_reserves_window_title_before_allocating_a_collapsed_first_gro
         splitter.origin.y + (metrics.splitter_hit_zone - metrics.splitter_thickness) / 2.0,
         first.origin.y + first.size.height
     );
-    assert!(
-        ((second.origin.y + second.size.height) - (bounds.origin.y + bounds.size.height)).abs()
-            < PIXEL_TOLERANCE
-    );
+    assert!(((second.origin.y + second.size.height) - bounds.size.height).abs() < PIXEL_TOLERANCE);
 }
 
 #[test]
@@ -378,64 +350,28 @@ fn floating_horizontal_split_reserves_title_for_each_collapsed_column_branch() {
 
     let (_, collapsed_panel_node) = builder.panel(key("split-floating-collapsed"), constraints());
     let collapsed_group = builder.tabs(vec![collapsed_panel_node], 0, true);
-    let left_column = builder.column(
-        300.0,
-        ColumnMode::Expanded,
-        vec![collapsed_group],
-        vec![1.0],
-    );
+    let left_column = builder.column(300.0, ColumnMode::Expanded, vec![collapsed_group], vec![1.0]);
 
     let (_, expanded_panel_node) = builder.panel(key("split-floating-expanded"), constraints());
     let expanded_group = builder.tabs(vec![expanded_panel_node], 0, false);
     let right_column = builder.column(300.0, ColumnMode::Expanded, vec![expanded_group], vec![1.0]);
     let root = builder.split(Axis::X, vec![left_column, right_column], vec![0.5, 0.5]);
     let bounds = Rect::new(Point::new(40.0, 50.0), Size::new(604.0, 400.0));
-    builder.floating_group(root, bounds, 1);
+    let floating = builder.floating_group(root, bounds, 1);
     let layout = builder.build();
 
-    let rects = layout
-        .compute_rects(viewport(1000.0, 700.0), &metrics)
-        .unwrap();
-    let collapsed = rects
-        .groups
-        .iter()
-        .find(|entry| entry.group == collapsed_group)
-        .unwrap()
-        .rect;
-    let expanded = rects
-        .groups
-        .iter()
-        .find(|entry| entry.group == expanded_group)
-        .unwrap()
-        .rect;
-    let collapsed_strip = rects
-        .tab_strips
-        .iter()
-        .find(|entry| entry.group == collapsed_group)
-        .unwrap()
-        .rect;
-    let expanded_strip = rects
-        .tab_strips
-        .iter()
-        .find(|entry| entry.group == expanded_group)
-        .unwrap()
-        .rect;
+    let rects = layout.compute_floating_rects(floating, &metrics).unwrap();
+    let collapsed = rects.groups.iter().find(|entry| entry.group == collapsed_group).unwrap().rect;
+    let expanded = rects.groups.iter().find(|entry| entry.group == expanded_group).unwrap().rect;
+    let collapsed_strip = rects.tab_strips.iter().find(|entry| entry.group == collapsed_group).unwrap().rect;
+    let expanded_strip = rects.tab_strips.iter().find(|entry| entry.group == expanded_group).unwrap().rect;
 
-    assert_eq!(rects.floating_groups[0].rect, bounds);
-    assert_eq!(collapsed.origin.y, bounds.origin.y + metrics.header_height);
-    assert_eq!(
-        collapsed_strip.origin.y,
-        bounds.origin.y + metrics.header_height
-    );
-    assert_eq!(expanded.origin.y, bounds.origin.y);
-    assert_eq!(
-        expanded_strip.origin.y,
-        bounds.origin.y + metrics.header_height
-    );
-    assert!(
-        (collapsed_strip.origin.y - expanded_strip.origin.y).abs() < PIXEL_TOLERANCE,
-        "both horizontal branches must align their tab strips below the shared title"
-    );
+    assert_eq!(rects.floating_groups[0].rect, Rect::new(Point::ZERO, bounds.size));
+    assert_eq!(collapsed.origin.y, metrics.header_height);
+    assert_eq!(collapsed_strip.origin.y, metrics.header_height);
+    assert_eq!(expanded.origin.y, 0.0);
+    assert_eq!(expanded_strip.origin.y, metrics.header_height);
+    assert!((collapsed_strip.origin.y - expanded_strip.origin.y).abs() < PIXEL_TOLERANCE);
 }
 
 #[test]
@@ -458,40 +394,19 @@ fn floating_horizontal_split_minimum_includes_title_for_collapsed_branches() {
     let floating = builder.floating_group(root, requested_bounds, 1);
     let layout = builder.build();
 
-    let rects = layout
-        .compute_rects(viewport(1000.0, 700.0), &metrics)
-        .unwrap();
-    let floating_rect = rects
-        .floating_groups
-        .iter()
-        .find(|entry| entry.group == floating)
-        .expect("floating split should have geometry")
-        .rect;
+    let rects = layout.compute_floating_rects(floating, &metrics).unwrap();
+    let floating_rect = rects.floating_groups[0].rect;
 
+    assert_eq!(floating_rect.origin, Point::ZERO);
     assert_eq!(
         floating_rect.size.height,
         metrics.header_height + metrics.effective_collapsed_group_height()
     );
-    assert_eq!(
-        layout.floating_group(floating).unwrap().bounds,
-        requested_bounds,
-        "geometry clamping must not mutate persistent model bounds"
-    );
+    assert_eq!(layout.floating_group(floating).unwrap().bounds, requested_bounds);
     for group in groups {
-        let group_rect = rects
-            .groups
-            .iter()
-            .find(|entry| entry.group == group)
-            .expect("collapsed branch should have group geometry")
-            .rect;
-        assert_eq!(
-            group_rect.origin.y,
-            floating_rect.origin.y + metrics.header_height
-        );
-        assert_eq!(
-            group_rect.size.height,
-            metrics.effective_collapsed_group_height()
-        );
+        let group_rect = rects.groups.iter().find(|entry| entry.group == group).unwrap().rect;
+        assert_eq!(group_rect.origin.y, metrics.header_height);
+        assert_eq!(group_rect.size.height, metrics.effective_collapsed_group_height());
     }
     assert!(rects.vertical_overflow.is_empty());
 }
@@ -514,25 +429,16 @@ fn floating_multi_group_column_minimum_includes_title_for_collapsed_first_group(
     let floating = builder.floating_group(column, requested_bounds, 1);
     let layout = builder.build();
 
-    let rects = layout
-        .compute_rects(viewport(1000.0, 700.0), &metrics)
-        .unwrap();
-    let actual_bounds = rects
-        .floating_groups
-        .iter()
-        .find(|entry| entry.group == floating)
-        .expect("floating column should have geometry")
-        .rect;
+    let rects = layout.compute_floating_rects(floating, &metrics).unwrap();
+    let actual_bounds = rects.floating_groups[0].rect;
 
     let expanded_minimum = metrics
         .min_group_height
         .max(metrics.header_height + metrics.tab_strip_height + constraints().min_size.height);
     let required_without_title =
         metrics.effective_collapsed_group_height() + expanded_minimum + metrics.splitter_thickness;
-    assert_eq!(
-        actual_bounds.size.height,
-        required_without_title + metrics.header_height
-    );
+    assert_eq!(actual_bounds.size.height, required_without_title + metrics.header_height);
+    assert_eq!(actual_bounds.origin, Point::ZERO);
     assert!(rects.vertical_overflow.is_empty());
 }
 
@@ -544,31 +450,17 @@ fn floating_vertical_split_minimum_includes_title_for_collapsed_first_branch() {
     let collapsed_group = builder.tabs(vec![collapsed_panel], 0, true);
     let (_, expanded_panel) = builder.panel(key("floating-y-min-expanded"), constraints());
     let expanded_group = builder.tabs(vec![expanded_panel], 0, false);
-    let root = builder.split(
-        Axis::Y,
-        vec![collapsed_group, expanded_group],
-        vec![0.5, 0.5],
-    );
+    let root = builder.split(Axis::Y, vec![collapsed_group, expanded_group], vec![0.5, 0.5]);
     let requested_bounds = Rect::new(Point::new(40.0, 50.0), Size::new(300.0, 100.0));
     let floating = builder.floating_group(root, requested_bounds, 1);
     let layout = builder.build();
 
     let rects = layout
-        .compute_rects(viewport(1000.0, 700.0), &metrics)
+        .compute_floating_rects(floating, &metrics)
         .expect("floating vertical split should reserve its title row");
-    let actual_bounds = rects
-        .floating_groups
-        .iter()
-        .find(|entry| entry.group == floating)
-        .expect("floating vertical split should have geometry")
-        .rect;
+    let actual_bounds = rects.floating_groups[0].rect;
     let group_rect = |group| {
-        rects
-            .groups
-            .iter()
-            .find(|entry| entry.group == group)
-            .expect("both split branches should have geometry")
-            .rect
+        rects.groups.iter().find(|entry| entry.group == group).unwrap().rect
     };
     let collapsed_rect = group_rect(collapsed_group);
     let expanded_rect = group_rect(expanded_group);
@@ -578,14 +470,9 @@ fn floating_vertical_split_minimum_includes_title_for_collapsed_first_branch() {
     let required_without_title =
         metrics.effective_collapsed_group_height() + expanded_minimum + metrics.splitter_thickness;
 
-    assert_eq!(
-        actual_bounds.size.height,
-        required_without_title + metrics.header_height
-    );
-    assert_eq!(
-        collapsed_rect.origin.y,
-        actual_bounds.origin.y + metrics.header_height
-    );
+    assert_eq!(actual_bounds.size.height, required_without_title + metrics.header_height);
+    assert_eq!(actual_bounds.origin, Point::ZERO);
+    assert_eq!(collapsed_rect.origin.y, metrics.header_height);
     assert_eq!(
         collapsed_rect.size.height,
         metrics.effective_collapsed_group_height()
@@ -595,16 +482,10 @@ fn floating_vertical_split_minimum_includes_title_for_collapsed_first_branch() {
         collapsed_rect.origin.y + collapsed_rect.size.height + metrics.splitter_thickness
     );
     assert!(
-        ((expanded_rect.origin.y + expanded_rect.size.height)
-            - (actual_bounds.origin.y + actual_bounds.size.height))
-            .abs()
+        ((expanded_rect.origin.y + expanded_rect.size.height) - actual_bounds.size.height).abs()
             < PIXEL_TOLERANCE
     );
-    assert_eq!(
-        layout.floating_group(floating).unwrap().bounds,
-        requested_bounds,
-        "geometry clamping must not mutate persistent model bounds"
-    );
+    assert_eq!(layout.floating_group(floating).unwrap().bounds, requested_bounds);
     assert!(rects.vertical_overflow.is_empty());
 }
 
@@ -615,28 +496,19 @@ fn floating_collapsed_group_stays_strip_sized_inside_window_bounds() {
     let (panel, panel_node) = builder.panel(key("floating-collapsed"), constraints());
     let group = builder.tabs(vec![panel_node], 0, true);
     let bounds = Rect::new(Point::new(20.0, 30.0), Size::new(360.0, 260.0));
-    builder.floating_group(group, bounds, 2);
+    let floating = builder.floating_group(group, bounds, 2);
     let layout = builder.build();
 
-    let rects = layout
-        .compute_rects(viewport(1000.0, 700.0), &metrics)
-        .unwrap();
+    let rects = layout.compute_floating_rects(floating, &metrics).unwrap();
 
-    assert_eq!(rects.floating_groups[0].rect, bounds);
-    assert_eq!(rects.groups[0].rect.origin.y, bounds.origin.y);
-    assert_eq!(rects.tab_strips[0].rect.origin.y, bounds.origin.y);
-    assert_eq!(
-        rects.groups[0].rect.size.height,
-        metrics.collapsed_group_height
-    );
-    assert_eq!(
-        rects.tab_strips[0].rect.size.height,
-        metrics.collapsed_group_height
-    );
+    assert_eq!(rects.floating_groups[0].rect, Rect::new(Point::ZERO, bounds.size));
+    assert_eq!(rects.groups[0].rect.origin, Point::ZERO);
+    assert_eq!(rects.tab_strips[0].rect.origin, Point::ZERO);
+    assert_eq!(rects.groups[0].rect.size.height, metrics.collapsed_group_height);
+    assert_eq!(rects.tab_strips[0].rect.size.height, metrics.collapsed_group_height);
     assert!(rects.panels.is_empty());
     assert!(layout.panel_instance(panel).is_some());
 }
-
 #[test]
 fn icon_rail_uses_rail_width_and_emits_flattened_panel_targets() {
     let metrics = DockMetrics::default();
@@ -1044,32 +916,19 @@ fn configurable_metrics_drive_header_strip_and_splitter_geometry() {
     assert_eq!(metrics.splitter_hit_zone, 9.0);
 }
 
+
 #[test]
-fn floating_bounds_clamp_to_client_area_respect_minimums_and_sort_by_z() {
+fn floating_geometry_is_local_and_independent_of_main_viewport_and_other_windows() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
-    let mut ids = Vec::new();
+    let mut fixtures = Vec::new();
+
     for (name, z_order, origin, size) in [
-        (
-            "float-high",
-            3,
-            Point::new(-100.0, 650.0),
-            Size::new(420.0, 360.0),
-        ),
-        (
-            "float-low",
-            1,
-            Point::new(900.0, -50.0),
-            Size::new(420.0, 360.0),
-        ),
-        (
-            "float-mid",
-            2,
-            Point::new(30.0, 40.0),
-            Size::new(100.0, 80.0),
-        ),
+        ("float-high", 3, Point::new(-100.0, 650.0), Size::new(1420.0, 960.0)),
+        ("float-low", 1, Point::new(9000.0, -5000.0), Size::new(420.0, 360.0)),
+        ("float-mid", 2, Point::new(30.0, 40.0), Size::new(100.0, 80.0)),
     ] {
-        let constraints = if name == "float-mid" {
+        let panel_constraints = if name == "float-mid" {
             PanelConstraints::new(
                 Size::new(160.0, 100.0),
                 Size::new(180.0, 140.0),
@@ -1079,48 +938,44 @@ fn floating_bounds_clamp_to_client_area_respect_minimums_and_sort_by_z() {
         } else {
             constraints()
         };
-        let (_, panel_node) = builder.panel(key(name), constraints);
+        let (panel, panel_node) = builder.panel(key(name), panel_constraints);
         let group = builder.tabs(vec![panel_node], 0, false);
-        ids.push(builder.floating_group(group, Rect::new(origin, size), z_order));
+        let floating = builder.floating_group(group, Rect::new(origin, size), z_order);
+        fixtures.push((floating, panel, z_order, size));
     }
     let layout = builder.build();
-    let client = Rect::new(Point::new(10.0, 20.0), Size::new(1000.0, 700.0));
 
-    let rects = layout.compute_rects(client, &metrics).unwrap();
+    let main_rects = layout
+        .compute_rects(Rect::new(Point::ZERO, Size::new(320.0, 180.0)), &metrics)
+        .unwrap();
+    assert!(main_rects.floating_groups.is_empty());
+    assert!(main_rects.floating_resize_edges.is_empty());
+    assert!(main_rects.panels.is_empty());
 
-    assert_eq!(
-        rects
-            .floating_groups
-            .iter()
-            .map(|item| item.z_order)
-            .collect::<Vec<_>>(),
-        vec![1, 2, 3]
-    );
-    assert_eq!(rects.floating_groups[0].group, ids[1]);
-    assert_eq!(
-        rects.floating_groups[0].rect,
-        Rect::new(Point::new(590.0, 20.0), Size::new(420.0, 360.0))
-    );
-    assert_eq!(rects.floating_groups[1].group, ids[2]);
-    assert_eq!(
-        rects.floating_groups[1].rect,
-        Rect::new(Point::new(30.0, 40.0), Size::new(160.0, 156.0))
-    );
-    assert_eq!(rects.floating_groups[2].group, ids[0]);
-    assert_eq!(
-        rects.floating_groups[2].rect,
-        Rect::new(Point::new(10.0, 360.0), Size::new(420.0, 360.0))
-    );
-    let small_panel = layout.floating_group(ids[2]).unwrap().bounds;
-    assert_eq!(small_panel.size, Size::new(100.0, 80.0));
-    assert_eq!(
-        layout.floating_group(ids[0]).unwrap().bounds.origin,
-        Point::new(-100.0, 650.0)
-    );
-    assert_eq!(rects.floating_resize_edges.len(), 24);
-    assert!(rects.vertical_overflow.is_empty());
+    for (floating, panel, z_order, requested_size) in &fixtures {
+        let rects = layout.compute_floating_rects(*floating, &metrics).unwrap();
+        assert_eq!(rects.floating_groups.len(), 1);
+        assert_eq!(rects.floating_groups[0].group, *floating);
+        assert_eq!(rects.floating_groups[0].z_order, *z_order);
+        assert_eq!(rects.floating_groups[0].rect.origin, Point::ZERO);
+        assert_eq!(rects.viewport, Some(rects.floating_groups[0].rect));
+        assert_eq!(rects.panels.len(), 1);
+        assert_eq!(rects.panels[0].panel, *panel);
+        assert_eq!(rects.panels[0].rect.origin.x, 0.0);
+        assert!(
+            rects.panels[0].rect.origin.y >= metrics.header_height + metrics.tab_strip_height
+        );
+        assert_eq!(
+            layout.floating_group(*floating).unwrap().bounds.size,
+            *requested_size,
+            "geometry must not rewrite the stored native-window bounds"
+        );
+        assert_eq!(rects.floating_resize_edges.len(), 8);
+    }
+
+    let first = layout.compute_floating_rects(fixtures[0].0, &metrics).unwrap();
+    assert_eq!(first.floating_groups[0].rect.size, Size::new(1420.0, 960.0));
 }
-
 #[test]
 fn vertical_split_reports_content_extent_when_child_minimums_do_not_fit() {
     let metrics = DockMetrics::default();
@@ -1167,8 +1022,9 @@ fn non_finite_viewport_is_rejected_without_emitting_non_finite_rectangles() {
     }
 }
 
+
 #[test]
-fn unfit_floating_window_does_not_abort_geometry_for_other_areas() {
+fn floating_geometry_failure_is_isolated_from_main_and_other_floating_windows() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
 
@@ -1196,57 +1052,30 @@ fn unfit_floating_window_does_not_abort_geometry_for_other_areas() {
     let visible_group = builder.tabs(vec![visible_panel_node], 0, false);
     let visible_floating = builder.floating_group(
         visible_group,
-        Rect::new(Point::new(260.0, 20.0), Size::new(200.0, 90.0)),
+        Rect::new(Point::new(260.0, 20.0), Size::new(200.0, 190.0)),
         2,
     );
     let layout = builder.build();
 
-    let rects = layout
+    let main_rects = layout
         .compute_rects(viewport(1000.0, 140.0), &metrics)
-        .expect("one unfit floating window must not abort the whole snapshot");
+        .expect("main geometry must not depend on floating-window size");
+    assert!(main_rects.columns.iter().any(|column| column.column == main_column));
+    assert!(main_rects.panels.iter().any(|panel| panel.panel == main_panel));
+    assert!(main_rects.floating_groups.is_empty());
 
-    assert!(
-        rects
-            .columns
-            .iter()
-            .any(|column| column.column == main_column),
-        "main dock geometry should still be available"
-    );
-    assert!(
-        rects.panels.iter().any(|panel| panel.panel == main_panel),
-        "main dock panel geometry should still be available"
-    );
-    assert!(
-        rects
-            .floating_groups
-            .iter()
-            .any(|group| group.group == visible_floating),
-        "a valid floating window should remain visible"
-    );
-    assert!(
-        !rects
-            .floating_groups
-            .iter()
-            .any(|group| group.group == too_tall_floating),
-        "a floating window that cannot fit should be omitted from this snapshot"
-    );
-    assert!(
-        rects
-            .panels
-            .iter()
-            .any(|panel| panel.panel == visible_panel),
-        "the valid floating panel should remain available"
-    );
-    assert!(
-        !rects
-            .panels
-            .iter()
-            .any(|panel| panel.panel == too_tall_panel),
-        "failed floating geometry must not leave partial panel rectangles"
-    );
+    let too_tall_rects = layout.compute_floating_rects(too_tall_floating, &metrics).unwrap();
+    assert_eq!(too_tall_rects.floating_groups.len(), 1);
+    assert!(too_tall_rects.floating_groups[0].rect.size.height >= 156.0);
+    assert!(too_tall_rects.panels.iter().any(|panel| panel.panel == too_tall_panel));
+
+    let visible_rects = layout.compute_floating_rects(visible_floating, &metrics).unwrap();
+    assert_eq!(visible_rects.floating_groups.len(), 1);
+    assert!(visible_rects.panels.iter().any(|panel| panel.panel == visible_panel));
+    assert!(!visible_rects.panels.iter().any(|panel| panel.panel == too_tall_panel));
+    assert!(!too_tall_rects.panels.iter().any(|panel| panel.panel == visible_panel));
     assert!(layout.validate(&metrics).is_ok());
 }
-
 #[test]
 fn refuses_to_shrink_canvas_below_its_minimum_without_overflow_policy() {
     let metrics = DockMetrics::default();
