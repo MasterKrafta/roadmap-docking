@@ -838,6 +838,8 @@ impl Render for TransferPanel {
 struct PanelViews {
     a: AnyView,
     b: AnyView,
+    a_entity: Entity<TransferPanel>,
+    b_entity: Entity<TransferPanel>,
 }
 
 impl PanelViews {
@@ -845,6 +847,13 @@ impl PanelViews {
         match panel {
             PanelId::A => self.a.clone(),
             PanelId::B => self.b.clone(),
+        }
+    }
+
+    fn focus_handle(&self, panel: PanelId, cx: &App) -> FocusHandle {
+        match panel {
+            PanelId::A => self.a_entity.read(cx).focus_handle.clone(),
+            PanelId::B => self.b_entity.read(cx).focus_handle.clone(),
         }
     }
 }
@@ -879,31 +888,64 @@ impl MainWindowView {
         self.activate_tab(PanelId::B, cx);
     }
 
-    fn extract_panel(&mut self, panel: PanelId, cx: &mut Context<Self>) {
-        let hwnd = self.state.update(cx, |state, cx| {
+    fn extract_panel(
+        &mut self,
+        panel: PanelId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (hwnd, next_active) = self.state.update(cx, |state, cx| {
             if state.floating_panel.is_some() || state.floating_hwnd == 0 {
-                return 0;
+                return (0, None);
             }
 
             state.floating_panel = Some(panel);
+
+            // If the active tab leaves the group, activate the remaining tab.
+            // When the panel returns, it is added back as an inactive tab.
+            let next_active = if state.active_tab == panel {
+                let remaining = panel.other();
+                state.active_tab = remaining;
+                Some(remaining)
+            } else {
+                None
+            };
+
             cx.notify();
-            state.floating_hwnd
+            (state.floating_hwnd, next_active)
         });
 
-        if hwnd != 0 {
-            tearoff_win::show_window(hwnd);
-            tearoff_win::activate_window(hwnd);
+        if hwnd == 0 {
+            return;
         }
+
+        if let Some(panel) = next_active {
+            let focus_handle = self.panels.focus_handle(panel, cx);
+            window.focus(&focus_handle, cx);
+        }
+
+        tearoff_win::show_window(hwnd);
+        tearoff_win::activate_window(hwnd);
     }
 
-    fn extract_inactive(&mut self, _: &MouseUpEvent, _: &mut Window, cx: &mut Context<Self>) {
+    fn extract_inactive(
+        &mut self,
+        _: &MouseUpEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let inactive_panel = self.state.read(cx).active_tab.other();
-        self.extract_panel(inactive_panel, cx);
+        self.extract_panel(inactive_panel, window, cx);
     }
 
-    fn extract_active(&mut self, _: &MouseUpEvent, _: &mut Window, cx: &mut Context<Self>) {
+    fn extract_active(
+        &mut self,
+        _: &MouseUpEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let active_panel = self.state.read(cx).active_tab;
-        self.extract_panel(active_panel, cx);
+        self.extract_panel(active_panel, window, cx);
     }
 }
 
@@ -914,110 +956,109 @@ impl Render for MainWindowView {
             (state.active_tab, state.floating_panel, state.floating_hwnd)
         };
         let inactive_tab = active_tab.other();
+
         let active_content = if floating_panel == Some(active_tab) {
             div()
                 .flex_1()
                 .items_center()
                 .justify_center()
                 .text_color(rgb(0x888888))
-                .child(format!(
-                    "Панель {} находится в плавающем окне",
-                    active_tab.label()
-                ))
+                .child("В группе временно нет активной вкладки")
         } else {
             div().flex_1().p_3().child(self.panels.get(active_tab))
         };
 
-        let extract_inactive_label = if floating_panel.is_some() || floating_hwnd == 0 {
-            "Верните плавающую панель перед следующим переносом".to_string()
-        } else {
-            format!("Извлечь неактивную {}", inactive_tab.label())
-        };
+        let mut header = div()
+            .h(px(42.))
+            .w_full()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap_2()
+            .px_3()
+            .bg(rgb(0x30363d))
+            .text_color(white())
+            .child("MAIN WINDOW · ГРУППА A + B");
+
+        // A floating panel is removed from the tab strip. It is inserted back
+        // into this same group by the button in the floating window.
+        if floating_panel != Some(PanelId::A) {
+            header = header.child(
+                div()
+                    .px_3()
+                    .py_1()
+                    .bg(if active_tab == PanelId::A {
+                        rgb(0x43566d)
+                    } else {
+                        rgb(0x252a30)
+                    })
+                    .cursor_pointer()
+                    .on_mouse_up(MouseButton::Left, cx.listener(Self::activate_a))
+                    .child("A"),
+            );
+        }
+
+        if floating_panel != Some(PanelId::B) {
+            header = header.child(
+                div()
+                    .px_3()
+                    .py_1()
+                    .bg(if active_tab == PanelId::B {
+                        rgb(0x43566d)
+                    } else {
+                        rgb(0x252a30)
+                    })
+                    .cursor_pointer()
+                    .on_mouse_up(MouseButton::Left, cx.listener(Self::activate_b))
+                    .child("B"),
+            );
+        }
+
+        let can_extract = floating_panel.is_none() && floating_hwnd != 0;
+        let inactive_label = format!("Извлечь {} из группы", inactive_tab.label());
+        let active_label = format!("Извлечь {} из группы", active_tab.label());
+
+        header = header.child(
+            div()
+                .ml_auto()
+                .px_2()
+                .py_1()
+                .bg(rgb(0x43566d))
+                .cursor_pointer()
+                .on_mouse_up(MouseButton::Left, cx.listener(Self::extract_inactive))
+                .child(if can_extract {
+                    inactive_label
+                } else {
+                    "Сначала верните плавающую панель".to_string()
+                }),
+        );
+        header = header.child(
+            div()
+                .px_2()
+                .py_1()
+                .bg(rgb(0x43566d))
+                .cursor_pointer()
+                .on_mouse_up(MouseButton::Left, cx.listener(Self::extract_active))
+                .child(if can_extract {
+                    active_label
+                } else {
+                    "Недоступно".to_string()
+                }),
+        );
 
         div()
             .size_full()
             .flex()
             .flex_col()
             .bg(rgb(0x1b1e22))
-            .child(
-                div()
-                    .h(px(42.))
-                    .w_full()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap_2()
-                    .px_3()
-                    .bg(rgb(0x30363d))
-                    .text_color(white())
-                    .child("MAIN WINDOW")
-                    .child(
-                        div()
-                            .px_3()
-                            .py_1()
-                            .bg(if active_tab == PanelId::A {
-                                rgb(0x43566d)
-                            } else {
-                                rgb(0x252a30)
-                            })
-                            .cursor_pointer()
-                            .on_mouse_up(MouseButton::Left, cx.listener(Self::activate_a))
-                            .child(if floating_panel == Some(PanelId::A) {
-                                "A · floating"
-                            } else {
-                                "A"
-                            }),
-                    )
-                    .child(
-                        div()
-                            .px_3()
-                            .py_1()
-                            .bg(if active_tab == PanelId::B {
-                                rgb(0x43566d)
-                            } else {
-                                rgb(0x252a30)
-                            })
-                            .cursor_pointer()
-                            .on_mouse_up(MouseButton::Left, cx.listener(Self::activate_b))
-                            .child(if floating_panel == Some(PanelId::B) {
-                                "B · floating"
-                            } else {
-                                "B"
-                            }),
-                    )
-                    .child(
-                        div()
-                            .ml_auto()
-                            .px_2()
-                            .py_1()
-                            .bg(rgb(0x43566d))
-                            .cursor_pointer()
-                            .on_mouse_up(
-                                MouseButton::Left,
-                                cx.listener(Self::extract_inactive),
-                            )
-                            .child(extract_inactive_label),
-                    )
-                    .child(
-                        div()
-                            .px_2()
-                            .py_1()
-                            .bg(rgb(0x43566d))
-                            .cursor_pointer()
-                            .on_mouse_up(
-                                MouseButton::Left,
-                                cx.listener(Self::extract_active),
-                            )
-                            .child("Извлечь активную"),
-                    ),
-            )
+            .child(header)
             .child(
                 div()
                     .px_3()
                     .py_2()
                     .text_color(rgb(0xa8b0ba))
                     .child(
-                        "Проверка: измени текст/счётчик B → выбери A → извлеки неактивную B. Верни B и открой вкладку снова.",
+                        "B находится вкладкой в общей группе с A. Извлеки активную или неактивную вкладку; возврат добавляет её обратно в эту же группу.",
                     ),
             )
             .child(active_content)
@@ -1062,8 +1103,17 @@ impl Render for FloatingWindowView {
         };
 
         let title = floating_panel
-            .map(|panel| format!("FLOATING WINDOW — PANEL {}", panel.label()))
+            .map(|panel| {
+                format!(
+                    "FLOATING WINDOW — {} (ИЗ ГРУППЫ A + B)",
+                    panel.label()
+                )
+            })
             .unwrap_or_else(|| "FLOATING WINDOW — EMPTY".to_string());
+
+        let return_label = floating_panel
+            .map(|panel| format!("Вложить {} обратно в группу A + B", panel.label()))
+            .unwrap_or_else(|| "Группа уже восстановлена".to_string());
 
         div()
             .size_full()
@@ -1092,7 +1142,7 @@ impl Render for FloatingWindowView {
                                 MouseButton::Left,
                                 cx.listener(Self::move_to_main),
                             )
-                            .child("Вернуть в главное"),
+                            .child(return_label),
                     ),
             )
             .child(content)
@@ -1125,6 +1175,8 @@ fn main() {
         let panels = PanelViews {
             a: AnyView::from(panel_a.clone()),
             b: AnyView::from(panel_b.clone()),
+            a_entity: panel_a.clone(),
+            b_entity: panel_b.clone(),
         };
 
         let floating_options = WindowOptions {
