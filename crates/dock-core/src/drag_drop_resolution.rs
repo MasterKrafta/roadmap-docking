@@ -549,3 +549,202 @@ fn rejected_drag_drop_request_does_not_mutate_or_invalidate_layout() {
     assert_eq!(layout.version(), version);
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
+
+
+#[test]
+fn floating_capture_released_without_a_target_keeps_the_window_floating() {
+    let metrics = DockMetrics::default();
+    let (layout, floating_id, _) = floating_layout();
+    let original = layout.floating_group(floating_id).unwrap().bounds;
+    let version = layout.version();
+    let payload = DragPayload::FloatingGroup { group: floating_id };
+    let mut session = DragSession::new(&metrics).unwrap();
+
+    session
+        .pointer_down_with_handle(
+            payload,
+            DragHandle::FloatingCapture,
+            Point::new(10.0, 20.0),
+        )
+        .unwrap();
+    session.pointer_move(Point::new(15.0, 20.0)).unwrap();
+
+    let request = session
+        .pointer_up(Point::new(18.0, 24.0), None)
+        .unwrap()
+        .expect("an empty FloatingCapture release completes the gesture");
+
+    assert_eq!(request.target, None);
+    assert!(matches!(
+        session.state(),
+        crate::DragState::Dropped { target: None, .. }
+    ));
+    assert_eq!(
+        layout.resolve_drag_drop(&request, &metrics).unwrap(),
+        DragDropAction::NoOp
+    );
+    assert_eq!(layout.version(), version);
+    assert_eq!(layout.floating_group(floating_id).unwrap().bounds, original);
+    assert_eq!(layout.floating_groups().count(), 1);
+}
+
+#[test]
+fn floating_group_can_merge_into_another_floating_window() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, source_a) = builder.panel(key("floating-merge-source-a"), constraints());
+    let (_, source_b) = builder.panel(key("floating-merge-source-b"), constraints());
+    let source_root = builder.tabs(vec![source_a, source_b], 1, true);
+    let source_float = builder.floating_group(source_root, bounds(40.0, 50.0), 1);
+
+    let (_, target_panel) = builder.panel(key("floating-merge-target"), constraints());
+    let target_root = builder.tabs(vec![target_panel], 0, false);
+    let target_float = builder.floating_group(target_root, bounds(520.0, 80.0), 2);
+
+    let mut layout = builder.build();
+    let panel_count = layout.panel_instances().count();
+    let request = DragDropRequest {
+        payload: DragPayload::FloatingGroup { group: source_float },
+        handle: DragHandle::FloatingCapture,
+        origin: Point::ZERO,
+        point: Point::new(12.0, 8.0),
+        target: Some(DropTarget::GroupTabs {
+            group: target_root,
+            index: 1,
+        }),
+        floating_bounds: None,
+    };
+
+    let action = layout.resolve_drag_drop(&request, &metrics).unwrap();
+    assert_eq!(
+        action,
+        DragDropAction::Command(DockCommand::DockFloating {
+            group: source_float,
+            target: DropTarget::GroupTabs {
+                group: target_root,
+                index: 1,
+            },
+        })
+    );
+    let DragDropAction::Command(command) = action else {
+        panic!("dropping onto the center of another floating group must merge tabs");
+    };
+    layout.apply(command, &metrics).unwrap();
+
+    assert!(layout.floating_group(source_float).is_none());
+    assert!(layout.floating_group(target_float).is_some());
+    assert_tabs_state(&layout, target_root, 2, false);
+    let Node::Tabs(merged) = layout.node(target_root).unwrap() else {
+        panic!("the destination remains a Tabs group");
+    };
+    assert_eq!(merged.children, vec![target_panel, source_a, source_b]);
+    assert_eq!(layout.panel_instances().count(), panel_count);
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
+fn floating_group_can_split_against_another_floating_window_edge() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, source_panel) = builder.panel(key("floating-edge-source"), constraints());
+    let source_root = builder.tabs(vec![source_panel], 0, false);
+    let source_float = builder.floating_group(source_root, bounds(40.0, 50.0), 1);
+
+    let (_, target_panel) = builder.panel(key("floating-edge-target"), constraints());
+    let target_root = builder.tabs(vec![target_panel], 0, false);
+    let target_float = builder.floating_group(target_root, bounds(520.0, 80.0), 2);
+
+    let mut layout = builder.build();
+    let request = DragDropRequest {
+        payload: DragPayload::FloatingGroup { group: source_float },
+        handle: DragHandle::FloatingCapture,
+        origin: Point::ZERO,
+        point: Point::new(12.0, 8.0),
+        target: Some(DropTarget::GroupEdge {
+            group: target_root,
+            zone: crate::DropZone::Bottom,
+        }),
+        floating_bounds: None,
+    };
+
+    let action = layout.resolve_drag_drop(&request, &metrics).unwrap();
+    assert_eq!(
+        action,
+        DragDropAction::Command(DockCommand::DockFloating {
+            group: source_float,
+            target: DropTarget::GroupEdge {
+                group: target_root,
+                zone: crate::DropZone::Bottom,
+            },
+        })
+    );
+    let DragDropAction::Command(command) = action else {
+        panic!("dropping on a floating stack edge must create a split");
+    };
+    layout.apply(command, &metrics).unwrap();
+
+    assert!(layout.floating_group(source_float).is_none());
+    assert!(layout.floating_group(target_float).is_some());
+    let target_area = layout.floating_group(target_float).unwrap().area;
+    let root = layout.dock_area(target_area).unwrap().root;
+    let Some(Node::Split(split)) = layout.node(root) else {
+        panic!("the destination floating window now owns a vertical split");
+    };
+    assert_eq!(split.axis, Axis::Y);
+    assert_eq!(split.children, vec![target_root, source_root]);
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
+fn extracting_one_panel_from_a_floating_group_returns_its_new_window_id() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+    let (moving_panel, moving_node) =
+        builder.panel(key("floating-extract-moving"), constraints());
+    let (remaining_panel, remaining_node) =
+        builder.panel(key("floating-extract-remaining"), constraints());
+    let source_root = builder.tabs(vec![moving_node, remaining_node], 0, false);
+    let source_float = builder.floating_group(source_root, bounds(40.0, 50.0), 1);
+    let mut layout = builder.build();
+
+    let request = DragDropRequest {
+        payload: DragPayload::Panel { panel: moving_panel },
+        handle: DragHandle::PanelTab,
+        origin: Point::ZERO,
+        point: Point::new(12.0, 8.0),
+        target: Some(DropTarget::FreeArea),
+        floating_bounds: Some(bounds(520.0, 80.0)),
+    };
+
+    let action = layout.resolve_drag_drop(&request, &metrics).unwrap();
+    let DragDropAction::Command(command) = action else {
+        panic!("dropping a panel into free space must create a floating group");
+    };
+    let outcome = layout.apply(command, &metrics).unwrap();
+    let new_float = match outcome.actual_value {
+        Some(crate::CommandValue::FloatingGroup(group)) => group,
+        other => panic!("Float must return the created FloatingGroupId, got {other:?}"),
+    };
+
+    assert_ne!(new_float, source_float);
+    assert!(layout.floating_group(source_float).is_some());
+    assert!(layout.floating_group(new_float).is_some());
+    assert!(matches!(
+        layout.node(source_root),
+        Some(Node::Tabs(tabs)) if tabs.children == vec![remaining_node]
+    ));
+    let new_area = layout.floating_group(new_float).unwrap().area;
+    let new_root = layout.dock_area(new_area).unwrap().root;
+    assert!(matches!(
+        layout.node(new_root),
+        Some(Node::Tabs(tabs)) if tabs.children == vec![moving_node]
+    ));
+    assert!(layout.panel_instance(moving_panel).is_some());
+    assert!(layout.panel_instance(remaining_panel).is_some());
+    assert_eq!(layout.panel_instances().count(), 2);
+    assert_eq!(layout.floating_groups().count(), 2);
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
