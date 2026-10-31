@@ -174,13 +174,13 @@ impl DockWorkspace {
         viewport: Rect,
         anchor: Point,
         on_dismiss: impl Fn(&mut App) + 'static,
-        app: &mut App,
+        cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let entries = self
             .panel_menu
             .iter()
             .map(|panel| {
-                let selected = self.controller.update(app, |controller, _| {
+                let selected = self.controller.update(cx, |controller, _| {
                     controller
                         .layout()
                         .panel_instances()
