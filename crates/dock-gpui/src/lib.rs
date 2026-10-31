@@ -9,6 +9,7 @@ pub mod actions;
 pub mod components;
 pub mod controller;
 pub mod dock_host;
+pub mod demo;
 
 mod geometry;
 pub mod input;
@@ -40,6 +41,7 @@ pub use components::{
     TabHeaderView, TabOverflow, TabStripView,
 };
 pub use dock_host::DockHost;
+pub use demo::run as run_demo;
 pub use missing_panel::MissingPanelPlaceholder;
 pub use persistence::WorkspacePersistenceError;
 pub use theme::DockTheme;
