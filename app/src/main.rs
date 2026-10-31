@@ -1,6 +1,6 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
-use dock_gpui::{DockWorkspace, PanelDefinition, Point, Rect, Size};
+use dock_gpui::{DockPanelMenu, DockWorkspace, PanelDefinition, Point, Rect, Size};
 use gpui::{
     App, AppContext, AnyView, Bounds, Context, Entity, IntoElement, Render, TitlebarOptions,
     Window, WindowBounds, WindowOptions, div, px, rgb, size,
@@ -34,7 +34,7 @@ fn main() {
 
 struct AppView {
     workspace: Entity<DockWorkspace>,
-    menu_open: bool,
+    panel_menu: Entity<DockPanelMenu>,
 }
 
 impl AppView {
@@ -60,10 +60,17 @@ impl AppView {
             DockWorkspace::new(panels, viewport, cx)
                 .expect("the app must provide the four baseline panel definitions")
         });
+        let panel_menu = workspace.update(cx, |workspace, workspace_cx| {
+            workspace.create_panel_menu(
+                Rect::new(Point::ZERO, Size::new(APP_WIDTH, APP_HEIGHT)),
+                Point::new(92.0, MENU_BAR_HEIGHT),
+                workspace_cx,
+            )
+        });
 
         Self {
             workspace,
-            menu_open: false,
+            panel_menu,
         }
     }
 }
@@ -81,8 +88,9 @@ impl Render for AppView {
             .hover(|style| style.bg(rgb(0x454545)))
             .child("Окно")
             .on_click(cx.listener(|view, _, _, cx| {
-                view.menu_open = !view.menu_open;
-                cx.notify();
+                view.panel_menu.update(cx, |menu, menu_cx| {
+                    menu.toggle(menu_cx);
+                });
             }));
 
         let menu_bar = div()
@@ -99,7 +107,7 @@ impl Render for AppView {
             .child(div().px(px(12.0)).child("Правка"))
             .child(menu_button);
 
-        let mut root = div()
+        div()
             .id("application-root")
             .size_full()
             .relative()
@@ -113,31 +121,8 @@ impl Render for AppView {
                     .flex_1()
                     .min_h_0()
                     .child(self.workspace.clone()),
-            );
-
-        if self.menu_open {
-            let app_view = cx.entity();
-            let menu = self.workspace.update(cx, |workspace, workspace_cx| {
-                workspace.panel_menu(
-                    "application-window-menu",
-                    Rect::new(
-                        Point::ZERO,
-                        Size::new(APP_WIDTH, APP_HEIGHT),
-                    ),
-                    Point::new(92.0, MENU_BAR_HEIGHT),
-                    move |app| {
-                        app_view.update(app, |view, cx| {
-                            view.menu_open = false;
-                            cx.notify();
-                        });
-                    },
-                    workspace_cx,
-                )
-            });
-            root = root.child(menu);
-        }
-
-        root
+            )
+            .child(self.panel_menu.clone())
     }
 }
 
