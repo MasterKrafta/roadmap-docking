@@ -43,6 +43,8 @@ pub struct DockHost {
     open_tab_overflow: Option<NodeId>,
     /// Whether middle-clicking a tab closes its panel instance.
     middle_click_closes_tabs: bool,
+    /// Keeps this host reactive to controller-owned layout and drag-state changes.
+    controller_observed: bool,
 }
 
 impl DockHost {
@@ -58,6 +60,7 @@ impl DockHost {
             open_group_menu: None,
             open_tab_overflow: None,
             middle_click_closes_tabs: true,
+            controller_observed: false,
         }
     }
 
@@ -146,6 +149,12 @@ impl DockHost {
 
 impl Render for DockHost {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if !self.controller_observed {
+            cx.observe(&self.controller, |_, _, host_cx| host_cx.notify())
+                .detach();
+            self.controller_observed = true;
+        }
+
         // One read transaction produces the geometry snapshot plus the IDs/modes
         // needed by the main-dock presentation layer. The Layout remains Core-owned.
         let (
