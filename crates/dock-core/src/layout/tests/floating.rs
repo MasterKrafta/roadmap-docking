@@ -1233,7 +1233,7 @@ fn floating_vertical_stack_reserves_title_row_when_first_group_collapsed() {
     let bottom_group = builder.tabs(vec![bottom_panel], 0, false);
 
     let root = builder.split(Axis::Y, vec![top_group, bottom_group], vec![0.5, 0.5]);
-    builder.floating_group(
+    let floating = builder.floating_group(
         root,
         Rect::new(Point::new(20.0, 30.0), Size::new(440.0, 400.0)),
         1,
@@ -1241,15 +1241,17 @@ fn floating_vertical_stack_reserves_title_row_when_first_group_collapsed() {
     let layout = builder.build();
     assert_eq!(layout.validate(&metrics), Ok(()));
 
-    let rects = layout
-        .compute_rects(Rect::new(Point::ZERO, Size::new(1200.0, 900.0)), &metrics)
-        .unwrap();
+    let rects = layout.compute_floating_rects(floating, &metrics).unwrap();
+    assert_eq!(
+        rects.floating_groups[0].rect,
+        Rect::new(Point::ZERO, Size::new(440.0, 400.0))
+    );
     let top_rect = rects
         .groups
         .iter()
         .find(|entry| entry.group == top_group)
         .unwrap();
-    assert_eq!(top_rect.rect.origin.y, 30.0 + metrics.header_height);
+    assert_eq!(top_rect.rect.origin.y, metrics.header_height);
     assert!(rects.groups.iter().any(|entry| entry.group == bottom_group));
 }
 
