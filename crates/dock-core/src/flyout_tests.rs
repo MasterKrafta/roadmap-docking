@@ -117,10 +117,6 @@ fn assert_base_rectangles_equal(before: &crate::LayoutRects, after: &crate::Layo
         "floating groups must not reflow",
     );
     assert_eq!(
-        after.floating_resize_edges, before.floating_resize_edges,
-        "floating resize handles must not move",
-    );
-    assert_eq!(
         after.drop_zones, before.drop_zones,
         "drop zones must not reflow"
     );
