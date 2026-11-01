@@ -977,7 +977,7 @@ impl FloatingWindowManager {
         let monitor_recovery_applied = if monitor_corrections.is_empty() {
             false
         } else {
-            match self.controller.update(cx, |controller, controller_cx| {
+            self.controller.update(cx, |controller, controller_cx| {
                 let applied = match controller.apply_workspace_monitor_bounds(&monitor_corrections) {
                     Ok(()) => true,
                     Err(error) => {
@@ -991,16 +991,7 @@ impl FloatingWindowManager {
                 controller.flush_events(controller_cx);
                 controller_cx.notify();
                 applied
-            }) {
-                Ok(applied) => applied,
-                Err(error) => {
-                    tracing::warn!(
-                        %error,
-                        "could not update the controller after monitor recovery"
-                    );
-                    false
-                }
-            }
+            })
         };
 
         self.reconciling = false;
