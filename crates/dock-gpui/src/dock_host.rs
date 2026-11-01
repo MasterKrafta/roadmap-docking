@@ -212,6 +212,13 @@ impl Render for DockHost {
             self.controller_observed = true;
         }
 
+        // Materialize one persistent GPUI view for every open PanelId, including
+        // inactive tabs. The factory runs only on cache misses; later host changes
+        // reuse the same AnyView/Entity instead of constructing a replacement.
+        self.controller.update(cx, |controller, panel_cx| {
+            controller.ensure_panel_views(window, panel_cx);
+        });
+
         // One read transaction produces the geometry snapshot plus the IDs/modes
         // needed by the main-dock presentation layer. The Layout remains Core-owned.
         let (
@@ -420,26 +427,31 @@ impl Render for DockHost {
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
+        // A PanelId can be mounted in one host only during this render pass.
+        // This also protects against stale/overlapping geometry snapshots.
+        let mut mounted_panel_ids = HashSet::new();
         let main_panel_views = panel_views
             .iter()
-            .filter(|(panel, _)| main_active_panels.contains(&panel.panel))
+            .filter(|(panel, _)| {
+                main_active_panels.contains(&panel.panel)
+                    && !active_flyout.is_some_and(|flyout| flyout.panel == panel.panel)
+                    && mounted_panel_ids.insert(panel.panel)
+            })
             .cloned()
             .collect::<Vec<_>>();
-        let flyout_panel_view =
-            rects
-                .as_ref()
-                .and_then(|rects| rects.flyout)
-                .and_then(|flyout_rect| {
-                    active_flyout
-                        .filter(|flyout| flyout.panel == flyout_rect.panel)
-                        .and_then(|flyout| {
-                            self.controller.update(cx, |controller, panel_cx| {
-                                controller
-                                    .panel_view(flyout.panel, window, panel_cx)
-                                    .map(|view| (flyout, view))
-                            })
-                        })
-                });
+        let flyout_panel_view = rects
+            .as_ref()
+            .and_then(|rects| rects.flyout)
+            .and_then(|flyout_rect| {
+                let flyout = active_flyout.filter(|flyout| {
+                    flyout.panel == flyout_rect.panel && mounted_panel_ids.insert(flyout.panel)
+                })?;
+                self.controller.update(cx, |controller, panel_cx| {
+                    controller
+                        .panel_view(flyout.panel, window, panel_cx)
+                        .map(|view| (flyout, view))
+                })
+            });
 
         // Keep scroll state only while its Column node still owns an overflow
         // region. Removing/replacing the Core node or resolving the overflow
@@ -856,7 +868,9 @@ impl Render for DockHost {
                     .collect::<Vec<_>>();
                 let floating_panel_views = panel_views
                     .iter()
-                    .filter(|(panel, _)| panel_ids.contains(&panel.panel))
+                    .filter(|(panel, _)| {
+                        panel_ids.contains(&panel.panel) && mounted_panel_ids.insert(panel.panel)
+                    })
                     .cloned()
                     .collect::<Vec<_>>();
 
