@@ -12,7 +12,7 @@ use stack_allocation::{allocate_stack_heights, push_vertical_overflow, weighted_
 
 #[path = "compute_rects/overlay_geometry.rs"]
 mod overlay_geometry;
-use overlay_geometry::{compute_flyout_rect, push_resize_edges};
+use overlay_geometry::compute_flyout_rect;
 
 #[path = "compute_rects/node_layout.rs"]
 mod node_layout;
@@ -24,9 +24,9 @@ use split_layout::{layout_floating_root, layout_split, push_splitter};
 
 use crate::{
     Axis, Column, ColumnMode, ColumnRect, ComputeRectsError, DockMetrics, DockSide,
-    FloatingGroupRect, FloatingResizeEdgeRect, FlyoutRect, GeometryError, GroupRect, Layout,
+    FloatingGroupRect, FlyoutRect, GeometryError, GroupRect, Layout,
     LayoutRects, Node, NodeId, OUTER_COLUMN_EDGE_BOUNDARY_INDEX, PanelRect, Point, Rect,
-    ResizeEdge, Size, SplitterRect, TabHeaderRect, TabOverflowRect, TabStripRect, Tabs,
+    Size, SplitterRect, TabHeaderRect, TabOverflowRect, TabStripRect, Tabs,
 };
 
 #[cfg(test)]
@@ -298,7 +298,6 @@ impl Layout {
         output
             .floating_groups
             .push(FloatingGroupRect::new(group, bounds, floating.z_order));
-        push_resize_edges(group, bounds, metrics, &mut output)?;
         layout_floating_root(
             self,
             area.root,
