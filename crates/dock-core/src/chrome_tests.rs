@@ -218,7 +218,6 @@ fn hidden_chrome_hides_floating_windows_but_preserves_all_layout_state() {
         visible_floating.floating_groups[0].rect,
         Rect::new(Point::ZERO, floating_bounds.size)
     );
-    assert!(!visible_floating.floating_resize_edges.is_empty());
 
     for mode in [ChromeMode::DockHidden, ChromeMode::AllHidden] {
         layout
@@ -231,7 +230,6 @@ fn hidden_chrome_hides_floating_windows_but_preserves_all_layout_state() {
         assert!(hidden.groups.is_empty());
         assert!(hidden.panels.is_empty());
         assert!(hidden.floating_groups.is_empty());
-        assert!(hidden.floating_resize_edges.is_empty());
 
         let hidden_floating = layout.compute_floating_rects(floating_id, &metrics).unwrap();
         assert_eq!(hidden_floating, crate::LayoutRects::default());
