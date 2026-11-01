@@ -107,6 +107,9 @@ pub enum PanelCommandError {
 
     #[error(transparent)]
     Command(#[from] CommandError),
+
+    #[error("the main window bounds are not available for positioning a floating panel")]
+    MainWindowBoundsUnavailable,
 }
 
 /// State for an active drag gesture.
