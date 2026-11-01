@@ -117,6 +117,7 @@ impl Layout {
                 self.apply_floating_command(command, metrics)
             }
             DockCommand::OpenPanel { .. }
+            | DockCommand::OpenPanelFloating { .. }
             | DockCommand::ClosePanel { .. }
             | DockCommand::CloseGroup { .. }
             | DockCommand::ActivateTab { .. }
