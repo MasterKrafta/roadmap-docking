@@ -224,6 +224,42 @@ impl FloatingWindowManager {
         Some(Rect::new(Point::new(origin.x as f32, origin.y as f32), bounds.size))
     }
 
+    /// Returns true when the physical cursor is over another registered
+    /// docking window, even if the source window still owns pointer capture.
+    pub(crate) fn cursor_over_other_docking_window(
+        &self,
+        source_group: FloatingGroupId,
+    ) -> bool {
+        let Some(source_window) = self
+            .registry
+            .floating
+            .get(&source_group)
+            .and_then(|entry| entry.native_window)
+        else {
+            return false;
+        };
+        let Ok(cursor) = self.native_ops.cursor_position() else {
+            return false;
+        };
+
+        let mut known = Vec::new();
+        if let Some(main) = self.main_native_window {
+            known.push(main);
+        }
+        known.extend(
+            self.registry
+                .floating
+                .values()
+                .filter_map(|entry| entry.native_window),
+        );
+
+        self.native_ops
+            .window_from_point(cursor, &known, Some(source_window))
+            .ok()
+            .flatten()
+            .is_some()
+    }
+
     pub(crate) fn native_move_active(&self) -> bool { self.native_move.is_some() }
 
     /// Starts native movement for a group created by the current main-window drag.
