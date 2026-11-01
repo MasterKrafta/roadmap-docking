@@ -140,7 +140,7 @@ pub use components::{
 };
 pub use dock_host::DockHost;
 pub use floating_manager::{
-    CompositionHostRegistry, FloatingWindowManager, PanelWindowOwner, PanelWindowRegistry,
+    CompositionHostRegistry, FloatingWindowManager, PanelLayoutLocation, PanelWindowRegistry,
     PanelWindowVisibility,
 };
 pub use missing_panel::MissingPanelPlaceholder;

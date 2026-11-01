@@ -23,7 +23,7 @@ use crate::{
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum PanelWindowOwner {
+pub enum PanelLayoutLocation {
     Main,
     Floating(FloatingGroupId),
 }
@@ -54,7 +54,7 @@ struct PanelWindowEntry {
 #[derive(Default)]
 pub struct PanelWindowRegistry {
     windows: HashMap<PanelId, PanelWindowEntry>,
-    panel_owners: HashMap<PanelId, PanelWindowOwner>,
+    panel_locations: HashMap<PanelId, PanelLayoutLocation>,
 }
 
 impl PanelWindowRegistry {
@@ -97,8 +97,8 @@ impl PanelWindowRegistry {
         self.windows.get(&panel)?.native_window
     }
 
-    pub fn owner_for_panel(&self, panel: PanelId) -> Option<PanelWindowOwner> {
-        self.panel_owners.get(&panel).copied()
+    pub fn layout_location_for_panel(&self, panel: PanelId) -> Option<PanelLayoutLocation> {
+        self.panel_locations.get(&panel).copied()
     }
 
     pub fn host_group_for_panel(&self, panel: PanelId) -> Option<FloatingGroupId> {
@@ -1016,12 +1016,12 @@ impl FloatingWindowManager {
         }
         self.reconciling = true;
 
-        let (mut groups, panel_owners, recover_initial_bounds) =
+        let (mut groups, panel_locations, recover_initial_bounds) =
             self.controller.update(cx, |controller, _| {
                 let recover_initial_bounds = controller.take_initial_monitor_recovery_pending();
                 let layout = controller.layout();
                 let metrics = controller.metrics();
-                let mut panel_owners = HashMap::new();
+                let mut panel_locations = HashMap::new();
 
                 for side in [DockSide::Left, DockSide::Right] {
                     if let Some(area) = layout.main_area(side) {
@@ -1029,7 +1029,7 @@ impl FloatingWindowManager {
                         let mut seen = HashSet::new();
                         collect_panel_order(layout, area.root, &mut panels, &mut seen);
                         for panel in panels {
-                            panel_owners.insert(panel, PanelWindowOwner::Main);
+                            panel_locations.insert(panel, PanelLayoutLocation::Main);
                         }
                     }
                 }
@@ -1044,7 +1044,7 @@ impl FloatingWindowManager {
                     let mut seen = HashSet::new();
                     collect_panel_order(layout, area.root, &mut panels, &mut seen);
                     for panel in &panels {
-                        panel_owners.insert(*panel, PanelWindowOwner::Floating(id));
+                        panel_locations.insert(*panel, PanelLayoutLocation::Floating(id));
                     }
 
                     groups.push(FloatingGroupSnapshot {
@@ -1056,11 +1056,11 @@ impl FloatingWindowManager {
                     });
                 }
 
-                (groups, panel_owners, recover_initial_bounds)
+                (groups, panel_locations, recover_initial_bounds)
             });
 
         groups.sort_by_key(|group| group.z_order);
-        let desired_panels = panel_owners.keys().copied().collect::<HashSet<_>>();
+        let desired_panels = panel_locations.keys().copied().collect::<HashSet<_>>();
 
         let monitor_work_areas = if recover_initial_bounds {
             match self.native_ops.monitor_work_areas() {
@@ -1101,7 +1101,7 @@ impl FloatingWindowManager {
             .copied()
             .collect::<Vec<_>>();
         for (index, panel) in missing_panels.into_iter().enumerate() {
-            let Some(owner) = panel_owners.get(&panel).copied() else {
+            let Some(owner) = panel_locations.get(&panel).copied() else {
                 continue;
             };
             let bounds = self.initial_panel_window_bounds(panel, owner, &groups, index, cx);
@@ -1237,7 +1237,7 @@ impl FloatingWindowManager {
             }
         }
 
-        self.registry.panel_owners = panel_owners;
+        self.registry.panel_locations = panel_locations;
 
         // Publish only hosts whose GPUI view has actually been assigned. A
         // failed assignment remains absent and is retried by the next pass.
@@ -1382,12 +1382,12 @@ impl FloatingWindowManager {
     fn initial_panel_window_bounds(
         &self,
         panel: PanelId,
-        owner: PanelWindowOwner,
+        owner: PanelLayoutLocation,
         groups: &[FloatingGroupSnapshot],
         offset: usize,
         cx: &mut Context<Self>,
     ) -> Rect {
-        if let PanelWindowOwner::Floating(group) = owner
+        if let PanelLayoutLocation::Floating(group) = owner
             && let Some(group) = groups.iter().find(|candidate| candidate.id == group)
         {
             return group.bounds;
@@ -1428,7 +1428,7 @@ impl FloatingWindowManager {
 
     fn release_panel_window(&mut self, panel: PanelId, cx: &mut Context<Self>) {
         let Some(mut entry) = self.registry.windows.remove(&panel) else {
-            self.registry.panel_owners.remove(&panel);
+            self.registry.panel_locations.remove(&panel);
             return;
         };
 
@@ -1466,7 +1466,7 @@ impl FloatingWindowManager {
             host.set_host_group(None);
             window.remove_window();
         });
-        self.registry.panel_owners.remove(&panel);
+        self.registry.panel_locations.remove(&panel);
     }
 
     fn create_panel_window(
@@ -1564,15 +1564,24 @@ impl FloatingWindowManager {
         }
 
         if let Some(native_window) = native_window {
-            // Native ownership only controls application minimize/close lifetime.
-            if let Some(owner) = self.main_native_window
-                && let Err(error) = self.native_ops.set_owner(native_window, owner)
-            {
-                tracing::warn!(
+            // Every PanelWindow is owned by MainWindow for the full application
+            // lifetime. Dock placement and composition host never change this.
+            let Some(owner) = self.main_native_window else {
+                tracing::error!(
+                    ?panel,
+                    "could not create PanelWindow without the main native owner"
+                );
+                let _ = window.update(cx, |_, window, _| window.remove_window());
+                return None;
+            };
+            if let Err(error) = self.native_ops.set_owner(native_window, owner) {
+                tracing::error!(
                     ?panel,
                     %error,
                     "could not assign the main window as PanelWindow owner"
                 );
+                let _ = window.update(cx, |_, window, _| window.remove_window());
+                return None;
             }
             if let Some(position) = self.physical_origin_for_bounds(bounds)
                 && let Err(error) = self.native_ops.move_window(native_window, position)
