@@ -792,8 +792,6 @@ mod windows_impl {
                 None if already_installed => {
                     // SAFETY: Remove the registered callback before freeing
                     // the reference data it owns.
-                    // SAFETY: Remove the registered callback before freeing
-                    // the reference data it owns.
                     if !unsafe {
                         RemoveWindowSubclass(
                             native,
