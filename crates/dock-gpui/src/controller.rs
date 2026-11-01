@@ -244,6 +244,8 @@ pub struct DockController {
     resize_frame: ResizeFrameThrottle,
     /// An undocked drag remains one history transaction until its native move ends.
     tearoff_transaction_active: bool,
+    /// The native adapter must place restored floating windows on available monitors.
+    workspace_restore_pending: bool,
     registry: PanelRegistry,
     /// One persistent AnyView per open runtime PanelId. Transfers and tab
     /// activation only change which host receives a clone; they never replace
@@ -268,6 +270,7 @@ impl DockController {
         layout
             .validate(&metrics)
             .map_err(DockControllerConfigError::InvalidLayout)?;
+        let workspace_restore_pending = layout.floating_groups().next().is_some();
 
         Ok(Self {
             layout,
@@ -283,6 +286,7 @@ impl DockController {
             interaction: None,
             resize_frame: ResizeFrameThrottle::default(),
             tearoff_transaction_active: false,
+            workspace_restore_pending,
             registry,
             panel_views: PanelViewCache::default(),
             last_error: None,
@@ -403,6 +407,58 @@ impl DockController {
                 .floating_group(group)
                 .and_then(|floating| self.layout.dock_area(floating.area))
                 .is_some_and(|area| self.layout.node(area.root).is_some()),
+        }
+    }
+
+    /// Returns and clears the one-shot flag consumed by FloatingWindowManager.
+    pub(crate) fn take_workspace_restore_pending(&mut self) -> bool {
+        std::mem::take(&mut self.workspace_restore_pending)
+    }
+
+    /// Applies monitor-recovery bounds after a workspace has been restored.
+    ///
+    /// These are environment repairs, not user edits: the restored workspace
+    /// already starts with a fresh history lineage, so the correction is kept
+    /// out of Undo/Redo as well.
+    pub(crate) fn apply_workspace_monitor_bounds(
+        &mut self,
+        corrections: &[(FloatingGroupId, Rect)],
+    ) -> Result<(), CommandError> {
+        if corrections.is_empty() {
+            return Ok(());
+        }
+        if self.has_active_pointer_interaction() || self.tearoff_transaction_active {
+            return Err(CommandError::InvalidValue {
+                field: "workspace_monitor_bounds",
+                reason: "cannot repair restored monitor bounds during an active pointer interaction",
+            });
+        }
+
+        let commands = corrections
+            .iter()
+            .map(|(group, bounds)| DockCommand::ResizeFloatingBounds {
+                group: *group,
+                bounds: *bounds,
+            })
+            .collect::<Vec<_>>();
+        let before_panels = self.panel_keys();
+        let previous_version = self.layout.version();
+
+        match self
+            .history
+            .apply_sequence(&mut self.layout, commands, &self.metrics)
+        {
+            Ok(_) => {
+                self.finish_success(before_panels, previous_version, std::iter::empty());
+                // replace_layout/new-controller construction establishes a new
+                // history lineage; monitor correction must not become an undo step.
+                self.history.clear();
+                Ok(())
+            }
+            Err(error) => {
+                self.finish_failure(&error);
+                Err(error)
+            }
         }
     }
 
