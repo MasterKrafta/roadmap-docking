@@ -752,7 +752,7 @@ fn extracting_one_panel_from_a_floating_group_returns_its_new_window_id() {
 #[test]
 fn floating_composition_with_split_root_can_build_drop_zones_and_dock() {
     let metrics = DockMetrics::default();
-    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+    let mut builder = LayoutBuilder::new(Profile::Generic);
 
     let (_, source_left_panel) = builder.panel(key("capture-split-left"), constraints());
     let source_left_group = builder.tabs(vec![source_left_panel], 0, false);
@@ -802,10 +802,13 @@ fn floating_composition_with_split_root_can_build_drop_zones_and_dock() {
     let target = zones
         .iter()
         .find_map(|zone| match zone.target {
-            DropTarget::GroupTabs { group, .. } if group == target_group => Some(zone.target),
+            DropTarget::MainColumn {
+                side: DockSide::Right,
+                index: 1,
+            } if zone.zone == crate::DropZone::DockEdge => Some(zone.target),
             _ => None,
         })
-        .expect("the main Dock must expose a valid target for the complete floating tree");
+        .expect("the main Dock edge must accept the complete floating tree");
 
     let request = crate::DragDropRequest {
         payload: crate::DragPayload::FloatingGroup {
@@ -813,17 +816,31 @@ fn floating_composition_with_split_root_can_build_drop_zones_and_dock() {
         },
         handle: crate::DragHandle::FloatingCapture,
         origin: Point::ZERO,
-        point: Point::new(12.0, 8.0),
+        point: Point::new(1198.0, 400.0),
         target: Some(target),
         floating_bounds: None,
     };
+    let action = layout.resolve_drag_drop(&request, &metrics).unwrap();
+    let crate::DragDropAction::Command(command) = action else {
+        panic!("docking a complete multi-column floating composition must create a command");
+    };
     assert_eq!(
-        layout.resolve_drag_drop(&request, &metrics).unwrap(),
-        crate::DragDropAction::Command(DockCommand::DockFloating {
+        command,
+        DockCommand::DockFloating {
             group: source_floating,
             target,
-        })
+        }
     );
+
+    let mut layout = layout;
+    layout.apply(command, &metrics).unwrap();
+    assert_eq!(layout.floating_groups().count(), 0);
+    let Some(Node::Split(split)) = layout.main_area(DockSide::Right).map(|area| layout.node(area.root)).flatten() else {
+        panic!("the right main dock should contain the merged horizontal composition");
+    };
+    assert_eq!(split.axis, Axis::X);
+    assert_eq!(split.children.len(), 3);
+    assert_eq!(layout.validate(&metrics), Ok(()));
 }
 
 #[test]
@@ -833,7 +850,7 @@ fn floating_group_can_dock_to_an_empty_main_window_edge() {
     let (_, panel_node) = builder.panel(key("empty-main-edge-panel"), constraints());
     let source_root = builder.tabs(vec![panel_node], 0, false);
     let floating_group = builder.floating_group(source_root, bounds(100.0, 120.0), 1);
-    let layout = builder.build();
+    let mut layout = builder.build();
 
     let rects = layout
         .compute_rects(
@@ -867,11 +884,11 @@ fn floating_group_can_dock_to_an_empty_main_window_edge() {
         floating_bounds: None,
     };
     let action = layout.resolve_drag_drop(&request, &metrics).unwrap();
-    assert_eq!(
-        action,
-        crate::DragDropAction::Command(DockCommand::DockFloating {
-            group: floating_group,
-            target: left_edge.target,
-        })
-    );
+    let crate::DragDropAction::Command(command) = action else {
+        panic!("docking a floating panel into an empty main side must create a command");
+    };
+    layout.apply(command, &metrics).unwrap();
+    assert_eq!(layout.floating_groups().count(), 0);
+    assert!(layout.main_area(DockSide::Left).is_some());
+    assert_eq!(layout.validate(&metrics), Ok(()));
 }
