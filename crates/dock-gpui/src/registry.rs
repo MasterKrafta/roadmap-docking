@@ -115,8 +115,16 @@ impl<T> PanelViewCache<T> {
         self.views.get(&panel)
     }
 
-    pub(crate) fn insert(&mut self, panel: PanelId, view: T) -> Option<T> {
-        self.views.insert(panel, view)
+    /// Returns the existing view for panel, creating it only on the first request.
+    ///
+    /// Unlike HashMap::insert, this API cannot silently replace an Entity/AnyView
+    /// that is already associated with the runtime PanelId.
+    pub(crate) fn get_or_insert_with(
+        &mut self,
+        panel: PanelId,
+        create: impl FnOnce() -> T,
+    ) -> &T {
+        self.views.entry(panel).or_insert_with(create)
     }
 
     pub(crate) fn retain(&mut self, mut is_open: impl FnMut(PanelId) -> bool) {
@@ -217,8 +225,8 @@ mod tests {
         let closed_panel = ids.insert(());
         let mut views = PanelViewCache::<&'static str>::default();
 
-        views.insert(moved_panel, "the original entity");
-        views.insert(closed_panel, "another entity");
+        views.get_or_insert_with(moved_panel, || "the original entity");
+        views.get_or_insert_with(closed_panel, || "another entity");
 
         // Docking, floating, merging, and tab activation leave the open PanelId
         // set unchanged, so those operations must retain its exact cached view.
@@ -230,11 +238,33 @@ mod tests {
     }
 
     #[test]
+    fn panel_view_cache_creates_a_view_once_and_never_replaces_it() {
+        let mut ids = SlotMap::<PanelId, ()>::with_key();
+        let panel = ids.insert(());
+        let mut views = PanelViewCache::<&'static str>::default();
+        let mut factory_calls = 0;
+
+        let first = views.get_or_insert_with(panel, || {
+            factory_calls += 1;
+            "original entity"
+        });
+        assert_eq!(*first, "original entity");
+
+        let second = views.get_or_insert_with(panel, || {
+            factory_calls += 1;
+            "replacement entity"
+        });
+        assert_eq!(*second, "original entity");
+        assert_eq!(factory_calls, 1);
+        assert_eq!(views.len(), 1);
+    }
+
+    #[test]
     fn panel_view_cache_can_be_cleared_when_the_workspace_is_replaced() {
         let mut ids = SlotMap::<PanelId, ()>::with_key();
         let panel = ids.insert(());
         let mut views = PanelViewCache::<&'static str>::default();
-        views.insert(panel, "entity");
+        views.get_or_insert_with(panel, || "entity");
 
         views.clear();
 
