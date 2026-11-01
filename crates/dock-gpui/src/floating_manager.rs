@@ -396,7 +396,7 @@ impl FloatingWindowManager {
             };
             self.controller.update(cx, |controller, _| {
                 let target = match controller.prepare_drop_resolver(source)
-                    .and_then(|resolver| resolver.resolve(point).map_err(Into::into))
+                    .and_then(|resolver| resolver.resolve(point))
                 {
                     Ok(target) => target,
                     Err(_) => {
@@ -426,7 +426,7 @@ impl FloatingWindowManager {
             self.controller.update(cx, |controller, _| {
                 let target = match controller
                     .prepare_floating_window_drop_resolver(target_id, target_group, source)
-                    .and_then(|resolver| resolver.resolve(point).map_err(Into::into))
+                    .and_then(|resolver| resolver.resolve(point))
                 {
                     Ok(target) => target,
                     Err(_) => {
