@@ -10,7 +10,7 @@ use gpui::{
 };
 
 use crate::{
-    DockController,
+    DockController, FloatingWindowManager,
     components::context_menu::{ContextMenuTarget, ContextMenuToggle},
     geometry::host_point_from_gpui_window,
 };
@@ -114,6 +114,7 @@ fn pointer_click_intent_for_hit(hit: HitResult, click_count: usize) -> PointerCl
 
 /// Shared pointer state retained by DockHost across rerenders.
 pub(crate) struct PointerEventState {
+    pub(crate) manager: Entity<FloatingWindowManager>,
     pub(crate) pointer_capture: Rc<Cell<Option<HitboxId>>>,
     pub(crate) pointer_press: Rc<Cell<Option<PointerPress>>>,
 }
@@ -131,6 +132,7 @@ pub(crate) fn register_pointer_events(
     pointer_state: PointerEventState,
 ) {
     let PointerEventState {
+        manager,
         pointer_capture,
         pointer_press,
     } = pointer_state;
@@ -316,6 +318,9 @@ pub(crate) fn register_pointer_events(
         let pointer_capture = pointer_capture.clone();
         let pointer_press = pointer_press.clone();
         move |event: &MouseMoveEvent, phase, window, app| {
+            if manager.update(app, |manager, _| manager.native_move_active()) {
+                return;
+            }
             if phase != DispatchPhase::Capture {
                 return;
             }
@@ -382,6 +387,23 @@ pub(crate) fn register_pointer_events(
                 pointer_press.set(None);
             }
 
+            let should_tearoff = controller.update(app, |controller, _| {
+                let handle = controller.drag().session().handle();
+                let dragging = matches!(controller.drag().session().state(), DragState::Dragging { .. });
+                let leaves_host = !controller.viewport().contains(host_point).unwrap_or(true);
+                dragging && leaves_host
+                    && matches!(handle, Some(DragHandle::PanelTab | DragHandle::GroupGrip | DragHandle::FlyoutPanel))
+            });
+            if should_tearoff
+                && super::drag::begin_native_tearoff(&controller, &manager, point, app)
+            {
+                window.release_pointer();
+                pointer_capture.set(None);
+                pointer_press.set(None);
+                app.stop_propagation();
+                return;
+            }
+
             let capture_needed = controller.update(app, |controller, _| {
                 matches!(
                     controller.drag().session().state(),
@@ -423,6 +445,7 @@ pub(crate) fn register_pointer_events(
     });
 
     window.on_mouse_event({
+        let manager = manager.clone();
         let controller = controller.clone();
         let scroll_handles = scroll_handles.clone();
         let toggle_context_menu = toggle_context_menu.clone();
@@ -430,6 +453,9 @@ pub(crate) fn register_pointer_events(
         let pointer_press = pointer_press.clone();
         move |event: &MouseUpEvent, phase, window, app| {
             if phase != DispatchPhase::Capture || event.button != MouseButton::Left {
+                return;
+            }
+            if manager.update(app, |manager, _| manager.native_move_active()) {
                 return;
             }
 
@@ -524,11 +550,15 @@ pub(crate) fn register_pointer_events(
     });
 
     window.on_mouse_event({
+        let manager = manager.clone();
         let controller = controller.clone();
         let pointer_capture = pointer_capture.clone();
         let pointer_press = pointer_press.clone();
         move |_event: &MouseExitEvent, phase, window, app| {
             if phase != DispatchPhase::Capture {
+                return;
+            }
+            if manager.update(app, |manager, _| manager.native_move_active()) {
                 return;
             }
             pointer_press.set(None);
