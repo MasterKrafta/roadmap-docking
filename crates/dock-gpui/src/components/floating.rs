@@ -499,7 +499,7 @@ fn floating_host_snapshot(
 pub struct FloatingHost {
     controller: Entity<DockController>,
     manager: WeakEntity<FloatingWindowManager>,
-    group: FloatingGroupId,
+    group: Option<FloatingGroupId>,
     theme: Theme,
     column_scroll_handles: HashMap<NodeId, ScrollHandle>,
     open_context_menu: Option<FloatingHostOpenMenu>,
@@ -510,10 +510,13 @@ pub struct FloatingHost {
 }
 
 impl FloatingHost {
-    /// Creates a root view for one existing floating group in the shared Layout.
+    /// Creates the persistent view hosted by one PanelWindow.
+    ///
+    /// A window with no assigned group stays blank and hidden. The manager
+    /// assigns a group only while this panel is the chosen composition host.
     pub fn new(
         controller: Entity<DockController>,
-        group: FloatingGroupId,
+        group: Option<FloatingGroupId>,
         theme: Theme,
         manager: WeakEntity<FloatingWindowManager>,
     ) -> Self {
@@ -531,13 +534,13 @@ impl FloatingHost {
         }
     }
 
-    /// Returns the Core floating-group ID rendered by this root view.
-    pub fn group(&self) -> FloatingGroupId {
+    /// Returns the Core group currently rendered by this PanelWindow, if any.
+    pub fn group(&self) -> Option<FloatingGroupId> {
         self.group
     }
 
-    /// Rebinds this hidden host when its native window is reused for a new group.
-    pub(crate) fn set_group(&mut self, group: FloatingGroupId) {
+    /// Changes which composition this panel's permanent window hosts.
+    pub(crate) fn set_host_group(&mut self, group: Option<FloatingGroupId>) {
         if self.group == group {
             return;
         }
@@ -556,6 +559,10 @@ impl FloatingHost {
 
 impl Render for FloatingHost {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let Some(group) = self.group else {
+            return div().size_full();
+        };
+
         if !self.controller_observed {
             cx.observe(&self.controller, |_, _, host_cx| host_cx.notify())
                 .detach();
@@ -569,15 +576,15 @@ impl Render for FloatingHost {
         });
 
         let window_id = window.window_handle().window_id();
-        let group = self.group;
         if !self.native_resize_observation_pending {
             self.native_resize_observation_pending = true;
             cx.defer_in(window, move |host, _, host_cx| {
                 host.native_resize_observation_pending = false;
-                // A reusable host may have been rebound before this callback
-                // runs, so observe whichever group it currently represents.
-                let group = host.group;
-                if let Some(manager) = host.manager.upgrade() {
+                // The permanent PanelWindow may stop hosting a group before
+                // this deferred callback runs.
+                if let Some(group) = host.group
+                    && let Some(manager) = host.manager.upgrade()
+                {
                     manager.update(host_cx, |manager, manager_cx| {
                         manager.observe_native_resize(group, window_id, manager_cx);
                     });
@@ -600,7 +607,7 @@ impl Render for FloatingHost {
         };
 
         let mut root = div()
-            .id(format!("floating-host-root-{:?}", self.group))
+            .id(format!("floating-host-root-{:?}", group))
             .relative()
             .size_full()
             .overflow_hidden()
@@ -611,7 +618,6 @@ impl Render for FloatingHost {
         let manager = self.manager.clone();
         let controller = self.controller.clone();
         let tab_press = self.tab_press.clone();
-        let group = self.group;
         let input_window_id = window_id;
         let floating_rect = snapshot.as_ref().map(|snapshot| snapshot.floating.rect);
         let title_input = canvas(
