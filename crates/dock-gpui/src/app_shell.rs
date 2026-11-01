@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use dock_core::{Point, Rect};
+use dock_core::Point;
 use gpui::{
     App, Context, Entity, IntoElement, ParentElement, Render, Styled, Window, div,
     prelude::InteractiveElement as _, px, rgb,
@@ -43,7 +43,7 @@ impl AppShell {
 }
 
 impl Render for AppShell {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if !self.controller_observed {
             cx.observe(&self.controller, |_, _, shell_cx| shell_cx.notify())
                 .detach();
@@ -132,9 +132,6 @@ impl Render for AppShell {
             ));
         }
 
-        // Keep a live window reference so popup geometry follows the actual
-        // main-window viewport rather than a hard-coded demo size.
-        let _ = window.bounds();
         root
     }
 }
