@@ -633,9 +633,8 @@ fn core_point_at_host_point(
     app: &mut App,
 ) -> Option<Point> {
     controller.update(app, |controller, _| {
-        let floating_title_height = controller.metrics().header_height;
         let rects = controller.geometry().ok()?;
-        map_hit_test_point(point, rects, scroll_handles, floating_title_height).ok()
+        map_hit_test_point(point, rects, scroll_handles).ok()
     })
 }
 
