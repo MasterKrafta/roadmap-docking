@@ -1443,9 +1443,69 @@ fn physical_coordinate(value: f32, scale: f32) -> Option<i32> {
 
 #[cfg(test)]
 mod coordinate_tests {
-    use super::{main_local_point_from_screen, screen_position_from_main_local};
+    use super::{
+        main_local_point_from_screen, native_rect_has_reachable_title_area,
+        restored_window_origin, screen_position_from_main_local,
+    };
     use dock_core::Point;
-    use platform::PhysicalPoint;
+    use platform::{PhysicalPoint, PhysicalRect};
+
+    #[test]
+    fn off_screen_restored_window_is_placed_inside_the_preferred_work_area() {
+        let window = PhysicalRect {
+            left: 5000,
+            top: 4000,
+            right: 5600,
+            bottom: 4400,
+        };
+        let work_area = PhysicalRect {
+            left: 0,
+            top: 0,
+            right: 1920,
+            bottom: 1040,
+        };
+
+        assert_eq!(
+            restored_window_origin(window, work_area),
+            Some(PhysicalPoint { x: 1320, y: 0 }),
+        );
+    }
+
+    #[test]
+    fn partly_visible_window_keeps_a_reachable_title_strip() {
+        let work_area = PhysicalRect {
+            left: 0,
+            top: 0,
+            right: 1920,
+            bottom: 1040,
+        };
+        let window = PhysicalRect {
+            left: 1880,
+            top: 32,
+            right: 2480,
+            bottom: 432,
+        };
+
+        assert!(native_rect_has_reachable_title_area(window, &[work_area]));
+    }
+
+    #[test]
+    fn window_below_the_work_area_does_not_count_as_title_reachable() {
+        let work_area = PhysicalRect {
+            left: 0,
+            top: 0,
+            right: 1920,
+            bottom: 1040,
+        };
+        let window = PhysicalRect {
+            left: 100,
+            top: 1050,
+            right: 700,
+            bottom: 1450,
+        };
+
+        assert!(!native_rect_has_reachable_title_area(window, &[work_area]));
+    }
 
     #[test]
     fn main_host_local_bounds_convert_to_virtual_desktop_physical_origin() {
