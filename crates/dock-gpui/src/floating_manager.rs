@@ -403,6 +403,11 @@ impl FloatingWindowManager {
                 controller_cx.notify();
             });
         }
+
+        // A resize can finish on a monitor with a different DPI. Re-read the
+        // final window scale after the modal loop has exited and resize the
+        // native frame to the preserved Core logical size at that scale.
+        self.reconcile(cx);
     }
 
     fn core_bounds_from_native_window(&self, native_window: NativeWindowId) -> Option<Rect> {
