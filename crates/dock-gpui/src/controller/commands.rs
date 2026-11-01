@@ -381,7 +381,7 @@ impl DockController {
         &mut self,
         group: FloatingGroupId,
         floating_origin: Point,
-        main_drop: Option<(DropTarget, Point)>,
+        drop_target: Option<(DropTarget, Point)>,
         cx: &mut Context<Self>,
     ) -> Result<(), CommandError> {
         if !self.tearoff_transaction_active {
@@ -391,7 +391,7 @@ impl DockController {
             });
         }
 
-        let dock_command = if let Some((target, point)) = main_drop
+        let dock_command = if let Some((target, point)) = drop_target
             && target != DropTarget::FreeArea
         {
             match self.drag.session().state() {
