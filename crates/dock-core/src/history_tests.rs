@@ -2,8 +2,9 @@ use slotmap::Key;
 
 use crate::layout_builder::LayoutBuilder;
 use crate::{
-    Axis, ChromeMode, ColumnMode, DockCommand, DockMetrics, DockSide, DragCancelReason,
-    DragHandle, DragPayload, DragSession, DragState, DropTarget, Layout, Node, PanelConstraints,
+    Axis, ChromeMode, ColumnMode, CommandValue, DockCommand, DockMetrics, DockSide,
+    DragCancelReason, DragHandle, DragPayload, DragSession, DragState, DropTarget, Layout, Node,
+    PanelConstraints,
     PanelId, PanelKey, Point, Profile, Rect, Size, UndoRedoHistory,
 };
 
@@ -952,6 +953,59 @@ fn new_persistent_command_after_undo_discards_redo_branch() {
         .unwrap();
     assert!(!history.can_redo());
     assert_eq!(history.undo_len(), 1);
+}
+
+#[test]
+fn open_floating_panel_supports_undo_and_redo() {
+    let metrics = DockMetrics::default();
+    let mut layout = Layout::new(Profile::Photoshop);
+    let mut history = UndoRedoHistory::new();
+    let panel_key = key("history-open-floating-panel");
+    let bounds = Rect::new(Point::new(120.0, 80.0), Size::new(420.0, 320.0));
+    let before = persistent_shape(&layout);
+
+    let outcome = history
+        .apply(
+            &mut layout,
+            DockCommand::OpenPanelFloating {
+                key: panel_key.clone(),
+                constraints: constraints(),
+                bounds,
+            },
+            &metrics,
+        )
+        .unwrap();
+    let original_panel_id = match outcome.actual_value {
+        Some(CommandValue::PanelId(panel_id)) => panel_id,
+        other => panic!("OpenPanelFloating must return PanelId, got {other:?}"),
+    };
+    assert_eq!(history.undo_len(), 1);
+    assert_eq!(layout.panel_instances().count(), 1);
+    assert_eq!(layout.floating_groups().count(), 1);
+    assert!(layout.main_area(DockSide::Left).is_none());
+    assert!(layout.main_area(DockSide::Right).is_none());
+    let opened = persistent_shape(&layout);
+
+    assert!(history.undo(&mut layout, &metrics).unwrap());
+    assert_eq!(persistent_shape(&layout), before);
+    assert!(layout.panel_instance(original_panel_id).is_none());
+    assert_eq!(layout.panel_instances().count(), 0);
+    assert_eq!(layout.floating_groups().count(), 0);
+    assert!(history.can_redo());
+
+    assert!(history.redo(&mut layout, &metrics).unwrap());
+    assert_eq!(persistent_shape(&layout), opened);
+    let restored_panel_id = layout
+        .panel_instances()
+        .find(|(_, instance)| instance.key == panel_key)
+        .map(|(panel_id, _)| panel_id)
+        .expect("redo must restore the floating panel instance");
+    assert_ne!(
+        restored_panel_id, original_panel_id,
+        "redo must allocate a fresh runtime PanelId"
+    );
+    assert_eq!(layout.floating_groups().count(), 1);
+    assert_eq!(layout.validate(&metrics), Ok(()));
 }
 
 #[test]
