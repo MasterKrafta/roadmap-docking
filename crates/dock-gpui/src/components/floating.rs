@@ -10,13 +10,14 @@ use dock_core::{
     TabOverflowRect, TabStripRect, VerticalOverflow,
 };
 use gpui::{
-    AnyView, Context, Entity, IntoElement, ParentElement, Render, ScrollHandle,
-    StatefulInteractiveElement, Styled, Window, WindowId, div, prelude::InteractiveElement as _, px, rgb,
+    AnyView, Context, DispatchPhase, Entity, HitboxBehavior, IntoElement, MouseButton,
+    MouseDownEvent, ParentElement, Render, ScrollHandle, StatefulInteractiveElement, Styled,
+    WeakEntity, Window, WindowId, canvas, div, prelude::InteractiveElement as _, px, rgb,
 };
 use ui::Theme;
 
 use crate::{
-    DockController,
+    DockController, FloatingWindowManager,
     actions::dispatch_command,
     dock_host::{
         build_context_menu_entries, collect_subtree_nodes, context_menu_target_exists,
@@ -460,6 +461,7 @@ fn floating_host_snapshot(
 /// coordinate space on every render.
 pub struct FloatingHost {
     controller: Entity<DockController>,
+    manager: WeakEntity<FloatingWindowManager>,
     group: FloatingGroupId,
     theme: Theme,
     column_scroll_handles: HashMap<NodeId, ScrollHandle>,
@@ -474,9 +476,11 @@ impl FloatingHost {
         controller: Entity<DockController>,
         group: FloatingGroupId,
         theme: Theme,
+        manager: WeakEntity<FloatingWindowManager>,
     ) -> Self {
         Self {
             controller,
+            manager,
             group,
             theme,
             column_scroll_handles: HashMap::new(),
@@ -544,6 +548,66 @@ impl Render for FloatingHost {
             .size_full()
             .overflow_hidden()
             .bg(rgb(self.theme.colors.panel_surface_background));
+
+        // The native window moves from a frame-driven platform poll. Only the
+        // custom title grip starts that session; close controls remain clickable.
+        let manager = self.manager.clone();
+        let controller = self.controller.clone();
+        let group = self.group;
+        let input_window_id = window_id;
+        let title_input = canvas(
+            move |bounds, window, _| Some(window.insert_hitbox(bounds, HitboxBehavior::Normal).id),
+            move |_, hitbox, window, _| {
+                if let Some(hitbox) = hitbox {
+                    let manager = manager.clone();
+                    let controller = controller.clone();
+                    window.on_mouse_event(move |event: &MouseDownEvent, phase, window, app| {
+                        if phase != DispatchPhase::Capture
+                            || event.button != MouseButton::Left
+                            || !hitbox.is_hovered(window)
+                        {
+                            return;
+                        }
+                        let Ok(point) = crate::geometry::point_from_gpui(event.position) else {
+                            return;
+                        };
+                        let is_title_grip = controller.update(app, |controller, _| {
+                            let hit = controller.hit_floating_window(input_window_id, group, point).ok();
+                            let metrics = controller.metrics();
+                            let width = controller
+                                .floating_geometry(input_window_id, group)
+                                .ok()
+                                .and_then(|rects| rects.floating_groups.first())
+                                .map(|floating| floating.rect.size.width);
+                            let title_height = controller
+                                .floating_geometry(input_window_id, group)
+                                .ok()
+                                .and_then(|rects| rects.floating_groups.first())
+                                .map(|floating| metrics.header_height.min(floating.rect.size.height))
+                                .unwrap_or(0.0);
+                            let close_width = metrics.group_control_button_width.min(title_height);
+                            matches!(hit, Some(dock_core::HitResult::FloatingTitle { group: hit_group }) if hit_group == group)
+                                && width.is_some_and(|width| point.x < width - close_width)
+                        });
+                        if !is_title_grip {
+                            return;
+                        }
+                        if let Some(manager) = manager.upgrade()
+                            && manager.update(app, |manager, manager_cx| {
+                                manager.begin_existing_window_move(group, point, manager_cx)
+                            })
+                        {
+                            app.stop_propagation();
+                        }
+                    });
+                }
+            },
+        )
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full();
+        root = root.child(title_input);
 
         let Some(snapshot) = snapshot else {
             return root;
