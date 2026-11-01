@@ -234,6 +234,21 @@ pub(crate) fn group_main_column(
         .map(|index| (side, index, columns[index].1))
 }
 
+pub(crate) fn edge_group_for_column(
+    layout: &Layout,
+    column: NodeId,
+    last: bool,
+) -> Option<NodeId> {
+    let Some(Node::Column(value)) = layout.node(column) else {
+        return None;
+    };
+    if last {
+        value.groups.last().copied()
+    } else {
+        value.groups.first().copied()
+    }
+}
+
 pub(crate) fn can_add_column(
     layout: &Layout,
     tree_index: &DropZoneTreeIndex,
