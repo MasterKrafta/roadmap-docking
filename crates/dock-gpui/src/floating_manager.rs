@@ -7,7 +7,7 @@ use std::{collections::{HashMap, HashSet}, time::Duration};
 
 use dock_core::{
     DockCommand, DockSide, DragPayload, DragState, DropSource, DropTarget, FloatingGroupId,
-    PanelId, PanelKey, Point, Rect, Size,
+    Node, NodeId, PanelId, PanelKey, Point, Rect, Size,
 };
 use gpui::{
     AppContext, Bounds, Context, Entity, Subscription, Window, WindowBounds,
@@ -20,7 +20,6 @@ use platform::{
 use crate::{
     DockController, DockEvent, DockTheme, PanelCommandError,
     components::FloatingHost,
-    dock_host::collect_panel_ids,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -29,7 +28,13 @@ pub enum PanelWindowOwner {
     Floating(FloatingGroupId),
 }
 
-struct FloatingWindowEntry {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PanelWindowVisibility {
+    Hidden,
+    Visible,
+}
+
+struct PanelWindowEntry {
     window: WindowHandle<FloatingHost>,
     window_id: WindowId,
     native_window: Option<NativeWindowId>,
@@ -38,45 +43,82 @@ struct FloatingWindowEntry {
     native_min_size: Option<PhysicalSize>,
     native_scale_factor: Option<f32>,
     resize_enabled: bool,
+    host_group: Option<FloatingGroupId>,
+    visibility: PanelWindowVisibility,
 }
 
-/// Maps Core floating groups to their native GPUI windows.
+/// Permanent native-window records keyed by the identity of an open panel.
 ///
-/// Windows released after a group merge are hidden and retained for the next
-/// extraction. This is a small reuse cache, not a pre-created window pool:
-/// entries are added only when a real floating composition disappears.
+/// A PanelWindow is never reassigned to another PanelId. Hidden records remain
+/// alive while the panel is open, even when another window or MainWindow hosts
+/// the composition containing that panel.
 #[derive(Default)]
-pub struct WindowRegistry {
-    floating: HashMap<FloatingGroupId, FloatingWindowEntry>,
-    reusable: Vec<FloatingWindowEntry>,
+pub struct PanelWindowRegistry {
+    windows: HashMap<PanelId, PanelWindowEntry>,
     panel_owners: HashMap<PanelId, PanelWindowOwner>,
 }
 
-impl WindowRegistry {
-    pub fn floating_count(&self) -> usize {
-        self.floating.len()
+impl PanelWindowRegistry {
+    pub fn panel_count(&self) -> usize {
+        self.windows.len()
     }
 
-    pub fn reusable_count(&self) -> usize {
-        self.reusable.len()
+    pub fn visible_count(&self) -> usize {
+        self.windows
+            .values()
+            .filter(|entry| entry.visibility == PanelWindowVisibility::Visible)
+            .count()
     }
 
-    pub fn window_for_group(
-        &self,
-        group: FloatingGroupId,
-    ) -> Option<WindowHandle<FloatingHost>> {
-        self.floating.get(&group).map(|entry| entry.window)
+    pub fn window_for_panel(&self, panel: PanelId) -> Option<WindowHandle<FloatingHost>> {
+        self.windows.get(&panel).map(|entry| entry.window)
     }
 
-    pub fn native_window_for_group(
-        &self,
-        group: FloatingGroupId,
-    ) -> Option<NativeWindowId> {
-        self.floating.get(&group)?.native_window
+    pub fn native_window_for_panel(&self, panel: PanelId) -> Option<NativeWindowId> {
+        self.windows.get(&panel)?.native_window
     }
 
     pub fn owner_for_panel(&self, panel: PanelId) -> Option<PanelWindowOwner> {
         self.panel_owners.get(&panel).copied()
+    }
+
+    pub fn host_group_for_panel(&self, panel: PanelId) -> Option<FloatingGroupId> {
+        self.windows.get(&panel)?.host_group
+    }
+
+    pub fn visibility_for_panel(&self, panel: PanelId) -> Option<PanelWindowVisibility> {
+        self.windows.get(&panel).map(|entry| entry.visibility)
+    }
+}
+
+/// Kept as a type alias for callers that used the older registry name.
+pub type WindowRegistry = PanelWindowRegistry;
+
+/// Maps each Core floating composition to the permanent panel window that
+/// currently hosts it. The Main Dock is hosted by the one shared MainWindow.
+#[derive(Default)]
+pub struct CompositionHostRegistry {
+    main_window_id: Option<WindowId>,
+    floating_groups: HashMap<FloatingGroupId, PanelId>,
+}
+
+impl CompositionHostRegistry {
+    pub fn main_window_id(&self) -> Option<WindowId> {
+        self.main_window_id
+    }
+
+    pub fn panel_for_group(&self, group: FloatingGroupId) -> Option<PanelId> {
+        self.floating_groups.get(&group).copied()
+    }
+
+    pub fn group_for_panel(&self, panel: PanelId) -> Option<FloatingGroupId> {
+        self.floating_groups
+            .iter()
+            .find_map(|(group, host)| (*host == panel).then_some(*group))
+    }
+
+    pub fn floating_count(&self) -> usize {
+        self.floating_groups.len()
     }
 }
 
@@ -113,6 +155,7 @@ struct FloatingGroupSnapshot {
     bounds: Rect,
     z_order: i32,
     minimum_size: Option<Size>,
+    panels: Vec<PanelId>,
 }
 
 #[derive(Clone, Copy)]
@@ -131,7 +174,8 @@ pub struct FloatingWindowManager {
     native_move: Option<NativeMoveSession>,
     native_resize: Option<NativeResizeSession>,
     reconciling: bool,
-    registry: WindowRegistry,
+    registry: PanelWindowRegistry,
+    host_registry: CompositionHostRegistry,
     native_ops: SystemNativeWindowOps,
     controller_subscription: Option<Subscription>,
 }
@@ -146,14 +190,24 @@ impl FloatingWindowManager {
             native_move: None,
             native_resize: None,
             reconciling: false,
-            registry: WindowRegistry::default(),
+            registry: PanelWindowRegistry::default(),
+            host_registry: CompositionHostRegistry::default(),
             native_ops: SystemNativeWindowOps,
             controller_subscription: None,
         }
     }
 
-    pub fn registry(&self) -> &WindowRegistry {
+    pub fn registry(&self) -> &PanelWindowRegistry {
         &self.registry
+    }
+
+    pub fn host_registry(&self) -> &CompositionHostRegistry {
+        &self.host_registry
+    }
+
+    fn panel_window_for_group(&self, group: FloatingGroupId) -> Option<&PanelWindowEntry> {
+        let panel = self.host_registry.panel_for_group(group)?;
+        self.registry.windows.get(&panel)
     }
 
     /// Connects the manager to the main GPUI window and the shared controller.
@@ -166,6 +220,8 @@ impl FloatingWindowManager {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.host_registry.main_window_id = Some(window.window_handle().window_id());
+
         if self.main_native_window.is_none() {
             match self.native_ops.hwnd_of(window) {
                 Ok(native_window) => self.main_native_window = Some(native_window),
