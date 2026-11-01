@@ -23,7 +23,8 @@ pub use dock_core;
 
 use std::path::PathBuf;
 
-use gpui::{Context, Window, div, prelude::*};
+#[cfg(windows)]
+use gpui::{AppContext, Context, Window, div, prelude::*};
 
 /// Options for starting the built-in dock demo.
 #[derive(Default)]
@@ -34,16 +35,19 @@ pub struct RunOptions {
 
 /// Small content view used by the built-in launcher until an application
 /// supplies its own PanelRegistry and panel factories.
+#[cfg(windows)]
 struct StarterPanel {
     title: &'static str,
 }
 
+#[cfg(windows)]
 impl Render for StarterPanel {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         div().size_full().p_4().child(self.title)
     }
 }
 
+#[cfg(windows)]
 fn starter_panel_registry() -> PanelRegistry {
     use dock_core::{PanelConstraints, PanelKey, Size};
 
@@ -84,7 +88,7 @@ fn starter_panel_registry() -> PanelRegistry {
 /// available.
 #[cfg(windows)]
 pub fn run(options: RunOptions) {
-    use gpui::{App, AppContext, Bounds, WindowBounds, WindowOptions, px, size};
+    use gpui::{App, Bounds, WindowBounds, WindowOptions, px, size};
     use gpui_platform::application;
 
     let workspace_path = options.workspace_path;
