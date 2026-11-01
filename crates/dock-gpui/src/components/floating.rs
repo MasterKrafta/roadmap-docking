@@ -690,11 +690,12 @@ impl Render for FloatingHost {
                         let Some(press) = tab_press_for_move.get() else {
                             return;
                         };
-                        if let Some(manager) = manager_for_move.upgrade()
-                            && manager
+                        let manager_entity = manager_for_move.upgrade();
+                        if manager_entity.as_ref().is_some_and(|manager| {
+                            manager
                                 .update(app, |manager, _| manager.native_move_active())
                                 .unwrap_or(false)
-                        {
+                        }) {
                             return;
                         }
                         let Ok(point) = crate::geometry::point_from_gpui(event.position) else {
@@ -728,11 +729,18 @@ impl Render for FloatingHost {
                         let leaves_source = floating_rect.is_some_and(|rect| {
                             rect.contains(point).map(|contains| !contains).unwrap_or(true)
                         });
-                        if leaves_source {
-                            if let Some(manager) = manager_for_move.upgrade()
+                        let over_other_window = manager_entity.as_ref().is_some_and(|manager| {
+                            manager
+                                .update(app, |manager, _| {
+                                    manager.cursor_over_other_docking_window(group)
+                                })
+                                .unwrap_or(false)
+                        });
+                        if leaves_source || over_other_window {
+                            if let Some(manager) = manager_entity.as_ref()
                                 && begin_floating_tab_tearoff(
                                     &controller_for_move,
-                                    &manager,
+                                    manager,
                                     input_window_id,
                                     group,
                                     press.panel,
