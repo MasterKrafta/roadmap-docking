@@ -905,6 +905,7 @@ impl Render for DockHost {
                     middle_click_closes_tabs,
                     self.controller.clone(),
                     theme,
+                    false,
                 ));
             }
 
