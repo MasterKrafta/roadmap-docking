@@ -44,7 +44,10 @@ impl DockController {
             json,
             &descriptors,
             &self.metrics(),
-            WorkspaceLoadOptions::new(Some(self.viewport())),
+            // Core has no monitor/DPI context. Preserve physical desktop origins
+            // here; FloatingWindowManager performs monitor-aware recovery after
+            // native windows are created and their actual monitor scale is known.
+            WorkspaceLoadOptions::new(None),
         )?;
         let diagnostics = loaded.diagnostics;
         self.replace_layout(loaded.layout);
