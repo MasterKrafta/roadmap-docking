@@ -817,9 +817,10 @@ impl FloatingWindowManager {
         Some(point)
     }
 
-    /// WindowOptions bounds use logical screen coordinates; Core stores physical
-    /// screen origins. The main monitor scale is the bootstrap approximation until
-    /// monitor-specific DPI selection is handled by the multi-monitor stage.
+    /// WindowOptions bounds use GPUI logical screen coordinates while Core
+    /// stores physical desktop origins. The main-window scale is only the
+    /// creation-time approximation; after the HWND is placed, sync_window_bounds
+    /// reads its destination monitor's DPI and corrects the native size.
     fn gpui_origin_for_bounds(&self, bounds: Rect) -> Point {
         let scale = self.main_native_window
             .and_then(|main| self.native_ops.scale_factor(main).ok())
