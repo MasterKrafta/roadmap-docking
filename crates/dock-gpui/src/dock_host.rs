@@ -795,7 +795,6 @@ impl Render for DockHost {
                     panel_view,
                     self.controller.clone(),
                     theme,
-                    false,
                 ));
             }
 
