@@ -220,8 +220,9 @@ pub struct DockController {
     interaction: Option<ResizeInteraction>,
     resize_frame: ResizeFrameThrottle,
     registry: PanelRegistry,
-    /// One persistent AnyView per open runtime PanelId. Transfers only change
-    /// which host receives a clone; they never replace the cached entity.
+    /// One persistent AnyView per open runtime PanelId. Transfers and tab
+    /// activation only change which host receives a clone; they never replace
+    /// the cached entity. A full workspace replacement resets this cache.
     panel_views: PanelViewCache<AnyView>,
     last_error: Option<CommandError>,
     pending_events: VecDeque<DockEvent>,
