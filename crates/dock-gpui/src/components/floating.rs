@@ -26,6 +26,7 @@ use crate::{
 
 use super::{
     column::ColumnView,
+    drop_overlay::{DragGhost, DropOverlay},
     context_menu::{
         ContextMenu, ContextMenuCallbacks, ContextMenuDismiss, ContextMenuSubmenuToggle,
         ContextMenuTarget, GroupMenuToggle,
@@ -346,6 +347,9 @@ struct FloatingHostSnapshot {
     rail_display_orders: HashMap<NodeId, Vec<ColumnDisplayItem>>,
     title: String,
     metrics: DockMetrics,
+    drag_preview: Option<DragPreview>,
+    drag_zones: Vec<DropZoneRect>,
+    active_drop_zone: Option<dock_core::DropZoneRect>,
 }
 
 /// Resolves the display title from the first active tab in tree order.
@@ -439,6 +443,18 @@ fn floating_host_snapshot(
         controller.registry(),
     )
     .unwrap_or_else(|| "Floating panels".to_string());
+    let drag_preview = controller.floating_window_drag_preview(window_id, group);
+    let drag_resolver = controller.floating_window_drop_resolver(window_id, group);
+    let drag_zones = drag_resolver
+        .map(|resolver| resolver.zones().to_vec())
+        .unwrap_or_default();
+    let active_drop_zone = drag_preview.and_then(|preview| {
+        let zone = drag_resolver?
+            .resolve_zone(preview.point)
+            .ok()?
+            .filter(|zone| preview.target == Some(zone.target))?;
+        Some(zone)
+    });
 
     Ok(Some(FloatingHostSnapshot {
         rects,
@@ -450,6 +466,9 @@ fn floating_host_snapshot(
         rail_display_orders,
         title,
         metrics,
+        drag_preview,
+        drag_zones,
+        active_drop_zone,
     }))
 }
 
@@ -715,8 +734,8 @@ impl Render for FloatingHost {
             &snapshot.rects.vertical_overflow,
             &self.column_scroll_handles,
             None,
-            None,
-            &[],
+            snapshot.drag_preview,
+            &snapshot.drag_zones,
             snapshot.metrics,
             &snapshot.title,
             None,
@@ -725,6 +744,25 @@ impl Render for FloatingHost {
             self.controller.clone(),
             self.theme,
         ));
+
+        if let Some(preview) = snapshot.drag_preview {
+            let floating_rects = [snapshot.floating];
+            root = root.child(DropOverlay::render(
+                snapshot.active_drop_zone,
+                Some(preview),
+                &snapshot.rects.groups,
+                &snapshot.rects.tab_headers,
+                &snapshot.rects.tab_strips,
+                &floating_rects,
+                self.theme,
+            ));
+            root = root.child(DragGhost::render(
+                Some(preview),
+                &snapshot.group_presentations,
+                snapshot.rects.viewport,
+                self.theme,
+            ));
+        }
 
         if let Some(open) = self.open_context_menu.as_ref()
             && let Some(viewport) = snapshot.rects.viewport
