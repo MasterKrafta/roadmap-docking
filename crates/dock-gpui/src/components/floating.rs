@@ -444,7 +444,7 @@ fn floating_host_snapshot(
                 .ok()
                 .map(|order| (*column, order))
         })
-        .collect::<HashMap<NodeId, Vec<ColumnDisplayItem>>();
+        .collect::<HashMap<NodeId, Vec<ColumnDisplayItem>>>();
     let title = floating_root_title(
         layout,
         area.root,
