@@ -252,6 +252,29 @@ impl DockController {
         .map_err(PanelCommandError::Command)
     }
 
+    /// Opens a registered panel directly as a new floating composition.
+    ///
+    /// The caller supplies bounds in Core's physical-screen-origin coordinate
+    /// contract. The native-window manager is responsible for converting the
+    /// main-window-local launch position into those coordinates.
+    pub fn open_panel_floating(
+        &mut self,
+        key: &PanelKey,
+        bounds: dock_core::Rect,
+    ) -> Result<CommandOutcome, PanelCommandError> {
+        let constraints = self
+            .registry
+            .get(key)
+            .ok_or_else(|| PanelCommandError::UnknownPanel(key.clone()))?
+            .constraints();
+        self.dispatch(DockCommand::OpenPanelFloating {
+            key: key.clone(),
+            constraints,
+            bounds,
+        })
+        .map_err(PanelCommandError::Command)
+    }
+
     pub fn close_panel(&mut self, panel: PanelId) -> Result<CommandOutcome, CommandError> {
         self.dispatch(DockCommand::ClosePanel { panel })
     }
