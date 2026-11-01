@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use dock_core::{GeometryError, PanelConstraints, PanelKey};
+use dock_core::{GeometryError, PanelConstraints, PanelId, PanelKey};
 use gpui::{AnyView, App, SharedString, Window};
 
 /// An icon reference supplied by the application for a panel.
@@ -91,6 +91,39 @@ pub struct PanelRegistry {
     descriptors: HashMap<PanelKey, PanelDescriptor>,
 }
 
+/// Runtime views for panel instances that are currently present in Layout.
+///
+/// Unlike PanelRegistry, this cache is keyed by the runtime PanelId rather than
+/// the stable panel kind. Its value is kept while an instance is moved, floated,
+/// merged, split, or made inactive; it is pruned only when that PanelId closes.
+#[derive(Default)]
+pub(crate) struct PanelViewCache<T> {
+    views: HashMap<PanelId, T>,
+}
+
+impl<T> PanelViewCache<T> {
+    pub(crate) fn get(&self, panel: PanelId) -> Option<&T> {
+        self.views.get(&panel)
+    }
+
+    pub(crate) fn insert(&mut self, panel: PanelId, view: T) -> Option<T> {
+        self.views.insert(panel, view)
+    }
+
+    pub(crate) fn retain(&mut self, mut is_open: impl FnMut(PanelId) -> bool) {
+        self.views.retain(|panel, _| is_open(*panel));
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.views.clear();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
+        self.views.len()
+    }
+}
+
 impl PanelRegistry {
     pub fn new() -> Self {
         Self::default()
@@ -143,9 +176,10 @@ impl PanelRegistry {
 
 #[cfg(test)]
 mod tests {
-    use dock_core::{PanelConstraints, PanelKey, Size};
+    use dock_core::{PanelConstraints, PanelId, PanelKey, Size};
+    use slotmap::SlotMap;
 
-    use super::{IconSource, PanelDescriptor, PanelRegistry, PanelRegistryError};
+    use super::{IconSource, PanelDescriptor, PanelRegistry, PanelRegistryError, PanelViewCache};
 
     fn descriptor(key: &str) -> PanelDescriptor {
         PanelDescriptor::new(
@@ -155,6 +189,38 @@ mod tests {
             PanelConstraints::new(Size::new(120.0, 80.0), Size::new(280.0, 220.0), None, true),
             |_, _| unreachable!("panel factories are lazy"),
         )
+    }
+
+    #[test]
+    fn panel_view_cache_keeps_instances_when_their_layout_location_changes() {
+        let mut ids = SlotMap::<PanelId, ()>::with_key();
+        let moved_panel = ids.insert(());
+        let closed_panel = ids.insert(());
+        let mut views = PanelViewCache::<&'static str>::default();
+
+        views.insert(moved_panel, "the original entity");
+        views.insert(closed_panel, "another entity");
+
+        // Docking, floating, merging, and tab activation leave the open PanelId
+        // set unchanged, so those operations must retain its exact cached view.
+        views.retain(|panel| panel == moved_panel);
+
+        assert_eq!(views.len(), 1);
+        assert_eq!(views.get(moved_panel), Some(&"the original entity"));
+        assert_eq!(views.get(closed_panel), None);
+    }
+
+    #[test]
+    fn panel_view_cache_can_be_cleared_when_the_workspace_is_replaced() {
+        let mut ids = SlotMap::<PanelId, ()>::with_key();
+        let panel = ids.insert(());
+        let mut views = PanelViewCache::<&'static str>::default();
+        views.insert(panel, "entity");
+
+        views.clear();
+
+        assert_eq!(views.len(), 0);
+        assert_eq!(views.get(panel), None);
     }
 
     #[test]
