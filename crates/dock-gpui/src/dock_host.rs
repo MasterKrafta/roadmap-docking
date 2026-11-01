@@ -59,6 +59,7 @@ pub struct DockHost {
     root_focus_handle: Option<FocusHandle>,
     focus_observed: bool,
     floating_manager: Option<Entity<FloatingWindowManager>>,
+    floating_manager_attached: bool,
 }
 
 #[derive(Clone)]
@@ -86,7 +87,20 @@ impl DockHost {
             root_focus_handle: None,
             focus_observed: false,
             floating_manager: None,
+            floating_manager_attached: false,
         }
+    }
+
+    /// Uses the application's shared floating-window manager.
+    ///
+    /// The app shell can then route menu actions through the same manager that
+    /// reconciles this host's floating windows.
+    pub(crate) fn with_floating_window_manager(
+        mut self,
+        manager: Entity<FloatingWindowManager>,
+    ) -> Self {
+        self.floating_manager = Some(manager);
+        self
     }
 
     /// Supplies the application's toolbar slot.
@@ -181,11 +195,14 @@ impl Render for DockHost {
             let theme = self.theme;
             let manager = cx.new(|_| FloatingWindowManager::new(controller, theme));
             self.floating_manager = Some(manager.clone());
-            manager.update(cx, |manager, manager_cx| {
-                manager.attach_main_window(window, manager_cx);
-            });
             manager
         };
+        if !self.floating_manager_attached {
+            floating_manager.update(cx, |manager, manager_cx| {
+                manager.attach_main_window(window, manager_cx);
+            });
+            self.floating_manager_attached = true;
+        }
 
         let focus_handle = self
             .root_focus_handle
