@@ -581,7 +581,7 @@ impl FloatingHost {
 impl Render for FloatingHost {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let Some(group) = self.group else {
-            return div().size_full();
+            return div().id("empty-panel-window").size_full();
         };
 
         if !self.controller_observed {
