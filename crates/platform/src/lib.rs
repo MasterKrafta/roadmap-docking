@@ -190,6 +190,7 @@ mod windows_impl {
     const RESIZE_REDRAW_INTERVAL_MS: u32 = 8;
     const WM_GPUI_FORCE_UPDATE_WINDOW: u32 = WM_USER + 5;
     const MIN_SIZE_SUBCLASS_ID: usize = 0x444f_434b;
+    const RESIZE_LOOP_SUBCLASS_ID: usize = 0x5253_495a;
 
     #[derive(Clone, Copy, Default)]
     pub struct SystemNativeWindowOps;
@@ -225,13 +226,71 @@ mod windows_impl {
         unsafe { (GetAsyncKeyState(VK_LBUTTON.0 as i32) as u16) & 0x8000 != 0 }
     }
 
+    struct ResizeLoopState {
+        active: bool,
+    }
+
+    unsafe extern "system" fn resize_loop_subclass_proc(
+        window: HWND,
+        message: u32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+        subclass_id: usize,
+        reference_data: usize,
+    ) -> LRESULT {
+        if reference_data == 0 {
+            // SAFETY: Forward the message because no state was attached.
+            return unsafe { DefSubclassProc(window, message, wparam, lparam) };
+        }
+
+        let state = reference_data as *mut ResizeLoopState;
+        if message == WM_ENTERSIZEMOVE {
+            // SAFETY: The subclass owns this live state allocation.
+            unsafe { (*state).active = true };
+        }
+
+        // SAFETY: Forward the message to GPUI/the remaining subclass chain.
+        let result = unsafe { DefSubclassProc(window, message, wparam, lparam) };
+
+        if message == WM_EXITSIZEMOVE {
+            // SAFETY: The subclass owns this live state allocation.
+            unsafe { (*state).active = false };
+        }
+        if message == WM_NCDESTROY {
+            // SAFETY: Detach this callback before freeing its owned state.
+            unsafe {
+                let _ = RemoveWindowSubclass(window, Some(resize_loop_subclass_proc), subclass_id);
+                drop(Box::from_raw(state));
+            }
+        }
+
+        result
+    }
+
     unsafe extern "system" fn resize_redraw_timer_proc(
         window: HWND,
         _message: u32,
         _timer_id: usize,
         _time: u32,
     ) {
-        if left_button_is_down() {
+        let mut reference_data = 0usize;
+        // SAFETY: Query the resize-loop subclass attached to this same HWND.
+        let tracking_installed = unsafe {
+            GetWindowSubclass(
+                window,
+                Some(resize_loop_subclass_proc),
+                RESIZE_LOOP_SUBCLASS_ID,
+                Some(&mut reference_data as *mut usize),
+            )
+        }
+        .as_bool();
+        let resizing = tracking_installed
+            && reference_data != 0
+            // SAFETY: The subclass retains this state until it is removed or
+            // WM_NCDESTROY runs on the same UI thread.
+            && unsafe { (*(reference_data as *const ResizeLoopState)).active };
+
+        if resizing {
             // SAFETY: window is the HWND supplied by SetTimer. This message ID
             // is handled by the pinned GPUI Windows backend.
             let _ = unsafe {
@@ -513,6 +572,39 @@ mod windows_impl {
             }
             .map_err(|error| platform_error("SetWindowPos(enable resize)", error))?;
 
+            let mut reference_data = 0usize;
+            // SAFETY: Query whether the resize-loop state is already attached.
+            let tracking_installed = unsafe {
+                GetWindowSubclass(
+                    native,
+                    Some(resize_loop_subclass_proc),
+                    RESIZE_LOOP_SUBCLASS_ID,
+                    Some(&mut reference_data as *mut usize),
+                )
+            }
+            .as_bool();
+            if !tracking_installed {
+                let pointer = Box::into_raw(Box::new(ResizeLoopState { active: false }));
+                // SAFETY: The window subclass owns this allocation until it is
+                // explicitly removed or WM_NCDESTROY is received.
+                if !unsafe {
+                    SetWindowSubclass(
+                        native,
+                        Some(resize_loop_subclass_proc),
+                        RESIZE_LOOP_SUBCLASS_ID,
+                        pointer as usize,
+                    )
+                }
+                .as_bool()
+                {
+                    let error = last_error("SetWindowSubclass(resize loop)");
+                    // SAFETY: Registration failed, so the callback did not
+                    // retain the allocation.
+                    unsafe { drop(Box::from_raw(pointer)) };
+                    return Err(error);
+                }
+            }
+
             // SAFETY: Attach an 8 ms UI-thread timer to this GPUI window.
             let timer = unsafe {
                 SetTimer(
@@ -530,10 +622,39 @@ mod windows_impl {
 
         fn disable_resize(&self, window: NativeWindowId) -> Result<(), NativeError> {
             let native = hwnd(window);
-            // SAFETY: Kill the timer and remove WS_THICKFRAME from the same
-            // GPUI-owned HWND; then apply the non-client frame update.
+            // SAFETY: Stop the timer before detaching its resize-loop state.
+            unsafe { let _ = KillTimer(Some(native), RESIZE_REDRAW_TIMER_ID); }
+
+            let mut reference_data = 0usize;
+            // SAFETY: Query the exact subclass callback and ID installed above.
+            let tracking_installed = unsafe {
+                GetWindowSubclass(
+                    native,
+                    Some(resize_loop_subclass_proc),
+                    RESIZE_LOOP_SUBCLASS_ID,
+                    Some(&mut reference_data as *mut usize),
+                )
+            }
+            .as_bool();
+            if tracking_installed {
+                // SAFETY: Detach the callback before freeing its retained state.
+                if !unsafe {
+                    RemoveWindowSubclass(native, Some(resize_loop_subclass_proc), RESIZE_LOOP_SUBCLASS_ID)
+                }
+                .as_bool()
+                {
+                    return Err(last_error("RemoveWindowSubclass(resize loop)"));
+                }
+                if reference_data != 0 {
+                    // SAFETY: The callback is detached and can no longer access
+                    // this allocation.
+                    unsafe { drop(Box::from_raw(reference_data as *mut ResizeLoopState)) };
+                }
+            }
+
+            // SAFETY: Remove WS_THICKFRAME from the same GPUI-owned HWND and
+            // apply the non-client frame update without moving or activating it.
             unsafe {
-                let _ = KillTimer(Some(native), RESIZE_REDRAW_TIMER_ID);
                 let style = GetWindowLongPtrW(native, GWL_STYLE) as u32 & !WS_THICKFRAME.0;
                 let _ = SetWindowLongPtrW(native, GWL_STYLE, style as isize);
                 SetWindowPos(
