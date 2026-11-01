@@ -4,7 +4,7 @@ use std::collections::HashMap;
 mod drop_zone_tree;
 pub(super) use drop_zone_tree::{
     DropZoneTreeIndex, can_add_column, collect_panels, contains_node, direct_parent,
-    edge_group_for_column, edge_group_for_dock_edge, group_edge_is_noop, group_main_column,
+    group_edge_is_noop, group_main_column,
     is_rail_group, main_columns, owner_column, panel_node, source_allows, source_is_floating_root,
     source_root, target_area,
 };
