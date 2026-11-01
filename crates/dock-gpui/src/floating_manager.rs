@@ -1535,9 +1535,9 @@ mod coordinate_tests {
             bottom: 1040,
         };
         let window = PhysicalRect {
-            left: 1880,
+            left: 1840,
             top: 32,
-            right: 2480,
+            right: 2440,
             bottom: 432,
         };
 
