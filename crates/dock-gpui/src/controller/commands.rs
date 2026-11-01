@@ -323,16 +323,18 @@ impl DockController {
             return Some(view.clone());
         }
         let key = self.layout.panel_instance(panel)?.key.clone();
-        let view: AnyView = match self.registry.get(&key) {
-            Some(descriptor) => descriptor.create_view(window, app),
-            None => {
-                let missing_key = key.clone();
-                app.new(|_| crate::MissingPanelPlaceholder::new(missing_key))
-                    .into()
+        let registry = &self.registry;
+        let view = self.panel_views.get_or_insert_with(panel, || {
+            match registry.get(&key) {
+                Some(descriptor) => descriptor.create_view(window, app),
+                None => {
+                    let missing_key = key.clone();
+                    app.new(|_| crate::MissingPanelPlaceholder::new(missing_key))
+                        .into()
+                }
             }
-        };
-        self.panel_views.insert(panel, view.clone());
-        Some(view)
+        });
+        Some(view.clone())
     }
 
     /// Emits events queued by plain controller methods. Call this from the
