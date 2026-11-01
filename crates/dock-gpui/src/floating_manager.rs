@@ -3,7 +3,7 @@
 //! The manager stores only window handles and derived panel ownership. The
 //! shared DockController remains the sole owner of Layout and panel views.
 
-use std::collections::{HashMap, HashSet};
+use std::{collections::{HashMap, HashSet}, time::Duration};
 
 use dock_core::{
     DockSide, DragPayload, DragState, DropSource, DropTarget, FloatingGroupId,
@@ -101,6 +101,7 @@ struct NativeMoveSession {
     start_pointer: Point,
     drag_threshold: f32,
     threshold_crossed: bool,
+    high_resolution_timer: bool,
     drop_target: Option<NativeMoveTarget>,
 }
 
@@ -233,10 +234,11 @@ impl FloatingWindowManager {
             tracing::warn!(?group, %error, "could not start native tear-off movement");
             return false;
         }
+        let high_resolution_timer = self.native_ops.begin_high_resolution_timer().is_ok();
         self.native_move = Some(NativeMoveSession {
             group, native_window, kind: NativeMoveKind::TearOff, grab_offset, initial_cursor: cursor,
             start_bounds: model_bounds, start_pointer: pointer, drag_threshold: 0.0, threshold_crossed: true,
-            drop_target: None,
+            high_resolution_timer, drop_target: None,
         });
         self.schedule_native_move(cx, group, window_id);
         true
@@ -261,6 +263,7 @@ impl FloatingWindowManager {
         }
         let scale = self.native_ops.scale_factor(native_window).ok()
             .filter(|scale| scale.is_finite() && *scale > 0.0).unwrap_or(1.0);
+        let high_resolution_timer = self.native_ops.begin_high_resolution_timer().is_ok();
         self.native_move = Some(NativeMoveSession {
             group, native_window, kind: NativeMoveKind::ExistingWindow,
             grab_offset: PhysicalPoint {
@@ -269,24 +272,36 @@ impl FloatingWindowManager {
             },
             initial_cursor: cursor, start_bounds, start_pointer: pointer,
             drag_threshold: metrics.drag_threshold * scale, threshold_crossed: false,
-            drop_target: None,
+            high_resolution_timer, drop_target: None,
         });
         self.schedule_native_move(cx, group, window_id);
         true
     }
 
     fn schedule_native_move(&self, cx: &mut Context<Self>, group: FloatingGroupId, window_id: WindowId) {
-        let Some(window) = self.registry.floating.get(&group).map(|entry| entry.window) else { return; };
         let manager = cx.entity().downgrade();
-        let _ = window.update(cx, move |_, window, _| {
-            schedule_native_move_tick(window, manager, group, window_id);
-        });
+        cx.spawn(async move |_, app| {
+            loop {
+                app.background_executor().timer(Duration::from_millis(4)).await;
+                let Some(keep_moving) = manager.update(app, |manager, manager_cx| {
+                    manager.tick_native_move(group, window_id, manager_cx)
+                }) else {
+                    break;
+                };
+                if !keep_moving {
+                    break;
+                }
+            }
+        }).detach();
     }
 
     fn tick_native_move(&mut self, group: FloatingGroupId, window_id: WindowId, cx: &mut Context<Self>) -> bool {
         let Some(mut state) = self.native_move.filter(|state| state.group == group) else { return false; };
         if self.registry.floating.get(&group).is_none_or(|entry| entry.window_id != window_id) {
             self.native_move = None;
+            if state.high_resolution_timer {
+                let _ = self.native_ops.end_high_resolution_timer();
+            }
             return false;
         }
         if self.native_ops.key_down(NativeKey::Escape).unwrap_or(false) {
@@ -416,6 +431,9 @@ impl FloatingWindowManager {
 
     fn finish_native_move(&mut self, state: NativeMoveSession, cx: &mut Context<Self>) {
         self.native_move = None;
+        if state.high_resolution_timer {
+            let _ = self.native_ops.end_high_resolution_timer();
+        }
         let origin = self.native_ops.window_rect(state.native_window).ok()
             .and_then(|rect| self.core_origin_from_screen(PhysicalPoint { x: rect.left, y: rect.top }))
             .unwrap_or(state.start_bounds.origin);
@@ -432,6 +450,9 @@ impl FloatingWindowManager {
 
     fn cancel_native_move(&mut self, state: NativeMoveSession, cx: &mut Context<Self>) {
         self.native_move = None;
+        if state.high_resolution_timer {
+            let _ = self.native_ops.end_high_resolution_timer();
+        }
         let _ = self.controller.update(cx, |controller, controller_cx| {
             let result = controller.cancel_pointer_interaction_on_escape();
             controller.flush_events(controller_cx);
@@ -826,21 +847,6 @@ impl FloatingWindowManager {
     }
 }
 
-fn schedule_native_move_tick(
-    window: &mut Window,
-    manager: WeakEntity<FloatingWindowManager>,
-    group: FloatingGroupId,
-    window_id: WindowId,
-) {
-    window.on_next_frame(move |window, app| {
-        let keep_moving = manager
-            .update(app, |manager, cx| manager.tick_native_move(group, window_id, cx))
-            .unwrap_or(false);
-        if keep_moving {
-            schedule_native_move_tick(window, manager, group, window_id);
-        }
-    });
-}
 
 fn screen_position_from_main_local(
     local: Point,
@@ -907,5 +913,13 @@ mod coordinate_tests {
             ),
             Some(Point::new(120.0, 56.0)),
         );
+    }
+}
+
+impl Drop for FloatingWindowManager {
+    fn drop(&mut self) {
+        if self.native_move.is_some_and(|state| state.high_resolution_timer) {
+            let _ = self.native_ops.end_high_resolution_timer();
+        }
     }
 }
