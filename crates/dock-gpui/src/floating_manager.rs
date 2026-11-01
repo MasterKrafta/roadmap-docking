@@ -1213,7 +1213,8 @@ impl FloatingWindowManager {
         }
 
         // Only selected composition hosts become visible. All other open
-        // PanelWindows (nested panels and Main-Dock panels) remain alive/hidden.        // Native resize styles and minimum size are synchronized in the pass
+        // PanelWindows (nested panels and Main-Dock panels) remain alive/hidden.
+        // Native resize styles and minimum size are synchronized in the pass
         // above. The first show therefore happens only after the permanent
         // PanelWindow has its host group, HWND, placement, and native constraints.
         for group in &groups {
@@ -1407,12 +1408,11 @@ impl FloatingWindowManager {
             ..Default::default()
         };
 
+        // The GPUI root is created hidden. reconcile assigns its composition,
+        // configures the native surface, and only then makes this window visible.
         let window = match cx.open_window(options, move |_, app| {
             app.new(|_| FloatingHost::new_panel_window(controller, theme, manager))
-        }) {        // The host is assigned immediately after creation, before its native
-        // surface is shown. This keeps the first presented frame on the correct
-        // composition instead of briefly displaying an empty placeholder.
-
+        }) {
             Ok(window) => window,
             Err(error) => {
                 tracing::error!(
