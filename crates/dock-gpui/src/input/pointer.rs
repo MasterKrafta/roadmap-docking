@@ -269,17 +269,6 @@ pub(crate) fn register_pointer_events(
                         layout_version,
                     }));
                 }
-                PointerDownIntent::RaiseFloating { group } => {
-                    raise_floating_group(&controller, group, app);
-                }
-                PointerDownIntent::RaiseFloatingForPanel { panel } => {
-                    let group = controller.update(app, |controller, _| {
-                        floating_group_for_panel(controller.layout(), panel)
-                    });
-                    if let Some(group) = group {
-                        raise_floating_group(&controller, group, app);
-                    }
-                }
                 PointerDownIntent::DismissFlyout => {
                     let flyout_is_open =
                         controller.update(app, |controller, _| controller.layout().flyout().is_some());
