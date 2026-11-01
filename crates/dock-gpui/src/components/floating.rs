@@ -510,11 +510,32 @@ pub struct FloatingHost {
 }
 
 impl FloatingHost {
-    /// Creates the persistent view hosted by one PanelWindow.
+    /// Creates a host for an already assigned floating composition.
+    ///
+    /// This constructor remains compatible with callers that explicitly create
+    /// a group host. The permanent PanelWindow manager uses new_panel_window().
+    pub fn new(
+        controller: Entity<DockController>,
+        group: FloatingGroupId,
+        theme: Theme,
+        manager: WeakEntity<FloatingWindowManager>,
+    ) -> Self {
+        Self::with_host_group(controller, Some(group), theme, manager)
+    }
+
+    /// Creates the permanent view hosted by one PanelWindow.
     ///
     /// A window with no assigned group stays blank and hidden. The manager
     /// assigns a group only while this panel is the chosen composition host.
-    pub fn new(
+    pub(crate) fn new_panel_window(
+        controller: Entity<DockController>,
+        theme: Theme,
+        manager: WeakEntity<FloatingWindowManager>,
+    ) -> Self {
+        Self::with_host_group(controller, None, theme, manager)
+    }
+
+    fn with_host_group(
         controller: Entity<DockController>,
         group: Option<FloatingGroupId>,
         theme: Theme,
