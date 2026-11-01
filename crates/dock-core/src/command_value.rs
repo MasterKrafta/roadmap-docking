@@ -1,4 +1,4 @@
-use crate::{FloatingGroupId, NodeId, Rect, Size};
+use crate::{FloatingGroupId, NodeId, PanelId, Rect, Size};
 
 /// Command-specific result data returned after a successful command.
 ///
@@ -9,6 +9,8 @@ use crate::{FloatingGroupId, NodeId, Rect, Size};
 pub enum CommandValue {
     /// Identifier of the new floating composition created by a Float command.
     FloatingGroup(FloatingGroupId),
+    /// Identifier of a panel instance opened by an OpenPanel command.
+    PanelId(PanelId),
     /// Effective width of a resized column, in logical pixels.
     ColumnWidth(f32),
     /// Effective signed movement of a main-column boundary, in logical pixels.
@@ -30,10 +32,15 @@ pub enum CommandValue {
 #[cfg(test)]
 mod tests {
     use super::CommandValue;
-    use crate::Size;
+    use crate::{PanelId, Size};
+    use slotmap::Key;
 
     #[test]
     fn command_values_keep_their_kind() {
+        assert_eq!(
+            CommandValue::PanelId(PanelId::null()),
+            CommandValue::PanelId(PanelId::null())
+        );
         assert!(matches!(
             CommandValue::ColumnWidth(280.0),
             CommandValue::ColumnWidth(value) if value == 280.0
