@@ -122,7 +122,6 @@ fn open_panel_floating_is_idempotent_for_the_same_panel_key() {
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
 
-
 #[test]
 fn open_panel_floating_allows_duplicate_keys_when_not_singleton() {
     let metrics = DockMetrics::default();
