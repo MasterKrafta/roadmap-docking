@@ -533,6 +533,7 @@ impl Render for DockHost {
         let pointer_capture = self.pointer_capture.clone();
         let pointer_press_for_measurement = self.pointer_press.clone();
         let pointer_press_for_events = self.pointer_press.clone();
+        let floating_manager_for_pointer_events = floating_manager.clone();
         let measurement = canvas(
             move |bounds, window, app| {
                 let (viewport, window_origin) = match host_geometry_from_gpui_bounds(bounds) {
@@ -583,7 +584,7 @@ impl Render for DockHost {
                         pointer_scroll_handles.clone(),
                         pointer_context_menu.clone(),
                         crate::input::PointerEventState {
-                            manager: floating_manager.clone(),
+                            manager: floating_manager_for_pointer_events.clone(),
                             pointer_capture: pointer_capture.clone(),
                             pointer_press: pointer_press_for_events.clone(),
                         },
