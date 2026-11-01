@@ -7,7 +7,7 @@ use gpui::{
     AnyView, Bounds, ClipboardItem, Context, CursorStyle, Element, ElementId, ElementInputHandler,
     Entity, EntityInputHandler, FocusHandle, Focusable, GlobalElementId, KeyBinding, LayoutId,
     MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point,
-    ShapedLine, SharedString, Style, TextAlign, TextRun, UTF16Selection, Window, WindowBounds,
+    ScrollHandle, ShapedLine, SharedString, Style, TextAlign, TextRun, UTF16Selection, Window, WindowBounds,
     WindowKind, WindowOptions,
 };
 use gpui_platform::application;
@@ -93,6 +93,7 @@ struct TransferPanel {
     id: PanelId,
     state: Entity<TransferState>,
     focus_handle: FocusHandle,
+    scroll_handle: ScrollHandle,
     content: SharedString,
     selected_range: Range<usize>,
     selection_reversed: bool,
@@ -117,6 +118,7 @@ impl TransferPanel {
             id,
             state,
             focus_handle: cx.focus_handle(),
+            scroll_handle: ScrollHandle::new(),
             content,
             selected_range: end..end,
             selection_reversed: false,
@@ -758,22 +760,68 @@ impl Render for TransferPanel {
         }
 
         let focus_handle = self.focus_handle.clone();
+        let scroll_handle = self.scroll_handle.clone();
+        let scroll_offset = self.scroll_handle.offset().y.as_f32();
+        let scroll_max_offset = self.scroll_handle.max_offset().y.as_f32();
         let cursor = self.cursor_offset();
         let selection = self.selected_range.clone();
         let content_len = self.content.len();
         let click_count = self.click_count;
         let entity_label = format!("{:?}", entity_id);
 
-        div()
+        let input = div()
+            .w_full()
+            .track_focus(&focus_handle)
+            .key_context("TransferPanelInput")
+            .cursor(CursorStyle::IBeam)
+            .on_action(cx.listener(Self::backspace))
+            .on_action(cx.listener(Self::delete))
+            .on_action(cx.listener(Self::left))
+            .on_action(cx.listener(Self::right))
+            .on_action(cx.listener(Self::select_left))
+            .on_action(cx.listener(Self::select_right))
+            .on_action(cx.listener(Self::select_all))
+            .on_action(cx.listener(Self::home))
+            .on_action(cx.listener(Self::end))
+            .on_action(cx.listener(Self::paste))
+            .on_action(cx.listener(Self::copy))
+            .on_action(cx.listener(Self::cut))
+            .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
+            .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
+            .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
+            .on_mouse_move(cx.listener(Self::on_mouse_move))
+            .border_1()
+            .border_color(rgb(0x687383))
+            .bg(rgb(0x171a1f))
+            .p_2()
+            .child(TextElement {
+                input: cx.entity(),
+            });
+
+        let counter = div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap_2()
+            .child(format!("Счётчик внутри панели: {click_count}"))
+            .child(
+                div()
+                    .px_2()
+                    .py_1()
+                    .bg(rgb(0x43566d))
+                    .cursor_pointer()
+                    .on_mouse_up(
+                        MouseButton::Left,
+                        cx.listener(Self::increment_counter),
+                    )
+                    .child("Увеличить"),
+            );
+
+        let mut scroll_content = div()
             .w_full()
             .flex()
             .flex_col()
             .gap_2()
-            .p_3()
-            .bg(rgb(0x292d32))
-            .text_color(rgb(0xe5e7eb))
-            .child(format!("Панель {}", self.id.label()))
-            .child("Один и тот же Entity / AnyView при переносе")
             .child(format!("EntityId: {entity_label}"))
             .child(format!("Текущий host: {}", location.label()))
             .child(format!(
@@ -783,55 +831,48 @@ impl Render for TransferPanel {
             .child(format!(
                 "Состояние курсора: byte {cursor}/{content_len}, выделение {selection:?}"
             ))
-            .child(
+            .child(input)
+            .child(counter);
+
+        // The scrollable content is deliberately taller than the panel. Its
+        // handle belongs to TransferPanel, not the host, so the offset must
+        // survive while the tab is inactive and is rendered elsewhere later.
+        for row in 0..24 {
+            scroll_content = scroll_content.child(
                 div()
-                    .w_full()
-                    .track_focus(&focus_handle)
-                    .key_context("TransferPanelInput")
-                    .cursor(CursorStyle::IBeam)
-                    .on_action(cx.listener(Self::backspace))
-                    .on_action(cx.listener(Self::delete))
-                    .on_action(cx.listener(Self::left))
-                    .on_action(cx.listener(Self::right))
-                    .on_action(cx.listener(Self::select_left))
-                    .on_action(cx.listener(Self::select_right))
-                    .on_action(cx.listener(Self::select_all))
-                    .on_action(cx.listener(Self::home))
-                    .on_action(cx.listener(Self::end))
-                    .on_action(cx.listener(Self::paste))
-                    .on_action(cx.listener(Self::copy))
-                    .on_action(cx.listener(Self::cut))
-                    .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
-                    .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
-                    .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
-                    .on_mouse_move(cx.listener(Self::on_mouse_move))
-                    .border_1()
-                    .border_color(rgb(0x687383))
-                    .bg(rgb(0x171a1f))
-                    .p_2()
-                    .child(TextElement {
-                        input: cx.entity(),
-                    }),
-            )
-            .child(
-                div()
+                    .h(px(28.0))
+                    .px_2()
                     .flex()
-                    .flex_row()
                     .items_center()
-                    .gap_2()
-                    .child(format!("Счётчик внутри панели: {click_count}"))
-                    .child(
-                        div()
-                            .px_2()
-                            .py_1()
-                            .bg(rgb(0x43566d))
-                            .cursor_pointer()
-                            .on_mouse_up(
-                                MouseButton::Left,
-                                cx.listener(Self::increment_counter),
-                            )
-                            .child("Увеличить"),
-                    ),
+                    .bg(rgb(if row % 2 == 0 { 0x303741 } else { 0x272d35 }))
+                    .child(format!("Строка прокрутки {} — состояние панели сохраняется", row + 1)),
+            );
+        }
+
+        div()
+            .size_full()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .p_3()
+            .bg(rgb(0x292d32))
+            .text_color(rgb(0xe5e7eb))
+            .child(format!("Панель {}", self.id.label()))
+            .child("Один и тот же Entity / AnyView при переносе")
+            .child(format!(
+                "ScrollHandle: {:.1} / {:.1} px",
+                scroll_offset, scroll_max_offset
+            ))
+            .child(
+                div()
+                    .id(format!("transfer-panel-scroll-{}", self.id.label()))
+                    .flex_1()
+                    .min_h_0()
+                    .w_full()
+                    .overflow_y_scroll()
+                    .track_scroll(&scroll_handle)
+                    .child(scroll_content),
             )
     }
 }
@@ -894,7 +935,7 @@ impl Render for MainWindowView {
                     .p_3()
                     .bg(rgb(0x292d32))
                     .child(
-                        "Проверка: в окне A нажми «Присоединить B сюда». Окно B скроется, а A покажет вкладки A и B. Затем извлеки B обратно — окно B появится снова.",
+                        "Проверка неактивной вкладки: сначала в окне B измени текст, выдели фрагмент, нажми «Увеличить» и прокрути область вниз. Затем в окне A нажми «Присоединить B сюда»: A останется активной, а B станет неактивной вкладкой. Не активируя B, нажми «Извлечь B» в окне A. В окне B должны сохраниться EntityId, текст, курсор/выделение, счётчик и позиция прокрутки. Кликни в поле ввода, чтобы отдельно проверить FocusHandle.",
                     ),
             )
     }
