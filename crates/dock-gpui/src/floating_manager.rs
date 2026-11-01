@@ -302,6 +302,7 @@ impl FloatingWindowManager {
             if state.high_resolution_timer {
                 let _ = self.native_ops.end_high_resolution_timer();
             }
+            self.cancel_controller_move(cx);
             return false;
         }
         let pointer_interaction_active = self.controller.update(cx, |controller, _| {
