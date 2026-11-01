@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use dock_core::{
-    DragPayload, DragPreview, DropTarget, DropZone, DropZoneRect, FloatingGroupId,
-    FloatingGroupRect, GroupRect, Point, Rect, TabHeaderRect, TabStripRect,
+    DragPayload, DragPreview, DropTarget, DropZone, DropZoneRect, FloatingGroupRect, GroupRect,
+    Point, Rect, TabHeaderRect, TabStripRect,
 };
 use gpui::{
     IntoElement, ParentElement, SharedString, Styled, div, img, prelude::InteractiveElement as _,
@@ -123,7 +123,6 @@ impl DragGhost {
     pub(crate) fn render(
         preview: Option<DragPreview>,
         presentations: &HashMap<dock_core::NodeId, GroupPresentation>,
-        floating_titles: &HashMap<FloatingGroupId, String>,
         viewport: Option<Rect>,
         theme: Theme,
     ) -> impl IntoElement {
@@ -132,7 +131,7 @@ impl DragGhost {
         };
 
         let (title, icon, subtitle, is_group) =
-            ghost_presentation(preview.payload, presentations, floating_titles);
+            ghost_presentation(preview.payload, presentations);
         let width = if is_group { 244.0 } else { 220.0 };
         let height = if subtitle.is_some() { 56.0 } else { 46.0 };
         let mut left = preview.point.x + 18.0;
@@ -217,7 +216,6 @@ impl DragGhost {
 fn ghost_presentation(
     payload: DragPayload,
     presentations: &HashMap<dock_core::NodeId, GroupPresentation>,
-    floating_titles: &HashMap<FloatingGroupId, String>,
 ) -> (
     SharedString,
     Option<SharedString>,
@@ -253,12 +251,8 @@ fn ghost_presentation(
                 true,
             )
         }
-        DragPayload::FloatingGroup { group } => (
-            floating_titles
-                .get(&group)
-                .cloned()
-                .map(SharedString::from)
-                .unwrap_or_else(|| SharedString::from("Floating window")),
+        DragPayload::FloatingGroup { .. } => (
+            SharedString::from("Floating window"),
             None,
             Some(SharedString::from("Floating window")),
             true,

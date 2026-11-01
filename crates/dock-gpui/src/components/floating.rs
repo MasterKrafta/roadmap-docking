@@ -5,13 +5,13 @@ use std::{
 
 use dock_core::{
     ColumnDisplayItem, ColumnMode, ColumnRect, ComputeRectsError, DockCommand, DockMetrics,
-    DragPreview, DropZoneRect, FloatingGroupId, FloatingGroupRect, FloatingResizeEdgeRect,
-    FlyoutState, GroupRect, LayoutRects, Node, NodeId, PanelId, PanelRect, Point, ResizeEdge,
-    SplitterRect, TabHeaderRect, TabOverflowRect, TabStripRect, VerticalOverflow,
+    DragPreview, DropZoneRect, FloatingGroupId, FloatingGroupRect, FlyoutState, GroupRect,
+    Layout, LayoutRects, Node, NodeId, PanelId, PanelRect, Point, SplitterRect, TabHeaderRect,
+    TabOverflowRect, TabStripRect, VerticalOverflow,
 };
 use gpui::{
     AnyView, Context, Entity, IntoElement, ParentElement, Render, ScrollHandle,
-    StatefulInteractiveElement, Styled, Window, div, prelude::InteractiveElement as _, px, rgb,
+    StatefulInteractiveElement, Styled, Window, WindowId, div, prelude::InteractiveElement as _, px, rgb,
 };
 use ui::Theme;
 
@@ -19,8 +19,7 @@ use crate::{
     DockController,
     actions::dispatch_command,
     dock_host::{
-        build_context_menu_entries, collect_main_nodes, context_menu_target_exists,
-        floating_root_title,
+        build_context_menu_entries, collect_subtree_nodes, context_menu_target_exists,
     },
 };
 
@@ -37,17 +36,16 @@ use super::{
     collect_group_presentations,
 };
 
-/// A floating composition rendered inside the DockHost's workspace.
+/// Content view for one native floating window.
 ///
-/// The view receives only the Core geometry and the IDs reachable from this
-/// floating group's root. It does not create an OS window or keep a second tree.
+/// The root already owns the native window bounds and local coordinate origin.
+/// The view renders only the Core subtree supplied for its FloatingGroupId.
 pub struct FloatingWindowView;
 
 impl FloatingWindowView {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn render(
         floating: FloatingGroupRect,
-        resize_edges: &[FloatingResizeEdgeRect],
         columns: &[ColumnRect],
         groups: &[GroupRect],
         panels: Vec<(PanelRect, AnyView)>,
@@ -71,13 +69,8 @@ impl FloatingWindowView {
         middle_click_closes_tabs: bool,
         controller: Entity<DockController>,
         theme: Theme,
-        window_root: bool,
     ) -> impl IntoElement {
-        let origin = if window_root {
-            Point::ZERO
-        } else {
-            floating.rect.origin
-        };
+        let origin = Point::ZERO;
         let mut column_group_ids = HashSet::new();
         for ids in column_groups.values() {
             column_group_ids.extend(ids.iter().copied());
@@ -93,27 +86,11 @@ impl FloatingWindowView {
             .collect::<HashSet<PanelId>>();
 
         let mut root = div()
-            .id(format!("floating-window-{:?}", floating.group));
-
-        if window_root {
-            root = root
-                .relative()
-                .size_full()
-                .overflow_hidden()
-                .bg(rgb(theme.colors.panel_surface_background));
-        } else {
-            root = root
-                .absolute()
-                .left(px(floating.rect.origin.x))
-                .top(px(floating.rect.origin.y))
-                .w(px(floating.rect.size.width))
-                .h(px(floating.rect.size.height))
-                .overflow_hidden()
-                .bg(rgb(theme.colors.panel_surface_background))
-                .border_1()
-                .border_color(rgb(theme.colors.group_frame_border))
-                .shadow_lg();
-        }
+            .id(format!("floating-window-{:?}", floating.group))
+            .relative()
+            .size_full()
+            .overflow_hidden()
+            .bg(rgb(theme.colors.panel_surface_background));
 
         // Each Column remains a normal Core subtree. Its groups, tab strips,
         // panel views and internal vertical splitters use the same components
@@ -345,33 +322,6 @@ impl FloatingWindowView {
             .child(close_button);
         root = root.child(title_bar);
 
-        // The workspace preview still uses Core resize hit rectangles.
-        // A native FloatingHost delegates resize hit testing to the OS frame.
-        if !window_root {
-            for resize in resize_edges
-                .iter()
-                .filter(|edge| edge.group == floating.group)
-            {
-                let mut handle = div()
-                    .id(format!(
-                        "floating-resize-{:?}-{:?}",
-                        floating.group, resize.edge
-                    ))
-                    .absolute()
-                    .left(px(resize.rect.origin.x - origin.x))
-                    .top(px(resize.rect.origin.y - origin.y))
-                    .w(px(resize.rect.size.width))
-                    .h(px(resize.rect.size.height));
-
-                handle = match resize.edge {
-                    ResizeEdge::Left | ResizeEdge::Right => handle.cursor_col_resize(),
-                    ResizeEdge::Top | ResizeEdge::Bottom => handle.cursor_row_resize(),
-                    ResizeEdge::TopLeft | ResizeEdge::BottomRight => handle.cursor_nwse_resize(),
-                    ResizeEdge::TopRight | ResizeEdge::BottomLeft => handle.cursor_nesw_resize(),
-                };
-                root = root.child(handle);
-            }
-        }
 
         root
     }
@@ -397,13 +347,49 @@ struct FloatingHostSnapshot {
     metrics: DockMetrics,
 }
 
+/// Resolves the display title from the first active tab in tree order.
+fn floating_root_title(
+    layout: &Layout,
+    root: NodeId,
+    presentations: &HashMap<NodeId, GroupPresentation>,
+    registry: &crate::PanelRegistry,
+) -> Option<String> {
+    match layout.node(root)? {
+        Node::Split(split) => split
+            .children
+            .iter()
+            .find_map(|child| floating_root_title(layout, *child, presentations, registry)),
+        Node::Column(column) => column
+            .groups
+            .iter()
+            .find_map(|group| floating_root_title(layout, *group, presentations, registry)),
+        Node::Tabs(_) => {
+            let presentation = presentations.get(&root)?;
+            let active_panel = presentation.active_panel?;
+            presentation
+                .tabs
+                .iter()
+                .find(|tab| tab.panel == active_panel)
+                .map(|tab| tab.title.to_string())
+        }
+        Node::Panel(panel) => {
+            let instance = layout.panel_instance(panel.panel_id)?;
+            registry
+                .get(&instance.key)
+                .map(|descriptor| descriptor.title().to_string())
+                .or_else(|| Some(instance.key.to_string()))
+        }
+    }
+}
+
 fn floating_host_snapshot(
-    controller: &DockController,
+    controller: &mut DockController,
+    window_id: WindowId,
     group: FloatingGroupId,
 ) -> Result<Option<FloatingHostSnapshot>, ComputeRectsError> {
     let metrics = controller.metrics();
+    let rects = controller.floating_geometry(window_id, group)?.clone();
     let layout = controller.layout();
-    let rects = layout.compute_floating_rects(group, &metrics)?;
     let Some(floating) = rects.floating_groups.first().copied() else {
         // Hidden dock chrome deliberately produces an empty floating snapshot.
         return Ok(None);
@@ -418,7 +404,7 @@ fn floating_host_snapshot(
     let mut node_ids = HashSet::new();
     let mut column_ids = HashSet::new();
     let mut column_groups = HashMap::new();
-    collect_main_nodes(
+    collect_subtree_nodes(
         layout,
         area.root,
         &mut node_ids,
@@ -536,8 +522,9 @@ impl Render for FloatingHost {
             controller.ensure_panel_views(window, panel_cx);
         });
 
+        let window_id = window.window_handle().window_id();
         let snapshot = self.controller.update(cx, |controller, _| {
-            floating_host_snapshot(controller, self.group)
+            floating_host_snapshot(controller, window_id, self.group)
         });
         let snapshot = match snapshot {
             Ok(snapshot) => snapshot,
@@ -650,7 +637,6 @@ impl Render for FloatingHost {
 
         root = root.child(FloatingWindowView::render(
             snapshot.floating,
-            &snapshot.rects.floating_resize_edges,
             &snapshot.rects.columns,
             &snapshot.rects.groups,
             panel_views,
@@ -674,7 +660,6 @@ impl Render for FloatingHost {
             self.middle_click_closes_tabs,
             self.controller.clone(),
             self.theme,
-            true,
         ));
 
         if let Some(open) = self.open_context_menu.as_ref()

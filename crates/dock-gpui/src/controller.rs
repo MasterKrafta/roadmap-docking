@@ -1,13 +1,13 @@
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 
 use dock_core::{
     Axis, CommandError, CommandValue, DockCommand, DockMetrics, DragCancelReason, DragHandle,
     DragPayload, DragSession, DragSessionError, DragState, DropSource, DropZoneResolver,
-    FlyoutState, GeometryError, HitResult, Layout, LayoutRects, Node,
+    FloatingGroupId, FlyoutState, GeometryError, HitResult, Layout, LayoutRects, Node,
     OUTER_COLUMN_EDGE_BOUNDARY_INDEX, PanelId, PanelKey, Point, Profile, Rect, ValidationError,
     WorkspaceDiagnostic,
 };
-use gpui::{AnyView, EventEmitter};
+use gpui::{AnyView, EventEmitter, WindowId};
 use thiserror::Error;
 
 use crate::registry::{PanelRegistry, PanelViewCache};
@@ -49,6 +49,7 @@ impl EventEmitter<DockEvent> for DockController {}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct RectCacheKey {
+    window_id: Option<WindowId>,
     layout_version: u64,
     viewport: Rect,
     metrics_revision: u64,
@@ -57,6 +58,26 @@ struct RectCacheKey {
     /// ResizeFlyout is transient and does not advance Layout::version().
     /// Its remembered width therefore participates in the geometry cache key.
     flyout_width: Option<f32>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct FloatingRectCacheKey {
+    window_id: WindowId,
+    group: FloatingGroupId,
+    layout_version: u64,
+    metrics_revision: u64,
+    chrome: dock_core::ChromeMode,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum ResolverCacheKey {
+    Main(RectCacheKey),
+    Floating(FloatingRectCacheKey),
+}
+
+struct FloatingGeometryCache {
+    key: FloatingRectCacheKey,
+    rects: LayoutRects,
 }
 
 /// Controller construction and configuration errors.
@@ -95,7 +116,7 @@ pub enum PanelCommandError {
 pub struct DragController {
     session: DragSession,
     resolver: Option<DropZoneResolver>,
-    resolver_key: Option<RectCacheKey>,
+    resolver_key: Option<ResolverCacheKey>,
     resolver_source: Option<DropSource>,
     /// Layout revision captured when the current drag press began.
     layout_version: Option<u64>,
@@ -124,7 +145,7 @@ impl DragController {
         self.resolver.as_ref()
     }
 
-    fn set_resolver(&mut self, resolver: DropZoneResolver, key: RectCacheKey, source: DropSource) {
+    fn set_resolver(&mut self, resolver: DropZoneResolver, key: ResolverCacheKey, source: DropSource) {
         self.resolver = Some(resolver);
         self.resolver_key = Some(key);
         self.resolver_source = Some(source);
@@ -216,6 +237,8 @@ pub struct DockController {
     metrics_revision: u64,
     rects: Option<LayoutRects>,
     rects_key: Option<RectCacheKey>,
+    main_window_id: Option<WindowId>,
+    floating_rects: HashMap<WindowId, FloatingGeometryCache>,
     drag: DragController,
     interaction: Option<ResizeInteraction>,
     resize_frame: ResizeFrameThrottle,
@@ -253,6 +276,8 @@ impl DockController {
             metrics_revision: 0,
             rects: None,
             rects_key: None,
+            main_window_id: None,
+            floating_rects: HashMap::new(),
             interaction: None,
             resize_frame: ResizeFrameThrottle::default(),
             registry,

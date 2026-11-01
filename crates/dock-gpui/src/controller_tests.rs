@@ -1,9 +1,10 @@
-use super::{DockController, DockEvent};
+use super::{DockController, DockEvent, ResolverCacheKey};
 use dock_core::{
     CommandError, DockCommand, DockMetrics, DragHandle, DragPayload, DragState, DropSource,
     HitResult, InitialLayoutError, LayoutRects, PanelConstraints, PanelId, PanelKey, Point,
-    Profile, Rect, Size,
+    Node, Profile, Rect, Size,
 };
+use gpui::WindowId;
 use slotmap::Key;
 
 use crate::registry::{IconSource, PanelDescriptor, PanelRegistry};
@@ -560,4 +561,116 @@ fn resize_sequence_uses_core_actual_values_and_one_undo_checkpoint() {
         controller.layout().node(column),
         Some(dock_core::Node::Column(value)) if value.group_ratios == ratios_before
     ));
+}
+
+#[test]
+fn main_geometry_cache_is_bound_to_its_window_id() {
+    let mut controller = controller();
+    let first_window = WindowId::from(71);
+    let second_window = WindowId::from(72);
+
+    controller.set_main_window_id(first_window);
+    controller.geometry().unwrap();
+    assert!(controller.cached_geometry_is_current());
+
+    controller.set_main_window_id(second_window);
+    assert!(!controller.cached_geometry_is_current());
+    controller.geometry().unwrap();
+    assert!(controller.cached_geometry_is_current());
+}
+
+#[test]
+fn floating_geometry_hit_test_and_drop_resolver_are_window_local() {
+    let mut controller = DockController::empty(
+        Profile::Photoshop,
+        DockMetrics::default(),
+        baseline_registry(),
+        Rect::new(Point::ZERO, Size::new(1200.0, 800.0)),
+    )
+    .unwrap();
+    controller.reset_workspace().unwrap();
+
+    let source_nodes = controller
+        .layout()
+        .nodes()
+        .filter_map(|(id, node)| matches!(node, Node::Tabs(_)).then_some(id))
+        .take(2)
+        .collect::<Vec<_>>();
+    assert_eq!(source_nodes.len(), 2, "the baseline workspace has two tab groups");
+
+    for (index, node) in source_nodes.iter().copied().enumerate() {
+        controller
+            .dispatch(DockCommand::Float {
+                node,
+                bounds: Rect::new(
+                    Point::new(280.0 + index as f32 * 40.0, 120.0),
+                    Size::new(440.0, 360.0),
+                ),
+            })
+            .unwrap();
+    }
+
+    let floating_groups = controller
+        .layout()
+        .floating_groups()
+        .map(|(group, _)| group)
+        .collect::<Vec<_>>();
+    assert_eq!(floating_groups.len(), 2);
+
+    let first_group = floating_groups[0];
+    let second_group = floating_groups[1];
+    let first_window = WindowId::from(81);
+    let second_window = WindowId::from(82);
+
+    controller.floating_geometry(first_window, first_group).unwrap();
+    controller.floating_geometry(second_window, second_group).unwrap();
+    assert_eq!(controller.floating_rects.len(), 2);
+    assert_eq!(controller.floating_rects[&first_window].key.group, first_group);
+    assert_eq!(controller.floating_rects[&second_window].key.group, second_group);
+
+    assert!(controller.geometry().unwrap().floating_groups.is_empty());
+    let first_rects = controller.floating_geometry(first_window, first_group).unwrap();
+    assert_eq!(first_rects.floating_groups.len(), 1);
+    assert_eq!(first_rects.floating_groups[0].rect.origin, Point::ZERO);
+    assert_eq!(
+        controller.hit_floating_window(first_window, first_group, Point::new(10.0, 10.0)),
+        Ok(HitResult::FloatingTitle { group: first_group })
+    );
+
+    // A hidden PopUp can be rebound to another group without retaining its old snapshot.
+    controller.floating_geometry(first_window, second_group).unwrap();
+    assert_eq!(controller.floating_rects[&first_window].key.group, second_group);
+    assert_eq!(controller.floating_rects[&second_window].key.group, second_group);
+    let first_cache = &controller.floating_rects[&first_window].rects as *const LayoutRects;
+    let second_cache = &controller.floating_rects[&second_window].rects as *const LayoutRects;
+    assert_ne!(first_cache, second_cache);
+
+    let floating_root = controller
+        .layout()
+        .floating_group(second_group)
+        .and_then(|floating| controller.layout().dock_area(floating.area))
+        .map(|area| area.root)
+        .unwrap();
+    let source = DropSource::Group { group: floating_root };
+    controller
+        .begin_drag_interaction(
+            DragPayload::Group { group: floating_root },
+            DragHandle::GroupGrip,
+            Point::new(40.0, 20.0),
+        )
+        .unwrap();
+    controller
+        .drag_mut()
+        .session_mut()
+        .pointer_move(Point::new(120.0, 100.0))
+        .unwrap();
+    assert!(matches!(controller.drag().session().state(), DragState::Dragging { .. }));
+
+    controller
+        .prepare_floating_window_drop_resolver(first_window, second_group, source)
+        .unwrap();
+    assert!(matches!(controller.drag.resolver_key, Some(ResolverCacheKey::Floating(_))));
+
+    controller.prepare_drop_resolver(source).unwrap();
+    assert!(matches!(controller.drag.resolver_key, Some(ResolverCacheKey::Main(_))));
 }

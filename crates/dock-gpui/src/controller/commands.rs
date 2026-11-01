@@ -377,6 +377,7 @@ impl DockController {
         }
         if self.layout.version() != previous_version {
             self.rects_key = None;
+            self.floating_rects.clear();
             self.drag.clear_resolver();
             self.pending_events.push_back(DockEvent::LayoutChanged {
                 version: self.layout.version(),
@@ -451,6 +452,7 @@ impl DockController {
         self.interaction = None;
         self.resize_frame.latest = None;
         self.rects_key = None;
+        self.floating_rects.clear();
         self.last_error = None;
         self.pending_events.push_back(DockEvent::LayoutChanged {
             version: self.layout.version(),

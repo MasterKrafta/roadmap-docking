@@ -1,8 +1,13 @@
 use dock_core::{
-    ComputeRectsError, DockMetrics, DropSource, GeometryError, HitResult, LayoutRects, Point, Rect,
+    ComputeRectsError, DockMetrics, DropSource, FloatingGroupId, GeometryError, HitResult,
+    LayoutRects, Point, Rect,
 };
+use gpui::WindowId;
 
-use super::{DockController, DockControllerConfigError, RectCacheKey};
+use super::{
+    DockController, DockControllerConfigError, FloatingGeometryCache, FloatingRectCacheKey,
+    RectCacheKey, ResolverCacheKey,
+};
 
 impl DockController {
     /// Returns the cached geometry snapshot, computing it only when its key
@@ -32,6 +37,99 @@ impl DockController {
         self.hit(point)
     }
 
+    /// Returns the cached local geometry for one floating composition in one GPUI window.
+    ///
+    /// The cache is keyed by both WindowId and FloatingGroupId. This matters when
+    /// FloatingWindowManager reuses a hidden PopUp window for another group.
+    pub fn floating_geometry(
+        &mut self,
+        window_id: WindowId,
+        group: FloatingGroupId,
+    ) -> Result<&LayoutRects, ComputeRectsError> {
+        self.ensure_floating_geometry(window_id, group)?;
+        self.floating_rects
+            .get(&window_id)
+            .map(|cache| &cache.rects)
+            .ok_or(ComputeRectsError::InvalidLayoutState)
+    }
+
+    /// Resolves a pointer against the local geometry owned by a floating window.
+    pub fn hit_floating_window(
+        &mut self,
+        window_id: WindowId,
+        group: FloatingGroupId,
+        point: Point,
+    ) -> Result<HitResult, ComputeRectsError> {
+        self.ensure_floating_geometry(window_id, group)?;
+        let cache = self
+            .floating_rects
+            .get(&window_id)
+            .ok_or(ComputeRectsError::InvalidLayoutState)?;
+        self.layout.hit_test(point, &cache.rects, &self.metrics)
+    }
+
+    /// Builds or reuses a drop resolver from this floating window's local snapshot.
+    ///
+    /// The key includes the GPUI window and Core group identities, so a resolver
+    /// prepared for the main window or a previously hosted group is never reused.
+    pub fn prepare_floating_window_drop_resolver(
+        &mut self,
+        window_id: WindowId,
+        group: FloatingGroupId,
+        source: DropSource,
+    ) -> Result<&dock_core::DropZoneResolver, ComputeRectsError> {
+        if !matches!(
+            self.drag.session().state(),
+            dock_core::DragState::Dragging { .. }
+        ) || self.drag.session().handle() == Some(dock_core::DragHandle::FloatingTitle)
+        {
+            return Err(ComputeRectsError::InvalidLayoutState);
+        }
+
+        self.ensure_floating_geometry(window_id, group)?;
+        let key = self
+            .floating_rects
+            .get(&window_id)
+            .map(|cache| cache.key)
+            .ok_or(ComputeRectsError::InvalidLayoutState)?;
+        let resolver_key = ResolverCacheKey::Floating(key);
+        let resolver_is_current = self.drag.resolver.is_some()
+            && self.drag.resolver_key == Some(resolver_key)
+            && self.drag.resolver_source == Some(source);
+
+        if !resolver_is_current {
+            let resolver = {
+                let cache = self
+                    .floating_rects
+                    .get(&window_id)
+                    .ok_or(ComputeRectsError::InvalidLayoutState)?;
+                self.layout
+                    .prepare_drop_resolver(source, &cache.rects, &self.metrics)?
+            };
+            self.drag.set_resolver(resolver, resolver_key, source);
+        }
+
+        self.drag
+            .resolver()
+            .ok_or(ComputeRectsError::InvalidLayoutState)
+    }
+
+    /// Updates the identity of the main rendering window and invalidates its snapshot.
+    pub(crate) fn set_main_window_id(&mut self, window_id: WindowId) {
+        if self.main_window_id == Some(window_id) {
+            return;
+        }
+        if self.has_active_pointer_interaction()
+            && let Err(error) = self.cancel_pointer_interaction()
+        {
+            tracing::warn!(%error, "could not cancel dock interaction before main window replacement");
+        }
+        self.main_window_id = Some(window_id);
+        self.rects = None;
+        self.rects_key = None;
+        self.drag.clear_resolver();
+    }
+
     /// Builds or reuses a resolver for an active docking drag after its threshold.
     /// FloatingTitle is a window move and is rejected without preparing dock zones.
     pub fn prepare_drop_resolver(
@@ -46,7 +144,7 @@ impl DockController {
             return Err(ComputeRectsError::InvalidLayoutState);
         }
         self.ensure_geometry()?;
-        let key = self.rect_cache_key();
+        let key = ResolverCacheKey::Main(self.rect_cache_key());
         let resolver_is_current = self.drag.resolver.is_some()
             && self.drag.resolver_key == Some(key)
             && self.drag.resolver_source == Some(source);
@@ -105,7 +203,40 @@ impl DockController {
         self.metrics_revision = next_revision;
         self.drag = drag;
         self.rects_key = None;
+        self.floating_rects.clear();
         Ok(true)
+    }
+
+    fn ensure_floating_geometry(
+        &mut self,
+        window_id: WindowId,
+        group: FloatingGroupId,
+    ) -> Result<(), ComputeRectsError> {
+        let key = FloatingRectCacheKey {
+            window_id,
+            group,
+            layout_version: self.layout.version(),
+            metrics_revision: self.metrics_revision,
+            chrome: self.layout.chrome(),
+        };
+        if self
+            .floating_rects
+            .get(&window_id)
+            .is_some_and(|cache| cache.key == key)
+        {
+            return Ok(());
+        }
+
+        let rects = match self.layout.compute_floating_rects(group, &self.metrics) {
+            Ok(rects) => rects,
+            Err(error) => {
+                self.floating_rects.remove(&window_id);
+                return Err(error);
+            }
+        };
+        self.floating_rects
+            .insert(window_id, FloatingGeometryCache { key, rects });
+        Ok(())
     }
 
     fn ensure_geometry(&mut self) -> Result<(), ComputeRectsError> {
@@ -135,6 +266,7 @@ impl DockController {
             .and_then(|state| self.layout.panel_instance(state.panel))
             .and_then(|instance| self.layout.flyout_width(&instance.key));
         RectCacheKey {
+            window_id: self.main_window_id,
             layout_version: self.layout.version(),
             viewport: self.viewport,
             metrics_revision: self.metrics_revision,

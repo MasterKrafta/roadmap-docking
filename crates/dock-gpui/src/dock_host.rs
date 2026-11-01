@@ -33,8 +33,8 @@ use crate::{
 /// Options bar, and document canvas are supplied by the application as GPUI
 /// views; their visibility follows the current Core chrome mode.
 ///
-/// Layer order is deliberate: CanvasSlot, main dock surfaces, flyout, floating
-/// groups in ascending Core z-order, drag feedback, then the universal ContextMenu.
+/// Layer order is deliberate: CanvasSlot, main dock surfaces, flyout,
+/// main-window drop feedback, then the universal ContextMenu.
 pub struct DockHost {
     controller: Entity<DockController>,
     theme: DockTheme,
@@ -171,6 +171,11 @@ impl DockHost {
 
 impl Render for DockHost {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let main_window_id = window.window_handle().window_id();
+        self.controller.update(cx, |controller, _| {
+            controller.set_main_window_id(main_window_id);
+        });
+
         let focus_handle = self
             .root_focus_handle
             .get_or_insert_with(|| cx.focus_handle())
@@ -234,16 +239,13 @@ impl Render for DockHost {
             });
         }
 
-        // One read transaction produces the geometry snapshot plus the IDs/modes
-        // needed by the main-dock presentation layer. The Layout remains Core-owned.
+        // One read transaction produces only the main-window geometry and presentation data.
         let (
             chrome,
             rects,
             main_node_ids,
             main_column_ids,
             main_column_groups,
-            floating_titles,
-            all_column_ids,
             column_modes,
             group_presentations,
             rail_display_orders,
@@ -265,7 +267,7 @@ impl Render for DockHost {
 
             for side in [DockSide::Left, DockSide::Right] {
                 if let Some(area) = layout.main_area(side) {
-                    collect_main_nodes(
+                    collect_subtree_nodes(
                         layout,
                         area.root,
                         &mut main_node_ids,
@@ -275,39 +277,7 @@ impl Render for DockHost {
                 }
             }
 
-            // Collect each floating root independently. The maps contain
-            // IDs only; Layout remains the single owner of every tree.
-            let mut floating_node_ids = HashMap::new();
-            let mut all_node_ids = main_node_ids.clone();
-            let mut all_column_ids = main_column_ids.clone();
-
-            if let Ok(rects) = &rects {
-                for floating_rect in &rects.floating_groups {
-                    let Some(floating) = layout.floating_group(floating_rect.group) else {
-                        continue;
-                    };
-                    let Some(area) = layout.dock_area(floating.area) else {
-                        continue;
-                    };
-
-                    let mut nodes = HashSet::new();
-                    let mut columns = HashSet::new();
-                    let mut column_groups = HashMap::new();
-                    collect_main_nodes(
-                        layout,
-                        area.root,
-                        &mut nodes,
-                        &mut columns,
-                        &mut column_groups,
-                    );
-
-                    all_node_ids.extend(nodes.iter().copied());
-                    all_column_ids.extend(columns.iter().copied());
-                    floating_node_ids.insert(floating_rect.group, nodes);
-                }
-            }
-
-            let column_modes = all_column_ids
+            let column_modes = main_column_ids
                 .iter()
                 .filter_map(|id| match layout.node(*id) {
                     Some(Node::Column(column)) => Some((*id, column.mode)),
@@ -315,7 +285,7 @@ impl Render for DockHost {
                 })
                 .collect::<HashMap<_, _>>();
             let group_presentations =
-                collect_group_presentations(layout, controller.registry(), &all_node_ids);
+                collect_group_presentations(layout, controller.registry(), &main_node_ids);
             let rail_display_orders = column_modes
                 .iter()
                 .filter(|(_, mode)| mode.is_rail())
@@ -327,21 +297,6 @@ impl Render for DockHost {
                 })
                 .collect::<HashMap<NodeId, Vec<ColumnDisplayItem>>>();
 
-            let floating_titles = floating_node_ids
-                .keys()
-                .filter_map(|floating_id| {
-                    let floating = layout.floating_group(*floating_id)?;
-                    let area = layout.dock_area(floating.area)?;
-                    let title = floating_root_title(
-                        layout,
-                        area.root,
-                        &group_presentations,
-                        controller.registry(),
-                    )
-                    .unwrap_or_else(|| "Floating panels".to_string());
-                    Some((*floating_id, title))
-                })
-                .collect::<HashMap<_, _>>();
             let active_flyout = layout.flyout();
             let drag_preview = controller.drag().session().preview();
             let drag_handle = controller.drag().session().handle();
@@ -370,8 +325,6 @@ impl Render for DockHost {
                 main_node_ids,
                 main_column_ids,
                 main_column_groups,
-                floating_titles,
-                all_column_ids,
                 column_modes,
                 group_presentations,
                 rail_display_orders,
@@ -463,11 +416,11 @@ impl Render for DockHost {
             let overflow_columns = rects
                 .vertical_overflow
                 .iter()
-                .filter(|overflow| all_column_ids.contains(&overflow.owner))
+                .filter(|overflow| main_column_ids.contains(&overflow.owner))
                 .map(|overflow| overflow.owner)
                 .collect::<HashSet<_>>();
             self.column_scroll_handles.retain(|owner, _| {
-                all_column_ids.contains(owner) && overflow_columns.contains(owner)
+                main_column_ids.contains(owner) && overflow_columns.contains(owner)
             });
             for owner in overflow_columns {
                 self.column_scroll_handles.entry(owner).or_default();
@@ -478,7 +431,7 @@ impl Render for DockHost {
             !context_menu_target_exists(
                 open.target,
                 &group_presentations,
-                &all_column_ids,
+                &main_column_ids,
                 rects.as_ref(),
             )
         }) {
@@ -809,13 +762,12 @@ impl Render for DockHost {
                 &rects.groups,
                 &rects.tab_headers,
                 &rects.tab_strips,
-                &rects.floating_groups,
+                &[],
                 theme,
             ));
             workspace = workspace.child(DragGhost::render(
                 drag_preview,
                 &group_presentations,
-                &floating_titles,
                 rects.viewport,
                 theme,
             ));
@@ -1059,9 +1011,9 @@ pub(crate) fn build_context_menu_entries(
     }
 }
 
-/// Collects only nodes reachable from the left/right main dock roots.
-/// Floating compositions are deliberately rendered by their own later layer.
-pub(crate) fn collect_main_nodes(
+/// Collects node IDs reachable from one Core tree root.
+/// The caller decides which window owns the resulting local presentation.
+pub(crate) fn collect_subtree_nodes(
     layout: &Layout,
     id: NodeId,
     nodes: &mut HashSet<NodeId>,
@@ -1075,57 +1027,22 @@ pub(crate) fn collect_main_nodes(
     match layout.node(id) {
         Some(Node::Split(split)) => {
             for child in &split.children {
-                collect_main_nodes(layout, *child, nodes, columns, column_groups);
+                collect_subtree_nodes(layout, *child, nodes, columns, column_groups);
             }
         }
         Some(Node::Column(column)) => {
             columns.insert(id);
             column_groups.insert(id, column.groups.clone());
             for group in &column.groups {
-                collect_main_nodes(layout, *group, nodes, columns, column_groups);
+                collect_subtree_nodes(layout, *group, nodes, columns, column_groups);
             }
         }
         Some(Node::Tabs(tabs)) => {
             for child in &tabs.children {
-                collect_main_nodes(layout, *child, nodes, columns, column_groups);
+                collect_subtree_nodes(layout, *child, nodes, columns, column_groups);
             }
         }
         Some(Node::Panel(_)) | None => {}
-    }
-}
-
-/// Returns the first active tab title in deterministic tree order.
-pub(crate) fn floating_root_title(
-    layout: &Layout,
-    root: NodeId,
-    presentations: &HashMap<NodeId, crate::components::tab_strip::GroupPresentation>,
-    registry: &crate::PanelRegistry,
-) -> Option<String> {
-    match layout.node(root)? {
-        Node::Split(split) => split
-            .children
-            .iter()
-            .find_map(|child| floating_root_title(layout, *child, presentations, registry)),
-        Node::Column(column) => column
-            .groups
-            .iter()
-            .find_map(|group| floating_root_title(layout, *group, presentations, registry)),
-        Node::Tabs(_) => {
-            let presentation = presentations.get(&root)?;
-            let active_panel = presentation.active_panel?;
-            presentation
-                .tabs
-                .iter()
-                .find(|tab| tab.panel == active_panel)
-                .map(|tab| tab.title.to_string())
-        }
-        Node::Panel(panel) => {
-            let instance = layout.panel_instance(panel.panel_id)?;
-            registry
-                .get(&instance.key)
-                .map(|descriptor| descriptor.title().to_string())
-                .or_else(|| Some(instance.key.to_string()))
-        }
     }
 }
 
