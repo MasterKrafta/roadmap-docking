@@ -1115,14 +1115,34 @@ impl FloatingWindowManager {
                         "could not detach a panel window from its previous composition"
                     );
                 }
-                if let Some(native_window) = entry.native_window
-                    && let Err(error) = self.native_ops.hide(native_window)
-                {
-                    tracing::warn!(
-                        ?panel,
-                        %error,
-                        "could not hide a panel window after it stopped hosting a composition"
-                    );
+                if let Some(native_window) = entry.native_window {
+                    if let Err(error) = self.native_ops.hide(native_window) {
+                        tracing::warn!(
+                            ?panel,
+                            %error,
+                            "could not hide a panel window after it stopped hosting a composition"
+                        );
+                    }
+                    if entry.resize_enabled {
+                        if let Err(error) = self.native_ops.disable_resize(native_window) {
+                            tracing::warn!(
+                                ?panel,
+                                %error,
+                                "could not disable native resize after a panel stopped hosting"
+                            );
+                        }
+                        entry.resize_enabled = false;
+                    }
+                    if entry.native_min_size.is_some() {
+                        if let Err(error) = self.native_ops.set_min_size(native_window, None) {
+                            tracing::warn!(
+                                ?panel,
+                                %error,
+                                "could not clear the native minimum size after a panel stopped hosting"
+                            );
+                        }
+                        entry.native_min_size = None;
+                    }
                 }
                 entry.host_group = None;
                 entry.visibility = PanelWindowVisibility::Hidden;
