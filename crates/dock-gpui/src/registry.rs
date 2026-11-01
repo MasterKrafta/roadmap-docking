@@ -266,6 +266,29 @@ mod tests {
     }
 
     #[test]
+    fn registry_exposes_descriptors_in_sorted_key_order_for_menus() {
+        let mut registry = PanelRegistry::new();
+        registry.register(descriptor("history")).unwrap();
+        registry.register(descriptor("color")).unwrap();
+        registry.register(descriptor("layers")).unwrap();
+
+        let keys = registry
+            .descriptors()
+            .into_iter()
+            .map(|descriptor| descriptor.key().to_string())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            keys,
+            vec![
+                "color".to_owned(),
+                "history".to_owned(),
+                "layers".to_owned()
+            ]
+        );
+    }
+
+    #[test]
     fn registry_rejects_duplicate_keys() {
         let mut registry = PanelRegistry::new();
         registry.register(descriptor("layers")).unwrap();
