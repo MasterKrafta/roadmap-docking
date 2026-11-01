@@ -178,8 +178,8 @@ mod windows_impl {
         },
         Media::{timeBeginPeriod, timeEndPeriod},
         UI::{
-            Controls::{DefSubclassProc, GetWindowSubclass, RemoveWindowSubclass, SetWindowSubclass},
             HiDpi::GetDpiForWindow,
+            Shell::{DefSubclassProc, GetWindowSubclass, RemoveWindowSubclass, SetWindowSubclass},
             Input::KeyboardAndMouse::{GetAsyncKeyState, VK_ESCAPE, VK_LBUTTON},
             WindowsAndMessaging::*,
         },
@@ -572,7 +572,7 @@ mod windows_impl {
                     native,
                     Some(min_track_size_proc),
                     MIN_SIZE_SUBCLASS_ID,
-                    &mut reference_data,
+                    Some(&mut reference_data as *mut usize),
                 )
             }
             .as_bool();
