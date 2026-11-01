@@ -833,7 +833,7 @@ fn flyout_title_grip_contains(
 
 #[cfg(test)]
 mod hit_dispatch_tests {
-    use dock_core::{Axis, HitResult, NodeId, PanelId, ResizeEdge};
+    use dock_core::{Axis, FloatingGroupId, HitResult, NodeId, PanelId, ResizeEdge};
     use slotmap::Key;
 
     use super::{
@@ -869,6 +869,7 @@ mod hit_dispatch_tests {
     fn pointer_down_intents_follow_the_hitresult_table() {
         let group = NodeId::null();
         let panel = PanelId::null();
+        let floating = FloatingGroupId::null();
 
         assert_eq!(
             pointer_down_intent_for_hit(HitResult::TabHeader {
@@ -914,10 +915,25 @@ mod hit_dispatch_tests {
             }),
             PointerDownIntent::Resize
         );
-        assert_eq!(pointer_down_intent_for_hit(HitResult::FloatingTitle { group: NodeId::null().into() }), PointerDownIntent::None);
-        assert_eq!(pointer_down_intent_for_hit(HitResult::FloatingGroup { group: NodeId::null().into() }), PointerDownIntent::None);
-        assert_eq!(pointer_down_intent_for_hit(HitResult::Panel { panel }), PointerDownIntent::None);
-        assert_eq!(pointer_down_intent_for_hit(HitResult::FloatingResizeEdge { group: NodeId::null().into(), edge: ResizeEdge::BottomRight }), PointerDownIntent::None);
+        assert_eq!(
+            pointer_down_intent_for_hit(HitResult::FloatingTitle { group: floating }),
+            PointerDownIntent::None
+        );
+        assert_eq!(
+            pointer_down_intent_for_hit(HitResult::FloatingGroup { group: floating }),
+            PointerDownIntent::None
+        );
+        assert_eq!(
+            pointer_down_intent_for_hit(HitResult::Panel { panel }),
+            PointerDownIntent::None
+        );
+        assert_eq!(
+            pointer_down_intent_for_hit(HitResult::FloatingResizeEdge {
+                group: floating,
+                edge: ResizeEdge::BottomRight,
+            }),
+            PointerDownIntent::None
+        );
         assert_eq!(
             pointer_down_intent_for_hit(HitResult::Canvas),
             PointerDownIntent::DismissFlyout
