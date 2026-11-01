@@ -305,8 +305,8 @@ mod windows_impl {
 
         // SAFETY: monitor is the HMONITOR supplied by EnumDisplayMonitors and
         // info is a valid writable MONITORINFO.
-        if let Err(error) = unsafe { GetMonitorInfoW(monitor, &mut info) } {
-            collection.error = Some(platform_error("GetMonitorInfoW", error));
+        if !unsafe { GetMonitorInfoW(monitor, &mut info) }.as_bool() {
+            collection.error = Some(last_error("GetMonitorInfoW"));
             return BOOL(0);
         }
 
@@ -575,7 +575,7 @@ mod windows_impl {
                     &mut reference_data,
                 )
             }
-            .is_ok();
+            .as_bool();
 
             match size {
                 Some(size) if already_installed => {
@@ -596,32 +596,43 @@ mod windows_impl {
                     }));
                     // SAFETY: The subclass owns this pointer until WM_NCDESTROY
                     // or explicit removal.
-                    if let Err(error) = unsafe {
+                    if !unsafe {
                         SetWindowSubclass(
                             native,
                             Some(min_track_size_proc),
                             MIN_SIZE_SUBCLASS_ID,
                             pointer as usize,
                         )
-                    } {
+                    }
+                    .as_bool()
+                    {
+                        let error = last_error("SetWindowSubclass(min size)");
                         // SAFETY: Registration failed, so the callback did not
                         // retain pointer and it is still owned here.
                         unsafe { drop(Box::from_raw(pointer)) };
-                        return Err(platform_error("SetWindowSubclass(min size)", error));
+                        return Err(error);
                     }
                     Ok(())
                 }
                 None if already_installed => {
                     // SAFETY: Remove the registered callback before freeing
                     // the reference data it owns.
-                    unsafe {
-                        let _ = RemoveWindowSubclass(
+                    // SAFETY: Remove the registered callback before freeing
+                    // the reference data it owns.
+                    if !unsafe {
+                        RemoveWindowSubclass(
                             native,
                             Some(min_track_size_proc),
                             MIN_SIZE_SUBCLASS_ID,
-                        );
-                        drop(Box::from_raw(reference_data as *mut MinTrackSize));
+                        )
                     }
+                    .as_bool()
+                    {
+                        return Err(last_error("RemoveWindowSubclass(min size)"));
+                    }
+                    // SAFETY: The callback was successfully detached, so it
+                    // can no longer access the allocation.
+                    unsafe { drop(Box::from_raw(reference_data as *mut MinTrackSize)) };
                     Ok(())
                 }
                 None => Ok(()),
@@ -635,7 +646,7 @@ mod windows_impl {
             exclude: Option<NativeWindowId>,
         ) -> Result<Option<NativeWindowId>, NativeError> {
             // SAFETY: Walk the desktop's top-level Z-order synchronously.
-            let mut current = unsafe { GetTopWindow(None) };
+            let mut current = unsafe { GetTopWindow(None) }.ok();
             while let Some(native) = current {
                 let id = NativeWindowId::from_raw(native.0 as isize);
                 if let Some(id) = id
@@ -658,7 +669,7 @@ mod windows_impl {
                 }
 
                 // SAFETY: Advance to the next top-level HWND in Z-order.
-                current = unsafe { GetWindow(Some(native), GW_HWNDNEXT) };
+                current = unsafe { GetWindow(native, GW_HWNDNEXT) }.ok();
             }
             Ok(None)
         }
@@ -682,7 +693,9 @@ mod windows_impl {
             if let Some(error) = collection.error {
                 return Err(error);
             }
-            result.map_err(|error| platform_error("EnumDisplayMonitors", error))?;
+            if !result.as_bool() {
+                return Err(last_error("EnumDisplayMonitors"));
+            }
             Ok(collection.work_areas)
         }
 
