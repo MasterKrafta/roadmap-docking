@@ -1134,7 +1134,7 @@ impl FloatingWindowManager {
                     host.set_host_group(None);
                     host_cx.notify();
                 }) {
-                    Ok(()) => true
+                    Ok(()) => true,
                     Err(error) => {
                         tracing::warn!(
                             ?panel,
