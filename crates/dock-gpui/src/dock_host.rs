@@ -176,15 +176,34 @@ impl Render for DockHost {
             controller.set_main_window_id(main_window_id);
         });
 
+        // Create and attach the native-window manager before focus/input listeners
+        // are installed so they can distinguish a cross-window native drag.
+        let floating_manager = if let Some(manager) = self.floating_manager.clone() {
+            manager
+        } else {
+            let controller = self.controller.clone();
+            let theme = self.theme;
+            let manager = cx.new(|_| FloatingWindowManager::new(controller, theme));
+            self.floating_manager = Some(manager.clone());
+            manager.update(cx, |manager, manager_cx| {
+                manager.attach_main_window(window, manager_cx);
+            });
+            manager
+        };
+
         let focus_handle = self
             .root_focus_handle
             .get_or_insert_with(|| cx.focus_handle())
             .clone();
         if !self.focus_observed {
             let controller = self.controller.clone();
+            let manager = floating_manager.clone();
             let pointer_capture = self.pointer_capture.clone();
             let pointer_press = self.pointer_press.clone();
             cx.on_focus_out(&focus_handle, window, move |_host, _event, window, app| {
+                if manager.update(app, |manager, _| manager.native_move_active()) {
+                    return;
+                }
                 controller.update(app, |controller, controller_cx| {
                     let result = controller.cancel_pointer_interaction_on_focus_loss();
                     controller_cx.notify();
@@ -227,17 +246,6 @@ impl Render for DockHost {
             controller.ensure_panel_views(window, panel_cx);
         });
 
-        // One manager follows the shared Layout and owns the native windows
-        // for its floating groups. It is created only once for this main host.
-        if self.floating_manager.is_none() {
-            let controller = self.controller.clone();
-            let theme = self.theme;
-            let manager = cx.new(|_| FloatingWindowManager::new(controller, theme));
-            self.floating_manager = Some(manager.clone());
-            manager.update(cx, |manager, manager_cx| {
-                manager.attach_main_window(window, manager_cx);
-            });
-        }
 
         // One read transaction produces only the main-window geometry and presentation data.
         let (
@@ -517,6 +525,7 @@ impl Render for DockHost {
             }
         });
         let controller_for_measurement = self.controller.clone();
+        let manager_for_measurement = floating_manager.clone();
         let pointer_controller = self.controller.clone();
         let pointer_scroll_handles = self.column_scroll_handles.clone();
         let pointer_context_menu = toggle_context_menu.clone();
@@ -534,6 +543,9 @@ impl Render for DockHost {
                     }
                 };
 
+                manager_for_measurement.update(app, |manager, _| {
+                    manager.set_main_host_origin(window_origin);
+                });
                 controller_for_measurement.update(app, |controller, controller_cx| {
                     match controller.set_viewport(viewport) {
                         Ok(true) => {
@@ -571,6 +583,7 @@ impl Render for DockHost {
                         pointer_scroll_handles.clone(),
                         pointer_context_menu.clone(),
                         crate::input::PointerEventState {
+                            manager: floating_manager.clone(),
                             pointer_capture: pointer_capture.clone(),
                             pointer_press: pointer_press_for_events.clone(),
                         },
@@ -643,10 +656,14 @@ impl Render for DockHost {
         // leaves its source panel visible in the rail.
         {
             let controller_for_escape = self.controller.clone();
+            let manager_for_escape = floating_manager.clone();
             let pointer_capture_for_escape = self.pointer_capture.clone();
             let pointer_press_for_escape = self.pointer_press.clone();
             workspace = workspace.capture_key_down(move |event, window, app| {
                 if context_menu_is_open || !event.keystroke.key.eq_ignore_ascii_case("escape") {
+                    return;
+                }
+                if manager_for_escape.update(app, |manager, _| manager.native_move_active()) {
                     return;
                 }
 
