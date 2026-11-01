@@ -1,8 +1,9 @@
 use crate::layout_builder::LayoutBuilder;
 use crate::{
     Axis, ColumnMode, DockCommand, DockMetrics, DockSide, DragDropAction, DragDropRequest,
-    DragHandle, DragPayload, DragSession, DragSessionError, DropSource, DropTarget, FloatingGroupId, Layout,
-    Node, NodeId, PanelConstraints, PanelKey, Point, Profile, Rect, Size, Tabs,
+    DragHandle, DragPayload, DragSession, DragSessionError, DropSource, DropTarget,
+    FloatingGroupId, Layout, Node, NodeId, PanelConstraints, PanelKey, Point, Profile, Rect, Size,
+    Tabs,
 };
 
 fn key(value: &str) -> PanelKey {
@@ -835,7 +836,11 @@ fn floating_composition_with_split_root_can_build_drop_zones_and_dock() {
     let mut layout = layout;
     layout.apply(command, &metrics).unwrap();
     assert_eq!(layout.floating_groups().count(), 0);
-    let Some(Node::Split(split)) = layout.main_area(DockSide::Right).map(|area| layout.node(area.root)).flatten() else {
+    let right_root = layout
+        .main_area(DockSide::Right)
+        .expect("the right main dock must remain present")
+        .root;
+    let Some(Node::Split(split)) = layout.node(right_root) else {
         panic!("the right main dock should contain the merged horizontal composition");
     };
     assert_eq!(split.axis, Axis::X);
