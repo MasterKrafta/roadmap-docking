@@ -420,6 +420,41 @@ impl FloatingWindowManager {
 
     pub(crate) fn native_move_active(&self) -> bool { self.native_move.is_some() }
 
+    /// A GPUI host losing focus is not a cancellation when another managed
+    /// window of this application received the OS foreground activation.
+    ///
+    /// If the platform cannot query the foreground window, preserve the
+    /// existing native-move behavior as a conservative fallback.
+    pub(crate) fn should_preserve_pointer_interaction_on_focus_out(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let interaction_active = self.controller.update(cx, |controller, _| {
+            controller.has_active_pointer_interaction()
+        });
+        if !interaction_active {
+            return false;
+        }
+
+        let foreground = match self.native_ops.foreground_window() {
+            Ok(Some(window)) => window,
+            Ok(None) => return false,
+            Err(error) => {
+                tracing::debug!(
+                    %error,
+                    "could not determine the foreground window while handling focus loss"
+                );
+                return self.native_move_active();
+            }
+        };
+
+        self.main_native_window == Some(foreground)
+            || self.registry.windows.values().any(|entry| {
+                entry.native_window == Some(foreground)
+            })
+    }
+
+
     /// Starts polling a native OS sizing loop after its first GPUI redraw.
     pub(crate) fn observe_native_resize(
         &mut self,
