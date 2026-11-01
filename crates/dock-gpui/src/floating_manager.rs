@@ -1123,18 +1123,37 @@ impl FloatingWindowManager {
                     .filter(|_| entry.host_group.is_some())
             })
             .collect::<Vec<_>>();
+        // A failed GPUI detach must not be followed by mounting the same
+        // composition in another window. Keep that group without an active host
+        // for this pass and retry the detach on the next reconciliation.
+        let mut blocked_groups = HashSet::new();
         for panel in detached_panels {
             if let Some(entry) = self.registry.windows.get_mut(&panel) {
-                if let Err(error) = entry.window.update(cx, |host, _, host_cx| {
+                let previous_group = entry.host_group;
+                let detached = match entry.window.update(cx, |host, _, host_cx| {
                     host.set_host_group(None);
                     host_cx.notify();
                 }) {
-                    tracing::debug!(
-                        ?panel,
-                        %error,
-                        "could not detach a panel window from its previous composition"
-                    );
-                }
+                    Ok(()) => {
+                        entry.host_group = None;
+                        true
+                    }
+                    Err(error) => {
+                        tracing::warn!(
+                            ?panel,
+                            ?previous_group,
+                            %error,
+                            "could not detach a panel window; composition host transfer is deferred"
+                        );
+                        if let Some(group) = previous_group
+                            && groups.iter().any(|candidate| candidate.id == group)
+                        {
+                            blocked_groups.insert(group);
+                        }
+                        false
+                    }
+                };
+
                 if let Some(native_window) = entry.native_window {
                     if let Err(error) = self.native_ops.hide(native_window) {
                         tracing::warn!(
@@ -1164,16 +1183,29 @@ impl FloatingWindowManager {
                         entry.native_min_size = None;
                     }
                 }
-                entry.host_group = None;
+
+                // On failure the old GPUI host association is deliberately
+                // retained. It stays hidden, and no replacement is mounted
+                // until a later pass can detach it successfully.
+                if detached {
+                    entry.host_group = None;
+                }
                 entry.visibility = PanelWindowVisibility::Hidden;
             }
         }
 
-        self.host_registry.floating_groups = next_hosts.clone();
+        self.host_registry.floating_groups = next_hosts
+            .iter()
+            .filter(|(group, _)| !blocked_groups.contains(group))
+            .map(|(group, panel)| (*group, *panel))
+            .collect();
         self.registry.panel_owners = panel_owners;
 
         let mut monitor_corrections = Vec::new();
         for group in &groups {
+            if blocked_groups.contains(&group.id) {
+                continue;
+            }
             let Some(panel) = next_hosts.get(&group.id).copied() else {
                 continue;
             };
@@ -1218,6 +1250,9 @@ impl FloatingWindowManager {
         // above. The first show therefore happens only after the permanent
         // PanelWindow has its host group, HWND, placement, and native constraints.
         for group in &groups {
+            if blocked_groups.contains(&group.id) {
+                continue;
+            }
             let Some(panel) = next_hosts.get(&group.id).copied() else {
                 continue;
             };
