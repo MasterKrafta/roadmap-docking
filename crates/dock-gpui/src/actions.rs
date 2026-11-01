@@ -21,7 +21,6 @@ pub(crate) fn dispatch_command(
     }
 }
 
-
 /// Toggles one registry-backed panel through the manager that owns floating
 /// window placement. Panel existence and the resulting checkmark still come
 /// from the shared Core Layout.
