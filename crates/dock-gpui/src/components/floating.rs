@@ -6,6 +6,7 @@ use std::{
 
 use dock_core::{
     ColumnDisplayItem, ColumnMode, ColumnRect, ComputeRectsError, DockCommand, DockMetrics,
+    DragHandle,
     DragPreview, DropZoneRect, FloatingGroupId, FloatingGroupRect, FlyoutState, GroupRect,
     Layout, LayoutRects, Node, NodeId, PanelId, PanelRect, Point, SplitterRect, TabHeaderRect,
     TabOverflowRect, TabStripRect, VerticalOverflow,
@@ -47,9 +48,9 @@ use super::{
 ///
 /// The root already owns the native window bounds and local coordinate origin.
 /// The view renders only the Core subtree supplied for its FloatingGroupId.
-pub struct FloatingWindowView;
+struct FloatingWindowContent;
 
-impl FloatingWindowView {
+impl FloatingWindowContent {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn render(
         floating: FloatingGroupRect,
@@ -361,6 +362,7 @@ struct FloatingHostSnapshot {
     title: String,
     metrics: DockMetrics,
     drag_preview: Option<DragPreview>,
+    drag_handle: Option<DragHandle>,
     drag_zones: Vec<DropZoneRect>,
     active_drop_zone: Option<dock_core::DropZoneRect>,
 }
@@ -457,6 +459,7 @@ fn floating_host_snapshot(
     )
     .unwrap_or_else(|| "Floating panels".to_string());
     let drag_preview = controller.floating_window_drag_preview(window_id, group);
+    let drag_handle = controller.drag().session().handle();
     let drag_resolver = controller.floating_window_drop_resolver(window_id, group);
     let drag_zones = drag_resolver
         .map(|resolver| resolver.zones().to_vec())
@@ -480,6 +483,7 @@ fn floating_host_snapshot(
         title,
         metrics,
         drag_preview,
+        drag_handle,
         drag_zones,
         active_drop_zone,
     }))
@@ -972,7 +976,7 @@ impl Render for FloatingHost {
             }
         });
 
-        root = root.child(FloatingWindowView::render(
+        root = root.child(FloatingWindowContent::render(
             snapshot.floating,
             &snapshot.rects.columns,
             &snapshot.rects.groups,
@@ -1010,12 +1014,16 @@ impl Render for FloatingHost {
                 &floating_rects,
                 self.theme,
             ));
-            root = root.child(DragGhost::render(
-                Some(preview),
-                &snapshot.group_presentations,
-                snapshot.rects.viewport,
-                self.theme,
-            ));
+            if snapshot.drag_handle != Some(DragHandle::FloatingCapture)
+                && snapshot.drag_handle != Some(DragHandle::FloatingTitle)
+            {
+                root = root.child(DragGhost::render(
+                    Some(preview),
+                    &snapshot.group_presentations,
+                    snapshot.rects.viewport,
+                    self.theme,
+                ));
+            }
         }
 
         if let Some(open) = self.open_context_menu.as_ref()
