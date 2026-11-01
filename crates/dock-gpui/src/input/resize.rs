@@ -6,8 +6,7 @@ use gpui::{App, Entity};
 
 use crate::{DockController, ResizeInteraction};
 
-/// Starts the same Core resize transaction from either a splitter or a
-/// floating-window edge/corner supplied by the geometry hit-test.
+/// Starts a Core resize transaction from a splitter or flyout edge hit.
 pub(crate) fn begin_resize_hit(
     controller: &Entity<DockController>,
     hit: HitResult,
@@ -95,11 +94,6 @@ fn command_for_pointer(
                 width: width.max(1.0),
             })
         }
-        HitResult::FloatingResizeEdge { group, edge } => {
-            let start_bounds = interaction.start_bounds?;
-            let bounds = resize_floating_bounds(start_bounds, edge, dx, dy)?;
-            (bounds != start_bounds).then_some(DockCommand::ResizeFloatingBounds { group, bounds })
-        }
         HitResult::Splitter {
             owner,
             boundary_index,
@@ -157,54 +151,6 @@ fn command_for_pointer(
         },
         _ => None,
     }
-}
-
-/// Applies an absolute pointer delta to the original floating bounds. The
-/// opposite edge remains fixed for left/top resizing; Core performs the final
-/// minimum-size and viewport clamping in its next geometry snapshot.
-fn resize_floating_bounds(start: Rect, edge: ResizeEdge, dx: f32, dy: f32) -> Option<Rect> {
-    if !dx.is_finite() || !dy.is_finite() {
-        return None;
-    }
-
-    let original_left = start.origin.x;
-    let original_top = start.origin.y;
-    let original_right = original_left + start.size.width;
-    let original_bottom = original_top + start.size.height;
-
-    let mut left = original_left;
-    let mut top = original_top;
-    let mut right = original_right;
-    let mut bottom = original_bottom;
-
-    match edge {
-        ResizeEdge::Left => left = (original_left + dx).min(original_right - 1.0),
-        ResizeEdge::Right => right = (original_right + dx).max(original_left + 1.0),
-        ResizeEdge::Top => top = (original_top + dy).min(original_bottom - 1.0),
-        ResizeEdge::Bottom => bottom = (original_bottom + dy).max(original_top + 1.0),
-        ResizeEdge::TopLeft => {
-            left = (original_left + dx).min(original_right - 1.0);
-            top = (original_top + dy).min(original_bottom - 1.0);
-        }
-        ResizeEdge::TopRight => {
-            right = (original_right + dx).max(original_left + 1.0);
-            top = (original_top + dy).min(original_bottom - 1.0);
-        }
-        ResizeEdge::BottomLeft => {
-            left = (original_left + dx).min(original_right - 1.0);
-            bottom = (original_bottom + dy).max(original_top + 1.0);
-        }
-        ResizeEdge::BottomRight => {
-            right = (original_right + dx).max(original_left + 1.0);
-            bottom = (original_bottom + dy).max(original_top + 1.0);
-        }
-    }
-
-    let resized = Rect::new(
-        Point::new(left, top),
-        dock_core::Size::new(right - left, bottom - top),
-    );
-    resized.validate().ok().map(|_| resized)
 }
 
 fn reset_command_for_interaction(
@@ -342,14 +288,6 @@ pub(crate) fn resize_preview_for_interaction(
                 scroll_owner: (axis == Axis::Y).then_some(owner),
             })
         }
-        HitResult::FloatingResizeEdge { edge, .. } => {
-            let rect = resize_floating_bounds(interaction.start_bounds?, edge, dx, dy)?;
-            Some(ResizePreview {
-                rect,
-                kind: ResizePreviewKind::BoundsOutline,
-                scroll_owner: None,
-            })
-        }
         HitResult::FlyoutResizeEdge { edge, .. } => {
             let start = interaction.start_flyout_rect?;
             let direction = match edge {
@@ -378,7 +316,7 @@ pub(crate) fn resize_preview_for_interaction(
                 scroll_owner: None,
             })
         }
-        // Only splitter, floating-edge, and flyout-edge hits can start a resize.
+        // Only splitter and flyout-edge hits can start a resize.
         // Keep the preview API exhaustive as HitResult grows with new hit kinds.
         _ => None,
     }
@@ -401,10 +339,10 @@ fn splitter_preview_rect(start: Rect, axis: Axis, dx: f32, dy: f32) -> Option<Re
 
 #[cfg(test)]
 mod tests {
-    use dock_core::{Axis, Point, Rect, ResizeEdge, Size};
+    use dock_core::{Axis, Point, Rect, Size};
 
     use super::{
-        pointer_delta_from_origin, resize_floating_bounds, signed_outer_width_delta,
+        pointer_delta_from_origin, signed_outer_width_delta,
         splitter_preview_rect,
     };
 
@@ -442,32 +380,4 @@ mod tests {
         assert_eq!(signed_outer_width_delta(24.0, false), -24.0);
     }
 
-    #[test]
-    fn floating_top_left_resize_keeps_the_opposite_edges_fixed() {
-        let original = Rect::new(Point::new(100.0, 50.0), Size::new(300.0, 200.0));
-
-        assert_eq!(
-            resize_floating_bounds(original, ResizeEdge::TopLeft, 20.0, 30.0),
-            Some(Rect::new(Point::new(120.0, 80.0), Size::new(280.0, 170.0),))
-        );
-    }
-
-    #[test]
-    fn floating_bottom_right_resize_keeps_the_origin_fixed() {
-        let original = Rect::new(Point::new(100.0, 50.0), Size::new(300.0, 200.0));
-
-        assert_eq!(
-            resize_floating_bounds(original, ResizeEdge::BottomRight, 40.0, 50.0),
-            Some(Rect::new(Point::new(100.0, 50.0), Size::new(340.0, 250.0),))
-        );
-    }
-
-    #[test]
-    fn floating_resize_rejects_non_finite_pointer_deltas() {
-        let original = Rect::new(Point::new(100.0, 50.0), Size::new(300.0, 200.0));
-        assert_eq!(
-            resize_floating_bounds(original, ResizeEdge::Right, f32::NAN, 0.0),
-            None
-        );
-    }
 }
