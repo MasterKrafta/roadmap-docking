@@ -1009,6 +1009,69 @@ fn open_floating_panel_supports_undo_and_redo() {
 }
 
 #[test]
+fn close_floating_panel_supports_undo_and_redo() {
+    let metrics = DockMetrics::default();
+    let mut layout = Layout::new(Profile::Photoshop);
+    let mut history = UndoRedoHistory::new();
+    let panel_key = key("history-close-floating-panel");
+    let bounds = Rect::new(Point::new(160.0, 100.0), Size::new(440.0, 340.0));
+
+    let open = history
+        .apply(
+            &mut layout,
+            DockCommand::OpenPanelFloating {
+                key: panel_key.clone(),
+                constraints: constraints(),
+                bounds,
+            },
+            &metrics,
+        )
+        .unwrap();
+    let original_panel_id = match open.actual_value {
+        Some(CommandValue::PanelId(panel_id)) => panel_id,
+        other => panic!("OpenPanelFloating must return PanelId, got {other:?}"),
+    };
+    let opened = persistent_shape(&layout);
+
+    history
+        .apply(
+            &mut layout,
+            DockCommand::ClosePanel {
+                panel: original_panel_id,
+            },
+            &metrics,
+        )
+        .unwrap();
+    assert_eq!(layout.panel_instances().count(), 0);
+    assert_eq!(layout.floating_groups().count(), 0);
+    assert_eq!(layout.validate(&metrics), Ok(()));
+
+    assert!(history.undo(&mut layout, &metrics).unwrap());
+    assert_eq!(persistent_shape(&layout), opened);
+    let restored_panel_id = layout
+        .panel_instances()
+        .find(|(_, instance)| instance.key == panel_key)
+        .map(|(panel_id, _)| panel_id)
+        .expect("undo must restore the closed floating panel");
+    assert_ne!(
+        restored_panel_id, original_panel_id,
+        "undo must allocate a fresh runtime PanelId"
+    );
+    let (_, restored_group) = layout
+        .floating_groups()
+        .next()
+        .expect("undo must restore the floating composition");
+    assert_eq!(restored_group.bounds, bounds);
+    assert_eq!(layout.validate(&metrics), Ok(()));
+
+    assert!(history.redo(&mut layout, &metrics).unwrap());
+    assert!(layout.panel_instance(restored_panel_id).is_none());
+    assert_eq!(layout.panel_instances().count(), 0);
+    assert_eq!(layout.floating_groups().count(), 0);
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
 fn undo_and_redo_never_revive_stale_panel_ids() {
     let metrics = DockMetrics::default();
     let mut fixture = fixture();
