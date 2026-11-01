@@ -318,10 +318,8 @@ impl Layout {
         zones: &mut Vec<DropZoneRect>,
     ) -> Result<(), ComputeRectsError> {
         let DropZoneBuildContext {
-            source,
             source_root,
             source_panels,
-            tree_index,
             rects,
             metrics,
             viewport,
@@ -329,9 +327,9 @@ impl Layout {
             right_columns,
             may_add_left_column,
             may_add_right_column,
+            ..
         } = *context;
-        // The two outside viewport edges open/extend a dock. A whole group uses
-        // its edge operation when a neighbouring column exists; panels use an exact slot.
+        // The two outside viewport edges insert a column on the corresponding dock side.
         if rects.canvas.is_some()
             && source_allows(self, source_panels, AllowedArea::MAIN_DOCK)
         {
@@ -362,21 +360,11 @@ impl Layout {
                 // target for both a single panel and a complete group/composition.
                 // Unlike GroupEdge, MainColumn also works when this dock side is
                 // empty and can accept multi-column floating roots unchanged.
-                let target = Some(DropTarget::MainColumn {
+                let target = DropTarget::MainColumn {
                     side,
                     index: if is_left { 0 } else { columns.len() },
-                });
-                if let Some(target) = target {
-                    let is_noop = match target {
-                        DropTarget::GroupEdge { group, zone } => {
-                            group_edge_is_noop(self, tree_index, source, group, zone)
-                        }
-                        _ => false,
-                    };
-                    if !is_noop {
-                        push_zone(zones, target, zone, rect)?;
-                    }
-                }
+                };
+                push_zone(zones, target, zone, rect)?;
             }
         }
 
