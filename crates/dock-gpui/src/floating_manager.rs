@@ -1223,6 +1223,9 @@ impl FloatingWindowManager {
         }
 
         if let Some(native_window) = native_window {
+            // This owner relationship ties the popup to the application's
+            // lifetime (minimize/close behavior); docking membership remains
+            // exclusively represented by the Core Layout and panel ownership map.
             if let Some(owner) = self.main_native_window
                 && let Err(error) = self.native_ops.set_owner(native_window, owner)
             {
