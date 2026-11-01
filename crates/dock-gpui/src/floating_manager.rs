@@ -7,7 +7,7 @@ use std::{collections::{HashMap, HashSet}, time::Duration};
 
 use dock_core::{
     DockSide, DragPayload, DragState, DropSource, DropTarget, FloatingGroupId,
-    PanelId, Point, Rect,
+    PanelId, Point, Rect, Size,
 };
 use gpui::{
     AppContext, Bounds, Context, Entity, Subscription, Window, WindowBounds,
@@ -35,6 +35,8 @@ struct FloatingWindowEntry {
     native_window: Option<NativeWindowId>,
     bounds: Rect,
     z_order: i32,
+    native_min_size: Option<PhysicalSize>,
+    resize_enabled: bool,
 }
 
 /// Maps Core floating groups to their native GPUI windows.
@@ -109,6 +111,7 @@ struct FloatingGroupSnapshot {
     id: FloatingGroupId,
     bounds: Rect,
     z_order: i32,
+    minimum_size: Option<Size>,
 }
 
 /// Reconciles the native-window registry with the current Core Layout.
@@ -664,6 +667,7 @@ impl FloatingWindowManager {
     pub fn reconcile(&mut self, cx: &mut Context<Self>) {
         let (mut groups, panel_owners) = self.controller.update(cx, |controller, _| {
             let layout = controller.layout();
+            let metrics = controller.metrics();
             let mut panel_owners = HashMap::new();
 
             for side in [DockSide::Left, DockSide::Right] {
@@ -682,6 +686,7 @@ impl FloatingWindowManager {
                     id,
                     bounds: group.bounds,
                     z_order: group.z_order,
+                    minimum_size: layout.floating_minimum_size(id, &metrics).ok(),
                 });
 
                 if let Some(area) = layout.dock_area(group.area) {
@@ -745,6 +750,7 @@ impl FloatingWindowManager {
             };
 
             self.sync_window_bounds(&mut entry, group);
+            self.sync_native_resize(&mut entry, group);
             entry.z_order = group.z_order;
             self.registry.floating.insert(group.id, entry);
         }
@@ -781,6 +787,26 @@ impl FloatingWindowManager {
         };
 
         if let Some(native_window) = entry.native_window {
+            if entry.resize_enabled {
+                if let Err(error) = self.native_ops.disable_resize(native_window) {
+                    tracing::warn!(
+                        ?group,
+                        %error,
+                        "could not disable native resize on a released floating window"
+                    );
+                }
+                entry.resize_enabled = false;
+            }
+            if entry.native_min_size.is_some() {
+                if let Err(error) = self.native_ops.set_min_size(native_window, None) {
+                    tracing::warn!(
+                        ?group,
+                        %error,
+                        "could not clear the native minimum size on a released floating window"
+                    );
+                }
+                entry.native_min_size = None;
+            }
             if let Err(error) = self.native_ops.hide(native_window) {
                 tracing::warn!(
                     ?group,
@@ -818,6 +844,7 @@ impl FloatingWindowManager {
             }
 
             self.sync_window_bounds(&mut entry, group);
+            self.sync_native_resize(&mut entry, group);
             entry.z_order = group.z_order;
             if let Some(native_window) = entry.native_window
                 && let Err(error) = self.native_ops.show_no_activate(native_window)
@@ -935,22 +962,72 @@ impl FloatingWindowManager {
                     "could not clear the floating window topmost state"
                 );
             }
-            if let Err(error) = self.native_ops.show_no_activate(native_window) {
-                tracing::warn!(
-                    ?group.id,
-                    %error,
-                    "could not show the new floating window"
-                );
-            }
         }
 
-        Some(FloatingWindowEntry {
+        let mut entry = FloatingWindowEntry {
             window,
             window_id,
             native_window,
             bounds: group.bounds,
             z_order: group.z_order,
-        })
+            native_min_size: None,
+            resize_enabled: false,
+        };
+        self.sync_native_resize(&mut entry, group);
+        if let Some(native_window) = entry.native_window
+            && let Err(error) = self.native_ops.show_no_activate(native_window)
+        {
+            tracing::warn!(
+                ?group.id,
+                %error,
+                "could not show the new floating window"
+            );
+        }
+
+        Some(entry)
+    }
+
+    fn sync_native_resize(
+        &self,
+        entry: &mut FloatingWindowEntry,
+        group: FloatingGroupSnapshot,
+    ) {
+        let Some(native_window) = entry.native_window else {
+            return;
+        };
+
+        if !entry.resize_enabled {
+            match self.native_ops.enable_resize(native_window) {
+                Ok(()) => entry.resize_enabled = true,
+                Err(error) => tracing::warn!(
+                    ?group.id,
+                    %error,
+                    "could not enable native floating-window resize"
+                ),
+            }
+        }
+
+        let desired_minimum = group.minimum_size.and_then(|minimum| {
+            let scale = self.native_ops.scale_factor(native_window)
+                .ok()
+                .filter(|scale| scale.is_finite() && *scale > 0.0)
+                .unwrap_or(1.0);
+            let width = physical_coordinate(minimum.width, scale)?;
+            let height = physical_coordinate(minimum.height, scale)?;
+            let size = PhysicalSize { width, height };
+            size.is_valid().then_some(size)
+        });
+
+        if entry.native_min_size != desired_minimum {
+            match self.native_ops.set_min_size(native_window, desired_minimum) {
+                Ok(()) => entry.native_min_size = desired_minimum,
+                Err(error) => tracing::warn!(
+                    ?group.id,
+                    %error,
+                    "could not synchronize native floating-window minimum size"
+                ),
+            }
+        }
     }
 
     fn sync_window_bounds(
