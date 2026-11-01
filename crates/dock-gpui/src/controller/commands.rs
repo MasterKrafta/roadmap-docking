@@ -558,6 +558,7 @@ impl DockController {
     pub(crate) fn replace_layout(&mut self, layout: dock_core::Layout) {
         let before_panels = self.panel_keys();
         self.layout = layout;
+        self.workspace_restore_pending = true;
         let after_panels = self.panel_keys();
 
         for (panel, key) in &before_panels {
