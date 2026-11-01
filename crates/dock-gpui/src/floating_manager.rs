@@ -1379,9 +1379,20 @@ impl FloatingWindowManager {
             }
         };
 
-        let window_id = window
-            .update(cx, |_, window, _| window.window_handle().window_id())
-            .ok()?;
+        let window_id = match window.update(cx, |_, window, _| {
+            window.window_handle().window_id()
+        }) {
+            Ok(window_id) => window_id,
+            Err(error) => {
+                tracing::error!(
+                    ?panel,
+                    %error,
+                    "could not inspect the new PanelWindow identifier"
+                );
+                let _ = window.update(cx, |_, window, _| window.remove_window());
+                return None;
+            }
+        };
         let native_ops = self.native_ops;
         let native_window = match window.update(cx, move |_, window, _| {
             native_ops.hwnd_of(window)
