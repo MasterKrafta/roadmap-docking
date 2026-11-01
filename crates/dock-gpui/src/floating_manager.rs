@@ -110,9 +110,6 @@ impl PanelWindowRegistry {
     }
 }
 
-/// Kept as a type alias for callers that used the older registry name.
-pub type WindowRegistry = PanelWindowRegistry;
-
 /// Maps each Core floating composition to the permanent panel window that
 /// currently hosts it. The Main Dock is hosted by the one shared MainWindow.
 #[derive(Default)]
@@ -233,7 +230,7 @@ impl FloatingWindowManager {
     ///
     /// The main HWND is retained as the native owner for every PanelWindow.
     /// The first reconciliation creates records for all open PanelIds already
-    /// present in a workspace loaded before DockHost was rendered.
+    /// present in the initial Layout before DockHost was rendered.
     pub(crate) fn attach_main_window(
         &mut self,
         window: &mut Window,
@@ -1019,9 +1016,9 @@ impl FloatingWindowManager {
         }
         self.reconciling = true;
 
-        let (mut groups, panel_owners, restore_pending) =
+        let (mut groups, panel_owners, recover_initial_bounds) =
             self.controller.update(cx, |controller, _| {
-                let restore_pending = controller.take_workspace_restore_pending();
+                let recover_initial_bounds = controller.take_initial_monitor_recovery_pending();
                 let layout = controller.layout();
                 let metrics = controller.metrics();
                 let mut panel_owners = HashMap::new();
@@ -1059,19 +1056,19 @@ impl FloatingWindowManager {
                     });
                 }
 
-                (groups, panel_owners, restore_pending)
+                (groups, panel_owners, recover_initial_bounds)
             });
 
         groups.sort_by_key(|group| group.z_order);
         let desired_panels = panel_owners.keys().copied().collect::<HashSet<_>>();
 
-        let monitor_work_areas = if restore_pending {
+        let monitor_work_areas = if recover_initial_bounds {
             match self.native_ops.monitor_work_areas() {
                 Ok(areas) => Some(areas),
                 Err(error) => {
                     tracing::debug!(
                         %error,
-                        "could not enumerate monitor work areas for workspace recovery"
+                        "could not enumerate monitor work areas for initial floating-window recovery"
                     );
                     None
                 }
@@ -1338,13 +1335,13 @@ impl FloatingWindowManager {
         self.reconciling = false;
         if !monitor_corrections.is_empty() {
             let applied = self.controller.update(cx, |controller, controller_cx| {
-                let applied = match controller.apply_workspace_monitor_bounds(&monitor_corrections)
+                let applied = match controller.apply_initial_monitor_bounds(&monitor_corrections)
                 {
                     Ok(()) => true,
                     Err(error) => {
                         tracing::warn!(
                             %error,
-                            "could not persist monitor recovery in the restored Core layout"
+                            "could not apply initial monitor recovery to the Core layout"
                         );
                         false
                     }

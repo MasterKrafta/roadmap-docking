@@ -1,11 +1,11 @@
 use std::collections::{HashMap, VecDeque};
 
 use dock_core::{
-    Axis, CommandError, CommandValue, DockCommand, DockMetrics, DragCancelReason, DragHandle,
+    create_initial_layout, Axis, CommandError, CommandValue, DockCommand, DockMetrics,
+    DragCancelReason, DragHandle, InitialLayoutError,
     DragPayload, DragSession, DragSessionError, DragState, DropSource, DropZoneResolver,
     FloatingGroupId, FlyoutState, GeometryError, HitResult, Layout, LayoutRects, Node,
     OUTER_COLUMN_EDGE_BOUNDARY_INDEX, PanelId, PanelKey, Point, Profile, Rect, ValidationError,
-    WorkspaceDiagnostic,
 };
 use gpui::{AnyView, EventEmitter, WindowId};
 use thiserror::Error;
@@ -40,9 +40,6 @@ pub enum DockEvent {
         version: u64,
     },
     CommandFailed(CommandError),
-    WorkspaceLoaded {
-        diagnostics: Vec<WorkspaceDiagnostic>,
-    },
 }
 
 impl EventEmitter<DockEvent> for DockController {}
@@ -246,11 +243,12 @@ pub struct DockController {
     /// An undocked drag remains one history transaction until its native move ends.
     tearoff_transaction_active: bool,
     /// The native adapter must place restored floating windows on available monitors.
-    workspace_restore_pending: bool,
+    /// Initial native bounds may come from a caller-provided Layout and need monitor recovery.
+    initial_monitor_recovery_pending: bool,
     registry: PanelRegistry,
     /// One persistent AnyView per open runtime PanelId. Transfers and tab
     /// activation only change which host receives a clone; they never replace
-    /// the cached entity. A full workspace replacement resets this cache.
+    /// the cached entity. Replacing the Layout resets this cache.
     panel_views: PanelViewCache<AnyView>,
     last_error: Option<CommandError>,
     pending_events: VecDeque<DockEvent>,
@@ -271,7 +269,7 @@ impl DockController {
         layout
             .validate(&metrics)
             .map_err(DockControllerConfigError::InvalidLayout)?;
-        let workspace_restore_pending = layout.floating_groups().next().is_some();
+        let initial_monitor_recovery_pending = layout.floating_groups().next().is_some();
 
         Ok(Self {
             layout,
@@ -287,7 +285,7 @@ impl DockController {
             interaction: None,
             resize_frame: ResizeFrameThrottle::default(),
             tearoff_transaction_active: false,
-            workspace_restore_pending,
+            initial_monitor_recovery_pending,
             registry,
             panel_views: PanelViewCache::default(),
             last_error: None,
@@ -303,6 +301,14 @@ impl DockController {
         viewport: Rect,
     ) -> Result<Self, DockControllerConfigError> {
         Self::new(Layout::new(profile), metrics, registry, viewport)
+    }
+
+    /// Recreates the profile's initial layout without reading or writing a workspace file.
+    pub fn reset_layout(&mut self) -> Result<(), InitialLayoutError> {
+        let descriptors = self.registry().descriptors_for_core();
+        let layout = create_initial_layout(self.layout().profile(), &descriptors, self.metrics())?;
+        self.replace_layout(layout);
+        Ok(())
     }
 
     pub fn layout(&self) -> &Layout {
@@ -411,17 +417,16 @@ impl DockController {
         }
     }
 
-    /// Returns and clears the one-shot flag consumed by FloatingWindowManager.
-    pub(crate) fn take_workspace_restore_pending(&mut self) -> bool {
-        std::mem::take(&mut self.workspace_restore_pending)
+    /// Returns and clears the initial monitor-recovery flag for caller-provided layouts.
+    pub(crate) fn take_initial_monitor_recovery_pending(&mut self) -> bool {
+        std::mem::take(&mut self.initial_monitor_recovery_pending)
     }
 
-    /// Applies monitor-recovery bounds after a workspace has been restored.
+    /// Applies initial monitor-recovery bounds before the layout enters normal use.
     ///
-    /// These are environment repairs, not user edits: the restored workspace
-    /// already starts with a fresh history lineage, so the correction is kept
-    /// out of Undo/Redo as well.
-    pub(crate) fn apply_workspace_monitor_bounds(
+    /// These are environment repairs, not user edits. The controller is freshly
+    /// constructed for this layout, so the correction must not become an Undo step.
+    pub(crate) fn apply_initial_monitor_bounds(
         &mut self,
         corrections: &[(FloatingGroupId, Rect)],
     ) -> Result<(), CommandError> {
@@ -430,8 +435,8 @@ impl DockController {
         }
         if self.has_active_pointer_interaction() || self.tearoff_transaction_active {
             return Err(CommandError::InvalidValue {
-                field: "workspace_monitor_bounds",
-                reason: "cannot repair restored monitor bounds during an active pointer interaction",
+                field: "initial_monitor_bounds",
+                reason: "cannot repair initial monitor bounds during an active pointer interaction",
             });
         }
 
@@ -451,8 +456,6 @@ impl DockController {
         {
             Ok(_) => {
                 self.finish_success(before_panels, previous_version, std::iter::empty());
-                // replace_layout/new-controller construction establishes a new
-                // history lineage; monitor correction must not become an undo step.
                 self.history.clear();
                 Ok(())
             }
@@ -751,12 +754,6 @@ impl DockController {
 
     pub fn clear_last_error(&mut self) {
         self.last_error = None;
-    }
-
-    /// Queues workspace-load diagnostics for subscribers of the controller entity.
-    pub(crate) fn queue_workspace_loaded(&mut self, diagnostics: Vec<WorkspaceDiagnostic>) {
-        self.pending_events
-            .push_back(DockEvent::WorkspaceLoaded { diagnostics });
     }
 
     pub fn can_undo(&self) -> bool {

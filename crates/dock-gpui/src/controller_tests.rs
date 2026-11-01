@@ -196,7 +196,7 @@ fn transient_dispatch_rejects_persistent_commands() {
 }
 
 #[test]
-fn reset_workspace_restores_core_baseline_and_clears_history() {
+fn reset_layout_restores_core_baseline_and_clears_history() {
     let mut controller = DockController::empty(
         Profile::Photoshop,
         DockMetrics::default(),
@@ -214,7 +214,7 @@ fn reset_workspace_restores_core_baseline_and_clears_history() {
     assert!(controller.can_undo());
     controller.geometry().unwrap();
 
-    controller.reset_workspace().unwrap();
+    controller.reset_layout().unwrap();
 
     assert_eq!(controller.layout.panel_instances().count(), 4);
     assert!(!controller.can_undo());
@@ -227,13 +227,13 @@ fn reset_workspace_restores_core_baseline_and_clears_history() {
 }
 
 #[test]
-fn reset_workspace_without_required_descriptors_keeps_current_layout() {
+fn reset_layout_without_required_descriptors_keeps_current_layout() {
     let mut controller = controller();
     controller.geometry().unwrap();
     let version = controller.layout.version();
     let cached_ptr = controller.cached_geometry().unwrap() as *const LayoutRects;
 
-    let result = controller.reset_workspace();
+    let result = controller.reset_layout();
 
     assert!(matches!(
         result,
@@ -588,7 +588,7 @@ fn floating_geometry_hit_test_and_drop_resolver_are_window_local() {
         Rect::new(Point::ZERO, Size::new(1200.0, 800.0)),
     )
     .unwrap();
-    controller.reset_workspace().unwrap();
+    controller.reset_layout().unwrap();
 
     let source_nodes = controller
         .layout()
@@ -697,7 +697,7 @@ fn native_tearoff_replaces_source_drag_with_floating_capture_and_escape_rolls_ba
         Rect::new(Point::ZERO, Size::new(1200.0, 800.0)),
     )
     .unwrap();
-    controller.reset_workspace().unwrap();
+    controller.reset_layout().unwrap();
 
     let source_group = controller
         .layout()

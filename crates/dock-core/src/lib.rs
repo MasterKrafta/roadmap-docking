@@ -54,10 +54,6 @@ mod tabs;
 mod undo_redo_history;
 mod validation_error;
 mod vertical_overflow;
-#[cfg(feature = "serde")]
-mod workspace_file;
-#[cfg(feature = "serde")]
-mod workspace_types;
 
 pub use allowed_area::AllowedArea;
 pub use axis::Axis;
@@ -112,13 +108,6 @@ pub use tabs::Tabs;
 pub use undo_redo_history::{DEFAULT_UNDO_LIMIT, UndoRedoHistory};
 pub use validation_error::{ValidationError, ValidationReason};
 pub use vertical_overflow::VerticalOverflow;
-#[cfg(feature = "serde")]
-pub use workspace_file::{WORKSPACE_FORMAT, WORKSPACE_VERSION, WorkspaceFile};
-#[cfg(feature = "serde")]
-pub use workspace_types::{
-    WorkspaceDiagnostic, WorkspaceFileError, WorkspaceFloatingGroup, WorkspaceLayout,
-    WorkspaceLoadOptions, WorkspaceLoadResult, WorkspaceNode,
-};
 
 #[cfg(test)]
 mod chrome_tests;
@@ -139,8 +128,6 @@ mod layout_builder;
 #[cfg(test)]
 mod tab_overflow_tests;
 
-#[cfg(all(test, feature = "serde"))]
-mod workspace_file_tests;
 
 #[cfg(test)]
 mod history_tests;

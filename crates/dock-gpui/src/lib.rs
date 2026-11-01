@@ -15,24 +15,19 @@ pub mod floating_manager;
 mod geometry;
 pub mod input;
 pub mod missing_panel;
-pub mod persistence;
 pub mod registry;
 pub mod theme;
 
 /// The UI-independent docking model used by this adapter.
 pub use dock_core;
 
-use std::path::PathBuf;
 
 #[cfg(windows)]
 use gpui::{AppContext, Context, Window, div, prelude::*};
 
 /// Options for starting the built-in dock demo.
 #[derive(Default)]
-pub struct RunOptions {
-    /// Optional workspace file to restore instead of starting with an empty workspace.
-    pub workspace_path: Option<PathBuf>,
-}
+pub struct RunOptions {}
 
 /// Small content view used by the built-in launcher. Applications that need
 /// their own panels can construct DockController and DockHost directly.
@@ -80,22 +75,18 @@ fn starter_panel_registry() -> PanelRegistry {
 /// Launches the built-in empty Dock workspace on Windows.
 ///
 /// The normal launch creates only the main window. Panel types remain available
-/// in the registry, but no panel instances or panel windows are created until a
-/// workspace is restored or the user explicitly opens a panel. When the
-/// workspace_path option is set, the saved workspace is loaded before the main
-/// window is created; a load error is logged and the workspace remains empty.
+/// in the registry, but no panel instances or panel windows are created until
+/// the user explicitly opens a panel.
 #[cfg(windows)]
-pub fn run(options: RunOptions) {
+pub fn run(_options: RunOptions) {
     use gpui::{App, Bounds, WindowBounds, WindowOptions, px, size};
     use gpui_platform::application;
-
-    let workspace_path = options.workspace_path;
 
     application().run(move |cx: &mut App| {
         let metrics = DockMetrics::default();
         let registry = starter_panel_registry();
         let viewport = Rect::new(Point::ZERO, Size::new(1440.0, 740.0));
-        let mut controller =
+        let controller =
             match DockController::empty(Profile::Photoshop, metrics, registry, viewport) {
                 Ok(controller) => controller,
                 Err(error) => {
@@ -103,16 +94,6 @@ pub fn run(options: RunOptions) {
                     return;
                 }
             };
-
-        if let Some(path) = workspace_path.as_ref()
-            && let Err(error) = controller.load_workspace_from(path)
-        {
-            tracing::warn!(
-                path = %path.display(),
-                %error,
-                "could not restore the requested dock workspace; keeping the workspace empty"
-            );
-        }
 
         let controller = cx.new(|_| controller);
         let bounds = Bounds::centered(None, size(px(1440.0), px(740.0)), cx);
@@ -161,10 +142,9 @@ pub use components::{
 pub use dock_host::DockHost;
 pub use floating_manager::{
     CompositionHostRegistry, FloatingWindowManager, PanelWindowOwner, PanelWindowRegistry,
-    PanelWindowVisibility, WindowRegistry,
+    PanelWindowVisibility,
 };
 pub use missing_panel::MissingPanelPlaceholder;
-pub use persistence::WorkspacePersistenceError;
 pub use theme::DockTheme;
 
 pub use controller::{
@@ -184,7 +164,5 @@ pub use dock_core::{
     OUTER_COLUMN_EDGE_BOUNDARY_INDEX, Panel, PanelConstraints, PanelId, PanelInstance, PanelKey,
     PanelKeyError, PanelRect, PanelState, Point, Profile, Rect, ResizeEdge, Size, Split,
     SplitterRect, TabHeaderRect, TabOverflowRect, TabStripRect, Tabs, UndoRedoHistory,
-    ValidationError, ValidationReason, VerticalOverflow, WorkspaceDiagnostic, WorkspaceFile,
-    WorkspaceFileError, WorkspaceFloatingGroup, WorkspaceLayout, WorkspaceLoadOptions,
-    WorkspaceLoadResult, WorkspaceNode,
+    ValidationError, ValidationReason, VerticalOverflow,
 };
