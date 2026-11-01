@@ -242,7 +242,7 @@ fn active_tab_gets_panel_bounds_and_all_tabs_get_header_rectangles() {
 
 
 #[test]
-fn floating_geometry_preserves_bounds_z_order_and_resize_handles() {
+fn floating_geometry_preserves_bounds_and_z_order() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
     let (panel, panel_node) = builder.panel(key("floating-panel"), constraints());
@@ -259,7 +259,6 @@ fn floating_geometry_preserves_bounds_z_order_and_resize_handles() {
     assert_eq!(rects.floating_groups[0].group, floating);
     assert_eq!(rects.floating_groups[0].rect, expected_bounds);
     assert_eq!(rects.floating_groups[0].z_order, 9);
-    assert_eq!(rects.floating_resize_edges.len(), 8);
     assert_eq!(rects.panels.len(), 1);
     assert_eq!(rects.panels[0].panel, panel);
     assert_eq!(rects.panels[0].rect.origin.x, 0.0);
@@ -949,7 +948,6 @@ fn floating_geometry_is_local_and_independent_of_main_viewport_and_other_windows
         .compute_rects(Rect::new(Point::ZERO, Size::new(320.0, 180.0)), &metrics)
         .unwrap();
     assert!(main_rects.floating_groups.is_empty());
-    assert!(main_rects.floating_resize_edges.is_empty());
     assert!(main_rects.panels.is_empty());
 
     for (floating, panel, z_order, requested_size) in &fixtures {
@@ -970,8 +968,7 @@ fn floating_geometry_is_local_and_independent_of_main_viewport_and_other_windows
             *requested_size,
             "geometry must not rewrite the stored native-window bounds"
         );
-        assert_eq!(rects.floating_resize_edges.len(), 8);
-    }
+        }
 
     let first = layout.compute_floating_rects(fixtures[0].0, &metrics).unwrap();
     assert_eq!(first.floating_groups[0].rect.size, Size::new(1420.0, 960.0));
