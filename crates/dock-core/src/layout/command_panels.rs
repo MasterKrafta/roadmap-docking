@@ -18,6 +18,11 @@ impl Layout {
                 constraints,
                 target,
             } => self.apply_open_panel_command(key, constraints, target, metrics),
+            DockCommand::OpenPanelFloating {
+                key,
+                constraints,
+                bounds,
+            } => self.apply_open_panel_floating_command(key, constraints, bounds),
             DockCommand::ClosePanel { panel } => self.apply_close_panel_command(panel),
             DockCommand::CloseGroup { group } => self.apply_close_group_command(group),
             DockCommand::ActivateTab { group, panel } => {
@@ -57,6 +62,74 @@ impl Layout {
         let resolved_target =
             self.resolve_and_validate_open_panel_target(key, *target, *constraints, metrics)?;
         self.insert_new_panel_for_open_target(key, *constraints, resolved_target, metrics)
+    }
+
+    /// Creates a panel and its Floating area in one Layout transaction.
+    ///
+    /// This command is intentionally idempotent by PanelKey: opening a type
+    /// that already exists returns its PanelId without creating another instance.
+    pub(super) fn apply_open_panel_floating_command(
+        &mut self,
+        key: &PanelKey,
+        constraints: &PanelConstraints,
+        bounds: &crate::Rect,
+    ) -> Result<CommandApplication, CommandError> {
+        constraints
+            .validate()
+            .map_err(|error| CommandError::InvalidValue {
+                field: "constraints",
+                reason: geometry_error_reason(error),
+            })?;
+        bounds
+            .validate_non_empty()
+            .map_err(|error| CommandError::InvalidValue {
+                field: "bounds",
+                reason: geometry_error_reason(error),
+            })?;
+
+        if let Some((panel_id, _)) = self
+            .panel_instances
+            .iter()
+            .find(|(_, instance)| instance.key == *key)
+        {
+            return Ok(CommandApplication {
+                actual_value: Some(CommandValue::PanelId(panel_id)),
+                inverse: None,
+                persistent: false,
+            });
+        }
+
+        let panel_id = self
+            .panel_instances
+            .insert(crate::PanelInstance::new(key.clone(), *constraints));
+        self.validate_panel_ids_allowed_for_area(
+            &[panel_id],
+            crate::AllowedArea::FLOATING,
+        )?;
+
+        let panel_node = self.nodes.insert(Node::Panel(crate::Panel::new(panel_id)));
+        let next_z = self.next_floating_z_order()?;
+        let root = if self.profile == crate::Profile::Photoshop {
+            self.nodes.insert(Node::Tabs(crate::Tabs {
+                children: vec![panel_node],
+                active_index: 0,
+                collapsed: false,
+            }))
+        } else {
+            panel_node
+        };
+        let area_id = self.dock_areas.insert(crate::DockArea::floating(root));
+        self.floating_groups.insert(crate::FloatingGroup::new(
+            area_id,
+            *bounds,
+            next_z,
+        ));
+
+        Ok(CommandApplication {
+            actual_value: Some(CommandValue::PanelId(panel_id)),
+            inverse: Some(DockCommand::ClosePanel { panel: panel_id }),
+            persistent: true,
+        })
     }
 
     pub(super) fn resolve_and_validate_open_panel_target(
