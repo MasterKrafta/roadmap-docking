@@ -6,7 +6,7 @@
 use std::{collections::{HashMap, HashSet}, time::Duration};
 
 use dock_core::{
-    DockSide, DragPayload, DragState, DropSource, DropTarget, FloatingGroupId,
+    DockCommand, DockSide, DragPayload, DragState, DropSource, DropTarget, FloatingGroupId,
     PanelId, Point, Rect, Size,
 };
 use gpui::{
@@ -114,6 +114,13 @@ struct FloatingGroupSnapshot {
     minimum_size: Option<Size>,
 }
 
+#[derive(Clone, Copy)]
+struct NativeResizeSession {
+    group: FloatingGroupId,
+    window_id: WindowId,
+    transaction_started: bool,
+}
+
 /// Reconciles the native-window registry with the current Core Layout.
 pub struct FloatingWindowManager {
     controller: Entity<DockController>,
@@ -121,6 +128,7 @@ pub struct FloatingWindowManager {
     main_native_window: Option<NativeWindowId>,
     main_host_origin: Point,
     native_move: Option<NativeMoveSession>,
+    native_resize: Option<NativeResizeSession>,
     registry: WindowRegistry,
     native_ops: SystemNativeWindowOps,
     controller_subscription: Option<Subscription>,
@@ -134,6 +142,7 @@ impl FloatingWindowManager {
             main_native_window: None,
             main_host_origin: Point::ZERO,
             native_move: None,
+            native_resize: None,
             registry: WindowRegistry::default(),
             native_ops: SystemNativeWindowOps,
             controller_subscription: None,
@@ -264,6 +273,157 @@ impl FloatingWindowManager {
     }
 
     pub(crate) fn native_move_active(&self) -> bool { self.native_move.is_some() }
+
+    /// Starts polling a native OS sizing loop after its first GPUI redraw.
+    pub(crate) fn observe_native_resize(
+        &mut self,
+        group: FloatingGroupId,
+        window_id: WindowId,
+        cx: &mut Context<Self>,
+    ) {
+        if self.native_move.is_some() || self.native_resize.is_some() {
+            return;
+        }
+        let Some(entry) = self.registry.floating.get(&group) else {
+            return;
+        };
+        if entry.window_id != window_id {
+            return;
+        }
+        let Some(native_window) = entry.native_window else {
+            return;
+        };
+        if !self.native_ops.is_resizing(native_window).unwrap_or(false) {
+            return;
+        }
+
+        self.native_resize = Some(NativeResizeSession {
+            group,
+            window_id,
+            transaction_started: false,
+        });
+        self.schedule_native_resize(cx, group, window_id);
+    }
+
+    fn schedule_native_resize(
+        &self,
+        cx: &mut Context<Self>,
+        group: FloatingGroupId,
+        window_id: WindowId,
+    ) {
+        let manager = cx.entity().downgrade();
+        cx.spawn(async move |_, app| {
+            loop {
+                app.background_executor().timer(Duration::from_millis(8)).await;
+                let Ok(keep_polling) = manager.update(app, |manager, manager_cx| {
+                    manager.tick_native_resize(group, window_id, manager_cx)
+                }) else {
+                    break;
+                };
+                if !keep_polling {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn tick_native_resize(
+        &mut self,
+        group: FloatingGroupId,
+        window_id: WindowId,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(mut state) = self.native_resize.filter(|state| {
+            state.group == group && state.window_id == window_id
+        }) else {
+            return false;
+        };
+
+        let native_window = self.registry.floating.get(&group).and_then(|entry| {
+            (entry.window_id == window_id).then_some(entry.native_window).flatten()
+        });
+        let Some(native_window) = native_window else {
+            self.finish_native_resize_transaction(state, cx);
+            return false;
+        };
+
+        let resizing = self.native_ops.is_resizing(native_window).unwrap_or(false);
+        if let Some(bounds) = self.core_bounds_from_native_window(native_window) {
+            let current = self.controller.update(cx, |controller, _| {
+                controller.layout().floating_group(group).map(|floating| floating.bounds)
+            });
+            if let Some(current) = current
+                && current != bounds
+            {
+                if !state.transaction_started {
+                    state.transaction_started = self.controller.update(cx, |controller, _| {
+                        controller.begin_native_resize_transaction()
+                    });
+                }
+                if state.transaction_started {
+                    let result = self.controller.update(cx, |controller, controller_cx| {
+                        controller.dispatch_in(
+                            DockCommand::ResizeFloatingBounds { group, bounds },
+                            controller_cx,
+                        )
+                    });
+                    if let Err(error) = result {
+                        tracing::warn!(
+                            ?group,
+                            %error,
+                            "could not synchronize native floating-window bounds with Core"
+                        );
+                    }
+                }
+            }
+        }
+
+        if !resizing {
+            self.finish_native_resize_transaction(state, cx);
+            return false;
+        }
+
+        self.native_resize = Some(state);
+        true
+    }
+
+    fn finish_native_resize_transaction(
+        &mut self,
+        state: NativeResizeSession,
+        cx: &mut Context<Self>,
+    ) {
+        self.native_resize = None;
+        if state.transaction_started {
+            self.controller.update(cx, |controller, controller_cx| {
+                controller.finish_native_resize_transaction();
+                controller_cx.notify();
+            });
+        }
+    }
+
+    fn core_bounds_from_native_window(&self, native_window: NativeWindowId) -> Option<Rect> {
+        let rect = self.native_ops.window_rect(native_window).ok()?;
+        let physical_width = rect.right.checked_sub(rect.left)?;
+        let physical_height = rect.bottom.checked_sub(rect.top)?;
+        if physical_width <= 0 || physical_height <= 0 {
+            return None;
+        }
+        let scale = self.native_ops.scale_factor(native_window).ok()?;
+        if !scale.is_finite() || scale <= 0.0 {
+            return None;
+        }
+
+        let bounds = Rect::new(
+            Point::new(rect.left as f32, rect.top as f32),
+            Size::new(
+                physical_width as f32 / scale,
+                physical_height as f32 / scale,
+            ),
+        );
+        bounds.validate_non_empty().ok()?;
+        Some(bounds)
+    }
 
     /// Starts native movement for a group created by the current main-window drag.
     pub(crate) fn begin_tearoff_move(
@@ -782,7 +942,7 @@ impl FloatingWindowManager {
         group: FloatingGroupId,
         cx: &mut Context<Self>,
     ) {
-        let Some(entry) = self.registry.floating.remove(&group) else {
+        let Some(mut entry) = self.registry.floating.remove(&group) else {
             return;
         };
 
