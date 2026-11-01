@@ -974,7 +974,8 @@ impl FloatingWindowManager {
             }
         }
 
-        if !monitor_corrections.is_empty() {
+        let monitor_recovery_applied = !monitor_corrections.is_empty();
+        if monitor_recovery_applied {
             let result = self.controller.update(cx, |controller, controller_cx| {
                 let result = controller.apply_workspace_monitor_bounds(&monitor_corrections);
                 if let Err(error) = result {
@@ -995,6 +996,12 @@ impl FloatingWindowManager {
         }
 
         self.reconciling = false;
+        if monitor_recovery_applied {
+            // Core may enforce a stricter minimum size while accepting the
+            // recovered bounds. Run one normal pass so the native frame matches
+            // the final, Core-constrained rectangle before continuing.
+            self.reconcile(cx);
+        }
     }
 
     fn release_group_window(
