@@ -214,7 +214,9 @@ impl Render for DockHost {
             let pointer_capture = self.pointer_capture.clone();
             let pointer_press = self.pointer_press.clone();
             cx.on_focus_out(&focus_handle, window, move |_host, _event, window, app| {
-                if manager.update(app, |manager, _| manager.native_move_active()) {
+                if manager.update(app, |manager, manager_cx| {
+                    manager.should_preserve_pointer_interaction_on_focus_out(manager_cx)
+                }) {
                     return;
                 }
                 controller.update(app, |controller, controller_cx| {
