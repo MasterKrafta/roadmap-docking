@@ -205,7 +205,7 @@ mod tests {
         };
         let commands = [
             DockCommand::OpenPanel {
-                key,
+                key: key.clone(),
                 constraints,
                 target: Some(target),
             },
