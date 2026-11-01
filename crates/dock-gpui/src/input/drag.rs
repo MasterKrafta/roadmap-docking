@@ -310,14 +310,16 @@ pub(crate) fn finish_floating_tab_drag(
     app: &mut App,
 ) -> bool {
     controller.update(app, |controller, cx| {
-        let origin = match controller.drag().session().state() {
+        let is_active_panel_drag = matches!(
+            controller.drag().session().state(),
             DragState::Dragging {
                 payload: DragPayload::Panel { panel: active },
-                origin,
                 ..
-            } if active == panel => origin,
-            _ => return false,
-        };
+            } if active == panel
+        );
+        if !is_active_panel_drag {
+            return false;
+        }
 
         if let Err(error) = controller.drag_mut().session_mut().pointer_move(position) {
             tracing::debug!(%error, "floating tab release position was rejected");
