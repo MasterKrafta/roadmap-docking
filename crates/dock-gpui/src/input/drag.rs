@@ -251,9 +251,7 @@ pub(crate) fn begin_floating_tab_tearoff(
     let model_bounds = manager
         .update(app, |manager, _| {
             manager.screen_bounds_from_floating_local(source_group, local_bounds)
-        })
-        .ok()
-        .flatten();
+        });
     let Some(model_bounds) = model_bounds else {
         tracing::warn!("could not convert floating tab bounds into screen coordinates");
         return false;
