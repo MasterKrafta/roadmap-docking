@@ -6,7 +6,7 @@
 use std::collections::{HashMap, HashSet};
 
 use dock_core::{
-    DockSide, DragHandle, DragPayload, DragState, DropSource, DropTarget, FloatingGroupId,
+    DockSide, DragPayload, DragState, DropSource, DropTarget, FloatingGroupId,
     PanelId, Point, Rect,
 };
 use gpui::{
