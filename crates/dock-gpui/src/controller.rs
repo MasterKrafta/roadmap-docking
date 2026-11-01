@@ -10,7 +10,7 @@ use dock_core::{
 use gpui::{AnyView, EventEmitter};
 use thiserror::Error;
 
-use crate::registry::PanelRegistry;
+use crate::registry::{PanelRegistry, PanelViewCache};
 
 mod commands;
 mod layout_cache;
@@ -220,7 +220,9 @@ pub struct DockController {
     interaction: Option<ResizeInteraction>,
     resize_frame: ResizeFrameThrottle,
     registry: PanelRegistry,
-    panel_views: HashMap<PanelId, AnyView>,
+    /// One persistent AnyView per open runtime PanelId. Transfers only change
+    /// which host receives a clone; they never replace the cached entity.
+    panel_views: PanelViewCache<AnyView>,
     last_error: Option<CommandError>,
     pending_events: VecDeque<DockEvent>,
 }
@@ -253,7 +255,7 @@ impl DockController {
             interaction: None,
             resize_frame: ResizeFrameThrottle::default(),
             registry,
-            panel_views: HashMap::new(),
+            panel_views: PanelViewCache::default(),
             last_error: None,
             pending_events: VecDeque::new(),
         })
