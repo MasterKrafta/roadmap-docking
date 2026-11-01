@@ -33,8 +33,10 @@ use crate::{
 /// Options bar, and document canvas are supplied by the application as GPUI
 /// views; their visibility follows the current Core chrome mode.
 ///
-/// Layer order is deliberate: CanvasSlot, main dock surfaces, flyout,
-/// main-window drop feedback, then the universal ContextMenu.
+/// Main-window layer order is deliberate: CanvasSlot, main dock surfaces,
+/// flyout, main-window drop feedback, then the universal ContextMenu.
+/// Floating compositions are rendered by their own FloatingHost PopUp windows;
+/// native WS_THICKFRAME owns their resize interaction.
 pub struct DockHost {
     controller: Entity<DockController>,
     theme: DockTheme,
@@ -773,7 +775,7 @@ impl Render for DockHost {
             }
 
             // One overlay consumes the same resolver snapshot used by hit testing.
-            // The ghost is a visual-only sibling and has no pointer listeners.
+            // Native capture drags move the actual HWND; only in-dock drags show a ghost.
             workspace = workspace.child(DropOverlay::render(
                 active_drop_zone,
                 drag_preview,
@@ -783,12 +785,16 @@ impl Render for DockHost {
                 &[],
                 theme,
             ));
-            workspace = workspace.child(DragGhost::render(
-                drag_preview,
-                &group_presentations,
-                rects.viewport,
-                theme,
-            ));
+            if drag_handle != Some(DragHandle::FloatingCapture)
+                && drag_handle != Some(DragHandle::FloatingTitle)
+            {
+                workspace = workspace.child(DragGhost::render(
+                    drag_preview,
+                    &group_presentations,
+                    rects.viewport,
+                    theme,
+                ));
+            }
         }
 
         if let Some(mut preview) = resize_preview {
