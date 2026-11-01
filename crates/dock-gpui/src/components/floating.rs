@@ -4,13 +4,13 @@ use std::{
 };
 
 use dock_core::{
-    ColumnDisplayItem, ColumnMode, ColumnRect, DockCommand, DockMetrics, DragPreview, DropZoneRect,
-    ColumnMode, ComputeRectsError, FloatingGroupId, FloatingGroupRect, FloatingResizeEdgeRect,
+    ColumnDisplayItem, ColumnMode, ColumnRect, ComputeRectsError, DockCommand, DockMetrics,
+    DragPreview, DropZoneRect, FloatingGroupId, FloatingGroupRect, FloatingResizeEdgeRect,
     FlyoutState, GroupRect, LayoutRects, Node, NodeId, PanelId, PanelRect, Point, ResizeEdge,
     SplitterRect, TabHeaderRect, TabOverflowRect, TabStripRect, VerticalOverflow,
 };
 use gpui::{
-    AnyView, App, Context, Entity, IntoElement, ParentElement, Render, ScrollHandle,
+    AnyView, Context, Entity, IntoElement, ParentElement, Render, ScrollHandle,
     StatefulInteractiveElement, Styled, Window, div, prelude::InteractiveElement as _, px, rgb,
 };
 use ui::Theme;
@@ -388,7 +388,6 @@ struct FloatingHostOpenMenu {
 struct FloatingHostSnapshot {
     rects: LayoutRects,
     floating: FloatingGroupRect,
-    node_ids: HashSet<NodeId>,
     column_ids: HashSet<NodeId>,
     column_groups: HashMap<NodeId, Vec<NodeId>>,
     column_modes: HashMap<NodeId, ColumnMode>,
@@ -457,7 +456,6 @@ fn floating_host_snapshot(
     Ok(Some(FloatingHostSnapshot {
         rects,
         floating,
-        node_ids,
         column_ids,
         column_groups,
         column_modes,
