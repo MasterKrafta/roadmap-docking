@@ -52,12 +52,8 @@ fn starter_panel_registry() -> PanelRegistry {
     use dock_core::{PanelConstraints, PanelKey, Size};
 
     let mut registry = PanelRegistry::new();
-    let constraints = PanelConstraints::new(
-        Size::new(120.0, 80.0),
-        Size::new(280.0, 220.0),
-        None,
-        false,
-    );
+    let constraints =
+        PanelConstraints::new(Size::new(120.0, 80.0), Size::new(280.0, 220.0), None, false);
 
     for (key, title) in [
         ("layers", "Layers"),
@@ -97,19 +93,15 @@ pub fn run(options: RunOptions) {
     application().run(move |cx: &mut App| {
         let metrics = DockMetrics::default();
         let registry = starter_panel_registry();
-        let viewport = Rect::new(Point::ZERO, Size::new(1440.0, 840.0));
-        let mut controller = match DockController::empty(
-            Profile::Photoshop,
-            metrics,
-            registry,
-            viewport,
-        ) {
-            Ok(controller) => controller,
-            Err(error) => {
-                tracing::error!(%error, "could not create the dock controller");
-                return;
-            }
-        };
+        let viewport = Rect::new(Point::ZERO, Size::new(1440.0, 740.0));
+        let mut controller =
+            match DockController::empty(Profile::Photoshop, metrics, registry, viewport) {
+                Ok(controller) => controller,
+                Err(error) => {
+                    tracing::error!(%error, "could not create the dock controller");
+                    return;
+                }
+            };
 
         if let Some(path) = workspace_path.as_ref()
             && let Err(error) = controller.load_workspace_from(path)
@@ -122,7 +114,7 @@ pub fn run(options: RunOptions) {
         }
 
         let controller = cx.new(|_| controller);
-        let bounds = Bounds::centered(None, size(px(1440.0), px(840.0)), cx);
+        let bounds = Bounds::centered(None, size(px(1440.0), px(740.0)), cx);
         let open_result = cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
@@ -148,8 +140,8 @@ pub fn run(_options: RunOptions) {
 
 pub use components::{
     CanvasSlot, ColumnView, ContextMenu, ContextMenuEntry, ContextMenuItem, DragGhost, DropOverlay,
-    FloatingHost, FlyoutView, GroupView, MainDockView, PanelHost, RailView,
-    SplitterView, TabHeaderView, TabOverflow, TabStripView,
+    FloatingHost, FlyoutView, GroupView, MainDockView, PanelHost, RailView, SplitterView,
+    TabHeaderView, TabOverflow, TabStripView,
 };
 pub use dock_host::DockHost;
 pub use floating_manager::{FloatingWindowManager, PanelWindowOwner, WindowRegistry};
@@ -169,10 +161,10 @@ pub use dock_core::{
     DockAreaId, DockAreaKind, DockCommand, DockMetrics, DockSide, DragCancelReason, DragDropAction,
     DragDropRequest, DragHandle, DragPayload, DragPreview, DragSession, DragSessionError,
     DragState, DropSource, DropTarget, DropZone, DropZoneRect, DropZoneResolver, FloatingGroup,
-    FloatingGroupId, FloatingGroupRect, FlyoutRect, FlyoutState,
-    GeometryError, GroupRect, HitResult, InitialLayoutError, LastDockLocation, Layout, Node,
-    NodeId, OUTER_COLUMN_EDGE_BOUNDARY_INDEX, Panel, PanelConstraints, PanelId, PanelInstance,
-    PanelKey, PanelKeyError, PanelRect, PanelState, Point, Profile, Rect, ResizeEdge, Size, Split,
+    FloatingGroupId, FloatingGroupRect, FlyoutRect, FlyoutState, GeometryError, GroupRect,
+    HitResult, InitialLayoutError, LastDockLocation, Layout, Node, NodeId,
+    OUTER_COLUMN_EDGE_BOUNDARY_INDEX, Panel, PanelConstraints, PanelId, PanelInstance, PanelKey,
+    PanelKeyError, PanelRect, PanelState, Point, Profile, Rect, ResizeEdge, Size, Split,
     SplitterRect, TabHeaderRect, TabOverflowRect, TabStripRect, Tabs, UndoRedoHistory,
     ValidationError, ValidationReason, VerticalOverflow, WorkspaceDiagnostic, WorkspaceFile,
     WorkspaceFileError, WorkspaceFloatingGroup, WorkspaceLayout, WorkspaceLoadOptions,
