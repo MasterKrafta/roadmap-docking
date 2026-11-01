@@ -1,10 +1,10 @@
 use dock_core::{
-    ComputeRectsError, DragDropAction, DragDropRequest, DragHandle, DragPayload, DragState,
-    DropSource, DropTarget, Point, Rect, Size,
+    CommandValue, ComputeRectsError, DockCommand, DragDropAction, DragDropRequest, DragHandle,
+    DragPayload, DragState, DropSource, DropTarget, FloatingGroupId, Node, Point, Rect, Size,
 };
 use gpui::{App, Entity};
 
-use crate::DockController;
+use crate::{DockController, FloatingWindowManager};
 
 /// Begins a drag from an adapter-provided point in Core's host-local coordinates.
 pub(crate) fn begin_drag_at(
@@ -87,6 +87,63 @@ pub(crate) fn update_drag_at(
         cx.notify();
         was_pressed
     })
+}
+
+/// Turns an active main-window drag into a native floating window as soon as
+/// the pointer leaves the DockHost viewport after crossing Core's drag threshold.
+pub(crate) fn begin_native_tearoff(
+    controller: &Entity<DockController>,
+    manager: &Entity<FloatingWindowManager>,
+    pointer: Point,
+    app: &mut App,
+) -> bool {
+    let detached = controller.update(app, |controller, cx| {
+        let (payload, handle) = match controller.drag().session().state() {
+            DragState::Dragging { payload, .. } => (payload, controller.drag().session().handle()?),
+            _ => return None,
+        };
+        let bounds = floating_bounds(controller, payload, pointer)?;
+        let command = match (handle, payload) {
+            (DragHandle::PanelTab, DragPayload::Panel { panel }) => {
+                let node = controller.layout().nodes().find_map(|(id, node)| {
+                    matches!(node, Node::Panel(value) if value.panel_id == panel).then_some(id)
+                })?;
+                DockCommand::Float { node, bounds }
+            }
+            (DragHandle::FlyoutPanel, DragPayload::Panel { panel }) => {
+                DockCommand::FloatPanelFromFlyout { panel, bounds }
+            }
+            (DragHandle::GroupGrip, DragPayload::Group { group }) => {
+                DockCommand::Float { node: group, bounds }
+            }
+            _ => return None,
+        };
+        if !controller.begin_tearoff_transaction() {
+            return None;
+        }
+        let outcome = controller.dispatch_tearoff_float_in(command, cx).ok()?;
+        match outcome.actual_value {
+            Some(CommandValue::FloatingGroup(group)) => Some((group, bounds)),
+            _ => None,
+        }
+    });
+
+    let Some((group, bounds)) = detached else {
+        return false;
+    };
+    let started = manager.update(app, |manager, manager_cx| {
+        manager.begin_tearoff_move(group, pointer, bounds, manager_cx)
+    });
+    if !started {
+        let _ = controller.update(app, |controller, cx| {
+            let result = controller.cancel_pointer_interaction_on_escape();
+            controller.flush_events(cx);
+            cx.notify();
+            result
+        });
+        return false;
+    }
+    true
 }
 
 /// Ends a drag from a host-local release point. It prepares a resolver only when
