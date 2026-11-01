@@ -37,7 +37,7 @@ pub fn run(_options: RunOptions) {
 
 pub use components::{
     CanvasSlot, ColumnView, ContextMenu, ContextMenuEntry, ContextMenuItem, DragGhost, DropOverlay,
-    FloatingHost, FloatingWindowView, FlyoutView, GroupView, MainDockView, PanelHost, RailView,
+    FloatingHost, FlyoutView, GroupView, MainDockView, PanelHost, RailView,
     SplitterView, TabHeaderView, TabOverflow, TabStripView,
 };
 pub use dock_host::DockHost;
@@ -58,7 +58,7 @@ pub use dock_core::{
     DockAreaId, DockAreaKind, DockCommand, DockMetrics, DockSide, DragCancelReason, DragDropAction,
     DragDropRequest, DragHandle, DragPayload, DragPreview, DragSession, DragSessionError,
     DragState, DropSource, DropTarget, DropZone, DropZoneRect, DropZoneResolver, FloatingGroup,
-    FloatingGroupId, FloatingGroupRect, FloatingResizeEdgeRect, FlyoutRect, FlyoutState,
+    FloatingGroupId, FloatingGroupRect, FlyoutRect, FlyoutState,
     GeometryError, GroupRect, HitResult, InitialLayoutError, LastDockLocation, Layout, Node,
     NodeId, OUTER_COLUMN_EDGE_BOUNDARY_INDEX, Panel, PanelConstraints, PanelId, PanelInstance,
     PanelKey, PanelKeyError, PanelRect, PanelState, Point, Profile, Rect, ResizeEdge, Size, Split,
