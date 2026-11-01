@@ -1,5 +1,5 @@
 use crate::{
-    ColumnRect, DropZoneRect, FloatingGroupRect, FloatingResizeEdgeRect, FlyoutRect, GroupRect,
+    ColumnRect, DropZoneRect, FloatingGroupRect, FlyoutRect, GroupRect,
     PanelRect, Rect, SplitterRect, TabHeaderRect, TabOverflowRect, TabStripRect, VerticalOverflow,
 };
 
@@ -28,7 +28,6 @@ pub struct LayoutRects {
     pub panels: Vec<PanelRect>,
     pub splitters: Vec<SplitterRect>,
     pub floating_groups: Vec<FloatingGroupRect>,
-    pub floating_resize_edges: Vec<FloatingResizeEdgeRect>,
     /// Optional geometry for the active rail flyout, drawn above the Canvas.
     #[cfg_attr(feature = "serde", serde(default))]
     pub flyout: Option<FlyoutRect>,
@@ -65,12 +64,6 @@ pub(crate) fn assert_layout_rects_invariants(rects: &LayoutRects) {
             .floating_groups
             .iter()
             .map(|item| ("floating group", item.rect)),
-    );
-    emitted.extend(
-        rects
-            .floating_resize_edges
-            .iter()
-            .map(|item| ("floating resize edge", item.rect)),
     );
     emitted.extend(rects.flyout.map(|item| ("flyout", item.rect)));
     emitted.extend(rects.drop_zones.iter().map(|item| ("drop zone", item.rect)));
@@ -178,12 +171,6 @@ pub(crate) fn assert_layout_rects_invariants(rects: &LayoutRects) {
             .iter()
             .map(|item| ("floating window hit region", item.rect)),
     );
-    interactive.extend(
-        rects
-            .floating_resize_edges
-            .iter()
-            .map(|item| ("floating resize hit target", item.rect)),
-    );
     interactive.extend(rects.flyout.map(|item| ("flyout hit region", item.rect)));
     interactive.extend(
         rects
@@ -222,7 +209,6 @@ mod tests {
         assert!(rects.panels.is_empty());
         assert!(rects.splitters.is_empty());
         assert!(rects.floating_groups.is_empty());
-        assert!(rects.floating_resize_edges.is_empty());
         assert!(rects.flyout.is_none());
         assert!(rects.drop_zones.is_empty());
         assert!(rects.vertical_overflow.is_empty());
