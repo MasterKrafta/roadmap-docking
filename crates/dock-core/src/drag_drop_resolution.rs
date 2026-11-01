@@ -757,25 +757,15 @@ fn floating_composition_with_split_root_can_build_drop_zones_and_dock() {
 
     let (_, source_left_panel) = builder.panel(key("capture-split-left"), constraints());
     let source_left_group = builder.tabs(vec![source_left_panel], 0, false);
-    let source_left_column = builder.column(
-        metrics.default_column_width,
-        ColumnMode::Expanded,
-        vec![source_left_group],
-        vec![1.0],
-    );
 
     let (_, source_right_panel) = builder.panel(key("capture-split-right"), constraints());
     let source_right_group = builder.tabs(vec![source_right_panel], 0, false);
-    let source_right_column = builder.column(
-        metrics.default_column_width,
-        ColumnMode::Expanded,
-        vec![source_right_group],
-        vec![1.0],
-    );
 
+    // Generic floating roots can be a horizontal Split of tabs directly.
+    // Docking this tree into Main Dock must wrap each branch in a Column.
     let source_root = builder.split(
         Axis::X,
-        vec![source_left_column, source_right_column],
+        vec![source_left_group, source_right_group],
         vec![0.5, 0.5],
     );
     let source_floating = builder.floating_group(source_root, bounds(80.0, 90.0), 1);
