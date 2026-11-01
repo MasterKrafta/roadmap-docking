@@ -14,7 +14,7 @@ use dock_core::{
 use gpui::{
     AnyView, Context, DispatchPhase, Entity, HitboxBehavior, IntoElement, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Render, ScrollHandle,
-    StatefulInteractiveElement, Styled, WeakEntity, Window, WindowId, canvas, div,
+    FocusHandle, StatefulInteractiveElement, Styled, WeakEntity, Window, WindowId, canvas, div,
     prelude::InteractiveElement as _, px, rgb,
 };
 use ui::Theme;
@@ -507,6 +507,9 @@ pub struct FloatingHost {
     controller_observed: bool,
     native_resize_observation_pending: bool,
     middle_click_closes_tabs: bool,
+    /// Root focus boundary for cancelling gestures when this PanelWindow loses app focus.
+    root_focus_handle: Option<FocusHandle>,
+    focus_observed: bool,
 }
 
 impl FloatingHost {
@@ -552,6 +555,8 @@ impl FloatingHost {
             controller_observed: false,
             native_resize_observation_pending: false,
             middle_click_closes_tabs: true,
+            root_focus_handle: None,
+            focus_observed: false,
         }
     }
 
@@ -597,6 +602,41 @@ impl Render for FloatingHost {
         });
 
         let window_id = window.window_handle().window_id();
+        let focus_handle = self
+            .root_focus_handle
+            .get_or_insert_with(|| cx.focus_handle())
+            .clone();
+        if !self.focus_observed {
+            let controller = self.controller.clone();
+            let manager = self.manager.clone();
+            let tab_press = self.tab_press.clone();
+            cx.on_focus_out(&focus_handle, window, move |_host, _event, window, app| {
+                let preserve_interaction = manager.upgrade().is_some_and(|manager| {
+                    manager.update(app, |manager, manager_cx| {
+                        manager.should_preserve_pointer_interaction_on_focus_out(manager_cx)
+                    })
+                });
+                if preserve_interaction {
+                    return;
+                }
+
+                controller.update(app, |controller, controller_cx| {
+                    let result = controller.cancel_pointer_interaction_on_focus_loss();
+                    controller_cx.notify();
+                    if let Err(error) = result {
+                        tracing::warn!(
+                            %error,
+                            "could not cancel floating dock interaction on focus loss"
+                        );
+                    }
+                });
+                window.release_pointer();
+                tab_press.set(None);
+            })
+            .detach();
+            self.focus_observed = true;
+        }
+
         if !self.native_resize_observation_pending {
             self.native_resize_observation_pending = true;
             cx.defer_in(window, move |host, _, host_cx| {
@@ -629,6 +669,7 @@ impl Render for FloatingHost {
 
         let mut root = div()
             .id(format!("floating-host-root-{:?}", group))
+            .track_focus(&focus_handle)
             .relative()
             .size_full()
             .overflow_hidden()
