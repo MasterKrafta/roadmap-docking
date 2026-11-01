@@ -52,7 +52,7 @@ struct FloatingWindowContent;
 
 impl FloatingWindowContent {
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn render(
+    fn render(
         floating: FloatingGroupRect,
         columns: &[ColumnRect],
         groups: &[GroupRect],
