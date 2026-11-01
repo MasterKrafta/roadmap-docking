@@ -24,6 +24,7 @@ use crate::{
     actions::dispatch_command,
     input::drag::{
         begin_floating_tab_tearoff, finish_floating_tab_drag, update_floating_tab_drag,
+        FloatingTabDrag,
     },
     dock_host::{
         build_context_menu_entries, collect_subtree_nodes, context_menu_target_exists,
@@ -711,13 +712,16 @@ impl Render for FloatingHost {
                         let Ok(point) = crate::geometry::point_from_gpui(event.position) else {
                             return;
                         };
+                        let drag = FloatingTabDrag {
+                            source_window_id: input_window_id,
+                            source_group: group,
+                            panel: press.panel,
+                            press_origin: press.origin,
+                            layout_version: press.layout_version,
+                        };
                         let dragging = update_floating_tab_drag(
                             &controller_for_move,
-                            input_window_id,
-                            group,
-                            press.panel,
-                            press.origin,
-                            press.layout_version,
+                            drag,
                             point,
                             app,
                         );
@@ -751,10 +755,7 @@ impl Render for FloatingHost {
                             && begin_floating_tab_tearoff(
                                 &controller_for_move,
                                 manager,
-                                input_window_id,
-                                group,
-                                press.panel,
-                                press.origin,
+                                drag,
                                 point,
                                 app,
                             )
