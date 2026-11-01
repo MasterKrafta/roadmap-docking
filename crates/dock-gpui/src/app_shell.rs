@@ -3,7 +3,7 @@ use std::rc::Rc;
 use dock_core::Point;
 use gpui::{
     App, Context, Entity, IntoElement, ParentElement, Render, Styled, Window, div,
-    prelude::InteractiveElement as _, px, rgb,
+    prelude::InteractiveElement as _, px, rgb, StatefulInteractiveElement,
 };
 
 use crate::{
