@@ -1101,10 +1101,10 @@ impl FloatingWindowManager {
             .copied()
             .collect::<Vec<_>>();
         for (index, panel) in missing_panels.into_iter().enumerate() {
-            let Some(owner) = panel_locations.get(&panel).copied() else {
+            let Some(location) = panel_locations.get(&panel).copied() else {
                 continue;
             };
-            let bounds = self.initial_panel_window_bounds(panel, owner, &groups, index, cx);
+            let bounds = self.initial_panel_window_bounds(panel, location, &groups, index, cx);
             if let Some(entry) = self.create_panel_window(panel, bounds, cx) {
                 self.registry.windows.insert(panel, entry);
             } else {
@@ -1382,12 +1382,12 @@ impl FloatingWindowManager {
     fn initial_panel_window_bounds(
         &self,
         panel: PanelId,
-        owner: PanelLayoutLocation,
+        location: PanelLayoutLocation,
         groups: &[FloatingGroupSnapshot],
         offset: usize,
         cx: &mut Context<Self>,
     ) -> Rect {
-        if let PanelLayoutLocation::Floating(group) = owner
+        if let PanelLayoutLocation::Floating(group) = location
             && let Some(group) = groups.iter().find(|candidate| candidate.id == group)
         {
             return group.bounds;
