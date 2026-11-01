@@ -1159,6 +1159,7 @@ impl FloatingWindowManager {
         // composition in another window. Keep that group without an active host
         // for this pass and retry the detach on the next reconciliation.
         let mut blocked_groups = HashSet::new();
+        let mut hide_attempted_panels = HashSet::new();
         for panel in detached_panels {
             if let Some(entry) = self.registry.windows.get_mut(&panel) {
                 let previous_group = entry.host_group;
@@ -1183,14 +1184,27 @@ impl FloatingWindowManager {
                     }
                 };
 
-                if let Some(native_window) = entry.native_window {
-                    if let Err(error) = self.native_ops.hide(native_window) {
-                        tracing::warn!(
-                            ?panel,
-                            %error,
-                            "could not hide a panel window after it stopped hosting a composition"
-                        );
+                let hidden = if let Some(native_window) = entry.native_window {
+                    hide_attempted_panels.insert(panel);
+                    match self.native_ops.hide(native_window) {
+                        Ok(()) => true,
+                        Err(error) => {
+                            tracing::warn!(
+                                ?panel,
+                                %error,
+                                "could not hide a panel window after it stopped hosting a composition"
+                            );
+                            false
+                        }
                     }
+                } else {
+                    true
+                };
+                if hidden {
+                    entry.visibility = PanelWindowVisibility::Hidden;
+                }
+
+                if let Some(native_window) = entry.native_window {
                     if entry.resize_enabled {
                         if let Err(error) = self.native_ops.disable_resize(native_window) {
                             tracing::warn!(
@@ -1213,13 +1227,13 @@ impl FloatingWindowManager {
                     }
                 }
 
-                // On failure the old GPUI host association is deliberately
-                // retained. It stays hidden, and no replacement is mounted
-                // until a later pass can detach it successfully.
+                // On a failed detach, retain the old GPUI host association.
+                // A failed native hide also retains the previous visibility so
+                // the next reconciliation retries it instead of trusting a
+                // state that no longer matches the HWND.
                 if detached {
                     entry.host_group = None;
                 }
-                entry.visibility = PanelWindowVisibility::Hidden;
             }
         }
 
@@ -1304,17 +1318,26 @@ impl FloatingWindowManager {
         for (panel, entry) in &mut self.registry.windows {
             if entry.host_group.is_none()
                 && entry.visibility == PanelWindowVisibility::Visible
+                && !hide_attempted_panels.contains(panel)
             {
-                if let Some(native_window) = entry.native_window
-                    && let Err(error) = self.native_ops.hide(native_window)
-                {
-                    tracing::warn!(
-                        ?panel,
-                        %error,
-                        "could not hide a non-host panel window"
-                    );
+                let hidden = if let Some(native_window) = entry.native_window {
+                    match self.native_ops.hide(native_window) {
+                        Ok(()) => true,
+                        Err(error) => {
+                            tracing::warn!(
+                                ?panel,
+                                %error,
+                                "could not hide a non-host panel window"
+                            );
+                            false
+                        }
+                    }
+                } else {
+                    true
+                };
+                if hidden {
+                    entry.visibility = PanelWindowVisibility::Hidden;
                 }
-                entry.visibility = PanelWindowVisibility::Hidden;
             }
         }
 
