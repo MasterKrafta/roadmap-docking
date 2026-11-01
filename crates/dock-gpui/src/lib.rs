@@ -159,7 +159,10 @@ pub use components::{
     TabHeaderView, TabOverflow, TabStripView,
 };
 pub use dock_host::DockHost;
-pub use floating_manager::{FloatingWindowManager, PanelWindowOwner, WindowRegistry};
+pub use floating_manager::{
+    CompositionHostRegistry, FloatingWindowManager, PanelWindowOwner, PanelWindowRegistry,
+    PanelWindowVisibility, WindowRegistry,
+};
 pub use missing_panel::MissingPanelPlaceholder;
 pub use persistence::WorkspacePersistenceError;
 pub use theme::DockTheme;
