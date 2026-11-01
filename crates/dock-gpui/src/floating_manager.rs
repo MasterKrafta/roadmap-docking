@@ -2050,7 +2050,7 @@ mod coordinate_tests {
     fn main_host_coordinates_round_trip_at_fractional_monitor_dpi() {
         let client_origin = PhysicalPoint { x: -1920, y: 120 };
         let host_origin = Point::new(16.0, 24.0);
-        let local = Point::new(113.6, 77.2);
+        let local = Point::new(113.6, 77.0);
         let scale = 1.25;
 
         let screen = screen_position_from_main_local(
@@ -2068,8 +2068,8 @@ mod coordinate_tests {
         )
         .unwrap();
 
-        assert!((restored.x - local.x).abs() <= 0.4);
-        assert!((restored.y - local.y).abs() <= 0.4);
+        assert!((restored.x - local.x).abs() <= 0.25);
+        assert!((restored.y - local.y).abs() <= 0.25);
     }
 
     #[test]
