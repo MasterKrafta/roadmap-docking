@@ -887,3 +887,66 @@ fn floating_group_can_dock_to_an_empty_main_window_edge() {
     assert!(layout.main_area(DockSide::Left).is_some());
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
+
+#[test]
+fn split_root_floating_composition_can_create_first_main_dock_columns() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Generic);
+    let (_, left_panel) = builder.panel(key("empty-split-left"), constraints());
+    let left_group = builder.tabs(vec![left_panel], 0, false);
+    let (_, right_panel) = builder.panel(key("empty-split-right"), constraints());
+    let right_group = builder.tabs(vec![right_panel], 0, false);
+    let source_root = builder.split(Axis::X, vec![left_group, right_group], vec![0.4, 0.6]);
+    let floating_group = builder.floating_group(source_root, bounds(120.0, 90.0), 1);
+    let mut layout = builder.build();
+
+    let rects = layout
+        .compute_rects(
+            Rect::new(Point::ZERO, Size::new(1200.0, 800.0)),
+            &metrics,
+        )
+        .unwrap();
+    let zones = layout
+        .compute_drop_zones(DropSource::Group { group: source_root }, &rects, &metrics)
+        .unwrap();
+    let target = zones
+        .iter()
+        .find(|zone| {
+            zone.zone == crate::DropZone::DockEdge
+                && zone.target
+                    == DropTarget::MainColumn {
+                        side: DockSide::Left,
+                        index: 0,
+                    }
+        })
+        .expect("empty left Main Dock must accept the whole horizontal composition")
+        .target;
+    let request = crate::DragDropRequest {
+        payload: crate::DragPayload::FloatingGroup {
+            group: floating_group,
+        },
+        handle: crate::DragHandle::FloatingCapture,
+        origin: Point::ZERO,
+        point: Point::new(2.0, 400.0),
+        target: Some(target),
+        floating_bounds: None,
+    };
+    let crate::DragDropAction::Command(command) =
+        layout.resolve_drag_drop(&request, &metrics).unwrap()
+    else {
+        panic!("the empty main edge must resolve to DockFloating");
+    };
+
+    layout.apply(command, &metrics).unwrap();
+    assert_eq!(layout.floating_groups().count(), 0);
+    let root = layout.main_area(DockSide::Left).unwrap().root;
+    let Some(Node::Split(split)) = layout.node(root) else {
+        panic!("the horizontal composition root should remain a Split");
+    };
+    assert_eq!(split.axis, Axis::X);
+    assert_eq!(split.children.len(), 2);
+    assert!(split.children.iter().all(|child| {
+        matches!(layout.node(*child), Some(Node::Column(_)))
+    }));
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
