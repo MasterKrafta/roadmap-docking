@@ -1784,10 +1784,10 @@ impl FloatingWindowManager {
                 .zip(physical_coordinate(group.bounds.size.height, effective_scale));
             match desired_size {
                 Some((width, height)) if width > 0 && height > 0 => {
-                    if let Err(error) = self.native_ops.resize_window(
-                        native_window,
-                        PhysicalSize { width, height },
-                    ) {
+                    if let Err(error) = self
+                        .native_ops
+                        .resize_window(native_window, PhysicalSize { width, height })
+                    {
                         tracing::warn!(
                             ?group.id,
                             %error,
@@ -2053,20 +2053,10 @@ mod coordinate_tests {
         let local = Point::new(113.6, 77.0);
         let scale = 1.25;
 
-        let screen = screen_position_from_main_local(
-            local,
-            host_origin,
-            client_origin,
-            scale,
-        )
-        .unwrap();
-        let restored = main_local_point_from_screen(
-            screen,
-            client_origin,
-            host_origin,
-            scale,
-        )
-        .unwrap();
+        let screen =
+            screen_position_from_main_local(local, host_origin, client_origin, scale).unwrap();
+        let restored =
+            main_local_point_from_screen(screen, client_origin, host_origin, scale).unwrap();
 
         assert!((restored.x - local.x).abs() <= 0.25);
         assert!((restored.y - local.y).abs() <= 0.25);
