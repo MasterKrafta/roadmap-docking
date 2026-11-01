@@ -73,6 +73,26 @@ impl PanelWindowRegistry {
         self.windows.get(&panel).map(|entry| entry.window)
     }
 
+    pub fn window_id_for_panel(&self, panel: PanelId) -> Option<WindowId> {
+        self.windows.get(&panel).map(|entry| entry.window_id)
+    }
+
+    pub fn bounds_for_panel(&self, panel: PanelId) -> Option<Rect> {
+        self.windows.get(&panel).map(|entry| entry.bounds)
+    }
+
+    pub fn native_min_size_for_panel(&self, panel: PanelId) -> Option<PhysicalSize> {
+        self.windows.get(&panel)?.native_min_size
+    }
+
+    pub fn native_scale_factor_for_panel(&self, panel: PanelId) -> Option<f32> {
+        self.windows.get(&panel)?.native_scale_factor
+    }
+
+    pub fn resize_enabled_for_panel(&self, panel: PanelId) -> Option<bool> {
+        self.windows.get(&panel).map(|entry| entry.resize_enabled)
+    }
+
     pub fn native_window_for_panel(&self, panel: PanelId) -> Option<NativeWindowId> {
         self.windows.get(&panel)?.native_window
     }
@@ -1193,7 +1213,9 @@ impl FloatingWindowManager {
         }
 
         // Only selected composition hosts become visible. All other open
-        // PanelWindows (nested panels and Main-Dock panels) remain alive/hidden.
+        // PanelWindows (nested panels and Main-Dock panels) remain alive/hidden.        // Native resize styles and minimum size are synchronized in the pass
+        // above. The first show therefore happens only after the permanent
+        // PanelWindow has its host group, HWND, placement, and native constraints.
         for group in &groups {
             let Some(panel) = next_hosts.get(&group.id).copied() else {
                 continue;
@@ -1387,7 +1409,10 @@ impl FloatingWindowManager {
 
         let window = match cx.open_window(options, move |_, app| {
             app.new(|_| FloatingHost::new_panel_window(controller, theme, manager))
-        }) {
+        }) {        // The host is assigned immediately after creation, before its native
+        // surface is shown. This keeps the first presented frame on the correct
+        // composition instead of briefly displaying an empty placeholder.
+
             Ok(window) => window,
             Err(error) => {
                 tracing::error!(
