@@ -21,7 +21,6 @@ pub mod theme;
 /// The UI-independent docking model used by this adapter.
 pub use dock_core;
 
-
 #[cfg(windows)]
 use gpui::{AppContext, Context, Window, div, prelude::*};
 

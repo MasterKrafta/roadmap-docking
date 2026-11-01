@@ -128,6 +128,5 @@ mod layout_builder;
 #[cfg(test)]
 mod tab_overflow_tests;
 
-
 #[cfg(test)]
 mod history_tests;

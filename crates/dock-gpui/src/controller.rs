@@ -1,11 +1,11 @@
 use std::collections::{HashMap, VecDeque};
 
 use dock_core::{
-    create_initial_layout, Axis, CommandError, CommandValue, DockCommand, DockMetrics,
-    DragCancelReason, DragHandle, InitialLayoutError,
+    Axis, CommandError, CommandValue, DockCommand, DockMetrics, DragCancelReason, DragHandle,
     DragPayload, DragSession, DragSessionError, DragState, DropSource, DropZoneResolver,
-    FloatingGroupId, FlyoutState, GeometryError, HitResult, Layout, LayoutRects, Node,
-    OUTER_COLUMN_EDGE_BOUNDARY_INDEX, PanelId, PanelKey, Point, Profile, Rect, ValidationError,
+    FloatingGroupId, FlyoutState, GeometryError, HitResult, InitialLayoutError, Layout,
+    LayoutRects, Node, OUTER_COLUMN_EDGE_BOUNDARY_INDEX, PanelId, PanelKey, Point, Profile,
+    Rect, ValidationError, create_initial_layout,
 };
 use gpui::{AnyView, EventEmitter, WindowId};
 use thiserror::Error;
