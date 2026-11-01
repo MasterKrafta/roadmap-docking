@@ -48,7 +48,7 @@ fn starter_panel_registry() -> PanelRegistry {
 
     let mut registry = PanelRegistry::new();
     let constraints =
-        PanelConstraints::new(Size::new(120.0, 80.0), Size::new(280.0, 220.0), None, false);
+        PanelConstraints::new(Size::new(120.0, 80.0), Size::new(280.0, 220.0), None, true);
 
     for (key, title) in [
         ("layers", "Layers"),

@@ -98,9 +98,11 @@ fn open_panel_floating_is_idempotent_for_the_same_panel_key() {
     let metrics = DockMetrics::default();
     let mut layout = Layout::new(Profile::Photoshop);
     let key = PanelKey::new("floating-singleton").unwrap();
+    let mut singleton_constraints = descriptors()[0].1;
+    singleton_constraints.singleton = true;
     let command = DockCommand::OpenPanelFloating {
         key,
-        constraints: descriptors()[0].1,
+        constraints: singleton_constraints,
         bounds: Rect::new(Point::new(120.0, 80.0), Size::new(420.0, 320.0)),
     };
 
@@ -117,6 +119,35 @@ fn open_panel_floating_is_idempotent_for_the_same_panel_key() {
     assert!(second.inverse.is_none());
     assert_eq!(layout.panel_instances().count(), 1);
     assert_eq!(layout.floating_groups().count(), 1);
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+
+#[test]
+fn open_panel_floating_allows_duplicate_keys_when_not_singleton() {
+    let metrics = DockMetrics::default();
+    let mut layout = Layout::new(Profile::Photoshop);
+    let key = PanelKey::new("floating-multiple-instances").unwrap();
+    let command = DockCommand::OpenPanelFloating {
+        key,
+        constraints: descriptors()[0].1,
+        bounds: Rect::new(Point::new(120.0, 80.0), Size::new(420.0, 320.0)),
+    };
+
+    let first = layout.apply(command.clone(), &metrics).unwrap();
+    let first_panel = match first.actual_value {
+        Some(CommandValue::PanelId(panel_id)) => panel_id,
+        other => panic!("expected first opened PanelId, got {other:?}"),
+    };
+    let second = layout.apply(command, &metrics).unwrap();
+    let second_panel = match second.actual_value {
+        Some(CommandValue::PanelId(panel_id)) => panel_id,
+        other => panic!("expected second opened PanelId, got {other:?}"),
+    };
+
+    assert_ne!(first_panel, second_panel);
+    assert_eq!(layout.panel_instances().count(), 2);
+    assert_eq!(layout.floating_groups().count(), 2);
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
 

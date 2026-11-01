@@ -66,8 +66,9 @@ impl Layout {
 
     /// Creates a panel and its Floating area in one Layout transaction.
     ///
-    /// This command is intentionally idempotent by PanelKey: opening a type
-    /// that already exists returns its PanelId without creating another instance.
+    /// Repeated opens follow the same singleton policy as OpenPanel. A key is
+    /// deduplicated when the requested constraints or an existing instance
+    /// declares singleton; otherwise multiple instances are allowed.
     pub(super) fn apply_open_panel_floating_command(
         &mut self,
         key: &PanelKey,
@@ -87,11 +88,7 @@ impl Layout {
                 reason: geometry_error_reason(error),
             })?;
 
-        if let Some((panel_id, _)) = self
-            .panel_instances
-            .iter()
-            .find(|(_, instance)| instance.key == *key)
-        {
+        if let Some(panel_id) = self.find_existing_singleton_panel_id(key, constraints.singleton) {
             return Ok(CommandApplication {
                 actual_value: Some(CommandValue::PanelId(panel_id)),
                 inverse: None,
@@ -178,14 +175,26 @@ impl Layout {
         })
     }
 
+    fn find_existing_singleton_panel_id(
+        &self,
+        key: &PanelKey,
+        requested_singleton: bool,
+    ) -> Option<crate::PanelId> {
+        self.panel_instances
+            .iter()
+            .find(|(_, instance)| {
+                instance.key == *key && (requested_singleton || instance.constraints.singleton)
+            })
+            .map(|(panel_id, _)| panel_id)
+    }
+
     pub(super) fn try_reopen_existing_singleton_panel(
         &mut self,
         key: &PanelKey,
         requested_singleton: bool,
     ) -> Result<Option<CommandApplication>, CommandError> {
-        let Some((existing_id, _)) = self.panel_instances.iter().find(|(_, instance)| {
-            instance.key == *key && (requested_singleton || instance.constraints.singleton)
-        }) else {
+        let Some(existing_id) = self.find_existing_singleton_panel_id(key, requested_singleton)
+        else {
             return Ok(None);
         };
 

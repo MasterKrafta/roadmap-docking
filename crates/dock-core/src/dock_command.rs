@@ -18,7 +18,7 @@ pub enum DockCommand {
     /// Open a panel instance directly in a new floating composition.
     ///
     /// Unlike OpenPanel, this command never resolves a Main Dock destination.
-    /// The panel key is treated as a singleton by this user-driven open path.
+    /// Duplicate behavior follows PanelConstraints::singleton, just like OpenPanel.
     OpenPanelFloating {
         key: PanelKey,
         constraints: PanelConstraints,
