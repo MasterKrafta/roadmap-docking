@@ -974,26 +974,34 @@ impl FloatingWindowManager {
             }
         }
 
-        let monitor_recovery_applied = !monitor_corrections.is_empty();
-        if monitor_recovery_applied {
-            let result = self.controller.update(cx, |controller, controller_cx| {
-                let result = controller.apply_workspace_monitor_bounds(&monitor_corrections);
-                if let Err(error) = result {
-                    tracing::warn!(
-                        %error,
-                        "could not persist monitor recovery in the restored Core layout"
-                    );
-                }
+        let monitor_recovery_applied = if monitor_corrections.is_empty() {
+            false
+        } else {
+            match self.controller.update(cx, |controller, controller_cx| {
+                let applied = match controller.apply_workspace_monitor_bounds(&monitor_corrections) {
+                    Ok(()) => true,
+                    Err(error) => {
+                        tracing::warn!(
+                            %error,
+                            "could not persist monitor recovery in the restored Core layout"
+                        );
+                        false
+                    }
+                };
                 controller.flush_events(controller_cx);
                 controller_cx.notify();
-            });
-            if let Err(error) = result {
-                tracing::warn!(
-                    %error,
-                    "could not update the controller after monitor recovery"
-                );
+                applied
+            }) {
+                Ok(applied) => applied,
+                Err(error) => {
+                    tracing::warn!(
+                        %error,
+                        "could not update the controller after monitor recovery"
+                    );
+                    false
+                }
             }
-        }
+        };
 
         self.reconciling = false;
         if monitor_recovery_applied {
