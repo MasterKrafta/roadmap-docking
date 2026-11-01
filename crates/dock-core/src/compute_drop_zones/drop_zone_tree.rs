@@ -53,7 +53,12 @@ pub(crate) fn source_root(
             panel_node(tree_index, panel).ok_or(ComputeRectsError::InvalidLayoutState)
         }
         DropSource::Group { group } => {
-            if matches!(layout.node(group), Some(Node::Tabs(_))) {
+            // A floating-window capture carries the root node of the complete
+            // composition through the same resolver as a Tabs group. After
+            // edge docking that root may be a Split or Column, not a Tabs node.
+            if matches!(layout.node(group), Some(Node::Tabs(_)))
+                || source_is_floating_root(layout, group)
+            {
                 Ok(group)
             } else {
                 Err(ComputeRectsError::InvalidLayoutState)
