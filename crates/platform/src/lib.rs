@@ -133,6 +133,11 @@ pub trait NativeWindowOps {
     fn activate(&self, window: NativeWindowId) -> Result<(), NativeError>;
     fn hide(&self, window: NativeWindowId) -> Result<(), NativeError>;
 
+    /// Assigns the native owner of a top-level popup window.
+    ///
+    /// On Windows this is an application-lifecycle relationship: the popup is
+    /// hidden when its owner is minimized and destroyed with its owner. It must
+    /// not be used to represent whether a panel is docked or floating.
     fn set_owner(
         &self,
         window: NativeWindowId,
@@ -213,6 +218,29 @@ mod windows_impl {
         // SAFETY: GetLastError reads the calling thread's Win32 error state.
         let code = unsafe { GetLastError().0 };
         NativeError::Platform { operation, code }
+    }
+
+    /// Removes the resizable frame after a failed attempt to install native
+    /// resize tracking. Cleanup is best-effort; preserve the original error.
+    fn restore_non_resizable_frame(window: HWND) {
+        // SAFETY: The HWND is the live GPUI-owned window passed to enable_resize.
+        unsafe {
+            let style = GetWindowLongPtrW(window, GWL_STYLE) as u32 & !WS_THICKFRAME.0;
+            let _ = SetWindowLongPtrW(window, GWL_STYLE, style as isize);
+            let _ = SetWindowPos(
+                window,
+                None,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE
+                    | SWP_NOSIZE
+                    | SWP_NOZORDER
+                    | SWP_NOACTIVATE
+                    | SWP_FRAMECHANGED,
+            );
+        }
     }
 
     fn rect_from_native(rect: RECT) -> PhysicalRect {
@@ -556,9 +584,11 @@ mod windows_impl {
             let native = hwnd(window);
             // SAFETY: The HWND belongs to GPUI. Update its style and apply the
             // non-client frame change without moving, resizing or activating it.
-            unsafe {
-                let style = GetWindowLongPtrW(native, GWL_STYLE) as u32 | WS_THICKFRAME.0;
-                let _ = SetWindowLongPtrW(native, GWL_STYLE, style as isize);
+            // SAFETY: The HWND belongs to GPUI. Add the resizable frame and
+            // apply the non-client update without moving or activating it.
+            let style = unsafe { GetWindowLongPtrW(native, GWL_STYLE) as u32 | WS_THICKFRAME.0 };
+            unsafe { let _ = SetWindowLongPtrW(native, GWL_STYLE, style as isize); }
+            if let Err(error) = unsafe {
                 SetWindowPos(
                     native,
                     None,
@@ -572,12 +602,15 @@ mod windows_impl {
                         | SWP_NOACTIVATE
                         | SWP_FRAMECHANGED,
                 )
+            } {
+                let error = platform_error("SetWindowPos(enable resize)", error);
+                restore_non_resizable_frame(native);
+                return Err(error);
             }
-            .map_err(|error| platform_error("SetWindowPos(enable resize)", error))?;
 
             let mut reference_data = 0usize;
             // SAFETY: Query whether the resize-loop state is already attached.
-            let tracking_installed = unsafe {
+            let mut tracking_installed = unsafe {
                 GetWindowSubclass(
                     native,
                     Some(resize_loop_subclass_proc),
@@ -604,8 +637,11 @@ mod windows_impl {
                     // SAFETY: Registration failed, so the callback did not
                     // retain the allocation.
                     unsafe { drop(Box::from_raw(pointer)) };
+                    restore_non_resizable_frame(native);
                     return Err(error);
                 }
+                reference_data = pointer as usize;
+                tracking_installed = true;
             }
 
             // SAFETY: Attach an 8 ms UI-thread timer to this GPUI window.
@@ -618,7 +654,30 @@ mod windows_impl {
                 )
             };
             if timer == 0 {
-                return Err(last_error("SetTimer(resize redraw)"));
+                let error = last_error("SetTimer(resize redraw)");
+                // SAFETY: A failed SetTimer may follow successful subclass
+                // installation. Remove the timer defensively, then detach and
+                // release the subclass state only if detaching succeeds.
+                unsafe {
+                    let _ = KillTimer(Some(native), RESIZE_REDRAW_TIMER_ID);
+                }
+                if tracking_installed
+                    && unsafe {
+                        RemoveWindowSubclass(
+                            native,
+                            Some(resize_loop_subclass_proc),
+                            RESIZE_LOOP_SUBCLASS_ID,
+                        )
+                    }
+                    .as_bool()
+                    && reference_data != 0
+                {
+                    // SAFETY: The subclass was detached, so it no longer owns
+                    // or accesses this state allocation.
+                    unsafe { drop(Box::from_raw(reference_data as *mut ResizeLoopState)) };
+                }
+                restore_non_resizable_frame(native);
+                return Err(error);
             }
             Ok(())
         }
