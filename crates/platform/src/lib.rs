@@ -1,1 +1,819 @@
-//! Reserved for native platform integrations supplied by the application host.
+//! Narrow native-window API used by the GPUI adapter.
+//!
+//! This crate is the only layer that may call Win32 directly. The GPUI
+//! adapter remains safe Rust and depends only on the platform-neutral types
+//! and trait.
+
+#![deny(unsafe_op_in_unsafe_fn)]
+
+use gpui::Window;
+use std::fmt;
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct NativeWindowId(isize);
+
+impl NativeWindowId {
+    pub const fn from_raw(value: isize) -> Option<Self> {
+        if value == 0 { None } else { Some(Self(value)) }
+    }
+
+    pub const fn as_raw(self) -> isize {
+        self.0
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct PhysicalPoint {
+    pub x: i32,
+    pub y: i32,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct PhysicalSize {
+    pub width: i32,
+    pub height: i32,
+}
+
+impl PhysicalSize {
+    pub const fn is_valid(self) -> bool {
+        self.width > 0 && self.height > 0
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct PhysicalRect {
+    pub left: i32,
+    pub top: i32,
+    pub right: i32,
+    pub bottom: i32,
+}
+
+impl PhysicalRect {
+    pub const fn width(self) -> i32 {
+        self.right - self.left
+    }
+
+    pub const fn height(self) -> i32 {
+        self.bottom - self.top
+    }
+
+    pub const fn contains(self, point: PhysicalPoint) -> bool {
+        point.x >= self.left
+            && point.x < self.right
+            && point.y >= self.top
+            && point.y < self.bottom
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NativeKey {
+    Escape,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum NativeError {
+    Unsupported,
+    WindowHandleUnavailable,
+    UnexpectedWindowHandle,
+    InvalidSize,
+    Platform {
+        operation: &'static str,
+        code: u32,
+    },
+}
+
+impl fmt::Display for NativeError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Unsupported => formatter.write_str("native window operations are unsupported"),
+            Self::WindowHandleUnavailable => {
+                formatter.write_str("GPUI window has no native window handle")
+            }
+            Self::UnexpectedWindowHandle => {
+                formatter.write_str("GPUI window handle is not a Win32 HWND")
+            }
+            Self::InvalidSize => formatter.write_str("native window size must be positive"),
+            Self::Platform { operation, code } => {
+                write!(formatter, "{operation} failed with Win32 code {code}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for NativeError {}
+
+/// OS operations required by floating native windows.
+///
+/// Coordinates and sizes use physical screen pixels. Core and GPUI logical
+/// coordinates must be converted by the caller using scale_factor and
+/// client_origin. This crate does not know about DockCore.
+pub trait NativeWindowOps {
+    fn hwnd_of(&self, window: &Window) -> Result<NativeWindowId, NativeError>;
+
+    fn cursor_position(&self) -> Result<PhysicalPoint, NativeError>;
+    fn left_button_down(&self) -> Result<bool, NativeError>;
+    fn key_down(&self, key: NativeKey) -> Result<bool, NativeError>;
+
+    fn window_rect(&self, window: NativeWindowId) -> Result<PhysicalRect, NativeError>;
+    fn client_origin(&self, window: NativeWindowId) -> Result<PhysicalPoint, NativeError>;
+    fn scale_factor(&self, window: NativeWindowId) -> Result<f32, NativeError>;
+    fn move_window(
+        &self,
+        window: NativeWindowId,
+        position: PhysicalPoint,
+    ) -> Result<(), NativeError>;
+    fn resize_window(
+        &self,
+        window: NativeWindowId,
+        size: PhysicalSize,
+    ) -> Result<(), NativeError>;
+
+    fn show(&self, window: NativeWindowId) -> Result<(), NativeError>;
+    fn show_no_activate(&self, window: NativeWindowId) -> Result<(), NativeError>;
+    fn activate(&self, window: NativeWindowId) -> Result<(), NativeError>;
+    fn hide(&self, window: NativeWindowId) -> Result<(), NativeError>;
+
+    fn set_owner(
+        &self,
+        window: NativeWindowId,
+        owner: NativeWindowId,
+    ) -> Result<(), NativeError>;
+    fn remove_topmost(&self, window: NativeWindowId) -> Result<(), NativeError>;
+
+    fn enable_resize(&self, window: NativeWindowId) -> Result<(), NativeError>;
+    fn disable_resize(&self, window: NativeWindowId) -> Result<(), NativeError>;
+    /// Sets the minimum outer-window tracking size in physical pixels.
+    /// Pass None to remove the dynamic native constraint.
+    fn set_min_size(
+        &self,
+        window: NativeWindowId,
+        size: Option<PhysicalSize>,
+    ) -> Result<(), NativeError>;
+
+    /// Finds the topmost of known_windows under a screen point. The window
+    /// being dragged can be excluded so it cannot become its own drop target.
+    fn window_from_point(
+        &self,
+        point: PhysicalPoint,
+        known_windows: &[NativeWindowId],
+        exclude: Option<NativeWindowId>,
+    ) -> Result<Option<NativeWindowId>, NativeError>;
+
+    fn monitor_work_areas(&self) -> Result<Vec<PhysicalRect>, NativeError>;
+
+    /// Pair this request with end_high_resolution_timer when polling ends.
+    fn begin_high_resolution_timer(&self) -> Result<(), NativeError>;
+    fn end_high_resolution_timer(&self) -> Result<(), NativeError>;
+}
+
+#[cfg(windows)]
+mod windows_impl {
+    use super::*;
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use std::mem::size_of;
+    use windows::Win32::{
+        Foundation::{BOOL, HWND, LPARAM, POINT, RECT, WPARAM, GetLastError},
+        Graphics::Gdi::{
+            ClientToScreen, EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO,
+        },
+        Media::{timeBeginPeriod, timeEndPeriod},
+        UI::{
+            Controls::{DefSubclassProc, GetWindowSubclass, RemoveWindowSubclass, SetWindowSubclass},
+            HiDpi::GetDpiForWindow,
+            Input::KeyboardAndMouse::{GetAsyncKeyState, VK_ESCAPE, VK_LBUTTON},
+            WindowsAndMessaging::*,
+        },
+    };
+
+    const RESIZE_REDRAW_TIMER_ID: usize = 2;
+    const RESIZE_REDRAW_INTERVAL_MS: u32 = 8;
+    const WM_GPUI_FORCE_UPDATE_WINDOW: u32 = WM_USER + 5;
+    const MIN_SIZE_SUBCLASS_ID: usize = 0x444f_434b;
+
+    #[derive(Clone, Copy, Default)]
+    pub struct SystemNativeWindowOps;
+
+    fn hwnd(window: NativeWindowId) -> HWND {
+        HWND(window.as_raw() as _)
+    }
+
+    fn platform_error(operation: &'static str, error: windows::core::Error) -> NativeError {
+        NativeError::Platform {
+            operation,
+            code: error.code().0 as u32,
+        }
+    }
+
+    fn last_error(operation: &'static str) -> NativeError {
+        // SAFETY: GetLastError reads the calling thread's Win32 error state.
+        let code = unsafe { GetLastError().0 };
+        NativeError::Platform { operation, code }
+    }
+
+    fn rect_from_native(rect: RECT) -> PhysicalRect {
+        PhysicalRect {
+            left: rect.left,
+            top: rect.top,
+            right: rect.right,
+            bottom: rect.bottom,
+        }
+    }
+
+    fn left_button_is_down() -> bool {
+        // SAFETY: GetAsyncKeyState has no pointer arguments.
+        unsafe { (GetAsyncKeyState(VK_LBUTTON.0 as i32) as u16) & 0x8000 != 0 }
+    }
+
+    unsafe extern "system" fn resize_redraw_timer_proc(
+        window: HWND,
+        _message: u32,
+        _timer_id: usize,
+        _time: u32,
+    ) {
+        if left_button_is_down() {
+            // SAFETY: window is the HWND supplied by SetTimer. This message ID
+            // is handled by the pinned GPUI Windows backend.
+            let _ = unsafe {
+                PostMessageW(
+                    Some(window),
+                    WM_GPUI_FORCE_UPDATE_WINDOW,
+                    WPARAM(0),
+                    LPARAM(0),
+                )
+            };
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    struct MinTrackSize {
+        width: i32,
+        height: i32,
+    }
+
+    unsafe extern "system" fn min_track_size_proc(
+        window: HWND,
+        message: u32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+        subclass_id: usize,
+        reference_data: usize,
+    ) -> LRESULT {
+        // SAFETY: The callback and reference data are registered together by
+        // SetWindowSubclass; the Box remains live until WM_NCDESTROY/removal.
+        let result = unsafe { DefSubclassProc(window, message, wparam, lparam) };
+
+        if message == WM_GETMINMAXINFO && lparam.0 != 0 && reference_data != 0 {
+            // SAFETY: WM_GETMINMAXINFO supplies a writable MINMAXINFO pointer;
+            // reference_data points to the still-live MinTrackSize allocation.
+            unsafe {
+                let limits = &*(reference_data as *const MinTrackSize);
+                let info = &mut *(lparam.0 as *mut MINMAXINFO);
+                info.ptMinTrackSize.x = limits.width;
+                info.ptMinTrackSize.y = limits.height;
+            }
+        }
+
+        if message == WM_NCDESTROY && reference_data != 0 {
+            // SAFETY: Remove this exact subclass and free its Box exactly once.
+            unsafe {
+                let _ = RemoveWindowSubclass(window, Some(min_track_size_proc), subclass_id);
+                drop(Box::from_raw(reference_data as *mut MinTrackSize));
+            }
+        }
+
+        result
+    }
+
+    struct MonitorCollection {
+        work_areas: Vec<PhysicalRect>,
+        error: Option<NativeError>,
+    }
+
+    unsafe extern "system" fn monitor_enum_proc(
+        monitor: HMONITOR,
+        _dc: HDC,
+        _monitor_rect: *mut RECT,
+        data: LPARAM,
+    ) -> BOOL {
+        // SAFETY: EnumDisplayMonitors calls this synchronously with a pointer
+        // to the live MonitorCollection passed as LPARAM.
+        let collection = unsafe { &mut *(data.0 as *mut MonitorCollection) };
+        let mut info = MONITORINFO {
+            cbSize: size_of::<MONITORINFO>() as u32,
+            ..Default::default()
+        };
+
+        // SAFETY: monitor is the HMONITOR supplied by EnumDisplayMonitors and
+        // info is a valid writable MONITORINFO.
+        if let Err(error) = unsafe { GetMonitorInfoW(monitor, &mut info) } {
+            collection.error = Some(platform_error("GetMonitorInfoW", error));
+            return BOOL(0);
+        }
+
+        collection.work_areas.push(rect_from_native(info.rcWork));
+        BOOL(1)
+    }
+
+    impl NativeWindowOps for SystemNativeWindowOps {
+        fn hwnd_of(&self, window: &Window) -> Result<NativeWindowId, NativeError> {
+            let handle = window
+                .window_handle()
+                .map_err(|_| NativeError::WindowHandleUnavailable)?;
+
+            match handle.as_raw() {
+                RawWindowHandle::Win32(handle) => NativeWindowId::from_raw(handle.hwnd.get())
+                    .ok_or(NativeError::WindowHandleUnavailable),
+                _ => Err(NativeError::UnexpectedWindowHandle),
+            }
+        }
+
+        fn cursor_position(&self) -> Result<PhysicalPoint, NativeError> {
+            let mut point = POINT::default();
+            // SAFETY: point is a valid writable POINT.
+            unsafe { GetCursorPos(&mut point) }
+                .map_err(|error| platform_error("GetCursorPos", error))?;
+            Ok(PhysicalPoint {
+                x: point.x,
+                y: point.y,
+            })
+        }
+
+        fn left_button_down(&self) -> Result<bool, NativeError> {
+            Ok(left_button_is_down())
+        }
+
+        fn key_down(&self, key: NativeKey) -> Result<bool, NativeError> {
+            let virtual_key = match key {
+                NativeKey::Escape => VK_ESCAPE,
+            };
+            // SAFETY: GetAsyncKeyState accepts a virtual-key code and has no
+            // pointer arguments.
+            Ok(unsafe { (GetAsyncKeyState(virtual_key.0 as i32) as u16) & 0x8000 != 0 })
+        }
+
+        fn window_rect(&self, window: NativeWindowId) -> Result<PhysicalRect, NativeError> {
+            let mut rect = RECT::default();
+            // SAFETY: window is an HWND obtained from a live GPUI Window and
+            // rect is writable.
+            unsafe { GetWindowRect(hwnd(window), &mut rect) }
+                .map_err(|error| platform_error("GetWindowRect", error))?;
+            Ok(rect_from_native(rect))
+        }
+
+        fn client_origin(&self, window: NativeWindowId) -> Result<PhysicalPoint, NativeError> {
+            let mut point = POINT::default();
+            // SAFETY: point is writable and window is a GPUI-owned HWND.
+            unsafe { ClientToScreen(hwnd(window), &mut point) }
+                .map_err(|error| platform_error("ClientToScreen", error))?;
+            Ok(PhysicalPoint {
+                x: point.x,
+                y: point.y,
+            })
+        }
+
+        fn scale_factor(&self, window: NativeWindowId) -> Result<f32, NativeError> {
+            // SAFETY: GetDpiForWindow accepts an HWND and returns zero if it
+            // is not associated with a valid window.
+            let dpi = unsafe { GetDpiForWindow(hwnd(window)) };
+            if dpi == 0 {
+                return Err(last_error("GetDpiForWindow"));
+            }
+            Ok(dpi as f32 / 96.0)
+        }
+
+        fn move_window(
+            &self,
+            window: NativeWindowId,
+            position: PhysicalPoint,
+        ) -> Result<(), NativeError> {
+            // SAFETY: Move only bounds; preserve Z-order and do not activate.
+            unsafe {
+                SetWindowPos(
+                    hwnd(window),
+                    None,
+                    position.x,
+                    position.y,
+                    0,
+                    0,
+                    SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+                )
+            }
+            .map_err(|error| platform_error("SetWindowPos(move)", error))
+        }
+
+        fn resize_window(
+            &self,
+            window: NativeWindowId,
+            size: PhysicalSize,
+        ) -> Result<(), NativeError> {
+            if !size.is_valid() {
+                return Err(NativeError::InvalidSize);
+            }
+
+            // SAFETY: Resize only; preserve position, Z-order and activation.
+            unsafe {
+                SetWindowPos(
+                    hwnd(window),
+                    None,
+                    0,
+                    0,
+                    size.width,
+                    size.height,
+                    SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
+                )
+            }
+            .map_err(|error| platform_error("SetWindowPos(resize)", error))
+        }
+
+        fn show(&self, window: NativeWindowId) -> Result<(), NativeError> {
+            // SAFETY: window is a GPUI-owned HWND.
+            let _ = unsafe { ShowWindowAsync(hwnd(window), SW_SHOW) };
+            Ok(())
+        }
+
+        fn show_no_activate(&self, window: NativeWindowId) -> Result<(), NativeError> {
+            // SAFETY: window is a GPUI-owned HWND.
+            let _ = unsafe { ShowWindowAsync(hwnd(window), SW_SHOWNOACTIVATE) };
+            Ok(())
+        }
+
+        fn activate(&self, window: NativeWindowId) -> Result<(), NativeError> {
+            let native = hwnd(window);
+            // SAFETY: IsIconic and ShowWindowAsync operate on the supplied HWND.
+            unsafe {
+                if IsIconic(native).as_bool() {
+                    let _ = ShowWindowAsync(native, SW_RESTORE);
+                }
+            }
+            // SAFETY: SetForegroundWindow is called for a window owned by this
+            // process. Windows can still deny activation due to foreground policy.
+            if !unsafe { SetForegroundWindow(native) }.as_bool() {
+                return Err(last_error("SetForegroundWindow"));
+            }
+            Ok(())
+        }
+
+        fn hide(&self, window: NativeWindowId) -> Result<(), NativeError> {
+            // SAFETY: window is a GPUI-owned HWND.
+            let _ = unsafe { ShowWindowAsync(hwnd(window), SW_HIDE) };
+            Ok(())
+        }
+
+        fn set_owner(
+            &self,
+            window: NativeWindowId,
+            owner: NativeWindowId,
+        ) -> Result<(), NativeError> {
+            // SAFETY: both IDs originate from GPUI windows; GWLP_HWNDPARENT
+            // sets the owner for a top-level popup window.
+            let _ = unsafe {
+                SetWindowLongPtrW(hwnd(window), GWLP_HWNDPARENT, owner.as_raw())
+            };
+            Ok(())
+        }
+
+        fn remove_topmost(&self, window: NativeWindowId) -> Result<(), NativeError> {
+            // SAFETY: Preserve the window bounds and activation while removing
+            // the topmost extended style through the standard Z-order operation.
+            unsafe {
+                SetWindowPos(
+                    hwnd(window),
+                    Some(HWND_NOTOPMOST),
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER,
+                )
+            }
+            .map_err(|error| platform_error("SetWindowPos(HWND_NOTOPMOST)", error))
+        }
+
+        fn enable_resize(&self, window: NativeWindowId) -> Result<(), NativeError> {
+            let native = hwnd(window);
+            // SAFETY: The HWND belongs to GPUI. Update its style and apply the
+            // non-client frame change without moving, resizing or activating it.
+            unsafe {
+                let style = GetWindowLongPtrW(native, GWL_STYLE) as u32 | WS_THICKFRAME.0;
+                let _ = SetWindowLongPtrW(native, GWL_STYLE, style as isize);
+                SetWindowPos(
+                    native,
+                    None,
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE
+                        | SWP_NOSIZE
+                        | SWP_NOZORDER
+                        | SWP_NOACTIVATE
+                        | SWP_FRAMECHANGED,
+                )
+            }
+            .map_err(|error| platform_error("SetWindowPos(enable resize)", error))?;
+
+            // SAFETY: Attach an 8 ms UI-thread timer to this GPUI window.
+            let timer = unsafe {
+                SetTimer(
+                    Some(native),
+                    RESIZE_REDRAW_TIMER_ID,
+                    RESIZE_REDRAW_INTERVAL_MS,
+                    Some(resize_redraw_timer_proc),
+                )
+            };
+            if timer == 0 {
+                return Err(last_error("SetTimer(resize redraw)"));
+            }
+            Ok(())
+        }
+
+        fn disable_resize(&self, window: NativeWindowId) -> Result<(), NativeError> {
+            let native = hwnd(window);
+            // SAFETY: Kill the timer and remove WS_THICKFRAME from the same
+            // GPUI-owned HWND; then apply the non-client frame update.
+            unsafe {
+                let _ = KillTimer(Some(native), RESIZE_REDRAW_TIMER_ID);
+                let style = GetWindowLongPtrW(native, GWL_STYLE) as u32 & !WS_THICKFRAME.0;
+                let _ = SetWindowLongPtrW(native, GWL_STYLE, style as isize);
+                SetWindowPos(
+                    native,
+                    None,
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE
+                        | SWP_NOSIZE
+                        | SWP_NOZORDER
+                        | SWP_NOACTIVATE
+                        | SWP_FRAMECHANGED,
+                )
+            }
+            .map_err(|error| platform_error("SetWindowPos(disable resize)", error))
+        }
+
+        fn set_min_size(
+            &self,
+            window: NativeWindowId,
+            size: Option<PhysicalSize>,
+        ) -> Result<(), NativeError> {
+            if let Some(size) = size
+                && !size.is_valid()
+            {
+                return Err(NativeError::InvalidSize);
+            }
+
+            let native = hwnd(window);
+            let mut reference_data = 0usize;
+
+            // SAFETY: Query the exact subclass callback and ID used below.
+            let already_installed = unsafe {
+                GetWindowSubclass(
+                    native,
+                    Some(min_track_size_proc),
+                    MIN_SIZE_SUBCLASS_ID,
+                    &mut reference_data,
+                )
+            }
+            .is_ok();
+
+            match size {
+                Some(size) if already_installed => {
+                    // SAFETY: reference_data is the live allocation retained
+                    // by this window's min-size subclass.
+                    unsafe {
+                        *(reference_data as *mut MinTrackSize) = MinTrackSize {
+                            width: size.width,
+                            height: size.height,
+                        };
+                    }
+                    Ok(())
+                }
+                Some(size) => {
+                    let pointer = Box::into_raw(Box::new(MinTrackSize {
+                        width: size.width,
+                        height: size.height,
+                    }));
+                    // SAFETY: The subclass owns this pointer until WM_NCDESTROY
+                    // or explicit removal.
+                    if let Err(error) = unsafe {
+                        SetWindowSubclass(
+                            native,
+                            Some(min_track_size_proc),
+                            MIN_SIZE_SUBCLASS_ID,
+                            pointer as usize,
+                        )
+                    } {
+                        // SAFETY: Registration failed, so the callback did not
+                        // retain pointer and it is still owned here.
+                        unsafe { drop(Box::from_raw(pointer)) };
+                        return Err(platform_error("SetWindowSubclass(min size)", error));
+                    }
+                    Ok(())
+                }
+                None if already_installed => {
+                    // SAFETY: Remove the registered callback before freeing
+                    // the reference data it owns.
+                    unsafe {
+                        let _ = RemoveWindowSubclass(
+                            native,
+                            Some(min_track_size_proc),
+                            MIN_SIZE_SUBCLASS_ID,
+                        );
+                        drop(Box::from_raw(reference_data as *mut MinTrackSize));
+                    }
+                    Ok(())
+                }
+                None => Ok(()),
+            }
+        }
+
+        fn window_from_point(
+            &self,
+            point: PhysicalPoint,
+            known_windows: &[NativeWindowId],
+            exclude: Option<NativeWindowId>,
+        ) -> Result<Option<NativeWindowId>, NativeError> {
+            // SAFETY: Walk the desktop's top-level Z-order synchronously.
+            let mut current = unsafe { GetTopWindow(None) };
+            while let Some(native) = current {
+                let id = NativeWindowId::from_raw(native.0 as isize);
+                if let Some(id) = id
+                    && Some(id) != exclude
+                    && known_windows.contains(&id)
+                {
+                    // SAFETY: native is the current top-level HWND.
+                    let visible = unsafe {
+                        IsWindowVisible(native).as_bool() && !IsIconic(native).as_bool()
+                    };
+                    if visible {
+                        let mut rect = RECT::default();
+                        // SAFETY: rect is a valid writable RECT.
+                        if unsafe { GetWindowRect(native, &mut rect) }.is_ok()
+                            && rect_from_native(rect).contains(point)
+                        {
+                            return Ok(Some(id));
+                        }
+                    }
+                }
+
+                // SAFETY: Advance to the next top-level HWND in Z-order.
+                current = unsafe { GetWindow(Some(native), GW_HWNDNEXT) };
+            }
+            Ok(None)
+        }
+
+        fn monitor_work_areas(&self) -> Result<Vec<PhysicalRect>, NativeError> {
+            let mut collection = MonitorCollection {
+                work_areas: Vec::new(),
+                error: None,
+            };
+            // SAFETY: The LPARAM points to the live collection and the callback
+            // is invoked synchronously by EnumDisplayMonitors.
+            let result = unsafe {
+                EnumDisplayMonitors(
+                    None,
+                    None,
+                    Some(monitor_enum_proc),
+                    LPARAM((&mut collection as *mut MonitorCollection) as isize),
+                )
+            };
+
+            if let Some(error) = collection.error {
+                return Err(error);
+            }
+            result.map_err(|error| platform_error("EnumDisplayMonitors", error))?;
+            Ok(collection.work_areas)
+        }
+
+        fn begin_high_resolution_timer(&self) -> Result<(), NativeError> {
+            // SAFETY: timeBeginPeriod has no pointer arguments. The caller must
+            // pair this request with one end_high_resolution_timer call.
+            let result = unsafe { timeBeginPeriod(1) };
+            if result == 0 {
+                Ok(())
+            } else {
+                Err(NativeError::Platform {
+                    operation: "timeBeginPeriod",
+                    code: result,
+                })
+            }
+        }
+
+        fn end_high_resolution_timer(&self) -> Result<(), NativeError> {
+            // SAFETY: Release the 1 ms resolution requested above.
+            let result = unsafe { timeEndPeriod(1) };
+            if result == 0 {
+                Ok(())
+            } else {
+                Err(NativeError::Platform {
+                    operation: "timeEndPeriod",
+                    code: result,
+                })
+            }
+        }
+    }
+}
+
+#[cfg(not(windows))]
+mod stub_impl {
+    use super::*;
+
+    #[derive(Clone, Copy, Default)]
+    pub struct SystemNativeWindowOps;
+
+    impl NativeWindowOps for SystemNativeWindowOps {
+        fn hwnd_of(&self, _: &Window) -> Result<NativeWindowId, NativeError> {
+            Err(NativeError::Unsupported)
+        }
+        fn cursor_position(&self) -> Result<PhysicalPoint, NativeError> {
+            Err(NativeError::Unsupported)
+        }
+        fn left_button_down(&self) -> Result<bool, NativeError> {
+            Err(NativeError::Unsupported)
+        }
+        fn key_down(&self, _: NativeKey) -> Result<bool, NativeError> {
+            Err(NativeError::Unsupported)
+        }
+        fn window_rect(&self, _: NativeWindowId) -> Result<PhysicalRect, NativeError> {
+            Err(NativeError::Unsupported)
+        }
+        fn client_origin(&self, _: NativeWindowId) -> Result<PhysicalPoint, NativeError> {
+            Err(NativeError::Unsupported)
+        }
+        fn scale_factor(&self, _: NativeWindowId) -> Result<f32, NativeError> {
+            Err(NativeError::Unsupported)
+        }
+        fn move_window(
+            &self,
+            _: NativeWindowId,
+            _: PhysicalPoint,
+        ) -> Result<(), NativeError> {
+            Err(NativeError::Unsupported)
+        }
+        fn resize_window(
+            &self,
+            _: NativeWindowId,
+            _: PhysicalSize,
+        ) -> Result<(), NativeError> {
+            Err(NativeError::Unsupported)
+        }
+        fn show(&self, _: NativeWindowId) -> Result<(), NativeError> {
+            Err(NativeError::Unsupported)
+        }
+        fn show_no_activate(&self, _: NativeWindowId) -> Result<(), NativeError> {
+            Err(NativeError::Unsupported)
+        }
+        fn activate(&self, _: NativeWindowId) -> Result<(), NativeError> {
+            Err(NativeError::Unsupported)
+        }
+        fn hide(&self, _: NativeWindowId) -> Result<(), NativeError> {
+            Err(NativeError::Unsupported)
+        }
+        fn set_owner(
+            &self,
+            _: NativeWindowId,
+            _: NativeWindowId,
+        ) -> Result<(), NativeError> {
+            Err(NativeError::Unsupported)
+        }
+        fn remove_topmost(&self, _: NativeWindowId) -> Result<(), NativeError> {
+            Err(NativeError::Unsupported)
+        }
+        fn enable_resize(&self, _: NativeWindowId) -> Result<(), NativeError> {
+            Err(NativeError::Unsupported)
+        }
+        fn disable_resize(&self, _: NativeWindowId) -> Result<(), NativeError> {
+            Err(NativeError::Unsupported)
+        }
+        fn set_min_size(
+            &self,
+            _: NativeWindowId,
+            _: Option<PhysicalSize>,
+        ) -> Result<(), NativeError> {
+            Err(NativeError::Unsupported)
+        }
+        fn window_from_point(
+            &self,
+            _: PhysicalPoint,
+            _: &[NativeWindowId],
+            _: Option<NativeWindowId>,
+        ) -> Result<Option<NativeWindowId>, NativeError> {
+            Err(NativeError::Unsupported)
+        }
+        fn monitor_work_areas(&self) -> Result<Vec<PhysicalRect>, NativeError> {
+            Err(NativeError::Unsupported)
+        }
+        fn begin_high_resolution_timer(&self) -> Result<(), NativeError> {
+            Err(NativeError::Unsupported)
+        }
+        fn end_high_resolution_timer(&self) -> Result<(), NativeError> {
+            Err(NativeError::Unsupported)
+        }
+    }
+}
+
+#[cfg(windows)]
+pub use windows_impl::SystemNativeWindowOps;
+#[cfg(not(windows))]
+pub use stub_impl::SystemNativeWindowOps;
