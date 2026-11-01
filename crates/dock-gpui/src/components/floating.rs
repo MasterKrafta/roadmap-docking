@@ -562,8 +562,14 @@ impl Render for FloatingHost {
         });
 
         let window_id = window.window_handle().window_id();
+        let group = self.group;
+        if let Some(manager) = self.manager.upgrade() {
+            let _ = manager.update(cx, |manager, manager_cx| {
+                manager.observe_native_resize(group, window_id, manager_cx);
+            });
+        }
         let snapshot = self.controller.update(cx, |controller, _| {
-            floating_host_snapshot(controller, window_id, self.group)
+            floating_host_snapshot(controller, window_id, group)
         });
         let snapshot = match snapshot {
             Ok(snapshot) => snapshot,
