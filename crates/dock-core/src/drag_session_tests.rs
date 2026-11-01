@@ -116,25 +116,27 @@ fn target_for_layout(layout: &Layout) -> DropTarget {
 fn pointer_down_is_pressed_and_click_below_threshold_is_cancelled() {
     let payload = panel_payload();
     let mut session = session();
+    let origin = Point::new(10.0, 20.0);
+    let threshold = session.threshold();
+    let move_position = Point::new(origin.x + threshold * 0.95, origin.y);
+    let release_position = Point::new(origin.x + threshold * 0.75, origin.y);
 
-    session
-        .pointer_down(payload, Point::new(10.0, 20.0))
-        .unwrap();
+    session.pointer_down(payload, origin).unwrap();
     assert_eq!(
         session.state(),
         DragState::Pressed {
             payload,
-            origin: Point::new(10.0, 20.0),
-            position: Point::new(10.0, 20.0),
+            origin,
+            position: origin,
         }
     );
 
-    session.pointer_move(Point::new(13.9, 20.0)).unwrap();
+    session.pointer_move(move_position).unwrap();
     assert!(matches!(session.state(), DragState::Pressed { .. }));
 
     assert_eq!(
         session
-            .pointer_up(Point::new(13.5, 20.0), Some(DropTarget::FreeArea))
+            .pointer_up(release_position, Some(DropTarget::FreeArea))
             .unwrap(),
         None
     );
@@ -142,8 +144,8 @@ fn pointer_down_is_pressed_and_click_below_threshold_is_cancelled() {
         session.state(),
         DragState::Cancelled {
             payload,
-            origin: Point::new(10.0, 20.0),
-            position: Point::new(13.5, 20.0),
+            origin,
+            position: release_position,
             reason: DragCancelReason::BelowThreshold,
         }
     );
