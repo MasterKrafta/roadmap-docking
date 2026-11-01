@@ -50,7 +50,8 @@ impl Render for AppShell {
             self.controller_observed = true;
         }
 
-        let entries = self.controller.update(cx, |controller, _| {
+        let floating_manager = self.floating_manager.clone();
+        let entries = self.controller.update(cx, move |controller, _| {
             let layout = controller.layout();
             controller
                 .registry()
@@ -62,7 +63,7 @@ impl Render for AppShell {
                     let checked = layout
                         .panel_instances()
                         .any(|(_, instance)| instance.key == key);
-                    let manager = self.floating_manager.clone();
+                    let manager = floating_manager.clone();
                     ContextMenuItem::new(title, move |app| {
                         crate::actions::toggle_registered_panel(&manager, key.clone(), app);
                     })
