@@ -568,7 +568,7 @@ impl Render for FloatingHost {
         let window_id = window.window_handle().window_id();
         let group = self.group;
         if let Some(manager) = self.manager.upgrade() {
-            let _ = manager.update(cx, |manager, manager_cx| {
+            manager.update(cx, |manager, manager_cx| {
                 manager.observe_native_resize(group, window_id, manager_cx);
             });
         }
@@ -746,24 +746,23 @@ impl Render for FloatingHost {
                                 })
                                 
                         });
-                        if leaves_source || over_other_window {
-                            if let Some(manager) = manager_entity.as_ref()
-                                && begin_floating_tab_tearoff(
-                                    &controller_for_move,
-                                    manager,
-                                    input_window_id,
-                                    group,
-                                    press.panel,
-                                    press.origin,
-                                    point,
-                                    app,
-                                )
-                            {
-                                tab_press_for_move.set(None);
-                                window.release_pointer();
-                                app.stop_propagation();
-                                return;
-                            }
+                        if (leaves_source || over_other_window)
+                            && let Some(manager) = manager_entity.as_ref()
+                            && begin_floating_tab_tearoff(
+                                &controller_for_move,
+                                manager,
+                                input_window_id,
+                                group,
+                                press.panel,
+                                press.origin,
+                                point,
+                                app,
+                            )
+                        {
+                            tab_press_for_move.set(None);
+                            window.release_pointer();
+                            app.stop_propagation();
+                            return;
                         }
                         app.stop_propagation();
                     });
