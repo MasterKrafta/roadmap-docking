@@ -283,7 +283,7 @@ impl FloatingWindowManager {
         cx.spawn(async move |_, app| {
             loop {
                 app.background_executor().timer(Duration::from_millis(4)).await;
-                let Some(keep_moving) = manager.update(app, |manager, manager_cx| {
+                let Ok(keep_moving) = manager.update(app, |manager, manager_cx| {
                     manager.tick_native_move(group, window_id, manager_cx)
                 }) else {
                     break;
