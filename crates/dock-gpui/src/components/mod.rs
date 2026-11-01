@@ -18,7 +18,7 @@ pub use canvas_slot::CanvasSlot;
 pub use column::ColumnView;
 pub use context_menu::{ContextMenu, ContextMenuCallbacks, ContextMenuEntry, ContextMenuItem};
 pub use drop_overlay::{DragGhost, DropOverlay};
-pub use floating::{FloatingHost, FloatingWindowView};
+pub use floating::FloatingHost;
 pub use flyout::FlyoutView;
 pub use group::GroupView;
 pub use main_dock::MainDockView;
