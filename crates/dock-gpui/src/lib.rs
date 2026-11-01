@@ -29,7 +29,7 @@ use gpui::{AppContext, Context, Window, div, prelude::*};
 /// Options for starting the built-in dock demo.
 #[derive(Default)]
 pub struct RunOptions {
-    /// Optional workspace file to restore instead of the default demo layout.
+    /// Optional workspace file to restore instead of starting with an empty workspace.
     pub workspace_path: Option<PathBuf>,
 }
 
@@ -80,12 +80,13 @@ fn starter_panel_registry() -> PanelRegistry {
     registry
 }
 
-/// Launches the built-in Photoshop-style workspace on Windows.
+/// Launches the built-in empty Dock workspace on Windows.
 ///
-/// The default workspace uses four lightweight starter panels. When the
+/// The normal launch creates only the main window. Panel types remain available
+/// in the registry, but no panel instances or panel windows are created until a
+/// workspace is restored or the user explicitly opens a panel. When the
 /// workspace_path option is set, the saved workspace is loaded before the main
-/// window is created; a load error is logged and the default workspace remains
-/// available.
+/// window is created; a load error is logged and the workspace remains empty.
 #[cfg(windows)]
 pub fn run(options: RunOptions) {
     use gpui::{App, Bounds, WindowBounds, WindowOptions, px, size};
@@ -96,21 +97,13 @@ pub fn run(options: RunOptions) {
     application().run(move |cx: &mut App| {
         let metrics = DockMetrics::default();
         let registry = starter_panel_registry();
-        let descriptors = registry.descriptors_for_core();
-        let layout = match dock_core::create_initial_layout(
-            Profile::Photoshop,
-            &descriptors,
-            metrics,
-        ) {
-            Ok(layout) => layout,
-            Err(error) => {
-                tracing::error!(%error, "could not create the initial dock layout");
-                return;
-            }
-        };
-
         let viewport = Rect::new(Point::ZERO, Size::new(1440.0, 900.0));
-        let mut controller = match DockController::new(layout, metrics, registry, viewport) {
+        let mut controller = match DockController::empty(
+            Profile::Photoshop,
+            metrics,
+            registry,
+            viewport,
+        ) {
             Ok(controller) => controller,
             Err(error) => {
                 tracing::error!(%error, "could not create the dock controller");
@@ -124,7 +117,7 @@ pub fn run(options: RunOptions) {
             tracing::warn!(
                 path = %path.display(),
                 %error,
-                "could not restore the requested dock workspace; using the default layout"
+                "could not restore the requested dock workspace; keeping the workspace empty"
             );
         }
 
