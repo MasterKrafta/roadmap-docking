@@ -327,6 +327,7 @@ impl FloatingWindowManager {
     ) -> Option<FloatingWindowEntry> {
         let controller = self.controller.clone();
         let theme = self.theme;
+        let manager = cx.entity().downgrade();
         let show_immediately = self.main_native_window.is_none();
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds::new(
@@ -345,7 +346,7 @@ impl FloatingWindowManager {
         };
 
         let window = match cx.open_window(options, move |_, app| {
-            app.new(|_| FloatingHost::new(controller, group.id, theme))
+            app.new(|_| FloatingHost::new(controller, group.id, theme, manager))
         }) {
             Ok(window) => window,
             Err(error) => {
@@ -358,6 +359,9 @@ impl FloatingWindowManager {
             }
         };
 
+        let window_id = window
+            .update(cx, |_, window, _| window.window_handle().window_id())
+            .ok()?;
         let native_ops = self.native_ops;
         let native_window = match window.update(cx, move |_, window, _| {
             native_ops.hwnd_of(window)
@@ -400,6 +404,15 @@ impl FloatingWindowManager {
                     "could not assign the main window as floating-window owner"
                 );
             }
+            if let Some(position) = self.physical_origin_for_bounds(group.bounds)
+                && let Err(error) = self.native_ops.move_window(native_window, position)
+            {
+                tracing::warn!(
+                    ?group.id,
+                    %error,
+                    "could not place a floating window relative to the main workspace"
+                );
+            }
             if let Err(error) = self.native_ops.remove_topmost(native_window) {
                 tracing::warn!(
                     ?group.id,
@@ -418,6 +431,7 @@ impl FloatingWindowManager {
 
         Some(FloatingWindowEntry {
             window,
+            window_id,
             native_window,
             bounds: group.bounds,
             z_order: group.z_order,
@@ -442,13 +456,8 @@ impl FloatingWindowManager {
                 .unwrap_or(1.0);
 
             if entry.bounds.origin != group.bounds.origin
-                && let (Some(x), Some(y)) = (
-                    physical_coordinate(group.bounds.origin.x, scale),
-                    physical_coordinate(group.bounds.origin.y, scale),
-                )
-                && let Err(error) = self
-                    .native_ops
-                    .move_window(native_window, PhysicalPoint { x, y })
+                && let Some(position) = self.physical_origin_for_bounds(group.bounds)
+                && let Err(error) = self.native_ops.move_window(native_window, position)
             {
                 tracing::warn!(
                     ?group.id,
@@ -478,6 +487,21 @@ impl FloatingWindowManager {
 
         entry.bounds = group.bounds;
     }
+}
+
+fn schedule_native_move_tick(
+    window: &mut Window,
+    manager: WeakEntity<FloatingWindowManager>,
+    group: FloatingGroupId,
+) {
+    window.on_next_frame(move |window, app| {
+        let keep_moving = manager
+            .update(app, |manager, cx| manager.tick_native_move(group, cx))
+            .unwrap_or(false);
+        if keep_moving {
+            schedule_native_move_tick(window, manager, group);
+        }
+    });
 }
 
 fn physical_coordinate(value: f32, scale: f32) -> Option<i32> {
