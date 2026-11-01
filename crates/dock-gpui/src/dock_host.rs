@@ -155,15 +155,9 @@ impl DockHost {
     /// main-column viewport and back into the immutable Core coordinate space.
     pub fn hit_test(&self, point: Point, app: &mut App) -> Result<HitResult, ComputeRectsError> {
         let content_point = self.controller.update(app, |controller, _| {
-            let floating_title_height = controller.metrics().header_height;
             let rects = controller.geometry()?;
-            map_hit_test_point(
-                point,
-                rects,
-                &self.column_scroll_handles,
-                floating_title_height,
-            )
-            .map_err(ComputeRectsError::Geometry)
+            map_hit_test_point(point, rects, &self.column_scroll_handles)
+                .map_err(ComputeRectsError::Geometry)
         })?;
 
         self.controller
