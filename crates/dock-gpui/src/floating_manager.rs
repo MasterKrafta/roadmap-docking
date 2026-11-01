@@ -233,7 +233,10 @@ impl FloatingWindowManager {
                 .find_map(|(panel, instance)| (instance.key == *key).then_some(panel));
 
             if existing_panel.is_some() {
-                return Ok::<(Option<PanelId>, Option<Rect>), PanelCommandError>((existing_panel, None));
+                return Ok::<(Option<PanelId>, Option<Rect>), PanelCommandError>((
+                    existing_panel,
+                    None,
+                ));
             }
 
             let descriptor = controller
