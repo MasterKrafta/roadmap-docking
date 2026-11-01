@@ -825,3 +825,53 @@ fn floating_composition_with_split_root_can_build_drop_zones_and_dock() {
         })
     );
 }
+
+#[test]
+fn floating_group_can_dock_to_an_empty_main_window_edge() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+    let (_, panel_node) = builder.panel(key("empty-main-edge-panel"), constraints());
+    let source_root = builder.tabs(vec![panel_node], 0, false);
+    let floating_group = builder.floating_group(source_root, bounds(100.0, 120.0), 1);
+    let layout = builder.build();
+
+    let rects = layout
+        .compute_rects(
+            Rect::new(Point::ZERO, Size::new(1200.0, 800.0)),
+            &metrics,
+        )
+        .unwrap();
+    let zones = layout
+        .compute_drop_zones(DropSource::Group { group: source_root }, &rects, &metrics)
+        .unwrap();
+    let left_edge = zones
+        .iter()
+        .find(|zone| {
+            zone.zone == crate::DropZone::DockEdge
+                && zone.target
+                    == DropTarget::MainColumn {
+                        side: DockSide::Left,
+                        index: 0,
+                    }
+        })
+        .expect("an empty left Main Dock must expose an outer-edge insertion target");
+
+    let request = crate::DragDropRequest {
+        payload: crate::DragPayload::FloatingGroup {
+            group: floating_group,
+        },
+        handle: crate::DragHandle::FloatingCapture,
+        origin: Point::ZERO,
+        point: Point::new(2.0, 400.0),
+        target: Some(left_edge.target),
+        floating_bounds: None,
+    };
+    let action = layout.resolve_drag_drop(&request, &metrics).unwrap();
+    assert_eq!(
+        action,
+        crate::DragDropAction::Command(DockCommand::DockFloating {
+            group: floating_group,
+            target: left_edge.target,
+        })
+    );
+}
