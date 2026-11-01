@@ -7,8 +7,8 @@ use gpui::{
     AnyView, Bounds, ClipboardItem, Context, CursorStyle, Element, ElementId, ElementInputHandler,
     Entity, EntityInputHandler, FocusHandle, Focusable, GlobalElementId, KeyBinding, LayoutId,
     MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point,
-    ScrollHandle, ShapedLine, SharedString, Style, TextAlign, TextRun, UTF16Selection, Window, WindowBounds,
-    WindowKind, WindowOptions,
+    ScrollHandle, ShapedLine, SharedString, Style, TextAlign, TextRun, UTF16Selection, Window,
+    WindowBounds, WindowKind, WindowOptions,
 };
 use gpui_platform::application;
 
@@ -845,7 +845,10 @@ impl Render for TransferPanel {
                     .flex()
                     .items_center()
                     .bg(rgb(if row % 2 == 0 { 0x303741 } else { 0x272d35 }))
-                    .child(format!("Строка прокрутки {} — состояние панели сохраняется", row + 1)),
+                    .child(format!(
+                        "Строка прокрутки {} — состояние панели сохраняется",
+                        row + 1
+                    )),
             );
         }
 
