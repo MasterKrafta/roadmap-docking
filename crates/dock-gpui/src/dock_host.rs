@@ -518,7 +518,7 @@ impl Render for DockHost {
         let theme = self.theme;
         let context_menu_is_open = open_context_menu.is_some();
         let drag_cursor_style = drag_preview.map(|preview| {
-            if preview.target.is_some() || drag_handle == Some(DragHandle::FloatingTitle) {
+            if preview.target.is_some() || drag_handle == Some(DragHandle::FloatingCapture) {
                 gpui::CursorStyle::ClosedHand
             } else {
                 gpui::CursorStyle::OperationNotAllowed
@@ -640,11 +640,11 @@ impl Render for DockHost {
             .overflow_hidden()
             .child(measurement);
 
-        // The current semantic target controls the cursor. A floating-title drag
-        // intentionally has no drop target but is still a valid move gesture.
+        // A FloatingCapture drag remains a valid move while its native window
+        // crosses non-actionable space between the main dock and another window.
         if let Some(preview) = drag_preview {
             workspace =
-                if preview.target.is_some() || drag_handle == Some(DragHandle::FloatingTitle) {
+                if preview.target.is_some() || drag_handle == Some(DragHandle::FloatingCapture) {
                     workspace.cursor_grabbing()
                 } else {
                     workspace.cursor_not_allowed()
