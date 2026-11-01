@@ -4,11 +4,10 @@ use std::rc::Rc;
 
 use dock_core::{
     ColumnDisplayItem, ColumnMode, ComputeRectsError, DockCommand, DockSide, DragHandle,
-    DropTarget, GeometryError, HitResult, Layout, LayoutRects, Node, NodeId, PanelId, Point,
+    DropTarget, GeometryError, HitResult, Layout, LayoutRects, Node, NodeId, Point,
 };
 use gpui::{
-    AppContext,
-    AnyView, App, Context, Entity, FocusHandle, HitboxBehavior, HitboxId, IntoElement,
+    AnyView, App, AppContext, Context, Entity, FocusHandle, HitboxBehavior, HitboxId, IntoElement,
     ParentElement, Render, ScrollHandle, Styled, Window, canvas, div,
     prelude::InteractiveElement as _, px, rgb,
 };
@@ -261,7 +260,6 @@ impl Render for DockHost {
             controller.ensure_panel_views(window, panel_cx);
         });
 
-
         // One read transaction produces only the main-window geometry and presentation data.
         let (
             chrome,
@@ -391,8 +389,7 @@ impl Render for DockHost {
                     .iter()
                     .filter(|panel_rect| {
                         main_active_panels.contains(&panel_rect.panel)
-                            || active_flyout
-                                .is_some_and(|flyout| flyout.panel == panel_rect.panel)
+                            || active_flyout.is_some_and(|flyout| flyout.panel == panel_rect.panel)
                     })
                     .filter_map(|panel_rect| {
                         let panel = panel_rect.panel;
@@ -418,19 +415,20 @@ impl Render for DockHost {
             })
             .cloned()
             .collect::<Vec<_>>();
-        let flyout_panel_view = rects
-            .as_ref()
-            .and_then(|rects| rects.flyout)
-            .and_then(|flyout_rect| {
-                let flyout = active_flyout.filter(|flyout| {
-                    flyout.panel == flyout_rect.panel && mounted_panel_ids.insert(flyout.panel)
-                })?;
-                self.controller.update(cx, |controller, panel_cx| {
-                    controller
-                        .panel_view(flyout.panel, window, panel_cx)
-                        .map(|view| (flyout, view))
-                })
-            });
+        let flyout_panel_view =
+            rects
+                .as_ref()
+                .and_then(|rects| rects.flyout)
+                .and_then(|flyout_rect| {
+                    let flyout = active_flyout.filter(|flyout| {
+                        flyout.panel == flyout_rect.panel && mounted_panel_ids.insert(flyout.panel)
+                    })?;
+                    self.controller.update(cx, |controller, panel_cx| {
+                        controller
+                            .panel_view(flyout.panel, window, panel_cx)
+                            .map(|view| (flyout, view))
+                    })
+                });
 
         // Keep scroll state only while its Column node still owns an overflow
         // region. Removing/replacing the Core node or resolving the overflow
@@ -1082,4 +1080,3 @@ pub(crate) fn collect_subtree_nodes(
         Some(Node::Panel(_)) | None => {}
     }
 }
-
