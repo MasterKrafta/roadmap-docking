@@ -505,6 +505,16 @@ impl FloatingHost {
         self.group
     }
 
+    /// Rebinds this hidden host when its native window is reused for a new group.
+    pub(crate) fn set_group(&mut self, group: FloatingGroupId) {
+        if self.group == group {
+            return;
+        }
+        self.group = group;
+        self.column_scroll_handles.clear();
+        self.open_context_menu = None;
+    }
+
     /// Enables or disables closing a tab with the middle mouse button.
     pub fn middle_click_closes_tabs(mut self, enabled: bool) -> Self {
         self.middle_click_closes_tabs = enabled;

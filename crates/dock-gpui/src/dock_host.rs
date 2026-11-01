@@ -13,10 +13,10 @@ use gpui::{
 };
 
 use crate::{
-    DockController, DockTheme,
+    DockController, DockTheme, FloatingWindowManager,
     components::{
         CanvasSlot, ContextMenu, ContextMenuEntry, ContextMenuItem, ContextMenuTarget,
-        ContextMenuToggle, DragGhost, DropOverlay, FloatingWindowView, FlyoutView, MainDockView,
+        ContextMenuToggle, DragGhost, DropOverlay, FlyoutView, MainDockView,
         collect_group_presentations,
     },
     geometry::{host_geometry_from_gpui_bounds, point_from_gpui},
@@ -55,6 +55,7 @@ pub struct DockHost {
     /// Root focus boundary used to cancel gestures when this window loses focus.
     root_focus_handle: Option<FocusHandle>,
     focus_observed: bool,
+    floating_manager: Option<Entity<FloatingWindowManager>>,
 }
 
 #[derive(Clone)]
@@ -81,6 +82,7 @@ impl DockHost {
             controller_observed: false,
             root_focus_handle: None,
             focus_observed: false,
+            floating_manager: None,
         }
     }
 
@@ -219,6 +221,18 @@ impl Render for DockHost {
             controller.ensure_panel_views(window, panel_cx);
         });
 
+        // One manager follows the shared Layout and owns the native windows
+        // for its floating groups. It is created only once for this main host.
+        if self.floating_manager.is_none() {
+            let controller = self.controller.clone();
+            let theme = self.theme;
+            let manager = cx.new(|_| FloatingWindowManager::new(controller, theme));
+            self.floating_manager = Some(manager.clone());
+            manager.update(cx, |manager, manager_cx| {
+                manager.attach_main_window(window, manager_cx);
+            });
+        }
+
         // One read transaction produces the geometry snapshot plus the IDs/modes
         // needed by the main-dock presentation layer. The Layout remains Core-owned.
         let (
@@ -227,10 +241,6 @@ impl Render for DockHost {
             main_node_ids,
             main_column_ids,
             main_column_groups,
-            floating_node_ids,
-            floating_column_ids,
-            floating_column_groups,
-            floating_panel_ids,
             floating_titles,
             all_column_ids,
             column_modes,
@@ -267,9 +277,6 @@ impl Render for DockHost {
             // Collect each floating root independently. The maps contain
             // IDs only; Layout remains the single owner of every tree.
             let mut floating_node_ids = HashMap::new();
-            let mut floating_column_ids = HashMap::new();
-            let mut floating_column_groups = HashMap::new();
-            let mut floating_panel_ids = HashMap::new();
             let mut all_node_ids = main_node_ids.clone();
             let mut all_column_ids = main_column_ids.clone();
 
@@ -292,15 +299,10 @@ impl Render for DockHost {
                         &mut columns,
                         &mut column_groups,
                     );
-                    let mut panels = HashSet::new();
-                    collect_panel_ids(layout, area.root, &mut panels);
 
                     all_node_ids.extend(nodes.iter().copied());
                     all_column_ids.extend(columns.iter().copied());
                     floating_node_ids.insert(floating_rect.group, nodes);
-                    floating_column_ids.insert(floating_rect.group, columns);
-                    floating_column_groups.insert(floating_rect.group, column_groups);
-                    floating_panel_ids.insert(floating_rect.group, panels);
                 }
             }
 
@@ -367,10 +369,6 @@ impl Render for DockHost {
                 main_node_ids,
                 main_column_ids,
                 main_column_groups,
-                floating_node_ids,
-                floating_column_ids,
-                floating_column_groups,
-                floating_panel_ids,
                 floating_titles,
                 all_column_ids,
                 column_modes,
@@ -394,9 +392,8 @@ impl Render for DockHost {
             }
         };
 
-        // Main-column panels are mounted by ColumnView so their content moves
-        // with that column's own scroll handle. Floating panel views are selected
-        // per floating root below and mounted inside that composition.
+        // Main-column panels are mounted by ColumnView. Floating panels are mounted
+        // only by their matching FloatingHost native window.
         let main_active_panels = main_column_groups
             .values()
             .flat_map(|groups| groups.iter())
@@ -415,6 +412,11 @@ impl Render for DockHost {
                 rects
                     .panels
                     .iter()
+                    .filter(|panel_rect| {
+                        main_active_panels.contains(&panel_rect.panel)
+                            || active_flyout
+                                .is_some_and(|flyout| flyout.panel == panel_rect.panel)
+                    })
                     .filter_map(|panel_rect| {
                         let panel = panel_rect.panel;
                         let rect = *panel_rect;
@@ -798,116 +800,6 @@ impl Render for DockHost {
                 ));
             }
 
-            // Later children paint above earlier ones; Core z_order is preserved.
-            let mut floating_groups = rects.floating_groups.clone();
-            floating_groups.sort_by_key(|group| group.z_order);
-            for floating in floating_groups {
-                let node_ids = floating_node_ids
-                    .get(&floating.group)
-                    .cloned()
-                    .unwrap_or_default();
-                let column_ids = floating_column_ids
-                    .get(&floating.group)
-                    .cloned()
-                    .unwrap_or_default();
-                let empty_column_groups = HashMap::new();
-                let column_group_map = floating_column_groups
-                    .get(&floating.group)
-                    .unwrap_or(&empty_column_groups);
-                let panel_ids = floating_panel_ids
-                    .get(&floating.group)
-                    .cloned()
-                    .unwrap_or_default();
-
-                let floating_columns = rects
-                    .columns
-                    .iter()
-                    .filter(|column| column_ids.contains(&column.column))
-                    .copied()
-                    .collect::<Vec<_>>();
-                let floating_group_rects = rects
-                    .groups
-                    .iter()
-                    .filter(|group| node_ids.contains(&group.group))
-                    .copied()
-                    .collect::<Vec<_>>();
-                let floating_tab_strips = rects
-                    .tab_strips
-                    .iter()
-                    .filter(|strip| node_ids.contains(&strip.group))
-                    .copied()
-                    .collect::<Vec<_>>();
-                let floating_tab_headers = rects
-                    .tab_headers
-                    .iter()
-                    .filter(|header| node_ids.contains(&header.group))
-                    .copied()
-                    .collect::<Vec<_>>();
-                let floating_tab_overflows = rects
-                    .tab_overflows
-                    .iter()
-                    .filter(|overflow| node_ids.contains(&overflow.group))
-                    .cloned()
-                    .collect::<Vec<_>>();
-                let floating_splitters = rects
-                    .splitters
-                    .iter()
-                    .filter(|splitter| node_ids.contains(&splitter.owner))
-                    .copied()
-                    .collect::<Vec<_>>();
-                let floating_resize_edges = rects
-                    .floating_resize_edges
-                    .iter()
-                    .filter(|edge| edge.group == floating.group)
-                    .copied()
-                    .collect::<Vec<_>>();
-                let floating_overflow = rects
-                    .vertical_overflow
-                    .iter()
-                    .filter(|overflow| column_ids.contains(&overflow.owner))
-                    .copied()
-                    .collect::<Vec<_>>();
-                let floating_panel_views = panel_views
-                    .iter()
-                    .filter(|(panel, _)| {
-                        panel_ids.contains(&panel.panel) && mounted_panel_ids.insert(panel.panel)
-                    })
-                    .cloned()
-                    .collect::<Vec<_>>();
-
-                workspace = workspace.child(FloatingWindowView::render(
-                    floating,
-                    &floating_resize_edges,
-                    &floating_columns,
-                    &floating_group_rects,
-                    floating_panel_views,
-                    &floating_tab_strips,
-                    &floating_tab_headers,
-                    &floating_tab_overflows,
-                    &group_presentations,
-                    column_group_map,
-                    &column_modes,
-                    &rail_display_orders,
-                    &floating_splitters,
-                    &floating_overflow,
-                    &self.column_scroll_handles,
-                    active_flyout,
-                    drag_preview,
-                    &drag_zones,
-                    metrics,
-                    floating_titles
-                        .get(&floating.group)
-                        .map(String::as_str)
-                        .unwrap_or("Floating panels"),
-                    menu_group,
-                    toggle_context_menu.clone(),
-                    middle_click_closes_tabs,
-                    self.controller.clone(),
-                    theme,
-                    false,
-                ));
-            }
-
             // One overlay consumes the same resolver snapshot used by hit testing.
             // The ghost is a visual-only sibling and has no pointer listeners.
             workspace = workspace.child(DropOverlay::render(
@@ -1238,7 +1130,7 @@ pub(crate) fn floating_root_title(
 
 /// Collects panel IDs reachable from one tree root. Geometry emits only
 /// rectangles for active panels, so this set can safely include inactive tabs.
-fn collect_panel_ids(layout: &Layout, id: NodeId, panels: &mut HashSet<PanelId>) {
+pub(crate) fn collect_panel_ids(layout: &Layout, id: NodeId, panels: &mut HashSet<PanelId>) {
     match layout.node(id) {
         Some(Node::Split(split)) => {
             for child in &split.children {

@@ -9,6 +9,7 @@ pub mod actions;
 pub mod components;
 pub mod controller;
 pub mod dock_host;
+pub mod floating_manager;
 
 mod geometry;
 pub mod input;
@@ -40,6 +41,7 @@ pub use components::{
     SplitterView, TabHeaderView, TabOverflow, TabStripView,
 };
 pub use dock_host::DockHost;
+pub use floating_manager::{FloatingWindowManager, PanelWindowOwner, WindowRegistry};
 pub use missing_panel::MissingPanelPlaceholder;
 pub use persistence::WorkspacePersistenceError;
 pub use theme::DockTheme;
