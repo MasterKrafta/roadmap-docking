@@ -97,7 +97,7 @@ pub fn run(options: RunOptions) {
     application().run(move |cx: &mut App| {
         let metrics = DockMetrics::default();
         let registry = starter_panel_registry();
-        let viewport = Rect::new(Point::ZERO, Size::new(1440.0, 900.0));
+        let viewport = Rect::new(Point::ZERO, Size::new(1440.0, 840.0));
         let mut controller = match DockController::empty(
             Profile::Photoshop,
             metrics,
@@ -122,7 +122,7 @@ pub fn run(options: RunOptions) {
         }
 
         let controller = cx.new(|_| controller);
-        let bounds = Bounds::centered(None, size(px(1440.0), px(900.0)), cx);
+        let bounds = Bounds::centered(None, size(px(1440.0), px(840.0)), cx);
         let open_result = cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
