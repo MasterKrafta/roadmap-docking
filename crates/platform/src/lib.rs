@@ -144,7 +144,8 @@ pub trait NativeWindowOps {
     fn disable_resize(&self, window: NativeWindowId) -> Result<(), NativeError>;
     /// Reports whether this HWND is inside the OS modal move/resize loop.
     fn is_resizing(&self, window: NativeWindowId) -> Result<bool, NativeError>;
-    /// Sets the minimum outer-window tracking size in physical pixels.
+    /// Sets the minimum client-content size in physical pixels. The native
+    /// implementation includes the current non-client frame in WM_GETMINMAXINFO.
     /// Pass None to remove the dynamic native constraint.
     fn set_min_size(
         &self,
@@ -709,6 +710,35 @@ mod windows_impl {
             }
 
             let native = hwnd(window);
+            let outer_size = if let Some(client_size) = size {
+                let mut window_rect = RECT::default();
+                let mut client_rect = RECT::default();
+                // SAFETY: Both RECT values are writable outputs for this live HWND.
+                unsafe {
+                    GetWindowRect(native, &mut window_rect)
+                        .map_err(|error| platform_error("GetWindowRect(min size)", error))?;
+                    GetClientRect(native, &mut client_rect)
+                        .map_err(|error| platform_error("GetClientRect(min size)", error))?;
+                }
+                let window_width = window_rect.right.checked_sub(window_rect.left)
+                    .ok_or(NativeError::InvalidSize)?;
+                let window_height = window_rect.bottom.checked_sub(window_rect.top)
+                    .ok_or(NativeError::InvalidSize)?;
+                let client_width = client_rect.right.checked_sub(client_rect.left)
+                    .ok_or(NativeError::InvalidSize)?;
+                let client_height = client_rect.bottom.checked_sub(client_rect.top)
+                    .ok_or(NativeError::InvalidSize)?;
+                let frame_width = window_width.saturating_sub(client_width).max(0);
+                let frame_height = window_height.saturating_sub(client_height).max(0);
+                Some(PhysicalSize {
+                    width: client_size.width.checked_add(frame_width)
+                        .ok_or(NativeError::InvalidSize)?,
+                    height: client_size.height.checked_add(frame_height)
+                        .ok_or(NativeError::InvalidSize)?,
+                })
+            } else {
+                None
+            };
             let mut reference_data = 0usize;
 
             // SAFETY: Query the exact subclass callback and ID used below.
@@ -722,7 +752,7 @@ mod windows_impl {
             }
             .as_bool();
 
-            match size {
+            match outer_size {
                 Some(size) if already_installed => {
                     // SAFETY: reference_data is the live allocation retained
                     // by this window's min-size subclass.
