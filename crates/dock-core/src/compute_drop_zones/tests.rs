@@ -1299,3 +1299,32 @@ fn resolver_exposes_the_exact_legal_zone_selected_for_a_pointer() {
     assert!(resolver.zones().contains(&resolved_zone));
     assert_eq!(resolver.resolve(point).unwrap(), Some(resolved_zone.target));
 }
+
+#[test]
+fn empty_main_dock_side_exposes_first_column_drop_zone() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+    let (source_panel, source_node) = builder.panel(key("empty-side-source"), constraints());
+    let source_group = builder.tabs(vec![source_node], 0, false);
+    let right_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![source_group],
+        vec![1.0],
+    );
+    builder.main_area(DockSide::Right, right_column);
+    let layout = builder.build();
+    let rects = layout.compute_rects(viewport(), &metrics).unwrap();
+    let zones = layout
+        .compute_drop_zones(DropSource::Panel { panel: source_panel }, &rects, &metrics)
+        .unwrap();
+
+    assert!(zones.iter().any(|zone| {
+        zone.zone == DropZone::DockEdge
+            && zone.target
+                == DropTarget::MainColumn {
+                    side: DockSide::Left,
+                    index: 0,
+                }
+    }));
+}
