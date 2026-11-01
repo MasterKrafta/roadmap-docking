@@ -358,21 +358,14 @@ impl Layout {
                         Size::new(edge_width, viewport.size.height),
                     )
                 };
-                let target = match source {
-                    DropSource::Panel { .. } => Some(DropTarget::MainColumn {
-                        side,
-                        index: if is_left { 0 } else { columns.len() },
-                    }),
-                    DropSource::Group { .. } => edge_group_for_dock_edge(self, columns, is_left)
-                        .map(|group| DropTarget::GroupEdge {
-                            group,
-                            zone: if is_left {
-                                DropZone::Left
-                            } else {
-                                DropZone::Right
-                            },
-                        }),
-                };
+                // The outer edge of the main window is a column insertion
+                // target for both a single panel and a complete group/composition.
+                // Unlike GroupEdge, MainColumn also works when this dock side is
+                // empty and can accept multi-column floating roots unchanged.
+                let target = Some(DropTarget::MainColumn {
+                    side,
+                    index: if is_left { 0 } else { columns.len() },
+                });
                 if let Some(target) = target {
                     let is_noop = match target {
                         DropTarget::GroupEdge { group, zone } => {
