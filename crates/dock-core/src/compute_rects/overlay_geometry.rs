@@ -1,4 +1,5 @@
 use super::*;
+use crate::ResizeEdge;
 
 pub(super) fn compute_flyout_rect(
     layout: &Layout,
