@@ -574,11 +574,9 @@ impl Render for FloatingHost {
             self.native_resize_observation_pending = true;
             cx.defer_in(window, move |host, _, host_cx| {
                 host.native_resize_observation_pending = false;
-                // A host can be rebound to another Core group before this
-                // deferred callback runs. Observe only the group it rendered.
-                if host.group != group {
-                    return;
-                }
+                // A reusable host may have been rebound before this callback
+                // runs, so observe whichever group it currently represents.
+                let group = host.group;
                 if let Some(manager) = host.manager.upgrade() {
                     manager.update(host_cx, |manager, manager_cx| {
                         manager.observe_native_resize(group, window_id, manager_cx);
