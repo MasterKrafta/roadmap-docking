@@ -1501,6 +1501,14 @@ fn physical_coordinate(value: f32, scale: f32) -> Option<i32> {
         .then(|| scaled.round() as i32)
 }
 
+impl Drop for FloatingWindowManager {
+    fn drop(&mut self) {
+        if self.native_move.is_some_and(|state| state.high_resolution_timer) {
+            let _ = self.native_ops.end_high_resolution_timer();
+        }
+    }
+}
+
 #[cfg(test)]
 mod coordinate_tests {
     use super::{
@@ -1588,10 +1596,3 @@ mod coordinate_tests {
     }
 }
 
-impl Drop for FloatingWindowManager {
-    fn drop(&mut self) {
-        if self.native_move.is_some_and(|state| state.high_resolution_timer) {
-            let _ = self.native_ops.end_high_resolution_timer();
-        }
-    }
-}
