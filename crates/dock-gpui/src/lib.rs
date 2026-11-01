@@ -23,16 +23,130 @@ pub use dock_core;
 
 use std::path::PathBuf;
 
-/// Options for starting the dock application.
+use gpui::{Context, Window, div, prelude::*};
+
+/// Options for starting the built-in dock demo.
 #[derive(Default)]
 pub struct RunOptions {
-    /// Optional workspace file to restore at startup.
+    /// Optional workspace file to restore instead of the default demo layout.
     pub workspace_path: Option<PathBuf>,
 }
 
-/// Temporary entry point retained while the GPUI host is being implemented.
+/// Small content view used by the built-in launcher until an application
+/// supplies its own PanelRegistry and panel factories.
+struct StarterPanel {
+    title: &'static str,
+}
+
+impl Render for StarterPanel {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        div().size_full().p_4().child(self.title)
+    }
+}
+
+fn starter_panel_registry() -> PanelRegistry {
+    use dock_core::{PanelConstraints, PanelKey, Size};
+
+    let mut registry = PanelRegistry::new();
+    let constraints = PanelConstraints::new(
+        Size::new(120.0, 80.0),
+        Size::new(280.0, 220.0),
+        None,
+        false,
+    );
+
+    for (key, title) in [
+        ("layers", "Layers"),
+        ("color", "Color"),
+        ("properties", "Properties"),
+        ("history", "History"),
+    ] {
+        let panel_key = PanelKey::new(key).expect("built-in panel keys must be valid");
+        registry
+            .register(PanelDescriptor::new(
+                panel_key,
+                title,
+                IconSource::None,
+                constraints,
+                move |_window, app| app.new(|_| StarterPanel { title }).into(),
+            ))
+            .expect("built-in panel descriptors must be valid");
+    }
+
+    registry
+}
+
+/// Launches the built-in Photoshop-style workspace on Windows.
+///
+/// The default workspace uses four lightweight starter panels. When the
+/// workspace_path option is set, the saved workspace is loaded before the main
+/// window is created; a load error is logged and the default workspace remains
+/// available.
+#[cfg(windows)]
+pub fn run(options: RunOptions) {
+    use gpui::{App, AppContext, Bounds, WindowBounds, WindowOptions, px, size};
+    use gpui_platform::application;
+
+    let workspace_path = options.workspace_path;
+
+    application().run(move |cx: &mut App| {
+        let metrics = DockMetrics::default();
+        let registry = starter_panel_registry();
+        let descriptors = registry.descriptors_for_core();
+        let layout = match dock_core::create_initial_layout(
+            Profile::Photoshop,
+            &descriptors,
+            metrics,
+        ) {
+            Ok(layout) => layout,
+            Err(error) => {
+                tracing::error!(%error, "could not create the initial dock layout");
+                return;
+            }
+        };
+
+        let viewport = Rect::new(Point::ZERO, Size::new(1440.0, 900.0));
+        let mut controller = match DockController::new(layout, metrics, registry, viewport) {
+            Ok(controller) => controller,
+            Err(error) => {
+                tracing::error!(%error, "could not create the dock controller");
+                return;
+            }
+        };
+
+        if let Some(path) = workspace_path.as_ref()
+            && let Err(error) = controller.load_workspace_from(path)
+        {
+            tracing::warn!(
+                path = %path.display(),
+                %error,
+                "could not restore the requested dock workspace; using the default layout"
+            );
+        }
+
+        let controller = cx.new(|_| controller);
+        let bounds = Bounds::centered(None, size(px(1440.0), px(900.0)), cx);
+        let open_result = cx.open_window(
+            WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(bounds)),
+                ..Default::default()
+            },
+            move |_, cx| cx.new(|_| DockHost::new(controller.clone(), DockTheme::default())),
+        );
+
+        if open_result.is_err() {
+            tracing::error!("GPUI could not open the main dock window");
+            return;
+        }
+
+        cx.activate(true);
+    });
+}
+
+/// The current native floating-window implementation is Windows-specific.
+#[cfg(not(windows))]
 pub fn run(_options: RunOptions) {
-    tracing::warn!("dock-gpui host is not implemented yet");
+    tracing::warn!("the built-in dock demo currently requires the Windows native-window backend");
 }
 
 pub use components::{
