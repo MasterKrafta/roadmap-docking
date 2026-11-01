@@ -170,6 +170,16 @@ impl PanelRegistry {
         self.descriptors.is_empty()
     }
 
+    /// Returns panel descriptors in stable key order for application menus.
+    ///
+    /// The registry remains the source of panel types; open/checked state must
+    /// always be derived from the current Core Layout.
+    pub fn descriptors(&self) -> Vec<&PanelDescriptor> {
+        let mut descriptors = self.descriptors.values().collect::<Vec<_>>();
+        descriptors.sort_by(|left, right| left.key.cmp(&right.key));
+        descriptors
+    }
+
     /// Produces the deterministic, UI-independent descriptor list required by
     /// create_initial_layout and WorkspaceFile::load_json.
     pub fn descriptors_for_core(&self) -> Vec<(PanelKey, PanelConstraints)> {
