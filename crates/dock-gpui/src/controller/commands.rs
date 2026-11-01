@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-use dock_core::{CommandError, CommandOutcome, DockCommand, PanelId, PanelKey};
+use dock_core::{
+    CommandError, CommandOutcome, DockCommand, DragDropAction, DragDropRequest, DragHandle,
+    DragState, DropTarget, FloatingGroupId, PanelId, PanelKey, Point,
+};
 use gpui::{AnyView, App, AppContext, Context, Window};
 
 use super::{DockController, DockEvent, PanelCommandError};
@@ -328,6 +331,129 @@ impl DockController {
         self.flush_events(cx);
         cx.notify();
         result
+    }
+
+    /// Applies the initial Float command inside an already-open native tear-off transaction.
+    /// The active DragSession survives and adopts the new Layout revision.
+    pub(crate) fn dispatch_tearoff_float_in(
+        &mut self,
+        command: DockCommand,
+        cx: &mut Context<Self>,
+    ) -> Result<CommandOutcome, CommandError> {
+        if !self.tearoff_transaction_active
+            || !matches!(command, DockCommand::Float { .. } | DockCommand::FloatPanelFromFlyout { .. })
+        {
+            let error = CommandError::InvalidValue {
+                field: "tearoff",
+                reason: "a Float command requires an active native tear-off transaction",
+            };
+            self.finish_failure(&error);
+            self.flush_events(cx);
+            cx.notify();
+            return Err(error);
+        }
+
+        let before_panels = self.panel_keys();
+        let previous_version = self.layout.version();
+        match self.history.apply(&mut self.layout, command, &self.metrics) {
+            Ok(outcome) => {
+                self.finish_success(before_panels, previous_version, std::iter::empty());
+                self.drag.layout_version = Some(self.layout.version());
+                self.flush_events(cx);
+                cx.notify();
+                Ok(outcome)
+            }
+            Err(error) => {
+                self.finish_failure(&error);
+                let _ = self.history.cancel_transaction(&mut self.layout, &self.metrics);
+                self.tearoff_transaction_active = false;
+                self.drag.cancel_gesture();
+                self.flush_events(cx);
+                cx.notify();
+                Err(error)
+            }
+        }
+    }
+
+    /// Completes a native move as one undo step. A valid main-window drop docks
+    /// the detached payload; an empty-space drop commits the final floating origin.
+    pub(crate) fn finish_tearoff_move_in(
+        &mut self,
+        group: FloatingGroupId,
+        floating_origin: Point,
+        main_drop: Option<(DropTarget, Point)>,
+        cx: &mut Context<Self>,
+    ) -> Result<(), CommandError> {
+        if !self.tearoff_transaction_active {
+            return Err(CommandError::InvalidValue {
+                field: "tearoff",
+                reason: "there is no active native move transaction",
+            });
+        }
+
+        let dock_command = if let Some((target, point)) = main_drop
+            && target != DropTarget::FreeArea
+        {
+            match self.drag.session().state() {
+                DragState::Dragging { payload, origin, .. }
+                    if self.drag.session().handle() != Some(DragHandle::FloatingTitle) =>
+                {
+                    let request = DragDropRequest {
+                        payload,
+                        handle: self.drag.session().handle().unwrap_or(DragHandle::GroupGrip),
+                        origin,
+                        point,
+                        target: Some(target),
+                        floating_bounds: None,
+                    };
+                    match self.layout.resolve_drag_drop(&request, &self.metrics) {
+                        Ok(DragDropAction::Command(command)) => Some(command),
+                        Ok(DragDropAction::NoOp) => None,
+                        Err(error) => {
+                            tracing::debug!(%error, "native tear-off drop was rejected; keeping the floating window");
+                            None
+                        }
+                    }
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
+        let command = dock_command.unwrap_or(DockCommand::MoveFloating {
+            group,
+            origin: floating_origin,
+        });
+
+        let before_panels = self.panel_keys();
+        let previous_version = self.layout.version();
+        match self.history.apply(&mut self.layout, command, &self.metrics) {
+            Ok(_) => {
+                self.finish_success(before_panels, previous_version, std::iter::empty());
+                self.history.commit_transaction(&self.layout);
+                self.tearoff_transaction_active = false;
+                self.drag.cancel_gesture();
+                self.drag.clear_layout_version();
+                self.flush_events(cx);
+                cx.notify();
+                Ok(())
+            }
+            Err(error) => {
+                self.finish_failure(&error);
+                let cancel_result = self.history.cancel_transaction(&mut self.layout, &self.metrics);
+                self.tearoff_transaction_active = false;
+                self.drag.cancel_gesture();
+                self.drag.clear_layout_version();
+                if cancel_result.is_ok() && self.layout.version() != previous_version {
+                    self.pending_events.push_back(DockEvent::LayoutChanged {
+                        version: self.layout.version(),
+                    });
+                }
+                self.flush_events(cx);
+                cx.notify();
+                Err(error)
+            }
+        }
     }
 
     /// Publishes a Core drop-resolution failure without applying a command.
