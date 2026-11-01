@@ -142,6 +142,8 @@ pub trait NativeWindowOps {
 
     fn enable_resize(&self, window: NativeWindowId) -> Result<(), NativeError>;
     fn disable_resize(&self, window: NativeWindowId) -> Result<(), NativeError>;
+    /// Reports whether this HWND is inside the OS modal move/resize loop.
+    fn is_resizing(&self, window: NativeWindowId) -> Result<bool, NativeError>;
     /// Sets the minimum outer-window tracking size in physical pixels.
     /// Pass None to remove the dynamic native constraint.
     fn set_min_size(
@@ -674,6 +676,27 @@ mod windows_impl {
             .map_err(|error| platform_error("SetWindowPos(disable resize)", error))
         }
 
+        fn is_resizing(&self, window: NativeWindowId) -> Result<bool, NativeError> {
+            let mut reference_data = 0usize;
+            // SAFETY: Query the subclass and reference data attached to this HWND.
+            let installed = unsafe {
+                GetWindowSubclass(
+                    hwnd(window),
+                    Some(resize_loop_subclass_proc),
+                    RESIZE_LOOP_SUBCLASS_ID,
+                    Some(&mut reference_data as *mut usize),
+                )
+            }
+            .as_bool();
+            if !installed || reference_data == 0 {
+                return Ok(false);
+            }
+
+            // SAFETY: The registered subclass owns this state allocation until
+            // it is detached or WM_NCDESTROY runs, both on the UI thread.
+            Ok(unsafe { (*(reference_data as *const ResizeLoopState)).active })
+        }
+
         fn set_min_size(
             &self,
             window: NativeWindowId,
@@ -919,6 +942,9 @@ mod stub_impl {
             Err(NativeError::Unsupported)
         }
         fn disable_resize(&self, _: NativeWindowId) -> Result<(), NativeError> {
+            Err(NativeError::Unsupported)
+        }
+        fn is_resizing(&self, _: NativeWindowId) -> Result<bool, NativeError> {
             Err(NativeError::Unsupported)
         }
         fn set_min_size(
