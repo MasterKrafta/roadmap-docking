@@ -36,6 +36,87 @@ fn open_panel_expands_collapsed_photoshop_target_group() {
 }
 
 #[test]
+fn open_panel_floating_creates_a_floating_area_and_close_removes_it() {
+    let metrics = DockMetrics::default();
+    let mut layout = Layout::new(Profile::Photoshop);
+    let key = PanelKey::new("floating-on-open").unwrap();
+    let bounds = Rect::new(Point::new(120.0, 80.0), Size::new(420.0, 320.0));
+
+    let outcome = layout
+        .apply(
+            DockCommand::OpenPanelFloating {
+                key,
+                constraints: descriptors()[0].1,
+                bounds,
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    let panel_id = match outcome.actual_value {
+        Some(CommandValue::PanelId(panel_id)) => panel_id,
+        other => panic!("expected opened PanelId, got {other:?}"),
+    };
+    assert_eq!(outcome.new_version, 1);
+    assert!(layout.main_area(DockSide::Left).is_none());
+    assert!(layout.main_area(DockSide::Right).is_none());
+    assert_eq!(layout.panel_instances().count(), 1);
+    assert_eq!(layout.floating_groups().count(), 1);
+
+    let (floating_id, floating) = layout.floating_groups().next().unwrap();
+    assert_eq!(floating.bounds, bounds);
+    let root = layout.dock_area(floating.area).unwrap().root;
+    let Node::Tabs(tabs) = layout.node(root).unwrap() else {
+        panic!("Photoshop floating panel must use a Tabs root");
+    };
+    assert_eq!(tabs.active_index, 0);
+    assert_eq!(tabs.children.len(), 1);
+    assert!(matches!(
+        layout.node(tabs.children[0]),
+        Some(Node::Panel(panel)) if panel.panel_id == panel_id
+    ));
+    assert_eq!(layout.validate(&metrics), Ok(()));
+
+    layout
+        .apply(DockCommand::ClosePanel { panel: panel_id }, &metrics)
+        .unwrap();
+    assert!(layout.panel_instance(panel_id).is_none());
+    assert!(layout.floating_group(floating_id).is_none());
+    assert_eq!(layout.panel_instances().count(), 0);
+    assert_eq!(layout.floating_groups().count(), 0);
+    assert_eq!(layout.dock_areas().count(), 0);
+    assert_eq!(layout.nodes().count(), 0);
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
+fn open_panel_floating_is_idempotent_for_the_same_panel_key() {
+    let metrics = DockMetrics::default();
+    let mut layout = Layout::new(Profile::Photoshop);
+    let key = PanelKey::new("floating-singleton").unwrap();
+    let command = DockCommand::OpenPanelFloating {
+        key,
+        constraints: descriptors()[0].1,
+        bounds: Rect::new(Point::new(120.0, 80.0), Size::new(420.0, 320.0)),
+    };
+
+    let first = layout.apply(command.clone(), &metrics).unwrap();
+    let first_panel = match first.actual_value {
+        Some(CommandValue::PanelId(panel_id)) => panel_id,
+        other => panic!("expected opened PanelId, got {other:?}"),
+    };
+    let version = layout.version();
+
+    let second = layout.apply(command, &metrics).unwrap();
+    assert_eq!(second.actual_value, Some(CommandValue::PanelId(first_panel)));
+    assert_eq!(second.new_version, version);
+    assert!(second.inverse.is_none());
+    assert_eq!(layout.panel_instances().count(), 1);
+    assert_eq!(layout.floating_groups().count(), 1);
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
 fn apply_commits_a_successful_change_and_increments_version_once() {
     let metrics = DockMetrics::default();
     let mut layout = initial_layout(Profile::Generic);
