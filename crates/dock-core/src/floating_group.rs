@@ -8,6 +8,7 @@ use crate::{DockAreaId, GeometryError, Rect};
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct FloatingGroup {
     pub area: DockAreaId,
+    /// Window origin in physical pixels of the virtual desktop; size remains logical pixels.
     pub bounds: Rect,
     pub z_order: i32,
 }

@@ -97,42 +97,65 @@ pub(crate) fn begin_native_tearoff(
     pointer: Point,
     app: &mut App,
 ) -> bool {
-    let detached = controller.update(app, |controller, cx| {
+    let candidate = controller.update(app, |controller, _| {
         let (payload, handle) = match controller.drag().session().state() {
             DragState::Dragging { payload, .. } => (payload, controller.drag().session().handle()?),
             _ => return None,
         };
-        let bounds = floating_bounds(controller, payload, pointer)?;
+        let local_bounds = floating_bounds(controller, payload, pointer)?;
         let command = match (handle, payload) {
             (DragHandle::PanelTab, DragPayload::Panel { panel }) => {
                 let node = controller.layout().nodes().find_map(|(id, node)| {
                     matches!(node, Node::Panel(value) if value.panel_id == panel).then_some(id)
                 })?;
-                DockCommand::Float { node, bounds }
+                DockCommand::Float { node, bounds: local_bounds }
             }
             (DragHandle::FlyoutPanel, DragPayload::Panel { panel }) => {
-                DockCommand::FloatPanelFromFlyout { panel, bounds }
+                DockCommand::FloatPanelFromFlyout { panel, bounds: local_bounds }
             }
             (DragHandle::GroupGrip, DragPayload::Group { group }) => {
-                DockCommand::Float { node: group, bounds }
+                DockCommand::Float { node: group, bounds: local_bounds }
             }
             _ => return None,
         };
+        Some((command, local_bounds))
+    });
+
+    let Some((command, local_bounds)) = candidate else {
+        return false;
+    };
+    let model_bounds = manager.update(app, |manager, _| {
+        manager.screen_bounds_from_main_local(local_bounds)
+    });
+    let Some(model_bounds) = model_bounds else {
+        tracing::warn!("could not convert main-host bounds into physical screen coordinates");
+        return false;
+    };
+
+    let detached = controller.update(app, |controller, cx| {
         if !controller.begin_tearoff_transaction() {
             return None;
         }
-        let outcome = controller.dispatch_tearoff_float_in(command, cx).ok()?;
+        let outcome = match controller.dispatch_tearoff_float_in(command, cx) {
+            Ok(outcome) => outcome,
+            Err(_) => return None,
+        };
         match outcome.actual_value {
-            Some(CommandValue::FloatingGroup(group)) => Some((group, bounds)),
-            _ => None,
+            Some(CommandValue::FloatingGroup(group)) => Some(group),
+            _ => {
+                let _ = controller.cancel_pointer_interaction_on_escape();
+                controller.flush_events(cx);
+                cx.notify();
+                None
+            }
         }
     });
 
-    let Some((group, bounds)) = detached else {
+    let Some(group) = detached else {
         return false;
     };
     let started = manager.update(app, |manager, manager_cx| {
-        manager.begin_tearoff_move(group, pointer, bounds, manager_cx)
+        manager.begin_tearoff_move(group, pointer, local_bounds, model_bounds, manager_cx)
     });
     if !started {
         let _ = controller.update(app, |controller, cx| {
