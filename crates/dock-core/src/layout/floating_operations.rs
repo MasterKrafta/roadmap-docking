@@ -268,10 +268,11 @@ impl Layout {
         self.insert_existing_column_at(side, index, column, None, metrics)
     }
 
-    /// Moves every Column in a horizontal floating composition into a main dock.
+    /// Moves every branch of a horizontal floating composition into a main dock.
     ///
-    /// The existing Column and Tabs nodes remain intact. Only the floating
-    /// composition root is replaced with a main-dock Split(X) root.
+    /// Existing Columns are preserved; other Generic-profile branches are wrapped
+    /// in a Column without rebuilding their panel nodes or cached views. The
+    /// floating root is then attached as, or merged into, a main-dock Split(X).
     fn dock_floating_composition_to_main_column(
         &mut self,
         floating_group_id: FloatingGroupId,
