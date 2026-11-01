@@ -1339,7 +1339,6 @@ impl FloatingWindowManager {
                     );
                 }
             }
-        }
 
             entry.native_scale_factor = Some(scale);
         } else {
