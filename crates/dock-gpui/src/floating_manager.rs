@@ -36,6 +36,7 @@ struct FloatingWindowEntry {
     bounds: Rect,
     z_order: i32,
     native_min_size: Option<PhysicalSize>,
+    native_scale_factor: Option<f32>,
     resize_enabled: bool,
 }
 
@@ -129,6 +130,7 @@ pub struct FloatingWindowManager {
     main_host_origin: Point,
     native_move: Option<NativeMoveSession>,
     native_resize: Option<NativeResizeSession>,
+    reconciling: bool,
     registry: WindowRegistry,
     native_ops: SystemNativeWindowOps,
     controller_subscription: Option<Subscription>,
@@ -143,6 +145,7 @@ impl FloatingWindowManager {
             main_host_origin: Point::ZERO,
             native_move: None,
             native_resize: None,
+            reconciling: false,
             registry: WindowRegistry::default(),
             native_ops: SystemNativeWindowOps,
             controller_subscription: None,
@@ -825,7 +828,13 @@ impl FloatingWindowManager {
     /// This method intentionally snapshots only group metadata and panel
     /// ownership. It never clones Layout or builds a second docking tree.
     pub fn reconcile(&mut self, cx: &mut Context<Self>) {
-        let (mut groups, panel_owners) = self.controller.update(cx, |controller, _| {
+        if self.reconciling {
+            return;
+        }
+        self.reconciling = true;
+
+        let (mut groups, panel_owners, restore_pending) = self.controller.update(cx, |controller, _| {
+            let restore_pending = controller.take_workspace_restore_pending();
             let layout = controller.layout();
             let metrics = controller.metrics();
             let mut panel_owners = HashMap::new();
@@ -858,8 +867,23 @@ impl FloatingWindowManager {
                 }
             }
 
-            (groups, panel_owners)
+            (groups, panel_owners, restore_pending)
         });
+
+        let monitor_work_areas = if restore_pending {
+            match self.native_ops.monitor_work_areas() {
+                Ok(areas) => Some(areas),
+                Err(error) => {
+                    tracing::debug!(
+                        %error,
+                        "could not enumerate monitor work areas for workspace recovery"
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
 
         groups.sort_by_key(|group| group.z_order);
         let desired_groups = groups
@@ -881,6 +905,7 @@ impl FloatingWindowManager {
             self.release_group_window(group, cx);
         }
 
+        let mut monitor_corrections = Vec::new();
         for group in groups.iter().copied() {
             let mut entry = self.registry.floating.remove(&group.id);
 
@@ -910,6 +935,13 @@ impl FloatingWindowManager {
             };
 
             self.sync_window_bounds(&mut entry, group);
+            if let Some(areas) = monitor_work_areas.as_deref()
+                && let Some(corrected_bounds) =
+                    self.restore_native_window_to_monitor(&mut entry, areas)
+            {
+                monitor_corrections.push((group.id, corrected_bounds));
+                entry.bounds = corrected_bounds;
+            }
             self.sync_native_resize(&mut entry, group);
             entry.z_order = group.z_order;
             self.registry.floating.insert(group.id, entry);
@@ -935,6 +967,28 @@ impl FloatingWindowManager {
                 }
             }
         }
+
+        if !monitor_corrections.is_empty() {
+            let result = self.controller.update(cx, |controller, controller_cx| {
+                let result = controller.apply_workspace_monitor_bounds(&monitor_corrections);
+                if let Err(error) = result {
+                    tracing::warn!(
+                        %error,
+                        "could not persist monitor recovery in the restored Core layout"
+                    );
+                }
+                controller.flush_events(controller_cx);
+                controller_cx.notify();
+            });
+            if let Err(error) = result {
+                tracing::warn!(
+                    %error,
+                    "could not update the controller after monitor recovery"
+                );
+            }
+        }
+
+        self.reconciling = false;
     }
 
     fn release_group_window(
@@ -1006,15 +1060,6 @@ impl FloatingWindowManager {
             self.sync_window_bounds(&mut entry, group);
             self.sync_native_resize(&mut entry, group);
             entry.z_order = group.z_order;
-            if let Some(native_window) = entry.native_window
-                && let Err(error) = self.native_ops.show_no_activate(native_window)
-            {
-                tracing::warn!(
-                    ?group.id,
-                    %error,
-                    "could not show a reused floating window"
-                );
-            }
             return Some(entry);
         }
 
@@ -1131,20 +1176,62 @@ impl FloatingWindowManager {
             bounds: group.bounds,
             z_order: group.z_order,
             native_min_size: None,
+            native_scale_factor: None,
             resize_enabled: false,
         };
         self.sync_native_resize(&mut entry, group);
-        if let Some(native_window) = entry.native_window
-            && let Err(error) = self.native_ops.show_no_activate(native_window)
-        {
+        Some(entry)
+    }
+
+    /// Repositions a restored window only when its title area is no longer
+    /// reachable on any connected monitor. Returns corrected Core bounds.
+    fn restore_native_window_to_monitor(
+        &self,
+        entry: &mut FloatingWindowEntry,
+        work_areas: &[platform::PhysicalRect],
+    ) -> Option<Rect> {
+        let native_window = entry.native_window?;
+        if work_areas.is_empty() {
+            return None;
+        }
+        let current = self.native_ops.window_rect(native_window).ok()?;
+        if native_rect_has_reachable_title_area(current, work_areas) {
+            return None;
+        }
+        let work_area = self.preferred_monitor_work_area(work_areas)?;
+        let position = restored_window_origin(current, work_area)?;
+        if position.x == current.left && position.y == current.top {
+            return None;
+        }
+        if let Err(error) = self.native_ops.move_window(native_window, position) {
             tracing::warn!(
-                ?group.id,
                 %error,
-                "could not show the new floating window"
+                "could not move an off-screen restored floating window onto a connected monitor"
             );
+            return None;
         }
 
-        Some(entry)
+        let corrected = self.core_bounds_from_native_window(native_window)?;
+        entry.native_scale_factor = self.native_ops.scale_factor(native_window).ok();
+        Some(corrected)
+    }
+
+    fn preferred_monitor_work_area(
+        &self,
+        work_areas: &[platform::PhysicalRect],
+    ) -> Option<platform::PhysicalRect> {
+        if let Some(main) = self.main_native_window
+            && let Ok(rect) = self.native_ops.window_rect(main)
+        {
+            let center = PhysicalPoint {
+                x: (rect.left as i64 + rect.right as i64).div_euclid(2) as i32,
+                y: (rect.top as i64 + rect.bottom as i64).div_euclid(2) as i32,
+            };
+            if let Some(area) = work_areas.iter().copied().find(|area| area.contains(center)) {
+                return Some(area);
+            }
+        }
+        work_areas.first().copied()
     }
 
     fn sync_native_resize(
@@ -1195,7 +1282,17 @@ impl FloatingWindowManager {
         entry: &mut FloatingWindowEntry,
         group: FloatingGroupSnapshot,
     ) {
-        if entry.bounds == group.bounds {
+        let scale = entry.native_window.and_then(|native_window| {
+            self.native_ops.scale_factor(native_window).ok()
+        })
+        .filter(|scale| scale.is_finite() && *scale > 0.0);
+
+        let scale_changed = match (entry.native_scale_factor, scale) {
+            (Some(previous), Some(current)) => (previous - current).abs() > 0.001,
+            (None, Some(_)) => true,
+            _ => false,
+        };
+        if entry.bounds == group.bounds && !scale_changed {
             return;
         }
 
@@ -1207,16 +1304,12 @@ impl FloatingWindowManager {
             .is_some_and(|session| session.group == group.id)
         {
             entry.bounds = group.bounds;
+            entry.native_scale_factor = scale;
             return;
         }
 
         if let Some(native_window) = entry.native_window {
-            let scale = self
-                .native_ops
-                .scale_factor(native_window)
-                .ok()
-                .filter(|scale| scale.is_finite() && *scale > 0.0)
-                .unwrap_or(1.0);
+            let scale = scale.unwrap_or(1.0);
 
             if entry.bounds.origin != group.bounds.origin
                 && let Some(position) = self.physical_origin_for_bounds(group.bounds)
@@ -1229,7 +1322,7 @@ impl FloatingWindowManager {
                 );
             }
 
-            if entry.bounds.size != group.bounds.size
+            if (entry.bounds.size != group.bounds.size || scale_changed)
                 && let (Some(width), Some(height)) = (
                     physical_coordinate(group.bounds.size.width, scale),
                     physical_coordinate(group.bounds.size.height, scale),
@@ -1248,10 +1341,65 @@ impl FloatingWindowManager {
             }
         }
 
+            entry.native_scale_factor = Some(scale);
+        } else {
+            entry.native_scale_factor = None;
+        }
+
         entry.bounds = group.bounds;
     }
 }
 
+
+fn native_rect_has_reachable_title_area(
+    rect: platform::PhysicalRect,
+    work_areas: &[platform::PhysicalRect],
+) -> bool {
+    let width = rect.right.saturating_sub(rect.left).max(0);
+    let height = rect.bottom.saturating_sub(rect.top).max(0);
+    if width == 0 || height == 0 {
+        return false;
+    }
+
+    work_areas.iter().any(|area| {
+        let required_width = width.min(80).min(area.width().max(0));
+        let required_height = height.min(40).min(area.height().max(0));
+        let visible_width = rect.right.min(area.right).saturating_sub(rect.left.max(area.left));
+        let visible_height = rect.top.saturating_add(required_height)
+            .min(area.bottom)
+            .saturating_sub(rect.top.max(area.top));
+        visible_width >= required_width && visible_height >= required_height
+    })
+}
+
+fn restored_window_origin(
+    rect: platform::PhysicalRect,
+    work_area: platform::PhysicalRect,
+) -> Option<PhysicalPoint> {
+    let width = rect.right.checked_sub(rect.left)?;
+    let height = rect.bottom.checked_sub(rect.top)?;
+    let area_width = work_area.right.checked_sub(work_area.left)?;
+    let area_height = work_area.bottom.checked_sub(work_area.top)?;
+    if width <= 0 || height <= 0 || area_width <= 0 || area_height <= 0 {
+        return None;
+    }
+
+    // Keep the left side of the title strip and its top edge reachable. A
+    // window larger than the work area may extend beyond it, but stays usable.
+    let visible_width = width.min(80).min(area_width);
+    let visible_height = height.min(40).min(area_height);
+    let minimum_x = work_area.left as i64;
+    let maximum_x = work_area.right as i64 - visible_width as i64;
+    let minimum_y = work_area.top as i64;
+    let maximum_y = work_area.bottom as i64 - visible_height as i64;
+    let x = (rect.left as i64).clamp(minimum_x, maximum_x);
+    let y = (rect.top as i64).clamp(minimum_y, maximum_y);
+
+    Some(PhysicalPoint {
+        x: i32::try_from(x).ok()?,
+        y: i32::try_from(y).ok()?,
+    })
+}
 
 fn screen_position_from_main_local(
     local: Point,
