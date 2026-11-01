@@ -58,6 +58,10 @@ fn open_panel_floating_creates_a_floating_area_and_close_removes_it() {
         other => panic!("expected opened PanelId, got {other:?}"),
     };
     assert_eq!(outcome.new_version, 1);
+    assert_eq!(
+        outcome.inverse,
+        Some(DockCommand::ClosePanel { panel: panel_id })
+    );
     assert!(layout.main_area(DockSide::Left).is_none());
     assert!(layout.main_area(DockSide::Right).is_none());
     assert_eq!(layout.panel_instances().count(), 1);
