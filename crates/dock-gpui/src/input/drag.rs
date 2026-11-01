@@ -162,7 +162,7 @@ pub(crate) fn update_floating_tab_drag(
                 payload: active,
                 origin,
                 ..
-            } if active == payload && origin == press_origin => {}
+            } if active == payload && origin == drag.press_origin => {}
             _ => return false,
         }
 
@@ -179,7 +179,11 @@ pub(crate) fn update_floating_tab_drag(
 
         let source = DropSource::Panel { panel: drag.panel };
         let target = match controller
-            .prepare_floating_window_drop_resolver(drag.source_window_id, drag.source_group, source)
+            .prepare_floating_window_drop_resolver(
+                drag.source_window_id,
+                drag.source_group,
+                source,
+            )
             .and_then(|resolver| resolver.resolve(position))
         {
             Ok(target) => target,
