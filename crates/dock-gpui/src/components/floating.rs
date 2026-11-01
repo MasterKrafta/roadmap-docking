@@ -694,7 +694,7 @@ impl Render for FloatingHost {
                         if manager_entity.as_ref().is_some_and(|manager| {
                             manager
                                 .update(app, |manager, _| manager.native_move_active())
-                                .unwrap_or(false)
+                                
                         }) {
                             return;
                         }
@@ -734,7 +734,7 @@ impl Render for FloatingHost {
                                 .update(app, |manager, _| {
                                     manager.cursor_over_other_docking_window(group)
                                 })
-                                .unwrap_or(false)
+                                
                         });
                         if leaves_source || over_other_window {
                             if let Some(manager) = manager_entity.as_ref()
@@ -768,7 +768,7 @@ impl Render for FloatingHost {
                         if let Some(manager) = manager_for_up.upgrade()
                             && manager
                                 .update(app, |manager, _| manager.native_move_active())
-                                .unwrap_or(false)
+                                
                         {
                             return;
                         }
