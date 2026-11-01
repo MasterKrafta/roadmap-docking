@@ -1199,6 +1199,17 @@ impl FloatingWindowManager {
             return;
         }
 
+        // During an OS-owned modal resize the native frame is authoritative.
+        // Core has just received that frame's latest bounds; sending SetWindowPos
+        // back to the same HWND here can fight the active sizing loop.
+        if self
+            .native_resize
+            .is_some_and(|session| session.group == group.id)
+        {
+            entry.bounds = group.bounds;
+            return;
+        }
+
         if let Some(native_window) = entry.native_window {
             let scale = self
                 .native_ops
