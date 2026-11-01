@@ -437,10 +437,6 @@ impl DockController {
         true
     }
 
-    pub(crate) fn tearoff_transaction_active(&self) -> bool {
-        self.tearoff_transaction_active
-    }
-
     /// Called only after a resize command owned by the active interaction succeeds.
     pub(crate) fn record_resize_layout_version(&mut self) {
         if let Some(interaction) = self.interaction.as_mut() {

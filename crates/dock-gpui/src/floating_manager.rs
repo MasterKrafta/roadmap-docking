@@ -272,6 +272,10 @@ impl FloatingWindowManager {
 
     fn tick_native_move(&mut self, group: FloatingGroupId, window_id: WindowId, cx: &mut Context<Self>) -> bool {
         let Some(mut state) = self.native_move.filter(|state| state.group == group) else { return false; };
+        if self.registry.floating.get(&group).is_none_or(|entry| entry.window_id != window_id) {
+            self.native_move = None;
+            return false;
+        }
         if self.native_ops.key_down(NativeKey::Escape).unwrap_or(false) {
             self.cancel_native_move(state, cx);
             return false;
@@ -316,7 +320,6 @@ impl FloatingWindowManager {
             self.finish_native_move(state, cx);
             return false;
         }
-        let _ = window_id;
         true
     }
 

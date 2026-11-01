@@ -1,6 +1,6 @@
 use dock_core::{
     CommandValue, ComputeRectsError, DockCommand, DragDropAction, DragDropRequest, DragHandle,
-    DragPayload, DragState, DropSource, DropTarget, FloatingGroupId, Node, Point, Rect, Size,
+    DragPayload, DragState, DropSource, DropTarget, Node, Point, Rect, Size,
 };
 use gpui::{App, Entity};
 
