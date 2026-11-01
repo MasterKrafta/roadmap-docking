@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 
 use dock_core::{
     Axis, CommandError, CommandValue, DockCommand, DockMetrics, DragCancelReason, DragHandle,
