@@ -1,4 +1,5 @@
 use std::{
+    cell::Cell,
     collections::{HashMap, HashSet},
     rc::Rc,
 };
@@ -11,14 +12,18 @@ use dock_core::{
 };
 use gpui::{
     AnyView, Context, DispatchPhase, Entity, HitboxBehavior, IntoElement, MouseButton,
-    MouseDownEvent, ParentElement, Render, ScrollHandle, StatefulInteractiveElement, Styled,
-    WeakEntity, Window, WindowId, canvas, div, prelude::InteractiveElement as _, px, rgb,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Render, ScrollHandle,
+    StatefulInteractiveElement, Styled, WeakEntity, Window, WindowId, canvas, div,
+    prelude::InteractiveElement as _, px, rgb,
 };
 use ui::Theme;
 
 use crate::{
     DockController, FloatingWindowManager,
     actions::dispatch_command,
+    input::drag::{
+        begin_floating_tab_tearoff, finish_floating_tab_drag, update_floating_tab_drag,
+    },
     dock_host::{
         build_context_menu_entries, collect_subtree_nodes, context_menu_target_exists,
     },
@@ -330,6 +335,14 @@ impl FloatingWindowView {
 }
 
 
+#[derive(Clone, Copy)]
+struct FloatingTabPress {
+    tab_group: NodeId,
+    panel: PanelId,
+    origin: Point,
+    layout_version: u64,
+}
+
 #[derive(Clone)]
 struct FloatingHostOpenMenu {
     target: ContextMenuTarget,
@@ -485,6 +498,7 @@ pub struct FloatingHost {
     theme: Theme,
     column_scroll_handles: HashMap<NodeId, ScrollHandle>,
     open_context_menu: Option<FloatingHostOpenMenu>,
+    tab_press: Rc<Cell<Option<FloatingTabPress>>>,
     controller_observed: bool,
     middle_click_closes_tabs: bool,
 }
@@ -504,6 +518,7 @@ impl FloatingHost {
             theme,
             column_scroll_handles: HashMap::new(),
             open_context_menu: None,
+            tab_press: Rc::new(Cell::new(None)),
             controller_observed: false,
             middle_click_closes_tabs: true,
         }
@@ -522,6 +537,7 @@ impl FloatingHost {
         self.group = group;
         self.column_scroll_handles.clear();
         self.open_context_menu = None;
+        self.tab_press.set(None);
     }
 
     /// Enables or disables closing a tab with the middle mouse button.
@@ -572,14 +588,17 @@ impl Render for FloatingHost {
         // custom title grip starts that session; close controls remain clickable.
         let manager = self.manager.clone();
         let controller = self.controller.clone();
+        let tab_press = self.tab_press.clone();
         let group = self.group;
         let input_window_id = window_id;
+        let floating_rect = snapshot.as_ref().map(|snapshot| snapshot.floating.rect);
         let title_input = canvas(
             move |bounds, window, _| Some(window.insert_hitbox(bounds, HitboxBehavior::Normal).id),
             move |_, hitbox, window, _| {
                 if let Some(hitbox) = hitbox {
-                    let manager = manager.clone();
-                    let controller = controller.clone();
+                    let manager_for_down = manager.clone();
+                    let controller_for_down = controller.clone();
+                    let tab_press_for_down = tab_press.clone();
                     window.on_mouse_event(move |event: &MouseDownEvent, phase, window, app| {
                         if phase != DispatchPhase::Capture
                             || event.button != MouseButton::Left
@@ -590,32 +609,243 @@ impl Render for FloatingHost {
                         let Ok(point) = crate::geometry::point_from_gpui(event.position) else {
                             return;
                         };
-                        let is_title_grip = controller.update(app, |controller, _| {
-                            let hit = controller.hit_floating_window(input_window_id, group, point).ok();
-                            let metrics = controller.metrics();
-                            let width = controller
-                                .floating_geometry(input_window_id, group)
+                        let hit = controller_for_down.update(app, |controller, _| {
+                            controller
+                                .hit_floating_window(input_window_id, group, point)
                                 .ok()
-                                .and_then(|rects| rects.floating_groups.first())
-                                .map(|floating| floating.rect.size.width);
-                            let title_height = controller
-                                .floating_geometry(input_window_id, group)
-                                .ok()
-                                .and_then(|rects| rects.floating_groups.first())
-                                .map(|floating| metrics.header_height.min(floating.rect.size.height))
-                                .unwrap_or(0.0);
-                            let close_width = metrics.group_control_button_width.min(title_height);
-                            matches!(hit, Some(dock_core::HitResult::FloatingTitle { group: hit_group }) if hit_group == group)
-                                && width.is_some_and(|width| point.x < width - close_width)
                         });
-                        if !is_title_grip {
+                        if matches!(
+                            hit,
+                            Some(dock_core::HitResult::FloatingTitle { group: hit_group })
+                                if hit_group == group
+                        ) {
+                            let is_title_grip = controller_for_down.update(app, |controller, _| {
+                                let metrics = controller.metrics();
+                                let width = controller
+                                    .floating_geometry(input_window_id, group)
+                                    .ok()
+                                    .and_then(|rects| rects.floating_groups.first())
+                                    .map(|floating| floating.rect.size.width);
+                                let title_height = controller
+                                    .floating_geometry(input_window_id, group)
+                                    .ok()
+                                    .and_then(|rects| rects.floating_groups.first())
+                                    .map(|floating| metrics.header_height.min(floating.rect.size.height))
+                                    .unwrap_or(0.0);
+                                let close_width = metrics.group_control_button_width.min(title_height);
+                                width.is_some_and(|width| point.x < width - close_width)
+                            });
+                            if is_title_grip
+                                && let Some(manager) = manager_for_down.upgrade()
+                                && manager.update(app, |manager, manager_cx| {
+                                    manager.begin_existing_window_move(group, point, manager_cx)
+                                })
+                            {
+                                app.stop_propagation();
+                            }
                             return;
                         }
-                        if let Some(manager) = manager.upgrade()
-                            && manager.update(app, |manager, manager_cx| {
-                                manager.begin_existing_window_move(group, point, manager_cx)
-                            })
+
+                        let press = controller_for_down.update(app, |controller, _| {
+                            let dock_core::HitResult::TabHeader {
+                                group: tab_group,
+                                panel,
+                                ..
+                            } = controller
+                                .hit_floating_window(input_window_id, group, point)
+                                .ok()?
+                            else {
+                                return None;
+                            };
+                            let header = controller
+                                .floating_geometry(input_window_id, group)
+                                .ok()?
+                                .tab_headers
+                                .iter()
+                                .find(|header| header.group == tab_group && header.panel == panel)?;
+                            let close_width = 18.0_f32.min(header.rect.size.width);
+                            let header_right = header.rect.origin.x + header.rect.size.width;
+                            if point.x >= header_right - close_width {
+                                return None;
+                            }
+                            Some((tab_group, panel, controller.layout().version()))
+                        });
+                        if let Some((tab_group, panel, layout_version)) = press {
+                            tab_press_for_down.set(Some(FloatingTabPress {
+                                tab_group,
+                                panel,
+                                origin: point,
+                                layout_version,
+                            }));
+                        }
+                    });
+
+                    let manager_for_move = manager.clone();
+                    let controller_for_move = controller.clone();
+                    let tab_press_for_move = tab_press.clone();
+                    window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, app| {
+                        if phase != DispatchPhase::Capture || !event.dragging() {
+                            return;
+                        }
+                        let Some(press) = tab_press_for_move.get() else {
+                            return;
+                        };
+                        if let Some(manager) = manager_for_move.upgrade()
+                            && manager
+                                .update(app, |manager, _| manager.native_move_active())
+                                .unwrap_or(false)
                         {
+                            return;
+                        }
+                        let Ok(point) = crate::geometry::point_from_gpui(event.position) else {
+                            return;
+                        };
+                        let dragging = update_floating_tab_drag(
+                            &controller_for_move,
+                            input_window_id,
+                            group,
+                            press.panel,
+                            press.origin,
+                            press.layout_version,
+                            point,
+                            app,
+                        );
+                        if !dragging {
+                            return;
+                        }
+
+                        // Capture only after the Core threshold is crossed. A
+                        // normal click therefore continues to reach tab controls.
+                        window.capture_pointer(hitbox);
+                        if window.captured_hitbox() != Some(hitbox) {
+                            tab_press_for_move.set(None);
+                            let _ = controller_for_move.update(app, |controller, _| {
+                                controller.cancel_pointer_interaction()
+                            });
+                            return;
+                        }
+
+                        let leaves_source = floating_rect.is_some_and(|rect| {
+                            rect.contains(point).map(|contains| !contains).unwrap_or(true)
+                        });
+                        if leaves_source {
+                            if let Some(manager) = manager_for_move.upgrade()
+                                && begin_floating_tab_tearoff(
+                                    &controller_for_move,
+                                    &manager,
+                                    input_window_id,
+                                    group,
+                                    press.panel,
+                                    press.origin,
+                                    point,
+                                    app,
+                                )
+                            {
+                                tab_press_for_move.set(None);
+                                window.release_pointer();
+                                app.stop_propagation();
+                                return;
+                            }
+                        }
+                        app.stop_propagation();
+                    });
+
+                    let manager_for_up = manager.clone();
+                    let controller_for_up = controller.clone();
+                    let tab_press_for_up = tab_press.clone();
+                    window.on_mouse_event(move |event: &MouseUpEvent, phase, window, app| {
+                        if phase != DispatchPhase::Capture || event.button != MouseButton::Left {
+                            return;
+                        }
+                        if let Some(manager) = manager_for_up.upgrade()
+                            && manager
+                                .update(app, |manager, _| manager.native_move_active())
+                                .unwrap_or(false)
+                        {
+                            return;
+                        }
+                        let Some(press) = tab_press_for_up.get() else {
+                            return;
+                        };
+                        tab_press_for_up.set(None);
+                        let Ok(point) = crate::geometry::point_from_gpui(event.position) else {
+                            window.release_pointer();
+                            return;
+                        };
+
+                        let was_dragging = controller_for_up.update(app, |controller, _| {
+                            matches!(
+                                controller.drag().session().state(),
+                                dock_core::DragState::Dragging {
+                                    payload: dock_core::DragPayload::Panel { panel },
+                                    ..
+                                } if panel == press.panel
+                            )
+                        });
+                        if was_dragging {
+                            finish_floating_tab_drag(
+                                &controller_for_up,
+                                input_window_id,
+                                group,
+                                press.panel,
+                                point,
+                                app,
+                            );
+                            window.release_pointer();
+                            app.stop_propagation();
+                            return;
+                        }
+
+                        window.release_pointer();
+                        let should_activate = controller_for_up.update(app, |controller, _| {
+                            if controller.layout().version() != press.layout_version {
+                                return false;
+                            }
+                            let dock_core::HitResult::TabHeader {
+                                group: released_group,
+                                panel: released_panel,
+                                ..
+                            } = controller
+                                .hit_floating_window(input_window_id, group, point)
+                                .ok()
+                                .unwrap_or(dock_core::HitResult::Miss)
+                            else {
+                                return false;
+                            };
+                            if released_group != press.tab_group || released_panel != press.panel {
+                                return false;
+                            }
+                            let Some(header) = controller
+                                .floating_geometry(input_window_id, group)
+                                .ok()
+                                .and_then(|rects| {
+                                    rects
+                                        .tab_headers
+                                        .iter()
+                                        .find(|header| {
+                                            header.group == released_group
+                                                && header.panel == released_panel
+                                        })
+                                        .copied()
+                                })
+                            else {
+                                return false;
+                            };
+                            let close_width = 18.0_f32.min(header.rect.size.width);
+                            point.x < header.rect.origin.x + header.rect.size.width - close_width
+                        });
+                        if should_activate {
+                            controller_for_up.update(app, |controller, cx| {
+                                if let Err(error) = controller.dispatch_in(
+                                    DockCommand::ActivateTab {
+                                        group: press.tab_group,
+                                        panel: press.panel,
+                                    },
+                                    cx,
+                                ) {
+                                    tracing::debug!(%error, "could not activate floating tab");
+                                }
+                            });
                             app.stop_propagation();
                         }
                     });
