@@ -104,6 +104,18 @@ pub(crate) fn update_floating_tab_drag(
 ) -> bool {
     controller.update(app, |controller, cx| {
         if controller.layout().version() != layout_version {
+            if matches!(
+                controller.drag().session().state(),
+                DragState::Pressed {
+                    payload: DragPayload::Panel { panel: active },
+                    ..
+                } | DragState::Dragging {
+                    payload: DragPayload::Panel { panel: active },
+                    ..
+                } if active == panel
+            ) {
+                cancel_drag(controller);
+            }
             return false;
         }
 
