@@ -471,14 +471,14 @@ impl DockController {
         cx.notify();
     }
 
-    fn panel_keys(&self) -> HashMap<PanelId, PanelKey> {
+    pub(super) fn panel_keys(&self) -> HashMap<PanelId, PanelKey> {
         self.layout
             .panel_instances()
             .map(|(id, instance)| (id, instance.key.clone()))
             .collect()
     }
 
-    fn finish_success(
+    pub(super) fn finish_success(
         &mut self,
         before_panels: HashMap<PanelId, PanelKey>,
         previous_version: u64,
@@ -548,7 +548,7 @@ impl DockController {
         });
     }
 
-    fn finish_failure(&mut self, error: &CommandError) {
+    pub(super) fn finish_failure(&mut self, error: &CommandError) {
         self.last_error = Some(error.clone());
         self.pending_events
             .push_back(DockEvent::CommandFailed(error.clone()));
