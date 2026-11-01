@@ -544,6 +544,7 @@ impl Render for DockHost {
                         &group_presentations,
                         &column_modes,
                         self.controller.clone(),
+                        true,
                     )
                 })
             })
@@ -1021,6 +1022,7 @@ pub(crate) fn build_context_menu_entries(
     presentations: &HashMap<NodeId, crate::components::tab_strip::GroupPresentation>,
     column_modes: &HashMap<NodeId, ColumnMode>,
     controller: Entity<DockController>,
+    allow_float: bool,
 ) -> Vec<ContextMenuEntry> {
     match target {
         ContextMenuTarget::Group(group_id) => {
@@ -1055,15 +1057,17 @@ pub(crate) fn build_context_menu_entries(
                 },
                 controller.clone(),
             ));
-            entries.push(ContextMenuEntry::separator());
-            entries.push(command_menu_item(
-                "Вынести в плавающее окно",
-                DockCommand::Float {
-                    node: group_id,
-                    bounds: group.rect,
-                },
-                controller,
-            ));
+            if allow_float {
+                entries.push(ContextMenuEntry::separator());
+                entries.push(command_menu_item(
+                    "Вынести в плавающее окно",
+                    DockCommand::Float {
+                        node: group_id,
+                        bounds: group.rect,
+                    },
+                    controller,
+                ));
+            }
             entries
         }
         ContextMenuTarget::Tab { group, panel } => {

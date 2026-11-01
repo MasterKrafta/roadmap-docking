@@ -352,23 +352,23 @@ impl FloatingWindowView {
                 .iter()
                 .filter(|edge| edge.group == floating.group)
             {
-            let mut handle = div()
-                .id(format!(
-                    "floating-resize-{:?}-{:?}",
-                    floating.group, resize.edge
-                ))
-                .absolute()
-                .left(px(resize.rect.origin.x - origin.x))
-                .top(px(resize.rect.origin.y - origin.y))
-                .w(px(resize.rect.size.width))
-                .h(px(resize.rect.size.height));
+                let mut handle = div()
+                    .id(format!(
+                        "floating-resize-{:?}-{:?}",
+                        floating.group, resize.edge
+                    ))
+                    .absolute()
+                    .left(px(resize.rect.origin.x - origin.x))
+                    .top(px(resize.rect.origin.y - origin.y))
+                    .w(px(resize.rect.size.width))
+                    .h(px(resize.rect.size.height));
 
-            handle = match resize.edge {
-                ResizeEdge::Left | ResizeEdge::Right => handle.cursor_col_resize(),
-                ResizeEdge::Top | ResizeEdge::Bottom => handle.cursor_row_resize(),
-                ResizeEdge::TopLeft | ResizeEdge::BottomRight => handle.cursor_nwse_resize(),
-                ResizeEdge::TopRight | ResizeEdge::BottomLeft => handle.cursor_nesw_resize(),
-            };
+                handle = match resize.edge {
+                    ResizeEdge::Left | ResizeEdge::Right => handle.cursor_col_resize(),
+                    ResizeEdge::Top | ResizeEdge::Bottom => handle.cursor_row_resize(),
+                    ResizeEdge::TopLeft | ResizeEdge::BottomRight => handle.cursor_nwse_resize(),
+                    ResizeEdge::TopRight | ResizeEdge::BottomLeft => handle.cursor_nesw_resize(),
+                };
                 root = root.child(handle);
             }
         }
@@ -676,6 +676,7 @@ impl Render for FloatingHost {
                 &snapshot.group_presentations,
                 &snapshot.column_modes,
                 self.controller.clone(),
+                false,
             );
             if !entries.is_empty() {
                 root = root.child(ContextMenu::render(
