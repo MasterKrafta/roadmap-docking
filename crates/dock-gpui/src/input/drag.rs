@@ -1,8 +1,9 @@
 use dock_core::{
     CommandValue, ComputeRectsError, DockCommand, DragDropAction, DragDropRequest, DragHandle,
-    DragPayload, DragState, DropSource, DropTarget, Node, Point, Rect, Size,
+    DragPayload, DragState, DropSource, DropTarget, FloatingGroupId, Node, PanelId, Point, Rect,
+    Size,
 };
-use gpui::{App, Entity};
+use gpui::{App, Entity, WindowId};
 
 use crate::{DockController, FloatingWindowManager};
 
@@ -86,6 +87,293 @@ pub(crate) fn update_drag_at(
         }
         cx.notify();
         was_pressed
+    })
+}
+
+/// Updates a tab drag that started inside a floating host. The resolver is
+/// built from that host's own local geometry, not from the main DockHost.
+pub(crate) fn update_floating_tab_drag(
+    controller: &Entity<DockController>,
+    window_id: WindowId,
+    source_group: FloatingGroupId,
+    panel: PanelId,
+    press_origin: Point,
+    layout_version: u64,
+    position: Point,
+    app: &mut App,
+) -> bool {
+    controller.update(app, |controller, cx| {
+        if controller.layout().version() != layout_version {
+            return false;
+        }
+
+        let payload = DragPayload::Panel { panel };
+        match controller.drag().session().state() {
+            DragState::Idle => {
+                if let Err(error) = controller.begin_drag_interaction(
+                    payload,
+                    DragHandle::PanelTab,
+                    press_origin,
+                ) {
+                    tracing::debug!(%error, "could not begin floating tab drag");
+                    return false;
+                }
+            }
+            DragState::Dropped { .. } | DragState::Cancelled { .. } => {
+                if let Err(error) = controller.drag_mut().session_mut().reset() {
+                    tracing::debug!(%error, "could not reset previous floating tab drag");
+                    return false;
+                }
+                controller.drag_mut().clear_resolver();
+                controller.drag_mut().clear_layout_version();
+                if let Err(error) = controller.begin_drag_interaction(
+                    payload,
+                    DragHandle::PanelTab,
+                    press_origin,
+                ) {
+                    tracing::debug!(%error, "could not begin floating tab drag");
+                    return false;
+                }
+            }
+            DragState::Pressed {
+                payload: active,
+                origin,
+                ..
+            }
+            | DragState::Dragging {
+                payload: active,
+                origin,
+                ..
+            } if active == payload && origin == press_origin => {}
+            _ => return false,
+        }
+
+        if let Err(error) = controller.drag_mut().session_mut().pointer_move(position) {
+            tracing::debug!(%error, "floating tab drag pointer update failed");
+            cancel_drag(controller);
+            cx.notify();
+            return false;
+        }
+
+        if !matches!(controller.drag().session().state(), DragState::Dragging { .. }) {
+            return false;
+        }
+
+        let source = DropSource::Panel { panel };
+        let target = match controller
+            .prepare_floating_window_drop_resolver(window_id, source_group, source)
+            .and_then(|resolver| resolver.resolve(position))
+        {
+            Ok(target) => target,
+            Err(error) => {
+                tracing::debug!(%error, "could not resolve floating tab drop target");
+                cancel_drag(controller);
+                cx.notify();
+                return false;
+            }
+        };
+        if let Err(error) = controller.drag_mut().session_mut().set_drop_target(target) {
+            tracing::debug!(%error, "could not update floating tab drop target");
+            cancel_drag(controller);
+            cx.notify();
+            return false;
+        }
+
+        cx.notify();
+        true
+    })
+}
+
+/// Detaches one tab after its pointer leaves the source floating host. The
+/// existing tear-off transaction then continues as a native move of the new
+/// single-panel floating group.
+pub(crate) fn begin_floating_tab_tearoff(
+    controller: &Entity<DockController>,
+    manager: &Entity<FloatingWindowManager>,
+    source_window_id: WindowId,
+    source_group: FloatingGroupId,
+    panel: PanelId,
+    press_origin: Point,
+    pointer: Point,
+    app: &mut App,
+) -> bool {
+    let candidate = controller.update(app, |controller, _| {
+        let (active_panel, origin) = match controller.drag().session().state() {
+            DragState::Dragging {
+                payload: DragPayload::Panel { panel },
+                origin,
+                ..
+            } => (panel, origin),
+            _ => return None,
+        };
+        if active_panel != panel || origin != press_origin {
+            return None;
+        }
+
+        let (panel_node, preferred_size) = {
+            let layout = controller.layout();
+            let panel_node = layout.nodes().find_map(|(id, node)| {
+                matches!(node, Node::Panel(value) if value.panel_id == panel).then_some(id)
+            })?;
+            let preferred_size = layout.panel_instance(panel)?.constraints.preferred_size;
+            (panel_node, preferred_size)
+        };
+        let header_rect = controller
+            .floating_geometry(source_window_id, source_group)
+            .ok()?
+            .tab_headers
+            .iter()
+            .find(|header| header.panel == panel)?
+            .rect;
+        Some((panel_node, header_rect, preferred_size, origin))
+    });
+    let Some((panel_node, header_rect, preferred_size, origin)) = candidate else {
+        return false;
+    };
+
+    let Some(local_bounds) =
+        desired_floating_bounds(header_rect, preferred_size, origin, pointer)
+    else {
+        return false;
+    };
+    let model_bounds = manager
+        .update(app, |manager, _| {
+            manager.screen_bounds_from_floating_local(source_group, local_bounds)
+        })
+        .ok()
+        .flatten();
+    let Some(model_bounds) = model_bounds else {
+        tracing::warn!("could not convert floating tab bounds into screen coordinates");
+        return false;
+    };
+
+    let detached = controller.update(app, |controller, cx| {
+        if !controller.begin_tearoff_transaction() {
+            return None;
+        }
+        let outcome = match controller.dispatch_tearoff_float_in(
+            DockCommand::Float {
+                node: panel_node,
+                bounds: model_bounds,
+            },
+            cx,
+        ) {
+            Ok(outcome) => outcome,
+            Err(_) => return None,
+        };
+        match outcome.actual_value {
+            Some(CommandValue::FloatingGroup(group)) => {
+                if controller.continue_tearoff_as_floating_capture(group).is_ok() {
+                    Some(group)
+                } else {
+                    let _ = controller.cancel_pointer_interaction_on_escape();
+                    controller.flush_events(cx);
+                    cx.notify();
+                    None
+                }
+            }
+            _ => {
+                let _ = controller.cancel_pointer_interaction_on_escape();
+                controller.flush_events(cx);
+                cx.notify();
+                None
+            }
+        }
+    });
+    let Some(group) = detached else {
+        return false;
+    };
+
+    let started = manager.update(app, |manager, manager_cx| {
+        manager.begin_floating_tab_tearoff_move(group, model_bounds, manager_cx)
+    });
+    if !started {
+        let _ = controller.update(app, |controller, cx| {
+            let result = controller.cancel_pointer_interaction_on_escape();
+            controller.flush_events(cx);
+            cx.notify();
+            result
+        });
+        return false;
+    }
+    true
+}
+
+/// Finishes a tab drag that remains inside its source floating host. Drops that
+/// leave the host are promoted to a native tear-off by begin_floating_tab_tearoff.
+pub(crate) fn finish_floating_tab_drag(
+    controller: &Entity<DockController>,
+    window_id: WindowId,
+    source_group: FloatingGroupId,
+    panel: PanelId,
+    position: Point,
+    app: &mut App,
+) -> bool {
+    controller.update(app, |controller, cx| {
+        let origin = match controller.drag().session().state() {
+            DragState::Dragging {
+                payload: DragPayload::Panel { panel: active },
+                origin,
+                ..
+            } if active == panel => origin,
+            _ => return false,
+        };
+
+        if let Err(error) = controller.drag_mut().session_mut().pointer_move(position) {
+            tracing::debug!(%error, "floating tab release position was rejected");
+            cancel_drag(controller);
+            cx.notify();
+            return true;
+        }
+
+        let target = controller
+            .prepare_floating_window_drop_resolver(
+                window_id,
+                source_group,
+                DropSource::Panel { panel },
+            )
+            .and_then(|resolver| resolver.resolve(position))
+            .unwrap_or(None);
+        if let Err(error) = controller.drag_mut().session_mut().set_drop_target(target) {
+            tracing::debug!(%error, "could not set final floating tab drop target");
+            cancel_drag(controller);
+            cx.notify();
+            return true;
+        }
+
+        let request = match controller
+            .drag_mut()
+            .session_mut()
+            .pointer_up(position, target)
+        {
+            Ok(request) => request,
+            Err(error) => {
+                tracing::debug!(%error, "floating tab drag release did not produce a request");
+                None
+            }
+        };
+
+        if let Some(request) = request {
+            let action = {
+                let metrics = controller.metrics();
+                controller.layout().resolve_drag_drop(&request, &metrics)
+            };
+            match action {
+                Ok(DragDropAction::NoOp) => {}
+                Ok(DragDropAction::Command(command)) => {
+                    if let Err(error) = controller.dispatch_in(command, cx) {
+                        tracing::debug!(%error, "floating tab drop command was rejected");
+                    }
+                }
+                Err(error) => controller.report_drop_resolution_error_in(error, cx),
+            }
+        }
+
+        let _ = controller.drag_mut().session_mut().reset();
+        controller.drag_mut().clear_resolver();
+        controller.drag_mut().clear_layout_version();
+        cx.notify();
+        true
     })
 }
 
