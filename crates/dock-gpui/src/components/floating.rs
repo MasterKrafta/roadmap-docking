@@ -1,22 +1,40 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    rc::Rc,
+};
 
 use dock_core::{
     ColumnDisplayItem, ColumnMode, ColumnRect, DockCommand, DockMetrics, DragPreview, DropZoneRect,
-    FloatingGroupRect, FloatingResizeEdgeRect, FlyoutState, GroupRect, NodeId, PanelId, PanelRect,
-    Point, ResizeEdge, SplitterRect, TabHeaderRect, TabOverflowRect, TabStripRect,
-    VerticalOverflow,
+    ColumnMode, ComputeRectsError, FloatingGroupId, FloatingGroupRect, FloatingResizeEdgeRect,
+    FlyoutState, GroupRect, LayoutRects, Node, NodeId, PanelId, PanelRect, Point, ResizeEdge,
+    SplitterRect, TabHeaderRect, TabOverflowRect, TabStripRect, VerticalOverflow,
 };
 use gpui::{
-    AnyView, Entity, IntoElement, ParentElement, ScrollHandle, StatefulInteractiveElement, Styled,
-    div, prelude::InteractiveElement as _, px, rgb,
+    AnyView, App, Context, Entity, IntoElement, ParentElement, Render, ScrollHandle,
+    StatefulInteractiveElement, Styled, Window, div, prelude::InteractiveElement as _, px, rgb,
 };
 use ui::Theme;
 
-use crate::{DockController, actions::dispatch_command};
+use crate::{
+    DockController,
+    actions::dispatch_command,
+    dock_host::{
+        build_context_menu_entries, collect_main_nodes, context_menu_target_exists,
+        floating_root_title,
+    },
+};
 
 use super::{
-    column::ColumnView, context_menu::GroupMenuToggle, group::GroupView, panel_host::PanelHost,
-    splitter::SplitterView, tab_strip::GroupPresentation,
+    column::ColumnView,
+    context_menu::{
+        ContextMenu, ContextMenuCallbacks, ContextMenuDismiss, ContextMenuSubmenuToggle,
+        ContextMenuTarget, GroupMenuToggle,
+    },
+    group::GroupView,
+    panel_host::PanelHost,
+    splitter::SplitterView,
+    tab_strip::GroupPresentation,
+    collect_group_presentations,
 };
 
 /// A floating composition rendered inside the DockHost's workspace.
@@ -53,8 +71,13 @@ impl FloatingWindowView {
         middle_click_closes_tabs: bool,
         controller: Entity<DockController>,
         theme: Theme,
+        window_root: bool,
     ) -> impl IntoElement {
-        let origin = floating.rect.origin;
+        let origin = if window_root {
+            Point::ZERO
+        } else {
+            floating.rect.origin
+        };
         let mut column_group_ids = HashSet::new();
         for ids in column_groups.values() {
             column_group_ids.extend(ids.iter().copied());
@@ -70,17 +93,27 @@ impl FloatingWindowView {
             .collect::<HashSet<PanelId>>();
 
         let mut root = div()
-            .id(format!("floating-window-{:?}", floating.group))
-            .absolute()
-            .left(px(floating.rect.origin.x))
-            .top(px(floating.rect.origin.y))
-            .w(px(floating.rect.size.width))
-            .h(px(floating.rect.size.height))
-            .overflow_hidden()
-            .bg(rgb(theme.colors.panel_surface_background))
-            .border_1()
-            .border_color(rgb(theme.colors.group_frame_border))
-            .shadow_lg();
+            .id(format!("floating-window-{:?}", floating.group));
+
+        if window_root {
+            root = root
+                .relative()
+                .size_full()
+                .overflow_hidden()
+                .bg(rgb(theme.colors.panel_surface_background));
+        } else {
+            root = root
+                .absolute()
+                .left(px(floating.rect.origin.x))
+                .top(px(floating.rect.origin.y))
+                .w(px(floating.rect.size.width))
+                .h(px(floating.rect.size.height))
+                .overflow_hidden()
+                .bg(rgb(theme.colors.panel_surface_background))
+                .border_1()
+                .border_color(rgb(theme.colors.group_frame_border))
+                .shadow_lg();
+        }
 
         // Each Column remains a normal Core subtree. Its groups, tab strips,
         // panel views and internal vertical splitters use the same components
@@ -312,12 +345,13 @@ impl FloatingWindowView {
             .child(close_button);
         root = root.child(title_bar);
 
-        // Core emits the eight authoritative hit rectangles. The adapter only
-        // translates them into the floating window's local coordinate space.
-        for resize in resize_edges
-            .iter()
-            .filter(|edge| edge.group == floating.group)
-        {
+        // The workspace preview still uses Core resize hit rectangles.
+        // A native FloatingHost delegates resize hit testing to the OS frame.
+        if !window_root {
+            for resize in resize_edges
+                .iter()
+                .filter(|edge| edge.group == floating.group)
+            {
             let mut handle = div()
                 .id(format!(
                     "floating-resize-{:?}-{:?}",
@@ -335,7 +369,330 @@ impl FloatingWindowView {
                 ResizeEdge::TopLeft | ResizeEdge::BottomRight => handle.cursor_nwse_resize(),
                 ResizeEdge::TopRight | ResizeEdge::BottomLeft => handle.cursor_nesw_resize(),
             };
-            root = root.child(handle);
+                root = root.child(handle);
+            }
+        }
+
+        root
+    }
+}
+
+
+#[derive(Clone)]
+struct FloatingHostOpenMenu {
+    target: ContextMenuTarget,
+    anchor: Point,
+    open_submenu: Option<usize>,
+}
+
+struct FloatingHostSnapshot {
+    rects: LayoutRects,
+    floating: FloatingGroupRect,
+    node_ids: HashSet<NodeId>,
+    column_ids: HashSet<NodeId>,
+    column_groups: HashMap<NodeId, Vec<NodeId>>,
+    column_modes: HashMap<NodeId, ColumnMode>,
+    group_presentations: HashMap<NodeId, GroupPresentation>,
+    rail_display_orders: HashMap<NodeId, Vec<ColumnDisplayItem>>,
+    title: String,
+    metrics: DockMetrics,
+}
+
+fn floating_host_snapshot(
+    controller: &DockController,
+    group: FloatingGroupId,
+) -> Result<Option<FloatingHostSnapshot>, ComputeRectsError> {
+    let metrics = controller.metrics();
+    let layout = controller.layout();
+    let rects = layout.compute_floating_rects(group, &metrics)?;
+    let Some(floating) = rects.floating_groups.first().copied() else {
+        // Hidden dock chrome deliberately produces an empty floating snapshot.
+        return Ok(None);
+    };
+    let Some(floating_model) = layout.floating_group(group) else {
+        return Ok(None);
+    };
+    let Some(area) = layout.dock_area(floating_model.area) else {
+        return Ok(None);
+    };
+
+    let mut node_ids = HashSet::new();
+    let mut column_ids = HashSet::new();
+    let mut column_groups = HashMap::new();
+    collect_main_nodes(
+        layout,
+        area.root,
+        &mut node_ids,
+        &mut column_ids,
+        &mut column_groups,
+    );
+
+    let column_modes = column_ids
+        .iter()
+        .filter_map(|id| match layout.node(*id) {
+            Some(Node::Column(column)) => Some((*id, column.mode)),
+            _ => None,
+        })
+        .collect::<HashMap<_, _>>();
+    let group_presentations =
+        collect_group_presentations(layout, controller.registry(), &node_ids);
+    let rail_display_orders = column_modes
+        .iter()
+        .filter(|(_, mode)| mode.is_rail())
+        .filter_map(|(column, _)| {
+            layout
+                .column_display_order(*column)
+                .ok()
+                .map(|order| (*column, order))
+        })
+        .collect::<HashMap<NodeId, Vec<ColumnDisplayItem>>();
+    let title = floating_root_title(
+        layout,
+        area.root,
+        &group_presentations,
+        controller.registry(),
+    )
+    .unwrap_or_else(|| "Floating panels".to_string());
+
+    Ok(Some(FloatingHostSnapshot {
+        rects,
+        floating,
+        node_ids,
+        column_ids,
+        column_groups,
+        column_modes,
+        group_presentations,
+        rail_display_orders,
+        title,
+        metrics,
+    }))
+}
+
+/// Root GPUI view for exactly one Core floating composition.
+///
+/// The host owns presentation-only state (scroll handles and a transient
+/// context menu). The shared DockController remains the sole owner of Layout,
+/// history and panel views. Geometry is requested in this window's local
+/// coordinate space on every render.
+pub struct FloatingHost {
+    controller: Entity<DockController>,
+    group: FloatingGroupId,
+    theme: Theme,
+    column_scroll_handles: HashMap<NodeId, ScrollHandle>,
+    open_context_menu: Option<FloatingHostOpenMenu>,
+    controller_observed: bool,
+    middle_click_closes_tabs: bool,
+}
+
+impl FloatingHost {
+    /// Creates a root view for one existing floating group in the shared Layout.
+    pub fn new(
+        controller: Entity<DockController>,
+        group: FloatingGroupId,
+        theme: Theme,
+    ) -> Self {
+        Self {
+            controller,
+            group,
+            theme,
+            column_scroll_handles: HashMap::new(),
+            open_context_menu: None,
+            controller_observed: false,
+            middle_click_closes_tabs: true,
+        }
+    }
+
+    /// Returns the Core floating-group ID rendered by this root view.
+    pub fn group(&self) -> FloatingGroupId {
+        self.group
+    }
+
+    /// Enables or disables closing a tab with the middle mouse button.
+    pub fn middle_click_closes_tabs(mut self, enabled: bool) -> Self {
+        self.middle_click_closes_tabs = enabled;
+        self
+    }
+}
+
+impl Render for FloatingHost {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if !self.controller_observed {
+            cx.observe(&self.controller, |_, _, host_cx| host_cx.notify())
+                .detach();
+            self.controller_observed = true;
+        }
+
+        // Reuse the controller's persistent PanelId -> AnyView cache. This call
+        // is idempotent; factories run only for cache misses.
+        self.controller.update(cx, |controller, panel_cx| {
+            controller.ensure_panel_views(window, panel_cx);
+        });
+
+        let snapshot = self.controller.update(cx, |controller, _| {
+            floating_host_snapshot(controller, self.group)
+        });
+        let snapshot = match snapshot {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                tracing::warn!(
+                    ?self.group,
+                    %error,
+                    "floating host could not obtain local Core geometry"
+                );
+                None
+            }
+        };
+
+        let mut root = div()
+            .id(format!("floating-host-root-{:?}", self.group))
+            .relative()
+            .size_full()
+            .overflow_hidden()
+            .bg(rgb(self.theme.colors.panel_surface_background));
+
+        let Some(snapshot) = snapshot else {
+            return root;
+        };
+
+        // GPUI scroll state is presentation-only and follows the lifetime of
+        // the Column node within this one floating composition.
+        let overflow_columns = snapshot
+            .rects
+            .vertical_overflow
+            .iter()
+            .map(|overflow| overflow.owner)
+            .collect::<HashSet<_>>();
+        self.column_scroll_handles.retain(|column, _| {
+            snapshot.column_ids.contains(column) && overflow_columns.contains(column)
+        });
+        for column in overflow_columns {
+            self.column_scroll_handles.entry(column).or_default();
+        }
+
+        // Every PanelRect in compute_floating_rects belongs to this group and
+        // is already expressed in local (0, 0) coordinates.
+        let panel_views = snapshot
+            .rects
+            .panels
+            .iter()
+            .filter_map(|panel_rect| {
+                let panel_rect = *panel_rect;
+                self.controller.update(cx, |controller, panel_cx| {
+                    controller
+                        .panel_view(panel_rect.panel, window, panel_cx)
+                        .map(|view| (panel_rect, view))
+                })
+            })
+            .collect::<Vec<_>>();
+
+        if self.open_context_menu.as_ref().is_some_and(|open| {
+            !context_menu_target_exists(
+                open.target,
+                &snapshot.group_presentations,
+                &snapshot.column_ids,
+                Some(&snapshot.rects),
+            )
+        }) {
+            self.open_context_menu = None;
+        }
+
+        let toggle_host = cx.entity().downgrade();
+        let toggle_context_menu: GroupMenuToggle = Rc::new(move |target, anchor, app| {
+            if let Some(host) = toggle_host.upgrade() {
+                host.update(app, |host, host_cx| {
+                    host.open_context_menu = if host
+                        .open_context_menu
+                        .as_ref()
+                        .is_some_and(|open| open.target == target)
+                    {
+                        None
+                    } else {
+                        Some(FloatingHostOpenMenu {
+                            target,
+                            anchor,
+                            open_submenu: None,
+                        })
+                    };
+                    host_cx.notify();
+                });
+            }
+        });
+
+        let dismiss_host = cx.entity().downgrade();
+        let dismiss_context_menu: ContextMenuDismiss = Rc::new(move |app| {
+            if let Some(host) = dismiss_host.upgrade() {
+                host.update(app, |host, host_cx| {
+                    host.open_context_menu = None;
+                    host_cx.notify();
+                });
+            }
+        });
+
+        let submenu_host = cx.entity().downgrade();
+        let toggle_context_submenu: ContextMenuSubmenuToggle = Rc::new(move |index, app| {
+            if let Some(host) = submenu_host.upgrade() {
+                host.update(app, |host, host_cx| {
+                    if let Some(open) = host.open_context_menu.as_mut() {
+                        open.open_submenu = index;
+                        host_cx.notify();
+                    }
+                });
+            }
+        });
+
+        root = root.child(FloatingWindowView::render(
+            snapshot.floating,
+            &snapshot.rects.floating_resize_edges,
+            &snapshot.rects.columns,
+            &snapshot.rects.groups,
+            panel_views,
+            &snapshot.rects.tab_strips,
+            &snapshot.rects.tab_headers,
+            &snapshot.rects.tab_overflows,
+            &snapshot.group_presentations,
+            &snapshot.column_groups,
+            &snapshot.column_modes,
+            &snapshot.rail_display_orders,
+            &snapshot.rects.splitters,
+            &snapshot.rects.vertical_overflow,
+            &self.column_scroll_handles,
+            None,
+            None,
+            &[],
+            snapshot.metrics,
+            &snapshot.title,
+            None,
+            toggle_context_menu,
+            self.middle_click_closes_tabs,
+            self.controller.clone(),
+            self.theme,
+            true,
+        ));
+
+        if let Some(open) = self.open_context_menu.as_ref()
+            && let Some(viewport) = snapshot.rects.viewport
+        {
+            let entries = build_context_menu_entries(
+                open.target,
+                &snapshot.rects,
+                &snapshot.group_presentations,
+                &snapshot.column_modes,
+                self.controller.clone(),
+            );
+            if !entries.is_empty() {
+                root = root.child(ContextMenu::render(
+                    "floating-context-menu",
+                    viewport,
+                    open.anchor,
+                    &entries,
+                    open.open_submenu,
+                    ContextMenuCallbacks {
+                        on_submenu: toggle_context_submenu,
+                        on_dismiss: dismiss_context_menu,
+                    },
+                    self.theme,
+                ));
+            }
         }
 
         root

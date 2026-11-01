@@ -36,8 +36,8 @@ pub fn run(_options: RunOptions) {
 
 pub use components::{
     CanvasSlot, ColumnView, ContextMenu, ContextMenuEntry, ContextMenuItem, DragGhost, DropOverlay,
-    FloatingWindowView, FlyoutView, GroupView, MainDockView, PanelHost, RailView, SplitterView,
-    TabHeaderView, TabOverflow, TabStripView,
+    FloatingHost, FloatingWindowView, FlyoutView, GroupView, MainDockView, PanelHost, RailView,
+    SplitterView, TabHeaderView, TabOverflow, TabStripView,
 };
 pub use dock_host::DockHost;
 pub use missing_panel::MissingPanelPlaceholder;

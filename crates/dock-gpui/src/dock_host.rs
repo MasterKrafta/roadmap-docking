@@ -794,6 +794,7 @@ impl Render for DockHost {
                     panel_view,
                     self.controller.clone(),
                     theme,
+                    false,
                 ));
             }
 
@@ -982,7 +983,7 @@ fn render_resize_preview(preview: ResizePreview, theme: DockTheme) -> impl IntoE
     marker
 }
 
-fn context_menu_target_exists(
+pub(crate) fn context_menu_target_exists(
     target: ContextMenuTarget,
     presentations: &HashMap<NodeId, crate::components::tab_strip::GroupPresentation>,
     columns: &HashSet<NodeId>,
@@ -1014,7 +1015,7 @@ fn command_menu_item(
     .into()
 }
 
-fn build_context_menu_entries(
+pub(crate) fn build_context_menu_entries(
     target: ContextMenuTarget,
     rects: &LayoutRects,
     presentations: &HashMap<NodeId, crate::components::tab_strip::GroupPresentation>,
@@ -1163,7 +1164,7 @@ fn build_context_menu_entries(
 
 /// Collects only nodes reachable from the left/right main dock roots.
 /// Floating compositions are deliberately rendered by their own later layer.
-fn collect_main_nodes(
+pub(crate) fn collect_main_nodes(
     layout: &Layout,
     id: NodeId,
     nodes: &mut HashSet<NodeId>,
@@ -1197,7 +1198,7 @@ fn collect_main_nodes(
 }
 
 /// Returns the first active tab title in deterministic tree order.
-fn floating_root_title(
+pub(crate) fn floating_root_title(
     layout: &Layout,
     root: NodeId,
     presentations: &HashMap<NodeId, crate::components::tab_strip::GroupPresentation>,
