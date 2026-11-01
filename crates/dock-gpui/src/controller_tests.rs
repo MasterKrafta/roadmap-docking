@@ -632,10 +632,10 @@ fn floating_geometry_hit_test_and_drop_resolver_are_window_local() {
     let first_rects = controller.floating_geometry(first_window, first_group).unwrap();
     assert_eq!(first_rects.floating_groups.len(), 1);
     assert_eq!(first_rects.floating_groups[0].rect.origin, Point::ZERO);
-    assert_eq!(
+    assert!(matches!(
         controller.hit_floating_window(first_window, first_group, Point::new(10.0, 10.0)),
-        Ok(HitResult::FloatingTitle { group: first_group })
-    );
+        Ok(HitResult::FloatingTitle { group }) if group == first_group
+    ));
 
     // A hidden PopUp can be rebound to another group without retaining its old snapshot.
     controller.floating_geometry(first_window, second_group).unwrap();
@@ -670,7 +670,20 @@ fn floating_geometry_hit_test_and_drop_resolver_are_window_local() {
         .prepare_floating_window_drop_resolver(first_window, second_group, source)
         .unwrap();
     assert!(matches!(controller.drag.resolver_key, Some(ResolverCacheKey::Floating(_))));
+    assert!(controller.main_drop_resolver().is_none());
+    assert!(controller.main_drag_preview().is_none());
+    assert!(controller
+        .floating_window_drop_resolver(first_window, second_group)
+        .is_some());
+    assert!(controller
+        .floating_window_drag_preview(first_window, second_group)
+        .is_some());
 
     controller.prepare_drop_resolver(source).unwrap();
     assert!(matches!(controller.drag.resolver_key, Some(ResolverCacheKey::Main(_))));
+    assert!(controller.main_drop_resolver().is_some());
+    assert!(controller.main_drag_preview().is_some());
+    assert!(controller
+        .floating_window_drop_resolver(first_window, second_group)
+        .is_none());
 }

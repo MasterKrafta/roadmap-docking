@@ -298,9 +298,9 @@ impl Render for DockHost {
                 .collect::<HashMap<NodeId, Vec<ColumnDisplayItem>>>();
 
             let active_flyout = layout.flyout();
-            let drag_preview = controller.drag().session().preview();
-            let drag_handle = controller.drag().session().handle();
-            let resolver = controller.drag().resolver();
+            let drag_preview = controller.main_drag_preview();
+            let drag_handle = drag_preview.and_then(|_| controller.drag().session().handle());
+            let resolver = controller.main_drop_resolver();
             let drag_zones = resolver
                 .map(|resolver| resolver.zones().to_vec())
                 .unwrap_or_default();

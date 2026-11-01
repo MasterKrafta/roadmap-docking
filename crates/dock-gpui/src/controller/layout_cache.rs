@@ -165,6 +165,55 @@ impl DockController {
             .ok_or(ComputeRectsError::InvalidLayoutState)
     }
 
+    /// Returns the resolver only when it belongs to the current main-window snapshot.
+    pub(crate) fn main_drop_resolver(&self) -> Option<&dock_core::DropZoneResolver> {
+        let key = ResolverCacheKey::Main(self.rect_cache_key());
+        (self.drag.resolver_key == Some(key))
+            .then(|| self.drag.resolver())
+            .flatten()
+    }
+
+    /// Returns main-window preview data only while its resolver owns the active drag.
+    pub(crate) fn main_drag_preview(&self) -> Option<dock_core::DragPreview> {
+        self.main_drop_resolver()?;
+        self.drag.session().preview()
+    }
+
+    /// Returns the resolver only for the exact floating window/group cache entry.
+    pub(crate) fn floating_window_drop_resolver(
+        &self,
+        window_id: WindowId,
+        group: FloatingGroupId,
+    ) -> Option<&dock_core::DropZoneResolver> {
+        let expected = FloatingRectCacheKey {
+            window_id,
+            group,
+            layout_version: self.layout.version(),
+            metrics_revision: self.metrics_revision,
+            chrome: self.layout.chrome(),
+        };
+        let cache_is_current = self
+            .floating_rects
+            .get(&window_id)
+            .is_some_and(|cache| cache.key == expected);
+        if !cache_is_current
+            || self.drag.resolver_key != Some(ResolverCacheKey::Floating(expected))
+        {
+            return None;
+        }
+        self.drag.resolver()
+    }
+
+    /// Returns floating-window preview data only while its local resolver is current.
+    pub(crate) fn floating_window_drag_preview(
+        &self,
+        window_id: WindowId,
+        group: FloatingGroupId,
+    ) -> Option<dock_core::DragPreview> {
+        self.floating_window_drop_resolver(window_id, group)?;
+        self.drag.session().preview()
+    }
+
     /// Updates the viewport in logical pixels and invalidates adapter caches.
     pub fn set_viewport(&mut self, viewport: Rect) -> Result<bool, GeometryError> {
         viewport.validate_non_empty()?;
