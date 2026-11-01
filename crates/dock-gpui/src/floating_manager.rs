@@ -204,6 +204,26 @@ impl FloatingWindowManager {
         Some(Rect::new(Point::new(origin.x as f32, origin.y as f32), bounds.size))
     }
 
+    /// Converts a rectangle in one floating host's local logical coordinates
+    /// to the Core contract: physical virtual-desktop origin + logical size.
+    pub(crate) fn screen_bounds_from_floating_local(
+        &self,
+        source_group: FloatingGroupId,
+        bounds: Rect,
+    ) -> Option<Rect> {
+        bounds.validate_non_empty().ok()?;
+        let native_window = self.registry.floating.get(&source_group)?.native_window?;
+        let client = self.native_ops.client_origin(native_window).ok()?;
+        let scale = self.native_ops.scale_factor(native_window).ok()?;
+        let origin = screen_position_from_main_local(
+            bounds.origin,
+            Point::ZERO,
+            client,
+            scale,
+        )?;
+        Some(Rect::new(Point::new(origin.x as f32, origin.y as f32), bounds.size))
+    }
+
     pub(crate) fn native_move_active(&self) -> bool { self.native_move.is_some() }
 
     /// Starts native movement for a group created by the current main-window drag.
@@ -238,6 +258,63 @@ impl FloatingWindowManager {
             group, native_window, kind: NativeMoveKind::TearOff, grab_offset, initial_cursor: cursor,
             start_bounds: model_bounds, start_pointer: pointer, drag_threshold: 0.0, threshold_crossed: true,
             high_resolution_timer, drop_target: None,
+        });
+        self.schedule_native_move(cx, group, window_id);
+        true
+    }
+
+    /// Starts native movement for a newly-created floating window whose
+    /// source was detached from a tab inside another floating host.
+    pub(crate) fn begin_floating_tab_tearoff_move(
+        &mut self,
+        group: FloatingGroupId,
+        model_bounds: Rect,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.native_move.is_some() {
+            return false;
+        }
+        let Some(entry) = self.registry.floating.get(&group) else {
+            return false;
+        };
+        let (Some(native_window), window_id) = (entry.native_window, entry.window_id) else {
+            return false;
+        };
+        let Ok(cursor) = self.native_ops.cursor_position() else {
+            return false;
+        };
+        let Some(origin_x) = integer_physical_coordinate(model_bounds.origin.x) else {
+            return false;
+        };
+        let Some(origin_y) = integer_physical_coordinate(model_bounds.origin.y) else {
+            return false;
+        };
+        let grab_offset = PhysicalPoint {
+            x: cursor.x.saturating_sub(origin_x),
+            y: cursor.y.saturating_sub(origin_y),
+        };
+        let position = PhysicalPoint {
+            x: cursor.x.saturating_sub(grab_offset.x),
+            y: cursor.y.saturating_sub(grab_offset.y),
+        };
+        if let Err(error) = self.native_ops.move_window(native_window, position) {
+            tracing::warn!(?group, %error, "could not start native floating-tab tear-off movement");
+            return false;
+        }
+
+        let high_resolution_timer = self.native_ops.begin_high_resolution_timer().is_ok();
+        self.native_move = Some(NativeMoveSession {
+            group,
+            native_window,
+            kind: NativeMoveKind::TearOff,
+            grab_offset,
+            initial_cursor: cursor,
+            start_bounds: model_bounds,
+            start_pointer: Point::ZERO,
+            drag_threshold: 0.0,
+            threshold_crossed: true,
+            high_resolution_timer,
+            drop_target: None,
         });
         self.schedule_native_move(cx, group, window_id);
         true
