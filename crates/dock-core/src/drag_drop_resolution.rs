@@ -867,10 +867,10 @@ fn floating_group_can_dock_to_an_empty_main_window_edge() {
         .find(|zone| {
             zone.zone == crate::DropZone::DockEdge
                 && zone.target
-                    == DropTarget::MainColumn {
+                    == (DropTarget::MainColumn {
                         side: DockSide::Left,
                         index: 0,
-                    }
+                    })
         })
         .expect("an empty left Main Dock must expose an outer-edge insertion target");
 
