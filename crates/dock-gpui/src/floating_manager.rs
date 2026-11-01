@@ -353,7 +353,7 @@ impl FloatingWindowManager {
         bounds: Rect,
     ) -> Option<Rect> {
         bounds.validate_non_empty().ok()?;
-        let native_window = self.registry.floating.get(&source_group)?.native_window?;
+        let native_window = self.panel_window_for_group(source_group)?.native_window?;
         let client = self.native_ops.client_origin(native_window).ok()?;
         let scale = self.native_ops.scale_factor(native_window).ok()?;
         let origin = screen_position_from_main_local(
@@ -372,9 +372,7 @@ impl FloatingWindowManager {
         source_group: FloatingGroupId,
     ) -> bool {
         let Some(source_window) = self
-            .registry
-            .floating
-            .get(&source_group)
+            .panel_window_for_group(source_group)
             .and_then(|entry| entry.native_window)
         else {
             return false;
@@ -413,7 +411,7 @@ impl FloatingWindowManager {
         if self.native_move.is_some() || self.native_resize.is_some() {
             return;
         }
-        let Some(entry) = self.registry.floating.get(&group) else {
+        let Some(entry) = self.panel_window_for_group(group) else {
             return;
         };
         if entry.window_id != window_id {
@@ -469,7 +467,7 @@ impl FloatingWindowManager {
             return false;
         };
 
-        let native_window = self.registry.floating.get(&group).and_then(|entry| {
+        let native_window = self.panel_window_for_group(group).and_then(|entry| {
             (entry.window_id == window_id).then_some(entry.native_window).flatten()
         });
         let Some(native_window) = native_window else {
@@ -569,7 +567,7 @@ impl FloatingWindowManager {
         cx: &mut Context<Self>,
     ) -> bool {
         if self.native_move.is_some() { return false; }
-        let Some(entry) = self.registry.floating.get(&group) else { return false; };
+        let Some(entry) = self.panel_window_for_group(group) else { return false; };
         let (Some(native_window), window_id) = (entry.native_window, entry.window_id) else { return false; };
         let Ok(cursor) = self.native_ops.cursor_position() else { return false; };
         let scale = self.main_native_window
@@ -607,7 +605,7 @@ impl FloatingWindowManager {
         if self.native_move.is_some() {
             return false;
         }
-        let Some(entry) = self.registry.floating.get(&group) else {
+        let Some(entry) = self.panel_window_for_group(group) else {
             return false;
         };
         let (Some(native_window), window_id) = (entry.native_window, entry.window_id) else {
@@ -658,7 +656,7 @@ impl FloatingWindowManager {
         &mut self, group: FloatingGroupId, pointer: Point, cx: &mut Context<Self>,
     ) -> bool {
         if self.native_move.is_some() { return false; }
-        let Some(entry) = self.registry.floating.get(&group) else { return false; };
+        let Some(entry) = self.panel_window_for_group(group) else { return false; };
         let (Some(native_window), window_id) = (entry.native_window, entry.window_id) else { return false; };
         let Ok(cursor) = self.native_ops.cursor_position() else { return false; };
         let Ok(native_rect) = self.native_ops.window_rect(native_window) else { return false; };
@@ -706,7 +704,7 @@ impl FloatingWindowManager {
 
     fn tick_native_move(&mut self, group: FloatingGroupId, window_id: WindowId, cx: &mut Context<Self>) -> bool {
         let Some(mut state) = self.native_move.filter(|state| state.group == group) else { return false; };
-        if self.registry.floating.get(&group).is_none_or(|entry| entry.window_id != window_id) {
+        if self.panel_window_for_group(group).is_none_or(|entry| entry.window_id != window_id) {
             self.native_move = None;
             if state.high_resolution_timer {
                 let _ = self.native_ops.end_high_resolution_timer();
@@ -791,7 +789,7 @@ impl FloatingWindowManager {
         };
         let mut known = Vec::new();
         if let Some(main) = self.main_native_window { known.push(main); }
-        known.extend(self.registry.floating.values().filter_map(|entry| entry.native_window));
+        known.extend(self.registry.windows.values().filter_map(|entry| entry.native_window));
         let target_window = self.native_ops.window_from_point(cursor, &known, Some(state.native_window)).ok().flatten();
         let Some(target_window) = target_window else {
             state.drop_target = None;
@@ -822,8 +820,10 @@ impl FloatingWindowManager {
                 target.map(|target| NativeMoveTarget { target, point })
             })
         } else {
-            let Some((target_group, target_id)) = self.registry.floating.iter().find_map(|(group, entry)| {
-                (entry.native_window == Some(target_window) && *group != state.group).then_some((*group, entry.window_id))
+            let Some((target_group, target_id)) = self.host_registry.floating_groups.iter().find_map(|(group, panel)| {
+                let entry = self.registry.windows.get(panel)?;
+                (entry.native_window == Some(target_window) && *group != state.group)
+                    .then_some((*group, entry.window_id))
             }) else {
                 state.drop_target = None;
                 self.clear_native_drag_target(cx);
@@ -955,52 +955,61 @@ impl FloatingWindowManager {
         Point::new(bounds.origin.x / scale, bounds.origin.y / scale)
     }
 
-    /// Makes the registry match the current floating groups in Core.
+    /// Makes the PanelId registry and composition-host map match the current Layout.
     ///
-    /// This method intentionally snapshots only group metadata and panel
-    /// ownership. It never clones Layout or builds a second docking tree.
+    /// Every open panel keeps its own native window. A floating composition is
+    /// rendered by one of those windows; the other panel windows stay hidden.
     pub fn reconcile(&mut self, cx: &mut Context<Self>) {
         if self.reconciling {
             return;
         }
         self.reconciling = true;
 
-        let (mut groups, panel_owners, restore_pending) = self.controller.update(cx, |controller, _| {
-            let restore_pending = controller.take_workspace_restore_pending();
-            let layout = controller.layout();
-            let metrics = controller.metrics();
-            let mut panel_owners = HashMap::new();
+        let (mut groups, panel_owners, restore_pending) =
+            self.controller.update(cx, |controller, _| {
+                let restore_pending = controller.take_workspace_restore_pending();
+                let layout = controller.layout();
+                let metrics = controller.metrics();
+                let mut panel_owners = HashMap::new();
 
-            for side in [DockSide::Left, DockSide::Right] {
-                if let Some(area) = layout.main_area(side) {
-                    let mut panels = HashSet::new();
-                    collect_panel_ids(layout, area.root, &mut panels);
-                    for panel in panels {
-                        panel_owners.insert(panel, PanelWindowOwner::Main);
+                for side in [DockSide::Left, DockSide::Right] {
+                    if let Some(area) = layout.main_area(side) {
+                        let mut panels = Vec::new();
+                        let mut seen = HashSet::new();
+                        collect_panel_order(layout, area.root, &mut panels, &mut seen);
+                        for panel in panels {
+                            panel_owners.insert(panel, PanelWindowOwner::Main);
+                        }
                     }
                 }
-            }
 
-            let mut groups = Vec::new();
-            for (id, group) in layout.floating_groups() {
-                groups.push(FloatingGroupSnapshot {
-                    id,
-                    bounds: group.bounds,
-                    z_order: group.z_order,
-                    minimum_size: layout.floating_minimum_size(id, &metrics).ok(),
-                });
+                let mut groups = Vec::new();
+                for (id, group) in layout.floating_groups() {
+                    let Some(area) = layout.dock_area(group.area) else {
+                        continue;
+                    };
 
-                if let Some(area) = layout.dock_area(group.area) {
-                    let mut panels = HashSet::new();
-                    collect_panel_ids(layout, area.root, &mut panels);
-                    for panel in panels {
-                        panel_owners.insert(panel, PanelWindowOwner::Floating(id));
+                    let mut panels = Vec::new();
+                    let mut seen = HashSet::new();
+                    collect_panel_order(layout, area.root, &mut panels, &mut seen);
+                    for panel in &panels {
+                        panel_owners.insert(*panel, PanelWindowOwner::Floating(id));
                     }
-                }
-            }
 
-            (groups, panel_owners, restore_pending)
-        });
+                    groups.push(FloatingGroupSnapshot {
+                        id,
+                        bounds: group.bounds,
+                        z_order: group.z_order,
+                        minimum_size: layout.floating_minimum_size(id, &metrics).ok(),
+                        panels,
+                    });
+                }
+
+                (groups, panel_owners, restore_pending)
+            });
+
+        groups.sort_by_key(|group| group.z_order);
+        let desired_panels = panel_owners.keys().copied().collect::<HashSet<_>>();
 
         let monitor_work_areas = if restore_pending {
             match self.native_ops.monitor_work_areas() {
@@ -1017,93 +1026,209 @@ impl FloatingWindowManager {
             None
         };
 
-        groups.sort_by_key(|group| group.z_order);
-        let desired_groups = groups
-            .iter()
-            .map(|group| group.id)
-            .collect::<HashSet<_>>();
-
-        // A Core group can disappear when it is merged into another group or
-        // explicitly closed. Hide its native window and keep it available for
-        // a later extraction instead of destroying and recreating the HWND.
-        let removed_groups = self
+        // Closing a PanelId destroys only that panel's permanent window. It is
+        // never placed in a pool or reassigned to another panel.
+        let removed_panels = self
             .registry
-            .floating
+            .windows
             .keys()
-            .filter(|group| !desired_groups.contains(group))
+            .filter(|panel| !desired_panels.contains(panel))
             .copied()
             .collect::<Vec<_>>();
-        for group in removed_groups {
-            self.release_group_window(group, cx);
+        for panel in removed_panels {
+            self.release_panel_window(panel, cx);
         }
 
-        let mut monitor_corrections = Vec::new();
-        for group in groups.iter().copied() {
-            let mut entry = self.registry.floating.remove(&group.id);
+        // Discard GPUI handles that were externally closed, then recreate only
+        // records for PanelIds that still exist in Layout.
+        let unavailable_panels = self
+            .registry
+            .windows
+            .iter()
+            .filter_map(|(panel, entry)| {
+                entry
+                    .window
+                    .update(cx, |_, _, _| ())
+                    .is_err()
+                    .then_some(*panel)
+            })
+            .collect::<Vec<_>>();
+        for panel in unavailable_panels {
+            self.release_panel_window(panel, cx);
+        }
 
-            if let Some(existing) = entry.as_ref()
-                && existing.window.update(cx, |_, _, _| ()).is_err()
-            {
-                // A window may have been closed by the platform. Do not keep a
-                // stale handle in the registry; create a replacement below.
-                entry = None;
-            }
-
-            let mut entry = match entry {
-                Some(entry) => Some(entry),
-                None => self.take_reusable_window(group, cx),
+        let missing_panels = desired_panels
+            .iter()
+            .filter(|panel| !self.registry.windows.contains_key(panel))
+            .copied()
+            .collect::<Vec<_>>();
+        for (index, panel) in missing_panels.into_iter().enumerate() {
+            let Some(owner) = panel_owners.get(&panel).copied() else {
+                continue;
             };
-
-            if entry.is_none() {
-                entry = self.create_window(group, cx);
-            }
-
-            let Some(mut entry) = entry else {
+            let bounds = self.initial_panel_window_bounds(panel, owner, &groups, index, cx);
+            if let Some(entry) = self.create_panel_window(panel, bounds, cx) {
+                self.registry.windows.insert(panel, entry);
+            } else {
                 tracing::error!(
-                    ?group.id,
-                    "could not create or reuse a floating native window"
+                    ?panel,
+                    "could not create the permanent native window for an open panel"
                 );
+            }
+        }
+
+        // Prefer the previous host while it remains a member of the same
+        // composition. After a merge, the target composition keeps its host;
+        // after extraction, the detached panel's own window becomes the host.
+        let previous_hosts = self.host_registry.floating_groups.clone();
+        let mut next_hosts = HashMap::new();
+        for group in &groups {
+            let previous = previous_hosts
+                .get(&group.id)
+                .copied()
+                .filter(|panel| group.panels.contains(panel));
+            let host = previous.or_else(|| {
+                group
+                    .panels
+                    .iter()
+                    .copied()
+                    .find(|panel| self.registry.windows.contains_key(panel))
+            });
+            if let Some(host) = host {
+                next_hosts.insert(group.id, host);
+            }
+        }
+
+        let mut next_group_by_panel = HashMap::new();
+        for (group, panel) in &next_hosts {
+            next_group_by_panel.insert(*panel, *group);
+        }
+
+        // First detach old hosts and hide them. This happens before any new
+        // window mounts the composition, preventing one AnyView from being
+        // hosted by two GPUI windows during a host transfer.
+        let detached_panels = self
+            .registry
+            .windows
+            .iter()
+            .filter_map(|(panel, entry)| {
+                (entry.host_group != next_group_by_panel.get(panel).copied())
+                    .then_some(*panel)
+                    .filter(|_| entry.host_group.is_some())
+            })
+            .collect::<Vec<_>>();
+        for panel in detached_panels {
+            if let Some(entry) = self.registry.windows.get_mut(&panel) {
+                if let Err(error) = entry.window.update(cx, |host, _, host_cx| {
+                    host.set_host_group(None);
+                    host_cx.notify();
+                }) {
+                    tracing::debug!(
+                        ?panel,
+                        %error,
+                        "could not detach a panel window from its previous composition"
+                    );
+                }
+                if let Some(native_window) = entry.native_window
+                    && let Err(error) = self.native_ops.hide(native_window)
+                {
+                    tracing::warn!(
+                        ?panel,
+                        %error,
+                        "could not hide a panel window after it stopped hosting a composition"
+                    );
+                }
+                entry.host_group = None;
+                entry.visibility = PanelWindowVisibility::Hidden;
+            }
+        }
+
+        self.host_registry.floating_groups = next_hosts.clone();
+        self.registry.panel_owners = panel_owners;
+
+        let mut monitor_corrections = Vec::new();
+        for group in &groups {
+            let Some(panel) = next_hosts.get(&group.id).copied() else {
+                continue;
+            };
+            let Some(entry) = self.registry.windows.get_mut(&panel) else {
                 continue;
             };
 
-            self.sync_window_bounds(&mut entry, group);
+            if entry.host_group != Some(group.id) {
+                match entry.window.update(cx, |host, _, host_cx| {
+                    host.set_host_group(Some(group.id));
+                    host_cx.notify();
+                }) {
+                    Ok(()) => entry.host_group = Some(group.id),
+                    Err(error) => {
+                        tracing::warn!(
+                            ?panel,
+                            ?group.id,
+                            %error,
+                            "could not assign a floating composition to its permanent panel window"
+                        );
+                        continue;
+                    }
+                }
+            }
+
+            self.sync_window_bounds(entry, *group);
             if let Some(areas) = monitor_work_areas.as_deref()
                 && let Some(corrected_bounds) =
-                    self.restore_native_window_to_monitor(&mut entry, areas)
+                    self.restore_native_window_to_monitor(entry, areas)
             {
                 monitor_corrections.push((group.id, corrected_bounds));
                 entry.bounds = corrected_bounds;
             }
-            self.sync_native_resize(&mut entry, group);
+            self.sync_native_resize(entry, *group);
             entry.z_order = group.z_order;
-            self.registry.floating.insert(group.id, entry);
         }
 
-        self.registry.panel_owners = panel_owners;
-
-        // Re-showing without activation in ascending z-order restores the
-        // stacking order without stealing focus from the main application.
-        for group in groups {
-            if let Some(native_window) = self
-                .registry
-                .floating
-                .get(&group.id)
-                .and_then(|entry| entry.native_window)
-                && let Err(error) = self.native_ops.show_no_activate(native_window)
-            {
-                tracing::warn!(
-                    ?group.id,
-                    %error,
-                    "could not update floating-window visibility or z-order"
-                );
+        // Only selected composition hosts become visible. All other open
+        // PanelWindows (nested panels and Main-Dock panels) remain alive/hidden.
+        for group in &groups {
+            let Some(panel) = next_hosts.get(&group.id).copied() else {
+                continue;
+            };
+            let Some(entry) = self.registry.windows.get_mut(&panel) else {
+                continue;
+            };
+            if let Some(native_window) = entry.native_window {
+                match self.native_ops.show_no_activate(native_window) {
+                    Ok(()) => entry.visibility = PanelWindowVisibility::Visible,
+                    Err(error) => tracing::warn!(
+                        ?panel,
+                        ?group.id,
+                        %error,
+                        "could not show the native window hosting a floating composition"
+                    ),
+                }
             }
         }
 
-        let monitor_recovery_applied = if monitor_corrections.is_empty() {
-            false
-        } else {
-            self.controller.update(cx, |controller, controller_cx| {
-                let applied = match controller.apply_workspace_monitor_bounds(&monitor_corrections) {
+        for (panel, entry) in &mut self.registry.windows {
+            if entry.host_group.is_none()
+                && entry.visibility == PanelWindowVisibility::Visible
+            {
+                if let Some(native_window) = entry.native_window
+                    && let Err(error) = self.native_ops.hide(native_window)
+                {
+                    tracing::warn!(
+                        ?panel,
+                        %error,
+                        "could not hide a non-host panel window"
+                    );
+                }
+                entry.visibility = PanelWindowVisibility::Hidden;
+            }
+        }
+
+        self.reconciling = false;
+        if !monitor_corrections.is_empty() {
+            let applied = self.controller.update(cx, |controller, controller_cx| {
+                let applied = match controller.apply_workspace_monitor_bounds(&monitor_corrections)
+                {
                     Ok(()) => true,
                     Err(error) => {
                         tracing::warn!(
@@ -1116,24 +1241,63 @@ impl FloatingWindowManager {
                 controller.flush_events(controller_cx);
                 controller_cx.notify();
                 applied
-            })
-        };
-
-        self.reconciling = false;
-        if monitor_recovery_applied {
-            // Core may enforce a stricter minimum size while accepting the
-            // recovered bounds. Run one normal pass so the native frame matches
-            // the final, Core-constrained rectangle before continuing.
-            self.reconcile(cx);
+            });
+            if applied {
+                self.reconcile(cx);
+            }
         }
     }
 
-    fn release_group_window(
-        &mut self,
-        group: FloatingGroupId,
+    fn initial_panel_window_bounds(
+        &self,
+        panel: PanelId,
+        owner: PanelWindowOwner,
+        groups: &[FloatingGroupSnapshot],
+        offset: usize,
         cx: &mut Context<Self>,
-    ) {
-        let Some(mut entry) = self.registry.floating.remove(&group) else {
+    ) -> Rect {
+        if let PanelWindowOwner::Floating(group) = owner
+            && let Some(group) = groups.iter().find(|candidate| candidate.id == group)
+        {
+            return group.bounds;
+        }
+
+        let (viewport, preferred_size, floating_count) =
+            self.controller.update(cx, |controller, _| {
+                let preferred_size = controller
+                    .layout()
+                    .panel_instance(panel)
+                    .and_then(|instance| controller.registry().get(&instance.key))
+                    .map(|descriptor| descriptor.constraints().preferred_size)
+                    .unwrap_or(Size::new(280.0, 220.0));
+                (
+                    controller.viewport(),
+                    preferred_size,
+                    controller.layout().floating_groups().count(),
+                )
+            });
+
+        let cascade = (floating_count.saturating_add(offset).min(7) as f32) * 24.0;
+        let max_x =
+            (viewport.origin.x + viewport.size.width - preferred_size.width).max(viewport.origin.x);
+        let max_y =
+            (viewport.origin.y + viewport.size.height - preferred_size.height)
+                .max(viewport.origin.y);
+        let x = (viewport.origin.x
+            + (viewport.size.width - preferred_size.width).max(0.0) * 0.5
+            + cascade)
+            .min(max_x);
+        let y = (viewport.origin.y
+            + (viewport.size.height - preferred_size.height).max(0.0) * 0.5
+            + cascade)
+            .min(max_y);
+
+        Rect::new(Point::new(x, y), preferred_size)
+    }
+
+    fn release_panel_window(&mut self, panel: PanelId, cx: &mut Context<Self>) {
+        let Some(mut entry) = self.registry.windows.remove(&panel) else {
+            self.registry.panel_owners.remove(&panel);
             return;
         };
 
@@ -1141,9 +1305,9 @@ impl FloatingWindowManager {
             if entry.resize_enabled {
                 if let Err(error) = self.native_ops.disable_resize(native_window) {
                     tracing::warn!(
-                        ?group,
+                        ?panel,
                         %error,
-                        "could not disable native resize on a released floating window"
+                        "could not disable native resize before destroying a panel window"
                     );
                 }
                 entry.resize_enabled = false;
@@ -1151,76 +1315,47 @@ impl FloatingWindowManager {
             if entry.native_min_size.is_some() {
                 if let Err(error) = self.native_ops.set_min_size(native_window, None) {
                     tracing::warn!(
-                        ?group,
+                        ?panel,
                         %error,
-                        "could not clear the native minimum size on a released floating window"
+                        "could not clear the native minimum size before destroying a panel window"
                     );
                 }
                 entry.native_min_size = None;
             }
             if let Err(error) = self.native_ops.hide(native_window) {
-                tracing::warn!(
-                    ?group,
-                    %error,
-                    "could not hide a released floating window"
-                );
-            }
-            self.registry.reusable.push(entry);
-        } else {
-            // Platforms without native hide support cannot safely retain a
-            // hidden GPUI window. Close it and create a fresh one if needed.
-            let _ = entry
-                .window
-                .update(cx, |_, window, _| window.remove_window());
-        }
-    }
-
-    fn take_reusable_window(
-        &mut self,
-        group: FloatingGroupSnapshot,
-        cx: &mut Context<Self>,
-    ) -> Option<FloatingWindowEntry> {
-        while let Some(mut entry) = self.registry.reusable.pop() {
-            let result = entry.window.update(cx, |host, _, host_cx| {
-                host.set_group(group.id);
-                host_cx.notify();
-            });
-            if let Err(error) = result {
                 tracing::debug!(
-                    ?group.id,
+                    ?panel,
                     %error,
-                    "discarding an unavailable reusable floating window"
+                    "panel window was already hidden or unavailable during release"
                 );
-                continue;
             }
-
-            self.sync_window_bounds(&mut entry, group);
-            self.sync_native_resize(&mut entry, group);
-            entry.z_order = group.z_order;
-            return Some(entry);
         }
 
-        None
+        let _ = entry.window.update(cx, |host, window, _| {
+            host.set_host_group(None);
+            window.remove_window();
+        });
+        self.registry.panel_owners.remove(&panel);
     }
 
-    fn create_window(
+    fn create_panel_window(
         &mut self,
-        group: FloatingGroupSnapshot,
+        panel: PanelId,
+        bounds: Rect,
         cx: &mut Context<Self>,
-    ) -> Option<FloatingWindowEntry> {
+    ) -> Option<PanelWindowEntry> {
         let controller = self.controller.clone();
         let theme = self.theme;
         let manager = cx.entity().downgrade();
-        let show_immediately = self.main_native_window.is_none();
-        let logical_origin = self.gpui_origin_for_bounds(group.bounds);
+        let logical_origin = self.gpui_origin_for_bounds(bounds);
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds::new(
                 point(px(logical_origin.x), px(logical_origin.y)),
-                size(px(group.bounds.size.width), px(group.bounds.size.height)),
+                size(px(bounds.size.width), px(bounds.size.height)),
             ))),
             titlebar: None,
             focus: false,
-            show: show_immediately,
+            show: false,
             kind: WindowKind::PopUp,
             is_movable: true,
             app_owns_titlebar_drag: true,
@@ -1230,14 +1365,14 @@ impl FloatingWindowManager {
         };
 
         let window = match cx.open_window(options, move |_, app| {
-            app.new(|_| FloatingHost::new(controller, group.id, theme, manager))
+            app.new(|_| FloatingHost::new(controller, None, theme, manager))
         }) {
             Ok(window) => window,
             Err(error) => {
                 tracing::error!(
-                    ?group.id,
+                    ?panel,
                     %error,
-                    "GPUI could not open a floating window"
+                    "GPUI could not create a permanent PanelWindow"
                 );
                 return None;
             }
@@ -1253,17 +1388,17 @@ impl FloatingWindowManager {
             Ok(Ok(native_window)) => Some(native_window),
             Ok(Err(error)) => {
                 tracing::debug!(
-                    ?group.id,
+                    ?panel,
                     %error,
-                    "floating window has no native handle"
+                    "PanelWindow has no native handle"
                 );
                 None
             }
             Err(error) => {
                 tracing::error!(
-                    ?group.id,
+                    ?panel,
                     %error,
-                    "could not inspect a newly created floating window"
+                    "could not inspect a newly created PanelWindow"
                 );
                 let _ = window.update(cx, |_, window, _| window.remove_window());
                 return None;
@@ -1271,56 +1406,53 @@ impl FloatingWindowManager {
         };
 
         if self.main_native_window.is_some() && native_window.is_none() {
-            // On Windows a hidden window without an HWND cannot be shown or
-            // assigned an owner. Fail closed rather than leave an invisible
-            // GPUI window registered as if it were usable.
+            // A hidden Windows popup without an HWND cannot be shown or bound
+            // to the application's native owner; do not register it as usable.
             let _ = window.update(cx, |_, window, _| window.remove_window());
             return None;
         }
 
         if let Some(native_window) = native_window {
-            // This owner relationship ties the popup to the application's
-            // lifetime (minimize/close behavior); docking membership remains
-            // exclusively represented by the Core Layout and panel ownership map.
+            // Native ownership only controls application minimize/close lifetime.
             if let Some(owner) = self.main_native_window
                 && let Err(error) = self.native_ops.set_owner(native_window, owner)
             {
                 tracing::warn!(
-                    ?group.id,
+                    ?panel,
                     %error,
-                    "could not assign the main window as floating-window owner"
+                    "could not assign the main window as PanelWindow owner"
                 );
             }
-            if let Some(position) = self.physical_origin_for_bounds(group.bounds)
+            if let Some(position) = self.physical_origin_for_bounds(bounds)
                 && let Err(error) = self.native_ops.move_window(native_window, position)
             {
                 tracing::warn!(
-                    ?group.id,
+                    ?panel,
                     %error,
-                    "could not place a floating window relative to the main workspace"
+                    "could not place a newly created PanelWindow"
                 );
             }
             if let Err(error) = self.native_ops.remove_topmost(native_window) {
                 tracing::warn!(
-                    ?group.id,
+                    ?panel,
                     %error,
-                    "could not clear the floating window topmost state"
+                    "could not clear the PanelWindow topmost state"
                 );
             }
         }
 
-        let mut entry = FloatingWindowEntry {
+        Some(PanelWindowEntry {
             window,
             window_id,
             native_window,
-            bounds: group.bounds,
-            z_order: group.z_order,
+            bounds,
+            z_order: 0,
             native_min_size: None,
             native_scale_factor: None,
             resize_enabled: false,
-        };
-        self.sync_native_resize(&mut entry, group);
-        Some(entry)
+            host_group: None,
+            visibility: PanelWindowVisibility::Hidden,
+        })
     }
 
     /// Repositions a restored window only when its title area is no longer
@@ -1522,6 +1654,37 @@ impl FloatingWindowManager {
     }
 }
 
+
+fn collect_panel_order(
+    layout: &dock_core::Layout,
+    root: NodeId,
+    panels: &mut Vec<PanelId>,
+    seen: &mut HashSet<PanelId>,
+) {
+    match layout.node(root) {
+        Some(Node::Split(split)) => {
+            for child in &split.children {
+                collect_panel_order(layout, *child, panels, seen);
+            }
+        }
+        Some(Node::Column(column)) => {
+            for group in &column.groups {
+                collect_panel_order(layout, *group, panels, seen);
+            }
+        }
+        Some(Node::Tabs(tabs)) => {
+            for child in &tabs.children {
+                collect_panel_order(layout, *child, panels, seen);
+            }
+        }
+        Some(Node::Panel(panel)) => {
+            if seen.insert(panel.panel_id) {
+                panels.push(panel.panel_id);
+            }
+        }
+        None => {}
+    }
+}
 
 fn native_rect_has_reachable_title_area(
     rect: platform::PhysicalRect,
