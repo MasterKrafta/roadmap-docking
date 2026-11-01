@@ -415,6 +415,23 @@ impl DockController {
         true
     }
 
+    /// Opens a single history transaction for one continuous native OS resize.
+    /// The adapter streams ResizeFloatingBounds commands until WM_EXITSIZEMOVE.
+    pub(crate) fn begin_native_resize_transaction(&mut self) -> bool {
+        if self.tearoff_transaction_active
+            || self.interaction.is_some()
+            || !self.history.begin_transaction(&self.layout)
+        {
+            return false;
+        }
+        true
+    }
+
+    /// Commits the Core bounds updates collected during one native resize loop.
+    pub(crate) fn finish_native_resize_transaction(&mut self) -> bool {
+        self.history.commit_transaction(&self.layout)
+    }
+
     /// Replaces the source tab/group drag with a capture drag for the newly created
     /// floating composition. The history transaction is deliberately left open.
     pub(crate) fn continue_tearoff_as_floating_capture(
