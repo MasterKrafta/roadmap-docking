@@ -1,7 +1,7 @@
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use slotmap::SlotMap;
 
@@ -46,6 +46,23 @@ impl fmt::Debug for ValidationCache {
     }
 }
 
+/// Arena parts restored from the persistent workspace DTO.
+#[cfg(feature = "serde")]
+pub(crate) struct WorkspaceLayoutParts {
+    pub(crate) nodes: SlotMap<NodeId, Node>,
+    pub(crate) panel_instances: SlotMap<PanelId, PanelInstance>,
+    pub(crate) dock_areas: SlotMap<DockAreaId, DockArea>,
+    pub(crate) main_areas: [Option<DockAreaId>; 2],
+    pub(crate) floating_groups: SlotMap<FloatingGroupId, FloatingGroup>,
+    pub(crate) canvas: CanvasState,
+    pub(crate) profile: Profile,
+    pub(crate) chrome: ChromeMode,
+}
+
+#[cfg(feature = "serde")]
+pub(crate) type FloatingBoundsClampResult =
+    Result<Vec<(usize, Rect, Rect)>, (usize, crate::ComputeRectsError)>;
+
 /// Complete UI-independent docking state.
 ///
 /// Layout is the sole owner of runtime arenas. Public access is read-only;
@@ -88,6 +105,8 @@ mod layout_api;
 mod sizing;
 mod tree_navigation;
 mod validation;
+#[cfg(feature = "serde")]
+mod workspace;
 
 #[cfg(test)]
 mod tests;
