@@ -7,6 +7,7 @@ use dock_core::{
     DropTarget, GeometryError, HitResult, Layout, LayoutRects, Node, NodeId, PanelId, Point,
 };
 use gpui::{
+    AppContext,
     AnyView, App, Context, Entity, FocusHandle, HitboxBehavior, HitboxId, IntoElement,
     ParentElement, Render, ScrollHandle, Styled, Window, canvas, div,
     prelude::InteractiveElement as _, px, rgb,
