@@ -107,7 +107,13 @@ impl Render for AppShell {
             .size_full()
             .bg(rgb(self.theme.colors.window_background))
             .child(menu_bar)
-            .child(self.dock_host.clone());
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .w_full()
+                    .child(self.dock_host.clone()),
+            );
 
         if self.panels_menu_open {
             let mut viewport = self.controller.update(cx, |controller, _| controller.viewport());
