@@ -1025,19 +1025,6 @@ impl FloatingWindowManager {
             None
         };
 
-        // Closing a PanelId destroys only that panel's permanent window. It is
-        // never placed in a pool or reassigned to another panel.
-        let removed_panels = self
-            .registry
-            .windows
-            .keys()
-            .filter(|panel| !desired_panels.contains(panel))
-            .copied()
-            .collect::<Vec<_>>();
-        for panel in removed_panels {
-            self.release_panel_window(panel, cx);
-        }
-
         // Discard GPUI handles that were externally closed, then recreate only
         // records for PanelIds that still exist in Layout.
         let unavailable_panels = self
@@ -1224,6 +1211,20 @@ impl FloatingWindowManager {
             }
         }
 
+        // A composition host is handed to a surviving PanelWindow before the
+        // closed panel's own HWND is destroyed. The old host was detached above;
+        // the replacement has already been assigned and shown at this point.
+        let removed_panels = self
+            .registry
+            .windows
+            .keys()
+            .filter(|panel| !desired_panels.contains(panel))
+            .copied()
+            .collect::<Vec<_>>();
+        for panel in removed_panels {
+            self.release_panel_window(panel, cx);
+        }
+
         self.reconciling = false;
         if !monitor_corrections.is_empty() {
             let applied = self.controller.update(cx, |controller, controller_cx| {
@@ -1365,7 +1366,7 @@ impl FloatingWindowManager {
         };
 
         let window = match cx.open_window(options, move |_, app| {
-            app.new(|_| FloatingHost::new(controller, None, theme, manager))
+            app.new(|_| FloatingHost::new_panel_window(controller, theme, manager))
         }) {
             Ok(window) => window,
             Err(error) => {
