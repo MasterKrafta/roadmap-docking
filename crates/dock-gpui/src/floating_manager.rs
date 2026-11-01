@@ -5,13 +5,16 @@
 
 use std::collections::{HashMap, HashSet};
 
-use dock_core::{DockSide, FloatingGroupId, PanelId, Rect};
+use dock_core::{
+    DockSide, DragHandle, DragPayload, DragState, DropSource, DropTarget, FloatingGroupId,
+    PanelId, Point, Rect,
+};
 use gpui::{
-    AppContext, Bounds, Context, Entity, Subscription, Window, WindowBounds, WindowHandle,
-    WindowKind, WindowOptions, point, px, size,
+    AppContext, Bounds, Context, Entity, Subscription, WeakEntity, Window, WindowBounds,
+    WindowHandle, WindowId, WindowKind, WindowOptions, point, px, size,
 };
 use platform::{
-    NativeWindowId, NativeWindowOps, PhysicalPoint, PhysicalSize, SystemNativeWindowOps,
+    NativeKey, NativeWindowId, NativeWindowOps, PhysicalPoint, PhysicalSize, SystemNativeWindowOps,
 };
 
 use crate::{
@@ -28,6 +31,7 @@ pub enum PanelWindowOwner {
 
 struct FloatingWindowEntry {
     window: WindowHandle<FloatingHost>,
+    window_id: WindowId,
     native_window: Option<NativeWindowId>,
     bounds: Rect,
     z_order: i32,
@@ -73,6 +77,33 @@ impl WindowRegistry {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum NativeMoveKind {
+    TearOff,
+    ExistingWindow,
+}
+
+#[derive(Clone, Copy)]
+struct NativeMoveTarget {
+    group: Option<FloatingGroupId>,
+    target: DropTarget,
+    point: Point,
+}
+
+#[derive(Clone, Copy)]
+struct NativeMoveSession {
+    group: FloatingGroupId,
+    native_window: NativeWindowId,
+    kind: NativeMoveKind,
+    grab_offset: PhysicalPoint,
+    initial_cursor: PhysicalPoint,
+    start_bounds: Rect,
+    start_pointer: Point,
+    drag_threshold: f32,
+    threshold_crossed: bool,
+    drop_target: Option<NativeMoveTarget>,
+}
+
 #[derive(Clone, Copy)]
 struct FloatingGroupSnapshot {
     id: FloatingGroupId,
@@ -85,6 +116,8 @@ pub struct FloatingWindowManager {
     controller: Entity<DockController>,
     theme: DockTheme,
     main_native_window: Option<NativeWindowId>,
+    main_host_origin: Point,
+    native_move: Option<NativeMoveSession>,
     registry: WindowRegistry,
     native_ops: SystemNativeWindowOps,
     controller_subscription: Option<Subscription>,
@@ -96,6 +129,8 @@ impl FloatingWindowManager {
             controller,
             theme,
             main_native_window: None,
+            main_host_origin: Point::ZERO,
+            native_move: None,
             registry: WindowRegistry::default(),
             native_ops: SystemNativeWindowOps,
             controller_subscription: None,
@@ -141,6 +176,258 @@ impl FloatingWindowManager {
         }
 
         self.reconcile(cx);
+    }
+
+    /// Records the main DockHost origin inside the main window's client area.
+    pub(crate) fn set_main_host_origin(&mut self, origin: Point) {
+        if origin.validate().is_err() || self.main_host_origin == origin { return; }
+        self.main_host_origin = origin;
+    }
+
+    pub(crate) fn native_move_active(&self) -> bool { self.native_move.is_some() }
+
+    /// Starts native movement for a group created by the current main-window drag.
+    pub(crate) fn begin_tearoff_move(
+        &mut self, group: FloatingGroupId, pointer: Point, bounds: Rect, cx: &mut Context<Self>,
+    ) -> bool {
+        if self.native_move.is_some() { return false; }
+        let Some(entry) = self.registry.floating.get(&group) else { return false; };
+        let (Some(native_window), window_id) = (entry.native_window, entry.window_id) else { return false; };
+        let Ok(cursor) = self.native_ops.cursor_position() else { return false; };
+        let scale = self.main_native_window
+            .and_then(|main| self.native_ops.scale_factor(main).ok())
+            .filter(|scale| scale.is_finite() && *scale > 0.0).unwrap_or(1.0);
+        let Some(offset_x) = physical_coordinate(pointer.x - bounds.origin.x, scale) else { return false; };
+        let Some(offset_y) = physical_coordinate(pointer.y - bounds.origin.y, scale) else { return false; };
+        let grab_offset = PhysicalPoint { x: offset_x, y: offset_y };
+        let position = PhysicalPoint {
+            x: cursor.x.saturating_sub(grab_offset.x),
+            y: cursor.y.saturating_sub(grab_offset.y),
+        };
+        if let Err(error) = self.native_ops.move_window(native_window, position) {
+            tracing::warn!(?group, %error, "could not start native tear-off movement");
+            return false;
+        }
+        self.native_move = Some(NativeMoveSession {
+            group, native_window, kind: NativeMoveKind::TearOff, grab_offset, initial_cursor: cursor,
+            start_bounds: bounds, start_pointer: pointer, drag_threshold: 0.0, threshold_crossed: true,
+            drop_target: None,
+        });
+        self.schedule_native_move(cx, group, window_id);
+        true
+    }
+
+    /// Starts a thresholded native move from an already-floating title grip.
+    pub(crate) fn begin_existing_window_move(
+        &mut self, group: FloatingGroupId, pointer: Point, cx: &mut Context<Self>,
+    ) -> bool {
+        if self.native_move.is_some() { return false; }
+        let Some(entry) = self.registry.floating.get(&group) else { return false; };
+        let (Some(native_window), window_id) = (entry.native_window, entry.window_id) else { return false; };
+        let Ok(cursor) = self.native_ops.cursor_position() else { return false; };
+        let Ok(native_rect) = self.native_ops.window_rect(native_window) else { return false; };
+        let start_bounds = self.controller.update(cx, |controller, _| {
+            controller.layout().floating_group(group).map(|floating| floating.bounds)
+        });
+        let Some(start_bounds) = start_bounds else { return false; };
+        let metrics = self.controller.update(cx, |controller, _| controller.metrics());
+        if !self.controller.update(cx, |controller, _| controller.begin_floating_window_move(group, pointer)) {
+            return false;
+        }
+        let scale = self.native_ops.scale_factor(native_window).ok()
+            .filter(|scale| scale.is_finite() && *scale > 0.0).unwrap_or(1.0);
+        self.native_move = Some(NativeMoveSession {
+            group, native_window, kind: NativeMoveKind::ExistingWindow,
+            grab_offset: PhysicalPoint {
+                x: cursor.x.saturating_sub(native_rect.left),
+                y: cursor.y.saturating_sub(native_rect.top),
+            },
+            initial_cursor: cursor, start_bounds, start_pointer: pointer,
+            drag_threshold: metrics.drag_threshold * scale, threshold_crossed: false,
+            drop_target: None,
+        });
+        self.schedule_native_move(cx, group, window_id);
+        true
+    }
+
+    fn schedule_native_move(&self, cx: &mut Context<Self>, group: FloatingGroupId, window_id: WindowId) {
+        let Some(window) = self.registry.floating.get(&group).map(|entry| entry.window) else { return; };
+        let manager = cx.entity().downgrade();
+        let _ = window.update(cx, move |_, window, _| {
+            schedule_native_move_tick(window, manager, group, window_id);
+        });
+    }
+
+    fn tick_native_move(&mut self, group: FloatingGroupId, window_id: WindowId, cx: &mut Context<Self>) -> bool {
+        let Some(mut state) = self.native_move.filter(|state| state.group == group) else { return false; };
+        if self.native_ops.key_down(NativeKey::Escape).unwrap_or(false) {
+            self.cancel_native_move(state, cx);
+            return false;
+        }
+        let Ok(cursor) = self.native_ops.cursor_position() else {
+            self.cancel_native_move(state, cx);
+            return false;
+        };
+        if !state.threshold_crossed {
+            let dx = cursor.x.saturating_sub(state.initial_cursor.x);
+            let dy = cursor.y.saturating_sub(state.initial_cursor.y);
+            let distance = ((dx as f64).powi(2) + (dy as f64).powi(2)).sqrt();
+            if distance < state.drag_threshold as f64 {
+                if !self.native_ops.left_button_down().unwrap_or(false) {
+                    self.finish_native_move(state, cx);
+                    return false;
+                }
+                return true;
+            }
+            state.threshold_crossed = true;
+            let scale = self.native_ops.scale_factor(state.native_window).ok()
+                .filter(|scale| scale.is_finite() && *scale > 0.0).unwrap_or(1.0);
+            let point = Point::new(state.start_pointer.x + dx as f32 / scale, state.start_pointer.y + dy as f32 / scale);
+            self.controller.update(cx, |controller, _| {
+                if matches!(controller.drag().session().state(), DragState::Pressed { .. }) {
+                    let _ = controller.drag_mut().session_mut().pointer_move(point);
+                }
+            });
+        }
+        let position = PhysicalPoint {
+            x: cursor.x.saturating_sub(state.grab_offset.x),
+            y: cursor.y.saturating_sub(state.grab_offset.y),
+        };
+        if let Err(error) = self.native_ops.move_window(state.native_window, position) {
+            tracing::warn!(?group, %error, "native floating-window move failed");
+            self.cancel_native_move(state, cx);
+            return false;
+        }
+        self.update_native_drop_target(&mut state, cursor, cx);
+        self.native_move = Some(state);
+        if !self.native_ops.left_button_down().unwrap_or(false) {
+            self.finish_native_move(state, cx);
+            return false;
+        }
+        let _ = window_id;
+        true
+    }
+
+    fn update_native_drop_target(&self, state: &mut NativeMoveSession, cursor: PhysicalPoint, cx: &mut Context<Self>) {
+        let source = self.controller.update(cx, |controller, _| {
+            let handle = controller.drag().session().handle()?;
+            let payload = match controller.drag().session().state() {
+                DragState::Dragging { payload, .. } => payload,
+                _ => return None,
+            };
+            if handle == DragHandle::FloatingTitle { return None; }
+            match payload {
+                DragPayload::Panel { panel } => Some(DropSource::Panel { panel }),
+                DragPayload::Group { group } => Some(DropSource::Group { group }),
+                DragPayload::FloatingGroup { .. } => None,
+            }
+        });
+        let Some(source) = source else { state.drop_target = None; return; };
+        let mut known = Vec::new();
+        if let Some(main) = self.main_native_window { known.push(main); }
+        known.extend(self.registry.floating.values().filter_map(|entry| entry.native_window));
+        let target_window = self.native_ops.window_from_point(cursor, &known, Some(state.native_window)).ok().flatten();
+        let Some(target_window) = target_window else { state.drop_target = None; return; };
+        let resolved = if Some(target_window) == self.main_native_window {
+            let Some(point) = self.core_point_for_main(cursor) else { state.drop_target = None; return; };
+            self.controller.update(cx, |controller, _| {
+                let target = controller.prepare_drop_resolver(source).ok()?.resolve(point).ok()?;
+                controller.drag_mut().session_mut().set_drop_target(target).ok()?;
+                target.map(|target| NativeMoveTarget { group: None, target, point })
+            })
+        } else {
+            let Some((target_group, target_id)) = self.registry.floating.iter().find_map(|(group, entry)| {
+                (entry.native_window == Some(target_window) && *group != state.group).then_some((*group, entry.window_id))
+            }) else { state.drop_target = None; return; };
+            let Some(point) = self.core_point_for_floating(target_window, cursor) else { state.drop_target = None; return; };
+            self.controller.update(cx, |controller, _| {
+                let target = controller.prepare_floating_window_drop_resolver(target_id, target_group, source).ok()?.resolve(point).ok()?;
+                controller.drag_mut().session_mut().set_drop_target(target).ok()?;
+                target.map(|target| NativeMoveTarget { group: Some(target_group), target, point })
+            })
+        };
+        state.drop_target = resolved;
+    }
+
+    fn core_point_for_main(&self, screen: PhysicalPoint) -> Option<Point> {
+        let main = self.main_native_window?;
+        let client = self.native_ops.client_origin(main).ok()?;
+        let scale = self.native_ops.scale_factor(main).ok()?;
+        if !scale.is_finite() || scale <= 0.0 { return None; }
+        let point = Point::new((screen.x - client.x) as f32 / scale - self.main_host_origin.x,
+            (screen.y - client.y) as f32 / scale - self.main_host_origin.y);
+        point.validate().ok()?;
+        Some(point)
+    }
+
+    fn core_point_for_floating(&self, window: NativeWindowId, screen: PhysicalPoint) -> Option<Point> {
+        let client = self.native_ops.client_origin(window).ok()?;
+        let scale = self.native_ops.scale_factor(window).ok()?;
+        if !scale.is_finite() || scale <= 0.0 { return None; }
+        let point = Point::new((screen.x - client.x) as f32 / scale, (screen.y - client.y) as f32 / scale);
+        point.validate().ok()?;
+        Some(point)
+    }
+
+    fn finish_native_move(&mut self, state: NativeMoveSession, cx: &mut Context<Self>) {
+        self.native_move = None;
+        let origin = self.native_ops.window_rect(state.native_window).ok()
+            .and_then(|rect| self.core_origin_from_screen(PhysicalPoint { x: rect.left, y: rect.top }))
+            .unwrap_or(state.start_bounds.origin);
+        let main_drop = state.drop_target.filter(|target| target.group.is_none())
+            .map(|target| (target.target, target.point));
+        let result = self.controller.update(cx, |controller, controller_cx| {
+            controller.finish_tearoff_move_in(state.group, origin, main_drop, controller_cx)
+        });
+        if let Err(error) = result {
+            tracing::warn!(?state.group, %error, "could not commit native floating-window move");
+            self.cancel_controller_move(cx);
+        }
+    }
+
+    fn cancel_native_move(&mut self, state: NativeMoveSession, cx: &mut Context<Self>) {
+        self.native_move = None;
+        let _ = self.controller.update(cx, |controller, controller_cx| {
+            let result = controller.cancel_pointer_interaction_on_escape();
+            controller.flush_events(controller_cx);
+            controller_cx.notify();
+            result
+        });
+        if state.kind == NativeMoveKind::ExistingWindow
+            && let Some(position) = self.physical_origin_for_bounds(state.start_bounds)
+            && let Err(error) = self.native_ops.move_window(state.native_window, position)
+        {
+            tracing::warn!(?state.group, %error, "could not restore floating window after Escape");
+        }
+    }
+
+    fn cancel_controller_move(&mut self, cx: &mut Context<Self>) {
+        let _ = self.controller.update(cx, |controller, controller_cx| {
+            let result = controller.cancel_pointer_interaction();
+            controller.flush_events(controller_cx);
+            controller_cx.notify();
+            result
+        });
+    }
+
+    fn physical_origin_for_bounds(&self, bounds: Rect) -> Option<PhysicalPoint> {
+        let main = self.main_native_window?;
+        let client = self.native_ops.client_origin(main).ok()?;
+        let scale = self.native_ops.scale_factor(main).ok()?;
+        let x = physical_coordinate(self.main_host_origin.x + bounds.origin.x, scale)?;
+        let y = physical_coordinate(self.main_host_origin.y + bounds.origin.y, scale)?;
+        Some(PhysicalPoint { x: client.x.checked_add(x)?, y: client.y.checked_add(y)? })
+    }
+
+    fn core_origin_from_screen(&self, screen: PhysicalPoint) -> Option<Point> {
+        let main = self.main_native_window?;
+        let client = self.native_ops.client_origin(main).ok()?;
+        let scale = self.native_ops.scale_factor(main).ok()?;
+        if !scale.is_finite() || scale <= 0.0 { return None; }
+        let point = Point::new((screen.x - client.x) as f32 / scale - self.main_host_origin.x,
+            (screen.y - client.y) as f32 / scale - self.main_host_origin.y);
+        point.validate().ok()?;
+        Some(point)
     }
 
     /// Makes the registry match the current floating groups in Core.
@@ -493,13 +780,14 @@ fn schedule_native_move_tick(
     window: &mut Window,
     manager: WeakEntity<FloatingWindowManager>,
     group: FloatingGroupId,
+    window_id: WindowId,
 ) {
     window.on_next_frame(move |window, app| {
         let keep_moving = manager
-            .update(app, |manager, cx| manager.tick_native_move(group, cx))
+            .update(app, |manager, cx| manager.tick_native_move(group, window_id, cx))
             .unwrap_or(false);
         if keep_moving {
-            schedule_native_move_tick(window, manager, group);
+            schedule_native_move_tick(window, manager, group, window_id);
         }
     });
 }
