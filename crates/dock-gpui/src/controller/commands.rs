@@ -375,8 +375,9 @@ impl DockController {
         }
     }
 
-    /// Completes a native move as one undo step. A valid main-window drop docks
-    /// the detached payload; an empty-space drop commits the final floating origin.
+    /// Completes a native move as one undo step. A valid drop on the main or
+    /// another floating window docks the detached payload; an empty-space drop
+    /// commits the final floating origin.
     pub(crate) fn finish_tearoff_move_in(
         &mut self,
         group: FloatingGroupId,
