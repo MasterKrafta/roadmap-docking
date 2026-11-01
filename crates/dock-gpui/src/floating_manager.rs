@@ -389,9 +389,23 @@ impl FloatingWindowManager {
             return;
         };
         let resolved = if Some(target_window) == self.main_native_window {
-            let Some(point) = self.core_point_for_main(cursor) else { state.drop_target = None; return; };
+            let Some(point) = self.core_point_for_main(cursor) else {
+                state.drop_target = None;
+                self.clear_native_drag_target(cx);
+                return;
+            };
             self.controller.update(cx, |controller, _| {
-                let target = controller.prepare_drop_resolver(source).ok()?.resolve(point).ok()?;
+                let target = match controller.prepare_drop_resolver(source)
+                    .and_then(|resolver| resolver.resolve(point).map_err(Into::into))
+                {
+                    Ok(target) => target,
+                    Err(_) => {
+                        controller.drag_mut().clear_resolver();
+                        let _ = controller.drag_mut().session_mut().pointer_move(point);
+                        let _ = controller.drag_mut().session_mut().set_drop_target(None);
+                        return None;
+                    }
+                };
                 controller.drag_mut().session_mut().pointer_move(point).ok()?;
                 controller.drag_mut().session_mut().set_drop_target(target).ok()?;
                 target.map(|target| NativeMoveTarget { group: None, target, point })
@@ -399,10 +413,29 @@ impl FloatingWindowManager {
         } else {
             let Some((target_group, target_id)) = self.registry.floating.iter().find_map(|(group, entry)| {
                 (entry.native_window == Some(target_window) && *group != state.group).then_some((*group, entry.window_id))
-            }) else { state.drop_target = None; return; };
-            let Some(point) = self.core_point_for_floating(target_window, cursor) else { state.drop_target = None; return; };
+            }) else {
+                state.drop_target = None;
+                self.clear_native_drag_target(cx);
+                return;
+            };
+            let Some(point) = self.core_point_for_floating(target_window, cursor) else {
+                state.drop_target = None;
+                self.clear_native_drag_target(cx);
+                return;
+            };
             self.controller.update(cx, |controller, _| {
-                let target = controller.prepare_floating_window_drop_resolver(target_id, target_group, source).ok()?.resolve(point).ok()?;
+                let target = match controller
+                    .prepare_floating_window_drop_resolver(target_id, target_group, source)
+                    .and_then(|resolver| resolver.resolve(point).map_err(Into::into))
+                {
+                    Ok(target) => target,
+                    Err(_) => {
+                        controller.drag_mut().clear_resolver();
+                        let _ = controller.drag_mut().session_mut().pointer_move(point);
+                        let _ = controller.drag_mut().session_mut().set_drop_target(None);
+                        return None;
+                    }
+                };
                 controller.drag_mut().session_mut().pointer_move(point).ok()?;
                 controller.drag_mut().session_mut().set_drop_target(target).ok()?;
                 target.map(|target| NativeMoveTarget { group: Some(target_group), target, point })

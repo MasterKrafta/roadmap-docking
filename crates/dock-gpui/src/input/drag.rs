@@ -131,6 +131,13 @@ pub(crate) fn begin_native_tearoff(
         tracing::warn!("could not convert main-host bounds into physical screen coordinates");
         return false;
     };
+    let command = match command {
+        DockCommand::Float { node, .. } => DockCommand::Float { node, bounds: model_bounds },
+        DockCommand::FloatPanelFromFlyout { panel, .. } => {
+            DockCommand::FloatPanelFromFlyout { panel, bounds: model_bounds }
+        }
+        _ => return false,
+    };
 
     let detached = controller.update(app, |controller, cx| {
         if !controller.begin_tearoff_transaction() {
