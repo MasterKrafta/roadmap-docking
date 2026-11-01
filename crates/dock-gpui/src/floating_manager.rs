@@ -1,7 +1,7 @@
-//! Runtime owner of the native windows corresponding to Core floating groups.
+//! Runtime owner of permanent native windows for open PanelIds.
 //!
-//! The manager stores only window handles and derived panel ownership. The
-//! shared DockController remains the sole owner of Layout and panel views.
+//! Composition hosts are selected separately from Core floating-group identity.
+//! The shared DockController remains the sole owner of Layout and panel views.
 
 use std::{collections::{HashMap, HashSet}, time::Duration};
 
@@ -39,7 +39,6 @@ struct PanelWindowEntry {
     window_id: WindowId,
     native_window: Option<NativeWindowId>,
     bounds: Rect,
-    z_order: i32,
     native_min_size: Option<PhysicalSize>,
     native_scale_factor: Option<f32>,
     resize_enabled: bool,
@@ -212,9 +211,9 @@ impl FloatingWindowManager {
 
     /// Connects the manager to the main GPUI window and the shared controller.
     ///
-    /// The main HWND is retained as the native owner for every floating window.
-    /// The first reconciliation also restores windows for groups already present
-    /// in a workspace loaded before DockHost was rendered.
+    /// The main HWND is retained as the native owner for every PanelWindow.
+    /// The first reconciliation creates records for all open PanelIds already
+    /// present in a workspace loaded before DockHost was rendered.
     pub(crate) fn attach_main_window(
         &mut self,
         window: &mut Window,
@@ -1183,7 +1182,6 @@ impl FloatingWindowManager {
                 entry.bounds = corrected_bounds;
             }
             self.sync_native_resize(&mut entry, group);
-            entry.z_order = group.z_order;
             self.registry.windows.insert(panel, entry);
         }
 
@@ -1448,7 +1446,6 @@ impl FloatingWindowManager {
             window_id,
             native_window,
             bounds,
-            z_order: 0,
             native_min_size: None,
             native_scale_factor: None,
             resize_enabled: false,
