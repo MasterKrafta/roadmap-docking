@@ -394,7 +394,7 @@ impl FloatingWindowManager {
                 self.clear_native_drag_target(cx);
                 return;
             };
-            self.controller.update(cx, |controller, _| {
+            self.controller.update(cx, |controller, controller_cx| {
                 let target = match controller.prepare_drop_resolver(source)
                     .and_then(|resolver| resolver.resolve(point))
                 {
@@ -408,6 +408,7 @@ impl FloatingWindowManager {
                 };
                 controller.drag_mut().session_mut().pointer_move(point).ok()?;
                 controller.drag_mut().session_mut().set_drop_target(target).ok()?;
+                controller_cx.notify();
                 target.map(|target| NativeMoveTarget { group: None, target, point })
             })
         } else {
@@ -423,7 +424,7 @@ impl FloatingWindowManager {
                 self.clear_native_drag_target(cx);
                 return;
             };
-            self.controller.update(cx, |controller, _| {
+            self.controller.update(cx, |controller, controller_cx| {
                 let target = match controller
                     .prepare_floating_window_drop_resolver(target_id, target_group, source)
                     .and_then(|resolver| resolver.resolve(point))
@@ -438,6 +439,7 @@ impl FloatingWindowManager {
                 };
                 controller.drag_mut().session_mut().pointer_move(point).ok()?;
                 controller.drag_mut().session_mut().set_drop_target(target).ok()?;
+                controller_cx.notify();
                 target.map(|target| NativeMoveTarget { group: Some(target_group), target, point })
             })
         };
@@ -446,9 +448,10 @@ impl FloatingWindowManager {
 
 
     fn clear_native_drag_target(&self, cx: &mut Context<Self>) {
-        self.controller.update(cx, |controller, _| {
+        self.controller.update(cx, |controller, controller_cx| {
             controller.drag_mut().clear_resolver();
             let _ = controller.drag_mut().session_mut().set_drop_target(None);
+            controller_cx.notify();
         });
     }
 
