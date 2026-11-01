@@ -85,7 +85,6 @@ enum NativeMoveKind {
 
 #[derive(Clone, Copy)]
 struct NativeMoveTarget {
-    group: Option<FloatingGroupId>,
     target: DropTarget,
     point: Point,
 }
@@ -410,7 +409,7 @@ impl FloatingWindowManager {
                 controller.drag_mut().session_mut().pointer_move(point).ok()?;
                 controller.drag_mut().session_mut().set_drop_target(target).ok()?;
                 controller_cx.notify();
-                target.map(|target| NativeMoveTarget { group: None, target, point })
+                target.map(|target| NativeMoveTarget { target, point })
             })
         } else {
             let Some((target_group, target_id)) = self.registry.floating.iter().find_map(|(group, entry)| {
@@ -441,7 +440,7 @@ impl FloatingWindowManager {
                 controller.drag_mut().session_mut().pointer_move(point).ok()?;
                 controller.drag_mut().session_mut().set_drop_target(target).ok()?;
                 controller_cx.notify();
-                target.map(|target| NativeMoveTarget { group: Some(target_group), target, point })
+                target.map(|target| NativeMoveTarget { target, point })
             })
         };
         state.drop_target = resolved;
@@ -481,10 +480,11 @@ impl FloatingWindowManager {
         let origin = self.native_ops.window_rect(state.native_window).ok()
             .and_then(|rect| self.core_origin_from_screen(PhysicalPoint { x: rect.left, y: rect.top }))
             .unwrap_or(state.start_bounds.origin);
-        let main_drop = state.drop_target.filter(|target| target.group.is_none())
-            .map(|target| (target.target, target.point));
+        // The target may belong to the main window or another floating window.
+        // Both have already resolved their own local coordinates into a Core target.
+        let drop_target = state.drop_target.map(|target| (target.target, target.point));
         let result = self.controller.update(cx, |controller, controller_cx| {
-            controller.finish_tearoff_move_in(state.group, origin, main_drop, controller_cx)
+            controller.finish_tearoff_move_in(state.group, origin, drop_target, controller_cx)
         });
         if let Err(error) = result {
             tracing::warn!(?state.group, %error, "could not commit native floating-window move");
