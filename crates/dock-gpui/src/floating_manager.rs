@@ -149,7 +149,7 @@ struct NativeMoveSession {
     drop_target: Option<NativeMoveTarget>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct FloatingGroupSnapshot {
     id: FloatingGroupId,
     bounds: Rect,
@@ -387,7 +387,7 @@ impl FloatingWindowManager {
         }
         known.extend(
             self.registry
-                .floating
+                .windows
                 .values()
                 .filter_map(|entry| entry.native_window),
         );
@@ -1151,7 +1151,7 @@ impl FloatingWindowManager {
             let Some(panel) = next_hosts.get(&group.id).copied() else {
                 continue;
             };
-            let Some(entry) = self.registry.windows.get_mut(&panel) else {
+            let Some(mut entry) = self.registry.windows.remove(&panel) else {
                 continue;
             };
 
@@ -1168,21 +1168,23 @@ impl FloatingWindowManager {
                             %error,
                             "could not assign a floating composition to its permanent panel window"
                         );
+                        self.registry.windows.insert(panel, entry);
                         continue;
                     }
                 }
             }
 
-            self.sync_window_bounds(entry, *group);
+            self.sync_window_bounds(&mut entry, group);
             if let Some(areas) = monitor_work_areas.as_deref()
                 && let Some(corrected_bounds) =
-                    self.restore_native_window_to_monitor(entry, areas)
+                    self.restore_native_window_to_monitor(&mut entry, areas)
             {
                 monitor_corrections.push((group.id, corrected_bounds));
                 entry.bounds = corrected_bounds;
             }
-            self.sync_native_resize(entry, *group);
+            self.sync_native_resize(&mut entry, group);
             entry.z_order = group.z_order;
+            self.registry.windows.insert(panel, entry);
         }
 
         // Only selected composition hosts become visible. All other open
@@ -1459,7 +1461,7 @@ impl FloatingWindowManager {
     /// reachable on any connected monitor. Returns corrected Core bounds.
     fn restore_native_window_to_monitor(
         &self,
-        entry: &mut FloatingWindowEntry,
+        entry: &mut PanelWindowEntry,
         work_areas: &[platform::PhysicalRect],
     ) -> Option<Rect> {
         let native_window = entry.native_window?;
@@ -1529,8 +1531,8 @@ impl FloatingWindowManager {
 
     fn sync_native_resize(
         &self,
-        entry: &mut FloatingWindowEntry,
-        group: FloatingGroupSnapshot,
+        entry: &mut PanelWindowEntry,
+        group: &FloatingGroupSnapshot,
     ) {
         let Some(native_window) = entry.native_window else {
             return;
@@ -1572,8 +1574,8 @@ impl FloatingWindowManager {
 
     fn sync_window_bounds(
         &self,
-        entry: &mut FloatingWindowEntry,
-        group: FloatingGroupSnapshot,
+        entry: &mut PanelWindowEntry,
+        group: &FloatingGroupSnapshot,
     ) {
         let scale = entry.native_window.and_then(|native_window| {
             self.native_ops.scale_factor(native_window).ok()
