@@ -256,7 +256,7 @@ fn signed_outer_width_delta(pointer_delta: f32, left_dock: bool) -> f32 {
 }
 
 /// Visual-only geometry for the active resize. A splitter preview is a thin
-/// guide line; floating and flyout resizes use an outline of the future bounds.
+/// guide line; flyout resizing uses an outline of the future bounds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ResizePreviewKind {
     SplitterLine,
