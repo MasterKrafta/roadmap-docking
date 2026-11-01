@@ -248,7 +248,7 @@ impl Default for DockMetrics {
             splitter_thickness: 4.0,
             splitter_hit_zone: 8.0,
             edge_drop_width: 24.0,
-            drag_threshold: 4.0,
+            drag_threshold: 2.0,
             min_group_height: 80.0,
             collapsed_group_height: 28.0,
             // These two heights were not specified by the roadmap excerpt;
