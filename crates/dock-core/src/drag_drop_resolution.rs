@@ -835,6 +835,12 @@ fn floating_composition_with_split_root_can_build_drop_zones_and_dock() {
     };
     assert_eq!(split.axis, Axis::X);
     assert_eq!(split.children.len(), 3);
+    assert!(
+        split
+            .children
+            .iter()
+            .all(|child| matches!(layout.node(*child), Some(Node::Column(_))))
+    );
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
 
