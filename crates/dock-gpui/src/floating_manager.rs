@@ -180,8 +180,20 @@ impl FloatingWindowManager {
 
     /// Records the main DockHost origin inside the main window's client area.
     pub(crate) fn set_main_host_origin(&mut self, origin: Point) {
-        if origin.validate().is_err() || self.main_host_origin == origin { return; }
+        if origin.validate().is_err() || self.main_host_origin == origin {
+            return;
+        }
         self.main_host_origin = origin;
+        let positions = self.registry.floating.values()
+            .filter_map(|entry| Some((entry.native_window?, entry.bounds)))
+            .collect::<Vec<_>>();
+        for (native_window, bounds) in positions {
+            if let Some(position) = self.physical_origin_for_bounds(bounds)
+                && let Err(error) = self.native_ops.move_window(native_window, position)
+            {
+                tracing::warn!(%error, "could not rebase floating window after main host origin changed");
+            }
+        }
     }
 
     pub(crate) fn native_move_active(&self) -> bool { self.native_move.is_some() }
@@ -322,12 +334,20 @@ impl FloatingWindowManager {
                 DragPayload::FloatingGroup { .. } => None,
             }
         });
-        let Some(source) = source else { state.drop_target = None; return; };
+        let Some(source) = source else {
+            state.drop_target = None;
+            self.clear_native_drag_target(cx);
+            return;
+        };
         let mut known = Vec::new();
         if let Some(main) = self.main_native_window { known.push(main); }
         known.extend(self.registry.floating.values().filter_map(|entry| entry.native_window));
         let target_window = self.native_ops.window_from_point(cursor, &known, Some(state.native_window)).ok().flatten();
-        let Some(target_window) = target_window else { state.drop_target = None; return; };
+        let Some(target_window) = target_window else {
+            state.drop_target = None;
+            self.clear_native_drag_target(cx);
+            return;
+        };
         let resolved = if Some(target_window) == self.main_native_window {
             let Some(point) = self.core_point_for_main(cursor) else { state.drop_target = None; return; };
             self.controller.update(cx, |controller, _| {
@@ -347,6 +367,14 @@ impl FloatingWindowManager {
             })
         };
         state.drop_target = resolved;
+    }
+
+
+    fn clear_native_drag_target(&self, cx: &mut Context<Self>) {
+        self.controller.update(cx, |controller, _| {
+            controller.drag_mut().clear_resolver();
+            let _ = controller.drag_mut().session_mut().set_drop_target(None);
+        });
     }
 
     fn core_point_for_main(&self, screen: PhysicalPoint) -> Option<Point> {
