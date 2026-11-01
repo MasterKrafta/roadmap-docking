@@ -266,6 +266,23 @@ impl DockController {
         }
     }
 
+    /// Ensures every open Layout instance has exactly one cached view.
+    ///
+    /// GPUI factories require a Window/App context, so the host calls this at
+    /// render time. Inactive tabs are registered too; they are not mounted until
+    /// their group becomes active. Existing entries are never recreated.
+    pub(crate) fn ensure_panel_views(&mut self, window: &mut Window, app: &mut App) {
+        let open_panels = self
+            .layout
+            .panel_instances()
+            .map(|(panel, _)| panel)
+            .collect::<Vec<_>>();
+
+        for panel in open_panels {
+            let _ = self.panel_view(panel, window, app);
+        }
+    }
+
     /// Returns a cloned cached view, creating it lazily on first access.
     ///
     /// An unknown panel key is represented by a cached MissingPanelPlaceholder.
@@ -276,7 +293,7 @@ impl DockController {
         window: &mut Window,
         app: &mut App,
     ) -> Option<AnyView> {
-        if let Some(view) = self.panel_views.get(&panel) {
+        if let Some(view) = self.panel_views.get(panel) {
             return Some(view.clone());
         }
         let key = self.layout.panel_instance(panel)?.key.clone();
@@ -370,7 +387,7 @@ impl DockController {
             }
         }
         self.panel_views
-            .retain(|panel, _| after_panels.contains_key(panel));
+            .retain(|panel| after_panels.contains_key(&panel));
         self.last_error = None;
     }
 
