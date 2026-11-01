@@ -505,6 +505,7 @@ pub struct FloatingHost {
     open_context_menu: Option<FloatingHostOpenMenu>,
     tab_press: Rc<Cell<Option<FloatingTabPress>>>,
     controller_observed: bool,
+    native_resize_observation_pending: bool,
     middle_click_closes_tabs: bool,
 }
 
@@ -525,6 +526,7 @@ impl FloatingHost {
             open_context_menu: None,
             tab_press: Rc::new(Cell::new(None)),
             controller_observed: false,
+            native_resize_observation_pending: false,
             middle_click_closes_tabs: true,
         }
     }
@@ -568,9 +570,20 @@ impl Render for FloatingHost {
 
         let window_id = window.window_handle().window_id();
         let group = self.group;
-        if let Some(manager) = self.manager.upgrade() {
-            manager.update(cx, |manager, manager_cx| {
-                manager.observe_native_resize(group, window_id, manager_cx);
+        if !self.native_resize_observation_pending {
+            self.native_resize_observation_pending = true;
+            cx.defer_in(window, move |host, _, host_cx| {
+                host.native_resize_observation_pending = false;
+                // A host can be rebound to another Core group before this
+                // deferred callback runs. Observe only the group it rendered.
+                if host.group != group {
+                    return;
+                }
+                if let Some(manager) = host.manager.upgrade() {
+                    manager.update(host_cx, |manager, manager_cx| {
+                        manager.observe_native_resize(group, window_id, manager_cx);
+                    });
+                }
             });
         }
         let snapshot = self.controller.update(cx, |controller, _| {
