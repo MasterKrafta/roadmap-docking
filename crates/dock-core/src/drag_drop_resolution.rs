@@ -920,10 +920,10 @@ fn split_root_floating_composition_can_create_first_main_dock_columns() {
         .find(|zone| {
             zone.zone == crate::DropZone::DockEdge
                 && zone.target
-                    == DropTarget::MainColumn {
+                    == (DropTarget::MainColumn {
                         side: DockSide::Left,
                         index: 0,
-                    }
+                    })
         })
         .expect("empty left Main Dock must accept the whole horizontal composition")
         .target;
