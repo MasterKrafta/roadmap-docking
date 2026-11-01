@@ -242,6 +242,8 @@ pub struct DockController {
     drag: DragController,
     interaction: Option<ResizeInteraction>,
     resize_frame: ResizeFrameThrottle,
+    /// An undocked drag remains one history transaction until its native move ends.
+    tearoff_transaction_active: bool,
     registry: PanelRegistry,
     /// One persistent AnyView per open runtime PanelId. Transfers and tab
     /// activation only change which host receives a clone; they never replace
@@ -280,6 +282,7 @@ impl DockController {
             floating_rects: HashMap::new(),
             interaction: None,
             resize_frame: ResizeFrameThrottle::default(),
+            tearoff_transaction_active: false,
             registry,
             panel_views: PanelViewCache::default(),
             last_error: None,
@@ -401,6 +404,41 @@ impl DockController {
                 .and_then(|floating| self.layout.dock_area(floating.area))
                 .is_some_and(|area| self.layout.node(area.root).is_some()),
         }
+    }
+
+    /// Opens one history transaction for a native tear-off / floating-window move.
+    pub(crate) fn begin_tearoff_transaction(&mut self) -> bool {
+        if self.tearoff_transaction_active || !self.history.begin_transaction(&self.layout) {
+            return false;
+        }
+        self.tearoff_transaction_active = true;
+        true
+    }
+
+    /// Starts a transaction and Core drag session for an already-floating title bar.
+    pub(crate) fn begin_floating_window_move(
+        &mut self,
+        group: FloatingGroupId,
+        point: Point,
+    ) -> bool {
+        if self.has_active_pointer_interaction() || !self.begin_tearoff_transaction() {
+            return false;
+        }
+        if let Err(error) = self.begin_drag_interaction(
+            DragPayload::FloatingGroup { group },
+            DragHandle::FloatingTitle,
+            point,
+        ) {
+            tracing::debug!(%error, ?group, "could not begin floating-window title drag");
+            let _ = self.history.cancel_transaction(&mut self.layout, &self.metrics);
+            self.tearoff_transaction_active = false;
+            return false;
+        }
+        true
+    }
+
+    pub(crate) fn tearoff_transaction_active(&self) -> bool {
+        self.tearoff_transaction_active
     }
 
     /// Called only after a resize command owned by the active interaction succeeds.
@@ -582,8 +620,10 @@ impl DockController {
     ) -> Result<(), CommandError> {
         self.drag.cancel_gesture_with_reason(reason);
         let interaction = self.interaction;
+        let tearoff_was_active = self.tearoff_transaction_active;
+        let previous_version = self.layout.version();
 
-        let cancel_result = if interaction.is_some() {
+        let cancel_result = if interaction.is_some() || tearoff_was_active {
             self.history
                 .cancel_transaction(&mut self.layout, &self.metrics)
         } else {
@@ -600,7 +640,16 @@ impl DockController {
         if let Err(error) = cancel_result {
             // Never leave an open history transaction after capture is lost.
             self.history.commit_transaction(&self.layout);
+            self.tearoff_transaction_active = false;
             return Err(error);
+        }
+        if tearoff_was_active {
+            self.tearoff_transaction_active = false;
+            if self.layout.version() != previous_version {
+                self.pending_events.push_back(DockEvent::LayoutChanged {
+                    version: self.layout.version(),
+                });
+            }
         }
 
         // Flyout width is transient session state and is intentionally omitted
