@@ -83,7 +83,6 @@ fn pointer_down_intent_for_hit(hit: HitResult) -> PointerDownIntent {
         HitResult::Canvas => PointerDownIntent::DismissFlyout,
         HitResult::FloatingTitle { .. }
         | HitResult::FloatingGroup { .. }
-        | HitResult::FloatingResizeEdge { .. }
         | HitResult::Panel { .. }
         | HitResult::Column { .. }
         | HitResult::Miss
@@ -914,13 +913,6 @@ mod hit_dispatch_tests {
         );
         assert_eq!(
             pointer_down_intent_for_hit(HitResult::Panel { panel }),
-            PointerDownIntent::None
-        );
-        assert_eq!(
-            pointer_down_intent_for_hit(HitResult::FloatingResizeEdge {
-                group: floating,
-                edge: ResizeEdge::BottomRight,
-            }),
             PointerDownIntent::None
         );
         assert_eq!(
