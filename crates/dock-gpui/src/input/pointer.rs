@@ -313,6 +313,7 @@ pub(crate) fn register_pointer_events(
     });
 
     window.on_mouse_event({
+        let manager = manager.clone();
         let controller = controller.clone();
         let scroll_handles = scroll_handles.clone();
         let pointer_capture = pointer_capture.clone();
