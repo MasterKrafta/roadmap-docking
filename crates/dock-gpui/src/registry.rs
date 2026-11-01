@@ -17,8 +17,9 @@ type PanelFactory = dyn Fn(&mut Window, &mut App) -> AnyView + 'static;
 /// Application-owned metadata and view factory for one panel kind.
 ///
 /// The descriptor contains no runtime panel ID and no docking state. Constraints
-/// are copied into dock-core when an instance is opened; the factory is called
-/// lazily by DockController when the panel is first rendered.
+/// are copied into dock-core when an instance is opened. DockHost calls the
+/// factory once per open PanelId when it synchronizes the runtime view cache;
+/// this may happen before an inactive tab is actually mounted.
 pub struct PanelDescriptor {
     key: PanelKey,
     title: SharedString,
@@ -95,7 +96,8 @@ pub struct PanelRegistry {
 ///
 /// Unlike PanelRegistry, this cache is keyed by the runtime PanelId rather than
 /// the stable panel kind. Its value is kept while an instance is moved, floated,
-/// merged, split, or made inactive; it is pruned only when that PanelId closes.
+/// merged, split, or made inactive; it is pruned when that PanelId closes and
+/// cleared when the entire workspace is replaced.
 pub(crate) struct PanelViewCache<T> {
     views: HashMap<PanelId, T>,
 }
