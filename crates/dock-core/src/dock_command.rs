@@ -15,6 +15,15 @@ pub enum DockCommand {
         constraints: PanelConstraints,
         target: Option<DropTarget>,
     },
+    /// Open a panel instance directly in a new floating composition.
+    ///
+    /// Unlike OpenPanel, this command never resolves a Main Dock destination.
+    /// The panel key is treated as a singleton by this user-driven open path.
+    OpenPanelFloating {
+        key: PanelKey,
+        constraints: PanelConstraints,
+        bounds: Rect,
+    },
     /// Close one panel instance.
     ClosePanel { panel: PanelId },
     /// Close every panel in a group.
@@ -200,6 +209,11 @@ mod tests {
                 constraints,
                 target: Some(target),
             },
+            DockCommand::OpenPanelFloating {
+                key,
+                constraints,
+                bounds: Rect::new(Point::ZERO, Size::new(420.0, 320.0)),
+            },
             DockCommand::ClosePanel {
                 panel: PanelId::null(),
             },
@@ -328,7 +342,7 @@ mod tests {
                 mode: ChromeMode::AllHidden,
             },
         ];
-        assert_eq!(commands.len(), 34);
+        assert_eq!(commands.len(), 35);
     }
 
     #[cfg(feature = "serde")]
