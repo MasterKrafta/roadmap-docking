@@ -687,3 +687,68 @@ fn floating_geometry_hit_test_and_drop_resolver_are_window_local() {
         .floating_window_drop_resolver(first_window, second_group)
         .is_none());
 }
+
+#[test]
+fn native_tearoff_replaces_source_drag_with_floating_capture_and_escape_rolls_back() {
+    let mut controller = DockController::empty(
+        Profile::Photoshop,
+        DockMetrics::default(),
+        baseline_registry(),
+        Rect::new(Point::ZERO, Size::new(1200.0, 800.0)),
+    )
+    .unwrap();
+    controller.reset_workspace().unwrap();
+
+    let source_group = controller
+        .layout()
+        .nodes()
+        .find_map(|(id, node)| matches!(node, Node::Tabs(_)).then_some(id))
+        .unwrap();
+    let press = Point::new(40.0, 20.0);
+    controller
+        .begin_drag_interaction(
+            dock_core::DragPayload::Group { group: source_group },
+            DragHandle::GroupGrip,
+            press,
+        )
+        .unwrap();
+    controller
+        .drag_mut()
+        .session_mut()
+        .pointer_move(Point::new(60.0, 20.0))
+        .unwrap();
+    assert!(matches!(controller.drag().session().state(), DragState::Dragging { .. }));
+    assert!(controller.begin_tearoff_transaction());
+
+    let outcome = controller
+        .history
+        .apply(
+            &mut controller.layout,
+            DockCommand::Float {
+                node: source_group,
+                bounds: Rect::new(Point::new(1500.0, 500.0), Size::new(440.0, 360.0)),
+            },
+            &controller.metrics,
+        )
+        .unwrap();
+    let Some(dock_core::CommandValue::FloatingGroup(floating_group)) = outcome.actual_value else {
+        panic!("Float must return the newly created floating group id");
+    };
+    controller.drag.layout_version = Some(controller.layout.version());
+
+    controller
+        .continue_tearoff_as_floating_capture(floating_group)
+        .unwrap();
+    assert!(matches!(
+        controller.drag().session().state(),
+        DragState::Dragging { payload: dock_core::DragPayload::FloatingGroup { group }, .. }
+            if group == floating_group
+    ));
+    assert_eq!(controller.drag().session().handle(), Some(DragHandle::FloatingCapture));
+    assert!(controller.tearoff_transaction_active);
+
+    controller.cancel_pointer_interaction_on_escape().unwrap();
+    assert_eq!(controller.layout.floating_groups().count(), 0);
+    assert!(!controller.tearoff_transaction_active);
+    assert_eq!(controller.drag().session().state(), DragState::Idle);
+}

@@ -141,7 +141,16 @@ pub(crate) fn begin_native_tearoff(
             Err(_) => return None,
         };
         match outcome.actual_value {
-            Some(CommandValue::FloatingGroup(group)) => Some(group),
+            Some(CommandValue::FloatingGroup(group)) => {
+                if controller.continue_tearoff_as_floating_capture(group).is_ok() {
+                    Some(group)
+                } else {
+                    let _ = controller.cancel_pointer_interaction_on_escape();
+                    controller.flush_events(cx);
+                    cx.notify();
+                    None
+                }
+            }
             _ => {
                 let _ = controller.cancel_pointer_interaction_on_escape();
                 controller.flush_events(cx);

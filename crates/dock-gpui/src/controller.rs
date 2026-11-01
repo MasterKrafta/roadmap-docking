@@ -415,6 +415,29 @@ impl DockController {
         true
     }
 
+    /// Replaces the source tab/group drag with a capture drag for the newly created
+    /// floating composition. The history transaction is deliberately left open.
+    pub(crate) fn continue_tearoff_as_floating_capture(
+        &mut self,
+        group: FloatingGroupId,
+    ) -> Result<(), DragSessionError> {
+        let (origin, position) = match self.drag.session().state() {
+            DragState::Dragging { origin, position, .. } => (origin, position),
+            _ => return Err(DragSessionError::NoActiveGesture),
+        };
+        self.drag.cancel_gesture();
+        self.begin_drag_interaction(
+            DragPayload::FloatingGroup { group },
+            DragHandle::FloatingCapture,
+            origin,
+        )?;
+        if let Err(error) = self.drag.session_mut().pointer_move(position) {
+            self.drag.cancel_gesture();
+            return Err(error);
+        }
+        Ok(())
+    }
+
     /// Starts a transaction and Core drag session for an already-floating title bar.
     pub(crate) fn begin_floating_window_move(
         &mut self,
@@ -426,7 +449,7 @@ impl DockController {
         }
         if let Err(error) = self.begin_drag_interaction(
             DragPayload::FloatingGroup { group },
-            DragHandle::FloatingTitle,
+            DragHandle::FloatingCapture,
             point,
         ) {
             tracing::debug!(%error, ?group, "could not begin floating-window title drag");

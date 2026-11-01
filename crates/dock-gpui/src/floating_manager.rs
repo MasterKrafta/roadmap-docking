@@ -338,16 +338,18 @@ impl FloatingWindowManager {
 
     fn update_native_drop_target(&self, state: &mut NativeMoveSession, cursor: PhysicalPoint, cx: &mut Context<Self>) {
         let source = self.controller.update(cx, |controller, _| {
-            let handle = controller.drag().session().handle()?;
             let payload = match controller.drag().session().state() {
                 DragState::Dragging { payload, .. } => payload,
                 _ => return None,
             };
-            if handle == DragHandle::FloatingTitle { return None; }
             match payload {
                 DragPayload::Panel { panel } => Some(DropSource::Panel { panel }),
                 DragPayload::Group { group } => Some(DropSource::Group { group }),
-                DragPayload::FloatingGroup { .. } => None,
+                DragPayload::FloatingGroup { group } => controller
+                    .layout()
+                    .floating_group(group)
+                    .and_then(|floating| controller.layout().dock_area(floating.area))
+                    .map(|area| DropSource::Group { group: area.root }),
             }
         });
         let Some(source) = source else {
