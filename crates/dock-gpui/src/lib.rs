@@ -33,8 +33,8 @@ pub struct RunOptions {
     pub workspace_path: Option<PathBuf>,
 }
 
-/// Small content view used by the built-in launcher until an application
-/// supplies its own PanelRegistry and panel factories.
+/// Small content view used by the built-in launcher. Applications that need
+/// their own panels can construct DockController and DockHost directly.
 #[cfg(windows)]
 struct StarterPanel {
     title: &'static str,
