@@ -254,10 +254,10 @@ impl FloatingWindowManager {
         );
 
         self.native_ops
-            .window_from_point(cursor, &known, Some(source_window))
+            .window_from_point(cursor, &known, None)
             .ok()
             .flatten()
-            .is_some()
+            .is_some_and(|target_window| target_window != source_window)
     }
 
     pub(crate) fn native_move_active(&self) -> bool { self.native_move.is_some() }
