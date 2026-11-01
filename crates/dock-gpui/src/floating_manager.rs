@@ -370,6 +370,7 @@ impl FloatingWindowManager {
             let Some(point) = self.core_point_for_main(cursor) else { state.drop_target = None; return; };
             self.controller.update(cx, |controller, _| {
                 let target = controller.prepare_drop_resolver(source).ok()?.resolve(point).ok()?;
+                controller.drag_mut().session_mut().pointer_move(point).ok()?;
                 controller.drag_mut().session_mut().set_drop_target(target).ok()?;
                 target.map(|target| NativeMoveTarget { group: None, target, point })
             })
@@ -380,6 +381,7 @@ impl FloatingWindowManager {
             let Some(point) = self.core_point_for_floating(target_window, cursor) else { state.drop_target = None; return; };
             self.controller.update(cx, |controller, _| {
                 let target = controller.prepare_floating_window_drop_resolver(target_id, target_group, source).ok()?.resolve(point).ok()?;
+                controller.drag_mut().session_mut().pointer_move(point).ok()?;
                 controller.drag_mut().session_mut().set_drop_target(target).ok()?;
                 target.map(|target| NativeMoveTarget { group: Some(target_group), target, point })
             })
