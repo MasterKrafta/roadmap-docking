@@ -1705,17 +1705,23 @@ impl FloatingWindowManager {
         entry: &mut PanelWindowEntry,
         group: &FloatingGroupSnapshot,
     ) {
-        let scale = entry.native_window.and_then(|native_window| {
-            self.native_ops.scale_factor(native_window).ok()
-        })
-        .filter(|scale| scale.is_finite() && *scale > 0.0);
+        let Some(native_window) = entry.native_window else {
+            entry.native_scale_factor = None;
+            entry.bounds = group.bounds;
+            return;
+        };
 
+        let scale = self
+            .native_ops
+            .scale_factor(native_window)
+            .ok()
+            .filter(|scale| scale.is_finite() && *scale > 0.0);
         let scale_changed = match (entry.native_scale_factor, scale) {
             (Some(previous), Some(current)) => (previous - current).abs() > 0.001,
             (None, Some(_)) => true,
             _ => false,
         };
-        if entry.bounds == group.bounds && !scale_changed {
+        if entry.bounds == group.bounds && scale.is_some() && !scale_changed {
             return;
         }
 
@@ -1731,56 +1737,79 @@ impl FloatingWindowManager {
             return;
         }
 
-        if let Some(native_window) = entry.native_window {
-            if entry.bounds.origin != group.bounds.origin
-                && let Some(position) = self.physical_origin_for_bounds(group.bounds)
-                && let Err(error) = self.native_ops.move_window(native_window, position)
-            {
-                tracing::warn!(
-                    ?group.id,
-                    %error,
-                    "could not move a floating native window"
-                );
-            }
-
-            // Moving to another monitor can synchronously update the HWND DPI.
-            // Query again after SetWindowPos rather than sizing with the source
-            // monitor's cached scale.
-            let effective_scale = self
-                .native_ops
-                .scale_factor(native_window)
-                .ok()
-                .filter(|scale| scale.is_finite() && *scale > 0.0)
-                .or(scale)
-                .unwrap_or(1.0);
-            let effective_scale_changed = entry.native_scale_factor.is_none_or(|previous| {
-                (previous - effective_scale).abs() > 0.001
-            });
-
-            if (entry.bounds.size != group.bounds.size || effective_scale_changed)
-                && let (Some(width), Some(height)) = (
-                    physical_coordinate(group.bounds.size.width, effective_scale),
-                    physical_coordinate(group.bounds.size.height, effective_scale),
-                )
-            {
-                let size = PhysicalSize { width, height };
-                if size.is_valid()
-                    && let Err(error) = self.native_ops.resize_window(native_window, size)
-                {
+        // Do not advance the cached bounds/scale until every requested native
+        // operation succeeds. Otherwise one transient SetWindowPos failure
+        // makes the next reconcile believe that the HWND is already in sync.
+        let mut synchronized = true;
+        if entry.bounds.origin != group.bounds.origin {
+            match self.physical_origin_for_bounds(group.bounds) {
+                Some(position) => {
+                    if let Err(error) = self.native_ops.move_window(native_window, position) {
+                        tracing::warn!(
+                            ?group.id,
+                            %error,
+                            "could not move a floating native window"
+                        );
+                        synchronized = false;
+                    }
+                }
+                None => {
                     tracing::warn!(
                         ?group.id,
-                        %error,
-                        "could not resize a floating native window"
+                        "could not convert floating-window origin to physical coordinates"
                     );
+                    synchronized = false;
                 }
             }
-
-            entry.native_scale_factor = Some(effective_scale);
-        } else {
-            entry.native_scale_factor = None;
         }
 
-        entry.bounds = group.bounds;
+        // Moving to another monitor can synchronously update the HWND DPI.
+        // Query again after SetWindowPos rather than sizing with the source
+        // monitor's cached scale.
+        let effective_scale = self
+            .native_ops
+            .scale_factor(native_window)
+            .ok()
+            .filter(|scale| scale.is_finite() && *scale > 0.0);
+        let Some(effective_scale) = effective_scale else {
+            // Keep the old cache so a later reconciliation retries the sync.
+            return;
+        };
+        let effective_scale_changed = entry.native_scale_factor.is_none_or(|previous| {
+            (previous - effective_scale).abs() > 0.001
+        });
+
+        if entry.bounds.size != group.bounds.size || effective_scale_changed {
+            let desired_size = physical_coordinate(group.bounds.size.width, effective_scale)
+                .zip(physical_coordinate(group.bounds.size.height, effective_scale));
+            match desired_size {
+                Some((width, height)) if width > 0 && height > 0 => {
+                    if let Err(error) = self.native_ops.resize_window(
+                        native_window,
+                        PhysicalSize { width, height },
+                    ) {
+                        tracing::warn!(
+                            ?group.id,
+                            %error,
+                            "could not resize a floating native window"
+                        );
+                        synchronized = false;
+                    }
+                }
+                _ => {
+                    tracing::warn!(
+                        ?group.id,
+                        "could not convert floating-window size to physical coordinates"
+                    );
+                    synchronized = false;
+                }
+            }
+        }
+
+        if synchronized {
+            entry.native_scale_factor = Some(effective_scale);
+            entry.bounds = group.bounds;
+        }
     }
 }
 
@@ -2014,6 +2043,54 @@ mod coordinate_tests {
                 1.5,
             ),
             Some(Point::new(120.0, 56.0)),
+        );
+    }
+
+    #[test]
+    fn main_host_coordinates_round_trip_at_fractional_monitor_dpi() {
+        let client_origin = PhysicalPoint { x: -1920, y: 120 };
+        let host_origin = Point::new(16.0, 24.0);
+        let local = Point::new(113.6, 77.2);
+        let scale = 1.25;
+
+        let screen = screen_position_from_main_local(
+            local,
+            host_origin,
+            client_origin,
+            scale,
+        )
+        .unwrap();
+        let restored = main_local_point_from_screen(
+            screen,
+            client_origin,
+            host_origin,
+            scale,
+        )
+        .unwrap();
+
+        assert!((restored.x - local.x).abs() <= 0.4);
+        assert!((restored.y - local.y).abs() <= 0.4);
+    }
+
+    #[test]
+    fn screen_coordinate_conversion_rejects_invalid_monitor_scale() {
+        assert!(
+            screen_position_from_main_local(
+                Point::new(1.0, 1.0),
+                Point::ZERO,
+                PhysicalPoint::default(),
+                0.0,
+            )
+            .is_none()
+        );
+        assert!(
+            main_local_point_from_screen(
+                PhysicalPoint::default(),
+                PhysicalPoint::default(),
+                Point::ZERO,
+                f32::NAN,
+            )
+            .is_none()
         );
     }
 }
