@@ -171,7 +171,7 @@ impl DockHost {
 
 impl Render for DockHost {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let main_window_id = window.window_handle().window_id();
+        let main_window_id = cx.window_handle().window_id();
         self.controller.update(cx, |controller, _| {
             controller.set_main_window_id(main_window_id);
         });

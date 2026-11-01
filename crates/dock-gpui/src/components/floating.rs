@@ -522,7 +522,7 @@ impl Render for FloatingHost {
             controller.ensure_panel_views(window, panel_cx);
         });
 
-        let window_id = window.window_handle().window_id();
+        let window_id = cx.window_handle().window_id();
         let snapshot = self.controller.update(cx, |controller, _| {
             floating_host_snapshot(controller, window_id, self.group)
         });
