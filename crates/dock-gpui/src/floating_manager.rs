@@ -1134,10 +1134,7 @@ impl FloatingWindowManager {
                     host.set_host_group(None);
                     host_cx.notify();
                 }) {
-                    Ok(()) => {
-                        entry.host_group = None;
-                        true
-                    }
+                    Ok(()) => true
                     Err(error) => {
                         tracing::warn!(
                             ?panel,
@@ -1194,13 +1191,11 @@ impl FloatingWindowManager {
             }
         }
 
-        self.host_registry.floating_groups = next_hosts
-            .iter()
-            .filter(|(group, _)| !blocked_groups.contains(group))
-            .map(|(group, panel)| (*group, *panel))
-            .collect();
         self.registry.panel_owners = panel_owners;
 
+        // Publish only hosts whose GPUI view has actually been assigned. A
+        // failed assignment remains absent and is retried by the next pass.
+        let mut active_hosts = HashMap::new();
         let mut monitor_corrections = Vec::new();
         for group in &groups {
             if blocked_groups.contains(&group.id) {
@@ -1242,7 +1237,9 @@ impl FloatingWindowManager {
             }
             self.sync_native_resize(&mut entry, group);
             self.registry.windows.insert(panel, entry);
+            active_hosts.insert(group.id, panel);
         }
+        self.host_registry.floating_groups = active_hosts.clone();
 
         // Only selected composition hosts become visible. All other open
         // PanelWindows (nested panels and Main-Dock panels) remain alive/hidden.
@@ -1253,7 +1250,7 @@ impl FloatingWindowManager {
             if blocked_groups.contains(&group.id) {
                 continue;
             }
-            let Some(panel) = next_hosts.get(&group.id).copied() else {
+            let Some(panel) = active_hosts.get(&group.id).copied() else {
                 continue;
             };
             let Some(entry) = self.registry.windows.get_mut(&panel) else {
