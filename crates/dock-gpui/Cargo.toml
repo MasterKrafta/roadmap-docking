@@ -7,7 +7,6 @@ rust-version.workspace = true
 [dependencies]
 dock-core = { path = "../dock-core", features = ["serde"] }
 gpui.workspace = true
-platform = { path = "../platform" }
 tracing.workspace = true
 thiserror.workspace = true
 ui = { path = "../ui" }

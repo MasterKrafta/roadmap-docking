@@ -171,8 +171,9 @@ mod windows_impl {
     use super::*;
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use std::mem::size_of;
+    use windows::core::BOOL;
     use windows::Win32::{
-        Foundation::{BOOL, HWND, LPARAM, POINT, RECT, WPARAM, GetLastError},
+        Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM, GetLastError},
         Graphics::Gdi::{
             ClientToScreen, EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO,
         },
@@ -316,8 +317,7 @@ mod windows_impl {
 
     impl NativeWindowOps for SystemNativeWindowOps {
         fn hwnd_of(&self, window: &Window) -> Result<NativeWindowId, NativeError> {
-            let handle = window
-                .window_handle()
+            let handle = HasWindowHandle::window_handle(window)
                 .map_err(|_| NativeError::WindowHandleUnavailable)?;
 
             match handle.as_raw() {
@@ -364,6 +364,7 @@ mod windows_impl {
             let mut point = POINT::default();
             // SAFETY: point is writable and window is a GPUI-owned HWND.
             unsafe { ClientToScreen(hwnd(window), &mut point) }
+                .ok()
                 .map_err(|error| platform_error("ClientToScreen", error))?;
             Ok(PhysicalPoint {
                 x: point.x,
