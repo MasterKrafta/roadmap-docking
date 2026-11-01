@@ -1389,6 +1389,7 @@ impl FloatingWindowManager {
         cx: &mut Context<Self>,
     ) -> Option<PanelWindowEntry> {
         let controller = self.controller.clone();
+        let panel_view_controller = self.controller.clone();
         let theme = self.theme;
         let manager = cx.entity().downgrade();
         let logical_origin = self.gpui_origin_for_bounds(bounds);
@@ -1410,7 +1411,13 @@ impl FloatingWindowManager {
 
         // The GPUI root is created hidden. reconcile assigns its composition,
         // configures the native surface, and only then makes this window visible.
-        let window = match cx.open_window(options, move |_, app| {
+        let window = match cx.open_window(options, move |window, app| {
+            // Materialize every open PanelView before this hidden native
+            // surface can be shown. This also creates inactive-tab views once;
+            // all later hosts reuse the same PanelId -> AnyView cache.
+            panel_view_controller.update(app, |controller, panel_cx| {
+                controller.ensure_panel_views(window, panel_cx);
+            });
             app.new(|_| FloatingHost::new_panel_window(controller, theme, manager))
         }) {
             Ok(window) => window,
