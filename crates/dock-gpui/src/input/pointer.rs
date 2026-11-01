@@ -1,7 +1,7 @@
 use std::{cell::Cell, collections::HashMap, rc::Rc};
 
 use dock_core::{
-    DockCommand, DragHandle, DragPayload, DragState, FloatingGroupId, HitResult, Layout, Node,
+    DockCommand, DragHandle, DragPayload, DragState, HitResult, Node,
     NodeId, PanelId, Point,
 };
 use gpui::{
@@ -41,11 +41,8 @@ enum PointerDownIntent {
     TabHeaderCandidate { group: NodeId, panel: PanelId },
     GroupCandidate { group: NodeId },
     FlyoutPanelCandidate { panel: PanelId },
-    FloatingTitleCandidate { group: FloatingGroupId },
     Resize,
     OverflowButton { group: NodeId },
-    RaiseFloating { group: FloatingGroupId },
-    RaiseFloatingForPanel { panel: PanelId },
     DismissFlyout,
     None,
 }
@@ -81,14 +78,16 @@ fn pointer_down_intent_for_hit(hit: HitResult) -> PointerDownIntent {
         }
         HitResult::TabOverflowButton { group } => PointerDownIntent::OverflowButton { group },
         HitResult::Splitter { .. }
-        | HitResult::FloatingResizeEdge { .. }
         | HitResult::FlyoutResizeEdge { .. } => PointerDownIntent::Resize,
         HitResult::FlyoutPanel { panel, .. } => PointerDownIntent::FlyoutPanelCandidate { panel },
-        HitResult::FloatingTitle { group } => PointerDownIntent::FloatingTitleCandidate { group },
-        HitResult::FloatingGroup { group } => PointerDownIntent::RaiseFloating { group },
-        HitResult::Panel { panel } => PointerDownIntent::RaiseFloatingForPanel { panel },
         HitResult::Canvas => PointerDownIntent::DismissFlyout,
-        HitResult::Column { .. } | HitResult::Miss | HitResult::DropZone { .. } => {
+        HitResult::FloatingTitle { .. }
+        | HitResult::FloatingGroup { .. }
+        | HitResult::FloatingResizeEdge { .. }
+        | HitResult::Panel { .. }
+        | HitResult::Column { .. }
+        | HitResult::Miss
+        | HitResult::DropZone { .. } => {
             PointerDownIntent::None
         }
     }
@@ -236,20 +235,6 @@ pub(crate) fn register_pointer_events(
                             &controller,
                             DragPayload::Panel { panel },
                             DragHandle::FlyoutPanel,
-                            core_point,
-                            app,
-                        );
-                    }
-                }
-                PointerDownIntent::FloatingTitleCandidate { group } => {
-                    let drag_grip =
-                        floating_title_grip_contains(&controller, group, core_point, app);
-                    raise_floating_group(&controller, group, app);
-                    if drag_grip {
-                        begin_drag_at(
-                            &controller,
-                            DragPayload::FloatingGroup { group },
-                            DragHandle::FloatingTitle,
                             core_point,
                             app,
                         );
@@ -641,45 +626,6 @@ fn dispatch_pointer_click(
     }
 }
 
-fn raise_floating_group(
-    controller: &Entity<DockController>,
-    group: FloatingGroupId,
-    app: &mut App,
-) {
-    let result = controller.update(app, |controller, cx| {
-        controller.dispatch_in(DockCommand::RaiseFloating { group }, cx)
-    });
-    if let Err(error) = result {
-        tracing::debug!(%error, "could not raise floating group from pointer-down");
-    }
-}
-
-fn floating_group_for_panel(layout: &Layout, panel: PanelId) -> Option<FloatingGroupId> {
-    layout.floating_groups().find_map(|(group, floating)| {
-        let root = layout.dock_area(floating.area)?.root;
-        subtree_contains_panel(layout, root, panel).then_some(group)
-    })
-}
-
-fn subtree_contains_panel(layout: &Layout, node: NodeId, panel: PanelId) -> bool {
-    match layout.node(node) {
-        Some(Node::Panel(candidate)) => candidate.panel_id == panel,
-        Some(Node::Split(split)) => split
-            .children
-            .iter()
-            .any(|child| subtree_contains_panel(layout, *child, panel)),
-        Some(Node::Column(column)) => column
-            .groups
-            .iter()
-            .any(|group| subtree_contains_panel(layout, *group, panel)),
-        Some(Node::Tabs(tabs)) => tabs
-            .children
-            .iter()
-            .any(|child| subtree_contains_panel(layout, *child, panel)),
-        None => false,
-    }
-}
-
 fn context_menu_target_for_hit(hit: HitResult) -> Option<ContextMenuTarget> {
     match hit {
         HitResult::Group { group } | HitResult::TabStrip { group } => {
@@ -885,35 +831,9 @@ fn flyout_title_grip_contains(
     })
 }
 
-fn floating_title_grip_contains(
-    controller: &Entity<DockController>,
-    group: dock_core::FloatingGroupId,
-    point: Point,
-    app: &mut App,
-) -> bool {
-    controller.update(app, |controller, _| {
-        let metrics = controller.metrics();
-        let Ok(rects) = controller.geometry() else {
-            return false;
-        };
-        let Some(floating) = rects
-            .floating_groups
-            .iter()
-            .find(|rect| rect.group == group)
-        else {
-            return false;
-        };
-        let header_height = metrics.header_height.min(floating.rect.size.height);
-        let close_width = metrics.group_control_button_width.min(header_height);
-        point.y >= floating.rect.origin.y
-            && point.y < floating.rect.origin.y + header_height
-            && point.x < floating.rect.origin.x + floating.rect.size.width - close_width
-    })
-}
-
 #[cfg(test)]
 mod hit_dispatch_tests {
-    use dock_core::{Axis, FloatingGroupId, HitResult, NodeId, PanelId, ResizeEdge};
+    use dock_core::{Axis, HitResult, NodeId, PanelId, ResizeEdge};
     use slotmap::Key;
 
     use super::{
@@ -949,7 +869,6 @@ mod hit_dispatch_tests {
     fn pointer_down_intents_follow_the_hitresult_table() {
         let group = NodeId::null();
         let panel = PanelId::null();
-        let floating = FloatingGroupId::null();
 
         assert_eq!(
             pointer_down_intent_for_hit(HitResult::TabHeader {
@@ -995,25 +914,10 @@ mod hit_dispatch_tests {
             }),
             PointerDownIntent::Resize
         );
-        assert_eq!(
-            pointer_down_intent_for_hit(HitResult::FloatingTitle { group: floating }),
-            PointerDownIntent::FloatingTitleCandidate { group: floating }
-        );
-        assert_eq!(
-            pointer_down_intent_for_hit(HitResult::FloatingGroup { group: floating }),
-            PointerDownIntent::RaiseFloating { group: floating }
-        );
-        assert_eq!(
-            pointer_down_intent_for_hit(HitResult::Panel { panel }),
-            PointerDownIntent::RaiseFloatingForPanel { panel }
-        );
-        assert_eq!(
-            pointer_down_intent_for_hit(HitResult::FloatingResizeEdge {
-                group: floating,
-                edge: ResizeEdge::BottomRight,
-            }),
-            PointerDownIntent::Resize
-        );
+        assert_eq!(pointer_down_intent_for_hit(HitResult::FloatingTitle { group: NodeId::null().into() }), PointerDownIntent::None);
+        assert_eq!(pointer_down_intent_for_hit(HitResult::FloatingGroup { group: NodeId::null().into() }), PointerDownIntent::None);
+        assert_eq!(pointer_down_intent_for_hit(HitResult::Panel { panel }), PointerDownIntent::None);
+        assert_eq!(pointer_down_intent_for_hit(HitResult::FloatingResizeEdge { group: NodeId::null().into(), edge: ResizeEdge::BottomRight }), PointerDownIntent::None);
         assert_eq!(
             pointer_down_intent_for_hit(HitResult::Canvas),
             PointerDownIntent::DismissFlyout
