@@ -748,3 +748,80 @@ fn extracting_one_panel_from_a_floating_group_returns_its_new_window_id() {
     assert_eq!(layout.floating_groups().count(), 2);
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
+
+#[test]
+fn floating_composition_with_split_root_can_build_drop_zones_and_dock() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, source_left_panel) = builder.panel(key("capture-split-left"), constraints());
+    let source_left_group = builder.tabs(vec![source_left_panel], 0, false);
+    let source_left_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![source_left_group],
+        vec![1.0],
+    );
+
+    let (_, source_right_panel) = builder.panel(key("capture-split-right"), constraints());
+    let source_right_group = builder.tabs(vec![source_right_panel], 0, false);
+    let source_right_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![source_right_group],
+        vec![1.0],
+    );
+
+    let source_root = builder.split(
+        Axis::X,
+        vec![source_left_column, source_right_column],
+        vec![0.5, 0.5],
+    );
+    let source_floating = builder.floating_group(source_root, bounds(80.0, 90.0), 1);
+
+    let (_, target_panel) = builder.panel(key("capture-split-target"), constraints());
+    let target_group = builder.tabs(vec![target_panel], 0, false);
+    let target_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![target_group],
+        vec![1.0],
+    );
+    builder.main_area(DockSide::Right, target_column);
+
+    let layout = builder.build();
+    let rects = layout
+        .compute_rects(
+            Rect::new(Point::ZERO, Size::new(1200.0, 800.0)),
+            &metrics,
+        )
+        .unwrap();
+    let zones = layout
+        .compute_drop_zones(DropSource::Group { group: source_root }, &rects, &metrics)
+        .unwrap();
+    let target = zones
+        .iter()
+        .find_map(|zone| match zone.target {
+            DropTarget::GroupTabs { group, .. } if group == target_group => Some(zone.target),
+            _ => None,
+        })
+        .expect("the main Dock must expose a valid target for the complete floating tree");
+
+    let request = crate::DragDropRequest {
+        payload: crate::DragPayload::FloatingGroup {
+            group: source_floating,
+        },
+        handle: crate::DragHandle::FloatingCapture,
+        origin: Point::ZERO,
+        point: Point::new(12.0, 8.0),
+        target: Some(target),
+        floating_bounds: None,
+    };
+    assert_eq!(
+        layout.resolve_drag_drop(&request, &metrics).unwrap(),
+        crate::DragDropAction::Command(DockCommand::DockFloating {
+            group: source_floating,
+            target,
+        })
+    );
+}
