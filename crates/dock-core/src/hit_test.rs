@@ -62,10 +62,6 @@ pub enum HitResult {
     FloatingGroup {
         group: FloatingGroupId,
     },
-    FloatingResizeEdge {
-        group: FloatingGroupId,
-        edge: ResizeEdge,
-    },
     DropZone {
         target: DropTarget,
         zone: DropZone,
@@ -79,7 +75,7 @@ mod hit_result_tests {
     use super::HitResult;
     #[cfg(feature = "serde")]
     use crate::PanelId;
-    use crate::{Axis, DropTarget, DropZone, NodeId, ResizeEdge};
+    use crate::{Axis, DropTarget, DropZone, NodeId};
 
     #[test]
     fn hit_results_are_pure_semantic_values() {
@@ -117,17 +113,6 @@ mod hit_result_tests {
         };
         assert!(matches!(hit, HitResult::TabOverflowButton { group } if group == NodeId::null()));
 
-        let hit = HitResult::FloatingResizeEdge {
-            group: crate::FloatingGroupId::null(),
-            edge: ResizeEdge::BottomRight,
-        };
-        assert!(matches!(
-            hit,
-            HitResult::FloatingResizeEdge {
-                edge: ResizeEdge::BottomRight,
-                ..
-            }
-        ));
     }
 
     #[cfg(feature = "serde")]
@@ -157,8 +142,8 @@ impl Layout {
     /// produced for this same Layout.
     ///
     /// Floating windows form front-to-back layers ordered by descending
-    /// z_order. Within a floating window resize grips beat its title band;
-    /// then splitters, group headers, tab headers, drop zones and panel content
+    /// z_order. Its title band is tested before its subtree; then splitters,
+    /// group headers, tab headers, drop zones and panel content
     /// are tested. Blank space inside the topmost floating window belongs to
     /// that window and does not leak hits to the content beneath it.
     ///
@@ -184,17 +169,6 @@ impl Layout {
         for floating in &floating_order {
             if !contains(floating.rect, point)? {
                 continue;
-            }
-
-            // Resize zones are generated corner-first, so the exact corner hit
-            // wins over the overlapping horizontal/vertical edge zones.
-            for resize in &rects.floating_resize_edges {
-                if resize.group == floating.group && contains(resize.rect, point)? {
-                    return Ok(HitResult::FloatingResizeEdge {
-                        group: floating.group,
-                        edge: resize.edge,
-                    });
-                }
             }
 
             let title_height = metrics.header_height.min(floating.rect.size.height);
