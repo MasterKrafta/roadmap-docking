@@ -773,15 +773,20 @@ impl Render for FloatingHost {
                             return;
                         };
 
-                        let was_dragging = controller_for_up.update(app, |controller, _| {
-                            matches!(
-                                controller.drag().session().state(),
-                                dock_core::DragState::Dragging {
-                                    payload: dock_core::DragPayload::Panel { panel },
-                                    ..
-                                } if panel == press.panel
-                            )
-                        });
+                        let (was_dragging, was_pressed) =
+                            controller_for_up.update(app, |controller, _| {
+                                match controller.drag().session().state() {
+                                    dock_core::DragState::Dragging {
+                                        payload: dock_core::DragPayload::Panel { panel },
+                                        ..
+                                    } if panel == press.panel => (true, false),
+                                    dock_core::DragState::Pressed {
+                                        payload: dock_core::DragPayload::Panel { panel },
+                                        ..
+                                    } if panel == press.panel => (false, true),
+                                    _ => (false, false),
+                                }
+                            });
                         if was_dragging {
                             finish_floating_tab_drag(
                                 &controller_for_up,
@@ -797,6 +802,11 @@ impl Render for FloatingHost {
                         }
 
                         window.release_pointer();
+                        if was_pressed {
+                            let _ = controller_for_up.update(app, |controller, _| {
+                                controller.cancel_pointer_interaction()
+                            });
+                        }
                         let should_activate = controller_for_up.update(app, |controller, _| {
                             if controller.layout().version() != press.layout_version {
                                 return false;
