@@ -190,6 +190,7 @@ pub(crate) fn begin_native_tearoff(
 /// resolver captured at that transition. Core revalidates before one command.
 pub(crate) fn finish_drag_at(
     controller: &Entity<DockController>,
+    manager: &Entity<FloatingWindowManager>,
     position: Point,
     app: &mut App,
 ) -> bool {
@@ -267,7 +268,11 @@ pub(crate) fn finish_drag_at(
                 // result. Core validates the source/area constraints and applies
                 // floating-size and viewport fitting in its geometry pipeline.
                 let desired_bounds = floating_bounds_for_request(controller, &request);
-                request.floating_bounds = desired_bounds;
+                request.floating_bounds = desired_bounds.and_then(|bounds| {
+                    manager.update(cx, |manager, _| {
+                        manager.screen_bounds_from_main_local(bounds)
+                    })
+                });
             }
 
             // Resolve every completed request in Core. NoOp is deliberately not

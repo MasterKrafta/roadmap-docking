@@ -495,7 +495,7 @@ pub(crate) fn register_pointer_events(
             };
 
             let drag_was_started = if drag_active {
-                finish_drag_at(&controller, point, app)
+                finish_drag_at(&controller, &manager, point, app)
             } else {
                 false
             };
