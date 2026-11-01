@@ -308,7 +308,7 @@ impl Layout {
                         mode: ColumnMode::Expanded,
                         groups: vec![group],
                         group_ratios: vec![1.0],
-                        last_expanded_width: Some(self.metrics_default_column_width_placeholder()),
+                        last_expanded_width: Some(metrics.default_column_width),
                     }))
                 }
                 None => return Err(CommandError::MissingNode { node: child }),
