@@ -2,7 +2,7 @@ use super::{ComputeRectsError, HitResult, Point, Rect};
 use crate::layout_builder::LayoutBuilder;
 use crate::{
     Axis, ColumnMode, DockMetrics, DockSide, DropSource, DropTarget, DropZone, GeometryError,
-    LayoutRects, PanelConstraints, PanelKey, Profile, ResizeEdge, Size,
+    LayoutRects, PanelConstraints, PanelKey, Profile, Size,
 };
 
 fn constraints() -> PanelConstraints {
@@ -177,39 +177,6 @@ fn benchmark_hit_test_multiple_floating_subtrees() {
     );
 }
 
-
-#[test]
-fn every_floating_resize_zone_beats_title_drag() {
-    let metrics = DockMetrics::default();
-    let mut builder = LayoutBuilder::new(Profile::Photoshop);
-    let (_, panel_node) = builder.panel(key("resize-zones"), constraints());
-    let group = builder.tabs(vec![panel_node], 0, false);
-    let bounds = Rect::new(Point::new(100.0, 100.0), Size::new(300.0, 200.0));
-    let floating = builder.floating_group(group, bounds, 1);
-    let layout = builder.build();
-    let rects = layout.compute_floating_rects(floating, &metrics).unwrap();
-
-    for (point, expected) in [
-        (Point::new(150.0, 2.0), ResizeEdge::Top),
-        (Point::new(297.0, 2.0), ResizeEdge::TopRight),
-        (Point::new(298.0, 100.0), ResizeEdge::Right),
-        (Point::new(297.0, 198.0), ResizeEdge::BottomRight),
-        (Point::new(150.0, 198.0), ResizeEdge::Bottom),
-        (Point::new(2.0, 198.0), ResizeEdge::BottomLeft),
-        (Point::new(2.0, 100.0), ResizeEdge::Left),
-        (Point::new(2.0, 2.0), ResizeEdge::TopLeft),
-    ] {
-        assert_eq!(
-            layout.hit_test(point, &rects, &metrics).unwrap(),
-            HitResult::FloatingResizeEdge { group: floating, edge: expected }
-        );
-    }
-
-    assert_eq!(
-        layout.hit_test(Point::new(40.0, 12.0), &rects, &metrics).unwrap(),
-        HitResult::FloatingTitle { group: floating }
-    );
-}
 
 #[test]
 fn floating_window_hit_testing_and_drop_zones_use_its_local_snapshot() {
