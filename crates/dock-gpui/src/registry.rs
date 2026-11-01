@@ -96,9 +96,16 @@ pub struct PanelRegistry {
 /// Unlike PanelRegistry, this cache is keyed by the runtime PanelId rather than
 /// the stable panel kind. Its value is kept while an instance is moved, floated,
 /// merged, split, or made inactive; it is pruned only when that PanelId closes.
-#[derive(Default)]
 pub(crate) struct PanelViewCache<T> {
     views: HashMap<PanelId, T>,
+}
+
+impl<T> Default for PanelViewCache<T> {
+    fn default() -> Self {
+        Self {
+            views: HashMap::new(),
+        }
+    }
 }
 
 impl<T> PanelViewCache<T> {
