@@ -181,7 +181,9 @@ mod windows_impl {
     use std::mem::size_of;
     use windows::core::BOOL;
     use windows::Win32::{
-        Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM, GetLastError, SetLastError, WIN32_ERROR},
+        Foundation::{
+            GetLastError, HWND, LPARAM, LRESULT, POINT, RECT, SetLastError, WIN32_ERROR, WPARAM,
+        },
         Graphics::Gdi::{
             ClientToScreen, EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO,
         },
@@ -558,10 +560,11 @@ mod windows_impl {
             // SAFETY: Both IDs originate from GPUI-owned top-level windows.
             // Clear the thread error first because a successful call may return
             // zero when the previous owner was null.
-            unsafe { SetLastError(WIN32_ERROR(0)); }
-            let previous_owner = unsafe {
-                SetWindowLongPtrW(hwnd(window), GWLP_HWNDPARENT, owner.as_raw())
-            };
+            unsafe {
+                SetLastError(WIN32_ERROR(0));
+            }
+            let previous_owner =
+                unsafe { SetWindowLongPtrW(hwnd(window), GWLP_HWNDPARENT, owner.as_raw()) };
             if previous_owner == 0 {
                 let error = last_error("SetWindowLongPtrW(owner)");
                 if matches!(&error, NativeError::Platform { code, .. } if *code != 0) {
