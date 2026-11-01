@@ -1314,8 +1314,6 @@ impl FloatingWindowManager {
         }
 
         if let Some(native_window) = entry.native_window {
-            let scale = scale.unwrap_or(1.0);
-
             if entry.bounds.origin != group.bounds.origin
                 && let Some(position) = self.physical_origin_for_bounds(group.bounds)
                 && let Err(error) = self.native_ops.move_window(native_window, position)
@@ -1327,25 +1325,39 @@ impl FloatingWindowManager {
                 );
             }
 
-            if (entry.bounds.size != group.bounds.size || scale_changed)
-                && let (Some(width), Some(height)) = (
-                    physical_coordinate(group.bounds.size.width, scale),
-                    physical_coordinate(group.bounds.size.height, scale),
-                )
-            {
-                let size = PhysicalSize { width, height };
-                if size.is_valid()
-                    && let Err(error) = self.native_ops.resize_window(native_window, size)
-                {
-                    tracing::warn!(
-                        ?group.id,
-                        %error,
-                        "could not resize a floating native window"
-                    );
+            // Moving to another monitor can synchronously update the HWND DPI.
+            // Query again after SetWindowPos rather than sizing with the source
+            // monitor's cached scale.
+            let effective_scale = self
+                .native_ops
+                .scale_factor(native_window)
+                .ok()
+                .filter(|scale| scale.is_finite() && *scale > 0.0)
+                .or(scale)
+                .unwrap_or(1.0);
+            let effective_scale_changed = entry.native_scale_factor.is_none_or(|previous| {
+                (previous - effective_scale).abs() > 0.001
+            });
+
+            if entry.bounds.size != group.bounds.size || effective_scale_changed {
+                if let (Some(width), Some(height)) = (
+                    physical_coordinate(group.bounds.size.width, effective_scale),
+                    physical_coordinate(group.bounds.size.height, effective_scale),
+                ) {
+                    let size = PhysicalSize { width, height };
+                    if size.is_valid()
+                        && let Err(error) = self.native_ops.resize_window(native_window, size)
+                    {
+                        tracing::warn!(
+                            ?group.id,
+                            %error,
+                            "could not resize a floating native window"
+                        );
+                    }
                 }
             }
 
-            entry.native_scale_factor = Some(scale);
+            entry.native_scale_factor = Some(effective_scale);
         } else {
             entry.native_scale_factor = None;
         }
