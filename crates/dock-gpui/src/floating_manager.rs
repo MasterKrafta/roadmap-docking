@@ -1216,8 +1216,29 @@ impl FloatingWindowManager {
             return None;
         }
 
+        let destination_scale = self
+            .native_ops
+            .scale_factor(native_window)
+            .ok()
+            .filter(|scale| scale.is_finite() && *scale > 0.0)
+            .unwrap_or(1.0);
+        if let (Some(width), Some(height)) = (
+            physical_coordinate(entry.bounds.size.width, destination_scale),
+            physical_coordinate(entry.bounds.size.height, destination_scale),
+        ) {
+            let desired_size = PhysicalSize { width, height };
+            if desired_size.is_valid()
+                && let Err(error) = self.native_ops.resize_window(native_window, desired_size)
+            {
+                tracing::warn!(
+                    %error,
+                    "could not rescale a restored floating window for its destination monitor"
+                );
+            }
+        }
+
         let corrected = self.core_bounds_from_native_window(native_window)?;
-        entry.native_scale_factor = self.native_ops.scale_factor(native_window).ok();
+        entry.native_scale_factor = Some(destination_scale);
         Some(corrected)
     }
 
