@@ -186,14 +186,14 @@ impl Layout {
             {
                 self.dock_floating_stack_to_main_column(root, split, side, index, metrics)
             }
+            (Some(Node::Column(_)), DropTarget::MainColumn { side, index }) => {
+                self.detach_node(root)?;
+                self.insert_existing_column_at(side, index, root, None, metrics)
+            }
             (Some(Node::Split(split)), DropTarget::MainColumn { side, index })
-                if split.axis == Axis::X
-                    && split
-                        .children
-                        .iter()
-                        .all(|child| matches!(self.nodes.get(*child), Some(Node::Column(_)))) =>
+                if split.axis == Axis::X =>
             {
-                self.dock_floating_composition_to_main_column(group_id, root, split, side, index)
+                self.dock_floating_composition_to_main_column(group_id, root, split, side, index, metrics)
             }
             (Some(Node::Split(split)), DropTarget::RailSlot { column, index })
                 if split.axis == Axis::Y =>
@@ -279,16 +279,11 @@ impl Layout {
         split: Split,
         side: DockSide,
         index: usize,
+        metrics: &DockMetrics,
     ) -> Result<(), CommandError> {
-        if split.axis != Axis::X
-            || split.children.is_empty()
-            || split
-                .children
-                .iter()
-                .any(|child| !matches!(self.nodes.get(*child), Some(Node::Column(_))))
-        {
+        if split.axis != Axis::X || split.children.is_empty() {
             return Err(CommandError::InvalidTarget {
-                reason: "floating main-dock composition must contain horizontal Columns",
+                reason: "floating main-dock composition must use a non-empty horizontal Split",
             });
         }
 
@@ -297,8 +292,29 @@ impl Layout {
                 group: floating_group_id,
             },
         )?;
-        let source_columns = split.children;
         let source_ratios = normalized_ratios(split.ratios.into_iter().map(Some).collect());
+        let mut source_columns = Vec::with_capacity(split.children.len());
+        for child in split.children {
+            let column = match self.nodes.get(child).cloned() {
+                Some(Node::Column(_)) => child,
+                Some(_) => {
+                    // Generic floating roots may be horizontal splits of Tabs
+                    // or nested groups rather than pre-existing Columns. Turn
+                    // each branch into one main-dock Column without rebuilding
+                    // any panel node or its cached view.
+                    let group = self.group_node_for(child)?;
+                    self.nodes.insert(Node::Column(crate::Column {
+                        width: metrics.default_column_width,
+                        mode: ColumnMode::Expanded,
+                        groups: vec![group],
+                        group_ratios: vec![1.0],
+                        last_expanded_width: Some(self.metrics_default_column_width_placeholder()),
+                    }))
+                }
+                None => return Err(CommandError::MissingNode { node: child }),
+            };
+            source_columns.push(column);
+        }
         let side_slot = side_index(side);
         let Some(main_area) = self.main_area(side).copied() else {
             if index != 0 {
@@ -308,6 +324,13 @@ impl Layout {
                 });
             }
             self.detach_node(root)?;
+            let Some(Node::Split(source_split)) = self.nodes.get_mut(root) else {
+                return Err(CommandError::InvalidTarget {
+                    reason: "floating composition root changed unexpectedly",
+                });
+            };
+            source_split.children = source_columns;
+            source_split.ratios = source_ratios;
             let area_id = self.dock_areas.insert(crate::DockArea::main(side, root));
             self.main_areas[side_slot] = Some(area_id);
             return Ok(());
