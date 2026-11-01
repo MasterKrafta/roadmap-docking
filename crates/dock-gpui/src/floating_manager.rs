@@ -233,7 +233,7 @@ impl FloatingWindowManager {
                 .find_map(|(panel, instance)| (instance.key == *key).then_some(panel));
 
             if existing_panel.is_some() {
-                return Ok((existing_panel, None));
+                return Ok::<(Option<PanelId>, Option<Rect>), PanelCommandError>((existing_panel, None));
             }
 
             let descriptor = controller
@@ -254,7 +254,7 @@ impl FloatingWindowManager {
                 + cascade)
                 .min(max_y);
 
-            Ok((
+            Ok::<(Option<PanelId>, Option<Rect>), PanelCommandError>((
                 None,
                 Some(Rect::new(Point::new(x, y), size)),
             ))
