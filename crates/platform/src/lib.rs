@@ -131,6 +131,8 @@ pub trait NativeWindowOps {
     fn show(&self, window: NativeWindowId) -> Result<(), NativeError>;
     fn show_no_activate(&self, window: NativeWindowId) -> Result<(), NativeError>;
     fn activate(&self, window: NativeWindowId) -> Result<(), NativeError>;
+    /// Returns the current OS foreground window, or None when no window is foreground.
+    fn foreground_window(&self) -> Result<Option<NativeWindowId>, NativeError>;
     fn hide(&self, window: NativeWindowId) -> Result<(), NativeError>;
 
     /// Assigns the native owner of a top-level popup window.
@@ -544,6 +546,12 @@ mod windows_impl {
                 return Err(last_error("SetForegroundWindow"));
             }
             Ok(())
+        }
+
+        fn foreground_window(&self) -> Result<Option<NativeWindowId>, NativeError> {
+            // SAFETY: GetForegroundWindow has no pointer arguments and may return a null HWND.
+            let foreground = unsafe { GetForegroundWindow() };
+            Ok(NativeWindowId::from_raw(foreground.0 as isize))
         }
 
         fn hide(&self, window: NativeWindowId) -> Result<(), NativeError> {
@@ -1021,6 +1029,9 @@ mod stub_impl {
             Err(NativeError::Unsupported)
         }
         fn activate(&self, _: NativeWindowId) -> Result<(), NativeError> {
+            Err(NativeError::Unsupported)
+        }
+        fn foreground_window(&self) -> Result<Option<NativeWindowId>, NativeError> {
             Err(NativeError::Unsupported)
         }
         fn hide(&self, _: NativeWindowId) -> Result<(), NativeError> {
