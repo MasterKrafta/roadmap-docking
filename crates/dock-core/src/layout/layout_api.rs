@@ -155,6 +155,31 @@ impl Layout {
         self.floating_groups.get(id)
     }
 
+    /// Returns the minimum logical size required by one floating composition.
+    ///
+    /// The calculation uses the same tree and panel-constraint rules as Core's
+    /// floating resize commands. UI adapters can use it to configure native
+    /// window minimum tracking sizes without reimplementing layout sizing.
+    pub fn floating_minimum_size(
+        &self,
+        id: FloatingGroupId,
+        metrics: &DockMetrics,
+    ) -> Result<Size, CommandError> {
+        let floating = self
+            .floating_groups
+            .get(id)
+            .copied()
+            .ok_or(CommandError::MissingFloatingGroup { group: id })?;
+        let root = self
+            .dock_areas
+            .get(floating.area)
+            .map(|area| area.root)
+            .ok_or(CommandError::InvalidTarget {
+                reason: "floating group references a missing dock area",
+            })?;
+        self.minimum_floating_size(root, metrics)
+    }
+
     /// Returns the main area for a side, if one exists.
     pub fn main_area(&self, side: DockSide) -> Option<&DockArea> {
         let index = helpers::side_index(side);
