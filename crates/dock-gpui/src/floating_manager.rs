@@ -963,14 +963,13 @@ impl FloatingWindowManager {
                 .floating
                 .get(&group.id)
                 .and_then(|entry| entry.native_window)
+                && let Err(error) = self.native_ops.show_no_activate(native_window)
             {
-                if let Err(error) = self.native_ops.show_no_activate(native_window) {
-                    tracing::warn!(
-                        ?group.id,
-                        %error,
-                        "could not update floating-window visibility or z-order"
-                    );
-                }
+                tracing::warn!(
+                    ?group.id,
+                    %error,
+                    "could not update floating-window visibility or z-order"
+                );
             }
         }
 
@@ -1367,21 +1366,21 @@ impl FloatingWindowManager {
                 (previous - effective_scale).abs() > 0.001
             });
 
-            if entry.bounds.size != group.bounds.size || effective_scale_changed {
-                if let (Some(width), Some(height)) = (
+            if (entry.bounds.size != group.bounds.size || effective_scale_changed)
+                && let (Some(width), Some(height)) = (
                     physical_coordinate(group.bounds.size.width, effective_scale),
                     physical_coordinate(group.bounds.size.height, effective_scale),
-                ) {
-                    let size = PhysicalSize { width, height };
-                    if size.is_valid()
-                        && let Err(error) = self.native_ops.resize_window(native_window, size)
-                    {
-                        tracing::warn!(
-                            ?group.id,
-                            %error,
-                            "could not resize a floating native window"
-                        );
-                    }
+                )
+            {
+                let size = PhysicalSize { width, height };
+                if size.is_valid()
+                    && let Err(error) = self.native_ops.resize_window(native_window, size)
+                {
+                    tracing::warn!(
+                        ?group.id,
+                        %error,
+                        "could not resize a floating native window"
+                    );
                 }
             }
 
