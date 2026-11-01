@@ -60,6 +60,117 @@ fn c46_float_panel_keeps_panel_instance_and_id() {
 }
 
 #[test]
+fn c46_float_panel_from_floating_tabs_keeps_the_source_window_when_tabs_remain() {
+    let metrics = DockMetrics::default();
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+    let (remaining_panel, remaining_node) = builder.panel(
+        PanelKey::new("c46-floating-extract-remaining").unwrap(),
+        descriptors()[0].1,
+    );
+    let (moving_panel, moving_node) = builder.panel(
+        PanelKey::new("c46-floating-extract-moving").unwrap(),
+        descriptors()[0].1,
+    );
+    let source_tabs = builder.tabs(vec![remaining_node, moving_node], 0, false);
+    let source_floating = builder.floating_group(
+        source_tabs,
+        Rect::new(Point::new(120.0, 140.0), Size::new(420.0, 300.0)),
+        1,
+    );
+    let mut layout = builder.build();
+    let source_area = layout.floating_group(source_floating).unwrap().area;
+    assert_eq!(layout.validate(&metrics), Ok(()));
+
+    layout
+        .apply(
+            DockCommand::Float {
+                node: moving_node,
+                bounds: Rect::new(Point::new(560.0, 180.0), Size::new(320.0, 240.0)),
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    let extracted_group = layout
+        .floating_groups()
+        .find_map(|(id, _)| (id != source_floating).then_some(id))
+        .expect("extracting a tab creates a second floating group");
+    let source = layout.floating_group(source_floating).unwrap();
+    assert_eq!(source.area, source_area);
+    assert_eq!(
+        layout.dock_area(source_area).unwrap().root,
+        source_tabs,
+        "the original floating window keeps its remaining Tabs group"
+    );
+    assert!(matches!(
+        layout.node(source_tabs),
+        Some(Node::Tabs(tabs))
+            if tabs.children == vec![remaining_node]
+                && tabs.active_index == 0
+    ));
+
+    let extracted = layout.floating_group(extracted_group).unwrap();
+    let extracted_root = layout.dock_area(extracted.area).unwrap().root;
+    assert!(matches!(
+        layout.node(extracted_root),
+        Some(Node::Tabs(tabs))
+            if tabs.children == vec![moving_node]
+                && tabs.active_index == 0
+    ));
+    assert!(matches!(
+        layout.node(moving_node),
+        Some(Node::Panel(panel)) if panel.panel_id == moving_panel
+    ));
+    assert!(layout.panel_instance(remaining_panel).is_some());
+    assert!(layout.panel_instance(moving_panel).is_some());
+    assert_eq!(layout.panel_instances().count(), 2);
+    assert_eq!(layout.floating_groups().count(), 2);
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
+fn c46_extracting_the_last_floating_tab_removes_the_empty_source_window() {
+    let metrics = DockMetrics::default();
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+    let (panel, panel_node) = builder.panel(
+        PanelKey::new("c46-floating-extract-last").unwrap(),
+        descriptors()[0].1,
+    );
+    let source_tabs = builder.tabs(vec![panel_node], 0, false);
+    let source_floating = builder.floating_group(
+        source_tabs,
+        Rect::new(Point::new(80.0, 100.0), Size::new(400.0, 280.0)),
+        1,
+    );
+    let mut layout = builder.build();
+    let source_area = layout.floating_group(source_floating).unwrap().area;
+
+    layout
+        .apply(
+            DockCommand::Float {
+                node: panel_node,
+                bounds: Rect::new(Point::new(520.0, 160.0), Size::new(300.0, 220.0)),
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    assert!(layout.floating_group(source_floating).is_none());
+    assert!(layout.dock_area(source_area).is_none());
+    assert!(layout.node(source_tabs).is_none());
+    assert_eq!(layout.floating_groups().count(), 1);
+    assert!(layout.panel_instance(panel).is_some());
+    let (_, extracted) = layout.floating_groups().next().unwrap();
+    let extracted_root = layout.dock_area(extracted.area).unwrap().root;
+    assert!(matches!(
+        layout.node(extracted_root),
+        Some(Node::Tabs(tabs)) if tabs.children == vec![panel_node]
+    ));
+    assert_eq!(layout.panel_instances().count(), 1);
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
 fn photoshop_floating_roots_reject_columns_and_horizontal_compositions() {
     let metrics = DockMetrics::default();
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
