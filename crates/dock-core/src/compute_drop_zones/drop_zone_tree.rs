@@ -234,30 +234,6 @@ pub(crate) fn group_main_column(
         .map(|index| (side, index, columns[index].1))
 }
 
-pub(crate) fn edge_group_for_column(layout: &Layout, column: NodeId, last: bool) -> Option<NodeId> {
-    let Some(Node::Column(value)) = layout.node(column) else {
-        return None;
-    };
-    if last {
-        value.groups.last().copied()
-    } else {
-        value.groups.first().copied()
-    }
-}
-
-pub(crate) fn edge_group_for_dock_edge(
-    layout: &Layout,
-    columns: &[(NodeId, Rect)],
-    is_left: bool,
-) -> Option<NodeId> {
-    let (column, _) = if is_left {
-        columns.first().copied()?
-    } else {
-        columns.last().copied()?
-    };
-    edge_group_for_column(layout, column, is_left)
-}
-
 pub(crate) fn can_add_column(
     layout: &Layout,
     tree_index: &DropZoneTreeIndex,
