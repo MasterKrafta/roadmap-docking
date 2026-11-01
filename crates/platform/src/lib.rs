@@ -181,7 +181,7 @@ mod windows_impl {
     use std::mem::size_of;
     use windows::core::BOOL;
     use windows::Win32::{
-        Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM, GetLastError},
+        Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM, GetLastError, SetLastError, WIN32_ERROR},
         Graphics::Gdi::{
             ClientToScreen, EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO,
         },
@@ -555,11 +555,19 @@ mod windows_impl {
             window: NativeWindowId,
             owner: NativeWindowId,
         ) -> Result<(), NativeError> {
-            // SAFETY: both IDs originate from GPUI windows; GWLP_HWNDPARENT
-            // sets the owner for a top-level popup window.
-            let _ = unsafe {
+            // SAFETY: Both IDs originate from GPUI-owned top-level windows.
+            // Clear the thread error first because a successful call may return
+            // zero when the previous owner was null.
+            unsafe { SetLastError(WIN32_ERROR(0)); }
+            let previous_owner = unsafe {
                 SetWindowLongPtrW(hwnd(window), GWLP_HWNDPARENT, owner.as_raw())
             };
+            if previous_owner == 0 {
+                let error = last_error("SetWindowLongPtrW(owner)");
+                if matches!(&error, NativeError::Platform { code, .. } if *code != 0) {
+                    return Err(error);
+                }
+            }
             Ok(())
         }
 
@@ -582,12 +590,12 @@ mod windows_impl {
 
         fn enable_resize(&self, window: NativeWindowId) -> Result<(), NativeError> {
             let native = hwnd(window);
-            // SAFETY: The HWND belongs to GPUI. Update its style and apply the
-            // non-client frame change without moving, resizing or activating it.
             // SAFETY: The HWND belongs to GPUI. Add the resizable frame and
             // apply the non-client update without moving or activating it.
             let style = unsafe { GetWindowLongPtrW(native, GWL_STYLE) as u32 | WS_THICKFRAME.0 };
-            unsafe { let _ = SetWindowLongPtrW(native, GWL_STYLE, style as isize); }
+            unsafe {
+                let _ = SetWindowLongPtrW(native, GWL_STYLE, style as isize);
+            }
             if let Err(error) = unsafe {
                 SetWindowPos(
                     native,
