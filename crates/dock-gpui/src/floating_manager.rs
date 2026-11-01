@@ -1422,14 +1422,30 @@ fn restored_window_origin(
         return None;
     }
 
-    // Keep the left side of the title strip and its top edge reachable. A
-    // window larger than the work area may extend beyond it, but stays usable.
-    let visible_width = width.min(80).min(area_width);
-    let visible_height = height.min(40).min(area_height);
-    let minimum_x = work_area.left as i64;
-    let maximum_x = work_area.right as i64 - visible_width as i64;
-    let minimum_y = work_area.top as i64;
-    let maximum_y = work_area.bottom as i64 - visible_height as i64;
+    // Keep windows fully inside the work area when they fit. Larger
+    // compositions may extend beyond it, but retain a reachable title strip.
+    let (minimum_x, maximum_x) = if width <= area_width {
+        (
+            work_area.left as i64,
+            work_area.right as i64 - width as i64,
+        )
+    } else {
+        (
+            work_area.left as i64 - width as i64 + 80,
+            work_area.right as i64 - 80,
+        )
+    };
+    let (minimum_y, maximum_y) = if height <= area_height {
+        (
+            work_area.top as i64,
+            work_area.bottom as i64 - height as i64,
+        )
+    } else {
+        (
+            work_area.top as i64,
+            work_area.bottom as i64 - 40,
+        )
+    };
     let x = (rect.left as i64).clamp(minimum_x, maximum_x);
     let y = (rect.top as i64).clamp(minimum_y, maximum_y);
 
@@ -1506,7 +1522,7 @@ mod coordinate_tests {
 
         assert_eq!(
             restored_window_origin(window, work_area),
-            Some(PhysicalPoint { x: 1320, y: 0 }),
+            Some(PhysicalPoint { x: 1320, y: 640 }),
         );
     }
 
