@@ -7,6 +7,7 @@
 
 pub mod actions;
 pub mod components;
+mod app_shell;
 pub mod controller;
 pub mod dock_host;
 pub mod floating_manager;
@@ -115,12 +116,25 @@ pub fn run(options: RunOptions) {
 
         let controller = cx.new(|_| controller);
         let bounds = Bounds::centered(None, size(px(1440.0), px(740.0)), cx);
+        let theme = DockTheme::default();
         let open_result = cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 ..Default::default()
             },
-            move |_, cx| cx.new(|_| DockHost::new(controller.clone(), DockTheme::default())),
+            move |_, cx| {
+                let manager_controller = controller.clone();
+                let manager =
+                    cx.new(move |_| FloatingWindowManager::new(manager_controller, theme));
+
+                let host_controller = controller.clone();
+                let host_manager = manager.clone();
+                let dock_host = cx.new(move |_| {
+                    DockHost::new(host_controller, theme).with_floating_window_manager(host_manager)
+                });
+
+                cx.new(move |_| AppShell::new(controller, dock_host, manager, theme))
+            },
         );
 
         if open_result.is_err() {
@@ -138,6 +152,7 @@ pub fn run(_options: RunOptions) {
     tracing::warn!("the built-in dock demo currently requires the Windows native-window backend");
 }
 
+pub use app_shell::AppShell;
 pub use components::{
     CanvasSlot, ColumnView, ContextMenu, ContextMenuEntry, ContextMenuItem, DragGhost, DropOverlay,
     FloatingHost, FlyoutView, GroupView, MainDockView, PanelHost, RailView, SplitterView,
