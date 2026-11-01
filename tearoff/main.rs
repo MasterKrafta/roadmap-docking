@@ -576,12 +576,16 @@ mod tearoff_win {
     /// (иначе во время модального resize-цикла Windows картинка замирает).
     unsafe extern "system" fn resize_redraw_timer_proc(hwnd: HWND, _msg: u32, _id: usize, _time: u32) {
         if left_down() {
-            let _ = PostMessageW(
-                Some(hwnd),
-                WM_GPUI_FORCE_UPDATE_WINDOW,
-                WPARAM(0),
-                LPARAM(0),
-            );
+            // SAFETY: hwnd is supplied by Windows for this timer callback.
+            // PostMessageW only queues the redraw message; it does not retain pointers.
+            let _ = unsafe {
+                PostMessageW(
+                    Some(hwnd),
+                    WM_GPUI_FORCE_UPDATE_WINDOW,
+                    WPARAM(0),
+                    LPARAM(0),
+                )
+            };
         }
     }
 }
