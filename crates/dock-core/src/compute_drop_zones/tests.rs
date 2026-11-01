@@ -117,10 +117,10 @@ fn groups_have_center_and_tab_insertion_targets_but_not_static_default_zones() {
         .iter()
         .find(|zone| {
             zone.target
-                == DropTarget::MainColumn {
+                == (DropTarget::MainColumn {
                     side: DockSide::Left,
                     index: 0,
-                }
+                })
                 && zone.zone == DropZone::ColumnLeft
         })
         .unwrap();
