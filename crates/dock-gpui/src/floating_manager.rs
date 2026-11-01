@@ -7,7 +7,7 @@ use std::{collections::{HashMap, HashSet}, time::Duration};
 
 use dock_core::{
     DockCommand, DockSide, DragPayload, DragState, DropSource, DropTarget, FloatingGroupId,
-    PanelId, Point, Rect, Size,
+    PanelId, PanelKey, Point, Rect, Size,
 };
 use gpui::{
     AppContext, Bounds, Context, Entity, Subscription, Window, WindowBounds,
@@ -18,7 +18,7 @@ use platform::{
 };
 
 use crate::{
-    DockController, DockEvent, DockTheme,
+    DockController, DockEvent, DockTheme, PanelCommandError,
     components::FloatingHost,
     dock_host::collect_panel_ids,
 };
@@ -217,6 +217,73 @@ impl FloatingWindowManager {
             scale,
         )?;
         Some(Rect::new(Point::new(origin.x as f32, origin.y as f32), bounds.size))
+    }
+
+    /// Opens a registered panel directly in a floating window or closes its
+    /// existing instance. The checked state is derived exclusively from Layout.
+    pub(crate) fn toggle_panel_from_menu(
+        &mut self,
+        key: &PanelKey,
+        cx: &mut Context<Self>,
+    ) -> Result<(), PanelCommandError> {
+        let (existing_panel, local_bounds) = self.controller.update(cx, |controller, _| {
+            let existing_panel = controller
+                .layout()
+                .panel_instances()
+                .find_map(|(panel, instance)| (instance.key == *key).then_some(panel));
+
+            if existing_panel.is_some() {
+                return Ok((existing_panel, None));
+            }
+
+            let descriptor = controller
+                .registry()
+                .get(key)
+                .ok_or_else(|| PanelCommandError::UnknownPanel(key.clone()))?;
+            let size = descriptor.constraints().preferred_size;
+            let viewport = controller.viewport();
+            let cascade = (controller.layout().floating_groups().count().min(7) as f32) * 24.0;
+            let max_x = (viewport.origin.x + viewport.size.width - size.width)
+                .max(viewport.origin.x);
+            let max_y = (viewport.origin.y + viewport.size.height - size.height)
+                .max(viewport.origin.y);
+            let x = (viewport.origin.x + (viewport.size.width - size.width).max(0.0) * 0.5
+                + cascade)
+                .min(max_x);
+            let y = (viewport.origin.y + (viewport.size.height - size.height).max(0.0) * 0.5
+                + cascade)
+                .min(max_y);
+
+            Ok((
+                None,
+                Some(Rect::new(Point::new(x, y), size)),
+            ))
+        })?;
+
+        let result = if let Some(panel) = existing_panel {
+            self.controller.update(cx, |controller, controller_cx| {
+                let result = controller
+                    .close_panel(panel)
+                    .map(|_| ())
+                    .map_err(PanelCommandError::Command);
+                controller.flush_events(controller_cx);
+                controller_cx.notify();
+                result
+            })
+        } else {
+            let local_bounds = local_bounds.expect("new panel must have initial bounds");
+            let bounds = self
+                .screen_bounds_from_main_local(local_bounds)
+                .ok_or(PanelCommandError::MainWindowBoundsUnavailable)?;
+            self.controller.update(cx, |controller, controller_cx| {
+                let result = controller.open_panel_floating(key, bounds).map(|_| ());
+                controller.flush_events(controller_cx);
+                controller_cx.notify();
+                result
+            })
+        };
+
+        result
     }
 
     /// Converts a rectangle in one floating host's local logical coordinates
