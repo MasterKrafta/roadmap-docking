@@ -888,12 +888,12 @@ mod coordinate_tests {
     #[test]
     fn main_host_local_bounds_convert_to_virtual_desktop_physical_origin() {
         let screen = screen_position_from_main_local(
-            Point::new(120.0, 55.0),
+            Point::new(120.0, 56.0),
             Point::new(32.0, 48.0),
             PhysicalPoint { x: 1400, y: 80 },
             1.5,
         ).unwrap();
-        assert_eq!(screen, PhysicalPoint { x: 1628, y: 234 });
+        assert_eq!(screen, PhysicalPoint { x: 1628, y: 236 });
         assert_eq!(
             main_local_point_from_screen(
                 screen,
@@ -901,7 +901,7 @@ mod coordinate_tests {
                 Point::new(32.0, 48.0),
                 1.5,
             ),
-            Some(Point::new(120.0, 55.0)),
+            Some(Point::new(120.0, 56.0)),
         );
     }
 }
