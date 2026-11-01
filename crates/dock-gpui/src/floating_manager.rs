@@ -304,6 +304,13 @@ impl FloatingWindowManager {
             }
             return false;
         }
+        let pointer_interaction_active = self.controller.update(cx, |controller, _| {
+            controller.has_active_pointer_interaction()
+        });
+        if !pointer_interaction_active {
+            self.cancel_native_move(state, cx);
+            return false;
+        }
         if self.native_ops.key_down(NativeKey::Escape).unwrap_or(false) {
             self.cancel_native_move(state, cx);
             return false;
