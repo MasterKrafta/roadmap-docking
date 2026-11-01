@@ -7,6 +7,16 @@ use gpui::{App, Entity, WindowId};
 
 use crate::{DockController, FloatingWindowManager};
 
+/// Identifies the floating tab gesture across pointer updates and tear-off.
+#[derive(Clone, Copy)]
+pub(crate) struct FloatingTabDrag {
+    pub(crate) source_window_id: WindowId,
+    pub(crate) source_group: FloatingGroupId,
+    pub(crate) panel: PanelId,
+    pub(crate) press_origin: Point,
+    pub(crate) layout_version: u64,
+}
+
 /// Begins a drag from an adapter-provided point in Core's host-local coordinates.
 pub(crate) fn begin_drag_at(
     controller: &Entity<DockController>,
@@ -94,16 +104,12 @@ pub(crate) fn update_drag_at(
 /// built from that host's own local geometry, not from the main DockHost.
 pub(crate) fn update_floating_tab_drag(
     controller: &Entity<DockController>,
-    window_id: WindowId,
-    source_group: FloatingGroupId,
-    panel: PanelId,
-    press_origin: Point,
-    layout_version: u64,
+    drag: FloatingTabDrag,
     position: Point,
     app: &mut App,
 ) -> bool {
     controller.update(app, |controller, cx| {
-        if controller.layout().version() != layout_version {
+        if controller.layout().version() != drag.layout_version {
             if matches!(
                 controller.drag().session().state(),
                 DragState::Pressed {
@@ -112,20 +118,20 @@ pub(crate) fn update_floating_tab_drag(
                 } | DragState::Dragging {
                     payload: DragPayload::Panel { panel: active },
                     ..
-                } if active == panel
+                } if active == drag.panel
             ) {
                 cancel_drag(controller);
             }
             return false;
         }
 
-        let payload = DragPayload::Panel { panel };
+        let payload = DragPayload::Panel { panel: drag.panel };
         match controller.drag().session().state() {
             DragState::Idle => {
                 if let Err(error) = controller.begin_drag_interaction(
                     payload,
                     DragHandle::PanelTab,
-                    press_origin,
+                    drag.press_origin,
                 ) {
                     tracing::debug!(%error, "could not begin floating tab drag");
                     return false;
@@ -141,7 +147,7 @@ pub(crate) fn update_floating_tab_drag(
                 if let Err(error) = controller.begin_drag_interaction(
                     payload,
                     DragHandle::PanelTab,
-                    press_origin,
+                    drag.press_origin,
                 ) {
                     tracing::debug!(%error, "could not begin floating tab drag");
                     return false;
@@ -171,9 +177,9 @@ pub(crate) fn update_floating_tab_drag(
             return false;
         }
 
-        let source = DropSource::Panel { panel };
+        let source = DropSource::Panel { panel: drag.panel };
         let target = match controller
-            .prepare_floating_window_drop_resolver(window_id, source_group, source)
+            .prepare_floating_window_drop_resolver(drag.source_window_id, drag.source_group, source)
             .and_then(|resolver| resolver.resolve(position))
         {
             Ok(target) => target,
@@ -202,10 +208,7 @@ pub(crate) fn update_floating_tab_drag(
 pub(crate) fn begin_floating_tab_tearoff(
     controller: &Entity<DockController>,
     manager: &Entity<FloatingWindowManager>,
-    source_window_id: WindowId,
-    source_group: FloatingGroupId,
-    panel: PanelId,
-    press_origin: Point,
+    drag: FloatingTabDrag,
     pointer: Point,
     app: &mut App,
 ) -> bool {
@@ -218,24 +221,24 @@ pub(crate) fn begin_floating_tab_tearoff(
             } => (panel, origin),
             _ => return None,
         };
-        if active_panel != panel || origin != press_origin {
+        if active_panel != drag.panel || origin != drag.press_origin {
             return None;
         }
 
         let (panel_node, preferred_size) = {
             let layout = controller.layout();
             let panel_node = layout.nodes().find_map(|(id, node)| {
-                matches!(node, Node::Panel(value) if value.panel_id == panel).then_some(id)
+                matches!(node, Node::Panel(value) if value.panel_id == drag.panel).then_some(id)
             })?;
-            let preferred_size = layout.panel_instance(panel)?.constraints.preferred_size;
+            let preferred_size = layout.panel_instance(drag.panel)?.constraints.preferred_size;
             (panel_node, preferred_size)
         };
         let header_rect = controller
-            .floating_geometry(source_window_id, source_group)
+            .floating_geometry(drag.source_window_id, drag.source_group)
             .ok()?
             .tab_headers
             .iter()
-            .find(|header| header.panel == panel)?
+            .find(|header| header.panel == drag.panel)?
             .rect;
         Some((panel_node, header_rect, preferred_size, origin))
     });
@@ -250,7 +253,7 @@ pub(crate) fn begin_floating_tab_tearoff(
     };
     let model_bounds = manager
         .update(app, |manager, _| {
-            manager.screen_bounds_from_floating_local(source_group, local_bounds)
+            manager.screen_bounds_from_floating_local(drag.source_group, local_bounds)
         });
     let Some(model_bounds) = model_bounds else {
         tracing::warn!("could not convert floating tab bounds into screen coordinates");
@@ -272,15 +275,10 @@ pub(crate) fn begin_floating_tab_tearoff(
             Err(_) => return None,
         };
         match outcome.actual_value {
-            Some(CommandValue::FloatingGroup(group)) => {
-                if controller.continue_tearoff_as_floating_capture(group).is_ok() {
-                    Some(group)
-                } else {
-                    let _ = controller.cancel_pointer_interaction_on_escape();
-                    controller.flush_events(cx);
-                    cx.notify();
-                    None
-                }
+            Some(CommandValue::FloatingGroup(group))
+                if controller.continue_tearoff_as_floating_capture(group).is_ok() =>
+            {
+                Some(group)
             }
             _ => {
                 let _ = controller.cancel_pointer_interaction_on_escape();
@@ -448,15 +446,10 @@ pub(crate) fn begin_native_tearoff(
             Err(_) => return None,
         };
         match outcome.actual_value {
-            Some(CommandValue::FloatingGroup(group)) => {
-                if controller.continue_tearoff_as_floating_capture(group).is_ok() {
-                    Some(group)
-                } else {
-                    let _ = controller.cancel_pointer_interaction_on_escape();
-                    controller.flush_events(cx);
-                    cx.notify();
-                    None
-                }
+            Some(CommandValue::FloatingGroup(group))
+                if controller.continue_tearoff_as_floating_capture(group).is_ok() =>
+            {
+                Some(group)
             }
             _ => {
                 let _ = controller.cancel_pointer_interaction_on_escape();
