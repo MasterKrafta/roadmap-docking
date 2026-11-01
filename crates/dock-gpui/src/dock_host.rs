@@ -1083,28 +1083,3 @@ pub(crate) fn collect_subtree_nodes(
     }
 }
 
-/// Collects panel IDs reachable from one tree root. Geometry emits only
-/// rectangles for active panels, so this set can safely include inactive tabs.
-pub(crate) fn collect_panel_ids(layout: &Layout, id: NodeId, panels: &mut HashSet<PanelId>) {
-    match layout.node(id) {
-        Some(Node::Split(split)) => {
-            for child in &split.children {
-                collect_panel_ids(layout, *child, panels);
-            }
-        }
-        Some(Node::Column(column)) => {
-            for group in &column.groups {
-                collect_panel_ids(layout, *group, panels);
-            }
-        }
-        Some(Node::Tabs(tabs)) => {
-            for child in &tabs.children {
-                collect_panel_ids(layout, *child, panels);
-            }
-        }
-        Some(Node::Panel(panel)) => {
-            panels.insert(panel.panel_id);
-        }
-        None => {}
-    }
-}

@@ -1,8 +1,12 @@
 //! GPUI event adapters. UI events are translated into dock-core input values here.
 
+#[path = "input_drag.rs"]
 pub mod drag;
+#[path = "input_pointer.rs"]
 pub mod pointer;
+#[path = "input_resize.rs"]
 pub mod resize;
+#[path = "input_scroll.rs"]
 pub mod scroll;
 
 pub(crate) use drag::floating_bounds;

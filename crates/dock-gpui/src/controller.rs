@@ -12,7 +12,9 @@ use thiserror::Error;
 
 use crate::registry::{PanelRegistry, PanelViewCache};
 
+#[path = "controller_commands.rs"]
 mod commands;
+#[path = "controller_layout_cache.rs"]
 mod layout_cache;
 
 /// Events emitted by the controller entity after successful model operations.
