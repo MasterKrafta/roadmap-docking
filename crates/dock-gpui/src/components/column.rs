@@ -23,8 +23,9 @@ use super::{
     tab_strip::GroupPresentation,
 };
 
-/// One main-dock column. Core supplies the group rectangles and the scroll
-/// extent; GPUI supplies only the clipping and ephemeral scroll position.
+/// One dock Column. Core supplies all Group rectangles, including adaptive
+/// compact strips. GPUI keeps a scroll viewport only for flattened rail slots
+/// or other explicit vertical overflow reported by Core.
 pub struct ColumnView;
 
 impl ColumnView {
@@ -131,9 +132,9 @@ impl ColumnView {
                 ));
             }
 
-            // Mount active panel content inside the scrolling content tree. This
-            // keeps panel views aligned with Core geometry and clipped by the
-            // owning column's scroll viewport.
+            // Mount active panel content in the same coordinate space as Group
+            // surfaces. Expanded Columns do not scroll; this viewport is only
+            // scrollable when Core reports an explicit overflow (for example a rail).
             content = content.child(PanelHost::render(panels, content_origin));
         } else {
             let pointer_offset = Point::new(
