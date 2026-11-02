@@ -95,8 +95,8 @@ impl ColumnHeaderView {
                     .h_full()
                     .bg(rgb(theme.colors.group_grip_background)),
             )
-            .child(menu_button)
             .child(mode_button)
+            .child(menu_button)
     }
 }
 
