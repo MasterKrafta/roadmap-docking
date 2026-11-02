@@ -199,22 +199,6 @@ impl ColumnView {
     }
 }
 
-fn next_column_mode(mode: ColumnMode) -> ColumnMode {
-    match mode {
-        ColumnMode::Expanded => ColumnMode::IconsAndLabels,
-        ColumnMode::IconsAndLabels => ColumnMode::IconsOnly,
-        ColumnMode::IconsOnly => ColumnMode::Expanded,
-    }
-}
-
-fn column_mode_label(mode: ColumnMode) -> &'static str {
-    match mode {
-        ColumnMode::Expanded => "⟨⟨",
-        ColumnMode::IconsAndLabels => "⟨",
-        ColumnMode::IconsOnly => "⟩⟩",
-    }
-}
-
 pub(crate) fn group_surface(
     group: GroupRect,
     content_origin: Point,
