@@ -591,8 +591,8 @@ pub(super) fn distribute_heights_with_minimums(
 
 impl Layout {
     /// Computes the minimum layout size using the same rules as geometry.
-    /// Expanded Tabs include their header and strip; Split/Column stacks include
-    /// splitter gaps; Expanded Columns retain their configured width.
+    /// Expanded Tabs include their header and strip; Columns include their own
+    /// header row and splitter gaps; Expanded Columns retain their configured width.
     pub(crate) fn minimum_node_size(
         &self,
         node_id: NodeId,
@@ -720,12 +720,12 @@ impl Layout {
         Ok(size)
     }
 
-    /// Computes a floating window's minimum size, including reserved title rows.
+    /// Computes a floating window's minimum size, including its native title row.
     ///
-    /// A collapsed root Tabs group is rendered as a strip, but its floating
-    /// window must still fit the minimum panel content size. Composite roots
-    /// also reserve a title row above collapsed first branches, matching the
-    /// geometry emitted by compute_rects.
+    /// Columns have their own independent header row, so any floating tree that
+    /// contains a Column also reserves the native window title above the complete
+    /// composition. Trees without Columns retain the established collapsed-branch
+    /// title reservation behavior.
     pub(crate) fn minimum_floating_size(
         &self,
         node_id: NodeId,
