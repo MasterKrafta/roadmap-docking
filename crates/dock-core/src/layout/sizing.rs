@@ -680,7 +680,7 @@ impl Layout {
                 let slot_count = self.column_display_order(node_id)?.len();
                 Size::new(
                     width,
-                    if slot_count == 0 {
+                    if column.groups.is_empty() {
                         0.0
                     } else {
                         metrics.column_header_height
