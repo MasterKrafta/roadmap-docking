@@ -167,7 +167,11 @@ fn collapsed_groups_keep_fixed_height_and_are_excluded_from_ratios() {
     assert_eq!(heights[0], metrics.collapsed_group_height);
     assert!((heights[1] / heights[2] - 0.3 / 0.5).abs() < PIXEL_TOLERANCE);
     assert!(
-        (heights.iter().sum::<f32>() + 2.0 * metrics.splitter_thickness - 500.0).abs()
+        (heights.iter().sum::<f32>()
+            + 2.0 * metrics.splitter_thickness
+            + metrics.column_header_height
+            - 500.0)
+            .abs()
             < PIXEL_TOLERANCE
     );
     assert_eq!(rects.panels.len(), 2);
@@ -204,10 +208,14 @@ fn ratio_allocation_clamps_small_group_to_its_panel_minimum_and_redistributes_re
 
     assert_eq!(heights[0], metrics.collapsed_group_height);
     assert!((heights[2] - minimum).abs() < PIXEL_TOLERANCE);
-    assert!((heights[1] - 348.0).abs() < PIXEL_TOLERANCE);
+    assert!((heights[1] - 316.0).abs() < PIXEL_TOLERANCE);
     assert!(heights[2] >= minimum);
     assert!(
-        (heights.iter().sum::<f32>() + 2.0 * metrics.splitter_thickness - 500.0).abs()
+        (heights.iter().sum::<f32>()
+            + 2.0 * metrics.splitter_thickness
+            + metrics.column_header_height
+            - 500.0)
+            .abs()
             < PIXEL_TOLERANCE
     );
 }
@@ -235,7 +243,7 @@ fn active_tab_gets_panel_bounds_and_all_tabs_get_header_rectangles() {
     assert_eq!(rects.panels[0].panel, active_panel);
     assert_eq!(
         rects.panels[0].rect.origin.y,
-        metrics.header_height + metrics.tab_strip_height
+        metrics.column_header_height + metrics.header_height + metrics.tab_strip_height
     );
     assert!(rects.drop_zones.is_empty());
 }
@@ -289,7 +297,10 @@ fn single_group_floating_column_keeps_standalone_group_geometry() {
         .rect;
 
     assert_eq!(rects.floating_groups[0].rect, Rect::new(Point::ZERO, bounds.size));
-    assert_eq!(group_rect.origin, Point::ZERO);
+    assert_eq!(
+        group_rect.origin,
+        Point::new(0.0, metrics.column_header_height)
+    );
     assert_eq!(
         group_rect.size.height,
         metrics.effective_collapsed_group_height()
@@ -325,7 +336,10 @@ fn floating_column_reserves_window_title_before_allocating_a_collapsed_first_gro
     let splitter = rects.splitters.iter().find(|entry| entry.owner == column).unwrap().rect;
 
     assert_eq!(rects.floating_groups[0].rect, Rect::new(Point::ZERO, bounds.size));
-    assert_eq!(first.origin.y, metrics.header_height);
+    assert_eq!(
+        first.origin.y,
+        metrics.header_height + metrics.column_header_height
+    );
     assert_eq!(first.size.height, metrics.effective_collapsed_group_height());
     assert!(
         second.origin.y >= first.origin.y + first.size.height + metrics.splitter_thickness,
@@ -366,10 +380,19 @@ fn floating_horizontal_split_reserves_title_for_each_collapsed_column_branch() {
     let expanded_strip = rects.tab_strips.iter().find(|entry| entry.group == expanded_group).unwrap().rect;
 
     assert_eq!(rects.floating_groups[0].rect, Rect::new(Point::ZERO, bounds.size));
-    assert_eq!(collapsed.origin.y, metrics.header_height);
-    assert_eq!(collapsed_strip.origin.y, metrics.header_height);
-    assert_eq!(expanded.origin.y, 0.0);
-    assert_eq!(expanded_strip.origin.y, metrics.header_height);
+    assert_eq!(
+        collapsed.origin.y,
+        metrics.header_height + metrics.column_header_height
+    );
+    assert_eq!(
+        collapsed_strip.origin.y,
+        metrics.header_height + metrics.column_header_height
+    );
+    assert_eq!(expanded.origin.y, metrics.column_header_height);
+    assert_eq!(
+        expanded_strip.origin.y,
+        metrics.column_header_height + metrics.header_height
+    );
     assert!((collapsed_strip.origin.y - expanded_strip.origin.y).abs() < PIXEL_TOLERANCE);
 }
 
@@ -399,12 +422,17 @@ fn floating_horizontal_split_minimum_includes_title_for_collapsed_branches() {
     assert_eq!(floating_rect.origin, Point::ZERO);
     assert_eq!(
         floating_rect.size.height,
-        metrics.header_height + metrics.effective_collapsed_group_height()
+        metrics.header_height
+            + metrics.column_header_height
+            + metrics.effective_collapsed_group_height()
     );
     assert_eq!(layout.floating_group(floating).unwrap().bounds, requested_bounds);
     for group in groups {
         let group_rect = rects.groups.iter().find(|entry| entry.group == group).unwrap().rect;
-        assert_eq!(group_rect.origin.y, metrics.header_height);
+        assert_eq!(
+            group_rect.origin.y,
+            metrics.header_height + metrics.column_header_height
+        );
         assert_eq!(group_rect.size.height, metrics.effective_collapsed_group_height());
     }
     assert!(rects.vertical_overflow.is_empty());
@@ -436,7 +464,10 @@ fn floating_multi_group_column_minimum_includes_title_for_collapsed_first_group(
         .max(metrics.header_height + metrics.tab_strip_height + constraints().min_size.height);
     let required_without_title =
         metrics.effective_collapsed_group_height() + expanded_minimum + metrics.splitter_thickness;
-    assert_eq!(actual_bounds.size.height, required_without_title + metrics.header_height);
+    assert_eq!(
+        actual_bounds.size.height,
+        required_without_title + metrics.header_height + metrics.column_header_height
+    );
     assert_eq!(actual_bounds.origin, Point::ZERO);
     assert!(rects.vertical_overflow.is_empty());
 }
@@ -469,9 +500,15 @@ fn floating_vertical_split_minimum_includes_title_for_collapsed_first_branch() {
     let required_without_title =
         metrics.effective_collapsed_group_height() + expanded_minimum + metrics.splitter_thickness;
 
-    assert_eq!(actual_bounds.size.height, required_without_title + metrics.header_height);
+    assert_eq!(
+        actual_bounds.size.height,
+        required_without_title + metrics.header_height + metrics.column_header_height
+    );
     assert_eq!(actual_bounds.origin, Point::ZERO);
-    assert_eq!(collapsed_rect.origin.y, metrics.header_height);
+    assert_eq!(
+        collapsed_rect.origin.y,
+        metrics.header_height + metrics.column_header_height
+    );
     assert_eq!(
         collapsed_rect.size.height,
         metrics.effective_collapsed_group_height()
@@ -501,8 +538,14 @@ fn floating_collapsed_group_stays_strip_sized_inside_window_bounds() {
     let rects = layout.compute_floating_rects(floating, &metrics).unwrap();
 
     assert_eq!(rects.floating_groups[0].rect, Rect::new(Point::ZERO, bounds.size));
-    assert_eq!(rects.groups[0].rect.origin, Point::ZERO);
-    assert_eq!(rects.tab_strips[0].rect.origin, Point::ZERO);
+    assert_eq!(
+        rects.groups[0].rect.origin,
+        Point::new(0.0, metrics.column_header_height)
+    );
+    assert_eq!(
+        rects.tab_strips[0].rect.origin,
+        Point::new(0.0, metrics.column_header_height)
+    );
     assert_eq!(rects.groups[0].rect.size.height, metrics.collapsed_group_height);
     assert_eq!(rects.tab_strips[0].rect.size.height, metrics.collapsed_group_height);
     assert!(rects.panels.is_empty());
@@ -574,25 +617,37 @@ fn golden_rects_for_single_left_column_are_exact_and_deterministic() {
     assert_eq!(rects.groups.len(), 1);
     assert_eq!(
         rects.groups[0].rect,
-        Rect::new(Point::ZERO, Size::new(280.0, 600.0))
+        Rect::new(
+            Point::new(0.0, metrics.column_header_height),
+            Size::new(280.0, 600.0 - metrics.column_header_height)
+        )
     );
     assert_eq!(rects.tab_strips.len(), 1);
     assert_eq!(
         rects.tab_strips[0].rect,
-        Rect::new(Point::new(0.0, 28.0), Size::new(280.0, 28.0))
+        Rect::new(
+            Point::new(0.0, metrics.column_header_height + 28.0),
+            Size::new(280.0, 28.0)
+        )
     );
     assert_eq!(rects.tab_headers.len(), 1);
     assert_eq!(rects.tab_headers[0].panel, panel);
     assert_eq!(rects.tab_headers[0].index, 0);
     assert_eq!(
         rects.tab_headers[0].rect,
-        Rect::new(Point::new(0.0, 28.0), Size::new(280.0, 28.0))
+        Rect::new(
+            Point::new(0.0, metrics.column_header_height + 28.0),
+            Size::new(280.0, 28.0)
+        )
     );
     assert_eq!(rects.panels.len(), 1);
     assert_eq!(rects.panels[0].panel, panel);
     assert_eq!(
         rects.panels[0].rect,
-        Rect::new(Point::new(0.0, 56.0), Size::new(280.0, 544.0))
+        Rect::new(
+            Point::new(0.0, metrics.column_header_height + 56.0),
+            Size::new(280.0, 600.0 - metrics.column_header_height - 56.0)
+        )
     );
     assert_eq!(rects.splitters.len(), 1);
     assert_eq!(rects.splitters[0].owner, column);
@@ -670,10 +725,10 @@ fn golden_rects_for_1280_by_800_cover_both_docks_columns_groups_and_splitters() 
             .map(|item| item.rect)
             .collect::<Vec<_>>(),
         vec![
-            Rect::new(Point::ZERO, Size::new(240.0, 398.0)),
-            Rect::new(Point::new(0.0, 402.0), Size::new(240.0, 398.0)),
-            Rect::new(Point::new(244.0, 0.0), Size::new(300.0, 800.0)),
-            Rect::new(Point::new(1060.0, 0.0), Size::new(220.0, 800.0)),
+            Rect::new(Point::new(0.0, 32.0), Size::new(240.0, 382.0)),
+            Rect::new(Point::new(0.0, 418.0), Size::new(240.0, 382.0)),
+            Rect::new(Point::new(244.0, 32.0), Size::new(300.0, 768.0)),
+            Rect::new(Point::new(1060.0, 32.0), Size::new(220.0, 768.0)),
         ]
     );
 
@@ -723,10 +778,10 @@ fn golden_rects_for_1280_by_800_cover_both_docks_columns_groups_and_splitters() 
             .map(|item| item.rect)
             .collect::<Vec<_>>(),
         vec![
-            Rect::new(Point::new(0.0, 56.0), Size::new(240.0, 342.0)),
-            Rect::new(Point::new(0.0, 458.0), Size::new(240.0, 342.0)),
-            Rect::new(Point::new(244.0, 56.0), Size::new(300.0, 744.0)),
-            Rect::new(Point::new(1060.0, 56.0), Size::new(220.0, 744.0)),
+            Rect::new(Point::new(0.0, 88.0), Size::new(240.0, 326.0)),
+            Rect::new(Point::new(0.0, 474.0), Size::new(240.0, 326.0)),
+            Rect::new(Point::new(244.0, 88.0), Size::new(300.0, 712.0)),
+            Rect::new(Point::new(1060.0, 88.0), Size::new(220.0, 712.0)),
         ]
     );
     assert!(rects.vertical_overflow.is_empty());
@@ -758,11 +813,14 @@ fn fractional_logical_viewport_preserves_dpi_independent_geometry_and_reports_sm
     );
     assert_eq!(
         rects.groups[0].rect,
-        Rect::new(Point::new(12.25, 7.5), Size::new(200.25, 196.5),)
+        Rect::new(
+            Point::new(12.25, 39.5),
+            Size::new(200.25, 164.5),
+        )
     );
     assert_eq!(
         rects.panels[0].rect,
-        Rect::new(Point::new(12.25, 63.5), Size::new(200.25, 140.5),)
+        Rect::new(Point::new(12.25, 95.5), Size::new(200.25, 108.5),)
     );
     assert!(rects.vertical_overflow.is_empty());
 
@@ -775,11 +833,11 @@ fn fractional_logical_viewport_preserves_dpi_independent_geometry_and_reports_sm
     assert_eq!(short_rects.vertical_overflow[0].owner, column);
     assert_eq!(
         short_rects.vertical_overflow[0].viewport,
-        Rect::new(Point::new(12.25, 7.5), Size::new(200.25, 115.5),)
+        Rect::new(Point::new(12.25, 39.5), Size::new(200.25, 83.5),)
     );
     assert_eq!(
         short_rects.vertical_overflow[0].content_extent,
-        Rect::new(Point::new(12.25, 7.5), Size::new(200.25, 116.0),)
+        Rect::new(Point::new(12.25, 39.5), Size::new(200.25, 116.0),)
     );
     assert_eq!(short_rects.groups[0].rect.size.height, 116.0);
     assert_eq!(short_rects.panels[0].rect.size.height, 60.0);
@@ -871,8 +929,8 @@ fn configurable_metrics_drive_header_strip_and_splitter_geometry() {
             .map(|item| item.rect)
             .collect::<Vec<_>>(),
         vec![
-            Rect::new(Point::new(0.0, 31.5), Size::new(280.0, 20.25)),
-            Rect::new(Point::new(0.0, 283.25), Size::new(280.0, 20.25)),
+            Rect::new(Point::new(0.0, 63.5), Size::new(280.0, 20.25)),
+            Rect::new(Point::new(0.0, 299.75), Size::new(280.0, 20.25)),
         ]
     );
     assert_eq!(
@@ -882,15 +940,15 @@ fn configurable_metrics_drive_header_strip_and_splitter_geometry() {
             .map(|item| item.rect)
             .collect::<Vec<_>>(),
         vec![
-            Rect::new(Point::new(0.0, 51.75), Size::new(280.0, 196.5)),
-            Rect::new(Point::new(0.0, 303.5), Size::new(280.0, 196.5)),
+            Rect::new(Point::new(0.0, 83.75), Size::new(280.0, 180.5)),
+            Rect::new(Point::new(0.0, 320.0), Size::new(280.0, 180.5)),
         ]
     );
     assert_eq!(rects.splitters.len(), 2);
     assert_eq!(rects.splitters[0].owner, column);
     assert_eq!(
         rects.splitters[0].rect,
-        Rect::new(Point::new(0.0, 245.5), Size::new(280.0, 9.0))
+        Rect::new(Point::new(0.0, 261.5), Size::new(280.0, 9.0))
     );
     assert_eq!(rects.splitters[1].owner, column);
     assert_eq!(
@@ -961,7 +1019,8 @@ fn floating_geometry_is_local_and_independent_of_main_viewport_and_other_windows
         assert_eq!(rects.panels[0].panel, *panel);
         assert_eq!(rects.panels[0].rect.origin.x, 0.0);
         assert!(
-            rects.panels[0].rect.origin.y >= metrics.header_height + metrics.tab_strip_height
+            rects.panels[0].rect.origin.y
+            >= metrics.column_header_height + metrics.header_height + metrics.tab_strip_height
         );
         assert_eq!(
             layout.floating_group(*floating).unwrap().bounds.size,
@@ -1117,8 +1176,17 @@ fn minimum_group_stack_reports_scroll_extent_instead_of_compressing_content() {
     let overflow = rects.vertical_overflow.as_slice();
     assert_eq!(overflow.len(), 1);
     assert_eq!(overflow[0].owner, column);
-    assert_eq!(overflow[0].viewport, viewport(280.0, 120.0));
-    assert_eq!(overflow[0].content_extent.origin, Point::ZERO);
+    assert_eq!(
+        overflow[0].viewport,
+        Rect::new(
+            Point::new(0.0, metrics.column_header_height),
+            Size::new(280.0, 120.0 - metrics.column_header_height)
+        )
+    );
+    assert_eq!(
+        overflow[0].content_extent.origin,
+        Point::new(0.0, metrics.column_header_height)
+    );
     assert_eq!(overflow[0].content_extent.size, Size::new(280.0, 268.0));
     assert_eq!(rects.groups.len(), 3);
     assert_eq!(
@@ -1263,7 +1331,7 @@ fn very_short_column_preserves_panel_minimum_and_reports_full_overflow_extent() 
         metrics.header_height + metrics.tab_strip_height + constraints().min_size.height;
     assert_eq!(rects.vertical_overflow.len(), 1);
     assert_eq!(rects.vertical_overflow[0].owner, column);
-    assert_eq!(rects.vertical_overflow[0].viewport.size.height, 1.0);
+    assert_eq!(rects.vertical_overflow[0].viewport.size.height, 0.0);
     assert_eq!(
         rects.vertical_overflow[0].content_extent.size.height,
         minimum_group_height
@@ -1367,7 +1435,7 @@ fn collapsed_group_unit_weight_does_not_leave_expanded_column_weight_sum_zero() 
             .size
             .height
     };
-    assert!((height(expanded) - 468.0).abs() < PIXEL_TOLERANCE);
+    assert!((height(expanded) - 436.0).abs() < PIXEL_TOLERANCE);
     assert_eq!(
         height(collapsed),
         metrics.effective_collapsed_group_height()
@@ -1414,8 +1482,8 @@ fn nested_vertical_split_shares_space_when_all_expanded_child_weights_are_zero()
             .size
             .height
     };
-    assert!((height(group_a) - 232.0).abs() < PIXEL_TOLERANCE);
-    assert!((height(group_b) - 232.0).abs() < PIXEL_TOLERANCE);
+    assert!((height(group_a) - 216.0).abs() < PIXEL_TOLERANCE);
+    assert!((height(group_b) - 216.0).abs() < PIXEL_TOLERANCE);
     assert_eq!(
         height(collapsed),
         metrics.effective_collapsed_group_height()
@@ -1465,8 +1533,8 @@ fn zero_weight_child_keeps_its_minimum_without_changing_positive_weight_proporti
 
     let minimum = metrics.header_height + metrics.tab_strip_height + constraints().min_size.height;
     assert!((zero_height - minimum).abs() < PIXEL_TOLERANCE);
-    assert!((quarter_height - 219.0).abs() < PIXEL_TOLERANCE);
-    assert!((three_quarters_height - 657.0).abs() < PIXEL_TOLERANCE);
+    assert!((quarter_height - 211.0).abs() < PIXEL_TOLERANCE);
+    assert!((three_quarters_height - 633.0).abs() < PIXEL_TOLERANCE);
     assert!((quarter_height / three_quarters_height - 0.25 / 0.75).abs() < PIXEL_TOLERANCE);
     assert!(rects.vertical_overflow.is_empty());
 }
@@ -1513,7 +1581,11 @@ fn dominant_ratio_keeps_zero_weight_groups_at_minimum_and_gives_remainder_to_dom
     assert!((height(zero_a) - minimum).abs() < PIXEL_TOLERANCE);
     assert!((height(zero_b) - minimum).abs() < PIXEL_TOLERANCE);
     assert!(
-        (height(dominant) - (viewport_height - 2.0 * metrics.splitter_thickness - 2.0 * minimum))
+        (height(dominant)
+            - (viewport_height
+                - metrics.column_header_height
+                - 2.0 * metrics.splitter_thickness
+                - 2.0 * minimum))
             .abs()
             < PIXEL_TOLERANCE
     );
@@ -1968,7 +2040,10 @@ fn minimum_node_size_respects_metrics_between_geometry_passes() {
             .height
     };
 
-    assert_eq!(group_height(&default_rects), 150.0);
+    assert_eq!(
+        group_height(&default_rects),
+        150.0 - metrics.column_header_height
+    );
     assert_eq!(group_height(&taller_rects), 200.0);
     assert!(default_rects.vertical_overflow.is_empty());
     assert_eq!(taller_rects.vertical_overflow.len(), 1);
@@ -2059,7 +2134,7 @@ fn geometry_respects_collapsed_states() {
 
     assert_eq!(
         rendered_group_height(&expanded_rects, expanded_group),
-        500.0
+        500.0 - metrics.column_header_height
     );
     assert_eq!(
         rendered_group_height(&collapsed_rects, collapsed_group),
