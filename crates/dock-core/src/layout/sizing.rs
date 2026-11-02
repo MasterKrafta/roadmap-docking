@@ -689,17 +689,16 @@ impl Layout {
                 )
             }
             Node::Column(column) => {
-                let mut height = if column.groups.is_empty() {
+                // An expanded Column can always fall back to one compact strip per
+                // Group. Its structural minimum therefore reserves the Column header
+                // and those strips, not the full minimum height of every Panel view.
+                let height = if column.groups.is_empty() {
                     0.0
                 } else {
                     metrics.column_header_height
+                        + metrics.effective_collapsed_group_height()
+                            * column.groups.len() as f32
                 };
-                for group in &column.groups {
-                    height += self
-                        .minimum_node_size_with_cache(*group, metrics, cache)?
-                        .height;
-                }
-                height += metrics.splitter_thickness * column.groups.len().saturating_sub(1) as f32;
                 Size::new(column.width, height)
             }
         };
