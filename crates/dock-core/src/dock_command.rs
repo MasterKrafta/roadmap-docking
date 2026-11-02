@@ -155,6 +155,10 @@ pub enum DockCommand {
     /// space and submit this command through `Layout::apply`. Gesture recognition
     /// and view-only state changes do not belong to Core.
     CollapseGroup { group: NodeId, collapsed: bool },
+    /// Select one Group to temporarily expand while its owning Column is in adaptive overflow.
+    ///
+    /// This presentation preference is transient and never enters workspace or undo history.
+    SetColumnExpandedGroup { column: NodeId, group: Option<NodeId> },
     /// Change a column between expanded, labeled-rail, and icon-only modes.
     ///
     /// Mode changes affect presentation geometry only; the column/group/tab tree
@@ -322,6 +326,10 @@ mod tests {
             DockCommand::CollapseGroup {
                 group: NodeId::null(),
                 collapsed: true,
+            },
+            DockCommand::SetColumnExpandedGroup {
+                column: NodeId::null(),
+                group: Some(NodeId::null()),
             },
             DockCommand::SetColumnMode {
                 column: NodeId::null(),
