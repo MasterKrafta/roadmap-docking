@@ -657,3 +657,100 @@ fn generic_profile_does_not_implicitly_expand_collapsed_group_on_center_drop() {
     ));
     assert!(layout.validate(&metrics).is_ok());
 }
+
+#[test]
+fn adaptive_column_overflow_compacts_all_groups_and_expands_only_the_selected_group() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+    let mut groups = Vec::new();
+    for name in ["adaptive-a", "adaptive-b", "adaptive-c"] {
+        let (_, panel_node) = builder.panel(key(name), constraints());
+        groups.push(builder.tabs(vec![panel_node], 0, false));
+    }
+    let column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        groups.clone(),
+        vec![1.0 / 3.0; groups.len()],
+    );
+    builder.main_area(DockSide::Left, column);
+    let mut layout = builder.build();
+
+    let compact_rects = layout
+        .compute_rects(viewport(1000.0, 120.0), &metrics)
+        .unwrap();
+    assert!(compact_rects.vertical_overflow.is_empty());
+    assert_eq!(compact_rects.auto_collapsed_groups, groups);
+    assert!(compact_rects.auto_expanded_groups.is_empty());
+    assert!(compact_rects.panels.is_empty());
+
+    let version_before = layout.version();
+    layout
+        .apply(
+            DockCommand::SetColumnExpandedGroup {
+                column,
+                group: Some(groups[1]),
+            },
+            &metrics,
+        )
+        .unwrap();
+    assert_eq!(
+        layout.version(),
+        version_before,
+        "choosing a temporary overflow expansion must not create a persistent revision"
+    );
+
+    // 172 px remain below the Column header: two 28 px strips and the
+    // selected Group's 116 px minimum fit exactly.
+    let expanded_rects = layout
+        .compute_rects(viewport(1000.0, 204.0), &metrics)
+        .unwrap();
+    assert!(expanded_rects.vertical_overflow.is_empty());
+    assert_eq!(
+        expanded_rects.auto_collapsed_groups,
+        vec![groups[0], groups[2]]
+    );
+    assert_eq!(expanded_rects.auto_expanded_groups, vec![groups[1]]);
+    assert_eq!(
+        expanded_rects
+            .groups
+            .iter()
+            .find(|item| item.group == groups[1])
+            .unwrap()
+            .rect
+            .size
+            .height,
+        116.0
+    );
+    assert_eq!(
+        expanded_rects
+            .groups
+            .iter()
+            .filter(|item| item.group != groups[1])
+            .map(|item| item.rect.size.height)
+            .collect::<Vec<_>>(),
+        vec![
+            metrics.effective_collapsed_group_height(),
+            metrics.effective_collapsed_group_height()
+        ]
+    );
+    assert_eq!(expanded_rects.panels.len(), 1);
+
+    // A shorter viewport cannot fit the selected minimum beside the other
+    // strips, so the attempted expansion simply remains compact.
+    let too_short = layout
+        .compute_rects(viewport(1000.0, 200.0), &metrics)
+        .unwrap();
+    assert!(too_short.vertical_overflow.is_empty());
+    assert_eq!(too_short.auto_collapsed_groups, groups);
+    assert!(too_short.auto_expanded_groups.is_empty());
+    assert!(too_short.panels.is_empty());
+
+    // Once normal room returns, regular proportional layout takes over again.
+    let roomy = layout
+        .compute_rects(viewport(1000.0, 500.0), &metrics)
+        .unwrap();
+    assert!(roomy.auto_collapsed_groups.is_empty());
+    assert!(roomy.auto_expanded_groups.is_empty());
+    assert_eq!(roomy.panels.len(), 3);
+}
