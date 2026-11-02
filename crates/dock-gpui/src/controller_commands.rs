@@ -83,7 +83,8 @@ impl DockController {
     ) -> Result<CommandOutcome, CommandError> {
         if !matches!(
             &command,
-            DockCommand::OpenFlyout { .. }
+            DockCommand::SetColumnExpandedGroup { .. }
+                | DockCommand::OpenFlyout { .. }
                 | DockCommand::CloseFlyout
                 | DockCommand::DismissFlyout
                 | DockCommand::ResizeFlyout { .. }
