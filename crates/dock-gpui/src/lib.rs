@@ -134,7 +134,8 @@ pub fn run(_options: RunOptions) {
 
 pub use app_shell::AppShell;
 pub use components::{
-    CanvasSlot, ColumnView, ContextMenu, ContextMenuEntry, ContextMenuItem, DragGhost, DropOverlay,
+    CanvasSlot, ColumnHeaderView, ColumnView, ContextMenu, ContextMenuEntry, ContextMenuItem,
+    DragGhost, DropOverlay,
     FloatingHost, FlyoutView, GroupView, MainDockView, PanelHost, RailView, SplitterView,
     TabHeaderView, TabOverflow, TabStripView,
 };
