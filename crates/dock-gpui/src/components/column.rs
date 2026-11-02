@@ -93,6 +93,7 @@ impl ColumnView {
                         .find(|overflow| overflow.group == group.group)
                         .cloned();
                     content = content.child(GroupView::render(
+                        Some(column.column),
                         *group,
                         strip,
                         &headers,
