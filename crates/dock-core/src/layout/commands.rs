@@ -255,6 +255,12 @@ impl Layout {
                 if let Some(Node::Tabs(tabs)) = self.nodes.get_mut(*group) {
                     tabs.collapsed = *collapsed;
                 }
+                if *collapsed {
+                    // A manual collapse cancels any temporary Column expansion
+                    // preference for this Group.
+                    self.column_expanded_groups
+                        .retain(|_, selected| *selected != *group);
+                }
                 Ok(CommandApplication {
                     actual_value: None,
                     inverse: Some(DockCommand::CollapseGroup {
