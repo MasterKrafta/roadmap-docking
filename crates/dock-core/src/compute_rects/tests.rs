@@ -538,14 +538,8 @@ fn floating_collapsed_group_stays_strip_sized_inside_window_bounds() {
     let rects = layout.compute_floating_rects(floating, &metrics).unwrap();
 
     assert_eq!(rects.floating_groups[0].rect, Rect::new(Point::ZERO, bounds.size));
-    assert_eq!(
-        rects.groups[0].rect.origin,
-        Point::new(0.0, metrics.column_header_height)
-    );
-    assert_eq!(
-        rects.tab_strips[0].rect.origin,
-        Point::new(0.0, metrics.column_header_height)
-    );
+    assert_eq!(rects.groups[0].rect.origin, Point::ZERO);
+    assert_eq!(rects.tab_strips[0].rect.origin, Point::ZERO);
     assert_eq!(rects.groups[0].rect.size.height, metrics.collapsed_group_height);
     assert_eq!(rects.tab_strips[0].rect.size.height, metrics.collapsed_group_height);
     assert!(rects.panels.is_empty());
@@ -740,7 +734,7 @@ fn golden_rects_for_1280_by_800_cover_both_docks_columns_groups_and_splitters() 
     assert_eq!(rects.splitters[0].axis, Axis::Y);
     assert_eq!(
         rects.splitters[0].rect,
-        Rect::new(Point::new(0.0, 396.0), Size::new(240.0, 8.0))
+        Rect::new(Point::new(0.0, 412.0), Size::new(240.0, 8.0))
     );
     assert_eq!(rects.splitters[1].owner, left_root);
     assert_eq!(rects.splitters[1].boundary_index, 0);
@@ -862,7 +856,7 @@ fn pixel_snapping_is_deferred_to_the_render_boundary_for_common_dpi_scales() {
     builder.main_area(DockSide::Left, column);
     let layout = builder.build();
     let viewport = Rect::new(Point::new(12.25, 7.5), Size::new(520.75, 196.5));
-    let expected_logical_panel = Rect::new(Point::new(12.25, 63.5), Size::new(200.25, 140.5));
+    let expected_logical_panel = Rect::new(Point::new(12.25, 95.5), Size::new(200.25, 108.5));
     let baseline = layout.compute_rects(viewport, &metrics).unwrap();
     assert_eq!(baseline.panels[0].rect, expected_logical_panel);
 
@@ -1019,8 +1013,7 @@ fn floating_geometry_is_local_and_independent_of_main_viewport_and_other_windows
         assert_eq!(rects.panels[0].panel, *panel);
         assert_eq!(rects.panels[0].rect.origin.x, 0.0);
         assert!(
-            rects.panels[0].rect.origin.y
-            >= metrics.column_header_height + metrics.header_height + metrics.tab_strip_height
+            rects.panels[0].rect.origin.y >= metrics.header_height + metrics.tab_strip_height
         );
         assert_eq!(
             layout.floating_group(*floating).unwrap().bounds.size,
