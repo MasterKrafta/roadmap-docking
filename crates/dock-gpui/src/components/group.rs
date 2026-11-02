@@ -1,5 +1,6 @@
 use dock_core::{
-    DockCommand, FloatingGroupId, GroupRect, Point, TabHeaderRect, TabOverflowRect, TabStripRect,
+    DockCommand, FloatingGroupId, GroupRect, NodeId, Point, TabHeaderRect, TabOverflowRect,
+    TabStripRect,
 };
 use gpui::{
     Entity, IntoElement, ParentElement, StatefulInteractiveElement, Styled, div,
@@ -7,7 +8,7 @@ use gpui::{
 };
 use ui::Theme;
 
-use crate::{DockController, actions::dispatch_command};
+use crate::DockController;
 
 use super::{
     context_menu::{ContextMenuTarget, GroupMenuToggle},
@@ -20,6 +21,7 @@ pub struct GroupView;
 impl GroupView {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn render(
+        column: Option<NodeId>,
         group: GroupRect,
         strip: TabStripRect,
         headers: &[TabHeaderRect],
@@ -134,6 +136,9 @@ impl GroupView {
         let collapse_controller = controller.clone();
         let collapse_group = group.group;
         let collapse_to = !presentation.collapsed;
+        let model_collapsed = presentation.model_collapsed;
+        let auto_collapsed = presentation.auto_collapsed;
+        let auto_expanded = presentation.auto_expanded;
         let collapse_button = div()
             .id(format!("group-collapse-button-{:?}", group.group))
             .absolute()
@@ -149,14 +154,50 @@ impl GroupView {
             .text_color(rgb(theme.colors.primary_text))
             .child(if presentation.collapsed { "＋" } else { "−" })
             .on_click(move |_, _, app| {
-                dispatch_command(
-                    &collapse_controller,
-                    DockCommand::CollapseGroup {
+                let mut commands = Vec::with_capacity(2);
+                if auto_collapsed {
+                    if model_collapsed {
+                        commands.push(DockCommand::CollapseGroup {
+                            group: collapse_group,
+                            collapsed: false,
+                        });
+                    }
+                    if let Some(column) = column {
+                        commands.push(DockCommand::SetColumnExpandedGroup {
+                            column,
+                            group: Some(collapse_group),
+                        });
+                    } else if commands.is_empty() {
+                        commands.push(DockCommand::CollapseGroup {
+                            group: collapse_group,
+                            collapsed: false,
+                        });
+                    }
+                } else if auto_expanded {
+                    commands.push(DockCommand::CollapseGroup {
+                        group: collapse_group,
+                        collapsed: true,
+                    });
+                    if let Some(column) = column {
+                        commands.push(DockCommand::SetColumnExpandedGroup {
+                            column,
+                            group: None,
+                        });
+                    }
+                } else {
+                    commands.push(DockCommand::CollapseGroup {
                         group: collapse_group,
                         collapsed: collapse_to,
-                    },
-                    app,
-                );
+                    });
+                }
+
+                collapse_controller.update(app, |controller, controller_cx| {
+                    if let Err(error) =
+                        controller.dispatch_sequence_in(commands, controller_cx)
+                    {
+                        tracing::warn!(%error, "could not change dock Group expansion");
+                    }
+                });
             });
         root = root.child(collapse_button);
 
