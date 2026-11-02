@@ -47,8 +47,8 @@ pub(super) fn allocate_stack_heights(
     }
 
     // Never shrink a child below its content minimum. When the minimum layout
-    // does not fit, return those minimum sizes and let the adapter scroll the
-    // resulting content extent.
+    // does not fit, return those minimum sizes and let the caller choose its
+    // overflow policy: scroll the stack or apply container-specific compaction.
     if available < required {
         return Ok(StackAllocation {
             sizes: minimums,
