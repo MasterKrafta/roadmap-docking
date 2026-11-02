@@ -1,6 +1,5 @@
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ThemeMetrics {
-    pub column_header_height: f32,
     pub tab_strip_height: f32,
     /// Width of the collapse/close/menu buttons in a Tabs group.
     pub group_control_button_width: f32,
@@ -54,7 +53,6 @@ impl ThemeMetrics {
     /// Validates finite, positive layout metrics and their required relationships.
     pub fn validate(self) -> Result<(), &'static str> {
         let positive = [
-            ("column_header_height", self.column_header_height),
             ("tab_strip_height", self.tab_strip_height),
             (
                 "group_control_button_width",
@@ -85,7 +83,6 @@ impl ThemeMetrics {
         for (name, value) in positive {
             if !value.is_finite() {
                 return Err(match name {
-                    "column_header_height" => "column_header_height must be finite",
                     "tab_strip_height" => "tab_strip_height must be finite",
                     "group_control_button_width" => "group_control_button_width must be finite",
                     "tab_drag_zone_width" => "tab_drag_zone_width must be finite",
@@ -113,7 +110,6 @@ impl ThemeMetrics {
             }
             if value <= 0.0 {
                 return Err(match name {
-                    "column_header_height" => "column_header_height must be positive",
                     "tab_strip_height" => "tab_strip_height must be positive",
                     "group_control_button_width" => "group_control_button_width must be positive",
                     "tab_drag_zone_width" => "tab_drag_zone_width must be positive",
@@ -183,9 +179,6 @@ impl ThemeMetrics {
         if self.collapsed_group_height > self.min_group_height {
             return Err("collapsed_group_height must not exceed min_group_height");
         }
-        if self.column_header_height + self.tab_strip_height > self.min_group_height {
-            return Err("column_header_height + tab_strip_height must not exceed min_group_height");
-        }
         if self.max_columns == 0 {
             return Err("max_columns must be positive");
         }
@@ -197,7 +190,6 @@ impl ThemeMetrics {
 impl Default for ThemeMetrics {
     fn default() -> Self {
         Self {
-            column_header_height: 32.0,
             tab_strip_height: 28.0,
             group_control_button_width: 34.0,
             tab_drag_zone_width: 28.0,
@@ -298,7 +290,6 @@ mod tests {
     #[test]
     fn includes_main_window_column_metrics() {
         let m = ThemeMetrics::default();
-        assert!((m.column_header_height - 32.0).abs() < 1e-3);
         assert!((m.default_column_width - 280.0).abs() < 1e-3);
         assert!((m.min_column_width - 200.0).abs() < 1e-3);
         assert!((m.default_column_split_ratio - 0.5).abs() < 1e-3);
