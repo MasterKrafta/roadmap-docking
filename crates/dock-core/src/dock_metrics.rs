@@ -15,6 +15,8 @@ pub struct DockMetrics {
     pub drag_threshold: f32,
     pub min_group_height: f32,
     pub collapsed_group_height: f32,
+    /// Height of a Column's own header, separate from each Group header.
+    pub column_header_height: f32,
     pub header_height: f32,
     pub tab_strip_height: f32,
     /// Width of group controls such as the mode switch and group menu.
@@ -93,6 +95,12 @@ impl DockMetrics {
                 self.collapsed_group_height,
                 "collapsed_group_height must be finite",
                 "collapsed_group_height must be positive",
+            ),
+            (
+                "column_header_height",
+                self.column_header_height,
+                "column_header_height must be finite",
+                "column_header_height must be positive",
             ),
             (
                 "header_height",
@@ -182,6 +190,7 @@ impl<'de> serde::Deserialize<'de> for DockMetrics {
             drag_threshold: f32,
             min_group_height: f32,
             collapsed_group_height: f32,
+            column_header_height: f32,
             header_height: f32,
             tab_strip_height: f32,
             group_control_button_width: f32,
@@ -204,6 +213,7 @@ impl<'de> serde::Deserialize<'de> for DockMetrics {
                     drag_threshold: metrics.drag_threshold,
                     min_group_height: metrics.min_group_height,
                     collapsed_group_height: metrics.collapsed_group_height,
+                    column_header_height: metrics.column_header_height,
                     header_height: metrics.header_height,
                     tab_strip_height: metrics.tab_strip_height,
                     group_control_button_width: metrics.group_control_button_width,
@@ -226,6 +236,7 @@ impl<'de> serde::Deserialize<'de> for DockMetrics {
             drag_threshold: wire.drag_threshold,
             min_group_height: wire.min_group_height,
             collapsed_group_height: wire.collapsed_group_height,
+            column_header_height: wire.column_header_height,
             header_height: wire.header_height,
             tab_strip_height: wire.tab_strip_height,
             group_control_button_width: wire.group_control_button_width,
@@ -251,6 +262,7 @@ impl Default for DockMetrics {
             drag_threshold: 2.0,
             min_group_height: 80.0,
             collapsed_group_height: 28.0,
+            column_header_height: 32.0,
             // These two heights were not specified by the roadmap excerpt;
             // 28 px is a provisional placeholder for each.
             header_height: 28.0,
@@ -272,6 +284,7 @@ mod tests {
     fn provisional_defaults_are_valid() {
         assert_eq!(DockMetrics::default().validate(), Ok(()));
         assert_eq!(DockMetrics::default().rail_width, 36.0);
+        assert_eq!(DockMetrics::default().column_header_height, 32.0);
     }
 
     #[cfg(feature = "serde")]
@@ -294,6 +307,7 @@ mod tests {
         }"#;
         let metrics: DockMetrics = serde_json::from_str(legacy).unwrap();
         assert_eq!(metrics.group_control_button_width, 28.0);
+        assert_eq!(metrics.column_header_height, 32.0);
         assert_eq!(metrics.min_tab_width, 72.0);
         assert_eq!(metrics.tab_overflow_button_width, 28.0);
         assert_eq!(metrics.validate(), Ok(()));
