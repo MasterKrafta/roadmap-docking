@@ -442,7 +442,7 @@ fn floating_host_snapshot(
         })
         .collect::<HashMap<_, _>>();
     let group_presentations =
-        collect_group_presentations(layout, controller.registry(), &node_ids);
+        collect_group_presentations(layout, controller.registry(), &node_ids, Some(&rects));
     let rail_display_orders = column_modes
         .iter()
         .filter(|(_, mode)| mode.is_rail())
