@@ -114,6 +114,11 @@ pub(super) fn layout_column(
             (rect.size.height - metrics.column_header_height).max(0.0),
         ),
     );
+    // A viewport shorter than the fixed Column header has no usable Group area.
+    // Keep the Column/header geometry valid and let the user resize the window.
+    if content_rect.size.height <= 0.0 && !column.mode.is_rail() {
+        return Ok(());
+    }
 
     // Rail modes flatten tabs into fixed-height panel entries. Their order is
     // canonical: groups top-to-bottom, then tabs inside each group left-to-right.
@@ -186,7 +191,9 @@ pub(super) fn layout_column(
     let mut auto_expanded = None;
     let mut heights = allocation.sizes;
     if allocation.overflows {
-        let collapsed_height = metrics.effective_collapsed_group_height();
+        let collapsed_height = metrics
+            .effective_collapsed_group_height()
+            .min(content_rect.size.height / column.groups.len() as f32);
         let preferred = layout
             .column_expanded_group(id)
             .filter(|group| column.groups.contains(group))
@@ -199,14 +206,6 @@ pub(super) fn layout_column(
                 GeometryError::ArithmeticOverflow,
             ));
         }
-        if strip_total > content_rect.size.height {
-            return Err(ComputeRectsError::InsufficientSpace {
-                axis: Axis::Y,
-                available: content_rect.size.height,
-                required: strip_total,
-            });
-        }
-
         heights = vec![collapsed_height; column.groups.len()];
         if let Some(group) = preferred {
             let preferred_index = column
@@ -299,11 +298,11 @@ pub(super) fn layout_tabs(
 ) -> Result<(), ComputeRectsError> {
     let collapsed = tabs.collapsed || force_collapsed;
     let mut minimum_size = minimum_node_size(layout, id, metrics, minimum_sizes)?;
-    // An adaptive compact strip can be shorter than the configured preferred
-    // strip height only when the enclosing viewport itself is below Column's
-    // structural minimum. Normal/manual collapsed Groups keep the shared floor.
+    // A forced compact strip follows the height allocated by its Column. This
+    // keeps every Group visible even when the viewport is below the preferred
+    // compact-strip minimum; normal/manual collapsed Groups keep the shared floor.
     if force_collapsed {
-        minimum_size.height = metrics.effective_collapsed_group_height();
+        minimum_size.height = rect.size.height;
     }
     // Geometry and resize commands share Layout::minimum_node_size, including
     // the effective tab-strip floor for collapsed groups.
