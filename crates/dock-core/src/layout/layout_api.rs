@@ -20,6 +20,7 @@ impl Layout {
             history_identity: Arc::new(()),
             flyout_widths: HashMap::new(),
             flyout_width_order: VecDeque::new(),
+            column_expanded_groups: HashMap::new(),
             validation_cache: ValidationCache::default(),
         }
     }
@@ -57,8 +58,16 @@ impl Layout {
             history_identity: Arc::new(()),
             flyout_widths: HashMap::new(),
             flyout_width_order: VecDeque::new(),
+            column_expanded_groups: HashMap::new(),
             validation_cache: ValidationCache::default(),
         }
+    }
+
+    /// Returns the Group the user is currently trying to keep expanded in an overflowing Column.
+    ///
+    /// This preference is transient session state and is never written to a workspace.
+    pub fn column_expanded_group(&self, column: NodeId) -> Option<NodeId> {
+        self.column_expanded_groups.get(&column).copied()
     }
 
     /// Returns the remembered width for a panel's rail flyout, if one was set.
