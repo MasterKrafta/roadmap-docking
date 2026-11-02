@@ -43,6 +43,10 @@ impl DockController {
         };
         let before_panels = self.panel_keys();
         let previous_version = self.layout.version();
+        let adaptive_column_geometry = matches!(
+            &command,
+            DockCommand::SetColumnExpandedGroup { .. }
+        );
         let activated = match &command {
             DockCommand::ActivateTab { group, panel } => Some((*group, *panel)),
             _ => None,
@@ -50,6 +54,10 @@ impl DockController {
 
         match self.history.apply(&mut self.layout, command, &self.metrics) {
             Ok(outcome) => {
+                if adaptive_column_geometry {
+                    self.rects_key = None;
+                    self.floating_rects.clear();
+                }
                 self.finish_success(before_panels, previous_version, activated.into_iter());
                 if resize_owns_command {
                     self.record_resize_layout_version();
@@ -153,6 +161,9 @@ impl DockController {
         }
         let before_panels = self.panel_keys();
         let previous_version = self.layout.version();
+        let adaptive_column_geometry = commands.iter().any(|command| {
+            matches!(command, DockCommand::SetColumnExpandedGroup { .. })
+        });
         let activated = commands
             .iter()
             .filter_map(|command| match command {
@@ -166,6 +177,10 @@ impl DockController {
             .apply_sequence(&mut self.layout, commands, &self.metrics)
         {
             Ok(outcomes) => {
+                if adaptive_column_geometry {
+                    self.rects_key = None;
+                    self.floating_rects.clear();
+                }
                 self.finish_success(before_panels, previous_version, activated.into_iter());
                 if owns_resize_gesture {
                     self.record_resize_layout_version();
