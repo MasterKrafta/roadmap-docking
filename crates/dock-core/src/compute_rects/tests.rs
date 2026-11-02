@@ -445,7 +445,7 @@ fn floating_horizontal_column_split_minimum_includes_window_and_column_headers()
 }
 
 #[test]
-fn floating_multi_group_column_minimum_includes_title_for_collapsed_first_group() {
+fn floating_multi_group_column_minimum_allows_compact_group_strips() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Generic);
     let (_, collapsed_panel) = builder.panel(key("floating-min-column-collapsed"), constraints());
@@ -465,16 +465,14 @@ fn floating_multi_group_column_minimum_includes_title_for_collapsed_first_group(
     let rects = layout.compute_floating_rects(floating, &metrics).unwrap();
     let actual_bounds = rects.floating_groups[0].rect;
 
-    let expanded_minimum = metrics
-        .min_group_height
-        .max(metrics.header_height + metrics.tab_strip_height + constraints().min_size.height);
-    let required_without_title =
-        metrics.effective_collapsed_group_height() + expanded_minimum + metrics.splitter_thickness;
+    let required_group_height = metrics.effective_collapsed_group_height() * 2.0;
     assert_eq!(
         actual_bounds.size.height,
-        required_without_title + metrics.header_height + metrics.column_header_height
+        required_group_height + metrics.header_height + metrics.column_header_height
     );
     assert_eq!(actual_bounds.origin, Point::ZERO);
+    assert_eq!(rects.auto_collapsed_groups, vec![collapsed_group, expanded_group]);
+    assert!(rects.auto_expanded_groups.is_empty());
     assert!(rects.vertical_overflow.is_empty());
 }
 
@@ -821,23 +819,18 @@ fn fractional_logical_viewport_preserves_dpi_independent_geometry_and_reports_sm
     );
     assert!(rects.vertical_overflow.is_empty());
 
-    // The panel's declared minimum height is 60 px, so the expanded group
-    // minimum is header 28 + tab strip 28 + content 60 = 116 logical px.
-    // A viewport 0.5 px below that minimum must report overflow.
+    // The 83.5 px Group area cannot hold the expanded 116 px minimum.
+    // The Group becomes a compact strip instead of creating a scroll extent.
     let short_viewport = Rect::new(Point::new(12.25, 7.5), Size::new(520.75, 115.5));
     let short_rects = layout.compute_rects(short_viewport, &metrics).unwrap();
-    assert_eq!(short_rects.vertical_overflow.len(), 1);
-    assert_eq!(short_rects.vertical_overflow[0].owner, column);
+    assert!(short_rects.vertical_overflow.is_empty());
+    assert_eq!(short_rects.auto_collapsed_groups, vec![group]);
+    assert!(short_rects.auto_expanded_groups.is_empty());
     assert_eq!(
-        short_rects.vertical_overflow[0].viewport,
-        Rect::new(Point::new(12.25, 39.5), Size::new(200.25, 83.5),)
+        short_rects.groups[0].rect.size.height,
+        metrics.effective_collapsed_group_height()
     );
-    assert_eq!(
-        short_rects.vertical_overflow[0].content_extent,
-        Rect::new(Point::new(12.25, 39.5), Size::new(200.25, 116.0),)
-    );
-    assert_eq!(short_rects.groups[0].rect.size.height, 116.0);
-    assert_eq!(short_rects.panels[0].rect.size.height, 60.0);
+    assert!(short_rects.panels.is_empty());
 
     // Crossing the minimum Canvas width by 0.25 logical px must fail,
     // rather than shrinking either dock or the Canvas.
@@ -1154,7 +1147,7 @@ fn refuses_to_shrink_canvas_below_its_minimum_without_overflow_policy() {
 }
 
 #[test]
-fn minimum_group_stack_reports_scroll_extent_instead_of_compressing_content() {
+fn minimum_group_stack_compacts_every_group_instead_of_scrolling() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
     let mut groups = Vec::new();
@@ -1162,41 +1155,23 @@ fn minimum_group_stack_reports_scroll_extent_instead_of_compressing_content() {
         let (_, panel_node) = builder.panel(key(&format!("short-{index}")), constraints());
         groups.push(builder.tabs(vec![panel_node], 0, index == 0));
     }
-    let column = builder.column(280.0, ColumnMode::Expanded, groups, vec![0.2, 0.3, 0.5]);
+    let column = builder.column(280.0, ColumnMode::Expanded, groups.clone(), vec![0.2, 0.3, 0.5]);
     builder.main_area(DockSide::Left, column);
     let layout = builder.build();
 
     let rects = layout
         .compute_rects(viewport(1000.0, 120.0), &metrics)
         .unwrap();
-    let overflow = rects.vertical_overflow.as_slice();
-    assert_eq!(overflow.len(), 1);
-    assert_eq!(overflow[0].owner, column);
-    assert_eq!(
-        overflow[0].viewport,
-        Rect::new(
-            Point::new(0.0, metrics.column_header_height),
-            Size::new(280.0, 120.0 - metrics.column_header_height)
-        )
-    );
-    assert_eq!(
-        overflow[0].content_extent.origin,
-        Point::new(0.0, metrics.column_header_height)
-    );
-    assert_eq!(overflow[0].content_extent.size, Size::new(280.0, 268.0));
+    assert!(rects.vertical_overflow.is_empty());
+    assert_eq!(rects.auto_collapsed_groups, groups);
+    assert!(rects.auto_expanded_groups.is_empty());
     assert_eq!(rects.groups.len(), 3);
-    assert_eq!(
-        rects.groups[0].rect.size.height,
-        metrics.collapsed_group_height
-    );
-    assert_eq!(rects.groups[1].rect.size.height, 116.0);
-    assert_eq!(rects.groups[2].rect.size.height, 116.0);
     assert!(
-        rects
-            .panels
-            .iter()
-            .all(|panel| panel.rect.size.height >= constraints().min_size.height)
+        rects.groups.iter().all(|group| {
+            group.rect.size.height == metrics.effective_collapsed_group_height()
+        })
     );
+    assert!(rects.panels.is_empty());
 }
 
 fn assert_snapshot_rectangles_are_valid(rects: &LayoutRects) {
@@ -1311,7 +1286,7 @@ fn narrow_window_fails_at_canvas_minimum_instead_of_emitting_negative_rectangles
 }
 
 #[test]
-fn very_short_column_preserves_panel_minimum_and_reports_full_overflow_extent() {
+fn very_short_column_hides_groups_until_a_positive_content_area_exists() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
     let (_, panel_node) = builder.panel(key("short-window-panel"), constraints());
@@ -1323,21 +1298,9 @@ fn very_short_column_preserves_panel_minimum_and_reports_full_overflow_extent() 
 
     let rects = layout.compute_rects(short_window, &metrics).unwrap();
 
-    let minimum_group_height =
-        metrics.header_height + metrics.tab_strip_height + constraints().min_size.height;
-    assert_eq!(rects.vertical_overflow.len(), 1);
-    assert_eq!(rects.vertical_overflow[0].owner, column);
-    assert_eq!(rects.vertical_overflow[0].viewport.size.height, 0.0);
-    assert_eq!(
-        rects.vertical_overflow[0].content_extent.size.height,
-        minimum_group_height
-    );
-    assert_eq!(rects.groups[0].rect.size.height, minimum_group_height);
-    assert_eq!(
-        rects.panels[0].rect.size.height,
-        constraints().min_size.height
-    );
-    assert!(rects.groups[0].rect.size.height >= metrics.min_group_height);
+    assert!(rects.vertical_overflow.is_empty());
+    assert!(rects.groups.is_empty());
+    assert!(rects.panels.is_empty());
     assert_snapshot_rectangles_are_valid(&rects);
 }
 
@@ -2040,9 +2003,13 @@ fn minimum_node_size_respects_metrics_between_geometry_passes() {
         group_height(&default_rects),
         150.0 - metrics.column_header_height
     );
-    assert_eq!(group_height(&taller_rects), 200.0);
+    assert_eq!(
+        group_height(&taller_rects),
+        taller_metrics.effective_collapsed_group_height()
+    );
     assert!(default_rects.vertical_overflow.is_empty());
-    assert_eq!(taller_rects.vertical_overflow.len(), 1);
+    assert!(taller_rects.vertical_overflow.is_empty());
+    assert_eq!(taller_rects.auto_collapsed_groups, vec![group]);
 }
 
 #[test]
@@ -2159,7 +2126,7 @@ fn minimum_node_size_cache_reuses_subtree_values() {
     let first = layout
         .minimum_node_size_with_cache(column, &metrics, &mut cache)
         .expect("fixture should have a valid minimum size");
-    assert_eq!(cache.len(), 3, "column, tab group, and panel are cached");
+    assert_eq!(cache.len(), 1, "Column minimum uses its compact Group-strip floor");
 
     let cached_count = cache.len();
     let second = layout
