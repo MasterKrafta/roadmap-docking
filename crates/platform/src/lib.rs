@@ -135,17 +135,16 @@ pub trait NativeWindowOps {
     fn foreground_window(&self) -> Result<Option<NativeWindowId>, NativeError>;
     fn hide(&self, window: NativeWindowId) -> Result<(), NativeError>;
 
-    /// Assigns the native owner of a top-level popup window.
+    /// Assigns the native owner of a top-level floating window.
     ///
-    /// On Windows this is an application-lifecycle relationship: the popup is
-    /// hidden when its owner is minimized and destroyed with its owner. It must
+    /// On Windows this is an application-lifecycle relationship: the owned window
+    /// is hidden when its owner is minimized and destroyed with its owner. It must
     /// not be used to represent whether a panel is docked or floating.
     fn set_owner(
         &self,
         window: NativeWindowId,
         owner: NativeWindowId,
     ) -> Result<(), NativeError>;
-    fn remove_topmost(&self, window: NativeWindowId) -> Result<(), NativeError>;
 
     fn enable_resize(&self, window: NativeWindowId) -> Result<(), NativeError>;
     fn disable_resize(&self, window: NativeWindowId) -> Result<(), NativeError>;
@@ -209,6 +208,36 @@ mod windows_impl {
 
     fn hwnd(window: NativeWindowId) -> HWND {
         HWND(window.as_raw() as _)
+    }
+
+    /// Removes the window from the taskbar (and Alt+Tab).
+    ///
+    /// Clears `WS_EX_APPWINDOW` and sets `WS_EX_TOOLWINDOW`, which is what GPUI
+    /// itself does for `WindowKind::PopUp` on Windows. `WindowKind::Floating`
+    /// is handled like a normal window, so it would otherwise get a taskbar button.
+    ///
+    /// Call this while the window is still hidden: the style is applied on the
+    /// next show, so the taskbar button never appears.
+    pub(super) fn hide_from_taskbar(window: NativeWindowId) -> bool {
+        // SAFETY: The HWND originates from GPUI; callers must not use it after its window closes.
+        unsafe {
+            let native = hwnd(window);
+            let ex_style = GetWindowLongPtrW(native, GWL_EXSTYLE) as u32;
+            let ex_style = (ex_style & !WS_EX_APPWINDOW.0) | WS_EX_TOOLWINDOW.0;
+            let _previous = SetWindowLongPtrW(native, GWL_EXSTYLE, ex_style as isize);
+
+            // Make Windows re-read the extended style.
+            SetWindowPos(
+                native,
+                None,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+            )
+        }
+        .is_ok()
     }
 
     fn platform_error(operation: &'static str, error: windows::core::Error) -> NativeError {
@@ -580,23 +609,6 @@ mod windows_impl {
                 }
             }
             Ok(())
-        }
-
-        fn remove_topmost(&self, window: NativeWindowId) -> Result<(), NativeError> {
-            // SAFETY: Preserve the window bounds and activation while removing
-            // the topmost extended style through the standard Z-order operation.
-            unsafe {
-                SetWindowPos(
-                    hwnd(window),
-                    Some(HWND_NOTOPMOST),
-                    0,
-                    0,
-                    0,
-                    0,
-                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER,
-                )
-            }
-            .map_err(|error| platform_error("SetWindowPos(HWND_NOTOPMOST)", error))
         }
 
         fn enable_resize(&self, window: NativeWindowId) -> Result<(), NativeError> {
@@ -1044,9 +1056,6 @@ mod stub_impl {
         ) -> Result<(), NativeError> {
             Err(NativeError::Unsupported)
         }
-        fn remove_topmost(&self, _: NativeWindowId) -> Result<(), NativeError> {
-            Err(NativeError::Unsupported)
-        }
         fn enable_resize(&self, _: NativeWindowId) -> Result<(), NativeError> {
             Err(NativeError::Unsupported)
         }
@@ -1087,3 +1096,15 @@ mod stub_impl {
 pub use windows_impl::SystemNativeWindowOps;
 #[cfg(not(windows))]
 pub use stub_impl::SystemNativeWindowOps;
+
+/// Removes the taskbar and Alt+Tab entry from a hidden floating window.
+#[cfg(windows)]
+pub fn hide_from_taskbar(window: NativeWindowId) -> bool {
+    windows_impl::hide_from_taskbar(window)
+}
+
+/// Taskbar styling is only available for native Windows windows.
+#[cfg(not(windows))]
+pub fn hide_from_taskbar(_: NativeWindowId) -> bool {
+    false
+}
