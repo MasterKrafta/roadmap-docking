@@ -753,19 +753,23 @@ impl Layout {
                 }
                 minimum
             }
-            Some(Node::Column(column))
-                if column.groups.len() > 1 && self.floating_branch_starts_collapsed(node_id) =>
-            {
+            Some(Node::Column(_)) => {
                 let base = self.minimum_node_size_with_cache(node_id, metrics, cache)?;
                 Size::new(base.width, base.height + metrics.header_height)
             }
             Some(Node::Split(split))
-                if split.axis == Axis::Y && self.floating_branch_starts_collapsed(node_id) =>
+                if split.axis == Axis::Y
+                    && (self.floating_tree_contains_column(node_id)
+                        || self.floating_branch_starts_collapsed(node_id)) =>
             {
                 let base = self.minimum_node_size_with_cache(node_id, metrics, cache)?;
                 Size::new(base.width, base.height + metrics.header_height)
             }
             Some(Node::Split(split)) if split.axis == Axis::X => {
+                if self.floating_tree_contains_column(node_id) {
+                    let base = self.minimum_node_size_with_cache(node_id, metrics, cache)?;
+                    return Ok(Size::new(base.width, base.height + metrics.header_height));
+                }
                 let mut width = 0.0_f32;
                 let mut height = 0.0_f32;
                 for child in &split.children {
@@ -798,6 +802,26 @@ impl Layout {
             });
         }
         Ok(minimum)
+    }
+
+    /// Whether the floating composition contains a Column anywhere in its tree.
+    ///
+    /// A floating Column has its own header row, independent from the native
+    /// floating-window title. The complete composition therefore needs one
+    /// additional title row above its Core geometry.
+    pub(crate) fn floating_tree_contains_column(&self, node_id: NodeId) -> bool {
+        match self.nodes.get(node_id) {
+            Some(Node::Column(_)) => true,
+            Some(Node::Split(split)) => split
+                .children
+                .iter()
+                .any(|child| self.floating_tree_contains_column(*child)),
+            Some(Node::Tabs(tabs)) => tabs
+                .children
+                .iter()
+                .any(|child| self.floating_tree_contains_column(*child)),
+            Some(Node::Panel(_)) | None => false,
+        }
     }
 
     /// Whether the first visible vertical branch starts with a collapsed group.
