@@ -48,6 +48,7 @@ pub(super) fn layout_node(
             metrics,
             minimum_sizes,
             output,
+            false,
         ),
         Node::Panel(panel) => {
             let minimum = layout
@@ -176,28 +177,109 @@ pub(super) fn layout_column(
         metrics,
         minimum_sizes,
     )?;
+
+    // A Column never scrolls its Groups. If expanded minimums do not fit,
+    // every Group becomes a compact strip. The user may choose one Group to
+    // expand; it gets the remaining height only when its minimum fits beside
+    // all other strips. This is presentation state and does not rewrite Tabs.
+    let mut auto_collapsed = Vec::new();
+    let mut auto_expanded = None;
+    let mut heights = allocation.sizes;
     if allocation.overflows {
-        push_vertical_overflow(id, content_rect, allocation.content_height, output)?;
+        let collapsed_height = metrics.effective_collapsed_group_height();
+        let preferred = layout
+            .column_expanded_group(id)
+            .filter(|group| column.groups.contains(group))
+            .filter(|group| {
+                matches!(layout.node(*group), Some(Node::Tabs(tabs)) if !tabs.collapsed)
+            });
+        let strip_total = collapsed_height * column.groups.len() as f32;
+        if !strip_total.is_finite() {
+            return Err(ComputeRectsError::Geometry(
+                GeometryError::ArithmeticOverflow,
+            ));
+        }
+        if strip_total > content_rect.size.height {
+            return Err(ComputeRectsError::InsufficientSpace {
+                axis: Axis::Y,
+                available: content_rect.size.height,
+                required: strip_total,
+            });
+        }
+
+        heights = vec![collapsed_height; column.groups.len()];
+        if let Some(group) = preferred {
+            let preferred_index = column
+                .groups
+                .iter()
+                .position(|candidate| *candidate == group)
+                .ok_or(ComputeRectsError::InvalidLayoutState)?;
+            let preferred_minimum =
+                minimum_node_size(layout, group, metrics, minimum_sizes)?.height;
+            let expanded_height =
+                content_rect.size.height - collapsed_height * (column.groups.len() - 1) as f32;
+            if expanded_height >= preferred_minimum {
+                heights[preferred_index] = expanded_height;
+                auto_expanded = Some(group);
+            }
+        }
+
+        for group in &column.groups {
+            if Some(*group) != auto_expanded {
+                auto_collapsed.push(*group);
+            }
+        }
+        output.auto_collapsed_groups.extend(auto_collapsed.iter().copied());
+        if let Some(group) = auto_expanded {
+            output.auto_expanded_groups.push(group);
+        }
     }
 
     let mut y = content_rect.origin.y;
     for (index, group_id) in column.groups.iter().enumerate() {
-        let height = allocation.sizes[index];
+        let height = heights[index];
         let group_rect = Rect::new(
             Point::new(content_rect.origin.x, y),
             Size::new(content_rect.size.width, height),
         );
-        layout_node(
-            layout,
-            *group_id,
-            group_rect,
-            metrics,
-            minimum_sizes,
-            output,
-        )?;
+        if auto_collapsed.contains(group_id) {
+            if let Some(Node::Tabs(tabs)) = layout.node(*group_id) {
+                layout_tabs(
+                    layout,
+                    *group_id,
+                    tabs,
+                    group_rect,
+                    metrics,
+                    minimum_sizes,
+                    output,
+                    true,
+                )?;
+            } else {
+                layout_node(
+                    layout,
+                    *group_id,
+                    group_rect,
+                    metrics,
+                    minimum_sizes,
+                    output,
+                )?;
+            }
+        } else {
+            layout_node(
+                layout,
+                *group_id,
+                group_rect,
+                metrics,
+                minimum_sizes,
+                output,
+            )?;
+        }
         y += height;
 
-        if index + 1 < column.groups.len() {
+        // Adaptive overflow removes splitters: they would consume the very
+        // height needed by the compact strips and would imply draggable sizes
+        // that the automatic layout cannot honor.
+        if !allocation.overflows && index + 1 < column.groups.len() {
             push_splitter(id, index, Axis::Y, y, content_rect, metrics, output)?;
             y += metrics.splitter_thickness;
         }
@@ -213,9 +295,16 @@ pub(super) fn layout_tabs(
     metrics: &DockMetrics,
     minimum_sizes: &mut HashMap<NodeId, Size>,
     output: &mut LayoutRects,
+    force_collapsed: bool,
 ) -> Result<(), ComputeRectsError> {
-    let collapsed = tabs.collapsed;
-    let minimum_size = minimum_node_size(layout, id, metrics, minimum_sizes)?;
+    let collapsed = tabs.collapsed || force_collapsed;
+    let mut minimum_size = minimum_node_size(layout, id, metrics, minimum_sizes)?;
+    // An adaptive compact strip can be shorter than the configured preferred
+    // strip height only when the enclosing viewport itself is below Column's
+    // structural minimum. Normal/manual collapsed Groups keep the shared floor.
+    if force_collapsed {
+        minimum_size.height = metrics.effective_collapsed_group_height();
+    }
     // Geometry and resize commands share Layout::minimum_node_size, including
     // the effective tab-strip floor for collapsed groups.
     let minimum_height = minimum_size.height;
