@@ -35,6 +35,7 @@ impl Layout {
             history_identity: Arc::new(()),
             flyout_widths: HashMap::new(),
             flyout_width_order: VecDeque::new(),
+            column_expanded_groups: HashMap::new(),
             validation_cache: ValidationCache::default(),
         }
     }
