@@ -680,11 +680,20 @@ impl Layout {
                 let slot_count = self.column_display_order(node_id)?.len();
                 Size::new(
                     width,
-                    metrics.effective_collapsed_group_height() * slot_count as f32,
+                    if slot_count == 0 {
+                        0.0
+                    } else {
+                        metrics.column_header_height
+                            + metrics.effective_collapsed_group_height() * slot_count as f32
+                    },
                 )
             }
             Node::Column(column) => {
-                let mut height = 0.0_f32;
+                let mut height = if column.groups.is_empty() {
+                    0.0
+                } else {
+                    metrics.column_header_height
+                };
                 for group in &column.groups {
                     height += self
                         .minimum_node_size_with_cache(*group, metrics, cache)?
