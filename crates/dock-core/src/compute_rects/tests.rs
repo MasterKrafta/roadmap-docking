@@ -403,7 +403,7 @@ fn floating_horizontal_column_split_places_columns_below_one_shared_title() {
 }
 
 #[test]
-fn floating_horizontal_split_minimum_includes_title_for_collapsed_branches() {
+fn floating_horizontal_column_split_minimum_includes_window_and_column_headers() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Generic);
     let mut columns = Vec::new();
