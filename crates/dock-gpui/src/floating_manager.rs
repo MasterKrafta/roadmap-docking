@@ -14,7 +14,8 @@ use gpui::{
     WindowHandle, WindowId, WindowKind, WindowOptions, point, px, size,
 };
 use platform::{
-    NativeKey, NativeWindowId, NativeWindowOps, PhysicalPoint, PhysicalSize, SystemNativeWindowOps,
+    hide_from_taskbar, NativeKey, NativeWindowId, NativeWindowOps, PhysicalPoint, PhysicalSize,
+    SystemNativeWindowOps,
 };
 
 use crate::{
@@ -1488,7 +1489,7 @@ impl FloatingWindowManager {
             titlebar: None,
             focus: false,
             show: false,
-            kind: WindowKind::PopUp,
+            kind: WindowKind::Floating,
             is_movable: true,
             app_owns_titlebar_drag: true,
             is_resizable: true,
@@ -1557,7 +1558,7 @@ impl FloatingWindowManager {
         };
 
         if self.main_native_window.is_some() && native_window.is_none() {
-            // A hidden Windows popup without an HWND cannot be shown or bound
+            // A hidden Windows floating window without an HWND cannot be shown or bound
             // to the application's native owner; do not register it as usable.
             let _ = window.update(cx, |_, window, _| window.remove_window());
             return None;
@@ -1583,6 +1584,12 @@ impl FloatingWindowManager {
                 let _ = window.update(cx, |_, window, _| window.remove_window());
                 return None;
             }
+            if !hide_from_taskbar(native_window) {
+                tracing::warn!(
+                    ?panel,
+                    "could not hide the newly created PanelWindow from the taskbar"
+                );
+            }
             if let Some(position) = self.physical_origin_for_bounds(bounds)
                 && let Err(error) = self.native_ops.move_window(native_window, position)
             {
@@ -1590,13 +1597,6 @@ impl FloatingWindowManager {
                     ?panel,
                     %error,
                     "could not place a newly created PanelWindow"
-                );
-            }
-            if let Err(error) = self.native_ops.remove_topmost(native_window) {
-                tracing::warn!(
-                    ?panel,
-                    %error,
-                    "could not clear the PanelWindow topmost state"
                 );
             }
         }
