@@ -299,7 +299,7 @@ fn single_group_floating_column_keeps_standalone_group_geometry() {
     assert_eq!(rects.floating_groups[0].rect, Rect::new(Point::ZERO, bounds.size));
     assert_eq!(
         group_rect.origin,
-        Point::new(0.0, metrics.column_header_height)
+        Point::new(0.0, metrics.header_height + metrics.column_header_height)
     );
     assert_eq!(
         group_rect.size.height,
@@ -388,10 +388,13 @@ fn floating_horizontal_split_reserves_title_for_each_collapsed_column_branch() {
         collapsed_strip.origin.y,
         metrics.header_height + metrics.column_header_height
     );
-    assert_eq!(expanded.origin.y, metrics.column_header_height);
+    assert_eq!(
+        expanded.origin.y,
+        metrics.header_height + metrics.column_header_height
+    );
     assert_eq!(
         expanded_strip.origin.y,
-        metrics.column_header_height + metrics.header_height
+        metrics.header_height + metrics.column_header_height + metrics.header_height
     );
     assert!((collapsed_strip.origin.y - expanded_strip.origin.y).abs() < PIXEL_TOLERANCE);
 }
@@ -502,13 +505,10 @@ fn floating_vertical_split_minimum_includes_title_for_collapsed_first_branch() {
 
     assert_eq!(
         actual_bounds.size.height,
-        required_without_title + metrics.header_height + metrics.column_header_height
+        required_without_title + metrics.header_height
     );
     assert_eq!(actual_bounds.origin, Point::ZERO);
-    assert_eq!(
-        collapsed_rect.origin.y,
-        metrics.header_height + metrics.column_header_height
-    );
+    assert_eq!(collapsed_rect.origin.y, metrics.header_height);
     assert_eq!(
         collapsed_rect.size.height,
         metrics.effective_collapsed_group_height()
