@@ -278,7 +278,7 @@ fn floating_geometry_preserves_bounds_and_z_order() {
 }
 
 #[test]
-fn single_group_floating_column_keeps_standalone_group_geometry() {
+fn floating_single_group_column_keeps_its_header_below_window_title() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Generic);
     let (_, panel_node) = builder.panel(key("floating-single-column"), constraints());
@@ -353,7 +353,7 @@ fn floating_column_reserves_window_title_before_allocating_a_collapsed_first_gro
 }
 
 #[test]
-fn floating_horizontal_split_reserves_title_for_each_collapsed_column_branch() {
+fn floating_horizontal_column_split_places_columns_below_one_shared_title() {
     let metrics = DockMetrics {
         header_height: 32.0,
         tab_strip_height: 24.0,
@@ -396,7 +396,10 @@ fn floating_horizontal_split_reserves_title_for_each_collapsed_column_branch() {
         expanded_strip.origin.y,
         metrics.header_height + metrics.column_header_height + metrics.header_height
     );
-    assert!((collapsed_strip.origin.y - expanded_strip.origin.y).abs() < PIXEL_TOLERANCE);
+    assert!(
+        (expanded_strip.origin.y - collapsed_strip.origin.y - metrics.header_height).abs()
+            < PIXEL_TOLERANCE
+    );
 }
 
 #[test]
