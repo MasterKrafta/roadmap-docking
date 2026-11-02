@@ -258,9 +258,10 @@ impl FloatingWindowContent {
             .collect();
         root = root.child(PanelHost::render(loose_panels, origin));
 
-        // For expanded roots this overlays the first group's existing header;
-        // Core reserves the same band for a collapsed composite root. The
-        // active tab caption therefore stays in a single, predictable title row.
+        // Trees without Columns can share the floating title row with an
+        // expanded top Group; Core reserves it separately for collapsed roots.
+        // Trees containing Columns are laid out below this title row because
+        // each Column now owns an additional, independent header.
         let title_height = metrics.header_height.min(floating.rect.size.height);
         let close_size = metrics.group_control_button_width.min(title_height);
         let title_grip = div()
