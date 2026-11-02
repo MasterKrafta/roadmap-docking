@@ -143,6 +143,7 @@ impl Layout {
                 self.apply_column_resize_command(command, metrics)
             }
             DockCommand::CollapseGroup { .. }
+            | DockCommand::SetColumnExpandedGroup { .. }
             | DockCommand::SetColumnMode { .. }
             | DockCommand::SetChrome { .. } => self.apply_layout_state_command(command, metrics),
             DockCommand::OpenFlyout { .. }
