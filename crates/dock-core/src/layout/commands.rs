@@ -159,6 +159,7 @@ impl Layout {
             && self.flyout_auto_collapse == other.flyout_auto_collapse
             && self.flyout_widths == other.flyout_widths
             && self.flyout_width_order == other.flyout_width_order
+            && self.column_expanded_groups == other.column_expanded_groups
     }
 
     pub(super) fn same_persistent_state(&self, other: &Self) -> bool {
@@ -262,6 +263,40 @@ impl Layout {
                     persistent: true,
                 })
             }
+            DockCommand::SetColumnExpandedGroup { column, group } => {
+                let groups = match self.nodes.get(*column) {
+                    Some(Node::Column(column)) => &column.groups,
+                    Some(_) => {
+                        return Err(CommandError::InvalidTarget {
+                            reason: "SetColumnExpandedGroup target must be a Column node",
+                        });
+                    }
+                    None => return Err(CommandError::MissingNode { node: *column }),
+                };
+                if let Some(group) = group {
+                    if !groups.contains(group) {
+                        return Err(CommandError::InvalidTarget {
+                            reason: "expanded Group must belong to the target Column",
+                        });
+                    }
+                    if !matches!(self.nodes.get(*group), Some(Node::Tabs(_))) {
+                        return Err(CommandError::InvalidTarget {
+                            reason: "expanded Group must be a Tabs node",
+                        });
+                    }
+                }
+
+                let old = self.column_expanded_groups.get(column).copied();
+                if old == *group {
+                    return Ok(CommandApplication::transient());
+                }
+                if let Some(group) = group {
+                    self.column_expanded_groups.insert(*column, *group);
+                } else {
+                    self.column_expanded_groups.remove(column);
+                }
+                Ok(CommandApplication::transient())
+            }
             DockCommand::SetColumnMode { column, mode } => {
                 let current = match self.nodes.get(*column) {
                     Some(Node::Column(column)) => column.clone(),
@@ -355,6 +390,7 @@ impl Layout {
     pub(crate) fn history_snapshot(&self) -> Self {
         let mut snapshot = self.clone();
         snapshot.flyout = None;
+        snapshot.column_expanded_groups.clear();
         snapshot
     }
 
@@ -382,6 +418,7 @@ impl Layout {
         // so undo cannot make stale SlotMap handles valid again (the ABA problem).
         let mut candidate = self.clone();
         candidate.flyout = None;
+        candidate.column_expanded_groups.clear();
         candidate.flyout_auto_collapse = self.flyout_auto_collapse;
 
         let wanted_panel_ids: HashSet<_> = snapshot.panel_instances.keys().collect();
