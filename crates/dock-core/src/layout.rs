@@ -89,6 +89,8 @@ pub struct Layout {
     history_identity: Arc<()>,
     flyout_widths: HashMap<PanelKey, f32>,
     flyout_width_order: VecDeque<PanelKey>,
+    /// Session-only choice used to test one expanded Group while a Column is in adaptive overflow.
+    column_expanded_groups: HashMap<NodeId, NodeId>,
     validation_cache: ValidationCache,
 }
 
