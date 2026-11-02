@@ -191,7 +191,6 @@ impl ColumnView {
             column.rect.size.width,
             metrics,
             controller,
-            toggle_group_menu,
             theme,
         );
 
