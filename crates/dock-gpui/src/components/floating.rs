@@ -199,6 +199,7 @@ impl FloatingWindowContent {
                 .cloned();
 
             root = root.child(GroupView::render(
+                None,
                 *group,
                 strip,
                 &headers,
