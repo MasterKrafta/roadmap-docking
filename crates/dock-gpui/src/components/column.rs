@@ -1,20 +1,20 @@
 use std::collections::HashMap;
 
 use dock_core::{
-    ColumnDisplayItem, ColumnMode, ColumnRect, DockCommand, DockMetrics, DragPreview, DropZoneRect,
-    FloatingGroupId, FlyoutState, GroupRect, NodeId, PanelRect, Point, SplitterRect, TabHeaderRect,
-    TabOverflowRect, TabStripRect, VerticalOverflow,
+    ColumnDisplayItem, ColumnMode, ColumnRect, DockMetrics, DragPreview, DropZoneRect,
+    FloatingGroupId, FlyoutState, GroupRect, NodeId, PanelRect, Point, Rect, SplitterRect,
+    TabHeaderRect, TabOverflowRect, TabStripRect, VerticalOverflow,
 };
 use gpui::{
-    AnyView, Entity, IntoElement, ParentElement, ScrollHandle, StatefulInteractiveElement, Styled,
-    div, prelude::InteractiveElement as _, px, rgb,
+    AnyView, Entity, IntoElement, ParentElement, ScrollHandle, Styled, div, px, rgb,
 };
 use ui::Theme;
 
 use crate::DockController;
 
 use super::{
-    context_menu::{ContextMenuTarget, GroupMenuToggle},
+    column_header::ColumnHeaderView,
+    context_menu::GroupMenuToggle,
     group::GroupView,
     panel_host::PanelHost,
     rail::RailView,
@@ -53,8 +53,18 @@ impl ColumnView {
         coordinate_origin: Point,
         raise_floating: Option<FloatingGroupId>,
     ) -> impl IntoElement {
-        let viewport = overflow.map_or(column.rect, |value| value.viewport);
-        let content_extent = overflow.map_or(column.rect, |value| value.content_extent);
+        let content_rect = Rect::new(
+            Point::new(
+                column.rect.origin.x,
+                column.rect.origin.y + metrics.column_header_height,
+            ),
+            dock_core::Size::new(
+                column.rect.size.width,
+                (column.rect.size.height - metrics.column_header_height).max(0.0),
+            ),
+        );
+        let viewport = overflow.map_or(content_rect, |value| value.viewport);
+        let content_extent = overflow.map_or(content_rect, |value| value.content_extent);
         let content_origin = content_extent.origin;
 
         let mut content = div()
@@ -81,12 +91,6 @@ impl ColumnView {
                         .iter()
                         .find(|overflow| overflow.group == group.group)
                         .cloned();
-                    let is_first_group = group.rect.origin.y == column.rect.origin.y;
-                    let reserved_grip_left = if is_first_group {
-                        metrics.group_control_button_width + 8.0
-                    } else {
-                        0.0
-                    };
                     content = content.child(GroupView::render(
                         *group,
                         strip,
@@ -95,7 +99,7 @@ impl ColumnView {
                         presentation,
                         content_origin,
                         metrics,
-                        reserved_grip_left,
+                        0.0,
                         controller.clone(),
                         theme,
                         raise_floating,
@@ -103,7 +107,7 @@ impl ColumnView {
                         middle_click_closes_tabs,
                     ));
                 } else {
-                    content = content.child(group_surface(*group, content_origin, theme));
+                    content = content.child(group_surface(*group, content_origin, metrics, theme));
                 }
             }
             let pointer_offset = Point::new(
@@ -154,8 +158,8 @@ impl ColumnView {
         let mut scroll_viewport = div()
             .id(format!("dock-column-scroll-{:?}", column.column))
             .absolute()
-            .top_0()
-            .left_0()
+            .top(px(viewport.origin.y - column.rect.origin.y))
+            .left(px(viewport.origin.x - column.rect.origin.x))
             .w(px(viewport.size.width))
             .h(px(viewport.size.height))
             .bg(rgb(theme.colors.dock_background));
@@ -180,68 +184,17 @@ impl ColumnView {
             .bg(rgb(theme.colors.dock_background))
             .child(scroll_viewport);
 
-        // The mode control sits in the column's top chrome band. It overlays
-        // the first group grip rather than changing Core's authoritative rects.
-        let next_mode = next_column_mode(mode);
-        let mode_label = column_mode_label(mode);
-        let controller_for_click = controller.clone();
-        let column_id = column.column;
-        let mode_button = div()
-            .id(format!("column-mode-{:?}", column.column))
-            .absolute()
-            .top(px(3.0))
-            .right(px(3.0))
-            .w(px(18.0))
-            .h(px(18.0))
-            .flex()
-            .items_center()
-            .justify_center()
-            .cursor_pointer()
-            .bg(rgb(theme.colors.column_mode_button))
-            .border_1()
-            .border_color(rgb(theme.colors.group_frame_border))
-            .text_color(rgb(theme.colors.primary_text))
-            .child(mode_label)
-            .on_click(move |_, _, app| {
-                controller_for_click.update(app, |controller, controller_cx| {
-                    if let Err(error) = controller.dispatch_in(
-                        DockCommand::SetColumnMode {
-                            column: column_id,
-                            mode: next_mode,
-                        },
-                        controller_cx,
-                    ) {
-                        tracing::warn!(%error, "could not change dock column mode");
-                    }
-                });
-            });
+        let header = ColumnHeaderView::render(
+            column.column,
+            mode,
+            column.rect.size.width,
+            metrics,
+            controller,
+            toggle_group_menu,
+            theme,
+        );
 
-        let menu_toggle = toggle_group_menu.clone();
-        let menu_button = div()
-            .id(format!("column-menu-{:?}", column.column))
-            .absolute()
-            .top(px(3.0))
-            .right(px(24.0))
-            .w(px(18.0))
-            .h(px(18.0))
-            .flex()
-            .items_center()
-            .justify_center()
-            .cursor_pointer()
-            .bg(rgb(theme.colors.column_mode_button))
-            .border_1()
-            .border_color(rgb(theme.colors.group_frame_border))
-            .text_color(rgb(theme.colors.primary_text))
-            .child("⋮")
-            .on_click(move |event, _, app| {
-                (menu_toggle)(
-                    ContextMenuTarget::Column(column_id),
-                    Point::new(event.position().x.as_f32(), event.position().y.as_f32()),
-                    app,
-                );
-            });
-
-        root = root.child(mode_button).child(menu_button);
+        root = root.child(header);
         root
     }
 }
@@ -265,14 +218,12 @@ fn column_mode_label(mode: ColumnMode) -> &'static str {
 pub(crate) fn group_surface(
     group: GroupRect,
     content_origin: Point,
+    metrics: DockMetrics,
     theme: Theme,
 ) -> impl IntoElement {
     let left = group.rect.origin.x - content_origin.x;
     let top = group.rect.origin.y - content_origin.y;
-    let header_height = theme
-        .metrics
-        .column_header_height
-        .min(group.rect.size.height);
+    let header_height = metrics.header_height.min(group.rect.size.height);
 
     div()
         .id(format!("dock-group-{:?}", group.group))
@@ -295,25 +246,3 @@ pub(crate) fn group_surface(
         )
 }
 
-#[cfg(test)]
-mod tests {
-    use dock_core::ColumnMode;
-
-    use super::next_column_mode;
-
-    #[test]
-    fn column_mode_button_cycles_through_all_three_modes() {
-        assert_eq!(
-            next_column_mode(ColumnMode::Expanded),
-            ColumnMode::IconsAndLabels
-        );
-        assert_eq!(
-            next_column_mode(ColumnMode::IconsAndLabels),
-            ColumnMode::IconsOnly
-        );
-        assert_eq!(
-            next_column_mode(ColumnMode::IconsOnly),
-            ColumnMode::Expanded
-        );
-    }
-}
