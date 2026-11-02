@@ -25,6 +25,12 @@ pub struct LayoutRects {
     /// Per-group overflow buttons and the panel tabs omitted from visible headers.
     #[cfg_attr(feature = "serde", serde(default))]
     pub tab_overflows: Vec<TabOverflowRect>,
+    /// Groups temporarily represented as compact strips because their Column is too short.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub auto_collapsed_groups: Vec<crate::NodeId>,
+    /// The Group currently selected for expansion inside an overflowing Column.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub auto_expanded_groups: Vec<crate::NodeId>,
     pub panels: Vec<PanelRect>,
     pub splitters: Vec<SplitterRect>,
     pub floating_groups: Vec<FloatingGroupRect>,
@@ -206,6 +212,8 @@ mod tests {
         assert!(rects.tab_strips.is_empty());
         assert!(rects.tab_headers.is_empty());
         assert!(rects.tab_overflows.is_empty());
+        assert!(rects.auto_collapsed_groups.is_empty());
+        assert!(rects.auto_expanded_groups.is_empty());
         assert!(rects.panels.is_empty());
         assert!(rects.splitters.is_empty());
         assert!(rects.floating_groups.is_empty());
