@@ -110,8 +110,9 @@ impl Layout {
     /// presentation metrics for the two rail modes.
     /// The Canvas receives the remaining horizontal space. If that remainder is
     /// below min_canvas_width, computation fails instead of silently compressing
-    /// columns or the Canvas. Vertical content that cannot fit is reported with
-    /// a scroll extent. Floating compositions are computed separately with
+    /// columns or the Canvas. Expanded Column Groups compact into strips when their
+    /// minimum heights do not fit; other vertical stacks may still report a scroll
+    /// extent. Floating compositions are computed separately with
     /// `compute_floating_rects`.
     pub fn compute_rects(
         &self,
