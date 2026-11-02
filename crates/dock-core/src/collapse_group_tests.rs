@@ -341,7 +341,8 @@ fn reexpand_after_resize_and_reorder_restores_saved_weights_with_current_viewpor
             .size
             .height
     };
-    let available_group_height = 600.0 - 2.0 * metrics.splitter_thickness;
+    let available_group_height =
+        600.0 - metrics.column_header_height - 2.0 * metrics.splitter_thickness;
     let rendered_total = groups.iter().map(|group| height_for(*group)).sum::<f32>();
     assert!((rendered_total - available_group_height).abs() < 1.0e-3);
 
@@ -387,7 +388,7 @@ fn reexpand_after_resize_and_reorder_restores_saved_weights_with_current_viewpor
             .iter()
             .map(|group| small_height_for(*group))
             .sum::<f32>()
-            - 392.0)
+            - (400.0 - metrics.column_header_height - 2.0 * metrics.splitter_thickness))
             .abs()
             < 1.0e-3
     );
