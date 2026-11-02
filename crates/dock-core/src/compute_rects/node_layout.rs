@@ -100,6 +100,20 @@ pub(super) fn layout_column(
         return Ok(());
     }
 
+    let content_top = rect.origin.y + metrics.column_header_height;
+    if !content_top.is_finite() {
+        return Err(ComputeRectsError::Geometry(
+            GeometryError::ArithmeticOverflow,
+        ));
+    }
+    let content_rect = Rect::new(
+        Point::new(rect.origin.x, content_top),
+        Size::new(
+            rect.size.width,
+            (rect.size.height - metrics.column_header_height).max(0.0),
+        ),
+    );
+
     // Rail modes flatten tabs into fixed-height panel entries. Their order is
     // canonical: groups top-to-bottom, then tabs inside each group left-to-right.
     // Only geometry changes; the underlying Tabs/Column tree remains untouched.
@@ -114,11 +128,11 @@ pub(super) fn layout_column(
                 GeometryError::ArithmeticOverflow,
             ));
         }
-        if rect.size.height < required {
-            push_vertical_overflow(id, rect, required, output)?;
+        if content_rect.size.height < required {
+            push_vertical_overflow(id, content_rect, required, output)?;
         }
 
-        let mut y = rect.origin.y;
+        let mut y = content_rect.origin.y;
         let mut item_index = 0usize;
         while item_index < display_order.len() {
             let group_id = display_order[item_index].group;
@@ -128,8 +142,8 @@ pub(super) fn layout_column(
             while item_index < display_order.len() && display_order[item_index].group == group_id {
                 let item = display_order[item_index];
                 let item_rect = Rect::new(
-                    Point::new(rect.origin.x, y),
-                    Size::new(rect.size.width, slot_height),
+                    Point::new(content_rect.origin.x, y),
+                    Size::new(content_rect.size.width, slot_height),
                 );
                 item_rect.validate().map_err(ComputeRectsError::Geometry)?;
                 output.tab_headers.push(TabHeaderRect::new(
@@ -144,8 +158,8 @@ pub(super) fn layout_column(
             }
 
             let group_rect = Rect::new(
-                Point::new(rect.origin.x, group_start),
-                Size::new(rect.size.width, slot_height * item_count as f32),
+                Point::new(content_rect.origin.x, group_start),
+                Size::new(content_rect.size.width, slot_height * item_count as f32),
             );
             group_rect.validate().map_err(ComputeRectsError::Geometry)?;
             output.groups.push(GroupRect::new(group_id, group_rect));
@@ -157,21 +171,21 @@ pub(super) fn layout_column(
         layout,
         &column.groups,
         &column.group_ratios,
-        rect.size.height,
+        content_rect.size.height,
         Axis::Y,
         metrics,
         minimum_sizes,
     )?;
     if allocation.overflows {
-        push_vertical_overflow(id, rect, allocation.content_height, output)?;
+        push_vertical_overflow(id, content_rect, allocation.content_height, output)?;
     }
 
-    let mut y = rect.origin.y;
+    let mut y = content_rect.origin.y;
     for (index, group_id) in column.groups.iter().enumerate() {
         let height = allocation.sizes[index];
         let group_rect = Rect::new(
-            Point::new(rect.origin.x, y),
-            Size::new(rect.size.width, height),
+            Point::new(content_rect.origin.x, y),
+            Size::new(content_rect.size.width, height),
         );
         layout_node(
             layout,
@@ -184,7 +198,7 @@ pub(super) fn layout_column(
         y += height;
 
         if index + 1 < column.groups.len() {
-            push_splitter(id, index, Axis::Y, y, rect, metrics, output)?;
+            push_splitter(id, index, Axis::Y, y, content_rect, metrics, output)?;
             y += metrics.splitter_thickness;
         }
     }
