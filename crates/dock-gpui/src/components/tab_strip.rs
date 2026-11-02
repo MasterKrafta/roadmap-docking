@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use dock_core::{
-    DockCommand, FloatingGroupId, Layout, Node, NodeId, PanelId, TabHeaderRect, TabOverflowRect,
-    TabStripRect,
+    DockCommand, FloatingGroupId, Layout, LayoutRects, Node, NodeId, PanelId, TabHeaderRect,
+    TabOverflowRect, TabStripRect,
 };
 use gpui::{
     Entity, IntoElement, MouseButton, ParentElement, SharedString, StatefulInteractiveElement,
@@ -25,7 +25,14 @@ pub(crate) struct TabPresentation {
 
 #[derive(Clone, Default)]
 pub(crate) struct GroupPresentation {
+    /// Effective state after Column overflow compaction.
     pub collapsed: bool,
+    /// Persistent user-selected collapsed state in the Tabs model.
+    pub model_collapsed: bool,
+    /// This Group is temporarily collapsed by its overflowing Column.
+    pub auto_collapsed: bool,
+    /// This Group is the one temporarily expanded by user choice.
+    pub auto_expanded: bool,
     pub active_panel: Option<PanelId>,
     pub tabs: Vec<TabPresentation>,
 }
@@ -222,6 +229,7 @@ pub(crate) fn collect_group_presentations(
     layout: &Layout,
     registry: &PanelRegistry,
     node_ids: &HashSet<NodeId>,
+    rects: Option<&LayoutRects>,
 ) -> HashMap<NodeId, GroupPresentation> {
     let mut groups = HashMap::new();
     for group in node_ids {
@@ -262,10 +270,17 @@ pub(crate) fn collect_group_presentations(
                 _ => None,
             });
 
+        let auto_collapsed = rects
+            .is_some_and(|rects| rects.auto_collapsed_groups.contains(group));
+        let auto_expanded = rects
+            .is_some_and(|rects| rects.auto_expanded_groups.contains(group));
         groups.insert(
             *group,
             GroupPresentation {
-                collapsed: tabs.collapsed,
+                collapsed: tabs.collapsed || auto_collapsed,
+                model_collapsed: tabs.collapsed,
+                auto_collapsed,
+                auto_expanded,
                 active_panel,
                 tabs: tab_presentations,
             },
@@ -289,6 +304,7 @@ mod tests {
             &Layout::new(Profile::Photoshop),
             &crate::PanelRegistry::new(),
             &HashSet::<NodeId>::new(),
+            None,
         );
         assert!(groups.is_empty());
     }
@@ -299,6 +315,7 @@ mod tests {
             &Layout::new(Profile::Generic),
             &crate::PanelRegistry::new(),
             &HashSet::from([NodeId::null()]),
+            None,
         );
         assert!(groups.is_empty());
     }
