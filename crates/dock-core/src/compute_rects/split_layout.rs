@@ -25,10 +25,10 @@ pub(super) fn layout_split(
 
 /// Lays out a floating composition while respecting the independent window title.
 ///
-/// An expanded top group already uses Core's header row for the floating title.
-/// A collapsed top group has no such row, so its branch must reserve the same
-/// height before allocating group rectangles. Apply this only to composite
-/// floating roots; a standalone Tabs root keeps its own established geometry.
+/// Columns own a dedicated header row, so any floating composition containing a
+/// Column reserves the native title row above the complete Core subtree. Trees
+/// without Columns keep the established behavior where an expanded top Group
+/// can share its header row with the floating title.
 pub(super) fn layout_floating_root(
     layout: &Layout,
     id: NodeId,
@@ -38,18 +38,15 @@ pub(super) fn layout_floating_root(
     output: &mut LayoutRects,
 ) -> Result<(), ComputeRectsError> {
     let title_height = metrics.header_height.min(rect.size.height);
+    if layout.floating_tree_contains_column(id) && rect.size.height > title_height {
+        let content_rect = Rect::new(
+            Point::new(rect.origin.x, rect.origin.y + title_height),
+            Size::new(rect.size.width, rect.size.height - title_height),
+        );
+        return layout_node(layout, id, content_rect, metrics, minimum_sizes, output);
+    }
+
     match layout.node(id) {
-        Some(Node::Column(column))
-            if column.groups.len() > 1
-                && layout.floating_branch_starts_collapsed(id)
-                && rect.size.height > title_height =>
-        {
-            let content_rect = Rect::new(
-                Point::new(rect.origin.x, rect.origin.y + title_height),
-                Size::new(rect.size.width, rect.size.height - title_height),
-            );
-            layout_node(layout, id, content_rect, metrics, minimum_sizes, output)
-        }
         Some(Node::Split(split))
             if split.axis == Axis::Y
                 && layout.floating_branch_starts_collapsed(id)
