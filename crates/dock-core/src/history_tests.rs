@@ -1200,7 +1200,9 @@ fn resize_groups_with_tab_chrome_supports_history_undo_and_redo_after_clamping()
     let mut layout = builder.build();
     assert_eq!(layout.validate(&metrics), Ok(()));
 
-    let viewport = Rect::new(Point::ZERO, Size::new(1000.0, 504.0));
+    // 536 px leave 504 px below the fixed Column header; after the
+    // 4 px splitter, the two Groups share 500 px equally.
+    let viewport = Rect::new(Point::ZERO, Size::new(1000.0, 536.0));
     let group_heights = |layout: &Layout| {
         let rects = layout.compute_rects(viewport, &metrics).unwrap();
         let height_a = rects
