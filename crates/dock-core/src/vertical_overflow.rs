@@ -1,13 +1,11 @@
 use crate::{NodeId, Rect};
 
-/// Scroll metadata for a vertical layout stack whose minimum content is taller
-/// than the viewport allocated by its parent.
+/// Scroll metadata for a vertical layout stack that cannot use the adaptive
+/// Group-strip compaction available to expanded Columns.
 ///
 /// The content extent starts at the viewport origin and keeps its width, but
 /// extends downward to the full minimum-size allocation. Adapters may scroll or
-/// clip this content without shrinking any group below its minimum height. For
-/// main-dock columns, the eventual GPUI adapter should use `viewport` as the
-/// clipping/scrolling region and `content_extent` as the total scrollable size.
+/// clip this content without shrinking its children below their minimum sizes.
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct VerticalOverflow {
