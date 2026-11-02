@@ -306,7 +306,7 @@ impl Render for DockHost {
                 })
                 .collect::<HashMap<_, _>>();
             let group_presentations =
-                collect_group_presentations(layout, controller.registry(), &main_node_ids);
+                collect_group_presentations(layout, controller.registry(), &main_node_ids, rects.as_ref().ok());
             let rail_display_orders = column_modes
                 .iter()
                 .filter(|(_, mode)| mode.is_rail())
