@@ -553,6 +553,74 @@ impl FloatingWindowManager {
         true
     }
 
+    /// Positions an inactive tab's already-hidden PanelWindow under the cursor
+    /// while dragging from a floating host. The active host window is never moved here.
+    pub(crate) fn prepare_floating_tab_native_window_on_press(
+        &mut self,
+        source_group: FloatingGroupId,
+        panel: PanelId,
+        pointer: Point,
+        local_bounds: Rect,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.native_move.is_some()
+            || self.prepared_panel_tab_drag.is_some()
+            || self.native_resize.is_some()
+        {
+            return false;
+        }
+        let Some(source_window) = self
+            .panel_window_for_group(source_group)
+            .and_then(|entry| entry.native_window)
+        else {
+            return false;
+        };
+        let Some(entry) = self.registry.windows.get(&panel) else {
+            return false;
+        };
+        if entry.visibility != PanelWindowVisibility::Hidden {
+            // The active composition host remains stationary until the tab is
+            // actually detached; it may itself become the detached panel's host.
+            return false;
+        }
+        let (Some(native_window), window_id) = (entry.native_window, entry.window_id) else {
+            return false;
+        };
+        let Ok(cursor) = self.native_ops.cursor_position() else {
+            return false;
+        };
+        let scale = self
+            .native_ops
+            .scale_factor(source_window)
+            .ok()
+            .filter(|scale| scale.is_finite() && *scale > 0.0)
+            .unwrap_or(1.0);
+        let Some(offset_x) = physical_coordinate(pointer.x - local_bounds.origin.x, scale) else {
+            return false;
+        };
+        let Some(offset_y) = physical_coordinate(pointer.y - local_bounds.origin.y, scale) else {
+            return false;
+        };
+        let position = PhysicalPoint {
+            x: cursor.x.saturating_sub(offset_x),
+            y: cursor.y.saturating_sub(offset_y),
+        };
+        if let Err(error) = self.native_ops.move_window(native_window, position) {
+            tracing::debug!(?panel, %error, "could not position the hidden floating-tab drag surface");
+            return false;
+        }
+        if let Err(error) = self.native_ops.hide(native_window) {
+            tracing::debug!(?panel, %error, "could not keep the floating-tab drag surface hidden");
+            return false;
+        }
+        if let Some(entry) = self.registry.windows.get_mut(&panel) {
+            entry.visibility = PanelWindowVisibility::Hidden;
+        }
+        self.prepared_panel_tab_drag = Some(PreparedPanelTabDrag { panel, window_id });
+        cx.notify();
+        true
+    }
+
     /// Clears a hidden tab-drag surface when the gesture is released or cancelled.
     pub(crate) fn clear_prepared_panel_tab_drag(
         &mut self,
@@ -938,6 +1006,14 @@ impl FloatingWindowManager {
             drop_target: None,
         });
         self.schedule_native_move(cx, group, window_id);
+        if self.prepared_panel_tab_drag.is_some_and(|prepared| {
+            prepared.window_id == window_id
+                && self.host_registry.group_for_panel(prepared.panel) == Some(group)
+        }) {
+            self.prepared_panel_tab_drag = None;
+            self.reconcile(cx);
+            cx.notify();
+        }
         true
     }
 
