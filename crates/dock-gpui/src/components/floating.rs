@@ -808,8 +808,8 @@ impl Render for FloatingHost {
             .overflow_hidden()
             .bg(rgb(self.theme.colors.panel_surface_background));
 
-        // The native window moves from a frame-driven platform poll. Only the
-        // custom title grip starts that session; close controls remain clickable.
+        // Existing-window movement starts from the title grip. Tab tear-off
+        // uses the shared TabStrip boundary below; close controls remain clickable.
         let manager = self.manager.clone();
         let controller = self.controller.clone();
         let tab_press = self.tab_press.clone();
