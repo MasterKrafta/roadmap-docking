@@ -94,12 +94,14 @@ impl Layout {
             })?;
         let moving_panels = self.panel_ids_in_subtree(*node);
         self.validate_panel_ids_allowed_for_area(&moving_panels, AllowedArea::FLOATING)?;
-        let supports_photoshop_floating_root =
-            matches!(self.nodes.get(*node), Some(Node::Panel(_) | Node::Tabs(_)));
+        let supports_photoshop_floating_root = matches!(
+            self.nodes.get(*node),
+            Some(Node::Panel(_) | Node::Tabs(_) | Node::Column(_))
+        );
         if self.profile == Profile::Photoshop && !supports_photoshop_floating_root {
             return Err(CommandError::UnsupportedForProfile {
                 profile: self.profile,
-                reason: "only a Panel or Tabs node can become a Photoshop floating root",
+                reason: "only a Panel, Tabs, or Column node can become a Photoshop floating root",
             });
         }
         let next_z = self.next_floating_z_order()?;
