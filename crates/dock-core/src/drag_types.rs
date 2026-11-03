@@ -36,8 +36,8 @@ pub enum DragDropAction {
 /// The single semantic drop intent emitted by a successful drag release.
 ///
 /// This is not a command and does not mutate Layout. `payload` preserves the source
-/// semantics: Panel means one tab, Group means the complete group-grip payload,
-/// and FloatingGroup means the window itself. The adapter translates this one
+/// semantics: Panel means one tab, Group means one Tabs group, Column means a complete
+/// Column composition, and FloatingGroup means the native floating window itself. The adapter translates this one
 /// request into exactly one `DockCommand` and applies it once. Targets such as
 /// `DropTarget::FreeArea` may require the adapter to supply data such as floating
 /// bounds when forming that command.
@@ -70,6 +70,8 @@ pub enum DragHandle {
     FlyoutPanel,
     /// A group's grip/header; moves the whole Tabs node.
     GroupGrip,
+    /// A Column header; moves the complete Column composition.
+    ColumnHeader,
     /// A floating window title bar; moves window bounds, never docks it.
     FloatingTitle,
     /// An explicit floating-window capture affordance; may dock/stack the
@@ -83,6 +85,7 @@ impl DragHandle {
         match payload {
             DragPayload::Panel { .. } => Self::PanelTab,
             DragPayload::Group { .. } => Self::GroupGrip,
+            DragPayload::Column { .. } => Self::ColumnHeader,
             DragPayload::FloatingGroup { .. } => Self::FloatingTitle,
         }
     }
@@ -93,6 +96,7 @@ impl DragHandle {
             (Self::PanelTab, DragPayload::Panel { .. })
                 | (Self::FlyoutPanel, DragPayload::Panel { .. })
                 | (Self::GroupGrip, DragPayload::Group { .. })
+                | (Self::ColumnHeader, DragPayload::Column { .. })
                 | (Self::FloatingTitle, DragPayload::FloatingGroup { .. })
                 | (Self::FloatingCapture, DragPayload::FloatingGroup { .. })
         )
@@ -114,6 +118,11 @@ pub enum DragPayload {
     /// and the existing Tabs node retains active_index and collapsed state when
     /// it is moved, split, or floated as a group.
     Group { group: NodeId },
+    /// A complete Column composition dragged from its own header.
+    ///
+    /// Unlike Group, this carries every group in the Column together and preserves
+    /// the Column node and all of its descendants when moved or floated.
+    Column { column: NodeId },
     /// A floating window moved by its window/title drag surface.
     ///
     /// This is distinct from dragging the Tabs group inside that window.
