@@ -7,6 +7,10 @@
 
 pub mod actions;
 pub mod components;
+/// Standalone visual building blocks for the next Column composition.
+/// This module is not wired into DockHost or the active docking input pipeline.
+#[path = "dock-components/column.rs"]
+pub mod dock_components;
 mod app_shell;
 pub mod controller;
 pub mod dock_host;
