@@ -18,7 +18,7 @@ mod panel_content;
 mod tab;
 
 use dock_core::DockMetrics;
-use gpui::{AnyView, IntoElement, ParentElement, Styled, div, px, rgb};
+use gpui::{AnyView, InteractiveElement, IntoElement, ParentElement, Styled, div, px, rgb};
 use ui::Theme;
 
 pub use column_drag_area::ColumnDragArea;
