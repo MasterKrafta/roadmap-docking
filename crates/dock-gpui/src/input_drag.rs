@@ -418,6 +418,9 @@ pub(crate) fn begin_native_tearoff(
             (DragHandle::GroupGrip, DragPayload::Group { group }) => {
                 DockCommand::Float { node: group, bounds: local_bounds }
             }
+            (DragHandle::ColumnHeader, DragPayload::Column { column }) => {
+                DockCommand::Float { node: column, bounds: local_bounds }
+            }
             _ => return None,
         };
         Some((command, local_bounds))
