@@ -1,3 +1,4 @@
+use dock_core::{Point, Rect};
 use gpui::{IntoElement, InteractiveElement, ParentElement, Styled, div, px, rgb};
 use ui::Theme;
 
@@ -6,6 +7,15 @@ use ui::Theme;
 pub struct DockTab;
 
 impl DockTab {
+    /// Returns true once the pointer leaves the complete TabStrip region.
+    ///
+    /// The strip includes both tab headers and the empty insertion/drag lane.
+    /// Dock adapters use this shared boundary to decide when a tab becomes a
+    /// native floating window instead of remaining an in-strip tab drag.
+    pub(crate) fn leaves_strip_zone(strip_rect: Rect, point: Point) -> bool {
+        !matches!(strip_rect.contains(point), Ok(true))
+    }
+
     pub fn render(
         id: String,
         title: String,
@@ -42,6 +52,7 @@ impl DockTab {
             .flex_none()
             .flex()
             .items_center()
+            .cursor_move()
             .px(px(horizontal_padding))
             .overflow_hidden()
             .bg(rgb(if active {
@@ -61,5 +72,24 @@ impl DockTab {
                     .text_ellipsis()
                     .child(title),
             )
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use dock_core::{Point, Rect, Size};
+
+    use super::DockTab;
+
+    #[test]
+    fn tab_detaches_only_after_pointer_leaves_the_complete_strip() {
+        let strip = Rect::new(Point::new(10.0, 20.0), Size::new(240.0, 28.0));
+
+        assert!(!DockTab::leaves_strip_zone(strip, Point::new(20.0, 30.0)));
+        // The blank lane between tabs remains part of the strip drag zone.
+        assert!(!DockTab::leaves_strip_zone(strip, Point::new(180.0, 30.0)));
+        assert!(DockTab::leaves_strip_zone(strip, Point::new(9.0, 30.0)));
+        assert!(DockTab::leaves_strip_zone(strip, Point::new(20.0, 48.0)));
     }
 }
