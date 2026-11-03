@@ -23,7 +23,8 @@ use crate::{
     DockController, FloatingWindowManager,
     actions::dispatch_command,
     input::drag::{
-
+        begin_floating_tab_tearoff, finish_floating_tab_drag, update_floating_tab_drag,
+        FloatingTabDrag,
     },
     dock_host::{
         build_context_menu_entries, collect_subtree_nodes, context_menu_target_exists,
