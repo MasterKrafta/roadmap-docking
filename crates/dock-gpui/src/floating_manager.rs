@@ -474,6 +474,20 @@ impl FloatingWindowManager {
             .and_then(|main| self.native_ops.scale_factor(main).ok())
             .filter(|scale| scale.is_finite() && *scale > 0.0)
             .unwrap_or(1.0);
+        let Some(offset_x) = physical_coordinate(pointer.x - local_bounds.origin.x, scale) else {
+            return false;
+        };
+        let Some(offset_y) = physical_coordinate(pointer.y - local_bounds.origin.y, scale) else {
+            return false;
+        };
+        let position = PhysicalPoint {
+            x: cursor.x.saturating_sub(offset_x),
+            y: cursor.y.saturating_sub(offset_y),
+        };
+        if let Err(error) = self.native_ops.move_window(native_window, position) {
+            tracing::warn!(?panel, %error, "could not position the hidden tab drag surface");
+            return false;
+        }
         if self.native_ops.hide(native_window).is_err() {
             return false;
         }
