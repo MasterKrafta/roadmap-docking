@@ -2,8 +2,8 @@ use dock_core::{Point, Rect};
 use gpui::{IntoElement, InteractiveElement, ParentElement, Styled, div, px, rgb};
 use ui::Theme;
 
-/// Reusable tab header. The active state changes only its visual presentation;
-/// pointer behavior is intentionally not connected yet.
+/// Reusable tab header. The shared DockHost/FloatingHost pointer pipelines
+/// handle its drag gesture from Core tab geometry.
 pub struct DockTab;
 
 impl DockTab {
