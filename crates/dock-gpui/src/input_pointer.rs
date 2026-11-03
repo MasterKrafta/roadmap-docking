@@ -394,13 +394,7 @@ pub(crate) fn register_pointer_events(
             }
 
             let should_tearoff = controller.update(app, |controller, _| {
-                let DragState::Dragging { payload, .. } = controller.drag().session().state()
-                else {
-                    return false;
-                };
-                let handle = controller.drag().session().handle();
-                native_tearoff_enabled_for(handle, payload)
-                    && native_tearoff_boundary_reached(controller, handle, payload, point)
+                native_tearoff_required(controller, point)
             });
             if should_tearoff
                 && super::drag::begin_native_tearoff(&controller, &manager, point, app)
@@ -519,6 +513,24 @@ pub(crate) fn register_pointer_events(
             };
 
             let drag_was_started = if drag_active {
+                // MouseUp can be the first event delivered beyond the drag threshold.
+                // Update the session once more so a tab released outside its strip
+                // still becomes a floating window instead of being treated as a failed drop.
+                if update_drag_at(&controller, point, app) {
+                    pointer_press.set(None);
+                }
+                let should_tearoff = controller.update(app, |controller, _| {
+                    native_tearoff_required(controller, point)
+                });
+                if should_tearoff
+                    && super::drag::begin_native_tearoff(&controller, &manager, point, app)
+                {
+                    window.release_pointer();
+                    pointer_capture.set(None);
+                    pointer_press.set(None);
+                    app.stop_propagation();
+                    return;
+                }
                 finish_drag_at(&controller, &manager, point, app)
             } else {
                 false
@@ -632,6 +644,16 @@ fn native_tearoff_enabled_for(handle: Option<DragHandle>, payload: DragPayload) 
         (Some(DragHandle::GroupGrip), DragPayload::Group { .. }) => false,
         _ => false,
     }
+}
+
+/// Checks whether the active gesture has crossed its native tear-off boundary.
+fn native_tearoff_required(controller: &mut DockController, point: Point) -> bool {
+    let DragState::Dragging { payload, .. } = controller.drag().session().state() else {
+        return false;
+    };
+    let handle = controller.drag().session().handle();
+    native_tearoff_enabled_for(handle, payload)
+        && native_tearoff_boundary_reached(controller, handle, payload, point)
 }
 
 /// Checks the semantic boundary that turns an in-layout drag into a native tear-off.
