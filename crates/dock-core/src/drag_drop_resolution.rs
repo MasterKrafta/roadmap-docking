@@ -1082,6 +1082,60 @@ fn column_header_drag_moves_a_complete_column_between_main_docks() {
 }
 
 #[test]
+fn column_header_can_reorder_within_a_main_dock_at_max_column_capacity() {
+    let metrics = DockMetrics {
+        max_columns: 2,
+        ..DockMetrics::default()
+    };
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, first_panel) = builder.panel(key("column-capacity-first"), constraints());
+    let first_group = builder.tabs(vec![first_panel], 0, false);
+    let source_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![first_group],
+        vec![1.0],
+    );
+
+    let (_, second_panel) = builder.panel(key("column-capacity-second"), constraints());
+    let second_group = builder.tabs(vec![second_panel], 0, false);
+    let second_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![second_group],
+        vec![1.0],
+    );
+
+    let root = builder.split(
+        Axis::X,
+        vec![source_column, second_column],
+        vec![0.5, 0.5],
+    );
+    builder.main_area(DockSide::Left, root);
+
+    let layout = builder.build();
+    let rects = layout
+        .compute_rects(
+            Rect::new(Point::ZERO, Size::new(1200.0, 800.0)),
+            &metrics,
+        )
+        .unwrap();
+    let zones = layout
+        .compute_drop_zones(DropSource::Column { column: source_column }, &rects, &metrics)
+        .unwrap();
+
+    assert!(zones.iter().any(|zone| {
+        zone.target
+            == DropTarget::MainColumn {
+                side: DockSide::Left,
+                index: 2,
+            }
+            && zone.zone == crate::DropZone::ColumnRight
+    }));
+}
+
+#[test]
 fn column_header_drag_reorders_columns_within_one_main_dock() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
