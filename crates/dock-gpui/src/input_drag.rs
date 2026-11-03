@@ -391,7 +391,7 @@ pub(crate) fn finish_floating_tab_drag(
     })
 }
 
-/// Detaches a whole Column on pointer-down and assigns its already-created
+/// Detaches a drag-only composition on pointer-down and assigns its already-created
 /// hidden PanelWindow as a temporary native drag surface. The native move itself
 /// remains thresholded; releasing without moving cancels the open history transaction.
 pub(crate) fn begin_native_tearoff_on_press(
@@ -407,17 +407,27 @@ pub(crate) fn begin_native_tearoff_on_press(
             }
             _ => return None,
         };
-        let (DragHandle::ColumnHeader, DragPayload::Column { column }) = (handle, payload) else {
-            return None;
-        };
         let local_bounds = floating_bounds(controller, payload, pointer)?;
-        Some((
-            DockCommand::Float {
-                node: column,
+        let command = match (handle, payload) {
+            (DragHandle::ColumnHeader, DragPayload::Column { column }) => {
+                DockCommand::Float {
+                    node: column,
+                    bounds: local_bounds,
+                }
+            }
+            (DragHandle::GroupGrip, DragPayload::Group { group }) => DockCommand::Float {
+                node: group,
                 bounds: local_bounds,
             },
-            local_bounds,
-        ))
+            (DragHandle::FlyoutPanel, DragPayload::Panel { panel }) => {
+                DockCommand::FloatPanelFromFlyout {
+                    panel,
+                    bounds: local_bounds,
+                }
+            }
+            _ => return None,
+        };
+        Some((command, local_bounds))
     });
     let Some((command, local_bounds)) = candidate else {
         return false;
@@ -435,6 +445,12 @@ pub(crate) fn begin_native_tearoff_on_press(
             node,
             bounds: model_bounds,
         },
+        DockCommand::FloatPanelFromFlyout { panel, .. } => {
+            DockCommand::FloatPanelFromFlyout {
+                panel,
+                bounds: model_bounds,
+            }
+        }
         _ => return false,
     };
 
