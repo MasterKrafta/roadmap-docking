@@ -814,6 +814,13 @@ impl Render for FloatingHost {
                             // Capture at press so leaving this native window before
                             // the next GPUI move event still reaches the drag pipeline.
                             window.capture_pointer(hitbox);
+                            if window.captured_hitbox() != Some(hitbox)
+                                && let Some(manager) = manager_for_down.upgrade()
+                            {
+                                manager.update(app, |manager, manager_cx| {
+                                    manager.clear_prepared_panel_tab_drag(manager_cx);
+                                });
+                            }
                         }
                     });
 
