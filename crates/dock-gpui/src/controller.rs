@@ -504,7 +504,12 @@ impl DockController {
         group: FloatingGroupId,
     ) -> Result<(), DragSessionError> {
         let (origin, position) = match self.drag.session().state() {
-            DragState::Dragging { origin, position, .. } => (origin, position),
+            DragState::Pressed {
+                origin, position, ..
+            }
+            | DragState::Dragging {
+                origin, position, ..
+            } => (origin, position),
             _ => return Err(DragSessionError::NoActiveGesture),
         };
         self.drag.cancel_gesture();
