@@ -128,6 +128,9 @@ impl Layout {
             DockCommand::MoveGroup { .. } | DockCommand::MoveGroupToMainColumn { .. } => {
                 self.apply_group_transfer_command(command, metrics)
             }
+            DockCommand::MoveColumnToMainColumn { .. } => {
+                self.apply_column_transfer_command(command, metrics)
+            }
             DockCommand::MergeGroup { .. } | DockCommand::SplitGroup { .. } => {
                 self.apply_group_command(command, metrics)
             }
@@ -205,6 +208,9 @@ impl Layout {
                         affected.push(area.root);
                     }
                 }
+            }
+            DockCommand::MoveColumnToMainColumn { column, .. } => {
+                affected.push(*column);
             }
             DockCommand::SetChrome { .. } => {
                 for layout in [self, other] {
