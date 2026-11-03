@@ -34,6 +34,9 @@ impl Layout {
 
 impl FloatingZoneContext<'_> {
     fn append_all(&mut self) -> Result<(), ComputeRectsError> {
+        if matches!(self.source, DropSource::Column { .. }) {
+            return Ok(());
+        }
         // Floating-window drop zones are stacked over their contents. Their outer
         // top/bottom targets address the first/last group in a vertical stack.
         for index in (0..self.rects.floating_groups.len()).rev() {
@@ -105,6 +108,7 @@ impl FloatingZoneContext<'_> {
                         == Some(target_group.group)
                 }
                 DropSource::Group { .. } => false,
+                DropSource::Column { .. } => false,
             };
             if is_self || panel_already_in_group {
                 continue;
@@ -119,6 +123,7 @@ impl FloatingZoneContext<'_> {
                     group: target_group.group,
                     index: tabs.children.len(),
                 },
+                DropSource::Column { .. } => continue,
             };
             push_zone(
                 self.zones,
