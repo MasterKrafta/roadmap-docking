@@ -1,6 +1,142 @@
 use super::*;
 
 impl Layout {
+    /// A Column can only move as a complete composition: to another Main Dock
+    /// insertion slot or into free Canvas space as a floating root. It cannot
+    /// merge into an individual Tabs group or become a child of another Column.
+    pub(in crate::compute_drop_zones) fn append_column_drag_zones(
+        &self,
+        context: &DropZoneBuildContext<'_>,
+        zones: &mut Vec<DropZoneRect>,
+    ) -> Result<(), ComputeRectsError> {
+        let DropZoneBuildContext {
+            source,
+            source_panels,
+            rects,
+            metrics,
+            viewport,
+            left_columns,
+            right_columns,
+            may_add_left_column,
+            may_add_right_column,
+            ..
+        } = *context;
+        let DropSource::Column { column: source_column } = source else {
+            return Ok(());
+        };
+
+        let source_position = left_columns
+            .iter()
+            .position(|(id, _)| *id == source_column)
+            .map(|index| (DockSide::Left, index))
+            .or_else(|| {
+                right_columns
+                    .iter()
+                    .position(|(id, _)| *id == source_column)
+                    .map(|index| (DockSide::Right, index))
+            })
+            .ok_or(ComputeRectsError::InvalidLayoutState)?;
+
+        let can_insert = |side| match side {
+            DockSide::Left => may_add_left_column,
+            DockSide::Right => may_add_right_column,
+        };
+        let is_same_position = |side, index| {
+            source_position.0 == side
+                && (index == source_position.1 || index == source_position.1 + 1)
+        };
+
+        if source_allows(self, source_panels, AllowedArea::MAIN_DOCK) {
+            for (side, columns) in [
+                (DockSide::Left, left_columns),
+                (DockSide::Right, right_columns),
+            ] {
+                if !can_insert(side) {
+                    continue;
+                }
+                for (index, (_, column_rect)) in columns.iter().enumerate() {
+                    let edge_width = metrics.edge_drop_width.min(column_rect.size.width / 3.0);
+                    let left_rect = Rect::new(
+                        column_rect.origin,
+                        Size::new(edge_width, column_rect.size.height),
+                    );
+                    let right_rect = Rect::new(
+                        Point::new(
+                            column_rect.origin.x + column_rect.size.width - edge_width,
+                            column_rect.origin.y,
+                        ),
+                        Size::new(edge_width, column_rect.size.height),
+                    );
+
+                    if !is_same_position(side, index) {
+                        push_zone(
+                            zones,
+                            DropTarget::MainColumn { side, index },
+                            DropZone::ColumnLeft,
+                            left_rect,
+                        )?;
+                    }
+                    if !is_same_position(side, index + 1) {
+                        push_zone(
+                            zones,
+                            DropTarget::MainColumn {
+                                side,
+                                index: index + 1,
+                            },
+                            DropZone::ColumnRight,
+                            right_rect,
+                        )?;
+                    }
+                }
+            }
+
+            // The outer window edges also accept a whole Column, including when
+            // the destination Main Dock is currently empty.
+            if rects.canvas.is_some() {
+                let edge_width = metrics.edge_drop_width.min(viewport.size.width / 3.0);
+                for (side, columns, is_left) in [
+                    (DockSide::Left, left_columns, true),
+                    (DockSide::Right, right_columns, false),
+                ] {
+                    if !can_insert(side) {
+                        continue;
+                    }
+                    let index = if is_left { 0 } else { columns.len() };
+                    if is_same_position(side, index) {
+                        continue;
+                    }
+                    let edge_rect = if is_left {
+                        Rect::new(
+                            viewport.origin,
+                            Size::new(edge_width, viewport.size.height),
+                        )
+                    } else {
+                        Rect::new(
+                            Point::new(
+                                viewport.origin.x + viewport.size.width - edge_width,
+                                viewport.origin.y,
+                            ),
+                            Size::new(edge_width, viewport.size.height),
+                        )
+                    };
+                    push_zone(
+                        zones,
+                        DropTarget::MainColumn { side, index },
+                        DropZone::DockEdge,
+                        edge_rect,
+                    )?;
+                }
+            }
+        }
+
+        if source_allows(self, source_panels, AllowedArea::FLOATING)
+            && let Some(canvas) = rects.canvas
+        {
+            push_zone(zones, DropTarget::FreeArea, DropZone::FreeArea, canvas)?;
+        }
+        Ok(())
+    }
+
     pub(in crate::compute_drop_zones) fn append_main_group_zones(
         &self,
         context: &DropZoneBuildContext<'_>,
