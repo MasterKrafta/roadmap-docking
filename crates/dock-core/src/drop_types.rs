@@ -2,15 +2,17 @@ use crate::{DockSide, NodeId, Rect};
 
 /// The semantic item currently being dragged, used to compute legal drop targets.
 ///
-/// A whole Tabs group keeps its identity during reorder/split. A floating-window
-/// capture also uses the complete floating composition root here, which may be a
-/// Column or Split rather than a Tabs node. Individual panels carry their PanelId
-/// so Core can apply the panel's area restrictions.
+/// A whole Tabs group keeps its identity during reorder/split. Column sources carry
+/// an entire main-dock Column composition. A floating-window capture uses the complete
+/// floating composition root, which may be a Column or Split rather than a Tabs node.
+/// Individual panels carry their PanelId so Core can apply area restrictions.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum DropSource {
     Panel { panel: crate::PanelId },
     Group { group: crate::NodeId },
+    /// A whole Column dragged from the main dock.
+    Column { column: NodeId },
 }
 
 /// Semantic kind of a drop affordance. Cardinal directions are also used by
