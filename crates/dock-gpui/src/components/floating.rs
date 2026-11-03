@@ -456,6 +456,42 @@ fn floating_root_title(
     }
 }
 
+fn floating_title_drag_reserved_width(snapshot: &FloatingHostSnapshot) -> f32 {
+    let column_uses_window_header = snapshot.rects.columns.len() == 1
+        && snapshot.rects.columns[0].rect.origin == snapshot.floating.rect.origin
+        && snapshot.rects.columns[0].rect.size == snapshot.floating.rect.size;
+
+    if column_uses_window_header {
+        let column = snapshot.rects.columns[0];
+        let group_ids = snapshot
+            .column_groups
+            .get(&column.column)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        let group_rects = snapshot
+            .rects
+            .groups
+            .iter()
+            .filter(|group| group_ids.contains(&group.group))
+            .collect::<Vec<_>>();
+        let uses_dock_component_header = group_rects.len() == 1
+            && snapshot
+                .group_presentations
+                .get(&group_rects[0].group)
+                .is_some_and(|presentation| {
+                    presentation.tabs.len() == 1
+                        && presentation.active_panel
+                            == presentation.tabs.first().map(|tab| tab.panel)
+                });
+
+        if uses_dock_component_header {
+            return 2.0 * snapshot.metrics.column_control_button_width;
+        }
+    }
+
+    snapshot.metrics.group_control_button_width
+}
+
 fn floating_host_snapshot(
     controller: &mut DockController,
     window_id: WindowId,
@@ -746,6 +782,9 @@ impl Render for FloatingHost {
         let tab_press = self.tab_press.clone();
         let input_window_id = window_id;
         let floating_rect = snapshot.as_ref().map(|snapshot| snapshot.floating.rect);
+        let title_drag_reserved_width = snapshot
+            .as_ref()
+            .map(floating_title_drag_reserved_width);
         let title_input = canvas(
             move |bounds, window, _| Some(window.insert_hitbox(bounds, HitboxBehavior::Normal).id),
             move |_, hitbox, window, _| {
@@ -787,7 +826,11 @@ impl Render for FloatingHost {
                                     .map(|floating| metrics.header_height.min(floating.rect.size.height))
                                     .unwrap_or(0.0);
                                 let close_width = metrics.group_control_button_width.min(title_height);
-                                width.is_some_and(|width| point.x < width - close_width)
+                                let reserved_width = title_drag_reserved_width
+                                    .unwrap_or(close_width);
+                                width.is_some_and(|width| {
+                                    point.x < width - reserved_width.min(width)
+                                })
                             });
                             if is_title_grip
                                 && let Some(manager) = manager_for_down.upgrade()
