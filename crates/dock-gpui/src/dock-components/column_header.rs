@@ -1,3 +1,4 @@
+use super::{CollapseColumnButton, CloseColumnButton};
 use dock_core::DockMetrics;
 use gpui::{IntoElement, ParentElement, Styled, div, px, rgb};
 use ui::Theme;
@@ -40,4 +41,3 @@ impl ColumnHeader {
         header
     }
 }
-
