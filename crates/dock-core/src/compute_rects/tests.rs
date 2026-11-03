@@ -221,6 +221,59 @@ fn ratio_allocation_clamps_small_group_to_its_panel_minimum_and_redistributes_re
 }
 
 #[test]
+fn column_groups_share_one_toolbar_row_and_keep_a_flexible_group_drag_lane() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+    let (first_panel, first_node) = builder.panel(key("column-first-tab"), constraints());
+    let (second_panel, second_node) = builder.panel(key("column-second-tab"), constraints());
+    let first_group = builder.tabs(vec![first_node, second_node], 1, false);
+    let (third_panel, third_node) = builder.panel(key("column-second-group"), constraints());
+    let second_group = builder.tabs(vec![third_node], 0, false);
+    let column = builder.column(
+        280.0,
+        ColumnMode::Expanded,
+        vec![first_group, second_group],
+        vec![0.5, 0.5],
+    );
+    builder.main_area(DockSide::Left, column);
+    let layout = builder.build();
+
+    let rects = layout
+        .compute_rects(viewport(1000.0, 600.0), &metrics)
+        .unwrap();
+    let first_group_rect = rects.groups.iter().find(|rect| rect.group == first_group).unwrap().rect;
+    let second_group_rect = rects.groups.iter().find(|rect| rect.group == second_group).unwrap().rect;
+    let first_strip = rects.tab_strips.iter().find(|strip| strip.group == first_group).unwrap().rect;
+    let second_strip = rects.tab_strips.iter().find(|strip| strip.group == second_group).unwrap().rect;
+    let first_tab = rects.tab_headers.iter().find(|tab| tab.panel == first_panel).unwrap().rect;
+    let second_tab = rects.tab_headers.iter().find(|tab| tab.panel == second_panel).unwrap().rect;
+    let third_tab = rects.tab_headers.iter().find(|tab| tab.panel == third_panel).unwrap().rect;
+    let second_panel_rect = rects.panels.iter().find(|panel| panel.panel == third_panel).unwrap().rect;
+    let toolbar_height = metrics.header_height.max(metrics.tab_strip_height);
+    let strip_width = 280.0 - 2.0 * metrics.group_control_button_width;
+
+    assert_eq!(first_strip.origin, first_group_rect.origin);
+    assert_eq!(second_strip.origin, second_group_rect.origin);
+    assert_eq!(first_strip.size.width, strip_width);
+    assert_eq!(second_strip.size.width, strip_width);
+    assert_eq!(first_strip.size.height, toolbar_height);
+    assert_eq!(second_strip.size.height, toolbar_height);
+    assert_eq!(first_tab.size.width, metrics.min_tab_width);
+    assert_eq!(second_tab.origin.x, metrics.min_tab_width);
+    assert_eq!(second_tab.size.width, metrics.min_tab_width);
+    assert_eq!(third_tab.size.width, metrics.min_tab_width);
+    assert_eq!(
+        second_group_rect.origin.y,
+        first_group_rect.origin.y + first_group_rect.size.height + metrics.splitter_thickness
+    );
+    assert_eq!(
+        second_panel_rect.origin.y,
+        second_group_rect.origin.y + toolbar_height
+    );
+    assert!(first_strip.size.width > first_tab.size.width + second_tab.size.width);
+}
+
+#[test]
 fn active_tab_gets_panel_bounds_and_all_tabs_get_header_rectangles() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
@@ -243,7 +296,7 @@ fn active_tab_gets_panel_bounds_and_all_tabs_get_header_rectangles() {
     assert_eq!(rects.panels[0].panel, active_panel);
     assert_eq!(
         rects.panels[0].rect.origin.y,
-        metrics.column_header_height + metrics.header_height + metrics.tab_strip_height
+        metrics.column_header_height + metrics.header_height.max(metrics.tab_strip_height)
     );
     assert!(rects.drop_zones.is_empty());
 }
@@ -621,8 +674,11 @@ fn golden_rects_for_single_left_column_are_exact_and_deterministic() {
     assert_eq!(
         rects.tab_strips[0].rect,
         Rect::new(
-            Point::new(0.0, metrics.column_header_height + 28.0),
-            Size::new(280.0, 28.0)
+            Point::new(0.0, metrics.column_header_height),
+            Size::new(
+                280.0 - 2.0 * metrics.group_control_button_width,
+                metrics.header_height.max(metrics.tab_strip_height)
+            )
         )
     );
     assert_eq!(rects.tab_headers.len(), 1);
@@ -631,8 +687,11 @@ fn golden_rects_for_single_left_column_are_exact_and_deterministic() {
     assert_eq!(
         rects.tab_headers[0].rect,
         Rect::new(
-            Point::new(0.0, metrics.column_header_height + 28.0),
-            Size::new(280.0, 28.0)
+            Point::new(0.0, metrics.column_header_height),
+            Size::new(
+                metrics.min_tab_width,
+                metrics.header_height.max(metrics.tab_strip_height)
+            )
         )
     );
     assert_eq!(rects.panels.len(), 1);
@@ -640,8 +699,15 @@ fn golden_rects_for_single_left_column_are_exact_and_deterministic() {
     assert_eq!(
         rects.panels[0].rect,
         Rect::new(
-            Point::new(0.0, metrics.column_header_height + 56.0),
-            Size::new(280.0, 600.0 - metrics.column_header_height - 56.0)
+            Point::new(
+                0.0,
+                metrics.column_header_height + metrics.header_height.max(metrics.tab_strip_height)
+            ),
+            Size::new(
+                280.0,
+                600.0 - metrics.column_header_height
+                    - metrics.header_height.max(metrics.tab_strip_height)
+            )
         )
     );
     assert_eq!(rects.splitters.len(), 1);

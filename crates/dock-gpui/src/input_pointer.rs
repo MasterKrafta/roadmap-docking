@@ -774,13 +774,21 @@ fn group_grip_contains(
             return false;
         };
 
-        let reserved_grip_left = if rects.columns.iter().any(|column_rect| {
-            column_rect.rect.origin.y == group_rect.rect.origin.y
-                && matches!(
-                    controller.layout().node(column_rect.column),
-                    Some(Node::Column(column)) if column.groups.first() == Some(&group)
-                )
-        }) {
+        let is_column_group = rects.columns.iter().any(|column_rect| {
+            matches!(
+                controller.layout().node(column_rect.column),
+                Some(Node::Column(column)) if column.groups.contains(&group)
+            )
+        });
+        let reserved_grip_left = if !is_column_group
+            && rects.columns.iter().any(|column_rect| {
+                column_rect.rect.origin.y == group_rect.rect.origin.y
+                    && matches!(
+                        controller.layout().node(column_rect.column),
+                        Some(Node::Column(column)) if column.groups.first() == Some(&group)
+                    )
+            })
+        {
             metrics.group_control_button_width + 8.0
         } else {
             0.0
@@ -789,11 +797,21 @@ fn group_grip_contains(
             .group_control_button_width
             .min(group_rect.rect.size.width / 3.0)
             .max(1.0);
-        let header_height = metrics.header_height.min(group_rect.rect.size.height);
+        let requested_header_height = if is_column_group {
+            metrics.header_height.max(metrics.tab_strip_height)
+        } else {
+            metrics.header_height
+        };
+        let header_height = requested_header_height.min(group_rect.rect.size.height);
+        let right_reserve = if is_column_group {
+            control_width
+        } else {
+            2.0 * control_width
+        };
         point.y >= group_rect.rect.origin.y
             && point.y < group_rect.rect.origin.y + header_height
             && point.x >= group_rect.rect.origin.x + reserved_grip_left
-            && point.x < group_rect.rect.origin.x + group_rect.rect.size.width - 2.0 * control_width
+            && point.x < group_rect.rect.origin.x + group_rect.rect.size.width - right_reserve
     })
 }
 

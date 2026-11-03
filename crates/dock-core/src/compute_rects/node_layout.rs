@@ -49,6 +49,7 @@ pub(super) fn layout_node(
             minimum_sizes,
             output,
             false,
+            false,
         ),
         Node::Panel(panel) => {
             let minimum = layout
@@ -241,28 +242,18 @@ pub(super) fn layout_column(
             Point::new(content_rect.origin.x, y),
             Size::new(content_rect.size.width, height),
         );
-        if auto_collapsed.contains(group_id) {
-            if let Some(Node::Tabs(tabs)) = layout.node(*group_id) {
-                layout_tabs(
-                    layout,
-                    *group_id,
-                    tabs,
-                    group_rect,
-                    metrics,
-                    minimum_sizes,
-                    output,
-                    true,
-                )?;
-            } else {
-                layout_node(
-                    layout,
-                    *group_id,
-                    group_rect,
-                    metrics,
-                    minimum_sizes,
-                    output,
-                )?;
-            }
+        if let Some(Node::Tabs(tabs)) = layout.node(*group_id) {
+            layout_tabs(
+                layout,
+                *group_id,
+                tabs,
+                group_rect,
+                metrics,
+                minimum_sizes,
+                output,
+                auto_collapsed.contains(group_id),
+                true,
+            )?;
         } else {
             layout_node(
                 layout,
@@ -295,6 +286,7 @@ pub(super) fn layout_tabs(
     minimum_sizes: &mut HashMap<NodeId, Size>,
     output: &mut LayoutRects,
     force_collapsed: bool,
+    column_group: bool,
 ) -> Result<(), ComputeRectsError> {
     let collapsed = tabs.collapsed || force_collapsed;
     let mut minimum_size = minimum_node_size(layout, id, metrics, minimum_sizes)?;
@@ -333,17 +325,31 @@ pub(super) fn layout_tabs(
 
     let strip_height = if collapsed {
         group_rect.size.height
+    } else if column_group {
+        metrics
+            .header_height
+            .max(metrics.tab_strip_height)
+            .min(group_rect.size.height)
     } else {
         metrics.tab_strip_height
     };
-    let strip_y = if collapsed {
+    let strip_y = if collapsed || column_group {
         group_rect.origin.y
     } else {
         group_rect.origin.y + metrics.header_height
     };
+    let control_width = metrics
+        .group_control_button_width
+        .min(group_rect.size.width / 3.0)
+        .max(1.0);
+    let strip_width = if column_group {
+        (group_rect.size.width - 2.0 * control_width).max(0.0)
+    } else {
+        group_rect.size.width
+    };
     let strip_rect = Rect::new(
         Point::new(group_rect.origin.x, strip_y),
-        Size::new(group_rect.size.width, strip_height),
+        Size::new(strip_width, strip_height),
     );
     strip_rect.validate().map_err(ComputeRectsError::Geometry)?;
     output.tab_strips.push(TabStripRect::new(id, strip_rect));
@@ -351,17 +357,24 @@ pub(super) fn layout_tabs(
     if !tabs.children.is_empty() {
         let tab_count = tabs.children.len();
         let needs_overflow =
-            tab_count as f64 * f64::from(metrics.min_tab_width) > f64::from(group_rect.size.width);
+            tab_count as f64 * f64::from(metrics.min_tab_width) > f64::from(strip_width);
 
         if !needs_overflow {
-            // All tabs remain visible and share the strip width. This naturally
-            // compresses headers as more tabs are added, down to min_tab_width.
-            let tab_width = group_rect.size.width / tab_count as f32;
+            // Column tabs stay compact so the remaining strip width is a
+            // deliberate drag lane for the whole Group. Floating groups retain
+            // the existing full-width, evenly divided tab presentation.
+            let tab_width = if column_group {
+                metrics.min_tab_width
+            } else {
+                strip_width / tab_count as f32
+            };
             for (index, child_id) in tabs.children.iter().enumerate() {
                 if let Some(Node::Panel(panel)) = layout.node(*child_id) {
                     let x = group_rect.origin.x + tab_width * index as f32;
-                    let width = if index + 1 == tab_count {
-                        (group_rect.origin.x + group_rect.size.width) - x
+                    let width = if column_group {
+                        tab_width
+                    } else if index + 1 == tab_count {
+                        (group_rect.origin.x + strip_width) - x
                     } else {
                         tab_width
                     };
@@ -380,8 +393,8 @@ pub(super) fn layout_tabs(
             // Photoshop behavior: reserve a trailing button and expose omitted
             // panel ids so the adapter can build a menu/list.
             let requested_button_width =
-                metrics.tab_overflow_button_width.min(group_rect.size.width);
-            let requested_visible_width = (group_rect.size.width - requested_button_width).max(0.0);
+                metrics.tab_overflow_button_width.min(strip_width);
+            let requested_visible_width = (strip_width - requested_button_width).max(0.0);
             let visible_count =
                 ((requested_visible_width / metrics.min_tab_width).floor() as usize).min(tab_count);
             // When even one minimum-width tab cannot fit beside the button,
@@ -455,9 +468,13 @@ pub(super) fn layout_tabs(
         return Ok(());
     }
 
-    let content_y = group_rect.origin.y + metrics.header_height + metrics.tab_strip_height;
-    let content_height =
-        (group_rect.size.height - metrics.header_height - metrics.tab_strip_height).max(0.0);
+    let content_chrome_height = if column_group {
+        strip_height
+    } else {
+        metrics.header_height + metrics.tab_strip_height
+    };
+    let content_y = group_rect.origin.y + content_chrome_height;
+    let content_height = (group_rect.size.height - content_chrome_height).max(0.0);
     let content_rect = Rect::new(
         Point::new(group_rect.origin.x, content_y),
         Size::new(group_rect.size.width, content_height),

@@ -420,8 +420,21 @@ fn hit_layout_geometry(
         }));
     }
 
-    // A GroupRect's upper header band is the non-floating group/column header.
-    // Collapsed groups have no separate header: their tab strip starts at y=0.
+    // Tab headers share the Group toolbar row inside Columns, so resolve them
+    // before the wider Group drag band. Floating Groups keep separate rows.
+    for tab in rects.tab_headers.iter().rev() {
+        if node_in_scope(tab.group, scope_nodes, include_only) && contains(tab.rect, point)? {
+            return Ok(Some(HitResult::TabHeader {
+                group: tab.group,
+                panel: tab.panel,
+                index: tab.index,
+            }));
+        }
+    }
+
+    // A GroupRect's upper header band is the Group drag area. For a Group that
+    // belongs to a Column, the band is the single shared toolbar row.
+    // Collapsed Groups have no separate header: their tab strip starts at y=0.
     for group in rects.groups.iter().rev() {
         if !node_in_scope(group.group, scope_nodes, include_only) {
             continue;
@@ -436,23 +449,24 @@ fn hit_layout_geometry(
         if matches!(layout.node(group.group), Some(Node::Tabs(tabs)) if tabs.collapsed) {
             continue;
         }
-        let header_height = metrics.header_height.min(group.rect.size.height);
+        let is_column_group = rects.columns.iter().any(|column_rect| {
+            matches!(
+                layout.node(column_rect.column),
+                Some(Node::Column(column)) if column.groups.contains(&group.group)
+            )
+        });
+        let requested_header_height = if is_column_group {
+            metrics.header_height.max(metrics.tab_strip_height)
+        } else {
+            metrics.header_height
+        };
+        let header_height = requested_header_height.min(group.rect.size.height);
         let header = Rect::new(
             group.rect.origin,
             crate::Size::new(group.rect.size.width, header_height),
         );
         if contains(header, point)? {
             return Ok(Some(HitResult::Group { group: group.group }));
-        }
-    }
-
-    for tab in rects.tab_headers.iter().rev() {
-        if node_in_scope(tab.group, scope_nodes, include_only) && contains(tab.rect, point)? {
-            return Ok(Some(HitResult::TabHeader {
-                group: tab.group,
-                panel: tab.panel,
-                index: tab.index,
-            }));
         }
     }
 

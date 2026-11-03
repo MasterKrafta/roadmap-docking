@@ -59,7 +59,7 @@ impl GroupView {
             .border_1()
             .border_color(rgb(theme.colors.group_frame_border));
 
-        if header_height > 0.0 {
+        if column.is_none() && header_height > 0.0 {
             let grip = div()
                 .id(format!("group-grip-{:?}", group.group))
                 .absolute()
@@ -95,12 +95,12 @@ impl GroupView {
 
         // Collapsed groups have no header rect, so their controls overlay the
         // trailing edge of the remaining tab strip to keep Expand/Menu reachable.
-        let controls_top = if presentation.collapsed {
+        let controls_top = if column.is_some() || presentation.collapsed {
             strip.rect.origin.y - group.rect.origin.y
         } else {
             0.0
         };
-        let controls_height = if presentation.collapsed {
+        let controls_height = if column.is_some() || presentation.collapsed {
             strip.rect.size.height
         } else {
             header_height
@@ -120,7 +120,7 @@ impl GroupView {
             .cursor_pointer()
             .bg(rgb(theme.colors.group_menu_button))
             .text_color(rgb(theme.colors.primary_text))
-            .child("⋮")
+            .child(if column.is_some() { "☰" } else { "⋮" })
             .on_click(move |event, _, app| {
                 (menu_toggle)(
                     ContextMenuTarget::Group(group.group),
@@ -131,6 +131,26 @@ impl GroupView {
                     app,
                 );
             });
+        if column.is_some() {
+            // Column Groups use one compact toolbar: tabs on the left, a
+            // flexible drag lane in the middle, a fixed Group grip, and Menu.
+            let group_grip = div()
+                .id(format!("group-grip-handle-{:?}", group.group))
+                .absolute()
+                .left(px((group.rect.size.width - 2.0 * control_width).max(0.0)))
+                .top(px(controls_top))
+                .w(px(control_width))
+                .h(px(controls_height))
+                .flex()
+                .items_center()
+                .justify_center()
+                .cursor_pointer()
+                .bg(rgb(theme.colors.group_grip_background))
+                .text_color(rgb(theme.colors.primary_text))
+                .child("⠿");
+            return root.child(group_grip).child(menu_button);
+        }
+
         root = root.child(menu_button);
 
         let collapse_controller = controller.clone();

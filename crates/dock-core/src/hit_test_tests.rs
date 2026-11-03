@@ -415,7 +415,7 @@ fn splitter_priority_beats_overlapping_panel_content() {
 }
 
 #[test]
-fn group_header_precedes_tab_header_and_column_background() {
+fn column_group_toolbar_prefers_tabs_and_keeps_blank_group_drag_space() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
     let (panel_id, panel_node) = builder.panel(key("header-hit"), constraints());
@@ -427,16 +427,42 @@ fn group_header_precedes_tab_header_and_column_background() {
         .compute_rects(viewport(1000.0, 500.0), &metrics)
         .unwrap();
 
+    let tab = rects
+        .tab_headers
+        .iter()
+        .find(|header| header.panel == panel_id)
+        .unwrap()
+        .rect;
+    let tab_center = Point::new(
+        tab.origin.x + tab.size.width / 2.0,
+        tab.origin.y + tab.size.height / 2.0,
+    );
+    let blank_group_drag_point = Point::new(
+        tab.origin.x + tab.size.width + 4.0,
+        tab.origin.y + tab.size.height / 2.0,
+    );
+    let panel_content = rects.panels[0].rect;
+    let panel_point = Point::new(
+        panel_content.origin.x + 1.0,
+        panel_content.origin.y + 1.0,
+    );
+
+    assert_eq!(
+        layout.hit_test(tab_center, &rects, &metrics).unwrap(),
+        HitResult::TabHeader {
+            group,
+            panel: panel_id,
+            index: 0,
+        }
+    );
     assert_eq!(
         layout
-            .hit_test(Point::new(100.0, 10.0), &rects, &metrics)
+            .hit_test(blank_group_drag_point, &rects, &metrics)
             .unwrap(),
         HitResult::Group { group }
     );
     assert_eq!(
-        layout
-            .hit_test(Point::new(100.0, 100.0), &rects, &metrics)
-            .unwrap(),
+        layout.hit_test(panel_point, &rects, &metrics).unwrap(),
         HitResult::Panel { panel: panel_id }
     );
 }
@@ -496,9 +522,18 @@ fn tab_header_uses_half_open_bounds_and_precedes_panel_content() {
         .compute_rects(viewport(1000.0, 500.0), &metrics)
         .unwrap();
 
+    let left_header = rects
+        .tab_headers
+        .iter()
+        .find(|header| header.panel == left_panel)
+        .unwrap()
+        .rect;
+    let boundary_x = left_header.origin.x + left_header.size.width;
+    let header_y = left_header.origin.y + left_header.size.height / 2.0;
+
     assert_eq!(
         layout
-            .hit_test(Point::new(139.999, 40.0), &rects, &metrics)
+            .hit_test(Point::new(boundary_x - 0.001, header_y), &rects, &metrics)
             .unwrap(),
         HitResult::TabHeader {
             group,
@@ -506,7 +541,7 @@ fn tab_header_uses_half_open_bounds_and_precedes_panel_content() {
             index: 0
         }
     );
-    let boundary = Point::new(140.0, 40.0);
+    let boundary = Point::new(boundary_x, header_y);
     let expected = HitResult::TabHeader {
         group,
         panel: right_panel,
@@ -602,10 +637,13 @@ fn collapsed_tab_header_is_hit_without_inventing_a_group_header() {
         .compute_rects(viewport(1000.0, 500.0), &metrics)
         .unwrap();
 
+    let tab = rects.tab_headers[0].rect;
+    let tab_center = Point::new(
+        tab.origin.x + tab.size.width / 2.0,
+        tab.origin.y + tab.size.height / 2.0,
+    );
     assert_eq!(
-        layout
-            .hit_test(Point::new(100.0, 10.0), &rects, &metrics)
-            .unwrap(),
+        layout.hit_test(tab_center, &rects, &metrics).unwrap(),
         HitResult::TabHeader {
             group,
             panel: panel_id,
