@@ -463,6 +463,9 @@ impl FloatingWindowManager {
         let Some(entry) = self.registry.windows.get(&panel) else {
             return false;
         };
+        if entry.visibility != PanelWindowVisibility::Hidden {
+            return false;
+        }
         let (Some(native_window), window_id) = (entry.native_window, entry.window_id) else {
             return false;
         };
