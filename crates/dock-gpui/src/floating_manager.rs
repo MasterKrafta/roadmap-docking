@@ -154,7 +154,6 @@ struct NativeMoveTarget {
 #[derive(Clone, Copy)]
 struct PendingPanelTabTearOff {
     panel: PanelId,
-    native_window: NativeWindowId,
     window_id: WindowId,
     initial_cursor: PhysicalPoint,
     start_pointer: Point,
@@ -488,7 +487,6 @@ impl FloatingWindowManager {
         let high_resolution_timer = self.native_ops.begin_high_resolution_timer().is_ok();
         self.pending_panel_tab_tearoff = Some(PendingPanelTabTearOff {
             panel,
-            native_window,
             window_id,
             initial_cursor: cursor,
             start_pointer: pointer,
@@ -553,6 +551,15 @@ impl FloatingWindowManager {
         }) else {
             return false;
         };
+        let window_is_current = self.registry.windows.get(&panel).is_some_and(|entry| {
+            entry.window_id == state.window_id
+                && entry.native_window.is_some()
+                && entry.visibility == PanelWindowVisibility::Hidden
+        });
+        if !window_is_current {
+            self.cancel_pending_panel_tab_tearoff(cx);
+            return false;
+        }
         let source_is_current = self.controller.update(cx, |controller, _| {
             controller.layout().version() == state.layout_version
                 && matches!(
