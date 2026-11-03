@@ -652,7 +652,7 @@ impl FloatingWindowManager {
         true
     }
 
-    /// Assigns a hidden native window to a Column detached on pointer-down.
+    /// Assigns a hidden native window to a composition detached on pointer-down.
     /// The window is shown without its floating header only after the drag threshold
     /// is crossed; releasing before that threshold rolls the transaction back.
     pub(crate) fn begin_pending_tearoff_move(
@@ -695,11 +695,11 @@ impl FloatingWindowManager {
             y: cursor.y.saturating_sub(grab_offset.y),
         };
         if let Err(error) = self.native_ops.move_window(native_window, position) {
-            tracing::warn!(?group, %error, "could not position temporary Column window");
+            tracing::warn!(?group, %error, "could not position temporary floating window");
             return false;
         }
         if let Err(error) = self.native_ops.hide(native_window) {
-            tracing::warn!(?group, %error, "could not keep the temporary Column window hidden before drag threshold");
+            tracing::warn!(?group, %error, "could not keep the temporary floating window hidden before drag threshold");
             return false;
         }
         if let Some(panel) = self.host_registry.panel_for_group(group)
