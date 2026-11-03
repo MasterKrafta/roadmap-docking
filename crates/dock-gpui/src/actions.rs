@@ -49,7 +49,7 @@ pub(crate) fn toggle_registered_panel(
             }
         };
 
-        controller.dispatch_in(command, controller_cx)
+        controller.dispatch_in(command, controller_cx).map(|_| ())
     });
 
     if let Err(error) = result {
