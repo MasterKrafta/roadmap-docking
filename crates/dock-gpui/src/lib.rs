@@ -102,7 +102,13 @@ pub fn run(_options: RunOptions) {
             },
             move |_, cx| {
                 let host_controller = controller.clone();
-                let dock_host = cx.new(move |_| DockHost::new(host_controller, theme));
+                let manager_controller = controller.clone();
+                let floating_manager =
+                    cx.new(move |_| FloatingWindowManager::new(manager_controller, theme));
+                let dock_host = cx.new(move |_| {
+                    DockHost::new(host_controller, theme)
+                        .with_floating_window_manager(floating_manager)
+                });
                 cx.new(move |_| AppShell::new(controller, dock_host, theme))
             },
         );
