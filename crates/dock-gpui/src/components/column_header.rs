@@ -5,7 +5,7 @@ use gpui::{
 };
 use ui::Theme;
 
-use crate::DockController;
+use crate::{DockController, dock_components::ColumnDragArea};
 
 /// Fixed, non-scrolling header that belongs to the Column rather than to a Group.
 pub struct ColumnHeaderView;
@@ -65,13 +65,10 @@ impl ColumnHeaderView {
             .flex()
             .items_center()
             .bg(rgb(theme.colors.group_frame_background))
-            .child(
-                div()
-                    .id(format!("column-drag-zone-{:?}", column))
-                    .flex_1()
-                    .h_full()
-                    .bg(rgb(theme.colors.group_grip_background)),
-            )
+            .child(ColumnDragArea::render(
+                format!("column-drag-zone-{:?}", column),
+                theme,
+            ))
             .child(mode_button)
     }
 }
