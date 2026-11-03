@@ -495,8 +495,8 @@ fn floating_column_drag_area(snapshot: &FloatingHostSnapshot) -> Option<(Rect, f
     Some((column.rect, reserved_controls_width))
 }
 
-fn floating_dock_component_tabs(snapshot: &FloatingHostSnapshot) -> HashSet<PanelId> {
-    let mut panels = HashSet::new();
+fn floating_dock_component_tab_zones(snapshot: &FloatingHostSnapshot) -> HashMap<PanelId, Rect> {
+    let mut zones = HashMap::new();
     for column in &snapshot.rects.columns {
         let group_ids = snapshot
             .column_groups
@@ -512,17 +512,21 @@ fn floating_dock_component_tabs(snapshot: &FloatingHostSnapshot) -> HashSet<Pane
         if group_rects.len() != 1 {
             continue;
         }
-        let Some(presentation) = snapshot.group_presentations.get(&group_rects[0].group) else {
+        let group = group_rects[0];
+        let Some(presentation) = snapshot.group_presentations.get(&group.group) else {
             continue;
         };
         if presentation.tabs.len() == 1
             && presentation.active_panel == presentation.tabs.first().map(|tab| tab.panel)
             && let Some(tab) = presentation.tabs.first()
         {
-            panels.insert(tab.panel);
+            zones.insert(
+                tab.panel,
+                DockTab::drag_zone(group.rect, snapshot.metrics),
+            );
         }
     }
-    panels
+    zones
 }
 
 fn floating_host_snapshot(
@@ -815,9 +819,9 @@ impl Render for FloatingHost {
         let tab_press = self.tab_press.clone();
         let input_window_id = window_id;
         let floating_rect = snapshot.as_ref().map(|snapshot| snapshot.floating.rect);
-        let dock_component_tabs = snapshot
+        let dock_component_tab_zones = snapshot
             .as_ref()
-            .map(floating_dock_component_tabs)
+            .map(floating_dock_component_tab_zones)
             .unwrap_or_default();
         let column_drag_area = snapshot.as_ref().and_then(floating_column_drag_area);
         let title_input = canvas(
@@ -905,7 +909,7 @@ impl Render for FloatingHost {
                                 .find(|header| header.group == tab_group && header.panel == panel)?;
                             // DockTab has no close button: its complete header is draggable.
                             // Legacy TabHeaderView reserves the trailing close-button hit area.
-                            if !dock_component_tabs.contains(&panel) {
+                            if !dock_component_tab_zones.contains_key(&panel) {
                                 let close_width = 18.0_f32.min(header.rect.size.width);
                                 let header_right = header.rect.origin.x + header.rect.size.width;
                                 if point.x >= header_right - close_width {
@@ -976,25 +980,31 @@ impl Render for FloatingHost {
                             return;
                         }
 
-                        let leaves_source = controller_for_move.update(app, |controller, _| {
-                            let strip = controller
-                                .floating_geometry(input_window_id, group)
-                                .ok()
-                                .and_then(|rects| {
-                                    rects
-                                        .tab_strips
-                                        .iter()
-                                        .find(|strip| strip.group == press.tab_group)
-                                        .map(|strip| strip.rect)
-                                });
-                            if let Some(strip) = strip {
-                                DockTab::leaves_strip_zone(strip, point)
-                            } else {
-                                floating_rect.is_some_and(|rect| {
-                                    rect.contains(point).map(|contains| !contains).unwrap_or(true)
-                                })
-                            }
-                        });
+                        let leaves_source = if let Some(zone) =
+                            dock_component_tab_zones.get(&press.panel).copied()
+                        {
+                            DockTab::leaves_strip_zone(zone, point)
+                        } else {
+                            controller_for_move.update(app, |controller, _| {
+                                let strip = controller
+                                    .floating_geometry(input_window_id, group)
+                                    .ok()
+                                    .and_then(|rects| {
+                                        rects
+                                            .tab_strips
+                                            .iter()
+                                            .find(|strip| strip.group == press.tab_group)
+                                            .map(|strip| strip.rect)
+                                    });
+                                if let Some(strip) = strip {
+                                    DockTab::leaves_strip_zone(strip, point)
+                                } else {
+                                    floating_rect.is_some_and(|rect| {
+                                        rect.contains(point).map(|contains| !contains).unwrap_or(true)
+                                    })
+                                }
+                            })
+                        };
                         let over_other_window = manager_entity.as_ref().is_some_and(|manager| {
                             manager
                                 .update(app, |manager, _| {
@@ -1060,25 +1070,31 @@ impl Render for FloatingHost {
                             app,
                         );
                         if dragging {
-                            let leaves_source = controller_for_up.update(app, |controller, _| {
-                                let strip = controller
-                                    .floating_geometry(input_window_id, group)
-                                    .ok()
-                                    .and_then(|rects| {
-                                        rects
-                                            .tab_strips
-                                            .iter()
-                                            .find(|strip| strip.group == press.tab_group)
-                                            .map(|strip| strip.rect)
-                                    });
-                                if let Some(strip) = strip {
-                                    DockTab::leaves_strip_zone(strip, point)
-                                } else {
-                                    floating_rect.is_some_and(|rect| {
-                                        rect.contains(point).map(|contains| !contains).unwrap_or(true)
-                                    })
-                                }
-                            });
+                            let leaves_source = if let Some(zone) =
+                                dock_component_tab_zones.get(&press.panel).copied()
+                            {
+                                DockTab::leaves_strip_zone(zone, point)
+                            } else {
+                                controller_for_up.update(app, |controller, _| {
+                                    let strip = controller
+                                        .floating_geometry(input_window_id, group)
+                                        .ok()
+                                        .and_then(|rects| {
+                                            rects
+                                                .tab_strips
+                                                .iter()
+                                                .find(|strip| strip.group == press.tab_group)
+                                                .map(|strip| strip.rect)
+                                        });
+                                    if let Some(strip) = strip {
+                                        DockTab::leaves_strip_zone(strip, point)
+                                    } else {
+                                        floating_rect.is_some_and(|rect| {
+                                            rect.contains(point).map(|contains| !contains).unwrap_or(true)
+                                        })
+                                    }
+                                })
+                            };
                             let manager_entity = manager_for_up.upgrade();
                             let over_other_window = manager_entity.as_ref().is_some_and(|manager| {
                                 manager.update(app, |manager, _| {
