@@ -680,6 +680,9 @@ impl Render for DockHost {
                 if manager_for_escape.update(app, |manager, _| manager.native_move_active()) {
                     return;
                 }
+                manager_for_escape.update(app, |manager, manager_cx| {
+                    manager.cancel_pending_panel_tab_tearoff(manager_cx);
+                });
 
                 let had_pointer_state = pointer_capture_for_escape.get().is_some()
                     || pointer_press_for_escape.get().is_some();
