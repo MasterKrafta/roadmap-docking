@@ -206,7 +206,7 @@ pub(crate) fn update_floating_tab_drag(
     })
 }
 
-/// Detaches one tab after its pointer leaves the source floating host. The
+/// Detaches one tab after its pointer leaves the source TabStrip region. The
 /// existing tear-off transaction then continues as a native move of the new
 /// single-panel floating group.
 pub(crate) fn begin_floating_tab_tearoff(
