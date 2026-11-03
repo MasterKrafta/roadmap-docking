@@ -640,19 +640,27 @@ impl FloatingWindowManager {
                     return None;
                 }
             };
-            match outcome.actual_value {
-                Some(dock_core::CommandValue::FloatingGroup(group))
-                    if controller.continue_tearoff_as_floating_capture(group).is_ok() =>
-                {
-                    Some(group)
-                }
-                _ => {
-                    let _ = controller.cancel_pointer_interaction_on_escape();
-                    controller.flush_events(controller_cx);
-                    controller_cx.notify();
-                    None
-                }
+            let Some(dock_core::CommandValue::FloatingGroup(group)) = outcome.actual_value else {
+                let _ = controller.cancel_pointer_interaction_on_escape();
+                controller.flush_events(controller_cx);
+                controller_cx.notify();
+                return None;
+            };
+            if let Err(error) = controller.continue_tearoff_as_floating_capture(group) {
+                tracing::debug!(%error, ?panel, "could not continue tab tear-off as a floating capture");
+                let _ = controller.cancel_pointer_interaction_on_escape();
+                controller.flush_events(controller_cx);
+                controller_cx.notify();
+                return None;
             }
+            if let Err(error) = controller.drag_mut().session_mut().pointer_move(pointer) {
+                tracing::debug!(%error, ?panel, "could not cross the floating capture drag threshold");
+                let _ = controller.cancel_pointer_interaction_on_escape();
+                controller.flush_events(controller_cx);
+                controller_cx.notify();
+                return None;
+            }
+            Some(group)
         });
         let Some(group) = detached else {
             self.cancel_pending_panel_tab_tearoff(cx);
@@ -666,11 +674,27 @@ impl FloatingWindowManager {
 
         // Keep the target host hidden while the existing PanelWindow is reassigned.
         self.reconcile(cx);
+        let delta_x = pointer.x - state.start_pointer.x;
+        let delta_y = pointer.y - state.start_pointer.y;
+        let current_local_bounds = Rect::new(
+            Point::new(
+                state.local_bounds.origin.x + delta_x,
+                state.local_bounds.origin.y + delta_y,
+            ),
+            state.local_bounds.size,
+        );
+        let current_model_bounds = Rect::new(
+            Point::new(
+                state.model_bounds.origin.x + dx as f32,
+                state.model_bounds.origin.y + dy as f32,
+            ),
+            state.model_bounds.size,
+        );
         let started = self.begin_tearoff_move(
             group,
             pointer,
-            state.local_bounds,
-            state.model_bounds,
+            current_local_bounds,
+            current_model_bounds,
             cx,
         );
         if !started {
