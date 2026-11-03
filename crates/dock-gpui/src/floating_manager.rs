@@ -152,6 +152,20 @@ struct NativeMoveTarget {
 }
 
 #[derive(Clone, Copy)]
+struct PendingPanelTabTearOff {
+    panel: PanelId,
+    native_window: NativeWindowId,
+    window_id: WindowId,
+    initial_cursor: PhysicalPoint,
+    start_pointer: Point,
+    local_bounds: Rect,
+    model_bounds: Rect,
+    drag_threshold: f32,
+    layout_version: u64,
+    high_resolution_timer: bool,
+}
+
+#[derive(Clone, Copy)]
 struct NativeMoveSession {
     group: FloatingGroupId,
     native_window: NativeWindowId,
@@ -189,6 +203,7 @@ pub struct FloatingWindowManager {
     main_native_window: Option<NativeWindowId>,
     main_host_origin: Point,
     native_move: Option<NativeMoveSession>,
+    pending_panel_tab_tearoff: Option<PendingPanelTabTearOff>,
     native_resize: Option<NativeResizeSession>,
     reconciling: bool,
     registry: PanelWindowRegistry,
@@ -205,6 +220,7 @@ impl FloatingWindowManager {
             main_native_window: None,
             main_host_origin: Point::ZERO,
             native_move: None,
+            pending_panel_tab_tearoff: None,
             native_resize: None,
             reconciling: false,
             registry: PanelWindowRegistry::default(),
@@ -423,6 +439,252 @@ impl FloatingWindowManager {
         })
     }
 
+
+
+    pub(crate) fn pending_panel_tab_tearoff_active(&self) -> bool {
+        self.pending_panel_tab_tearoff.is_some()
+    }
+
+    /// Starts polling the cursor while a tab press is still a click candidate.
+    /// The Layout remains untouched until the native drag threshold is crossed.
+    pub(crate) fn begin_pending_panel_tab_tearoff(
+        &mut self,
+        panel: PanelId,
+        pointer: Point,
+        local_bounds: Rect,
+        model_bounds: Rect,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.native_move.is_some()
+            || self.pending_panel_tab_tearoff.is_some()
+            || self.native_resize.is_some()
+        {
+            return false;
+        }
+        let Some(entry) = self.registry.windows.get(&panel) else {
+            return false;
+        };
+        let (Some(native_window), window_id) = (entry.native_window, entry.window_id) else {
+            return false;
+        };
+        let Ok(cursor) = self.native_ops.cursor_position() else {
+            return false;
+        };
+        let scale = self
+            .main_native_window
+            .and_then(|main| self.native_ops.scale_factor(main).ok())
+            .filter(|scale| scale.is_finite() && *scale > 0.0)
+            .unwrap_or(1.0);
+        if self.native_ops.hide(native_window).is_err() {
+            return false;
+        }
+        if let Some(entry) = self.registry.windows.get_mut(&panel) {
+            entry.visibility = PanelWindowVisibility::Hidden;
+        }
+
+        let (metrics, layout_version) = self.controller.update(cx, |controller, _| {
+            (controller.metrics(), controller.layout().version())
+        });
+        let high_resolution_timer = self.native_ops.begin_high_resolution_timer().is_ok();
+        self.pending_panel_tab_tearoff = Some(PendingPanelTabTearOff {
+            panel,
+            native_window,
+            window_id,
+            initial_cursor: cursor,
+            start_pointer: pointer,
+            local_bounds,
+            model_bounds,
+            drag_threshold: metrics.drag_threshold * scale,
+            layout_version,
+            high_resolution_timer,
+        });
+        self.schedule_pending_panel_tab_tearoff(cx, panel, window_id);
+        cx.notify();
+        true
+    }
+
+    /// Stops the click-candidate watcher without cancelling the Core press.
+    /// MouseUp can then finish the normal below-threshold tab click.
+    pub(crate) fn cancel_pending_panel_tab_tearoff(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(state) = self.pending_panel_tab_tearoff.take() else {
+            return false;
+        };
+        if state.high_resolution_timer {
+            let _ = self.native_ops.end_high_resolution_timer();
+        }
+        cx.notify();
+        true
+    }
+
+    fn schedule_pending_panel_tab_tearoff(
+        &self,
+        cx: &mut Context<Self>,
+        panel: PanelId,
+        window_id: WindowId,
+    ) {
+        let manager = cx.entity().downgrade();
+        cx.spawn(async move |_, app| {
+            loop {
+                app.background_executor().timer(Duration::from_millis(4)).await;
+                let Ok(keep_polling) = manager.update(app, |manager, manager_cx| {
+                    manager.tick_pending_panel_tab_tearoff(panel, window_id, manager_cx)
+                }) else {
+                    break;
+                };
+                if !keep_polling {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn tick_pending_panel_tab_tearoff(
+        &mut self,
+        panel: PanelId,
+        window_id: WindowId,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(state) = self.pending_panel_tab_tearoff.filter(|state| {
+            state.panel == panel && state.window_id == window_id
+        }) else {
+            return false;
+        };
+        let source_is_current = self.controller.update(cx, |controller, _| {
+            controller.layout().version() == state.layout_version
+                && matches!(
+                    controller.drag().session().state(),
+                    DragState::Pressed {
+                        payload: DragPayload::Panel { panel: active },
+                        ..
+                    } if active == panel
+                )
+        });
+        if !source_is_current {
+            self.cancel_pending_panel_tab_tearoff(cx);
+            return false;
+        }
+        if self.native_ops.key_down(NativeKey::Escape).unwrap_or(false) {
+            self.cancel_pending_panel_tab_tearoff(cx);
+            self.controller.update(cx, |controller, controller_cx| {
+                let result = controller.cancel_pointer_interaction_on_escape();
+                controller.flush_events(controller_cx);
+                controller_cx.notify();
+                if let Err(error) = result {
+                    tracing::debug!(%error, "could not cancel pending tab drag with Escape");
+                }
+            });
+            return false;
+        }
+        if !self.native_ops.left_button_down().unwrap_or(false) {
+            self.cancel_pending_panel_tab_tearoff(cx);
+            return false;
+        }
+        let Ok(cursor) = self.native_ops.cursor_position() else {
+            self.cancel_pending_panel_tab_tearoff(cx);
+            return false;
+        };
+        let dx = cursor.x.saturating_sub(state.initial_cursor.x);
+        let dy = cursor.y.saturating_sub(state.initial_cursor.y);
+        let distance = ((dx as f64).powi(2) + (dy as f64).powi(2)).sqrt();
+        if distance < state.drag_threshold as f64 {
+            return true;
+        }
+
+        let scale = self
+            .main_native_window
+            .and_then(|main| self.native_ops.scale_factor(main).ok())
+            .filter(|scale| scale.is_finite() && *scale > 0.0)
+            .unwrap_or(1.0);
+        let pointer = Point::new(
+            state.start_pointer.x + dx as f32 / scale,
+            state.start_pointer.y + dy as f32 / scale,
+        );
+        let panel_node = self.controller.update(cx, |controller, _| {
+            controller.layout().nodes().find_map(|(id, node)| {
+                matches!(node, Node::Panel(value) if value.panel_id == panel).then_some(id)
+            })
+        });
+        let Some(panel_node) = panel_node else {
+            self.cancel_pending_panel_tab_tearoff(cx);
+            self.controller.update(cx, |controller, controller_cx| {
+                let _ = controller.cancel_pointer_interaction_on_escape();
+                controller.flush_events(controller_cx);
+                controller_cx.notify();
+            });
+            return false;
+        };
+
+        let detached = self.controller.update(cx, |controller, controller_cx| {
+            if !controller.begin_tearoff_transaction() {
+                return None;
+            }
+            let command = DockCommand::Float {
+                node: panel_node,
+                bounds: state.model_bounds,
+            };
+            let outcome = match controller.dispatch_tearoff_float_in(command, controller_cx) {
+                Ok(outcome) => outcome,
+                Err(error) => {
+                    tracing::debug!(%error, ?panel, "could not detach tab after drag threshold");
+                    return None;
+                }
+            };
+            match outcome.actual_value {
+                Some(dock_core::CommandValue::FloatingGroup(group))
+                    if controller.continue_tearoff_as_floating_capture(group).is_ok() =>
+                {
+                    Some(group)
+                }
+                _ => {
+                    let _ = controller.cancel_pointer_interaction_on_escape();
+                    controller.flush_events(controller_cx);
+                    controller_cx.notify();
+                    None
+                }
+            }
+        });
+        let Some(group) = detached else {
+            self.cancel_pending_panel_tab_tearoff(cx);
+            self.controller.update(cx, |controller, controller_cx| {
+                let _ = controller.cancel_pointer_interaction_on_escape();
+                controller.flush_events(controller_cx);
+                controller_cx.notify();
+            });
+            return false;
+        };
+
+        // Keep the target host hidden while the existing PanelWindow is reassigned.
+        self.reconcile(cx);
+        let started = self.begin_tearoff_move(
+            group,
+            pointer,
+            state.local_bounds,
+            state.model_bounds,
+            cx,
+        );
+        if !started {
+            self.cancel_pending_panel_tab_tearoff(cx);
+            self.controller.update(cx, |controller, controller_cx| {
+                let result = controller.cancel_pointer_interaction_on_escape();
+                controller.flush_events(controller_cx);
+                controller_cx.notify();
+                if let Err(error) = result {
+                    tracing::warn!(?panel, %error, "could not roll back failed tab tear-off");
+                }
+            });
+            self.reconcile(cx);
+            return false;
+        }
+
+        // The native-move session now owns its own timer and poller.
+        self.cancel_pending_panel_tab_tearoff(cx);
+        self.reconcile(cx);
+        true
+    }
 
     /// A GPUI host losing focus is not a cancellation when another managed
     /// window of this application received the OS foreground activation.
@@ -1403,6 +1665,9 @@ impl FloatingWindowManager {
                     session.group == group.id
                         && session.kind == NativeMoveKind::TearOff
                         && !session.threshold_crossed
+                })
+                || self.pending_panel_tab_tearoff.is_some_and(|pending| {
+                    group.panels.contains(&pending.panel)
                 })
             {
                 continue;
