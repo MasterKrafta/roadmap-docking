@@ -54,6 +54,7 @@ impl ColumnView {
         theme: Theme,
         coordinate_origin: Point,
         raise_floating: Option<FloatingGroupId>,
+        show_header: bool,
     ) -> impl IntoElement {
         let content_rect = Rect::new(
             Point::new(
@@ -65,6 +66,11 @@ impl ColumnView {
                 (column.rect.size.height - metrics.column_header_height).max(0.0),
             ),
         );
+        let hidden_header_offset = if show_header {
+            0.0
+        } else {
+            metrics.column_header_height
+        };
         let viewport = overflow.map_or(content_rect, |value| value.viewport);
         let content_extent = overflow.map_or(content_rect, |value| value.content_extent);
         let content_origin = content_extent.origin;
@@ -162,10 +168,12 @@ impl ColumnView {
         let mut scroll_viewport = div()
             .id(format!("dock-column-scroll-{:?}", column.column))
             .absolute()
-            .top(px(viewport.origin.y - column.rect.origin.y))
+            .top(px(
+                viewport.origin.y - column.rect.origin.y - hidden_header_offset,
+            ))
             .left(px(viewport.origin.x - column.rect.origin.x))
             .w(px(viewport.size.width))
-            .h(px(viewport.size.height))
+            .h(px(viewport.size.height + hidden_header_offset))
             .bg(rgb(theme.colors.dock_background));
 
         if let Some(handle) = scroll_handle.as_ref() {
@@ -197,7 +205,9 @@ impl ColumnView {
             theme,
         );
 
-        root = root.child(header);
+        if show_header {
+            root = root.child(header);
+        }
         root
     }
 }
