@@ -652,9 +652,9 @@ impl FloatingWindowManager {
         true
     }
 
-    /// Starts a thresholded native move for a Column detached on pointer-down.
-    /// The window is already assigned and visible, but its floating header stays hidden
-    /// until the native move ends.
+    /// Assigns a hidden native window to a Column detached on pointer-down.
+    /// The window is shown without its floating header only after the drag threshold
+    /// is crossed; releasing before that threshold rolls the transaction back.
     pub(crate) fn begin_pending_tearoff_move(
         &mut self,
         group: FloatingGroupId,
@@ -697,6 +697,14 @@ impl FloatingWindowManager {
         if let Err(error) = self.native_ops.move_window(native_window, position) {
             tracing::warn!(?group, %error, "could not position temporary Column window");
             return false;
+        }
+        if let Err(error) = self.native_ops.hide(native_window) {
+            tracing::debug!(?group, %error, "could not keep the temporary Column window hidden before drag threshold");
+        }
+        if let Some(panel) = self.host_registry.panel_for_group(group)
+            && let Some(entry) = self.registry.windows.get_mut(&panel)
+        {
+            entry.visibility = PanelWindowVisibility::Hidden;
         }
 
         let metrics = self.controller.update(cx, |controller, _| controller.metrics());
@@ -868,6 +876,18 @@ impl FloatingWindowManager {
                 return true;
             }
             state.threshold_crossed = true;
+            if state.kind == NativeMoveKind::TearOff {
+                if let Err(error) = self.native_ops.show_no_activate(state.native_window) {
+                    tracing::warn!(?group, %error, "could not show the temporary floating window after drag threshold");
+                    self.cancel_native_move(state, cx);
+                    return false;
+                }
+                if let Some(panel) = self.host_registry.panel_for_group(group)
+                    && let Some(entry) = self.registry.windows.get_mut(&panel)
+                {
+                    entry.visibility = PanelWindowVisibility::Visible;
+                }
+            }
             let scale = self.native_ops.scale_factor(state.native_window).ok()
                 .filter(|scale| scale.is_finite() && *scale > 0.0).unwrap_or(1.0);
             let point = Point::new(state.start_pointer.x + dx as f32 / scale, state.start_pointer.y + dy as f32 / scale);
@@ -1377,7 +1397,13 @@ impl FloatingWindowManager {
         // above. The first show therefore happens only after the permanent
         // PanelWindow has its host group, HWND, placement, and native constraints.
         for group in &groups {
-            if blocked_groups.contains(&group.id) {
+            if blocked_groups.contains(&group.id)
+                || self.native_move.is_some_and(|session| {
+                    session.group == group.id
+                        && session.kind == NativeMoveKind::TearOff
+                        && !session.threshold_crossed
+                })
+            {
                 continue;
             }
             let Some(panel) = active_hosts.get(&group.id).copied() else {
