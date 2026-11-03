@@ -12,6 +12,7 @@ use gpui::{
 use crate::{
     DockController, FloatingWindowManager,
     components::context_menu::{ContextMenuTarget, ContextMenuToggle},
+    dock_components::ColumnDragArea,
     geometry::host_point_from_gpui_window,
 };
 
@@ -395,16 +396,23 @@ pub(crate) fn register_pointer_events(
             }
 
             let should_tearoff = controller.update(app, |controller, _| {
-                matches!(
+                let handle = controller.drag().session().handle();
+                let state = controller.drag().session().state();
+
+                // Each drag area has its own route. Column is the first
+                // native tear-off zone; tab and group zones are wired later.
+                match (handle, state) {
                     (
-                        controller.drag().session().state(),
-                        controller.drag().session().handle(),
-                    ),
-                    (
-                        DragState::Dragging { .. },
-                        Some(DragHandle::PanelTab | DragHandle::GroupGrip)
-                    )
-                )
+                        Some(DragHandle::ColumnHeader),
+                        DragState::Dragging {
+                            payload: DragPayload::Column { .. },
+                            ..
+                        },
+                    ) => true,
+                    (Some(DragHandle::PanelTab), DragState::Dragging { .. })
+                    | (Some(DragHandle::GroupGrip), DragState::Dragging { .. }) => false,
+                    _ => false,
+                }
             });
             if should_tearoff
                 && super::drag::begin_native_tearoff(&controller, &manager, point, app)
@@ -930,27 +938,13 @@ fn column_header_drag_handle_contains(
         } else {
             metrics.group_control_button_width
         };
-        column_header_drag_zone_contains(
+        ColumnDragArea::contains(
             column_rect.rect,
             point,
             metrics.column_header_height,
             reserved_controls_width,
         )
     })
-}
-
-fn column_header_drag_zone_contains(
-    rect: Rect,
-    point: Point,
-    header_height: f32,
-    control_button_width: f32,
-) -> bool {
-    let header_height = header_height.min(rect.size.height);
-    let control_width = control_button_width.min(rect.size.width / 3.0).max(1.0);
-    point.y >= rect.origin.y
-        && point.y < rect.origin.y + header_height
-        && point.x >= rect.origin.x
-        && point.x < rect.origin.x + rect.size.width - control_width
 }
 
 fn group_grip_contains(
@@ -1037,8 +1031,8 @@ mod hit_dispatch_tests {
 
     use super::{
         PointerClickIntent, PointerDownIntent, PointerPressTarget,
-        column_header_drag_zone_contains, pointer_click_intent_for_hit,
-        pointer_down_intent_for_hit, pointer_press_target_for_hit,
+        pointer_click_intent_for_hit, pointer_down_intent_for_hit,
+        pointer_press_target_for_hit,
     };
 
     #[test]
@@ -1148,25 +1142,25 @@ mod hit_dispatch_tests {
             dock_core::Size::new(240.0, 500.0),
         );
 
-        assert!(column_header_drag_zone_contains(
+        assert!(crate::dock_components::ColumnDragArea::contains(
             rect,
             Point::new(100.0, 30.0),
             32.0,
             28.0,
         ));
-        assert!(column_header_drag_zone_contains(
+        assert!(crate::dock_components::ColumnDragArea::contains(
             rect,
             Point::new(221.0, 30.0),
             32.0,
             28.0,
         ));
-        assert!(!column_header_drag_zone_contains(
+        assert!(!crate::dock_components::ColumnDragArea::contains(
             rect,
             Point::new(222.0, 30.0),
             32.0,
             28.0,
         ));
-        assert!(!column_header_drag_zone_contains(
+        assert!(!crate::dock_components::ColumnDragArea::contains(
             rect,
             Point::new(100.0, 52.0),
             32.0,
