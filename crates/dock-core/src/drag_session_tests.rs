@@ -19,6 +19,20 @@ fn session() -> DragSession {
 }
 
 #[test]
+fn column_payload_defaults_to_column_header_handle() {
+    let column = NodeId::null();
+    let payload = DragPayload::Column { column };
+    let mut session = session();
+
+    session.pointer_down(payload, Point::ZERO).unwrap();
+    assert_eq!(session.handle(), Some(DragHandle::ColumnHeader));
+    assert!(matches!(
+        session.state(),
+        DragState::Pressed { payload: active, .. } if active == payload
+    ));
+}
+
+#[test]
 fn exposes_the_active_handle_and_clears_it_after_reset() {
     let mut session = session();
     assert_eq!(session.handle(), None);
