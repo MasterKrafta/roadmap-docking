@@ -1,4 +1,4 @@
-use dock_core::{Point, Rect};
+use dock_core::{DockMetrics, Point, Rect};
 use gpui::{IntoElement, InteractiveElement, ParentElement, Styled, div, px, rgb};
 use ui::Theme;
 
@@ -7,11 +7,24 @@ use ui::Theme;
 pub struct DockTab;
 
 impl DockTab {
-    /// Returns true once the pointer leaves the complete TabStrip region.
+    /// Computes the drag zone of the new DockColumn group header.
     ///
-    /// The strip includes both tab headers and the empty insertion/drag lane.
-    /// Dock adapters use this shared boundary to decide when a tab becomes a
-    /// native floating window instead of remaining an in-strip tab drag.
+    /// It contains the tab, the flexible spacer, and the GroupGrip. Only the
+    /// trailing GroupMenuButton is excluded from tab dragging.
+    pub(crate) fn drag_zone(group_rect: Rect, metrics: DockMetrics) -> Rect {
+        Rect::new(
+            group_rect.origin,
+            dock_core::Size::new(
+                (group_rect.size.width - metrics.group_control_button_width).max(0.0),
+                metrics
+                    .header_height
+                    .max(metrics.tab_strip_height)
+                    .min(group_rect.size.height),
+            ),
+        )
+    }
+
+    /// Returns true once the pointer leaves the complete DockTab drag zone.
     pub(crate) fn leaves_strip_zone(strip_rect: Rect, point: Point) -> bool {
         !matches!(strip_rect.contains(point), Ok(true))
     }
@@ -78,18 +91,23 @@ impl DockTab {
 
 #[cfg(test)]
 mod tests {
-    use dock_core::{Point, Rect, Size};
+    use dock_core::{DockMetrics, Point, Rect, Size};
 
     use super::DockTab;
 
     #[test]
-    fn tab_detaches_only_after_pointer_leaves_the_complete_strip() {
-        let strip = Rect::new(Point::new(10.0, 20.0), Size::new(240.0, 28.0));
+    fn tab_drag_zone_includes_the_group_grip_but_excludes_the_group_menu() {
+        let group = Rect::new(Point::new(10.0, 20.0), Size::new(240.0, 160.0));
+        let zone = DockTab::drag_zone(group, DockMetrics::default());
 
-        assert!(!DockTab::leaves_strip_zone(strip, Point::new(20.0, 30.0)));
-        // The blank lane between tabs remains part of the strip drag zone.
-        assert!(!DockTab::leaves_strip_zone(strip, Point::new(180.0, 30.0)));
-        assert!(DockTab::leaves_strip_zone(strip, Point::new(9.0, 30.0)));
-        assert!(DockTab::leaves_strip_zone(strip, Point::new(20.0, 48.0)));
+        assert_eq!(zone.origin, Point::new(10.0, 20.0));
+        assert_eq!(zone.size, Size::new(212.0, 28.0));
+        assert!(!DockTab::leaves_strip_zone(zone, Point::new(20.0, 30.0)));
+        // The blank lane remains part of the drag zone.
+        assert!(!DockTab::leaves_strip_zone(zone, Point::new(180.0, 30.0)));
+        // The GroupGrip (32 px) is included; the 28 px GroupMenuButton is not.
+        assert!(!DockTab::leaves_strip_zone(zone, Point::new(215.0, 30.0)));
+        assert!(DockTab::leaves_strip_zone(zone, Point::new(222.0, 30.0)));
+        assert!(DockTab::leaves_strip_zone(zone, Point::new(20.0, 48.0)));
     }
 }
