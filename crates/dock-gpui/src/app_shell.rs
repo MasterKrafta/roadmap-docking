@@ -7,7 +7,7 @@ use gpui::{
 };
 
 use crate::{
-    DockController, DockHost, DockTheme, FloatingWindowManager,
+    DockController, DockHost, DockTheme,
     components::{ContextMenu, ContextMenuCallbacks, ContextMenuEntry, ContextMenuItem},
 };
 
@@ -18,7 +18,6 @@ use crate::{
 pub struct AppShell {
     controller: Entity<DockController>,
     dock_host: Entity<DockHost>,
-    floating_manager: Entity<FloatingWindowManager>,
     theme: DockTheme,
     panels_menu_open: bool,
     controller_observed: bool,
@@ -28,13 +27,11 @@ impl AppShell {
     pub fn new(
         controller: Entity<DockController>,
         dock_host: Entity<DockHost>,
-        floating_manager: Entity<FloatingWindowManager>,
         theme: DockTheme,
     ) -> Self {
         Self {
             controller,
             dock_host,
-            floating_manager,
             theme,
             panels_menu_open: false,
             controller_observed: false,
@@ -50,7 +47,7 @@ impl Render for AppShell {
             self.controller_observed = true;
         }
 
-        let floating_manager = self.floating_manager.clone();
+        let controller_for_actions = self.controller.clone();
         let entries = self.controller.update(cx, move |controller, _| {
             let layout = controller.layout();
             controller
@@ -63,9 +60,18 @@ impl Render for AppShell {
                     let checked = layout
                         .panel_instances()
                         .any(|(_, instance)| instance.key == key);
-                    let manager = floating_manager.clone();
+                    let side = match key.as_str() {
+                        "layers" => dock_core::DockSide::Left,
+                        _ => dock_core::DockSide::Right,
+                    };
+                    let action_controller = controller_for_actions.clone();
                     ContextMenuItem::new(title, move |app| {
-                        crate::actions::toggle_registered_panel(&manager, key.clone(), app);
+                        crate::actions::toggle_registered_panel(
+                            &action_controller,
+                            key.clone(),
+                            side,
+                            app,
+                        );
                     })
                     .selected(checked)
                     .into()

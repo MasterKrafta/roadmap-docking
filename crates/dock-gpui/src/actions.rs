@@ -1,12 +1,9 @@
 //! Application-facing GPUI action dispatch helpers.
-//!
-//! Keyboard action registration and default key bindings are added here when
-//! the host exposes the corresponding keyboard interaction contract.
 
-use dock_core::{DockCommand, PanelKey};
+use dock_core::{DockCommand, DockSide, DropTarget, PanelKey};
 use gpui::{App, Entity};
 
-use crate::{DockController, FloatingWindowManager};
+use crate::DockController;
 
 /// Applies a semantic Core command and notifies the owning controller entity.
 pub(crate) fn dispatch_command(
@@ -21,17 +18,41 @@ pub(crate) fn dispatch_command(
     }
 }
 
-/// Toggles one registry-backed panel through the manager that owns floating
-/// window placement. Panel existence and the resulting checkmark still come
-/// from the shared Core Layout.
+/// Toggles one registered panel in its assigned Main Dock side.
+///
+/// This path deliberately bypasses FloatingWindowManager: opening a panel
+/// creates a Core Column inside the main window, never a native panel window.
 pub(crate) fn toggle_registered_panel(
-    manager: &Entity<FloatingWindowManager>,
+    controller: &Entity<DockController>,
     key: PanelKey,
+    side: DockSide,
     app: &mut App,
 ) {
-    if let Err(error) = manager.update(app, |manager, manager_cx| {
-        manager.toggle_panel_from_menu(&key, manager_cx)
+    if let Err(error) = controller.update(app, |controller, controller_cx| {
+        let existing_panel = controller
+            .layout()
+            .panel_instances()
+            .find_map(|(panel, instance)| (instance.key == key).then_some(panel));
+
+        let command = if let Some(panel) = existing_panel {
+            DockCommand::ClosePanel { panel }
+        } else {
+            let Some(descriptor) = controller.registry().get(&key) else {
+                tracing::warn!(panel = %key, "panel menu action references an unknown panel");
+                return;
+            };
+
+            DockCommand::OpenPanel {
+                key: key.clone(),
+                constraints: descriptor.constraints(),
+                target: Some(DropTarget::MainColumn { side, index: 0 }),
+            }
+        };
+
+        if let Err(error) = controller.dispatch_in(command, controller_cx) {
+            tracing::warn!(%error, panel = %key, "main-dock panel toggle failed");
+        }
     }) {
-        tracing::warn!(%error, panel = %key, "panel menu action failed");
+        tracing::warn!(%error, panel = %key, "panel menu action could not reach dock controller");
     }
 }

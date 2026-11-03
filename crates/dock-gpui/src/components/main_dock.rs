@@ -5,7 +5,7 @@ use dock_core::{
     FlyoutState, GroupRect, NodeId, PanelRect, Point, SplitterRect, TabHeaderRect, TabOverflowRect,
     TabStripRect, VerticalOverflow,
 };
-use gpui::{AnyView, Entity, IntoElement, ParentElement, ScrollHandle, Styled, div};
+use gpui::{AnyView, Entity, IntoElement, ParentElement, ScrollHandle, Styled, div, px};
 use ui::Theme;
 
 use crate::DockController;
@@ -86,35 +86,73 @@ impl MainDockView {
                 .cloned()
                 .collect::<Vec<_>>();
 
-            layer = layer.child(ColumnView::render(
-                *column,
-                mode,
-                &group_rects,
-                column_panels,
-                tab_strips,
-                tab_headers,
-                tab_overflows,
-                group_presentations,
-                rail_display_orders
-                    .get(&column.column)
-                    .map(Vec::as_slice)
-                    .unwrap_or(&[]),
-                active_flyout,
-                drag_preview,
-                drag_zones,
-                metrics,
-                menu_group,
-                context_menu.clone(),
-                middle_click_closes_tabs,
-                &group_splitters,
-                overflow,
-                scroll_handle,
-                controller.clone(),
-                theme,
-                Point::ZERO,
-                None,
-                true,
-            ));
+            let single_active_panel = if group_rects.len() == 1 {
+                group_rects.first().and_then(|group| {
+                    let presentation = group_presentations.get(&group.group)?;
+                    if presentation.tabs.len() != 1 {
+                        return None;
+                    }
+                    let tab = presentation.tabs.first()?;
+                    if presentation.active_panel != Some(tab.panel) {
+                        return None;
+                    }
+                    let panel_view = column_panels
+                        .iter()
+                        .find(|(panel, _)| panel.panel == tab.panel)
+                        .map(|(_, view)| view.clone())?;
+                    Some((tab.title.to_string(), panel_view))
+                })
+            } else {
+                None
+            };
+
+            if let Some((title, panel_view)) = single_active_panel {
+                layer = layer.child(
+                    div()
+                        .id(format!("dock-components-column-{:?}", column.column))
+                        .absolute()
+                        .left(px(column.rect.origin.x))
+                        .top(px(column.rect.origin.y))
+                        .w(px(column.rect.size.width))
+                        .h(px(column.rect.size.height))
+                        .child(crate::dock_components::DockColumnView::render_active(
+                            format!("dock-components-{:?}", column.column),
+                            title,
+                            panel_view,
+                            theme,
+                        )),
+                );
+            } else {
+                layer = layer.child(ColumnView::render(
+                    *column,
+                    mode,
+                    &group_rects,
+                    column_panels,
+                    tab_strips,
+                    tab_headers,
+                    tab_overflows,
+                    group_presentations,
+                    rail_display_orders
+                        .get(&column.column)
+                        .map(Vec::as_slice)
+                        .unwrap_or(&[]),
+                    active_flyout,
+                    drag_preview,
+                    drag_zones,
+                    metrics,
+                    menu_group,
+                    context_menu.clone(),
+                    middle_click_closes_tabs,
+                    &group_splitters,
+                    overflow,
+                    scroll_handle,
+                    controller.clone(),
+                    theme,
+                    Point::ZERO,
+                    None,
+                    true,
+                ));
+            }
         }
 
         // Axis::X represents vertical dividers between main-dock columns.

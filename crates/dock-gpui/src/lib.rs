@@ -7,8 +7,7 @@
 
 pub mod actions;
 pub mod components;
-/// Standalone visual building blocks for the next Column composition.
-/// This module is not wired into DockHost or the active docking input pipeline.
+/// Visual building blocks for the new main-dock Column presentation.
 #[path = "dock-components/column.rs"]
 pub mod dock_components;
 mod app_shell;
@@ -54,12 +53,7 @@ fn starter_panel_registry() -> PanelRegistry {
     let constraints =
         PanelConstraints::new(Size::new(120.0, 80.0), Size::new(280.0, 220.0), None, true);
 
-    for (key, title) in [
-        ("layers", "Layers"),
-        ("color", "Color"),
-        ("properties", "Properties"),
-        ("history", "History"),
-    ] {
+    for (key, title) in [("layers", "Layers"), ("color", "Color")] {
         let panel_key = PanelKey::new(key).expect("built-in panel keys must be valid");
         registry
             .register(PanelDescriptor::new(
@@ -107,17 +101,9 @@ pub fn run(_options: RunOptions) {
                 ..Default::default()
             },
             move |_, cx| {
-                let manager_controller = controller.clone();
-                let manager =
-                    cx.new(move |_| FloatingWindowManager::new(manager_controller, theme));
-
                 let host_controller = controller.clone();
-                let host_manager = manager.clone();
-                let dock_host = cx.new(move |_| {
-                    DockHost::new(host_controller, theme).with_floating_window_manager(host_manager)
-                });
-
-                cx.new(move |_| AppShell::new(controller, dock_host, manager, theme))
+                let dock_host = cx.new(move |_| DockHost::new(host_controller, theme));
+                cx.new(move |_| AppShell::new(controller, dock_host, theme))
             },
         );
 
