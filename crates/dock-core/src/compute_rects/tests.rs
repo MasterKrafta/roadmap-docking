@@ -445,13 +445,15 @@ fn floating_horizontal_column_split_places_columns_below_one_shared_title() {
         expanded.origin.y,
         metrics.header_height + metrics.column_header_height
     );
+    assert_eq!(expanded_strip.origin, expanded.origin);
     assert_eq!(
-        expanded_strip.origin.y,
-        metrics.header_height + metrics.column_header_height + metrics.header_height
+        expanded_strip.size.height,
+        metrics.header_height.max(metrics.tab_strip_height)
     );
-    assert!(
-        (expanded_strip.origin.y - collapsed_strip.origin.y - metrics.header_height).abs()
-            < PIXEL_TOLERANCE
+    assert_eq!(collapsed_strip.origin, collapsed.origin);
+    assert_eq!(
+        collapsed_strip.size.height,
+        metrics.effective_collapsed_group_height()
     );
 }
 
