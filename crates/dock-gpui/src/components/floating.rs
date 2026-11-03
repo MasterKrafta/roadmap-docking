@@ -72,6 +72,7 @@ impl FloatingWindowContent {
         drag_preview: Option<DragPreview>,
         drag_zones: &[DropZoneRect],
         metrics: DockMetrics,
+        hide_header: bool,
         title: &str,
         menu_group: Option<NodeId>,
         context_menu: GroupMenuToggle,
@@ -173,6 +174,7 @@ impl FloatingWindowContent {
                 theme,
                 origin,
                 Some(floating.group),
+                !hide_header,
             ));
         }
 
@@ -267,7 +269,7 @@ impl FloatingWindowContent {
 
         // A floating root Column uses its own ColumnHeaderView as the
         // window header. Other floating compositions keep the generic title bar.
-        if !column_uses_window_header {
+        if !column_uses_window_header && !hide_header {
             let title_height = metrics.header_height.min(floating.rect.size.height);
             let close_size = metrics.group_control_button_width.min(title_height);
             let title_grip = div()
@@ -513,6 +515,7 @@ pub struct FloatingHost {
     open_context_menu: Option<FloatingHostOpenMenu>,
     tab_press: Rc<Cell<Option<FloatingTabPress>>>,
     controller_observed: bool,
+    manager_observed: bool,
     native_resize_observation_pending: bool,
     middle_click_closes_tabs: bool,
     /// Root focus boundary for cancelling gestures when this PanelWindow loses app focus.
@@ -561,6 +564,7 @@ impl FloatingHost {
             open_context_menu: None,
             tab_press: Rc::new(Cell::new(None)),
             controller_observed: false,
+            manager_observed: false,
             native_resize_observation_pending: false,
             middle_click_closes_tabs: true,
             root_focus_handle: None,
@@ -601,6 +605,13 @@ impl Render for FloatingHost {
             cx.observe(&self.controller, |_, _, host_cx| host_cx.notify())
                 .detach();
             self.controller_observed = true;
+        }
+        if !self.manager_observed
+            && let Some(manager) = self.manager.upgrade()
+        {
+            cx.observe(&manager, |_, _, host_cx| host_cx.notify())
+                .detach();
+            self.manager_observed = true;
         }
 
         // Reuse the controller's persistent PanelId -> AnyView cache. This call
@@ -674,6 +685,11 @@ impl Render for FloatingHost {
                 None
             }
         };
+        let hide_header = self.manager.upgrade().is_some_and(|manager| {
+            manager
+                .update(cx, |manager, _| manager.hide_floating_header(group))
+                .unwrap_or(false)
+        });
 
         let mut root = div()
             .id(format!("floating-host-root-{:?}", group))
@@ -1082,6 +1098,7 @@ impl Render for FloatingHost {
             snapshot.drag_preview,
             &snapshot.drag_zones,
             snapshot.metrics,
+            hide_header,
             &snapshot.title,
             None,
             toggle_context_menu,
