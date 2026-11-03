@@ -1082,6 +1082,89 @@ fn column_header_drag_moves_a_complete_column_between_main_docks() {
 }
 
 #[test]
+fn column_header_drag_reorders_columns_within_one_main_dock() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, source_panel) = builder.panel(key("column-reorder-source"), constraints());
+    let source_group = builder.tabs(vec![source_panel], 0, false);
+    let source_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![source_group],
+        vec![1.0],
+    );
+
+    let (_, target_panel) = builder.panel(key("column-reorder-target"), constraints());
+    let target_group = builder.tabs(vec![target_panel], 0, false);
+    let target_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![target_group],
+        vec![1.0],
+    );
+    let root = builder.split(
+        Axis::X,
+        vec![source_column, target_column],
+        vec![0.35, 0.65],
+    );
+    builder.main_area(DockSide::Left, root);
+
+    let mut layout = builder.build();
+    let request = DragDropRequest {
+        payload: DragPayload::Column {
+            column: source_column,
+        },
+        handle: DragHandle::ColumnHeader,
+        origin: Point::ZERO,
+        point: Point::new(20.0, 20.0),
+        target: Some(DropTarget::MainColumn {
+            side: DockSide::Left,
+            index: 2,
+        }),
+        floating_bounds: None,
+    };
+
+    let action = layout.resolve_drag_drop(&request, &metrics).unwrap();
+    assert_eq!(
+        action,
+        DragDropAction::Command(DockCommand::MoveColumnToMainColumn {
+            column: source_column,
+            side: DockSide::Left,
+            index: 2,
+        })
+    );
+    let DragDropAction::Command(command) = action else {
+        panic!("moving to the final insertion slot must reorder the Column");
+    };
+    let outcome = layout.apply(command, &metrics).unwrap();
+
+    assert_eq!(
+        layout.main_columns(DockSide::Left).unwrap(),
+        vec![target_column, source_column]
+    );
+    assert_eq!(
+        outcome.inverse,
+        Some(DockCommand::MoveColumnToMainColumn {
+            column: source_column,
+            side: DockSide::Left,
+            index: 0,
+        })
+    );
+
+    layout.apply(outcome.inverse.unwrap(), &metrics).unwrap();
+    assert_eq!(
+        layout.main_columns(DockSide::Left).unwrap(),
+        vec![source_column, target_column]
+    );
+    let Some(Node::Split(split)) = layout.node(root) else {
+        panic!("the original Split(X) root remains the main dock composition");
+    };
+    assert_eq!(split.ratios, vec![0.35, 0.65]);
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
 fn photoshop_column_can_float_as_one_composition_and_dock_back() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
