@@ -396,23 +396,11 @@ pub(crate) fn register_pointer_events(
             }
 
             let should_tearoff = controller.update(app, |controller, _| {
-                let handle = controller.drag().session().handle();
-                let state = controller.drag().session().state();
-
-                // Each drag area has its own route. Column is the first
-                // native tear-off zone; tab and group zones are wired later.
-                match (handle, state) {
-                    (
-                        Some(DragHandle::ColumnHeader),
-                        DragState::Dragging {
-                            payload: DragPayload::Column { .. },
-                            ..
-                        },
-                    ) => true,
-                    (Some(DragHandle::PanelTab), DragState::Dragging { .. })
-                    | (Some(DragHandle::GroupGrip), DragState::Dragging { .. }) => false,
-                    _ => false,
-                }
+                let DragState::Dragging { payload, .. } = controller.drag().session().state()
+                else {
+                    return false;
+                };
+                native_tearoff_enabled_for(controller.drag().session().handle(), payload)
             });
             if should_tearoff
                 && super::drag::begin_native_tearoff(&controller, &manager, point, app)
@@ -633,6 +621,17 @@ pub(crate) fn register_pointer_events(
             }
         }
     });
+}
+
+/// Selects which semantic drag area may start a native tear-off.
+/// Only the Column drag area is enabled in this implementation stage.
+fn native_tearoff_enabled_for(handle: Option<DragHandle>, payload: DragPayload) -> bool {
+    match (handle, payload) {
+        (Some(DragHandle::ColumnHeader), DragPayload::Column { .. }) => true,
+        (Some(DragHandle::PanelTab), DragPayload::Panel { .. }) => false,
+        (Some(DragHandle::GroupGrip), DragPayload::Group { .. }) => false,
+        _ => false,
+    }
 }
 
 fn dispatch_pointer_click(
@@ -1026,13 +1025,15 @@ fn flyout_title_grip_contains(
 
 #[cfg(test)]
 mod hit_dispatch_tests {
-    use dock_core::{Axis, FloatingGroupId, HitResult, NodeId, PanelId, Point, Rect, ResizeEdge};
+    use dock_core::{
+        Axis, DragHandle, DragPayload, FloatingGroupId, HitResult, NodeId, PanelId, Point, Rect,
+        ResizeEdge,
+    };
     use slotmap::Key;
 
     use super::{
-        PointerClickIntent, PointerDownIntent, PointerPressTarget,
-        pointer_click_intent_for_hit, pointer_down_intent_for_hit,
-        pointer_press_target_for_hit,
+        PointerClickIntent, PointerDownIntent, PointerPressTarget, native_tearoff_enabled_for,
+        pointer_click_intent_for_hit, pointer_down_intent_for_hit, pointer_press_target_for_hit,
     };
 
     #[test]
@@ -1133,6 +1134,30 @@ mod hit_dispatch_tests {
             pointer_down_intent_for_hit(HitResult::Column { column: group }),
             PointerDownIntent::ColumnCandidate { column: group }
         );
+    }
+
+    #[test]
+    fn native_tearoff_routing_only_enables_the_column_zone_for_now() {
+        let column = NodeId::null();
+        let group = NodeId::null();
+        let panel = PanelId::null();
+
+        assert!(native_tearoff_enabled_for(
+            Some(DragHandle::ColumnHeader),
+            DragPayload::Column { column },
+        ));
+        assert!(!native_tearoff_enabled_for(
+            Some(DragHandle::PanelTab),
+            DragPayload::Panel { panel },
+        ));
+        assert!(!native_tearoff_enabled_for(
+            Some(DragHandle::GroupGrip),
+            DragPayload::Group { group },
+        ));
+        assert!(!native_tearoff_enabled_for(
+            Some(DragHandle::ColumnHeader),
+            DragPayload::Group { group },
+        ));
     }
 
     #[test]
