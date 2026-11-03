@@ -206,6 +206,55 @@ pub(crate) fn update_floating_tab_drag(
     })
 }
 
+/// Positions a spare hidden PanelWindow on pointer-down inside a floating
+/// composition. The visible host and Layout remain unchanged until a real tear-off.
+pub(crate) fn prepare_floating_tab_native_window_on_press(
+    controller: &Entity<DockController>,
+    manager: &Entity<FloatingWindowManager>,
+    drag: FloatingTabDrag,
+    app: &mut App,
+) -> bool {
+    let local_bounds = controller.update(app, |controller, _| {
+        let rects = controller
+            .floating_geometry(drag.source_window_id, drag.source_group)
+            .ok()?;
+        let header = rects
+            .tab_headers
+            .iter()
+            .find(|header| header.group == controller.drag().session().handle().and_then(|_| {
+                match controller.drag().session().state() {
+                    DragState::Pressed { payload: DragPayload::Panel { panel }, .. }
+                    | DragState::Dragging { payload: DragPayload::Panel { panel }, .. }
+                        if panel == drag.panel => Some(header.group),
+                    _ => None,
+                }
+            }).unwrap_or(header.group) && header.panel == drag.panel)?;
+        let preferred_size = controller
+            .layout()
+            .panel_instance(drag.panel)?
+            .constraints
+            .preferred_size;
+        desired_floating_bounds(
+            header.rect,
+            preferred_size,
+            drag.press_origin,
+            drag.press_origin,
+        )
+    });
+    let Some(local_bounds) = local_bounds else {
+        return false;
+    };
+    manager.update(app, |manager, manager_cx| {
+        manager.prepare_floating_tab_native_window_on_press(
+            drag.panel,
+            drag.source_group,
+            drag.press_origin,
+            local_bounds,
+            manager_cx,
+        )
+    })
+}
+
 /// Detaches one tab after its pointer leaves the source floating host. The
 /// existing tear-off transaction then continues as a native move of the new
 /// single-panel floating group.
