@@ -699,7 +699,8 @@ impl FloatingWindowManager {
             return false;
         }
         if let Err(error) = self.native_ops.hide(native_window) {
-            tracing::debug!(?group, %error, "could not keep the temporary Column window hidden before drag threshold");
+            tracing::warn!(?group, %error, "could not keep the temporary Column window hidden before drag threshold");
+            return false;
         }
         if let Some(panel) = self.host_registry.panel_for_group(group)
             && let Some(entry) = self.registry.windows.get_mut(&panel)
