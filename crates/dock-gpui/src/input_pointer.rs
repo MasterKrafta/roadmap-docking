@@ -181,13 +181,14 @@ pub(crate) fn register_pointer_events(
 
             match pointer_down_intent_for_hit(hit) {
                 PointerDownIntent::TabHeaderCandidate { group, panel } => {
-                    if tab_header_clickable_contains(
+                    let tab_is_clickable = tab_header_clickable_contains(
                         &controller,
                         group,
                         panel,
                         core_point,
                         app,
-                    ) {
+                    );
+                    if tab_is_clickable {
                         let layout_version =
                             controller.update(app, |controller, _| controller.layout().version());
                         pointer_press.set(Some(PointerPress {
@@ -209,13 +210,15 @@ pub(crate) fn register_pointer_events(
                             core_point,
                             app,
                         );
-                        if super::drag::begin_native_panel_tab_tearoff_on_press(
-                            &controller,
-                            &manager,
-                            panel,
-                            core_point,
-                            app,
-                        ) {
+                        if tab_is_clickable
+                            && super::drag::begin_native_panel_tab_tearoff_on_press(
+                                &controller,
+                                &manager,
+                                panel,
+                                core_point,
+                                app,
+                            )
+                        {
                             window.capture_pointer(root_hitbox);
                             if window.captured_hitbox() == Some(root_hitbox) {
                                 pointer_capture.set(Some(root_hitbox));
