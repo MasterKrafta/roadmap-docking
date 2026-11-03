@@ -215,20 +215,23 @@ pub(crate) fn prepare_floating_tab_native_window_on_press(
     app: &mut App,
 ) -> bool {
     let local_bounds = controller.update(app, |controller, _| {
-        let rects = controller
-            .floating_geometry(drag.source_window_id, drag.source_group)
-            .ok()?;
-        let header = rects
-            .tab_headers
-            .iter()
-            .find(|header| header.panel == drag.panel)?;
+        let header_rect = {
+            let rects = controller
+                .floating_geometry(drag.source_window_id, drag.source_group)
+                .ok()?;
+            rects
+                .tab_headers
+                .iter()
+                .find(|header| header.panel == drag.panel)
+                .map(|header| header.rect)?
+        };
         let preferred_size = controller
             .layout()
             .panel_instance(drag.panel)?
             .constraints
             .preferred_size;
         desired_floating_bounds(
-            header.rect,
+            header_rect,
             preferred_size,
             drag.press_origin,
             drag.press_origin,
