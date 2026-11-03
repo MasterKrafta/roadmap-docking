@@ -197,6 +197,9 @@ pub struct FloatingWindowManager {
     prepared_panel_tab_drag: Option<PreparedPanelTabDrag>,
     native_resize: Option<NativeResizeSession>,
     reconciling: bool,
+    /// Group being assigned to its permanent PanelWindow for an immediate native tear-off.
+    /// Reconciliation must not show it before the HWND has been positioned at the pointer.
+    pending_tearoff_group: Option<FloatingGroupId>,
     registry: PanelWindowRegistry,
     host_registry: CompositionHostRegistry,
     native_ops: SystemNativeWindowOps,
@@ -214,6 +217,7 @@ impl FloatingWindowManager {
             prepared_panel_tab_drag: None,
             native_resize: None,
             reconciling: false,
+            pending_tearoff_group: None,
             registry: PanelWindowRegistry::default(),
             host_registry: CompositionHostRegistry::default(),
             native_ops: SystemNativeWindowOps,
@@ -761,13 +765,27 @@ impl FloatingWindowManager {
         if self.native_move.is_some() {
             return false;
         }
+
+        // The LayoutChanged subscription may be delivered after this pointer
+        // callback. Ensure the new floating group has an assigned PanelWindow
+        // before looking it up, while keeping that window hidden until it has
+        // been positioned for this drag.
+        if self.panel_window_for_group(group).is_none() {
+            self.pending_tearoff_group = Some(group);
+            self.reconcile(cx);
+            self.pending_tearoff_group = None;
+        }
+
         let Some(entry) = self.panel_window_for_group(group) else {
+            tracing::warn!(?group, "tear-off group has no assigned PanelWindow after reconciliation");
             return false;
         };
         let (Some(native_window), window_id) = (entry.native_window, entry.window_id) else {
+            tracing::warn!(?group, "tear-off PanelWindow has no native window handle");
             return false;
         };
         let Ok(cursor) = self.native_ops.cursor_position() else {
+            tracing::warn!(?group, "could not read cursor position for native tear-off");
             return false;
         };
         let scale = self
@@ -1502,6 +1520,7 @@ impl FloatingWindowManager {
         // PanelWindow has its host group, HWND, placement, and native constraints.
         for group in &groups {
             if blocked_groups.contains(&group.id)
+                || self.pending_tearoff_group == Some(group.id)
                 || self.native_move.is_some_and(|session| {
                     session.group == group.id
                         && session.kind == NativeMoveKind::TearOff
