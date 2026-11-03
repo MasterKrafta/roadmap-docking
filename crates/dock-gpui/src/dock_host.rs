@@ -96,7 +96,7 @@ impl DockHost {
     ///
     /// Without this opt-in, panels stay in the main window and no native panel
     /// windows are created or reconciled.
-    pub(crate) fn with_floating_window_manager(
+    pub fn with_floating_window_manager(
         mut self,
         manager: Entity<FloatingWindowManager>,
     ) -> Self {
