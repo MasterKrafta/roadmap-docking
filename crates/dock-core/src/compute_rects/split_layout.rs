@@ -23,12 +23,11 @@ pub(super) fn layout_split(
     )
 }
 
-/// Lays out a floating composition while respecting the independent window title.
+/// Lays out a floating composition while respecting its root component's header.
 ///
-/// Columns own a dedicated header row, so any floating composition containing a
-/// Column reserves the native title row above the complete Core subtree. Trees
-/// without Columns keep the established behavior where an expanded top Group
-/// can share its header row with the floating title.
+/// A floating root that is itself a Column reuses the Column header as its window
+/// header. More complex compositions containing Columns keep a separate outer
+/// floating title row.
 pub(super) fn layout_floating_root(
     layout: &Layout,
     id: NodeId,
@@ -37,6 +36,10 @@ pub(super) fn layout_floating_root(
     minimum_sizes: &mut HashMap<NodeId, Size>,
     output: &mut LayoutRects,
 ) -> Result<(), ComputeRectsError> {
+    if matches!(layout.node(id), Some(Node::Column(_))) {
+        return layout_node(layout, id, rect, metrics, minimum_sizes, output);
+    }
+
     let title_height = metrics.header_height.min(rect.size.height);
     if layout.floating_tree_contains_column(id) && rect.size.height > title_height {
         let content_rect = Rect::new(
