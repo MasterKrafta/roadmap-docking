@@ -34,16 +34,19 @@ impl Layout {
                     .iter()
                     .position(|(id, _)| *id == source_column)
                     .map(|index| (DockSide::Right, index))
-            })
-            .ok_or(ComputeRectsError::InvalidLayoutState)?;
+            });
+        if source_position.is_none() && !source_is_floating_root(self, source_column) {
+            return Err(ComputeRectsError::InvalidLayoutState);
+        }
 
         let can_insert = |side| match side {
             DockSide::Left => may_add_left_column,
             DockSide::Right => may_add_right_column,
         };
         let is_same_position = |side, index| {
-            source_position.0 == side
-                && (index == source_position.1 || index == source_position.1 + 1)
+            source_position.is_some_and(|(source_side, source_index)| {
+                source_side == side && (index == source_index || index == source_index + 1)
+            })
         };
 
         if source_allows(self, source_panels, AllowedArea::MAIN_DOCK) {
