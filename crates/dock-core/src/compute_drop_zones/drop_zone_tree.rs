@@ -272,6 +272,11 @@ pub(crate) fn can_add_column(
     if layout.profile() != Profile::Photoshop || current_column_count < metrics.max_columns {
         return true;
     }
+    if let DropSource::Column { column } = source {
+        return layout
+            .main_column_position(column)
+            .is_some_and(|(source_side, _)| source_side == side);
+    }
     let Some(column_id) = owner_column(layout, tree_index, source_root) else {
         return false;
     };
