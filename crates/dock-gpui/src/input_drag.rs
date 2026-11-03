@@ -239,8 +239,8 @@ pub(crate) fn prepare_floating_tab_native_window_on_press(
     };
     manager.update(app, |manager, manager_cx| {
         manager.prepare_floating_tab_native_window_on_press(
-            drag.panel,
             drag.source_group,
+            drag.panel,
             drag.press_origin,
             local_bounds,
             manager_cx,
@@ -433,9 +433,9 @@ pub(crate) fn finish_floating_tab_drag(
     })
 }
 
-/// Detaches a drag-only composition on pointer-down and assigns its already-created
-/// hidden PanelWindow as a temporary native drag surface. The native move itself
-/// remains thresholded; releasing without moving cancels the open history transaction.
+/// Detaches a drag-only composition on pointer-down and assigns its permanent
+/// PanelWindow as a temporary native drag surface. The native move itself remains
+/// thresholded; releasing without moving cancels the open history transaction.
 pub(crate) fn begin_native_tearoff_on_press(
     controller: &Entity<DockController>,
     manager: &Entity<FloatingWindowManager>,
@@ -479,7 +479,7 @@ pub(crate) fn begin_native_tearoff_on_press(
         manager.screen_bounds_from_main_local(local_bounds)
     });
     let Some(model_bounds) = model_bounds else {
-        tracing::warn!("could not convert pressed tab bounds into physical screen coordinates");
+        tracing::warn!("could not convert drag source bounds into physical screen coordinates");
         return false;
     };
     let command = match command {
