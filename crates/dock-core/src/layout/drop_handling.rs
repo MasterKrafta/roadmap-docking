@@ -46,6 +46,9 @@ impl Layout {
             (DragHandle::GroupGrip, DragPayload::Group { group }) => {
                 self.resolve_group_grip_drag(request, group, metrics)
             }
+            (DragHandle::ColumnHeader, DragPayload::Column { column }) => {
+                self.resolve_column_header_drag(request, column, metrics)
+            }
             _ => Err(CommandError::InvalidTarget {
                 reason: "drag handle and payload do not describe a supported drag operation",
             }),
@@ -284,6 +287,83 @@ impl Layout {
         }
 
         None
+    }
+
+    pub(super) fn resolve_column_header_drag(
+        &self,
+        request: &DragDropRequest,
+        column: NodeId,
+        metrics: &DockMetrics,
+    ) -> Result<DragDropAction, CommandError> {
+        if !matches!(self.node(column), Some(Node::Column(_))) {
+            return Err(if self.node(column).is_some() {
+                CommandError::InvalidTarget {
+                    reason: "Column header drag source must be a Column node",
+                }
+            } else {
+                CommandError::MissingNode { node: column }
+            });
+        }
+        let (source_side, source_index) = self
+            .main_column_position(column)
+            .ok_or(CommandError::InvalidTarget {
+                reason: "Column header drag source must belong to a main dock",
+            })?;
+        let target = request.target.ok_or(CommandError::InvalidTarget {
+            reason: "Column header drag requires a resolved drop target",
+        })?;
+
+        if matches!(target, DropTarget::FreeArea) {
+            let bounds = request.floating_bounds.ok_or(CommandError::InvalidTarget {
+                reason: "FreeArea Float requests require explicit window bounds",
+            })?;
+            bounds
+                .validate_non_empty()
+                .map_err(|_| CommandError::InvalidValue {
+                    field: "bounds",
+                    reason: "floating bounds must be finite and positive",
+                })?;
+            self.validate_panel_ids_allowed_for_area(
+                &self.panel_ids_in_subtree(column),
+                AllowedArea::FLOATING,
+            )?;
+            return Ok(DragDropAction::Command(DockCommand::Float {
+                node: column,
+                bounds,
+            }));
+        }
+
+        self.validate_drop_target(target, metrics)?;
+        let DropTarget::MainColumn { side, index } = target else {
+            return Err(CommandError::InvalidTarget {
+                reason: "a whole Column can only dock into a Main Dock insertion slot",
+            });
+        };
+        let target_columns = self.main_columns(side)?;
+        self.validate_panel_ids_allowed_for_target(
+            &self.panel_ids_in_subtree(column),
+            target,
+        )?;
+
+        if source_side == side && (index == source_index || index == source_index + 1) {
+            return Ok(DragDropAction::NoOp);
+        }
+        if self.profile == Profile::Photoshop
+            && source_side != side
+            && target_columns.len() >= metrics.max_columns
+        {
+            return Err(CommandError::InvalidTarget {
+                reason: "destination Main Dock has reached max_columns",
+            });
+        }
+
+        Ok(DragDropAction::Command(
+            DockCommand::MoveColumnToMainColumn {
+                column,
+                side,
+                index,
+            },
+        ))
     }
 
     pub(super) fn resolve_group_grip_drag(
