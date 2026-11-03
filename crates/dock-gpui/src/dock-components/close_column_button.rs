@@ -1,4 +1,4 @@
-use gpui::{IntoElement, ParentElement, Styled, div, px, rgb};
+use gpui::{IntoElement, InteractiveElement, ParentElement, Styled, div, px, rgb};
 use ui::Theme;
 
 /// Visual close control for the whole Column.

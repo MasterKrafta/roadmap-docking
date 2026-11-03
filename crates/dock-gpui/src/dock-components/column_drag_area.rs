@@ -1,4 +1,4 @@
-use gpui::{IntoElement, Styled, div, rgb};
+use gpui::{IntoElement, InteractiveElement, Styled, div, rgb};
 use ui::Theme;
 
 /// Flexible drag surface for the whole Column header.

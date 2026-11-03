@@ -1,4 +1,4 @@
-use gpui::{IntoElement, ParentElement, Styled, div, px, rgb};
+use gpui::{IntoElement, InteractiveElement, ParentElement, Styled, div, px, rgb};
 use ui::Theme;
 
 /// Placeholder surface for the content hosted by a panel.

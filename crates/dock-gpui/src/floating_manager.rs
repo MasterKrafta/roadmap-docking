@@ -283,6 +283,22 @@ impl FloatingWindowManager {
         self.main_host_origin = origin;
     }
 
+    /// Converts a proposed main-host-local logical rectangle to the Core
+    /// floating-bounds contract: physical virtual-desktop origin + logical size.
+    pub(crate) fn screen_bounds_from_main_local(&self, bounds: Rect) -> Option<Rect> {
+        bounds.validate_non_empty().ok()?;
+        let main = self.main_native_window?;
+        let client = self.native_ops.client_origin(main).ok()?;
+        let scale = self.native_ops.scale_factor(main).ok()?;
+        let origin = screen_position_from_main_local(
+            bounds.origin,
+            self.main_host_origin,
+            client,
+            scale,
+        )?;
+        Some(Rect::new(Point::new(origin.x as f32, origin.y as f32), bounds.size))
+    }
+
     /// Converts a rectangle in one floating host's local logical coordinates
     /// to the Core contract: physical virtual-desktop origin + logical size.
     pub(crate) fn screen_bounds_from_floating_local(

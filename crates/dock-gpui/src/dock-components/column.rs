@@ -15,7 +15,7 @@ mod panel_content;
 #[path = "tab.rs"]
 mod tab;
 
-use gpui::{AnyView, IntoElement, ParentElement, Styled, div, px, rgb};
+use gpui::{AnyView, IntoElement, InteractiveElement, ParentElement, Styled, div, px, rgb};
 use ui::Theme;
 
 pub use column_drag_area::ColumnDragArea;

@@ -28,7 +28,7 @@ pub(crate) fn toggle_registered_panel(
     side: DockSide,
     app: &mut App,
 ) {
-    if let Err(error) = controller.update(app, |controller, controller_cx| {
+    let result = controller.update(app, |controller, controller_cx| {
         let existing_panel = controller
             .layout()
             .panel_instances()
@@ -39,7 +39,7 @@ pub(crate) fn toggle_registered_panel(
         } else {
             let Some(descriptor) = controller.registry().get(&key) else {
                 tracing::warn!(panel = %key, "panel menu action references an unknown panel");
-                return;
+                return Ok(());
             };
 
             DockCommand::OpenPanel {
@@ -49,10 +49,10 @@ pub(crate) fn toggle_registered_panel(
             }
         };
 
-        if let Err(error) = controller.dispatch_in(command, controller_cx) {
-            tracing::warn!(%error, panel = %key, "main-dock panel toggle failed");
-        }
-    }) {
-        tracing::warn!(%error, panel = %key, "panel menu action could not reach dock controller");
+        controller.dispatch_in(command, controller_cx)
+    });
+
+    if let Err(error) = result {
+        tracing::warn!(%error, panel = %key, "main-dock panel toggle failed");
     }
 }

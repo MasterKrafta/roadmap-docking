@@ -1,4 +1,4 @@
-use gpui::{IntoElement, ParentElement, Styled, div, px, rgb};
+use gpui::{IntoElement, InteractiveElement, ParentElement, Styled, div, px, rgb};
 use ui::Theme;
 
 /// Reusable tab header. The active state changes only its visual presentation;
