@@ -677,15 +677,23 @@ fn native_tearoff_boundary_reached(
             else {
                 return false;
             };
-            let Some(strip) = rects
-                .tab_strips
-                .iter()
-                .find(|strip| strip.group == group)
-                .map(|strip| strip.rect)
-            else {
-                return false;
+            let drag_zone = if is_dock_component_tab_group(controller.layout(), group) {
+                let Some(group_rect) = rects.groups.iter().find(|rect| rect.group == group) else {
+                    return false;
+                };
+                DockTab::drag_zone(group_rect.rect, controller.metrics())
+            } else {
+                let Some(strip) = rects
+                    .tab_strips
+                    .iter()
+                    .find(|strip| strip.group == group)
+                    .map(|strip| strip.rect)
+                else {
+                    return false;
+                };
+                strip
             };
-            DockTab::leaves_strip_zone(strip, point)
+            DockTab::leaves_strip_zone(drag_zone, point)
         }
         _ => false,
     }
@@ -832,27 +840,30 @@ fn uses_dock_component_group(
     app: &mut App,
 ) -> bool {
     controller.update(app, |controller, _| {
-        let layout = controller.layout();
-        let is_single_panel_group = matches!(
-            layout.node(group_id),
-            Some(Node::Tabs(tabs))
-                if tabs.children.len() == 1
-                    && tabs.children.first().is_some_and(
-                        |child| matches!(layout.node(*child), Some(Node::Panel(_)))
-                    )
-        );
-        if !is_single_panel_group {
-            return false;
-        }
+        is_dock_component_tab_group(controller.layout(), group_id)
+    })
+}
 
-        layout.nodes().any(|(column_id, node)| {
-            let Node::Column(column) = node else {
-                return false;
-            };
-            column.groups.len() == 1
-                && column.groups.first() == Some(&group_id)
-                && is_main_dock_column(layout, column_id)
-        })
+fn is_dock_component_tab_group(layout: &dock_core::Layout, group_id: NodeId) -> bool {
+    let is_single_panel_group = matches!(
+        layout.node(group_id),
+        Some(Node::Tabs(tabs))
+            if tabs.children.len() == 1
+                && tabs.children.first().is_some_and(
+                    |child| matches!(layout.node(*child), Some(Node::Panel(_)))
+                )
+    );
+    if !is_single_panel_group {
+        return false;
+    }
+
+    layout.nodes().any(|(column_id, node)| {
+        let Node::Column(column) = node else {
+            return false;
+        };
+        column.groups.len() == 1
+            && column.groups.first() == Some(&group_id)
+            && is_main_dock_column(layout, column_id)
     })
 }
 
