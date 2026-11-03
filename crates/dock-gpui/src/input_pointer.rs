@@ -137,6 +137,7 @@ pub(crate) fn register_pointer_events(
     } = pointer_state;
 
     window.on_mouse_event({
+        let manager = manager.clone();
         let controller = controller.clone();
         let scroll_handles = scroll_handles.clone();
         let toggle_context_menu = toggle_context_menu.clone();
@@ -243,6 +244,16 @@ pub(crate) fn register_pointer_events(
                             core_point,
                             app,
                         );
+                        if super::drag::begin_native_tearoff_on_press(
+                            &controller,
+                            &manager,
+                            core_point,
+                            app,
+                        ) {
+                            pointer_press.set(None);
+                            app.stop_propagation();
+                            return;
+                        }
                     }
                 }
                 PointerDownIntent::FlyoutPanelCandidate { panel } => {
