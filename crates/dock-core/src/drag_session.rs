@@ -346,7 +346,10 @@ impl DragSession {
         let target = match handle {
             DragHandle::FloatingTitle => None,
             DragHandle::FloatingCapture => target,
-            DragHandle::PanelTab | DragHandle::FlyoutPanel | DragHandle::GroupGrip => {
+            DragHandle::PanelTab
+            | DragHandle::FlyoutPanel
+            | DragHandle::GroupGrip
+            | DragHandle::ColumnHeader => {
                 let Some(target) = target else {
                     *state = DragState::Cancelled {
                         payload,
