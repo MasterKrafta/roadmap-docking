@@ -1017,7 +1017,6 @@ impl FloatingWindowManager {
 
     fn finish_native_move(&mut self, state: NativeMoveSession, cx: &mut Context<Self>) {
         self.native_move = None;
-        cx.notify();
         if state.high_resolution_timer {
             let _ = self.native_ops.end_high_resolution_timer();
         }
@@ -1034,11 +1033,11 @@ impl FloatingWindowManager {
             tracing::warn!(?state.group, %error, "could not commit native floating-window move");
             self.cancel_controller_move(cx);
         }
+        cx.notify();
     }
 
     fn cancel_native_move(&mut self, state: NativeMoveSession, cx: &mut Context<Self>) {
         self.native_move = None;
-        cx.notify();
         if state.high_resolution_timer {
             let _ = self.native_ops.end_high_resolution_timer();
         }
@@ -1054,6 +1053,7 @@ impl FloatingWindowManager {
         {
             tracing::warn!(?state.group, %error, "could not restore floating window after Escape");
         }
+        cx.notify();
     }
 
     fn cancel_controller_move(&mut self, cx: &mut Context<Self>) {
