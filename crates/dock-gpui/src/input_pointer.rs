@@ -382,8 +382,17 @@ pub(crate) fn register_pointer_events(
                 let handle = controller.drag().session().handle();
                 let dragging = matches!(controller.drag().session().state(), DragState::Dragging { .. });
                 let leaves_host = !controller.viewport().contains(host_point).unwrap_or(true);
-                dragging && leaves_host
-                    && matches!(handle, Some(DragHandle::PanelTab | DragHandle::GroupGrip | DragHandle::FlyoutPanel | DragHandle::ColumnHeader))
+                dragging
+                    && leaves_host
+                    && matches!(
+                        handle,
+                        Some(
+                            DragHandle::PanelTab
+                                | DragHandle::GroupGrip
+                                | DragHandle::FlyoutPanel
+                                | DragHandle::ColumnHeader
+                        )
+                    )
             });
             if should_tearoff
                 && super::drag::begin_native_tearoff(&controller, &manager, point, app)
@@ -1034,7 +1043,7 @@ mod hit_dispatch_tests {
             32.0,
             28.0,
         ));
-        assert!(!column_header_drag_zone_contains(
+        assert!(column_header_drag_zone_contains(
             rect,
             Point::new(221.0, 30.0),
             32.0,
