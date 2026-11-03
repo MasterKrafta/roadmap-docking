@@ -1,5 +1,7 @@
 #[path = "column_drag_area.rs"]
 mod column_drag_area;
+#[path = "column_header.rs"]
+mod column_header;
 #[path = "collapse_column_button.rs"]
 mod collapse_column_button;
 #[path = "close_column_button.rs"]
@@ -16,10 +18,11 @@ mod panel_content;
 mod tab;
 
 use dock_core::DockMetrics;
-use gpui::{AnyView, IntoElement, InteractiveElement, ParentElement, Styled, div, px, rgb};
+use gpui::{AnyView, IntoElement, ParentElement, Styled, div, px, rgb};
 use ui::Theme;
 
 pub use column_drag_area::ColumnDragArea;
+pub use column_header::ColumnHeader;
 pub use collapse_column_button::CollapseColumnButton;
 pub use close_column_button::CloseColumnButton;
 pub use group_drag_area::GroupDragArea;
@@ -28,8 +31,6 @@ pub use group_menu_button::GroupMenuButton;
 pub use panel_content::PanelContent;
 pub use tab::DockTab;
 
-/// Extra controls are rendered visually; their actions remain disabled.
-const SHOW_COLUMN_CONTROLS: bool = true;
 const SHOW_GROUP_CONTROLS: bool = true;
 
 /// Static visual variants for the new Column composition.
@@ -59,38 +60,7 @@ impl DockColumnView {
     ) -> impl IntoElement {
         let group_id = format!("{id}-group");
         let group_header_height = metrics.header_height.max(metrics.tab_strip_height);
-
-        let mut column_header = div()
-            .id(format!("{id}-header"))
-            .w_full()
-            .h(px(metrics.column_header_height))
-            .flex_none()
-            .flex()
-            .items_stretch()
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .h_full()
-                    .bg(rgb(theme.colors.group_grip_background)),
-            );
-
-        // These controls are visual only; their actions are not connected yet.
-        if SHOW_COLUMN_CONTROLS {
-            column_header = column_header
-                .child(CollapseColumnButton::render_with_metrics(
-                    format!("{id}-collapse"),
-                    theme,
-                    metrics.column_control_button_width,
-                    metrics.control_icon_size,
-                ))
-                .child(CloseColumnButton::render_with_metrics(
-                    format!("{id}-close"),
-                    theme,
-                    metrics.column_control_button_width,
-                    metrics.control_icon_size,
-                ));
-        }
+        let column_header = ColumnHeader::render(id.clone(), metrics, theme);
 
         let mut group_header = div()
             .id(format!("{group_id}-header"))
@@ -176,36 +146,7 @@ impl DockColumnView {
         theme: Theme,
     ) -> impl IntoElement {
         let group_header_height = metrics.header_height.max(metrics.tab_strip_height);
-        let mut column_header = div()
-            .id(format!("{id}-header"))
-            .w_full()
-            .h(px(metrics.column_header_height))
-            .flex_none()
-            .flex()
-            .items_stretch()
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .h_full()
-                    .bg(rgb(theme.colors.group_grip_background)),
-            );
-
-        if SHOW_COLUMN_CONTROLS {
-            column_header = column_header
-                .child(CollapseColumnButton::render_with_metrics(
-                    format!("{id}-collapse"),
-                    theme,
-                    metrics.column_control_button_width,
-                    metrics.control_icon_size,
-                ))
-                .child(CloseColumnButton::render_with_metrics(
-                    format!("{id}-close"),
-                    theme,
-                    metrics.column_control_button_width,
-                    metrics.control_icon_size,
-                ));
-        }
+        let column_header = ColumnHeader::render(id.to_owned(), metrics, theme);
 
         let mut column = div()
             .id(id)
