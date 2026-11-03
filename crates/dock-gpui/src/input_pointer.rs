@@ -137,7 +137,6 @@ pub(crate) fn register_pointer_events(
     } = pointer_state;
 
     window.on_mouse_event({
-        let manager = manager.clone();
         let controller = controller.clone();
         let scroll_handles = scroll_handles.clone();
         let toggle_context_menu = toggle_context_menu.clone();
