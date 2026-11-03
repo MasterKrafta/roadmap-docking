@@ -315,7 +315,8 @@ impl Default for DockMetrics {
             splitter_thickness: 4.0,
             splitter_hit_zone: 8.0,
             edge_drop_width: 24.0,
-            drag_threshold: 2.0,
+            // Begin dock drag gestures after a deliberate 6 logical-pixel move.
+            drag_threshold: 6.0,
             min_group_height: 80.0,
             collapsed_group_height: 28.0,
             column_header_height: 32.0,
@@ -350,6 +351,7 @@ mod tests {
         assert_eq!(DockMetrics::default().column_control_button_width, 32.0);
         assert_eq!(DockMetrics::default().group_grip_width, 32.0);
         assert_eq!(DockMetrics::default().group_control_button_width, 28.0);
+        assert_eq!(DockMetrics::default().drag_threshold, 6.0);
         assert_eq!(DockMetrics::default().tab_horizontal_padding, 8.0);
         assert_eq!(DockMetrics::default().control_icon_size, 14.0);
     }
