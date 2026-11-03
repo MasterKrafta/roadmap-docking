@@ -623,8 +623,8 @@ pub(crate) fn register_pointer_events(
     });
 }
 
-/// Selects which semantic drag area may start a native tear-off.
-/// Only the Column drag area is enabled in this implementation stage.
+/// Selects which semantic drag areas may start a native tear-off.
+/// Panel tabs become native windows only after leaving their complete TabStripRect.
 fn native_tearoff_enabled_for(handle: Option<DragHandle>, payload: DragPayload) -> bool {
     match (handle, payload) {
         (Some(DragHandle::ColumnHeader), DragPayload::Column { .. }) => true,
