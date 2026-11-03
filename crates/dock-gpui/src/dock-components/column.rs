@@ -74,7 +74,7 @@ impl DockColumnView {
                 title,
                 true,
                 theme,
-                metrics.default_tab_width,
+                metrics.min_tab_width,
                 metrics.min_tab_width,
                 metrics.tab_horizontal_padding,
             ))
