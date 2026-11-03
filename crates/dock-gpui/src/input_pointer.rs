@@ -1,8 +1,8 @@
 use std::{cell::Cell, collections::HashMap, rc::Rc};
 
 use dock_core::{
-    DockCommand, DragHandle, DragPayload, DragState, HitResult, Node,
-    NodeId, PanelId, Point,
+    Axis, DockCommand, DockSide, DragHandle, DragPayload, DragState, HitResult, Node,
+    NodeId, PanelId, Point, Rect,
 };
 use gpui::{
     App, DispatchPhase, Entity, HitboxId, MouseButton, MouseDownEvent, MouseExitEvent,
@@ -40,6 +40,7 @@ enum PointerPressTarget {
 enum PointerDownIntent {
     TabHeaderCandidate { group: NodeId, panel: PanelId },
     GroupCandidate { group: NodeId },
+    ColumnCandidate { column: NodeId },
     FlyoutPanelCandidate { panel: PanelId },
     Resize,
     OverflowButton { group: NodeId },
@@ -77,6 +78,7 @@ fn pointer_down_intent_for_hit(hit: HitResult) -> PointerDownIntent {
             PointerDownIntent::GroupCandidate { group }
         }
         HitResult::TabOverflowButton { group } => PointerDownIntent::OverflowButton { group },
+        HitResult::Column { column } => PointerDownIntent::ColumnCandidate { column },
         HitResult::Splitter { .. }
         | HitResult::FlyoutResizeEdge { .. } => PointerDownIntent::Resize,
         HitResult::FlyoutPanel { panel, .. } => PointerDownIntent::FlyoutPanelCandidate { panel },
@@ -84,7 +86,6 @@ fn pointer_down_intent_for_hit(hit: HitResult) -> PointerDownIntent {
         HitResult::FloatingTitle { .. }
         | HitResult::FloatingGroup { .. }
         | HitResult::Panel { .. }
-        | HitResult::Column { .. }
         | HitResult::Miss
         | HitResult::DropZone { .. } => {
             PointerDownIntent::None
@@ -228,6 +229,22 @@ pub(crate) fn register_pointer_events(
                         );
                     }
                 }
+                PointerDownIntent::ColumnCandidate { column } => {
+                    if column_header_drag_handle_contains(
+                        &controller,
+                        column,
+                        core_point,
+                        app,
+                    ) {
+                        begin_drag_at(
+                            &controller,
+                            DragPayload::Column { column },
+                            DragHandle::ColumnHeader,
+                            core_point,
+                            app,
+                        );
+                    }
+                }
                 PointerDownIntent::FlyoutPanelCandidate { panel } => {
                     if flyout_title_grip_contains(&controller, core_point, app) {
                         begin_drag_at(
@@ -366,7 +383,7 @@ pub(crate) fn register_pointer_events(
                 let dragging = matches!(controller.drag().session().state(), DragState::Dragging { .. });
                 let leaves_host = !controller.viewport().contains(host_point).unwrap_or(true);
                 dragging && leaves_host
-                    && matches!(handle, Some(DragHandle::PanelTab | DragHandle::GroupGrip | DragHandle::FlyoutPanel))
+                    && matches!(handle, Some(DragHandle::PanelTab | DragHandle::GroupGrip | DragHandle::FlyoutPanel | DragHandle::ColumnHeader))
             });
             if should_tearoff
                 && super::drag::begin_native_tearoff(&controller, &manager, point, app)
@@ -759,6 +776,63 @@ fn tab_header_drag_handle_contains(
     })
 }
 
+fn column_header_drag_handle_contains(
+    controller: &Entity<DockController>,
+    column: NodeId,
+    point: Point,
+    app: &mut App,
+) -> bool {
+    controller.update(app, |controller, _| {
+        let metrics = controller.metrics();
+        let Ok(rects) = controller.geometry().cloned() else {
+            return false;
+        };
+        let Some(column_rect) = rects.columns.iter().find(|rect| rect.column == column) else {
+            return false;
+        };
+
+        let layout = controller.layout();
+        let is_main_column = [DockSide::Left, DockSide::Right]
+            .into_iter()
+            .any(|side| {
+                let Some(area) = layout.main_area(side) else {
+                    return false;
+                };
+                match layout.node(area.root) {
+                    Some(Node::Column(_)) => area.root == column,
+                    Some(Node::Split(split)) => {
+                        split.axis == Axis::X && split.children.contains(&column)
+                    }
+                    _ => false,
+                }
+            });
+        if !is_main_column {
+            return false;
+        }
+
+        column_header_drag_zone_contains(
+            column_rect.rect,
+            point,
+            metrics.column_header_height,
+            metrics.group_control_button_width,
+        )
+    })
+}
+
+fn column_header_drag_zone_contains(
+    rect: Rect,
+    point: Point,
+    header_height: f32,
+    control_button_width: f32,
+) -> bool {
+    let header_height = header_height.min(rect.size.height);
+    let control_width = control_button_width.min(rect.size.width / 3.0).max(1.0);
+    point.y >= rect.origin.y
+        && point.y < rect.origin.y + header_height
+        && point.x >= rect.origin.x
+        && point.x < rect.origin.x + rect.size.width - control_width
+}
+
 fn group_grip_contains(
     controller: &Entity<DockController>,
     group: NodeId,
@@ -842,7 +916,8 @@ mod hit_dispatch_tests {
     use slotmap::Key;
 
     use super::{
-        PointerClickIntent, PointerDownIntent, PointerPressTarget, pointer_click_intent_for_hit,
+        PointerClickIntent, PointerDownIntent, PointerPressTarget,
+        column_header_drag_zone_contains, pointer_click_intent_for_hit,
         pointer_down_intent_for_hit, pointer_press_target_for_hit,
     };
 
@@ -942,8 +1017,41 @@ mod hit_dispatch_tests {
         );
         assert_eq!(
             pointer_down_intent_for_hit(HitResult::Column { column: group }),
-            PointerDownIntent::None
+            PointerDownIntent::ColumnCandidate { column: group }
         );
+    }
+
+    #[test]
+    fn column_header_drag_zone_excludes_the_mode_button_and_column_content() {
+        let rect = Rect::new(
+            Point::new(10.0, 20.0),
+            dock_core::Size::new(240.0, 500.0),
+        );
+
+        assert!(column_header_drag_zone_contains(
+            rect,
+            Point::new(100.0, 30.0),
+            32.0,
+            28.0,
+        ));
+        assert!(!column_header_drag_zone_contains(
+            rect,
+            Point::new(221.0, 30.0),
+            32.0,
+            28.0,
+        ));
+        assert!(!column_header_drag_zone_contains(
+            rect,
+            Point::new(222.0, 30.0),
+            32.0,
+            28.0,
+        ));
+        assert!(!column_header_drag_zone_contains(
+            rect,
+            Point::new(100.0, 52.0),
+            32.0,
+            28.0,
+        ));
     }
 
     #[test]
