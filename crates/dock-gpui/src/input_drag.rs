@@ -391,6 +391,94 @@ pub(crate) fn finish_floating_tab_drag(
     })
 }
 
+/// Detaches a whole Column on pointer-down and assigns its already-created
+/// hidden PanelWindow as a temporary native drag surface. The native move itself
+/// remains thresholded; releasing without moving cancels the open history transaction.
+pub(crate) fn begin_native_tearoff_on_press(
+    controller: &Entity<DockController>,
+    manager: &Entity<FloatingWindowManager>,
+    pointer: Point,
+    app: &mut App,
+) -> bool {
+    let candidate = controller.update(app, |controller, _| {
+        let (payload, handle) = match controller.drag().session().state() {
+            DragState::Pressed { payload, .. } => {
+                (payload, controller.drag().session().handle()?)
+            }
+            _ => return None,
+        };
+        let (DragHandle::ColumnHeader, DragPayload::Column { column }) = (handle, payload) else {
+            return None;
+        };
+        let local_bounds = floating_bounds(controller, payload, pointer)?;
+        Some((
+            DockCommand::Float {
+                node: column,
+                bounds: local_bounds,
+            },
+            local_bounds,
+        ))
+    });
+    let Some((command, local_bounds)) = candidate else {
+        return false;
+    };
+
+    let model_bounds = manager.update(app, |manager, _| {
+        manager.screen_bounds_from_main_local(local_bounds)
+    });
+    let Some(model_bounds) = model_bounds else {
+        tracing::warn!("could not convert pressed Column bounds into physical screen coordinates");
+        return false;
+    };
+    let command = match command {
+        DockCommand::Float { node, .. } => DockCommand::Float {
+            node,
+            bounds: model_bounds,
+        },
+        _ => return false,
+    };
+
+    let detached = controller.update(app, |controller, cx| {
+        if !controller.begin_tearoff_transaction() {
+            return None;
+        }
+        let outcome = match controller.dispatch_tearoff_float_in(command, cx) {
+            Ok(outcome) => outcome,
+            Err(_) => return None,
+        };
+        match outcome.actual_value {
+            Some(CommandValue::FloatingGroup(group))
+                if controller.continue_tearoff_as_floating_capture(group).is_ok() =>
+            {
+                Some(group)
+            }
+            _ => {
+                let _ = controller.cancel_pointer_interaction_on_escape();
+                controller.flush_events(cx);
+                cx.notify();
+                None
+            }
+        }
+    });
+    let Some(group) = detached else {
+        return false;
+    };
+
+    let started = manager.update(app, |manager, manager_cx| {
+        manager.begin_pending_tearoff_move(group, pointer, local_bounds, model_bounds, manager_cx)
+    });
+    if !started {
+        let _ = controller.update(app, |controller, cx| {
+            let result = controller.cancel_pointer_interaction_on_escape();
+            controller.flush_events(cx);
+            cx.notify();
+            result
+        });
+        return false;
+    }
+    true
+}
+
 /// Turns an active main-window drag into a native floating window as soon as
 /// the pointer leaves the DockHost viewport after crossing Core's drag threshold.
 pub(crate) fn begin_native_tearoff(
@@ -657,7 +745,10 @@ pub(crate) fn floating_bounds(
     pointer: Point,
 ) -> Option<Rect> {
     let (active_payload, origin) = match controller.drag().session().state() {
-        DragState::Dragging {
+        DragState::Pressed {
+            payload, origin, ..
+        }
+        | DragState::Dragging {
             payload, origin, ..
         } => (payload, origin),
         _ => return None,
