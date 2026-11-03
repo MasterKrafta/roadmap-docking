@@ -1,7 +1,8 @@
-//! Runtime owner of permanent native windows for open PanelIds.
+//! Runtime owner of native windows for floating dock compositions.
 //!
-//! Composition hosts are selected separately from Core floating-group identity.
-//! The shared DockController remains the sole owner of Layout and panel views.
+//! Main-dock panels do not allocate native surfaces. A composition gets one
+//! host window only after it becomes a floating group. The shared DockController
+//! remains the sole owner of Layout and panel views.
 
 use std::{collections::{HashMap, HashSet}, time::Duration};
 
@@ -46,11 +47,11 @@ struct PanelWindowEntry {
     visibility: PanelWindowVisibility,
 }
 
-/// Permanent native-window records keyed by the identity of an open panel.
+/// Native-window records keyed by the PanelId currently hosting a floating composition.
 ///
-/// A PanelWindow is never reassigned to another PanelId. Hidden records remain
-/// alive while the panel is open, even when another window or MainWindow hosts
-/// the composition containing that panel.
+/// Main-dock panels have no native-window record. When a composition is floated,
+/// one of its panels is selected as the host until that composition is docked or
+/// the selected host panel leaves it.
 #[derive(Default)]
 pub struct PanelWindowRegistry {
     windows: HashMap<PanelId, PanelWindowEntry>,
@@ -110,8 +111,8 @@ impl PanelWindowRegistry {
     }
 }
 
-/// Maps each Core floating composition to the permanent panel window that
-/// currently hosts it. The Main Dock is hosted by the one shared MainWindow.
+/// Maps each Core floating composition to the panel window created on demand
+/// to host it. The Main Dock is hosted by the one shared MainWindow.
 #[derive(Default)]
 pub struct CompositionHostRegistry {
     main_window_id: Option<WindowId>,
@@ -236,6 +237,25 @@ impl FloatingWindowManager {
     fn panel_window_for_group(&self, group: FloatingGroupId) -> Option<&PanelWindowEntry> {
         let panel = self.host_registry.panel_for_group(group)?;
         self.registry.windows.get(&panel)
+    }
+
+    /// Ensures a newly floated composition has its one native host window.
+    /// The temporary visibility guard lets the caller position the HWND before
+    /// showing it at the pointer, instead of flashing at its initial bounds.
+    fn ensure_panel_window_for_group(
+        &mut self,
+        group: FloatingGroupId,
+        cx: &mut Context<Self>,
+    ) -> Option<(PanelId, NativeWindowId, WindowId)> {
+        if self.panel_window_for_group(group).is_none() {
+            let previous_pending = self.pending_tearoff_group.replace(group);
+            self.reconcile(cx);
+            self.pending_tearoff_group = previous_pending;
+        }
+
+        let panel = self.host_registry.panel_for_group(group)?;
+        let entry = self.registry.windows.get(&panel)?;
+        Some((panel, entry.native_window?, entry.window_id))
     }
 
     /// Connects the manager to the main GPUI window and the shared controller.
@@ -707,54 +727,8 @@ impl FloatingWindowManager {
     }
 
     /// Starts native movement for a group created by the current main-window drag.
+    /// The native host is created on demand only after the drag threshold is crossed.
     pub(crate) fn begin_tearoff_move(
-        &mut self,
-        group: FloatingGroupId,
-        pointer: Point,
-        local_bounds: Rect,
-        model_bounds: Rect,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        if self.native_move.is_some() { return false; }
-        let Some(entry) = self.panel_window_for_group(group) else { return false; };
-        let (Some(native_window), window_id) = (entry.native_window, entry.window_id) else { return false; };
-        let Ok(cursor) = self.native_ops.cursor_position() else { return false; };
-        let scale = self.main_native_window
-            .and_then(|main| self.native_ops.scale_factor(main).ok())
-            .filter(|scale| scale.is_finite() && *scale > 0.0).unwrap_or(1.0);
-        let Some(offset_x) = physical_coordinate(pointer.x - local_bounds.origin.x, scale) else { return false; };
-        let Some(offset_y) = physical_coordinate(pointer.y - local_bounds.origin.y, scale) else { return false; };
-        let grab_offset = PhysicalPoint { x: offset_x, y: offset_y };
-        let position = PhysicalPoint {
-            x: cursor.x.saturating_sub(grab_offset.x),
-            y: cursor.y.saturating_sub(grab_offset.y),
-        };
-        if let Err(error) = self.native_ops.move_window(native_window, position) {
-            tracing::warn!(?group, %error, "could not start native tear-off movement");
-            return false;
-        }
-        let high_resolution_timer = self.native_ops.begin_high_resolution_timer().is_ok();
-        self.native_move = Some(NativeMoveSession {
-            group, native_window, kind: NativeMoveKind::TearOff, grab_offset, initial_cursor: cursor,
-            start_bounds: model_bounds, start_pointer: pointer, drag_threshold: 0.0, threshold_crossed: true,
-            high_resolution_timer, drop_target: None,
-        });
-        self.schedule_native_move(cx, group, window_id);
-        if self.prepared_panel_tab_drag.is_some_and(|prepared| {
-            prepared.window_id == window_id
-                && self.host_registry.group_for_panel(prepared.panel) == Some(group)
-        }) {
-            self.prepared_panel_tab_drag = None;
-            self.reconcile(cx);
-            cx.notify();
-        }
-        true
-    }
-
-    /// Assigns and shows a native window for a composition detached on pointer-down.
-    /// Its floating header stays hidden while the pointer remains below the drag threshold;
-    /// releasing before that threshold rolls the transaction back.
-    pub(crate) fn begin_pending_tearoff_move(
         &mut self,
         group: FloatingGroupId,
         pointer: Point,
@@ -765,23 +739,10 @@ impl FloatingWindowManager {
         if self.native_move.is_some() {
             return false;
         }
-
-        // The LayoutChanged subscription may be delivered after this pointer
-        // callback. Ensure the new floating group has an assigned PanelWindow
-        // before looking it up, while keeping that window hidden until it has
-        // been positioned for this drag.
-        if self.panel_window_for_group(group).is_none() {
-            self.pending_tearoff_group = Some(group);
-            self.reconcile(cx);
-            self.pending_tearoff_group = None;
-        }
-
-        let Some(entry) = self.panel_window_for_group(group) else {
-            tracing::warn!(?group, "tear-off group has no assigned PanelWindow after reconciliation");
-            return false;
-        };
-        let (Some(native_window), window_id) = (entry.native_window, entry.window_id) else {
-            tracing::warn!(?group, "tear-off PanelWindow has no native window handle");
+        let Some((panel, native_window, window_id)) =
+            self.ensure_panel_window_for_group(group, cx)
+        else {
+            tracing::warn!(?group, "could not prepare a native host for the detached composition");
             return false;
         };
         let Ok(cursor) = self.native_ops.cursor_position() else {
@@ -799,29 +760,16 @@ impl FloatingWindowManager {
         let Some(offset_y) = physical_coordinate(pointer.y - local_bounds.origin.y, scale) else {
             return false;
         };
-        let grab_offset = PhysicalPoint {
-            x: offset_x,
-            y: offset_y,
-        };
+        let grab_offset = PhysicalPoint { x: offset_x, y: offset_y };
         let position = PhysicalPoint {
             x: cursor.x.saturating_sub(grab_offset.x),
             y: cursor.y.saturating_sub(grab_offset.y),
         };
         if let Err(error) = self.native_ops.move_window(native_window, position) {
-            tracing::warn!(?group, %error, "could not position temporary floating window");
+            tracing::warn!(?group, %error, "could not position native tear-off window");
             return false;
-        }
-        if let Err(error) = self.native_ops.show_no_activate(native_window) {
-            tracing::warn!(?group, %error, "could not show the temporary floating window on pointer-down");
-            return false;
-        }
-        if let Some(panel) = self.host_registry.panel_for_group(group)
-            && let Some(entry) = self.registry.windows.get_mut(&panel)
-        {
-            entry.visibility = PanelWindowVisibility::Visible;
         }
 
-        let metrics = self.controller.update(cx, |controller, _| controller.metrics());
         let high_resolution_timer = self.native_ops.begin_high_resolution_timer().is_ok();
         self.native_move = Some(NativeMoveSession {
             group,
@@ -831,18 +779,37 @@ impl FloatingWindowManager {
             initial_cursor: cursor,
             start_bounds: model_bounds,
             start_pointer: pointer,
-            drag_threshold: metrics.drag_threshold * scale,
-            threshold_crossed: false,
+            drag_threshold: 0.0,
+            threshold_crossed: true,
             high_resolution_timer,
             drop_target: None,
         });
+        if let Err(error) = self.native_ops.show_no_activate(native_window) {
+            self.native_move = None;
+            if high_resolution_timer {
+                let _ = self.native_ops.end_high_resolution_timer();
+            }
+            tracing::warn!(?group, %error, "could not show native tear-off window");
+            return false;
+        }
+        if let Some(entry) = self.registry.windows.get_mut(&panel) {
+            entry.visibility = PanelWindowVisibility::Visible;
+        }
+
         self.schedule_native_move(cx, group, window_id);
-        cx.notify();
+        if self.prepared_panel_tab_drag.is_some_and(|prepared| {
+            prepared.window_id == window_id
+                && self.host_registry.group_for_panel(prepared.panel) == Some(group)
+        }) {
+            self.prepared_panel_tab_drag = None;
+            self.reconcile(cx);
+            cx.notify();
+        }
         true
     }
 
-    /// Starts native movement for a newly-created floating window whose
-    /// source was detached from a tab inside another floating host.
+    /// Starts native movement for a newly-created floating-tab composition.
+    /// Its single native host window is created only after the tab drag detaches.
     pub(crate) fn begin_floating_tab_tearoff_move(
         &mut self,
         group: FloatingGroupId,
@@ -852,13 +819,14 @@ impl FloatingWindowManager {
         if self.native_move.is_some() {
             return false;
         }
-        let Some(entry) = self.panel_window_for_group(group) else {
-            return false;
-        };
-        let (Some(native_window), window_id) = (entry.native_window, entry.window_id) else {
+        let Some((panel, native_window, window_id)) =
+            self.ensure_panel_window_for_group(group, cx)
+        else {
+            tracing::warn!(?group, "could not prepare a native host for the detached tab");
             return false;
         };
         let Ok(cursor) = self.native_ops.cursor_position() else {
+            tracing::warn!(?group, "could not read cursor position for floating-tab tear-off");
             return false;
         };
         let Some(origin_x) = integer_physical_coordinate(model_bounds.origin.x) else {
@@ -876,7 +844,7 @@ impl FloatingWindowManager {
             y: cursor.y.saturating_sub(grab_offset.y),
         };
         if let Err(error) = self.native_ops.move_window(native_window, position) {
-            tracing::warn!(?group, %error, "could not start native floating-tab tear-off movement");
+            tracing::warn!(?group, %error, "could not position floating-tab tear-off window");
             return false;
         }
 
@@ -894,6 +862,18 @@ impl FloatingWindowManager {
             high_resolution_timer,
             drop_target: None,
         });
+        if let Err(error) = self.native_ops.show_no_activate(native_window) {
+            self.native_move = None;
+            if high_resolution_timer {
+                let _ = self.native_ops.end_high_resolution_timer();
+            }
+            tracing::warn!(?group, %error, "could not show floating-tab tear-off window");
+            return false;
+        }
+        if let Some(entry) = self.registry.windows.get_mut(&panel) {
+            entry.visibility = PanelWindowVisibility::Visible;
+        }
+
         self.schedule_native_move(cx, group, window_id);
         if self.prepared_panel_tab_drag.is_some_and(|prepared| {
             prepared.window_id == window_id
@@ -1286,7 +1266,19 @@ impl FloatingWindowManager {
             });
 
         groups.sort_by_key(|group| group.z_order);
-        let desired_panels = panel_locations.keys().copied().collect::<HashSet<_>>();
+        let previous_hosts = self.host_registry.floating_groups.clone();
+        let next_hosts = groups
+            .iter()
+            .filter_map(|group| {
+                let previous = previous_hosts
+                    .get(&group.id)
+                    .copied()
+                    .filter(|panel| group.panels.contains(panel));
+                let host = previous.or_else(|| group.panels.first().copied())?;
+                Some((group.id, host))
+            })
+            .collect::<HashMap<_, _>>();
+        let desired_panels = next_hosts.values().copied().collect::<HashSet<_>>();
 
         let monitor_work_areas = if recover_initial_bounds {
             match self.native_ops.monitor_work_areas() {
@@ -1303,8 +1295,8 @@ impl FloatingWindowManager {
             None
         };
 
-        // Discard GPUI handles that were externally closed, then recreate only
-        // records for PanelIds that still exist in Layout.
+        // Discard externally closed native handles, then create only the
+        // composition hosts selected above. Main-dock panels allocate no windows.
         let unavailable_panels = self
             .registry
             .windows
@@ -1341,28 +1333,8 @@ impl FloatingWindowManager {
             }
         }
 
-        // Prefer the previous host while it remains a member of the same
-        // composition. After a merge, the target composition keeps its host;
-        // after extraction, the detached panel's own window becomes the host.
-        let previous_hosts = self.host_registry.floating_groups.clone();
-        let mut next_hosts = HashMap::new();
-        for group in &groups {
-            let previous = previous_hosts
-                .get(&group.id)
-                .copied()
-                .filter(|panel| group.panels.contains(panel));
-            let host = previous.or_else(|| {
-                group
-                    .panels
-                    .iter()
-                    .copied()
-                    .find(|panel| self.registry.windows.contains_key(panel))
-            });
-            if let Some(host) = host {
-                next_hosts.insert(group.id, host);
-            }
-        }
-
+        // The selected host remains stable while it belongs to the same
+        // composition. New compositions get their first panel as a host.
         let mut next_group_by_panel = HashMap::new();
         for (group, panel) in &next_hosts {
             next_group_by_panel.insert(*panel, *group);
@@ -1513,11 +1485,8 @@ impl FloatingWindowManager {
         }
         self.host_registry.floating_groups = active_hosts.clone();
 
-        // Only selected composition hosts become visible. All other open
-        // PanelWindows (nested panels and Main-Dock panels) remain alive/hidden.
-        // Native resize styles and minimum size are synchronized in the pass
-        // above. The first show therefore happens only after the permanent
-        // PanelWindow has its host group, HWND, placement, and native constraints.
+        // Only floating-composition hosts become visible. Native resize styles
+        // and minimum size are synchronized before the host window is shown.
         for group in &groups {
             if blocked_groups.contains(&group.id)
                 || self.pending_tearoff_group == Some(group.id)
