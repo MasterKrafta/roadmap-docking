@@ -206,51 +206,6 @@ pub(crate) fn update_floating_tab_drag(
     })
 }
 
-/// Positions a spare hidden PanelWindow on pointer-down inside a floating
-/// composition. The visible host and Layout remain unchanged until a real tear-off.
-pub(crate) fn prepare_floating_tab_native_window_on_press(
-    controller: &Entity<DockController>,
-    manager: &Entity<FloatingWindowManager>,
-    drag: FloatingTabDrag,
-    app: &mut App,
-) -> bool {
-    let local_bounds = controller.update(app, |controller, _| {
-        let header_rect = {
-            let rects = controller
-                .floating_geometry(drag.source_window_id, drag.source_group)
-                .ok()?;
-            rects
-                .tab_headers
-                .iter()
-                .find(|header| header.panel == drag.panel)
-                .map(|header| header.rect)?
-        };
-        let preferred_size = controller
-            .layout()
-            .panel_instance(drag.panel)?
-            .constraints
-            .preferred_size;
-        desired_floating_bounds(
-            header_rect,
-            preferred_size,
-            drag.press_origin,
-            drag.press_origin,
-        )
-    });
-    let Some(local_bounds) = local_bounds else {
-        return false;
-    };
-    manager.update(app, |manager, manager_cx| {
-        manager.prepare_floating_tab_native_window_on_press(
-            drag.panel,
-            drag.source_group,
-            drag.press_origin,
-            local_bounds,
-            manager_cx,
-        )
-    })
-}
-
 /// Detaches one tab after its pointer leaves the source floating host. The
 /// existing tear-off transaction then continues as a native move of the new
 /// single-panel floating group.
@@ -433,36 +388,6 @@ pub(crate) fn finish_floating_tab_drag(
         controller.drag_mut().clear_layout_version();
         cx.notify();
         true
-    })
-}
-
-/// Positions the PanelId's existing hidden native window on pointer-down.
-/// The source stays in its current Layout so tab reordering and docking remain available.
-pub(crate) fn prepare_panel_tab_native_window_on_press(
-    controller: &Entity<DockController>,
-    manager: &Entity<FloatingWindowManager>,
-    panel: PanelId,
-    pointer: Point,
-    app: &mut App,
-) -> bool {
-    let local_bounds = controller.update(app, |controller, _| {
-        floating_bounds(
-            controller,
-            DragPayload::Panel { panel },
-            pointer,
-        )
-    });
-    let Some(local_bounds) = local_bounds else {
-        return false;
-    };
-
-    manager.update(app, |manager, manager_cx| {
-        manager.prepare_panel_tab_native_window_on_press(
-            panel,
-            pointer,
-            local_bounds,
-            manager_cx,
-        )
     })
 }
 
