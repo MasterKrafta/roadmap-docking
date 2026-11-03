@@ -113,6 +113,7 @@ impl MainDockView {
                 theme,
                 Point::ZERO,
                 None,
+                true,
             ));
         }
 
