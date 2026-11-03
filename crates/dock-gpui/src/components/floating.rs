@@ -23,8 +23,7 @@ use crate::{
     DockController, FloatingWindowManager,
     actions::dispatch_command,
     input::drag::{
-        begin_floating_tab_tearoff, finish_floating_tab_drag,
-        prepare_floating_tab_native_window_on_press, update_floating_tab_drag, FloatingTabDrag,
+
     },
     dock_host::{
         build_context_menu_entries, collect_subtree_nodes, context_menu_target_exists,
@@ -638,12 +637,6 @@ impl Render for FloatingHost {
                 if preserve_interaction {
                     return;
                 }
-                if let Some(manager) = manager.upgrade() {
-                    manager.update(app, |manager, manager_cx| {
-                        manager.clear_prepared_panel_tab_drag(manager_cx);
-                    });
-                }
-
                 controller.update(app, |controller, controller_cx| {
                     let result = controller.cancel_pointer_interaction_on_focus_loss();
                     controller_cx.notify();
@@ -788,37 +781,15 @@ impl Render for FloatingHost {
                             Some((tab_group, panel, controller.layout().version()))
                         });
                         if let Some((tab_group, panel, layout_version)) = press {
-                            let drag = FloatingTabDrag {
-                                source_window_id: input_window_id,
-                                source_group: group,
-                                panel,
-                                press_origin: point,
-                                layout_version,
-                            };
                             tab_press_for_down.set(Some(FloatingTabPress {
                                 tab_group,
                                 panel,
                                 origin: point,
                                 layout_version,
                             }));
-                            if let Some(manager) = manager_for_down.upgrade() {
-                                let _ = prepare_floating_tab_native_window_on_press(
-                                    &controller_for_down,
-                                    &manager,
-                                    drag,
-                                    app,
-                                );
-                            }
                             // Capture at press so leaving this native window before
                             // the next GPUI move event still reaches the drag pipeline.
                             window.capture_pointer(hitbox);
-                            if window.captured_hitbox() != Some(hitbox)
-                                && let Some(manager) = manager_for_down.upgrade()
-                            {
-                                manager.update(app, |manager, manager_cx| {
-                                    manager.clear_prepared_panel_tab_drag(manager_cx);
-                                });
-                            }
                         }
                     });
 
@@ -912,11 +883,6 @@ impl Render for FloatingHost {
                                 
                         {
                             return;
-                        }
-                        if let Some(manager) = manager_for_up.upgrade() {
-                            manager.update(app, |manager, manager_cx| {
-                                manager.clear_prepared_panel_tab_drag(manager_cx);
-                            });
                         }
                         let Some(press) = tab_press_for_up.get() else {
                             return;
@@ -1190,8 +1156,7 @@ impl Render for FloatingHost {
             }
         }
 
-        // Escape cancels an in-progress floating-tab press/drag and releases
-        // the hidden PanelWindow prepared for a possible tear-off.
+
         let manager_for_escape = self.manager.clone();
         let controller_for_escape = self.controller.clone();
         let tab_press_for_escape = self.tab_press.clone();
@@ -1207,9 +1172,6 @@ impl Render for FloatingHost {
                 if manager.update(app, |manager, _| manager.native_move_active()) {
                     return;
                 }
-                manager.update(app, |manager, manager_cx| {
-                    manager.clear_prepared_panel_tab_drag(manager_cx);
-                });
             }
             tab_press_for_escape.set(None);
             controller_for_escape.update(app, |controller, controller_cx| {
