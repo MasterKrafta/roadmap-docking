@@ -38,12 +38,12 @@ pub struct DockColumnView;
 impl DockColumnView {
     /// Renders one Group occupying all available space below the Column header.
     pub fn one_group(theme: Theme) -> impl IntoElement {
-        Self::render_groups("column-one-group", 1, theme)
+        Self::render_groups("column-one-group", 1, DockMetrics::default(), theme)
     }
 
     /// Renders two Groups stacked vertically with equal available height.
     pub fn two_groups(theme: Theme) -> impl IntoElement {
-        Self::render_groups("column-two-groups", 2, theme)
+        Self::render_groups("column-two-groups", 2, DockMetrics::default(), theme)
     }
 
     /// Renders a live Column with exactly one active tab and its panel view.
@@ -154,8 +154,34 @@ impl DockColumnView {
     fn render_groups(
         id: &'static str,
         group_count: usize,
+        metrics: DockMetrics,
         theme: Theme,
     ) -> impl IntoElement {
+        let group_header_height = metrics.header_height.max(metrics.tab_strip_height);
+        let mut column_header = div()
+            .id(format!("{id}-header"))
+            .w_full()
+            .h(px(metrics.column_header_height))
+            .flex_none()
+            .flex()
+            .items_stretch()
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .bg(rgb(theme.colors.group_grip_background)),
+            );
+
+        if SHOW_COLUMN_CONTROLS {
+            column_header = column_header
+                .child(CollapseColumnButton::render(
+                    format!("{id}-collapse"),
+                    theme,
+                ))
+                .child(CloseColumnButton::render(format!("{id}-close"), theme));
+        }
+
         let mut column = div()
             .id(id)
             .w_full()
@@ -166,24 +192,38 @@ impl DockColumnView {
             .bg(rgb(theme.colors.dock_background))
             .border_1()
             .border_color(rgb(theme.colors.group_frame_border))
-            .child(
-                div()
-                    .id(format!("{id}-header"))
-                    .w_full()
-                    .h(px(32.0))
-                    .flex_none()
-                    .flex()
-                    .items_stretch()
-                    .child(ColumnDragArea::render(format!("{id}-column-drag"), theme))
-                    .child(CollapseColumnButton::render(
-                        format!("{id}-collapse"),
-                        theme,
-                    ))
-                    .child(CloseColumnButton::render(format!("{id}-close"), theme)),
-            );
+            .child(column_header);
 
         for index in 0..group_count {
             let group_id = format!("{id}-group-{index}");
+            let mut group_header = div()
+                .id(format!("{group_id}-header"))
+                .w_full()
+                .h(px(group_header_height))
+                .flex_none()
+                .flex()
+                .items_stretch()
+                .child(DockTab::render_with_width(
+                    format!("{group_id}-tab-one"),
+                    "Вкладка 1".to_owned(),
+                    true,
+                    theme,
+                    metrics.min_tab_width,
+                ))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .h_full()
+                        .bg(rgb(theme.colors.group_grip_background)),
+                );
+
+            if SHOW_GROUP_CONTROLS {
+                group_header = group_header
+                    .child(GroupGrip::render(format!("{group_id}-grip"), theme))
+                    .child(GroupMenuButton::render(format!("{group_id}-menu"), theme));
+            }
+
             let group = div()
                 .id(group_id.clone())
                 .w_full()
@@ -194,27 +234,7 @@ impl DockColumnView {
                 .overflow_hidden()
                 .border_1()
                 .border_color(rgb(theme.colors.group_frame_border))
-                .child(
-                    div()
-                        .id(format!("{group_id}-header"))
-                        .w_full()
-                        .h(px(32.0))
-                        .flex_none()
-                        .flex()
-                        .items_stretch()
-                        .child(DockTab::render(
-                            format!("{group_id}-tab-one"),
-                            "Вкладка 1".to_owned(),
-                            true,
-                            theme,
-                        ))
-                        .child(GroupDragArea::render(
-                            format!("{group_id}-drag"),
-                            theme,
-                        ))
-                        .child(GroupGrip::render(format!("{group_id}-grip"), theme))
-                        .child(GroupMenuButton::render(format!("{group_id}-menu"), theme)),
-                )
+                .child(group_header)
                 .child(PanelContent::render(
                     format!("{group_id}-content"),
                     theme,
