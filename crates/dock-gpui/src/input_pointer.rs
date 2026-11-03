@@ -228,6 +228,18 @@ pub(crate) fn register_pointer_events(
                             core_point,
                             app,
                         );
+                        if matches!(hit, HitResult::Group { .. })
+                            && super::drag::begin_native_tearoff_on_press(
+                                &controller,
+                                &manager,
+                                core_point,
+                                app,
+                            )
+                        {
+                            pointer_press.set(None);
+                            app.stop_propagation();
+                            return;
+                        }
                     }
                 }
                 PointerDownIntent::ColumnCandidate { column } => {
@@ -265,6 +277,16 @@ pub(crate) fn register_pointer_events(
                             core_point,
                             app,
                         );
+                        if super::drag::begin_native_tearoff_on_press(
+                            &controller,
+                            &manager,
+                            core_point,
+                            app,
+                        ) {
+                            pointer_press.set(None);
+                            app.stop_propagation();
+                            return;
+                        }
                     }
                 }
                 PointerDownIntent::Resize => {
