@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use dock_core::{DockCommand, FlyoutRect, ResizeEdge};
+use dock_core::{DockCommand, DockMetrics, FlyoutRect, ResizeEdge};
 use gpui::{
     Animation, AnimationExt, AnyView, App, Entity, IntoElement, ParentElement, SharedString,
     StatefulInteractiveElement, Styled, div, prelude::InteractiveElement as _, px, rgb,
@@ -22,10 +22,11 @@ impl FlyoutView {
         title: SharedString,
         panel_view: Option<AnyView>,
         controller: Entity<DockController>,
+        metrics: DockMetrics,
         theme: Theme,
     ) -> impl IntoElement {
         let rect = flyout.rect;
-        let header_height = theme.metrics.column_header_height.min(rect.size.height);
+        let header_height = metrics.header_height.min(rect.size.height);
         let close_size = theme.metrics.group_control_button_width.min(header_height);
         let resize_direction = resize_width_direction(flyout.resize_edge);
 
