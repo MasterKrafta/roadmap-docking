@@ -4,8 +4,6 @@ mod column_drag_area;
 mod collapse_column_button;
 #[path = "close_column_button.rs"]
 mod close_column_button;
-#[path = "first_tab.rs"]
-mod first_tab;
 #[path = "group_drag_area.rs"]
 mod group_drag_area;
 #[path = "group_grip.rs"]
@@ -14,8 +12,8 @@ mod group_grip;
 mod group_menu_button;
 #[path = "panel_content.rs"]
 mod panel_content;
-#[path = "second_tab.rs"]
-mod second_tab;
+#[path = "tab.rs"]
+mod tab;
 
 use gpui::{IntoElement, ParentElement, Styled, div, px, rgb};
 use ui::Theme;
@@ -23,12 +21,11 @@ use ui::Theme;
 pub use column_drag_area::ColumnDragArea;
 pub use collapse_column_button::CollapseColumnButton;
 pub use close_column_button::CloseColumnButton;
-pub use first_tab::FirstTab;
 pub use group_drag_area::GroupDragArea;
 pub use group_grip::GroupGrip;
 pub use group_menu_button::GroupMenuButton;
 pub use panel_content::PanelContent;
-pub use second_tab::SecondTab;
+pub use tab::DockTab;
 
 /// Static visual variants for the new Column composition.
 pub struct DockColumnView;
@@ -95,14 +92,16 @@ impl DockColumnView {
                         .flex_none()
                         .flex()
                         .items_stretch()
-                        .child(FirstTab::render(
+                        .child(DockTab::render(
                             format!("{group_id}-tab-one"),
                             "Вкладка 1".to_owned(),
+                            true,
                             theme,
                         ))
-                        .child(SecondTab::render(
+                        .child(DockTab::render(
                             format!("{group_id}-tab-two"),
                             "Вкладка 2".to_owned(),
+                            false,
                             theme,
                         ))
                         .child(GroupDragArea::render(

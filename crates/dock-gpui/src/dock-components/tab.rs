@@ -1,11 +1,17 @@
 use gpui::{IntoElement, ParentElement, Styled, div, px, rgb};
 use ui::Theme;
 
-/// Second tab header. Its full surface is reserved as a future tab drag zone.
-pub struct SecondTab;
+/// Reusable tab header. The active state changes only its visual presentation;
+/// pointer behavior is intentionally not connected yet.
+pub struct DockTab;
 
-impl SecondTab {
-    pub fn render(id: String, title: String, theme: Theme) -> impl IntoElement {
+impl DockTab {
+    pub fn render(
+        id: String,
+        title: String,
+        active: bool,
+        theme: Theme,
+    ) -> impl IntoElement {
         div()
             .id(id)
             .w(px(112.0))
@@ -16,7 +22,11 @@ impl SecondTab {
             .px(px(8.0))
             .overflow_hidden()
             .cursor_move()
-            .bg(rgb(theme.colors.panel_tab_inactive))
+            .bg(rgb(if active {
+                theme.colors.panel_tab_active
+            } else {
+                theme.colors.panel_tab_inactive
+            }))
             .border_1()
             .border_color(rgb(theme.colors.group_frame_border))
             .text_color(rgb(theme.colors.primary_text))
