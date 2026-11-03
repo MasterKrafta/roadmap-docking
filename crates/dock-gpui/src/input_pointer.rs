@@ -912,7 +912,7 @@ fn flyout_title_grip_contains(
 
 #[cfg(test)]
 mod hit_dispatch_tests {
-    use dock_core::{Axis, FloatingGroupId, HitResult, NodeId, PanelId, ResizeEdge};
+    use dock_core::{Axis, FloatingGroupId, HitResult, NodeId, PanelId, Point, Rect, ResizeEdge};
     use slotmap::Key;
 
     use super::{
