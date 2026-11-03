@@ -126,7 +126,7 @@ pub(super) fn validate_photoshop_floating_root(
     errors: &mut Vec<ValidationError>,
 ) {
     match nodes.get(root) {
-        Some(Node::Tabs(_)) => {}
+        Some(Node::Tabs(_)) | Some(Node::Column(_)) => {}
         Some(Node::Split(split)) if split.axis == Axis::Y => {
             if split
                 .children
@@ -143,7 +143,7 @@ pub(super) fn validate_photoshop_floating_root(
         Some(_) => errors.push(ValidationError::InvalidFloatingRoot {
             group,
             root,
-            reason: "floating root must be Tabs or Split(Y) of Tabs",
+            reason: "floating root must be Tabs, Column, or Split(Y) of Tabs",
         }),
         None => {}
     }
