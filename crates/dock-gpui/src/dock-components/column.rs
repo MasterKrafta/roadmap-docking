@@ -57,7 +57,6 @@ impl DockColumnView {
         panel_view: AnyView,
         metrics: DockMetrics,
         theme: Theme,
-        show_header: bool,
     ) -> impl IntoElement {
         let group_id = format!("{id}-group");
         let group_header_height = metrics.header_height.max(metrics.tab_strip_height);
@@ -104,7 +103,7 @@ impl DockColumnView {
                 ));
         }
 
-        let mut column = div()
+        let column = div()
             .id(id)
             .w_full()
             .h_full()
@@ -113,11 +112,8 @@ impl DockColumnView {
             .overflow_hidden()
             .bg(rgb(theme.colors.dock_background))
             .border_1()
-            .border_color(rgb(theme.colors.group_frame_border));
-
-        if show_header {
-            column = column.child(column_header);
-        }
+            .border_color(rgb(theme.colors.group_frame_border))
+            .child(column_header);
 
         column.child(
                 div()
