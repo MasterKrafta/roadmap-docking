@@ -876,9 +876,9 @@ impl FloatingWindowManager {
         true
     }
 
-    /// Assigns a hidden native window to a composition detached on pointer-down.
-    /// The window is shown without its floating header only after the drag threshold
-    /// is crossed; releasing before that threshold rolls the transaction back.
+    /// Assigns and shows a native window for a composition detached on pointer-down.
+    /// Its floating header stays hidden while the pointer remains below the drag threshold;
+    /// releasing before that threshold rolls the transaction back.
     pub(crate) fn begin_pending_tearoff_move(
         &mut self,
         group: FloatingGroupId,
@@ -922,14 +922,14 @@ impl FloatingWindowManager {
             tracing::warn!(?group, %error, "could not position temporary floating window");
             return false;
         }
-        if let Err(error) = self.native_ops.hide(native_window) {
-            tracing::warn!(?group, %error, "could not keep the temporary floating window hidden before drag threshold");
+        if let Err(error) = self.native_ops.show_no_activate(native_window) {
+            tracing::warn!(?group, %error, "could not show the temporary floating window on pointer-down");
             return false;
         }
         if let Some(panel) = self.host_registry.panel_for_group(group)
             && let Some(entry) = self.registry.windows.get_mut(&panel)
         {
-            entry.visibility = PanelWindowVisibility::Hidden;
+            entry.visibility = PanelWindowVisibility::Visible;
         }
 
         let metrics = self.controller.update(cx, |controller, _| controller.metrics());
