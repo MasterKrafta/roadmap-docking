@@ -311,8 +311,8 @@ pub(crate) fn begin_floating_tab_tearoff(
     true
 }
 
-/// Finishes a tab drag that remains inside its source floating host. Drops that
-/// leave the host are promoted to a native tear-off by begin_floating_tab_tearoff.
+/// Finishes a tab drag that remains inside its source TabStrip region. Leaving
+/// that region promotes the gesture to a native tear-off.
 pub(crate) fn finish_floating_tab_drag(
     controller: &Entity<DockController>,
     window_id: WindowId,
