@@ -124,6 +124,8 @@ pub trait NativeWindowOps {
         window: NativeWindowId,
         position: PhysicalPoint,
     ) -> Result<(), NativeError>;
+    /// Sets the requested client-content size in physical pixels.
+    /// The native implementation accounts for the non-client window frame.
     fn resize_window(
         &self,
         window: NativeWindowId,
