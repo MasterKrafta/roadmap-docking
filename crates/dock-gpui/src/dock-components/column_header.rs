@@ -1,6 +1,6 @@
 use super::{CollapseColumnButton, CloseColumnButton, ColumnDragArea};
 use dock_core::DockMetrics;
-use gpui::{InteractiveElement, IntoElement, ParentElement, Styled, div, px, rgb};
+use gpui::{InteractiveElement, IntoElement, ParentElement, Styled, div, px};
 use ui::Theme;
 
 /// Fixed visual header that belongs to the Column rather than to a Group.
