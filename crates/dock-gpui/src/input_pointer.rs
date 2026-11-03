@@ -1,8 +1,8 @@
 use std::{cell::Cell, collections::HashMap, rc::Rc};
 
 use dock_core::{
-    Axis, DockCommand, DockSide, DragHandle, DragPayload, DragState, DropTarget, HitResult,
-    Node, NodeId, PanelId, Point, Rect,
+    Axis, DockCommand, DockSide, DragHandle, DragPayload, DragState, HitResult, Node, NodeId,
+    PanelId, Point, Rect,
 };
 use gpui::{
     App, DispatchPhase, Entity, HitboxId, MouseButton, MouseDownEvent, MouseExitEvent,
@@ -395,26 +395,16 @@ pub(crate) fn register_pointer_events(
             }
 
             let should_tearoff = controller.update(app, |controller, _| {
-                let handle = controller.drag().session().handle();
-                let DragState::Dragging { target, .. } = controller.drag().session().state()
-                else {
-                    return false;
-                };
-                let leaves_host = !controller.viewport().contains(host_point).unwrap_or(true);
-                // Entering the empty Canvas is already a semantic FreeArea drop.
-                // Detach now so the native Floating window follows the cursor
-                // while the mouse button is still held, rather than waiting for MouseUp.
-                let enters_free_area = target == Some(DropTarget::FreeArea);
-                (leaves_host || enters_free_area)
-                    && matches!(
-                        handle,
-                        Some(
-                            DragHandle::PanelTab
-                                | DragHandle::GroupGrip
-                                | DragHandle::FlyoutPanel
-                                | DragHandle::ColumnHeader
-                        )
+                matches!(
+                    (
+                        controller.drag().session().state(),
+                        controller.drag().session().handle(),
+                    ),
+                    (
+                        DragState::Dragging { .. },
+                        Some(DragHandle::PanelTab | DragHandle::GroupGrip)
                     )
+                )
             });
             if should_tearoff
                 && super::drag::begin_native_tearoff(&controller, &manager, point, app)
