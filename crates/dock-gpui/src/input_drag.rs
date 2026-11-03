@@ -640,7 +640,11 @@ fn drop_source(controller: &DockController, payload: DragPayload) -> Option<Drop
                 .floating_group(group)
                 .and_then(|floating| controller.layout().dock_area(floating.area))
                 .map(|area| area.root)?;
-            Some(DropSource::Group { group: root })
+            Some(if matches!(controller.layout().node(root), Some(Node::Column(_))) {
+                DropSource::Column { column: root }
+            } else {
+                DropSource::Group { group: root }
+            })
         }
     }
 }
