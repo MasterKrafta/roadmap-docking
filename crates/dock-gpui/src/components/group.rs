@@ -35,10 +35,11 @@ impl GroupView {
         raise_floating: Option<FloatingGroupId>,
         toggle_menu: GroupMenuToggle,
         middle_click_closes_tabs: bool,
+        share_floating_title: bool,
     ) -> impl IntoElement {
         let left = group.rect.origin.x - content_origin.x;
         let top = group.rect.origin.y - content_origin.y;
-        let header_height = if presentation.collapsed {
+        let header_height = if presentation.collapsed || share_floating_title {
             0.0
         } else {
             metrics.header_height.min(group.rect.size.height)
@@ -92,6 +93,12 @@ impl GroupView {
             raise_floating,
             middle_click_closes_tabs,
         ));
+
+        // The floating window title bar already owns this top row. Do not
+        // paint a second Group grip or its controls over the same coordinates.
+        if share_floating_title {
+            return root;
+        }
 
         // Collapsed groups have no header rect, so their controls overlay the
         // trailing edge of the remaining tab strip to keep Expand/Menu reachable.

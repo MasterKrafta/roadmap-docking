@@ -213,6 +213,9 @@ impl FloatingWindowContent {
                 Some(floating.group),
                 context_menu.clone(),
                 middle_click_closes_tabs,
+                columns.is_empty()
+                    && !presentation.collapsed
+                    && group.rect.origin.y == floating.rect.origin.y,
             ));
         }
 
