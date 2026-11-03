@@ -65,6 +65,13 @@ pub enum DockCommand {
         side: DockSide,
         index: usize,
     },
+    /// Move a complete existing Column to an exact insertion slot on either Main Dock side.
+    /// The Column node and all groups/panels below it retain their identities.
+    MoveColumnToMainColumn {
+        column: NodeId,
+        side: DockSide,
+        index: usize,
+    },
     /// Merge a whole Tabs group into another Tabs group at an exact tab slot.
     /// The source group container is removed; its Panel nodes and instances survive.
     /// In the Photoshop profile, a successful merge also expands a collapsed target.
@@ -255,6 +262,11 @@ mod tests {
                 side: DockSide::Right,
                 index: 0,
             },
+            DockCommand::MoveColumnToMainColumn {
+                column: NodeId::null(),
+                side: DockSide::Left,
+                index: 1,
+            },
             DockCommand::MergeGroup {
                 group: NodeId::null(),
                 target_group: NodeId::null(),
@@ -350,7 +362,7 @@ mod tests {
                 mode: ChromeMode::AllHidden,
             },
         ];
-        assert_eq!(commands.len(), 35);
+        assert_eq!(commands.len(), 36);
     }
 
     #[cfg(feature = "serde")]
