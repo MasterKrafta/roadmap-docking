@@ -1185,6 +1185,38 @@ impl Render for FloatingHost {
             }
         }
 
+        // Escape cancels an in-progress floating-tab press/drag and releases
+        // the hidden PanelWindow prepared for a possible tear-off.
+        let manager_for_escape = self.manager.clone();
+        let controller_for_escape = self.controller.clone();
+        let tab_press_for_escape = self.tab_press.clone();
+        let context_menu_is_open = self.open_context_menu.is_some();
+        root = root.capture_key_down(move |event, window, app| {
+            if context_menu_is_open
+                || !event.keystroke.key.eq_ignore_ascii_case("escape")
+                || tab_press_for_escape.get().is_none()
+            {
+                return;
+            }
+            if let Some(manager) = manager_for_escape.upgrade() {
+                if manager.update(app, |manager, _| manager.native_move_active()) {
+                    return;
+                }
+                manager.update(app, |manager, manager_cx| {
+                    manager.clear_prepared_panel_tab_drag(manager_cx);
+                });
+            }
+            tab_press_for_escape.set(None);
+            controller_for_escape.update(app, |controller, controller_cx| {
+                if let Err(error) = controller.cancel_pointer_interaction_on_escape() {
+                    tracing::debug!(%error, "could not cancel floating tab drag with Escape");
+                }
+                controller_cx.notify();
+            });
+            window.release_pointer();
+            app.stop_propagation();
+        });
+
         root
     }
 }
