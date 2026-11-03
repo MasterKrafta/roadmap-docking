@@ -959,6 +959,129 @@ fn split_root_floating_composition_can_create_first_main_dock_columns() {
 
 
 #[test]
+fn column_header_drag_moves_a_complete_column_between_main_docks() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, first_panel) = builder.panel(key("column-drag-first"), constraints());
+    let first_group = builder.tabs(vec![first_panel], 0, false);
+    let (_, second_panel) = builder.panel(key("column-drag-second"), constraints());
+    let second_group = builder.tabs(vec![second_panel], 0, true);
+    let source_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![first_group, second_group],
+        vec![0.4, 0.6],
+    );
+    builder.main_area(DockSide::Left, source_column);
+
+    let (_, target_panel) = builder.panel(key("column-drag-target"), constraints());
+    let target_group = builder.tabs(vec![target_panel], 0, false);
+    let target_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![target_group],
+        vec![1.0],
+    );
+    builder.main_area(DockSide::Right, target_column);
+
+    let mut layout = builder.build();
+    let rects = layout
+        .compute_rects(
+            Rect::new(Point::ZERO, Size::new(1200.0, 800.0)),
+            &metrics,
+        )
+        .unwrap();
+    let zones = layout
+        .compute_drop_zones(DropSource::Column { column: source_column }, &rects, &metrics)
+        .unwrap();
+
+    assert!(zones.iter().all(|zone| matches!(
+        zone.target,
+        DropTarget::MainColumn { .. } | DropTarget::FreeArea
+    )));
+    assert!(zones.iter().any(|zone| {
+        zone.target
+            == DropTarget::MainColumn {
+                side: DockSide::Right,
+                index: 0,
+            }
+    }));
+    assert!(zones.iter().any(|zone| zone.target == DropTarget::FreeArea));
+
+    let floating_bounds = bounds(520.0, 140.0);
+    let free_area_request = DragDropRequest {
+        payload: DragPayload::Column {
+            column: source_column,
+        },
+        handle: DragHandle::ColumnHeader,
+        origin: Point::ZERO,
+        point: Point::new(600.0, 400.0),
+        target: Some(DropTarget::FreeArea),
+        floating_bounds: Some(floating_bounds),
+    };
+    assert_eq!(
+        layout.resolve_drag_drop(&free_area_request, &metrics).unwrap(),
+        DragDropAction::Command(DockCommand::Float {
+            node: source_column,
+            bounds: floating_bounds,
+        })
+    );
+
+    let request = DragDropRequest {
+        target: Some(DropTarget::MainColumn {
+            side: DockSide::Right,
+            index: 0,
+        }),
+        floating_bounds: None,
+        ..free_area_request
+    };
+    let action = layout.resolve_drag_drop(&request, &metrics).unwrap();
+    assert_eq!(
+        action,
+        DragDropAction::Command(DockCommand::MoveColumnToMainColumn {
+            column: source_column,
+            side: DockSide::Right,
+            index: 0,
+        })
+    );
+    let DragDropAction::Command(command) = action else {
+        panic!("dropping on a Main Dock column edge must move the whole Column");
+    };
+    let outcome = layout.apply(command, &metrics).unwrap();
+
+    assert!(layout.main_area(DockSide::Left).is_none());
+    assert_eq!(
+        layout.main_columns(DockSide::Right).unwrap(),
+        vec![source_column, target_column]
+    );
+    assert!(matches!(
+        layout.node(source_column),
+        Some(Node::Column(column))
+            if column.groups == vec![first_group, second_group]
+    ));
+    assert_eq!(
+        outcome.inverse,
+        Some(DockCommand::MoveColumnToMainColumn {
+            column: source_column,
+            side: DockSide::Left,
+            index: 0,
+        })
+    );
+
+    layout.apply(outcome.inverse.unwrap(), &metrics).unwrap();
+    assert_eq!(
+        layout.main_columns(DockSide::Left).unwrap(),
+        vec![source_column]
+    );
+    assert_eq!(
+        layout.main_columns(DockSide::Right).unwrap(),
+        vec![target_column]
+    );
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
 fn photoshop_column_can_float_as_one_composition_and_dock_back() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
