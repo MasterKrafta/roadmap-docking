@@ -128,7 +128,7 @@ impl DockColumnView {
             .child(column_header)
             .child(
                 div()
-                    .id(group_id)
+                    .id(group_id.clone())
                     .w_full()
                     .flex_1()
                     .min_h_0()
