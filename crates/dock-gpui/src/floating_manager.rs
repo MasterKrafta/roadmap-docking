@@ -191,8 +191,8 @@ pub struct FloatingWindowManager {
     native_move: Option<NativeMoveSession>,
     native_resize: Option<NativeResizeSession>,
     reconciling: bool,
-    /// Group being assigned to its permanent PanelWindow for an immediate native tear-off.
-    /// Reconciliation must not show it before the HWND has been positioned at the pointer.
+    /// Group whose floating host is being created for an active native tear-off.
+    /// Reconciliation keeps it hidden until the caller positions the HWND.
     pending_tearoff_group: Option<FloatingGroupId>,
     registry: PanelWindowRegistry,
     host_registry: CompositionHostRegistry,
@@ -252,9 +252,9 @@ impl FloatingWindowManager {
 
     /// Connects the manager to the main GPUI window and the shared controller.
     ///
-    /// The main HWND is retained as the native owner for every PanelWindow.
-    /// The first reconciliation creates records for all open PanelIds already
-    /// present in the initial Layout before DockHost was rendered.
+    /// The main HWND is retained as the native owner for each floating host.
+    /// The first reconciliation creates windows only for floating compositions
+    /// already present in the initial Layout.
     pub(crate) fn attach_main_window(
         &mut self,
         window: &mut Window,
@@ -1155,7 +1155,7 @@ impl FloatingWindowManager {
             } else {
                 tracing::error!(
                     ?panel,
-                    "could not create the permanent native window for an open panel"
+                    "could not create a native host window for a floating composition"
                 );
             }
         }
@@ -1290,7 +1290,7 @@ impl FloatingWindowManager {
                             ?panel,
                             ?group.id,
                             %error,
-                            "could not assign a floating composition to its permanent panel window"
+                            "could not assign a floating composition to its native host window"
                         );
                         self.registry.windows.insert(panel, entry);
                         continue;
@@ -1541,7 +1541,7 @@ impl FloatingWindowManager {
                 tracing::error!(
                     ?panel,
                     %error,
-                    "GPUI could not create a permanent PanelWindow"
+                    "GPUI could not create a floating PanelWindow"
                 );
                 return None;
             }
@@ -1593,8 +1593,8 @@ impl FloatingWindowManager {
         }
 
         if let Some(native_window) = native_window {
-            // Every PanelWindow is owned by MainWindow for the full application
-            // lifetime. Dock placement and composition host never change this.
+            // Each floating host window is owned by MainWindow for its lifetime.
+            // Dock placement and composition-host transfers never change its owner.
             let Some(owner) = self.main_native_window else {
                 tracing::error!(
                     ?panel,
