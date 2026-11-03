@@ -417,6 +417,12 @@ impl FloatingWindowManager {
     }
 
     pub(crate) fn native_move_active(&self) -> bool { self.native_move.is_some() }
+    pub(crate) fn hide_floating_header(&self, group: FloatingGroupId) -> bool {
+        self.native_move.is_some_and(|state| {
+            state.group == group && state.kind == NativeMoveKind::TearOff
+        })
+    }
+
 
     /// A GPUI host losing focus is not a cancellation when another managed
     /// window of this application received the OS foreground activation.
@@ -646,6 +652,73 @@ impl FloatingWindowManager {
         true
     }
 
+    /// Starts a thresholded native move for a Column detached on pointer-down.
+    /// The window is already assigned and visible, but its floating header stays hidden
+    /// until the native move ends.
+    pub(crate) fn begin_pending_tearoff_move(
+        &mut self,
+        group: FloatingGroupId,
+        pointer: Point,
+        local_bounds: Rect,
+        model_bounds: Rect,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.native_move.is_some() {
+            return false;
+        }
+        let Some(entry) = self.panel_window_for_group(group) else {
+            return false;
+        };
+        let (Some(native_window), window_id) = (entry.native_window, entry.window_id) else {
+            return false;
+        };
+        let Ok(cursor) = self.native_ops.cursor_position() else {
+            return false;
+        };
+        let scale = self
+            .main_native_window
+            .and_then(|main| self.native_ops.scale_factor(main).ok())
+            .filter(|scale| scale.is_finite() && *scale > 0.0)
+            .unwrap_or(1.0);
+        let Some(offset_x) = physical_coordinate(pointer.x - local_bounds.origin.x, scale) else {
+            return false;
+        };
+        let Some(offset_y) = physical_coordinate(pointer.y - local_bounds.origin.y, scale) else {
+            return false;
+        };
+        let grab_offset = PhysicalPoint {
+            x: offset_x,
+            y: offset_y,
+        };
+        let position = PhysicalPoint {
+            x: cursor.x.saturating_sub(grab_offset.x),
+            y: cursor.y.saturating_sub(grab_offset.y),
+        };
+        if let Err(error) = self.native_ops.move_window(native_window, position) {
+            tracing::warn!(?group, %error, "could not position temporary Column window");
+            return false;
+        }
+
+        let metrics = self.controller.update(cx, |controller, _| controller.metrics());
+        let high_resolution_timer = self.native_ops.begin_high_resolution_timer().is_ok();
+        self.native_move = Some(NativeMoveSession {
+            group,
+            native_window,
+            kind: NativeMoveKind::TearOff,
+            grab_offset,
+            initial_cursor: cursor,
+            start_bounds: model_bounds,
+            start_pointer: pointer,
+            drag_threshold: metrics.drag_threshold * scale,
+            threshold_crossed: false,
+            high_resolution_timer,
+            drop_target: None,
+        });
+        self.schedule_native_move(cx, group, window_id);
+        cx.notify();
+        true
+    }
+
     /// Starts native movement for a newly-created floating window whose
     /// source was detached from a tab inside another floating host.
     pub(crate) fn begin_floating_tab_tearoff_move(
@@ -785,7 +858,11 @@ impl FloatingWindowManager {
             let distance = ((dx as f64).powi(2) + (dy as f64).powi(2)).sqrt();
             if distance < state.drag_threshold as f64 {
                 if !self.native_ops.left_button_down().unwrap_or(false) {
-                    self.finish_native_move(state, cx);
+                    if state.kind == NativeMoveKind::TearOff {
+                        self.cancel_native_move(state, cx);
+                    } else {
+                        self.finish_native_move(state, cx);
+                    }
                     return false;
                 }
                 return true;
@@ -940,6 +1017,7 @@ impl FloatingWindowManager {
 
     fn finish_native_move(&mut self, state: NativeMoveSession, cx: &mut Context<Self>) {
         self.native_move = None;
+        cx.notify();
         if state.high_resolution_timer {
             let _ = self.native_ops.end_high_resolution_timer();
         }
@@ -960,6 +1038,7 @@ impl FloatingWindowManager {
 
     fn cancel_native_move(&mut self, state: NativeMoveSession, cx: &mut Context<Self>) {
         self.native_move = None;
+        cx.notify();
         if state.high_resolution_timer {
             let _ = self.native_ops.end_high_resolution_timer();
         }
