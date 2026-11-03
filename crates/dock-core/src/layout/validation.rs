@@ -831,11 +831,11 @@ impl Layout {
         Ok(())
     }
 
-    /// Migrates legacy Photoshop floating roots that used to wrap groups in Columns.
+    /// Migrates legacy Photoshop floating roots that use a horizontal Column composition.
     ///
-    /// Older workspaces represented floating columns and horizontal column compositions.
-    /// The Photoshop profile now stores the same Tabs groups directly as a Tabs root or a
-    /// vertical Split(Y) stack. Existing Tabs nodes and Panel identities are preserved.
+    /// A standalone Column is now a first-class floating root and keeps its NodeId and
+    /// complete component hierarchy. Legacy horizontal Split(X) compositions are still
+    /// flattened into a vertical Split(Y) stack while preserving their Tabs and Panels.
     pub(super) fn normalize_photoshop_floating_roots(
         &mut self,
     ) -> Result<(), Vec<ValidationError>> {
@@ -866,28 +866,9 @@ impl Layout {
             let (groups, ratios, wrappers) = match root_node {
                 Node::Tabs(_) => continue,
                 Node::Split(split) if split.axis == Axis::Y => continue,
-                Node::Column(column) => {
-                    if column
-                        .groups
-                        .iter()
-                        .any(|child| !matches!(self.nodes.get(*child), Some(Node::Tabs(_))))
-                    {
-                        return Err(vec![ValidationError::InvalidFloatingRoot {
-                            group: group_id,
-                            root,
-                            reason: "legacy floating Column must contain only Tabs groups",
-                        }]);
-                    }
-                    let ratios = normalized_ratios(
-                        column
-                            .groups
-                            .iter()
-                            .enumerate()
-                            .map(|(index, _)| column.group_ratios.get(index).copied())
-                            .collect(),
-                    );
-                    (column.groups, ratios, vec![root])
-                }
+                // Column roots are now the canonical floating representation.
+                // Do not unwrap them: the shared ColumnView owns their header and groups.
+                Node::Column(_) => continue,
                 Node::Split(split) if split.axis == Axis::X => {
                     let column_ratios = normalized_ratios(
                         split
