@@ -218,32 +218,6 @@ pub(crate) fn register_pointer_events(
                             core_point,
                             app,
                         );
-                        if tab_is_clickable
-                            && super::drag::prepare_panel_tab_native_window_on_press(
-                                &controller,
-                                &manager,
-                                panel,
-                                core_point,
-                                app,
-                            )
-                        {
-                            window.capture_pointer(root_hitbox);
-                            if window.captured_hitbox() == Some(root_hitbox) {
-                                pointer_capture.set(Some(root_hitbox));
-                            } else {
-                                manager.update(app, |manager, manager_cx| {
-                                    manager.clear_prepared_panel_tab_drag(manager_cx);
-                                });
-                                cancel_pointer_interaction(
-                                    &controller,
-                                    window,
-                                    &pointer_capture,
-                                    &pointer_press,
-                                    app,
-                                );
-                                return;
-                            }
-                        }
                     }
                 }
                 PointerDownIntent::GroupCandidate { group } => {
@@ -504,10 +478,6 @@ pub(crate) fn register_pointer_events(
                 pointer_press.set(None);
                 return;
             }
-            manager.update(app, |manager, manager_cx| {
-                manager.clear_prepared_panel_tab_drag(manager_cx);
-            });
-
             if !ensure_pointer_interaction_current(&controller, window, &pointer_capture, app) {
                 pointer_press.set(None);
                 return;
@@ -623,9 +593,6 @@ pub(crate) fn register_pointer_events(
                 window.release_pointer();
                 pointer_capture.set(None);
                 pointer_press.set(None);
-                return;
-            }
-            if manager.update(app, |manager, _| manager.prepared_panel_tab_drag_active()) {
                 return;
             }
             pointer_press.set(None);
