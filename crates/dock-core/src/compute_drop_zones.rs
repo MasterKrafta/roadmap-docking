@@ -173,6 +173,10 @@ impl Layout {
             may_add_left_column,
             may_add_right_column,
         };
+        if matches!(source, DropSource::Column { .. }) {
+            self.append_column_drag_zones(&context, &mut zones)?;
+            return Ok(zones);
+        }
         self.append_main_group_zones(&context, &mut zones)?;
         self.append_tab_insertion_zones(&context, &mut zones)?;
         self.append_main_column_zones(&context, &mut zones)?;
