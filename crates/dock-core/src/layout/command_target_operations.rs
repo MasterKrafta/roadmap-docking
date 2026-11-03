@@ -5,6 +5,161 @@ use super::*;
 use crate::ColumnDisplayItem;
 
 impl Layout {
+    pub(super) fn apply_column_transfer_command(
+        &mut self,
+        command: &DockCommand,
+        metrics: &DockMetrics,
+    ) -> Result<CommandApplication, CommandError> {
+        match command {
+            DockCommand::MoveColumnToMainColumn { column, side, index } => {
+                self.apply_move_column_to_main_column_command(column, side, index, metrics)
+            }
+            _ => Err(CommandError::InvalidTarget {
+                reason: "column transfer dispatcher received an unsupported command",
+            }),
+        }
+    }
+
+    pub(super) fn apply_move_column_to_main_column_command(
+        &mut self,
+        column: &NodeId,
+        side: &DockSide,
+        index: &usize,
+        metrics: &DockMetrics,
+    ) -> Result<CommandApplication, CommandError> {
+        if !matches!(self.nodes.get(*column), Some(Node::Column(_))) {
+            return Err(if self.nodes.contains_key(*column) {
+                CommandError::InvalidTarget {
+                    reason: "MoveColumnToMainColumn source must be a Column node",
+                }
+            } else {
+                CommandError::MissingNode { node: *column }
+            });
+        }
+        let (source_side, source_index) = self
+            .main_column_position(*column)
+            .ok_or(CommandError::InvalidTarget {
+                reason: "MoveColumnToMainColumn source must belong to a main dock",
+            })?;
+        let target_columns = self.main_columns(*side)?;
+        if *index > target_columns.len() {
+            return Err(CommandError::InvalidValue {
+                field: "index",
+                reason: "main-column insertion index is outside the dock",
+            });
+        }
+
+        let moving_panels = self.panel_ids_in_subtree(*column);
+        self.validate_panel_ids_allowed_for_area(&moving_panels, AllowedArea::MAIN_DOCK)?;
+
+        if source_side == *side {
+            return self
+                .reorder_main_column(*column, *side, *index, source_index)
+                .map(|application| application.unwrap_or_else(CommandApplication::persistent));
+        }
+        if self.profile == Profile::Photoshop && target_columns.len() >= metrics.max_columns {
+            return Err(CommandError::InvalidTarget {
+                reason: "destination Main Dock has reached max_columns",
+            });
+        }
+
+        let inverse = DockCommand::MoveColumnToMainColumn {
+            column: *column,
+            side: source_side,
+            index: source_index,
+        };
+        self.remember_subtree_dock_locations(*column);
+        self.detach_node(*column)?;
+        self.insert_existing_column_at(*side, *index, *column, None, metrics)?;
+        self.sync_main_column_ratios(*column)?;
+        self.remember_subtree_dock_locations(*column);
+
+        Ok(CommandApplication {
+            actual_value: None,
+            inverse: Some(inverse),
+            persistent: true,
+        })
+    }
+
+    fn reorder_main_column(
+        &mut self,
+        column: NodeId,
+        side: DockSide,
+        index: usize,
+        source_index: usize,
+    ) -> Result<Option<CommandApplication>, CommandError> {
+        // Slots immediately before and after the source represent its current place.
+        if index == source_index || index == source_index + 1 {
+            return Ok(Some(CommandApplication::persistent()));
+        }
+
+        let area_root = self
+            .main_area(side)
+            .map(|area| area.root)
+            .ok_or(CommandError::InvalidTarget {
+                reason: "source main dock area disappeared",
+            })?;
+        let Some(Node::Split(mut split)) = self.nodes.get(area_root).cloned() else {
+            // A one-Column dock has no distinct reorder destination.
+            return Ok(Some(CommandApplication::persistent()));
+        };
+        if split.axis != Axis::X {
+            return Err(CommandError::InvalidTarget {
+                reason: "main dock column order must be represented by Split(X)",
+            });
+        }
+        let ratio_index = split
+            .children
+            .iter()
+            .position(|id| *id == column)
+            .ok_or(CommandError::InvalidTarget {
+                reason: "source Column is absent from the main dock split",
+            })?;
+        if ratio_index >= split.ratios.len() {
+            return Err(CommandError::InvalidTarget {
+                reason: "main dock Column ratio is missing",
+            });
+        }
+
+        let moved_column = split.children.remove(ratio_index);
+        let moved_ratio = split.ratios.remove(ratio_index);
+        let adjusted_index = if index > source_index {
+            index - 1
+        } else {
+            index
+        };
+        if adjusted_index > split.children.len() {
+            return Err(CommandError::InvalidValue {
+                field: "index",
+                reason: "adjusted main-column insertion index is outside the dock",
+            });
+        }
+        split.children.insert(adjusted_index, moved_column);
+        split.ratios.insert(adjusted_index, moved_ratio);
+        let Some(Node::Split(current)) = self.nodes.get_mut(area_root) else {
+            return Err(CommandError::InvalidTarget {
+                reason: "main dock Split changed unexpectedly",
+            });
+        };
+        *current = split;
+
+        self.remember_subtree_dock_locations(column);
+        let inverse_index = if source_index > adjusted_index {
+            source_index + 1
+        } else {
+            source_index
+        };
+        Ok(Some(CommandApplication {
+            actual_value: None,
+            inverse: Some(DockCommand::MoveColumnToMainColumn {
+                column,
+                side,
+                index: inverse_index,
+            }),
+            persistent: true,
+        }))
+    }
+
     pub(super) fn insert_node_for_target(
         &mut self,
         node: NodeId,
