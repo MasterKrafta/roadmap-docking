@@ -12,7 +12,7 @@ impl DockTab {
         active: bool,
         theme: Theme,
     ) -> impl IntoElement {
-        Self::render_with_width(id, title, active, theme, 112.0)
+        Self::render_with_metrics(id, title, active, theme, 112.0, 72.0, 8.0)
     }
 
     pub fn render_with_width(
@@ -22,14 +22,27 @@ impl DockTab {
         theme: Theme,
         width: f32,
     ) -> impl IntoElement {
+        Self::render_with_metrics(id, title, active, theme, width, width.min(72.0), 8.0)
+    }
+
+    pub fn render_with_metrics(
+        id: String,
+        title: String,
+        active: bool,
+        theme: Theme,
+        width: f32,
+        min_width: f32,
+        horizontal_padding: f32,
+    ) -> impl IntoElement {
         div()
             .id(id)
             .w(px(width))
+            .min_w(px(min_width))
             .h_full()
             .flex_none()
             .flex()
             .items_center()
-            .px(px(8.0))
+            .px(px(horizontal_padding))
             .overflow_hidden()
             .bg(rgb(if active {
                 theme.colors.panel_tab_active

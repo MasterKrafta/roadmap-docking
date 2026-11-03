@@ -21,6 +21,16 @@ pub struct DockMetrics {
     pub tab_strip_height: f32,
     /// Width of group controls such as the mode switch and group menu.
     pub group_control_button_width: f32,
+    /// Width of the group drag grip.
+    pub group_grip_width: f32,
+    /// Width of each column header control.
+    pub column_control_button_width: f32,
+    /// Default width used by a standalone tab component.
+    pub default_tab_width: f32,
+    /// Horizontal padding inside a tab component.
+    pub tab_horizontal_padding: f32,
+    /// Font size for compact control glyphs.
+    pub control_icon_size: f32,
     /// Minimum width retained by each visible tab before overflow is used.
     pub min_tab_width: f32,
     /// Width reserved for the implementation-specific hidden-tabs menu button.
@@ -121,6 +131,30 @@ impl DockMetrics {
                 "group_control_button_width must be positive",
             ),
             (
+                "group_grip_width",
+                self.group_grip_width,
+                "group_grip_width must be finite",
+                "group_grip_width must be positive",
+            ),
+            (
+                "column_control_button_width",
+                self.column_control_button_width,
+                "column_control_button_width must be finite",
+                "column_control_button_width must be positive",
+            ),
+            (
+                "default_tab_width",
+                self.default_tab_width,
+                "default_tab_width must be finite",
+                "default_tab_width must be positive",
+            ),
+            (
+                "control_icon_size",
+                self.control_icon_size,
+                "control_icon_size must be finite",
+                "control_icon_size must be positive",
+            ),
+            (
                 "min_tab_width",
                 self.min_tab_width,
                 "min_tab_width must be finite",
@@ -147,6 +181,13 @@ impl DockMetrics {
             if value <= 0.0 {
                 return Err(non_positive);
             }
+        }
+
+        if !self.tab_horizontal_padding.is_finite() {
+            return Err("tab_horizontal_padding must be finite");
+        }
+        if self.tab_horizontal_padding < 0.0 {
+            return Err("tab_horizontal_padding must not be negative");
         }
 
         if self.min_column_width > self.default_column_width {
@@ -194,6 +235,11 @@ impl<'de> serde::Deserialize<'de> for DockMetrics {
             header_height: f32,
             tab_strip_height: f32,
             group_control_button_width: f32,
+            group_grip_width: f32,
+            column_control_button_width: f32,
+            default_tab_width: f32,
+            tab_horizontal_padding: f32,
+            control_icon_size: f32,
             min_tab_width: f32,
             tab_overflow_button_width: f32,
             min_canvas_width: f32,
@@ -217,6 +263,11 @@ impl<'de> serde::Deserialize<'de> for DockMetrics {
                     header_height: metrics.header_height,
                     tab_strip_height: metrics.tab_strip_height,
                     group_control_button_width: metrics.group_control_button_width,
+                    group_grip_width: metrics.group_grip_width,
+                    column_control_button_width: metrics.column_control_button_width,
+                    default_tab_width: metrics.default_tab_width,
+                    tab_horizontal_padding: metrics.tab_horizontal_padding,
+                    control_icon_size: metrics.control_icon_size,
                     min_tab_width: metrics.min_tab_width,
                     tab_overflow_button_width: metrics.tab_overflow_button_width,
                     min_canvas_width: metrics.min_canvas_width,
@@ -240,6 +291,11 @@ impl<'de> serde::Deserialize<'de> for DockMetrics {
             header_height: wire.header_height,
             tab_strip_height: wire.tab_strip_height,
             group_control_button_width: wire.group_control_button_width,
+            group_grip_width: wire.group_grip_width,
+            column_control_button_width: wire.column_control_button_width,
+            default_tab_width: wire.default_tab_width,
+            tab_horizontal_padding: wire.tab_horizontal_padding,
+            control_icon_size: wire.control_icon_size,
             min_tab_width: wire.min_tab_width,
             tab_overflow_button_width: wire.tab_overflow_button_width,
             min_canvas_width: wire.min_canvas_width,
@@ -268,6 +324,11 @@ impl Default for DockMetrics {
             header_height: 28.0,
             tab_strip_height: 28.0,
             group_control_button_width: 28.0,
+            group_grip_width: 32.0,
+            column_control_button_width: 32.0,
+            default_tab_width: 112.0,
+            tab_horizontal_padding: 8.0,
+            control_icon_size: 14.0,
             min_tab_width: 72.0,
             tab_overflow_button_width: 28.0,
             min_canvas_width: 320.0,
@@ -285,6 +346,12 @@ mod tests {
         assert_eq!(DockMetrics::default().validate(), Ok(()));
         assert_eq!(DockMetrics::default().rail_width, 36.0);
         assert_eq!(DockMetrics::default().column_header_height, 32.0);
+        assert_eq!(DockMetrics::default().default_tab_width, 112.0);
+        assert_eq!(DockMetrics::default().column_control_button_width, 32.0);
+        assert_eq!(DockMetrics::default().group_grip_width, 32.0);
+        assert_eq!(DockMetrics::default().group_control_button_width, 28.0);
+        assert_eq!(DockMetrics::default().tab_horizontal_padding, 8.0);
+        assert_eq!(DockMetrics::default().control_icon_size, 14.0);
     }
 
     #[cfg(feature = "serde")]
@@ -310,7 +377,30 @@ mod tests {
         assert_eq!(metrics.column_header_height, 32.0);
         assert_eq!(metrics.min_tab_width, 72.0);
         assert_eq!(metrics.tab_overflow_button_width, 28.0);
+        assert_eq!(metrics.group_grip_width, 32.0);
+        assert_eq!(metrics.column_control_button_width, 32.0);
+        assert_eq!(metrics.default_tab_width, 112.0);
+        assert_eq!(metrics.tab_horizontal_padding, 8.0);
+        assert_eq!(metrics.control_icon_size, 14.0);
         assert_eq!(metrics.validate(), Ok(()));
+    }
+
+    #[test]
+    fn tab_horizontal_padding_accepts_zero_but_rejects_negative_values() {
+        let metrics = DockMetrics {
+            tab_horizontal_padding: 0.0,
+            ..DockMetrics::default()
+        };
+        assert_eq!(metrics.validate(), Ok(()));
+
+        let metrics = DockMetrics {
+            tab_horizontal_padding: -1.0,
+            ..DockMetrics::default()
+        };
+        assert_eq!(
+            metrics.validate(),
+            Err("tab_horizontal_padding must not be negative")
+        );
     }
 
     #[cfg(feature = "serde")]

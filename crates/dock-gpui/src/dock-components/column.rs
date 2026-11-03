@@ -28,9 +28,9 @@ pub use group_menu_button::GroupMenuButton;
 pub use panel_content::PanelContent;
 pub use tab::DockTab;
 
-/// Extra controls are retained in code but disabled in the live composition.
-const SHOW_COLUMN_CONTROLS: bool = false;
-const SHOW_GROUP_CONTROLS: bool = false;
+/// Extra controls are rendered visually; their actions remain disabled.
+const SHOW_COLUMN_CONTROLS: bool = true;
+const SHOW_GROUP_CONTROLS: bool = true;
 
 /// Static visual variants for the new Column composition.
 pub struct DockColumnView;
@@ -75,15 +75,21 @@ impl DockColumnView {
                     .bg(rgb(theme.colors.group_grip_background)),
             );
 
-        // These controls remain available in the composition, but stay disabled
-        // until their actions are connected to the DockController.
+        // These controls are visual only; their actions are not connected yet.
         if SHOW_COLUMN_CONTROLS {
             column_header = column_header
-                .child(CollapseColumnButton::render(
+                .child(CollapseColumnButton::render_with_metrics(
                     format!("{id}-collapse"),
                     theme,
+                    metrics.column_control_button_width,
+                    metrics.control_icon_size,
                 ))
-                .child(CloseColumnButton::render(format!("{id}-close"), theme));
+                .child(CloseColumnButton::render_with_metrics(
+                    format!("{id}-close"),
+                    theme,
+                    metrics.column_control_button_width,
+                    metrics.control_icon_size,
+                ));
         }
 
         let mut group_header = div()
@@ -93,12 +99,14 @@ impl DockColumnView {
             .flex_none()
             .flex()
             .items_stretch()
-            .child(DockTab::render_with_width(
+            .child(DockTab::render_with_metrics(
                 format!("{group_id}-active-tab"),
                 title,
                 true,
                 theme,
+                metrics.default_tab_width,
                 metrics.min_tab_width,
+                metrics.tab_horizontal_padding,
             ))
             .child(
                 div()
@@ -108,11 +116,21 @@ impl DockColumnView {
                     .bg(rgb(theme.colors.group_grip_background)),
             );
 
-        // Group grip and menu are intentionally not mounted yet.
+        // Group grip and menu are visual only; their actions are not connected yet.
         if SHOW_GROUP_CONTROLS {
             group_header = group_header
-                .child(GroupGrip::render(format!("{group_id}-grip"), theme))
-                .child(GroupMenuButton::render(format!("{group_id}-menu"), theme));
+                .child(GroupGrip::render_with_metrics(
+                    format!("{group_id}-grip"),
+                    theme,
+                    metrics.group_grip_width,
+                    metrics.control_icon_size,
+                ))
+                .child(GroupMenuButton::render_with_metrics(
+                    format!("{group_id}-menu"),
+                    theme,
+                    metrics.group_control_button_width,
+                    metrics.control_icon_size,
+                ));
         }
 
         div()
@@ -175,11 +193,18 @@ impl DockColumnView {
 
         if SHOW_COLUMN_CONTROLS {
             column_header = column_header
-                .child(CollapseColumnButton::render(
+                .child(CollapseColumnButton::render_with_metrics(
                     format!("{id}-collapse"),
                     theme,
+                    metrics.column_control_button_width,
+                    metrics.control_icon_size,
                 ))
-                .child(CloseColumnButton::render(format!("{id}-close"), theme));
+                .child(CloseColumnButton::render_with_metrics(
+                    format!("{id}-close"),
+                    theme,
+                    metrics.column_control_button_width,
+                    metrics.control_icon_size,
+                ));
         }
 
         let mut column = div()
@@ -203,12 +228,14 @@ impl DockColumnView {
                 .flex_none()
                 .flex()
                 .items_stretch()
-                .child(DockTab::render_with_width(
+                .child(DockTab::render_with_metrics(
                     format!("{group_id}-tab-one"),
                     "Вкладка 1".to_owned(),
                     true,
                     theme,
+                    metrics.default_tab_width,
                     metrics.min_tab_width,
+                    metrics.tab_horizontal_padding,
                 ))
                 .child(
                     div()
@@ -220,8 +247,18 @@ impl DockColumnView {
 
             if SHOW_GROUP_CONTROLS {
                 group_header = group_header
-                    .child(GroupGrip::render(format!("{group_id}-grip"), theme))
-                    .child(GroupMenuButton::render(format!("{group_id}-menu"), theme));
+                    .child(GroupGrip::render_with_metrics(
+                        format!("{group_id}-grip"),
+                        theme,
+                        metrics.group_grip_width,
+                        metrics.control_icon_size,
+                    ))
+                    .child(GroupMenuButton::render_with_metrics(
+                        format!("{group_id}-menu"),
+                        theme,
+                        metrics.group_control_button_width,
+                        metrics.control_icon_size,
+                    ));
             }
 
             let group = div()
