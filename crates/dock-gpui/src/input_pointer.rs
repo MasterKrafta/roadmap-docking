@@ -164,7 +164,13 @@ pub(crate) fn register_pointer_events(
             let hit = controller.update(app, |controller, _| controller.hit(core_point).ok());
 
             if event.button == MouseButton::Right {
-                let target = hit.and_then(context_menu_target_for_hit);
+                let target = hit
+                    .filter(|hit| !dock_component_interactions_disabled_for_hit(
+                        &controller,
+                        *hit,
+                        app,
+                    ))
+                    .and_then(context_menu_target_for_hit);
                 if let Some(target) = target {
                     (toggle_context_menu)(target, host_point, app);
                     app.stop_propagation();
@@ -196,13 +202,15 @@ pub(crate) fn register_pointer_events(
                             layout_version,
                         }));
                     }
-                    if tab_header_drag_handle_contains(
-                        &controller,
-                        group,
-                        panel,
-                        core_point,
-                        app,
-                    ) {
+                    if !uses_dock_component_group(&controller, group, app)
+                        && tab_header_drag_handle_contains(
+                            &controller,
+                            group,
+                            panel,
+                            core_point,
+                            app,
+                        )
+                    {
                         begin_drag_at(
                             &controller,
                             DragPayload::Panel { panel },
@@ -239,7 +247,9 @@ pub(crate) fn register_pointer_events(
                     }
                 }
                 PointerDownIntent::GroupCandidate { group } => {
-                    if group_grip_contains(&controller, group, core_point, app) {
+                    if !uses_dock_component_group(&controller, group, app)
+                        && group_grip_contains(&controller, group, core_point, app)
+                    {
                         if matches!(hit, HitResult::TabStrip { .. }) {
                             let layout_version = controller
                                 .update(app, |controller, _| controller.layout().version());
@@ -270,12 +280,14 @@ pub(crate) fn register_pointer_events(
                     }
                 }
                 PointerDownIntent::ColumnCandidate { column } => {
-                    if column_header_drag_handle_contains(
-                        &controller,
-                        column,
-                        core_point,
-                        app,
-                    ) {
+                    if !uses_dock_component_column(&controller, column, app)
+                        && column_header_drag_handle_contains(
+                            &controller,
+                            column,
+                            core_point,
+                            app,
+                        )
+                    {
                         begin_drag_at(
                             &controller,
                             DragPayload::Column { column },
@@ -613,7 +625,19 @@ pub(crate) fn register_pointer_events(
                 return;
             }
 
+            let disable_component_actions = dock_component_interactions_disabled_for_hit(
+                &controller,
+                release_hit,
+                app,
+            );
             let intent = pointer_click_intent_for_hit(release_hit, event.click_count);
+            let intent = if disable_component_actions
+                && matches!(intent, PointerClickIntent::CollapseGroup { .. })
+            {
+                PointerClickIntent::None
+            } else {
+                intent
+            };
             if dispatch_pointer_click(intent, &controller, host_point, &toggle_context_menu, app) {
                 app.stop_propagation();
             }
@@ -794,6 +818,93 @@ fn cancel_pointer_interaction(
     pointer_press.set(None);
 }
 
+fn dock_component_interactions_disabled_for_hit(
+    controller: &Entity<DockController>,
+    hit: HitResult,
+    app: &mut App,
+) -> bool {
+    match hit {
+        HitResult::Column { column } => uses_dock_component_column(controller, column, app),
+        HitResult::Group { group }
+        | HitResult::TabStrip { group }
+        | HitResult::TabHeader { group, .. } => {
+            uses_dock_component_group(controller, group, app)
+        }
+        _ => false,
+    }
+}
+
+fn uses_dock_component_group(
+    controller: &Entity<DockController>,
+    group_id: NodeId,
+    app: &mut App,
+) -> bool {
+    controller.update(app, |controller, _| {
+        let layout = controller.layout();
+        let is_single_panel_group = matches!(
+            layout.node(group_id),
+            Some(Node::Tabs(tabs))
+                if tabs.children.len() == 1
+                    && tabs.children.first().is_some_and(
+                        |child| matches!(layout.node(*child), Some(Node::Panel(_)))
+                    )
+        );
+        if !is_single_panel_group {
+            return false;
+        }
+
+        layout.nodes().any(|(column_id, node)| {
+            let Node::Column(column) = node else {
+                return false;
+            };
+            column.groups.len() == 1
+                && column.groups.first() == Some(&group_id)
+                && is_main_dock_column(layout, column_id)
+        })
+    })
+}
+
+fn uses_dock_component_column(
+    controller: &Entity<DockController>,
+    column_id: NodeId,
+    app: &mut App,
+) -> bool {
+    controller.update(app, |controller, _| {
+        let layout = controller.layout();
+        let Some(Node::Column(column)) = layout.node(column_id) else {
+            return false;
+        };
+        let Some(group_id) = column.groups.first().copied() else {
+            return false;
+        };
+        column.groups.len() == 1
+            && is_main_dock_column(layout, column_id)
+            && matches!(
+                layout.node(group_id),
+                Some(Node::Tabs(tabs))
+                    if tabs.children.len() == 1
+                        && tabs.children.first().is_some_and(
+                            |child| matches!(layout.node(*child), Some(Node::Panel(_)))
+                        )
+            )
+    })
+}
+
+fn is_main_dock_column(layout: &dock_core::Layout, column: NodeId) -> bool {
+    [DockSide::Left, DockSide::Right].into_iter().any(|side| {
+        let Some(area) = layout.main_area(side) else {
+            return false;
+        };
+        match layout.node(area.root) {
+            Some(Node::Column(_)) => area.root == column,
+            Some(Node::Split(split)) => {
+                split.axis == Axis::X && split.children.contains(&column)
+            }
+            _ => false,
+        }
+    })
+}
+
 fn tab_header_clickable_contains(
     controller: &Entity<DockController>,
     group: NodeId,
@@ -878,21 +989,7 @@ fn column_header_drag_handle_contains(
         };
 
         let layout = controller.layout();
-        let is_main_column = [DockSide::Left, DockSide::Right]
-            .into_iter()
-            .any(|side| {
-                let Some(area) = layout.main_area(side) else {
-                    return false;
-                };
-                match layout.node(area.root) {
-                    Some(Node::Column(_)) => area.root == column,
-                    Some(Node::Split(split)) => {
-                        split.axis == Axis::X && split.children.contains(&column)
-                    }
-                    _ => false,
-                }
-            });
-        if !is_main_column {
+        if !is_main_dock_column(layout, column) {
             return false;
         }
 

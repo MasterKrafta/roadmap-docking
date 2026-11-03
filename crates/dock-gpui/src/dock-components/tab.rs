@@ -12,16 +12,25 @@ impl DockTab {
         active: bool,
         theme: Theme,
     ) -> impl IntoElement {
+        Self::render_with_width(id, title, active, theme, 112.0)
+    }
+
+    pub fn render_with_width(
+        id: String,
+        title: String,
+        active: bool,
+        theme: Theme,
+        width: f32,
+    ) -> impl IntoElement {
         div()
             .id(id)
-            .w(px(112.0))
+            .w(px(width))
             .h_full()
             .flex_none()
             .flex()
             .items_center()
             .px(px(8.0))
             .overflow_hidden()
-            .cursor_move()
             .bg(rgb(if active {
                 theme.colors.panel_tab_active
             } else {

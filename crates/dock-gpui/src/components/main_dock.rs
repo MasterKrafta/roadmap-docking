@@ -121,6 +121,7 @@ impl MainDockView {
                             format!("dock-components-{:?}", column.column),
                             title,
                             panel_view,
+                            metrics,
                             theme,
                         )),
                 );

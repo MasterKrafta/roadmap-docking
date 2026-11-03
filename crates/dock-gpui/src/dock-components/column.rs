@@ -15,6 +15,7 @@ mod panel_content;
 #[path = "tab.rs"]
 mod tab;
 
+use dock_core::DockMetrics;
 use gpui::{AnyView, IntoElement, InteractiveElement, ParentElement, Styled, div, px, rgb};
 use ui::Theme;
 
@@ -26,6 +27,10 @@ pub use group_grip::GroupGrip;
 pub use group_menu_button::GroupMenuButton;
 pub use panel_content::PanelContent;
 pub use tab::DockTab;
+
+/// Extra controls are retained in code but disabled in the live composition.
+const SHOW_COLUMN_CONTROLS: bool = false;
+const SHOW_GROUP_CONTROLS: bool = false;
 
 /// Static visual variants for the new Column composition.
 pub struct DockColumnView;
@@ -49,11 +54,69 @@ impl DockColumnView {
         id: String,
         title: String,
         panel_view: AnyView,
+        metrics: DockMetrics,
         theme: Theme,
     ) -> impl IntoElement {
         let group_id = format!("{id}-group");
+        let group_header_height = metrics.header_height.max(metrics.tab_strip_height);
+
+        let mut column_header = div()
+            .id(format!("{id}-header"))
+            .w_full()
+            .h(px(metrics.column_header_height))
+            .flex_none()
+            .flex()
+            .items_stretch()
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .bg(rgb(theme.colors.group_grip_background)),
+            );
+
+        // These controls remain available in the composition, but stay disabled
+        // until their actions are connected to the DockController.
+        if SHOW_COLUMN_CONTROLS {
+            column_header = column_header
+                .child(CollapseColumnButton::render(
+                    format!("{id}-collapse"),
+                    theme,
+                ))
+                .child(CloseColumnButton::render(format!("{id}-close"), theme));
+        }
+
+        let mut group_header = div()
+            .id(format!("{group_id}-header"))
+            .w_full()
+            .h(px(group_header_height))
+            .flex_none()
+            .flex()
+            .items_stretch()
+            .child(DockTab::render_with_width(
+                format!("{group_id}-active-tab"),
+                title,
+                true,
+                theme,
+                metrics.min_tab_width,
+            ))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .bg(rgb(theme.colors.group_grip_background)),
+            );
+
+        // Group grip and menu are intentionally not mounted yet.
+        if SHOW_GROUP_CONTROLS {
+            group_header = group_header
+                .child(GroupGrip::render(format!("{group_id}-grip"), theme))
+                .child(GroupMenuButton::render(format!("{group_id}-menu"), theme));
+        }
+
         div()
-            .id(id.clone())
+            .id(id)
             .w_full()
             .h_full()
             .flex()
@@ -62,24 +125,10 @@ impl DockColumnView {
             .bg(rgb(theme.colors.dock_background))
             .border_1()
             .border_color(rgb(theme.colors.group_frame_border))
+            .child(column_header)
             .child(
                 div()
-                    .id(format!("{id}-header"))
-                    .w_full()
-                    .h(px(32.0))
-                    .flex_none()
-                    .flex()
-                    .items_stretch()
-                    .child(ColumnDragArea::render(format!("{id}-column-drag"), theme))
-                    .child(CollapseColumnButton::render(
-                        format!("{id}-collapse"),
-                        theme,
-                    ))
-                    .child(CloseColumnButton::render(format!("{id}-close"), theme)),
-            )
-            .child(
-                div()
-                    .id(group_id.clone())
+                    .id(group_id)
                     .w_full()
                     .flex_1()
                     .min_h_0()
@@ -88,27 +137,7 @@ impl DockColumnView {
                     .overflow_hidden()
                     .border_1()
                     .border_color(rgb(theme.colors.group_frame_border))
-                    .child(
-                        div()
-                            .id(format!("{group_id}-header"))
-                            .w_full()
-                            .h(px(32.0))
-                            .flex_none()
-                            .flex()
-                            .items_stretch()
-                            .child(DockTab::render(
-                                format!("{group_id}-active-tab"),
-                                title,
-                                true,
-                                theme,
-                            ))
-                            .child(GroupDragArea::render(
-                                format!("{group_id}-drag"),
-                                theme,
-                            ))
-                            .child(GroupGrip::render(format!("{group_id}-grip"), theme))
-                            .child(GroupMenuButton::render(format!("{group_id}-menu"), theme)),
-                    )
+                    .child(group_header)
                     .child(
                         div()
                             .id(format!("{group_id}-content"))
