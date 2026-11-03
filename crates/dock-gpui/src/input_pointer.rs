@@ -12,7 +12,7 @@ use gpui::{
 use crate::{
     DockController, FloatingWindowManager,
     components::context_menu::{ContextMenuTarget, ContextMenuToggle},
-    dock_components::ColumnDragArea,
+    dock_components::{ColumnDragArea, DockTab},
     geometry::host_point_from_gpui_window,
 };
 
@@ -202,15 +202,13 @@ pub(crate) fn register_pointer_events(
                             layout_version,
                         }));
                     }
-                    if !uses_dock_component_group(&controller, group, app)
-                        && tab_header_drag_handle_contains(
-                            &controller,
-                            group,
-                            panel,
-                            core_point,
-                            app,
-                        )
-                    {
+                    if tab_header_drag_handle_contains(
+                        &controller,
+                        group,
+                        panel,
+                        core_point,
+                        app,
+                    ) {
                         begin_drag_at(
                             &controller,
                             DragPayload::Panel { panel },
@@ -400,7 +398,9 @@ pub(crate) fn register_pointer_events(
                 else {
                     return false;
                 };
-                native_tearoff_enabled_for(controller.drag().session().handle(), payload)
+                let handle = controller.drag().session().handle();
+                native_tearoff_enabled_for(handle, payload)
+                    && native_tearoff_boundary_reached(controller, handle, payload, point)
             });
             if should_tearoff
                 && super::drag::begin_native_tearoff(&controller, &manager, point, app)
@@ -628,8 +628,43 @@ pub(crate) fn register_pointer_events(
 fn native_tearoff_enabled_for(handle: Option<DragHandle>, payload: DragPayload) -> bool {
     match (handle, payload) {
         (Some(DragHandle::ColumnHeader), DragPayload::Column { .. }) => true,
-        (Some(DragHandle::PanelTab), DragPayload::Panel { .. }) => false,
+        (Some(DragHandle::PanelTab), DragPayload::Panel { .. }) => true,
         (Some(DragHandle::GroupGrip), DragPayload::Group { .. }) => false,
+        _ => false,
+    }
+}
+
+/// Checks the semantic boundary that turns an in-layout drag into a native tear-off.
+fn native_tearoff_boundary_reached(
+    controller: &mut DockController,
+    handle: Option<DragHandle>,
+    payload: DragPayload,
+    point: Point,
+) -> bool {
+    match (handle, payload) {
+        (Some(DragHandle::ColumnHeader), DragPayload::Column { .. }) => true,
+        (Some(DragHandle::PanelTab), DragPayload::Panel { panel }) => {
+            let Ok(rects) = controller.geometry() else {
+                return false;
+            };
+            let Some(group) = rects
+                .tab_headers
+                .iter()
+                .find(|header| header.panel == panel)
+                .map(|header| header.group)
+            else {
+                return false;
+            };
+            let Some(strip) = rects
+                .tab_strips
+                .iter()
+                .find(|strip| strip.group == group)
+                .map(|strip| strip.rect)
+            else {
+                return false;
+            };
+            DockTab::leaves_strip_zone(strip, point)
+        }
         _ => false,
     }
 }
@@ -847,6 +882,7 @@ fn tab_header_clickable_contains(
     point: Point,
     app: &mut App,
 ) -> bool {
+    let uses_component_tab = uses_dock_component_group(controller, group, app);
     controller.update(app, |controller, _| {
         let Ok(rects) = controller.geometry().cloned() else {
             return false;
@@ -868,6 +904,9 @@ fn tab_header_clickable_contains(
         else {
             return false;
         };
+        if uses_component_tab {
+            return matches!(header.rect.contains(point), Ok(true));
+        }
         let close_width = 18.0_f32.min(header.rect.size.width.max(0.0));
         point.x < header.rect.origin.x + header.rect.size.width - close_width
     })
@@ -880,6 +919,7 @@ fn tab_header_drag_handle_contains(
     point: Point,
     app: &mut App,
 ) -> bool {
+    let uses_component_tab = uses_dock_component_group(controller, group, app);
     controller.update(app, |controller, _| {
         let Ok(rects) = controller.geometry().cloned() else {
             return false;
@@ -899,8 +939,8 @@ fn tab_header_drag_handle_contains(
                     if column.mode.is_rail() && column.groups.contains(&group)
             )
         });
-        if is_rail {
-            return true;
+        if is_rail || uses_component_tab {
+            return matches!(header.rect.contains(point), Ok(true));
         }
 
         let close_width = 18.0_f32.min(header.rect.size.width.max(0.0));
@@ -1137,7 +1177,7 @@ mod hit_dispatch_tests {
     }
 
     #[test]
-    fn native_tearoff_routing_only_enables_the_column_zone_for_now() {
+    fn native_tearoff_routing_enables_columns_and_individual_tabs() {
         let column = NodeId::null();
         let group = NodeId::null();
         let panel = PanelId::null();
@@ -1146,7 +1186,7 @@ mod hit_dispatch_tests {
             Some(DragHandle::ColumnHeader),
             DragPayload::Column { column },
         ));
-        assert!(!native_tearoff_enabled_for(
+        assert!(native_tearoff_enabled_for(
             Some(DragHandle::PanelTab),
             DragPayload::Panel { panel },
         ));
