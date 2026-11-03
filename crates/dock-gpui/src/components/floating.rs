@@ -1043,6 +1043,64 @@ impl Render for FloatingHost {
                             return;
                         };
 
+                        // MouseUp can be the first event delivered beyond the drag threshold.
+                        // Give the shared floating-tab pipeline the release position before
+                        // deciding whether this tab crossed its source strip boundary.
+                        let drag = FloatingTabDrag {
+                            source_window_id: input_window_id,
+                            source_group: group,
+                            panel: press.panel,
+                            press_origin: press.origin,
+                            layout_version: press.layout_version,
+                        };
+                        let dragging = update_floating_tab_drag(
+                            &controller_for_up,
+                            drag,
+                            point,
+                            app,
+                        );
+                        if dragging {
+                            let leaves_source = controller_for_up.update(app, |controller, _| {
+                                let strip = controller
+                                    .floating_geometry(input_window_id, group)
+                                    .ok()
+                                    .and_then(|rects| {
+                                        rects
+                                            .tab_strips
+                                            .iter()
+                                            .find(|strip| strip.group == press.tab_group)
+                                            .map(|strip| strip.rect)
+                                    });
+                                if let Some(strip) = strip {
+                                    DockTab::leaves_strip_zone(strip, point)
+                                } else {
+                                    floating_rect.is_some_and(|rect| {
+                                        rect.contains(point).map(|contains| !contains).unwrap_or(true)
+                                    })
+                                }
+                            });
+                            let manager_entity = manager_for_up.upgrade();
+                            let over_other_window = manager_entity.as_ref().is_some_and(|manager| {
+                                manager.update(app, |manager, _| {
+                                    manager.cursor_over_other_docking_window(group)
+                                })
+                            });
+                            if (leaves_source || over_other_window)
+                                && let Some(manager) = manager_entity.as_ref()
+                                && begin_floating_tab_tearoff(
+                                    &controller_for_up,
+                                    manager,
+                                    drag,
+                                    point,
+                                    app,
+                                )
+                            {
+                                window.release_pointer();
+                                app.stop_propagation();
+                                return;
+                            }
+                        }
+
                         let (was_dragging, was_pressed) =
                             controller_for_up.update(app, |controller, _| {
                                 match controller.drag().session().state() {
