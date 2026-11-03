@@ -220,7 +220,7 @@ impl Layout {
         })
     }
 
-    pub(super) fn main_column_position(&self, column_id: NodeId) -> Option<(DockSide, usize)> {
+    pub(crate) fn main_column_position(&self, column_id: NodeId) -> Option<(DockSide, usize)> {
         for side in [DockSide::Left, DockSide::Right] {
             if let Ok(columns) = self.main_columns(side)
                 && let Some(index) = columns.iter().position(|id| *id == column_id)
