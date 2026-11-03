@@ -630,6 +630,7 @@ fn drop_source(controller: &DockController, payload: DragPayload) -> Option<Drop
     match payload {
         DragPayload::Panel { panel } => Some(DropSource::Panel { panel }),
         DragPayload::Group { group } => Some(DropSource::Group { group }),
+        DragPayload::Column { column } => Some(DropSource::Column { column }),
         DragPayload::FloatingGroup { group } => {
             let root = controller
                 .layout()
@@ -700,6 +701,11 @@ fn floating_bounds_for_request(
                 .iter()
                 .find(|group_rect| group_rect.group == group)
                 .map(|group_rect| group_rect.rect)?,
+            (DragHandle::ColumnHeader, DragPayload::Column { column }) => rects
+                .columns
+                .iter()
+                .find(|column_rect| column_rect.column == column)
+                .map(|column_rect| column_rect.rect)?,
             (
                 DragHandle::FloatingCapture | DragHandle::FloatingTitle,
                 DragPayload::FloatingGroup { group },
@@ -720,7 +726,7 @@ fn floating_bounds_for_request(
                 .constraints
                 .preferred_size
         }
-        DragPayload::Group { .. } => source_rect.size,
+        DragPayload::Group { .. } | DragPayload::Column { .. } => source_rect.size,
         DragPayload::FloatingGroup { group } => {
             controller.layout().floating_group(group)?.bounds.size
         }
