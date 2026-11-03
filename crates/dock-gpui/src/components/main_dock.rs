@@ -123,6 +123,7 @@ impl MainDockView {
                             panel_view,
                             metrics,
                             theme,
+                            true,
                         )),
                 );
             } else {
