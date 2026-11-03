@@ -80,6 +80,9 @@ impl FloatingWindowContent {
         theme: Theme,
     ) -> impl IntoElement {
         let origin = Point::ZERO;
+        let column_uses_window_header = columns.len() == 1
+            && columns[0].rect.origin == floating.rect.origin
+            && columns[0].rect.size == floating.rect.size;
         let mut column_group_ids = HashSet::new();
         for ids in column_groups.values() {
             column_group_ids.extend(ids.iter().copied());
@@ -262,79 +265,79 @@ impl FloatingWindowContent {
             .collect();
         root = root.child(PanelHost::render(loose_panels, origin));
 
-        // Trees without Columns can share the floating title row with an
-        // expanded top Group; Core reserves it separately for collapsed roots.
-        // Trees containing Columns are laid out below this title row because
-        // each Column now owns an additional, independent header.
-        let title_height = metrics.header_height.min(floating.rect.size.height);
-        let close_size = metrics.group_control_button_width.min(title_height);
-        let title_grip = div()
-            .id(format!("floating-title-{:?}", floating.group))
-            .flex_1()
-            .min_w_0()
-            .h_full()
-            .flex()
-            .items_center()
-            .px(px(8.0))
-            .overflow_hidden()
-            .cursor_move()
-            .text_color(rgb(theme.colors.primary_text))
-            .text_size(px(theme.typography.tab_size))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis()
-                    .child(title.to_owned()),
-            );
+        // A floating root Column uses its own ColumnHeaderView as the
+        // window header. Other floating compositions keep the generic title bar.
+        if !column_uses_window_header {
+            let title_height = metrics.header_height.min(floating.rect.size.height);
+            let close_size = metrics.group_control_button_width.min(title_height);
+            let title_grip = div()
+                .id(format!("floating-title-{:?}", floating.group))
+                .flex_1()
+                .min_w_0()
+                .h_full()
+                .flex()
+                .items_center()
+                .px(px(8.0))
+                .overflow_hidden()
+                .cursor_move()
+                .text_color(rgb(theme.colors.primary_text))
+                .text_size(px(theme.typography.tab_size))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .text_ellipsis()
+                        .child(title.to_owned()),
+                );
 
-        let close_button = div()
-            .id(format!("floating-close-{:?}", floating.group))
-            .w(px(close_size.max(1.0)))
-            .h(px(close_size.max(1.0)))
-            .flex_none()
-            .flex()
-            .items_center()
-            .justify_center()
-            .cursor_pointer()
-            .bg(rgb(theme.colors.icon_button_background))
-            .border_1()
-            .border_color(rgb(theme.colors.icon_button_border))
-            .text_color(rgb(theme.colors.primary_text))
-            .text_size(px(18.0))
-            .child("×")
-            .on_click({
-                let controller = controller.clone();
-                move |_, _, app| {
-                    dispatch_command(
-                        &controller,
-                        DockCommand::CloseFloatingGroup {
-                            group: floating.group,
-                        },
-                        app,
-                    );
-                }
-            });
+            let close_button = div()
+                .id(format!("floating-close-{:?}", floating.group))
+                .w(px(close_size.max(1.0)))
+                .h(px(close_size.max(1.0)))
+                .flex_none()
+                .flex()
+                .items_center()
+                .justify_center()
+                .cursor_pointer()
+                .bg(rgb(theme.colors.icon_button_background))
+                .border_1()
+                .border_color(rgb(theme.colors.icon_button_border))
+                .text_color(rgb(theme.colors.primary_text))
+                .text_size(px(18.0))
+                .child("×")
+                .on_click({
+                    let controller = controller.clone();
+                    move |_, _, app| {
+                        dispatch_command(
+                            &controller,
+                            DockCommand::CloseFloatingGroup {
+                                group: floating.group,
+                            },
+                            app,
+                        );
+                    }
+                });
 
-        let title_bar = div()
-            .id(format!("floating-title-bar-{:?}", floating.group))
-            .absolute()
-            .top_0()
-            .left_0()
-            .w_full()
-            .h(px(title_height))
-            .flex()
-            .items_center()
-            .gap(px(theme.metrics.button_gap))
-            .pr(px(4.0))
-            .bg(rgb(theme.colors.flyout_header_background))
-            .border_1()
-            .border_color(rgb(theme.colors.group_frame_border))
-            .child(title_grip)
-            .child(close_button);
-        root = root.child(title_bar);
+            let title_bar = div()
+                .id(format!("floating-title-bar-{:?}", floating.group))
+                .absolute()
+                .top_0()
+                .left_0()
+                .w_full()
+                .h(px(title_height))
+                .flex()
+                .items_center()
+                .gap(px(theme.metrics.button_gap))
+                .pr(px(4.0))
+                .bg(rgb(theme.colors.flyout_header_background))
+                .border_1()
+                .border_color(rgb(theme.colors.group_frame_border))
+                .child(title_grip)
+                .child(close_button);
+            root = root.child(title_bar);
+        }
 
 
         root
