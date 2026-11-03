@@ -691,9 +691,7 @@ impl Render for FloatingHost {
             }
         };
         let hide_header = self.manager.upgrade().is_some_and(|manager| {
-            manager
-                .update(cx, |manager, _| manager.hide_floating_header(group))
-                .unwrap_or(false)
+            manager.update(cx, |manager, _| manager.hide_floating_header(group))
         });
 
         let mut root = div()
