@@ -187,6 +187,7 @@ impl Layout {
                         == Some(group_rect.group)
                 }
                 DropSource::Group { .. } => false,
+                DropSource::Column { .. } => false,
             };
             if !source_contains_target
                 && !source_panel_is_here
@@ -202,6 +203,7 @@ impl Layout {
                         group: group_rect.group,
                         index: tabs.children.len(),
                     },
+                    DropSource::Column { .. } => continue,
                 };
                 push_zone(zones, target, DropZone::Center, center_rect)?;
             }
@@ -253,6 +255,7 @@ impl Layout {
                             group: group_rect.group,
                             zone: DropZone::Left,
                         },
+                        DropSource::Column { .. } => continue,
                     };
                     let right_target = match source {
                         DropSource::Panel { .. } => DropTarget::MainColumn {
@@ -263,6 +266,7 @@ impl Layout {
                             group: group_rect.group,
                             zone: DropZone::Right,
                         },
+                        DropSource::Column { .. } => continue,
                     };
                     if !group_edge_is_noop(
                         self,
@@ -348,6 +352,7 @@ impl Layout {
                     group: header.group,
                     index: header.index,
                 },
+                DropSource::Column { .. } => continue,
             };
             push_zone(zones, target, DropZone::TabInsertion, left_rect)?;
             let right_target = match source {
@@ -359,6 +364,7 @@ impl Layout {
                     group: header.group,
                     index: header.index + 1,
                 },
+                DropSource::Column { .. } => continue,
             };
             push_zone(zones, right_target, DropZone::TabInsertion, right_rect)?;
         }
@@ -415,11 +421,13 @@ impl Layout {
                     ),
                 );
                 let end_index = column.groups.len();
-                if !matches!(
-                    source,
-                    DropSource::Group { group }
-                        if self.group_slot_is_noop(group, *column_id, end_index)
-                ) {
+                if !matches!(source, DropSource::Column { .. })
+                    && !matches!(
+                        source,
+                        DropSource::Group { group }
+                            if self.group_slot_is_noop(group, *column_id, end_index)
+                    )
+                {
                     push_zone(
                         zones,
                         DropTarget::ColumnSlot {
@@ -468,6 +476,13 @@ impl Layout {
                                     },
                                 )
                             }),
+                        DropSource::Column { .. } => Some((
+                            DropTarget::MainColumn { side, index },
+                            DropTarget::MainColumn {
+                                side,
+                                index: index + 1,
+                            },
+                        )),
                     };
                     if let Some((left_target, right_target)) = targets {
                         let left_is_noop = match &left_target {
@@ -503,6 +518,7 @@ impl Layout {
         zones: &mut Vec<DropZoneRect>,
     ) -> Result<(), ComputeRectsError> {
         let DropZoneBuildContext {
+            source,
             source_panels,
             tree_index,
             rects,
@@ -510,6 +526,9 @@ impl Layout {
             right_columns,
             ..
         } = *context;
+        if matches!(source, DropSource::Column { .. }) {
+            return Ok(());
+        }
         // Exact insertion points in icon rails follow each rail's flattened group order.
         for column_rect in &rects.columns {
             let column_id = column_rect.column;
