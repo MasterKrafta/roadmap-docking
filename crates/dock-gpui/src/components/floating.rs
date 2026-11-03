@@ -186,7 +186,6 @@ impl FloatingWindowContent {
                             panel_view,
                             metrics,
                             theme,
-                            !hide_header,
                         )),
                 );
             } else {
