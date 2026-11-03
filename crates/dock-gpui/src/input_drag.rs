@@ -221,14 +221,7 @@ pub(crate) fn prepare_floating_tab_native_window_on_press(
         let header = rects
             .tab_headers
             .iter()
-            .find(|header| header.group == controller.drag().session().handle().and_then(|_| {
-                match controller.drag().session().state() {
-                    DragState::Pressed { payload: DragPayload::Panel { panel }, .. }
-                    | DragState::Dragging { payload: DragPayload::Panel { panel }, .. }
-                        if panel == drag.panel => Some(header.group),
-                    _ => None,
-                }
-            }).unwrap_or(header.group) && header.panel == drag.panel)?;
+            .find(|header| header.panel == drag.panel)?;
         let preferred_size = controller
             .layout()
             .panel_instance(drag.panel)?
