@@ -209,6 +209,30 @@ pub(crate) fn register_pointer_events(
                             core_point,
                             app,
                         );
+                        if super::drag::begin_native_panel_tab_tearoff_on_press(
+                            &controller,
+                            &manager,
+                            panel,
+                            core_point,
+                            app,
+                        ) {
+                            window.capture_pointer(root_hitbox);
+                            if window.captured_hitbox() == Some(root_hitbox) {
+                                pointer_capture.set(Some(root_hitbox));
+                            } else {
+                                manager.update(app, |manager, manager_cx| {
+                                    manager.cancel_pending_panel_tab_tearoff(manager_cx);
+                                });
+                                cancel_pointer_interaction(
+                                    &controller,
+                                    window,
+                                    &pointer_capture,
+                                    &pointer_press,
+                                    app,
+                                );
+                                return;
+                            }
+                        }
                     }
                 }
                 PointerDownIntent::GroupCandidate { group } => {
@@ -343,6 +367,14 @@ pub(crate) fn register_pointer_events(
         let pointer_press = pointer_press.clone();
         move |event: &MouseMoveEvent, phase, window, app| {
             if manager.update(app, |manager, _| manager.native_move_active()) {
+                if pointer_capture.get().is_some() {
+                    window.release_pointer();
+                    pointer_capture.set(None);
+                    pointer_press.set(None);
+                }
+                return;
+            }
+            if manager.update(app, |manager, _| manager.pending_panel_tab_tearoff_active()) {
                 return;
             }
             if phase != DispatchPhase::Capture {
@@ -489,8 +521,14 @@ pub(crate) fn register_pointer_events(
                 return;
             }
             if manager.update(app, |manager, _| manager.native_move_active()) {
+                window.release_pointer();
+                pointer_capture.set(None);
+                pointer_press.set(None);
                 return;
             }
+            manager.update(app, |manager, manager_cx| {
+                manager.cancel_pending_panel_tab_tearoff(manager_cx);
+            });
 
             if !ensure_pointer_interaction_current(&controller, window, &pointer_capture, app) {
                 pointer_press.set(None);
@@ -592,6 +630,12 @@ pub(crate) fn register_pointer_events(
                 return;
             }
             if manager.update(app, |manager, _| manager.native_move_active()) {
+                window.release_pointer();
+                pointer_capture.set(None);
+                pointer_press.set(None);
+                return;
+            }
+            if manager.update(app, |manager, _| manager.pending_panel_tab_tearoff_active()) {
                 return;
             }
             pointer_press.set(None);
