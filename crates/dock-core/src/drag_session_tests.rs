@@ -30,6 +30,19 @@ fn column_payload_defaults_to_column_header_handle() {
         session.state(),
         DragState::Pressed { payload: active, .. } if active == payload
     ));
+
+    session.pointer_move(Point::new(4.0, 0.0)).unwrap();
+    let target = DropTarget::MainColumn {
+        side: crate::DockSide::Right,
+        index: 0,
+    };
+    let request = session
+        .pointer_up(Point::new(8.0, 0.0), Some(target))
+        .unwrap()
+        .expect("ColumnHeader is a docking drag and emits a request on release");
+    assert_eq!(request.payload, payload);
+    assert_eq!(request.handle, DragHandle::ColumnHeader);
+    assert_eq!(request.target, Some(target));
 }
 
 #[test]
