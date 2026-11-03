@@ -437,7 +437,7 @@ pub(crate) fn begin_native_tearoff_on_press(
         manager.screen_bounds_from_main_local(local_bounds)
     });
     let Some(model_bounds) = model_bounds else {
-        tracing::warn!("could not convert pressed Column bounds into physical screen coordinates");
+        tracing::warn!("could not convert pressed tab bounds into physical screen coordinates");
         return false;
     };
     let command = match command {
