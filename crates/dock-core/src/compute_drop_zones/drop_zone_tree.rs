@@ -64,6 +64,15 @@ pub(crate) fn source_root(
                 Err(ComputeRectsError::InvalidLayoutState)
             }
         }
+        DropSource::Column { column } => {
+            if matches!(layout.node(column), Some(Node::Column(_)))
+                && main_side_for_node(layout, tree_index, column).is_some()
+            {
+                Ok(column)
+            } else {
+                Err(ComputeRectsError::InvalidLayoutState)
+            }
+        }
     }
 }
 
@@ -284,6 +293,9 @@ pub(crate) fn can_add_column(
             column.groups.len() == 1
                 && column.groups[0] == group
                 && matches!(layout.node(group), Some(Node::Tabs(tabs)) if tabs.children.len() == 1)
+        }
+        DropSource::Column { column } => {
+            main_side_for_node(layout, tree_index, column) == Some(side)
         }
     }
 }
