@@ -100,7 +100,7 @@ fn pointer_click_intent_for_hit(hit: HitResult, click_count: usize) -> PointerCl
         HitResult::TabHeader { group, panel, .. } if click_count == 1 => {
             PointerClickIntent::ActivateTab { group, panel }
         }
-        HitResult::TabStrip { group } | HitResult::Group { group } if click_count == 2 => {
+        HitResult::TabStrip { group } if click_count == 2 => {
             PointerClickIntent::CollapseGroup { group }
         }
         HitResult::TabOverflowButton { group } if click_count == 1 => {
@@ -1001,12 +1001,8 @@ mod hit_dispatch_tests {
             PointerClickIntent::None
         );
         assert_eq!(
-            pointer_click_intent_for_hit(HitResult::Group { group }, 1),
-            PointerClickIntent::None
-        );
-        assert_eq!(
             pointer_click_intent_for_hit(HitResult::Group { group }, 2),
-            PointerClickIntent::CollapseGroup { group }
+            PointerClickIntent::None
         );
         assert_eq!(
             pointer_click_intent_for_hit(HitResult::Canvas, 1),

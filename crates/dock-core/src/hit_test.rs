@@ -432,8 +432,16 @@ fn hit_layout_geometry(
         }
     }
 
-    // A GroupRect's upper header band is the Group drag area. For a Group that
-    // belongs to a Column, the band is the single shared toolbar row.
+    // The remaining area of a shared Column toolbar is still part of its tab
+    // strip: it begins a Group drag and keeps the existing double-click collapse.
+    // This also runs before the overlapping Group header band.
+    for strip in rects.tab_strips.iter().rev() {
+        if node_in_scope(strip.group, scope_nodes, include_only) && contains(strip.rect, point)? {
+            return Ok(Some(HitResult::TabStrip { group: strip.group }));
+        }
+    }
+
+    // A GroupRect's upper header band is the fixed Group drag handle.
     // Collapsed Groups have no separate header: their tab strip starts at y=0.
     for group in rects.groups.iter().rev() {
         if !node_in_scope(group.group, scope_nodes, include_only) {
@@ -473,12 +481,6 @@ fn hit_layout_geometry(
     for panel in rects.panels.iter().rev() {
         if panel_in_scope(panel.panel, scope_panels, include_only) && contains(panel.rect, point)? {
             return Ok(Some(HitResult::Panel { panel: panel.panel }));
-        }
-    }
-
-    for strip in rects.tab_strips.iter().rev() {
-        if node_in_scope(strip.group, scope_nodes, include_only) && contains(strip.rect, point)? {
-            return Ok(Some(HitResult::TabStrip { group: strip.group }));
         }
     }
 

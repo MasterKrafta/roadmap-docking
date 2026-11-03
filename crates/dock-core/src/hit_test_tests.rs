@@ -459,6 +459,18 @@ fn column_group_toolbar_prefers_tabs_and_keeps_blank_group_drag_space() {
         layout
             .hit_test(blank_group_drag_point, &rects, &metrics)
             .unwrap(),
+        HitResult::TabStrip { group }
+    );
+    let group_rect = rects.groups[0].rect;
+    let fixed_group_grip_point = Point::new(
+        group_rect.origin.x + group_rect.size.width
+            - 1.5 * metrics.group_control_button_width,
+        tab.origin.y + tab.size.height / 2.0,
+    );
+    assert_eq!(
+        layout
+            .hit_test(fixed_group_grip_point, &rects, &metrics)
+            .unwrap(),
         HitResult::Group { group }
     );
     assert_eq!(
