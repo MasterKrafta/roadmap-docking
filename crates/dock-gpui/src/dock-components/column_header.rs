@@ -1,4 +1,4 @@
-use super::{CollapseColumnButton, CloseColumnButton};
+use super::{CollapseColumnButton, CloseColumnButton, ColumnDragArea};
 use dock_core::DockMetrics;
 use gpui::{InteractiveElement, IntoElement, ParentElement, Styled, div, px, rgb};
 use ui::Theme;
@@ -15,13 +15,10 @@ impl ColumnHeader {
             .flex_none()
             .flex()
             .items_stretch()
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .h_full()
-                    .bg(rgb(theme.colors.group_grip_background)),
-            );
+            .child(ColumnDragArea::render(
+                format!("{id}-drag"),
+                theme,
+            ));
 
         // These controls are visual only; their actions are not connected yet.
         header = header
