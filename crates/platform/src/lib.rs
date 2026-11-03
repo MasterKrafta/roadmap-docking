@@ -116,6 +116,8 @@ pub trait NativeWindowOps {
 
     fn window_rect(&self, window: NativeWindowId) -> Result<PhysicalRect, NativeError>;
     fn client_origin(&self, window: NativeWindowId) -> Result<PhysicalPoint, NativeError>;
+    /// Returns client-content dimensions in physical pixels, excluding the non-client frame.
+    fn client_size(&self, window: NativeWindowId) -> Result<PhysicalSize, NativeError>;
     fn scale_factor(&self, window: NativeWindowId) -> Result<f32, NativeError>;
     fn move_window(
         &self,
@@ -495,6 +497,20 @@ mod windows_impl {
             })
         }
 
+        fn client_size(&self, window: NativeWindowId) -> Result<PhysicalSize, NativeError> {
+            let mut rect = RECT::default();
+            // SAFETY: rect is a writable output for this live HWND.
+            unsafe { GetClientRect(hwnd(window), &mut rect) }
+                .map_err(|error| platform_error("GetClientRect", error))?;
+            let width = rect.right.checked_sub(rect.left).ok_or(NativeError::InvalidSize)?;
+            let height = rect.bottom.checked_sub(rect.top).ok_or(NativeError::InvalidSize)?;
+            let size = PhysicalSize { width, height };
+            if !size.is_valid() {
+                return Err(NativeError::InvalidSize);
+            }
+            Ok(size)
+        }
+
         fn scale_factor(&self, window: NativeWindowId) -> Result<f32, NativeError> {
             // SAFETY: GetDpiForWindow accepts an HWND and returns zero if it
             // is not associated with a valid window.
@@ -534,15 +550,43 @@ mod windows_impl {
                 return Err(NativeError::InvalidSize);
             }
 
+            let native = hwnd(window);
+            let mut window_rect = RECT::default();
+            let mut client_rect = RECT::default();
+            // SAFETY: Both RECT values are writable outputs for this live HWND.
+            unsafe {
+                GetWindowRect(native, &mut window_rect)
+                    .map_err(|error| platform_error("GetWindowRect(resize)", error))?;
+                GetClientRect(native, &mut client_rect)
+                    .map_err(|error| platform_error("GetClientRect(resize)", error))?;
+            }
+
+            let window_width = window_rect.right.checked_sub(window_rect.left)
+                .ok_or(NativeError::InvalidSize)?;
+            let window_height = window_rect.bottom.checked_sub(window_rect.top)
+                .ok_or(NativeError::InvalidSize)?;
+            let client_width = client_rect.right.checked_sub(client_rect.left)
+                .ok_or(NativeError::InvalidSize)?;
+            let client_height = client_rect.bottom.checked_sub(client_rect.top)
+                .ok_or(NativeError::InvalidSize)?;
+            let frame_width = window_width.saturating_sub(client_width).max(0);
+            let frame_height = window_height.saturating_sub(client_height).max(0);
+            let outer_width = size.width.checked_add(frame_width)
+                .ok_or(NativeError::InvalidSize)?;
+            let outer_height = size.height.checked_add(frame_height)
+                .ok_or(NativeError::InvalidSize)?;
+
+            // Core sizes describe the client area. SetWindowPos expects the
+            // complete outer HWND size, so preserve the current non-client frame.
             // SAFETY: Resize only; preserve position, Z-order and activation.
             unsafe {
                 SetWindowPos(
-                    hwnd(window),
+                    native,
                     None,
                     0,
                     0,
-                    size.width,
-                    size.height,
+                    outer_width,
+                    outer_height,
                     SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
                 )
             }
@@ -1015,6 +1059,9 @@ mod stub_impl {
             Err(NativeError::Unsupported)
         }
         fn client_origin(&self, _: NativeWindowId) -> Result<PhysicalPoint, NativeError> {
+            Err(NativeError::Unsupported)
+        }
+        fn client_size(&self, _: NativeWindowId) -> Result<PhysicalSize, NativeError> {
             Err(NativeError::Unsupported)
         }
         fn scale_factor(&self, _: NativeWindowId) -> Result<f32, NativeError> {
