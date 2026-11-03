@@ -21,6 +21,7 @@ use ui::Theme;
 
 use crate::{
     DockController, FloatingWindowManager,
+    dock_components::DockColumnView,
     actions::dispatch_command,
     input::drag::{
         begin_floating_tab_tearoff, finish_floating_tab_drag, update_floating_tab_drag,
@@ -147,35 +148,78 @@ impl FloatingWindowContent {
                 .copied()
                 .unwrap_or(ColumnMode::Expanded);
 
-            root = root.child(ColumnView::render(
-                *column,
-                mode,
-                &column_group_rects,
-                column_panels,
-                tab_strips,
-                tab_headers,
-                tab_overflows,
-                group_presentations,
-                rail_display_orders
-                    .get(&column.column)
-                    .map(Vec::as_slice)
-                    .unwrap_or(&[]),
-                active_flyout,
-                drag_preview,
-                drag_zones,
-                metrics,
-                menu_group,
-                context_menu.clone(),
-                middle_click_closes_tabs,
-                &column_splitters,
-                overflow,
-                scroll_handles.get(&column.column).cloned(),
-                controller.clone(),
-                theme,
-                origin,
-                Some(floating.group),
-                !hide_header,
-            ));
+            // Use the same dock-components Column implementation as MainDockView
+            // when this Core Column is the supported single-group/single-tab shape.
+            // Its AnyView is the controller's cached panel view; it is not rebuilt.
+            let single_active_panel = if column_group_rects.len() == 1 {
+                column_group_rects.first().and_then(|group| {
+                    let presentation = group_presentations.get(&group.group)?;
+                    if presentation.tabs.len() != 1 {
+                        return None;
+                    }
+                    let tab = presentation.tabs.first()?;
+                    if presentation.active_panel != Some(tab.panel) {
+                        return None;
+                    }
+                    let panel_view = column_panels
+                        .iter()
+                        .find(|(panel, _)| panel.panel == tab.panel)
+                        .map(|(_, view)| view.clone())?;
+                    Some((tab.title.to_string(), panel_view))
+                })
+            } else {
+                None
+            };
+
+            if let Some((title, panel_view)) = single_active_panel {
+                root = root.child(
+                    div()
+                        .id(format!("floating-dock-components-column-{:?}", column.column))
+                        .absolute()
+                        .left(px(column.rect.origin.x))
+                        .top(px(column.rect.origin.y))
+                        .w(px(column.rect.size.width))
+                        .h(px(column.rect.size.height))
+                        .child(DockColumnView::render_active(
+                            format!("floating-dock-components-{:?}", column.column),
+                            title,
+                            panel_view,
+                            metrics,
+                            theme,
+                            !hide_header,
+                        )),
+                );
+            } else {
+                root = root.child(ColumnView::render(
+                    *column,
+                    mode,
+                    &column_group_rects,
+                    column_panels,
+                    tab_strips,
+                    tab_headers,
+                    tab_overflows,
+                    group_presentations,
+                    rail_display_orders
+                        .get(&column.column)
+                        .map(Vec::as_slice)
+                        .unwrap_or(&[]),
+                    active_flyout,
+                    drag_preview,
+                    drag_zones,
+                    metrics,
+                    menu_group,
+                    context_menu.clone(),
+                    middle_click_closes_tabs,
+                    &column_splitters,
+                    overflow,
+                    scroll_handles.get(&column.column).cloned(),
+                    controller.clone(),
+                    theme,
+                    origin,
+                    Some(floating.group),
+                    !hide_header,
+                ));
+            }
         }
 
         // Tabs nodes that are not owned by a Column still use GroupView.
