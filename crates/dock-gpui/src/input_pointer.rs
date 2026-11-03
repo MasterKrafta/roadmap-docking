@@ -1,8 +1,8 @@
 use std::{cell::Cell, collections::HashMap, rc::Rc};
 
 use dock_core::{
-    Axis, DockCommand, DockSide, DragHandle, DragPayload, DragState, HitResult, Node,
-    NodeId, PanelId, Point, Rect,
+    Axis, DockCommand, DockSide, DragHandle, DragPayload, DragState, DropTarget, HitResult,
+    Node, NodeId, PanelId, Point, Rect,
 };
 use gpui::{
     App, DispatchPhase, Entity, HitboxId, MouseButton, MouseDownEvent, MouseExitEvent,
@@ -396,10 +396,16 @@ pub(crate) fn register_pointer_events(
 
             let should_tearoff = controller.update(app, |controller, _| {
                 let handle = controller.drag().session().handle();
-                let dragging = matches!(controller.drag().session().state(), DragState::Dragging { .. });
+                let DragState::Dragging { target, .. } = controller.drag().session().state()
+                else {
+                    return false;
+                };
                 let leaves_host = !controller.viewport().contains(host_point).unwrap_or(true);
-                dragging
-                    && leaves_host
+                // Entering the empty Canvas is already a semantic FreeArea drop.
+                // Detach now so the native Floating window follows the cursor
+                // while the mouse button is still held, rather than waiting for MouseUp.
+                let enters_free_area = target == Some(DropTarget::FreeArea);
+                (leaves_host || enters_free_area)
                     && matches!(
                         handle,
                         Some(
