@@ -280,14 +280,12 @@ pub(crate) fn register_pointer_events(
                     }
                 }
                 PointerDownIntent::ColumnCandidate { column } => {
-                    if !uses_dock_component_column(&controller, column, app)
-                        && column_header_drag_handle_contains(
-                            &controller,
-                            column,
-                            core_point,
-                            app,
-                        )
-                    {
+                    if column_header_drag_handle_contains(
+                        &controller,
+                        column,
+                        core_point,
+                        app,
+                    ) {
                         begin_drag_at(
                             &controller,
                             DragPayload::Column { column },
@@ -979,6 +977,10 @@ fn column_header_drag_handle_contains(
     point: Point,
     app: &mut App,
 ) -> bool {
+    // DockColumnView renders two fixed-width controls; the standard ColumnHeaderView
+    // renders only its single mode button. Keep the hit-test drag zone aligned with
+    // the actual flexible ColumnDragArea in each presentation.
+    let uses_component_header = uses_dock_component_column(controller, column, app);
     controller.update(app, |controller, _| {
         let metrics = controller.metrics();
         let Ok(rects) = controller.geometry().cloned() else {
@@ -993,11 +995,16 @@ fn column_header_drag_handle_contains(
             return false;
         }
 
+        let reserved_controls_width = if uses_component_header {
+            2.0 * metrics.column_control_button_width
+        } else {
+            metrics.group_control_button_width
+        };
         column_header_drag_zone_contains(
             column_rect.rect,
             point,
             metrics.column_header_height,
-            metrics.group_control_button_width,
+            reserved_controls_width,
         )
     })
 }
