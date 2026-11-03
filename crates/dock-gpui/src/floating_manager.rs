@@ -548,9 +548,8 @@ impl FloatingWindowManager {
 
     fn core_bounds_from_native_window(&self, native_window: NativeWindowId) -> Option<Rect> {
         let rect = self.native_ops.window_rect(native_window).ok()?;
-        let physical_width = rect.right.checked_sub(rect.left)?;
-        let physical_height = rect.bottom.checked_sub(rect.top)?;
-        if physical_width <= 0 || physical_height <= 0 {
+        let client_size = self.native_ops.client_size(native_window).ok()?;
+        if !client_size.is_valid() {
             return None;
         }
         let scale = self.native_ops.scale_factor(native_window).ok()?;
@@ -561,8 +560,8 @@ impl FloatingWindowManager {
         let bounds = Rect::new(
             Point::new(rect.left as f32, rect.top as f32),
             Size::new(
-                physical_width as f32 / scale,
-                physical_height as f32 / scale,
+                client_size.width as f32 / scale,
+                client_size.height as f32 / scale,
             ),
         );
         bounds.validate_non_empty().ok()?;
