@@ -2,7 +2,7 @@
 
 use super::helpers::{equal_ratios, normalized_ratios, side_index, split_sibling_ratios};
 use super::*;
-use crate::ColumnDisplayItem;
+use crate::{AllowedArea, ColumnDisplayItem};
 
 impl Layout {
     pub(super) fn apply_column_transfer_command(
