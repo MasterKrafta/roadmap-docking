@@ -2,7 +2,7 @@ use std::{cell::Cell, collections::HashMap, rc::Rc};
 
 use dock_core::{
     Axis, DockCommand, DockSide, DragHandle, DragPayload, DragState, HitResult, Node, NodeId,
-    PanelId, Point, Rect,
+    PanelId, Point,
 };
 use gpui::{
     App, DispatchPhase, Entity, HitboxId, MouseButton, MouseDownEvent, MouseExitEvent,
