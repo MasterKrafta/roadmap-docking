@@ -1495,7 +1495,6 @@ impl FloatingWindowManager {
             host.set_host_group(None);
             window.remove_window();
         });
-        self.registry.panel_locations.remove(&panel);
     }
 
     fn create_panel_window(
