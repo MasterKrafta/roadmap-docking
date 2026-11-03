@@ -495,6 +495,64 @@ impl FloatingWindowManager {
         true
     }
 
+    /// Positions a non-host PanelWindow for a tab drag inside an existing
+    /// floating composition. The visible composition host remains untouched.
+    pub(crate) fn prepare_floating_tab_native_window_on_press(
+        &mut self,
+        panel: PanelId,
+        source_group: FloatingGroupId,
+        pointer: Point,
+        local_bounds: Rect,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(source_window) = self
+            .panel_window_for_group(source_group)
+            .and_then(|entry| entry.native_window)
+        else {
+            return false;
+        };
+        let Some(entry) = self.registry.windows.get(&panel) else {
+            return false;
+        };
+        if entry.host_group.is_some() || entry.visibility != PanelWindowVisibility::Hidden {
+            return false;
+        }
+        let Some(native_window) = entry.native_window else {
+            return false;
+        };
+        let Ok(cursor) = self.native_ops.cursor_position() else {
+            return false;
+        };
+        let scale = self
+            .native_ops
+            .scale_factor(source_window)
+            .ok()
+            .filter(|scale| scale.is_finite() && *scale > 0.0)
+            .unwrap_or(1.0);
+        let Some(offset_x) = physical_coordinate(pointer.x - local_bounds.origin.x, scale) else {
+            return false;
+        };
+        let Some(offset_y) = physical_coordinate(pointer.y - local_bounds.origin.y, scale) else {
+            return false;
+        };
+        let position = PhysicalPoint {
+            x: cursor.x.saturating_sub(offset_x),
+            y: cursor.y.saturating_sub(offset_y),
+        };
+        if let Err(error) = self.native_ops.move_window(native_window, position) {
+            tracing::debug!(?panel, ?source_group, %error, "could not position hidden floating-tab drag surface");
+            return false;
+        }
+        if self.native_ops.hide(native_window).is_err() {
+            return false;
+        }
+        if let Some(entry) = self.registry.windows.get_mut(&panel) {
+            entry.visibility = PanelWindowVisibility::Hidden;
+        }
+        cx.notify();
+        true
+    }
+
     /// Clears a hidden tab-drag surface when the gesture is released or cancelled.
     pub(crate) fn clear_prepared_panel_tab_drag(
         &mut self,
