@@ -224,7 +224,7 @@ pub(crate) fn register_pointer_events(
                                 pointer_capture.set(Some(root_hitbox));
                             } else {
                                 manager.update(app, |manager, manager_cx| {
-                                    manager.cancel_pending_panel_tab_tearoff(manager_cx);
+                                    manager.clear_prepared_panel_tab_drag(manager_cx);
                                 });
                                 cancel_pointer_interaction(
                                     &controller,
