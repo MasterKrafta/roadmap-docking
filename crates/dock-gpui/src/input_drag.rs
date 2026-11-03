@@ -239,8 +239,8 @@ pub(crate) fn prepare_floating_tab_native_window_on_press(
     };
     manager.update(app, |manager, manager_cx| {
         manager.prepare_floating_tab_native_window_on_press(
-            drag.source_group,
             drag.panel,
+            drag.source_group,
             drag.press_origin,
             local_bounds,
             manager_cx,
