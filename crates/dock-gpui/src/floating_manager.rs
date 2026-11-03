@@ -827,6 +827,7 @@ impl FloatingWindowManager {
             match payload {
                 DragPayload::Panel { panel } => Some(DropSource::Panel { panel }),
                 DragPayload::Group { group } => Some(DropSource::Group { group }),
+                DragPayload::Column { column } => Some(DropSource::Column { column }),
                 DragPayload::FloatingGroup { group } => controller
                     .layout()
                     .floating_group(group)
