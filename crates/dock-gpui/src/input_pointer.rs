@@ -211,7 +211,7 @@ pub(crate) fn register_pointer_events(
                             app,
                         );
                         if tab_is_clickable
-                            && super::drag::begin_native_panel_tab_tearoff_on_press(
+                            && super::drag::prepare_panel_tab_native_window_on_press(
                                 &controller,
                                 &manager,
                                 panel,
@@ -377,9 +377,6 @@ pub(crate) fn register_pointer_events(
                 }
                 return;
             }
-            if manager.update(app, |manager, _| manager.pending_panel_tab_tearoff_active()) {
-                return;
-            }
             if phase != DispatchPhase::Capture {
                 return;
             }
@@ -530,7 +527,7 @@ pub(crate) fn register_pointer_events(
                 return;
             }
             manager.update(app, |manager, manager_cx| {
-                manager.cancel_pending_panel_tab_tearoff(manager_cx);
+                manager.clear_prepared_panel_tab_drag(manager_cx);
             });
 
             if !ensure_pointer_interaction_current(&controller, window, &pointer_capture, app) {
@@ -638,7 +635,7 @@ pub(crate) fn register_pointer_events(
                 pointer_press.set(None);
                 return;
             }
-            if manager.update(app, |manager, _| manager.pending_panel_tab_tearoff_active()) {
+            if manager.update(app, |manager, _| manager.prepared_panel_tab_drag_active()) {
                 return;
             }
             pointer_press.set(None);
