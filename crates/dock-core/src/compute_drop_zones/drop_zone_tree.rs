@@ -66,7 +66,7 @@ pub(crate) fn source_root(
         }
         DropSource::Column { column } => {
             if matches!(layout.node(column), Some(Node::Column(_)))
-                && main_side_for_node(layout, tree_index, column).is_some()
+                && layout.main_column_position(column).is_some()
             {
                 Ok(column)
             } else {
@@ -295,7 +295,9 @@ pub(crate) fn can_add_column(
                 && matches!(layout.node(group), Some(Node::Tabs(tabs)) if tabs.children.len() == 1)
         }
         DropSource::Column { column } => {
-            main_side_for_node(layout, tree_index, column) == Some(side)
+            layout
+                .main_column_position(column)
+                .is_some_and(|(source_side, _)| source_side == side)
         }
     }
 }
