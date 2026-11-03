@@ -495,9 +495,9 @@ pub(crate) fn begin_native_tearoff_on_press(
     true
 }
 
-/// Watches a PanelTab press without mutating Layout. If the pointer is released
-/// below the threshold, the ordinary MouseUp path still activates the clicked tab.
-pub(crate) fn begin_native_panel_tab_tearoff_on_press(
+/// Positions the PanelId's existing hidden native window on pointer-down.
+/// The source stays in its current Layout so tab reordering and docking remain available.
+pub(crate) fn prepare_panel_tab_native_window_on_press(
     controller: &Entity<DockController>,
     manager: &Entity<FloatingWindowManager>,
     panel: PanelId,
@@ -514,20 +514,12 @@ pub(crate) fn begin_native_panel_tab_tearoff_on_press(
     let Some(local_bounds) = local_bounds else {
         return false;
     };
-    let model_bounds = manager.update(app, |manager, _| {
-        manager.screen_bounds_from_main_local(local_bounds)
-    });
-    let Some(model_bounds) = model_bounds else {
-        tracing::warn!("could not convert pressed tab bounds into physical screen coordinates");
-        return false;
-    };
 
     manager.update(app, |manager, manager_cx| {
-        manager.begin_pending_panel_tab_tearoff(
+        manager.prepare_panel_tab_native_window_on_press(
             panel,
             pointer,
             local_bounds,
-            model_bounds,
             manager_cx,
         )
     })
