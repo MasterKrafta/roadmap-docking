@@ -956,3 +956,70 @@ fn split_root_floating_composition_can_create_first_main_dock_columns() {
     }));
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
+
+
+#[test]
+fn photoshop_column_can_float_as_one_composition_and_dock_back() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, first_panel) = builder.panel(key("column-float-first"), constraints());
+    let first_group = builder.tabs(vec![first_panel], 0, false);
+    let (_, second_panel) = builder.panel(key("column-float-second"), constraints());
+    let second_group = builder.tabs(vec![second_panel], 0, false);
+    let column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![first_group, second_group],
+        vec![0.4, 0.6],
+    );
+    builder.main_area(DockSide::Left, column);
+
+    let mut layout = builder.build();
+    assert_eq!(layout.validate(&metrics), Ok(()));
+
+    let outcome = layout
+        .apply(
+            DockCommand::Float {
+                node: column,
+                bounds: bounds(480.0, 120.0),
+            },
+            &metrics,
+        )
+        .unwrap();
+    let Some(crate::CommandValue::FloatingGroup(floating_group)) = outcome.actual_value else {
+        panic!("floating a Column must return its new FloatingGroupId");
+    };
+
+    assert!(layout.main_area(DockSide::Left).is_none());
+    let floating_area = layout.floating_group(floating_group).unwrap().area;
+    assert_eq!(layout.dock_area(floating_area).unwrap().root, column);
+    assert!(matches!(
+        layout.node(column),
+        Some(Node::Column(value))
+            if value.groups == vec![first_group, second_group]
+    ));
+    assert_eq!(layout.validate(&metrics), Ok(()));
+
+    layout
+        .apply(
+            DockCommand::DockFloating {
+                group: floating_group,
+                target: DropTarget::MainColumn {
+                    side: DockSide::Left,
+                    index: 0,
+                },
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    assert!(layout.floating_group(floating_group).is_none());
+    assert_eq!(layout.main_area(DockSide::Left).unwrap().root, column);
+    assert!(matches!(
+        layout.node(column),
+        Some(Node::Column(value))
+            if value.groups == vec![first_group, second_group]
+    ));
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
