@@ -185,6 +185,23 @@ pub(crate) fn register_pointer_events(
                 return;
             };
 
+            // DockTab is the alternate drag grip for its owning Column. Start
+            // the exact same Core drag session as ColumnDragArea, so the whole
+            // Column (not just its Panel node) moves into the Floating host.
+            let dock_column = controller.update(app, |controller, _| {
+                dock_component_column_drag_target(controller, hit, core_point)
+            });
+            if let Some(column) = dock_column {
+                begin_drag_at(
+                    &controller,
+                    DragPayload::Column { column },
+                    DragHandle::ColumnHeader,
+                    core_point,
+                    app,
+                );
+                return;
+            }
+
             match pointer_down_intent_for_hit(hit) {
                 PointerDownIntent::TabHeaderCandidate { group, panel } => {
                     let tab_is_clickable = tab_header_clickable_contains(
@@ -851,6 +868,62 @@ fn uses_dock_component_group(
     controller.update(app, |controller, _| {
         is_dock_component_tab_group(controller.layout(), group_id)
     })
+}
+
+/// Resolves the alternate DockTab drag surface to its owning main Column.
+///
+/// A DockTab drag deliberately uses the Column payload and ColumnHeader handle,
+/// exactly like ColumnDragArea. This keeps the Core tear-off path and floating
+/// renderer identical regardless of which visible grip initiated the gesture.
+fn dock_component_column_drag_target(
+    controller: &mut DockController,
+    hit: HitResult,
+    point: Point,
+) -> Option<NodeId> {
+    let column_id = {
+        let layout = controller.layout();
+        let group_id = match hit {
+            HitResult::TabHeader { group, .. }
+            | HitResult::TabStrip { group }
+            | HitResult::Group { group } => group,
+            HitResult::Column { column } => {
+                let Node::Column(column) = layout.node(column)? else {
+                    return None;
+                };
+                *column.groups.first()?
+            }
+            _ => return None,
+        };
+
+        if !is_dock_component_tab_group(layout, group_id) {
+            return None;
+        }
+
+        layout.nodes().find_map(|(column_id, node)| {
+            let Node::Column(column) = node else {
+                return None;
+            };
+            (column.groups.len() == 1
+                && column.groups.first() == Some(&group_id)
+                && is_main_dock_column(layout, column_id))
+                .then_some(column_id)
+        })?
+    };
+
+    let group_rect = {
+        let rects = controller.geometry().ok()?;
+        rects
+            .groups
+            .iter()
+            .find(|rect| rect.group == controller.layout().nodes().find_map(|(id, node)| {
+                matches!(node, Node::Column(column) if id == column_id)
+                    .then(|| column.groups.first().copied())
+                    .flatten()
+            }).flatten()?)
+            .map(|rect| rect.rect)?
+    };
+    let drag_zone = DockTab::drag_zone(group_rect, controller.metrics());
+    (!DockTab::leaves_strip_zone(drag_zone, point)).then_some(column_id)
 }
 
 fn is_dock_component_tab_group(layout: &dock_core::Layout, group_id: NodeId) -> bool {
