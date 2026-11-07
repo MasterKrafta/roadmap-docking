@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use dock_core::{
     CommandError, CommandOutcome, DockCommand, DragDropAction, DragDropRequest, DragHandle,
-    DragState, DropTarget, FloatingGroupId, PanelId, PanelKey, Point,
+    DragState, DropTarget, FloatingGroupId, PanelId, PanelKey, Point, Rect,
 };
 use gpui::{AnyView, App, AppContext, Context, Window};
 
@@ -422,7 +422,7 @@ impl DockController {
     pub(crate) fn finish_tearoff_move_in(
         &mut self,
         group: FloatingGroupId,
-        floating_origin: Point,
+        floating_bounds: Rect,
         drop_target: Option<(DropTarget, Point)>,
         cx: &mut Context<Self>,
     ) -> Result<(), CommandError> {
@@ -462,9 +462,9 @@ impl DockController {
         } else {
             None
         };
-        let command = dock_command.unwrap_or(DockCommand::MoveFloating {
+        let command = dock_command.unwrap_or(DockCommand::ResizeFloatingBounds {
             group,
-            origin: floating_origin,
+            bounds: floating_bounds,
         });
 
         let before_panels = self.panel_keys();

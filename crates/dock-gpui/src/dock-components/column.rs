@@ -35,9 +35,11 @@ impl DockColumnView {
         Self::render_active_with_header(id, title, panel_view, metrics, theme, true)
     }
 
-    /// Hides the ColumnHeader during a DockTab-origin tear-off without
-    /// changing the Group's layout position. The header slot remains reserved,
-    /// so showing the header after release does not push the tab row downward.
+    /// Hides the ColumnHeader during a DockTab-origin tear-off.
+    ///
+    /// While hidden, the Group occupies the full client area. On release the
+    /// native window grows upward before the header is shown, keeping the tab
+    /// row at the same screen position.
     pub(crate) fn render_active_with_header(
         id: String,
         title: String,
@@ -60,14 +62,6 @@ impl DockColumnView {
 
         if show_column_header {
             column = column.child(ColumnHeader::render(id.clone(), metrics, theme));
-        } else {
-            column = column.child(
-                div()
-                    .id(format!("{id}-header-placeholder"))
-                    .w_full()
-                    .h(gpui::px(metrics.column_header_height))
-                    .flex_none(),
-            );
         }
 
         column.child(DockGroupView::render_active(

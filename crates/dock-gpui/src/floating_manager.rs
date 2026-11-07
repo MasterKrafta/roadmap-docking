@@ -1047,18 +1047,145 @@ impl FloatingWindowManager {
     }
 
     fn finish_native_move(&mut self, state: NativeMoveSession, cx: &mut Context<Self>) {
-        self.native_move = None;
         if state.high_resolution_timer {
             let _ = self.native_ops.end_high_resolution_timer();
         }
-        let origin = self.native_ops.window_rect(state.native_window).ok()
-            .and_then(|rect| self.core_origin_from_screen(PhysicalPoint { x: rect.left, y: rect.top }))
-            .unwrap_or(state.start_bounds.origin);
+
         // The target may belong to the main window or another floating window.
         // Both have already resolved their own local coordinates into a Core target.
         let drop_target = state.drop_target.map(|target| (target.target, target.point));
+        let is_free_release = drop_target
+            .is_none_or(|(target, _)| target == DropTarget::FreeArea);
+
+        let mut floating_bounds = self.controller.update(cx, |controller, _| {
+            controller
+                .layout()
+                .floating_group(state.group)
+                .map(|floating| floating.bounds)
+        }).unwrap_or(state.start_bounds);
+
+        let native_rect = self.native_ops.window_rect(state.native_window).ok();
+        if let Some(rect) = native_rect {
+            floating_bounds.origin = Point::new(rect.left as f32, rect.top as f32);
+        }
+
+        // A DockTab tear-off temporarily crops ColumnHeader from the native
+        // client area. When the pointer is released into free space, restore
+        // that client height and move the top edge up by exactly the same
+        // physical amount. The Group/tab row therefore stays stationary.
+        let mut rollback_header_expansion = None;
+        if state.kind == NativeMoveKind::TearOff && state.hide_header && is_free_release {
+            let metrics = self.controller.update(cx, |controller, _| controller.metrics());
+            let scale = self.native_ops.scale_factor(state.native_window).ok()
+                .filter(|scale| scale.is_finite() && *scale > 0.0);
+            let client_size = self.native_ops.client_size(state.native_window).ok();
+            let Some(rect) = native_rect else {
+                tracing::warn!(
+                    ?state.group,
+                    "could not read floating window bounds to restore ColumnHeader space"
+                );
+                self.native_move = None;
+                self.complete_native_move(state, floating_bounds, drop_target, cx);
+                return;
+            };
+
+            if let (Some(scale), Some(client_size)) = (scale, client_size) {
+                let header_pixels = physical_coordinate(metrics.column_header_height, scale);
+                let expanded_height = client_size.height.checked_add(header_pixels.unwrap_or(0));
+                let expanded_model_height = floating_bounds.size.height + metrics.column_header_height;
+                let new_position = header_pixels.and_then(|height| {
+                    rect.top.checked_sub(height).map(|top| PhysicalPoint {
+                        x: rect.left,
+                        y: top,
+                    })
+                });
+                let expanded_bounds = new_position.and_then(|position| {
+                    let bounds = Rect::new(
+                        Point::new(position.x as f32, position.y as f32),
+                        Size::new(floating_bounds.size.width, expanded_model_height),
+                    );
+                    bounds.validate_non_empty().ok().map(|_| (position, bounds))
+                });
+
+                if let (Some(header_pixels), Some(height), Some((position, bounds))) =
+                    (header_pixels, expanded_height, expanded_bounds)
+                {
+                    let expanded_client_size = PhysicalSize {
+                        width: client_size.width,
+                        height,
+                    };
+                    match self.native_ops.resize_window(state.native_window, expanded_client_size) {
+                        Ok(()) => match self.native_ops.move_window(state.native_window, position) {
+                            Ok(()) => {
+                                floating_bounds = bounds;
+                                rollback_header_expansion = Some((
+                                    client_size,
+                                    PhysicalPoint {
+                                        x: rect.left,
+                                        y: rect.top,
+                                    },
+                                ));
+                                tracing::debug!(
+                                    ?state.group,
+                                    header_pixels,
+                                    "restored floating ColumnHeader space above the dragged tab"
+                                );
+                            }
+                            Err(error) => {
+                                let _ = self.native_ops.resize_window(state.native_window, client_size);
+                                tracing::warn!(
+                                    ?state.group,
+                                    %error,
+                                    "could not raise floating window top edge for ColumnHeader"
+                                );
+                            }
+                        },
+                        Err(error) => {
+                            tracing::warn!(
+                                ?state.group,
+                                %error,
+                                "could not expand floating client area for ColumnHeader"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        self.native_move = None;
         let result = self.controller.update(cx, |controller, controller_cx| {
-            controller.finish_tearoff_move_in(state.group, origin, drop_target, controller_cx)
+            controller.finish_tearoff_move_in(
+                state.group,
+                floating_bounds,
+                drop_target,
+                controller_cx,
+            )
+        });
+        if let Err(error) = result {
+            if let Some((client_size, position)) = rollback_header_expansion {
+                let _ = self.native_ops.resize_window(state.native_window, client_size);
+                let _ = self.native_ops.move_window(state.native_window, position);
+            }
+            tracing::warn!(?state.group, %error, "could not commit native floating-window move");
+            self.cancel_controller_move(cx);
+        }
+        cx.notify();
+    }
+
+    fn complete_native_move(
+        &mut self,
+        state: NativeMoveSession,
+        floating_bounds: Rect,
+        drop_target: Option<(DropTarget, Point)>,
+        cx: &mut Context<Self>,
+    ) {
+        let result = self.controller.update(cx, |controller, controller_cx| {
+            controller.finish_tearoff_move_in(
+                state.group,
+                floating_bounds,
+                drop_target,
+                controller_cx,
+            )
         });
         if let Err(error) = result {
             tracing::warn!(?state.group, %error, "could not commit native floating-window move");
