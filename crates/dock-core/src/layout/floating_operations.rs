@@ -11,7 +11,7 @@ impl Layout {
         metrics: &DockMetrics,
     ) -> Result<CommandApplication, CommandError> {
         match command {
-            DockCommand::Float { node, bounds } => self.apply_float_command(node, bounds),
+            DockCommand::Float { node, bounds } => self.apply_float_command(node, bounds, metrics),
             DockCommand::MoveFloating { .. }
             | DockCommand::ResizeFloating { .. }
             | DockCommand::ResizeFloatingBounds { .. }
@@ -76,10 +76,43 @@ impl Layout {
         }
     }
 
+    pub(super) fn floating_root_for_node(
+        &mut self,
+        node: NodeId,
+        requested_width: f32,
+        metrics: &DockMetrics,
+    ) -> Result<NodeId, CommandError> {
+        if self.profile != Profile::Photoshop {
+            return Ok(node);
+        }
+
+        let group = match self.nodes.get(node) {
+            Some(Node::Column(_)) => return Ok(node),
+            Some(Node::Tabs(_)) => node,
+            Some(Node::Panel(_)) => self.nodes.insert(Node::Tabs(crate::Tabs {
+                children: vec![node],
+                active_index: 0,
+                collapsed: false,
+            })),
+            Some(Node::Split(_)) | None => return Ok(node),
+        };
+
+        let minimum_width = self.minimum_node_size(group, metrics)?.width;
+        let width = requested_width.max(metrics.min_column_width).max(minimum_width);
+        Ok(self.nodes.insert(Node::Column(crate::Column {
+            width,
+            mode: ColumnMode::Expanded,
+            groups: vec![group],
+            group_ratios: vec![1.0],
+            last_expanded_width: Some(width),
+        })))
+    }
+
     pub(super) fn apply_float_command(
         &mut self,
         node: &NodeId,
         bounds: &Rect,
+        metrics: &DockMetrics,
     ) -> Result<CommandApplication, CommandError> {
         // Bounds use model-space logical pixels. Visible-screen clamping
         // belongs to the geometry/render adapter, not to Core/GPUI.
@@ -105,18 +138,9 @@ impl Layout {
             });
         }
         let next_z = self.next_floating_z_order()?;
-        let panel_root = matches!(self.nodes.get(*node), Some(Node::Panel(_)));
         self.remember_subtree_dock_locations(*node);
         self.detach_node(*node)?;
-        let root = if panel_root && self.profile == Profile::Photoshop {
-            self.nodes.insert(Node::Tabs(crate::Tabs {
-                children: vec![*node],
-                active_index: 0,
-                collapsed: false,
-            }))
-        } else {
-            *node
-        };
+        let root = self.floating_root_for_node(*node, bounds.size.width, metrics)?;
         let area_id = self.dock_areas.insert(DockArea::floating(root));
         let floating_group = self
             .floating_groups
@@ -203,6 +227,15 @@ impl Layout {
                 self.dock_floating_stack_to_rail_slot(root, split, column, index)
             }
             (
+                Some(Node::Column(column)),
+                DropTarget::GroupTabs {
+                    group: target_group,
+                    index,
+                },
+            ) if column.groups.len() == 1 => {
+                self.merge_group_into_tabs(column.groups[0], target_group, index)
+            }
+            (
                 Some(Node::Tabs(_)),
                 DropTarget::GroupTabs {
                     group: target_group,
@@ -213,6 +246,25 @@ impl Layout {
                 if split.axis == Axis::Y =>
             {
                 self.dock_floating_stack_to_column_slot(root, split, column, index)
+            }
+            (
+                Some(Node::Column(column)),
+                DropTarget::Tabs {
+                    group: target_group,
+                    index,
+                },
+            ) if column.groups.len() == 1 => {
+                match self.nodes.get(column.groups[0]).cloned() {
+                    Some(Node::Tabs(tabs)) => self.dock_floating_tabs_to_tabs(
+                        column.groups[0],
+                        tabs,
+                        target_group,
+                        index,
+                    ),
+                    _ => Err(CommandError::InvalidTarget {
+                        reason: "a floating Column dropped into Tabs must contain one Tabs group",
+                    }),
+                }
             }
             (
                 Some(Node::Tabs(tabs)),
