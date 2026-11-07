@@ -1,7 +1,7 @@
 #[path = "dock_area_header.rs"]
 mod header;
 
-use dock_core::{DockMetrics, Rect};
+use dock_core::{ColumnRect, DockMetrics, Rect};
 use gpui::{InteractiveElement, IntoElement, ParentElement, Styled, div};
 use ui::Theme;
 
@@ -30,10 +30,10 @@ impl DockAreaView {
     pub(crate) fn render_header(
         id: String,
         area_rect: Rect,
-        column_count: usize,
+        columns: &[ColumnRect],
         metrics: DockMetrics,
         theme: Theme,
     ) -> impl IntoElement {
-        DockAreaHeader::render(id, area_rect, column_count, metrics, theme)
+        DockAreaHeader::render(id, area_rect, columns, metrics, theme)
     }
 }
