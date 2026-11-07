@@ -1,8 +1,8 @@
 use super::{ComputeRectsError, HitResult, Point, Rect};
 use crate::layout_builder::LayoutBuilder;
 use crate::{
-    Axis, ColumnMode, DockMetrics, DockSide, DropSource, DropTarget, DropZone, GeometryError,
-    LayoutRects, PanelConstraints, PanelKey, Profile, Size,
+    Axis, ColumnMode, DockCommand, DockMetrics, DockSide, DropSource, DropTarget, DropZone,
+    GeometryError, LayoutRects, PanelConstraints, PanelKey, Profile, Size,
 };
 
 fn constraints() -> PanelConstraints {
@@ -686,6 +686,46 @@ fn collapsed_tab_header_is_hit_without_inventing_a_group_header() {
     );
 }
 
+
+#[test]
+fn floating_detach_creates_a_column_header_hit_target() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+    let (_, panel_node) = builder.panel(key("floating-detach-column-header"), constraints());
+    let group = builder.tabs(vec![panel_node], 0, false);
+    let source_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![group],
+        vec![1.0],
+    );
+    builder.main_area(DockSide::Right, source_column);
+    let mut layout = builder.build();
+
+    layout
+        .apply(
+            DockCommand::Float {
+                node: group,
+                bounds: Rect::new(Point::new(40.0, 50.0), Size::new(300.0, 260.0)),
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    let (floating_id, floating) = layout.floating_groups().next().unwrap();
+    let floating_root = layout.dock_area(floating.area).unwrap().root;
+    assert!(matches!(layout.node(floating_root), Some(crate::Node::Column(_))));
+
+    let rects = layout.compute_floating_rects(floating_id, &metrics).unwrap();
+    assert_eq!(
+        layout
+            .hit_test(Point::new(120.0, 16.0), &rects, &metrics)
+            .unwrap(),
+        HitResult::Column {
+            column: floating_root
+        }
+    );
+}
 
 #[test]
 fn floating_column_header_area_is_not_blank_floating_group_space() {
