@@ -22,7 +22,7 @@ impl Layout {
                 key,
                 constraints,
                 bounds,
-            } => self.apply_open_panel_floating_command(key, constraints, bounds),
+            } => self.apply_open_panel_floating_command(key, constraints, bounds, metrics),
             DockCommand::ClosePanel { panel } => self.apply_close_panel_command(panel),
             DockCommand::CloseGroup { group } => self.apply_close_group_command(group),
             DockCommand::ActivateTab { group, panel } => {
@@ -74,6 +74,7 @@ impl Layout {
         key: &PanelKey,
         constraints: &PanelConstraints,
         bounds: &crate::Rect,
+        metrics: &DockMetrics,
     ) -> Result<CommandApplication, CommandError> {
         constraints
             .validate()
@@ -106,15 +107,8 @@ impl Layout {
 
         let panel_node = self.nodes.insert(Node::Panel(crate::Panel::new(panel_id)));
         let next_z = self.next_floating_z_order()?;
-        let root = if self.profile == crate::Profile::Photoshop {
-            self.nodes.insert(Node::Tabs(crate::Tabs {
-                children: vec![panel_node],
-                active_index: 0,
-                collapsed: false,
-            }))
-        } else {
-            panel_node
-        };
+        let root =
+            self.floating_root_for_node(panel_node, bounds.size.width, metrics)?;
         let area_id = self.dock_areas.insert(crate::DockArea::floating(root));
         self.floating_groups.insert(crate::FloatingGroup::new(
             area_id,
