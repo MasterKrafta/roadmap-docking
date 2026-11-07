@@ -12,7 +12,7 @@ use gpui::{
 use crate::{
     DockController, FloatingWindowManager,
     components::context_menu::{ContextMenuTarget, ContextMenuToggle},
-    dock_components::DockAreaDragArea,
+    dock_components::{DockAreaDragArea, DockTab},
     geometry::host_point_from_gpui_window,
 };
 
