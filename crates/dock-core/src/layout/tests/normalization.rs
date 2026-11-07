@@ -1,50 +1,47 @@
 use super::*;
 
 #[test]
-fn normalize_migrates_legacy_floating_column_to_vertical_tabs_stack() {
+fn normalize_preserves_floating_column_composition() {
     let metrics = DockMetrics::default();
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
     let (_, first_panel) = builder.panel(
-        PanelKey::new("legacy-floating-column-a").unwrap(),
+        PanelKey::new("floating-column-a").unwrap(),
         descriptors()[0].1,
     );
     let first_group = builder.tabs(vec![first_panel], 0, false);
     let (_, second_panel) = builder.panel(
-        PanelKey::new("legacy-floating-column-b").unwrap(),
+        PanelKey::new("floating-column-b").unwrap(),
         descriptors()[0].1,
     );
     let second_group = builder.tabs(vec![second_panel], 0, true);
-    let legacy_root = builder.column(
+    let column = builder.column(
         metrics.default_column_width,
         crate::ColumnMode::Expanded,
         vec![first_group, second_group],
         vec![0.3, 0.7],
     );
     let floating = builder.floating_group(
-        legacy_root,
+        column,
         Rect::new(Point::new(50.0, 60.0), Size::new(400.0, 300.0)),
         1,
     );
     let mut layout = builder.build();
 
-    assert!(layout.validate(&metrics).is_err());
+    assert_eq!(layout.validate(&metrics), Ok(()));
     layout.normalize_for_test(&metrics).unwrap();
 
     let area = layout.floating_group(floating).unwrap().area;
-    let migrated_root = layout.dock_area(area).unwrap().root;
+    assert_eq!(layout.dock_area(area).unwrap().root, column);
     assert!(matches!(
-        layout.node(migrated_root),
-        Some(Node::Split(split))
-            if split.axis == Axis::Y
-                && split.children == vec![first_group, second_group]
-                && split.ratios == vec![0.3, 0.7]
+        layout.node(column),
+        Some(Node::Column(value))
+            if value.groups == vec![first_group, second_group]
+                && value.group_ratios == vec![0.3, 0.7]
     ));
-    assert!(layout.node(legacy_root).is_none());
     assert!(matches!(layout.node(first_group), Some(Node::Tabs(_))));
     assert!(matches!(layout.node(second_group), Some(Node::Tabs(_))));
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
-
 #[test]
 fn normalize_migrates_legacy_horizontal_floating_composition_to_vertical_stack() {
     let metrics = DockMetrics::default();
