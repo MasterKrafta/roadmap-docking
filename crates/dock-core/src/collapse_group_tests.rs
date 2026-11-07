@@ -704,10 +704,10 @@ fn adaptive_column_overflow_compacts_all_groups_and_expands_only_the_selected_gr
         "choosing a temporary overflow expansion must not create a persistent revision"
     );
 
-    // 172 px remain below the Column header: two 28 px strips and the
-    // selected Group's 116 px minimum fit exactly.
+    // 144 px remain below the Column header: two 28 px strips and the
+    // selected Group's 88 px minimum fit exactly.
     let expanded_rects = layout
-        .compute_rects(viewport(1000.0, 204.0), &metrics)
+        .compute_rects(viewport(1000.0, 176.0), &metrics)
         .unwrap();
     assert!(expanded_rects.vertical_overflow.is_empty());
     assert_eq!(
@@ -724,7 +724,7 @@ fn adaptive_column_overflow_compacts_all_groups_and_expands_only_the_selected_gr
             .rect
             .size
             .height,
-        116.0
+        88.0
     );
     assert_eq!(
         expanded_rects
@@ -743,7 +743,7 @@ fn adaptive_column_overflow_compacts_all_groups_and_expands_only_the_selected_gr
     // A shorter viewport cannot fit the selected minimum beside the other
     // strips, so the attempted expansion simply remains compact.
     let too_short = layout
-        .compute_rects(viewport(1000.0, 200.0), &metrics)
+        .compute_rects(viewport(1000.0, 175.0), &metrics)
         .unwrap();
     assert!(too_short.vertical_overflow.is_empty());
     assert_eq!(too_short.auto_collapsed_groups, groups);
