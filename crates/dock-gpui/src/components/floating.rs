@@ -479,6 +479,33 @@ fn floating_title_pointer_region(
     Some(point.x < title_right - close_width)
 }
 
+/// Gives the visible Column header input priority over its own tab strip.
+/// Returns Some(false) for fixed header controls, reserving them from tab dragging.
+fn floating_column_title_pointer_region(
+    column_rect: Rect,
+    point: Point,
+    metrics: DockMetrics,
+    reserved_controls_width: f32,
+) -> Option<bool> {
+    let header_height = metrics.column_header_height.min(column_rect.size.height);
+    let right = column_rect.origin.x + column_rect.size.width;
+    let bottom = column_rect.origin.y + header_height;
+    if point.x < column_rect.origin.x
+        || point.x >= right
+        || point.y < column_rect.origin.y
+        || point.y >= bottom
+    {
+        return None;
+    }
+
+    Some(ColumnDragArea::contains(
+        column_rect,
+        point,
+        header_height,
+        reserved_controls_width,
+    ))
+}
+
 fn floating_column_drag_area(snapshot: &FloatingHostSnapshot) -> Option<(Rect, f32)> {
     let column = snapshot.rects.columns.first().copied()?;
     let is_window_header = snapshot.rects.columns.len() == 1
@@ -874,58 +901,67 @@ impl Render for FloatingHost {
                                 .hit_floating_window(input_window_id, group, point)
                                 .ok()
                         });
-                        // A root Tabs group shares its top row with the generic
-                        // Floating title bar. The title bar is painted above the
-                        // tab strip, so give it input priority as well; otherwise
-                        // a second drag at the same cursor position tears the tab
-                        // into yet another Floating window instead of moving this one.
-                        let generic_title_region = if !hide_header && column_drag_area.is_none() {
-                            floating_rect
-                                .zip(floating_metrics)
-                                .and_then(|(rect, metrics)| {
-                                    floating_title_pointer_region(rect, point, metrics)
+                        // Give the visible floating header priority over Core hit-testing:
+                        // in a one-column Floating composition its header overlaps the root
+                        // TabHeaderRect, so Core can otherwise report a tab instead of the
+                        // actual window drag surface.
+                        let floating_title_region = if !hide_header {
+                            if let Some((column_rect, reserved_controls_width)) = column_drag_area {
+                                floating_metrics.and_then(|metrics| {
+                                    floating_column_title_pointer_region(
+                                        column_rect,
+                                        point,
+                                        metrics,
+                                        reserved_controls_width,
+                                    )
                                 })
+                            } else {
+                                floating_rect
+                                    .zip(floating_metrics)
+                                    .and_then(|(rect, metrics)| {
+                                        floating_title_pointer_region(rect, point, metrics)
+                                    })
+                            }
                         } else {
                             None
                         };
+                        if let Some(is_title_grip) = floating_title_region {
+                            if is_title_grip
+                                && let Some(manager) = manager_for_down.upgrade()
+                                && manager.update(app, |manager, manager_cx| {
+                                    manager.begin_existing_window_move(group, point, manager_cx)
+                                })
+                            {
+                                app.stop_propagation();
+                            }
+                            // Also reserve the non-draggable header controls. They must
+                            // never fall through and start a tab tear-off underneath.
+                            return;
+                        }
+
                         let is_floating_title = matches!(
                             hit,
                             Some(dock_core::HitResult::FloatingTitle { group: hit_group })
                                 if hit_group == group
                         );
-                        if is_floating_title || generic_title_region.is_some() {
-                            let is_title_grip = if let Some((column_rect, reserved_controls_width)) =
-                                column_drag_area
-                            {
-                                controller_for_down.update(app, |controller, _| {
-                                    ColumnDragArea::contains(
-                                        column_rect,
-                                        point,
-                                        controller.metrics().column_header_height,
-                                        reserved_controls_width,
-                                    )
-                                })
-                            } else if let Some(is_grip) = generic_title_region {
-                                is_grip
-                            } else {
-                                controller_for_down.update(app, |controller, _| {
-                                    let metrics = controller.metrics();
-                                    let width = controller
-                                        .floating_geometry(input_window_id, group)
-                                        .ok()
-                                        .and_then(|rects| rects.floating_groups.first())
-                                        .map(|floating| floating.rect.size.width);
-                                    let title_height = controller
-                                        .floating_geometry(input_window_id, group)
-                                        .ok()
-                                        .and_then(|rects| rects.floating_groups.first())
-                                        .map(|floating| metrics.header_height.min(floating.rect.size.height))
-                                        .unwrap_or(0.0);
-                                    let close_width =
-                                        metrics.group_control_button_width.min(title_height);
-                                    width.is_some_and(|width| point.x < width - close_width)
-                                })
-                            };
+                        if is_floating_title {
+                            let is_title_grip = controller_for_down.update(app, |controller, _| {
+                                let metrics = controller.metrics();
+                                let width = controller
+                                    .floating_geometry(input_window_id, group)
+                                    .ok()
+                                    .and_then(|rects| rects.floating_groups.first())
+                                    .map(|floating| floating.rect.size.width);
+                                let title_height = controller
+                                    .floating_geometry(input_window_id, group)
+                                    .ok()
+                                    .and_then(|rects| rects.floating_groups.first())
+                                    .map(|floating| metrics.header_height.min(floating.rect.size.height))
+                                    .unwrap_or(0.0);
+                                let close_width =
+                                    metrics.group_control_button_width.min(title_height);
+                                width.is_some_and(|width| point.x < width - close_width)
+                            });
                             if is_title_grip
                                 && let Some(manager) = manager_for_down.upgrade()
                                 && manager.update(app, |manager, manager_cx| {
@@ -1490,6 +1526,41 @@ mod floating_title_hit_tests {
         );
         assert_eq!(
             floating_title_pointer_region(floating, Point::new(5.0, 25.0), metrics),
+            None,
+        );
+    }
+
+    #[test]
+    fn column_header_takes_priority_over_its_overlapping_tab_header() {
+        let column = Rect::new(Point::new(10.0, 20.0), Size::new(240.0, 500.0));
+        let metrics = DockMetrics::default();
+        let reserved_controls_width = 2.0 * metrics.column_control_button_width;
+
+        assert_eq!(
+            super::floating_column_title_pointer_region(
+                column,
+                Point::new(100.0, 30.0),
+                metrics,
+                reserved_controls_width,
+            ),
+            Some(true),
+        );
+        assert_eq!(
+            super::floating_column_title_pointer_region(
+                column,
+                Point::new(240.0, 30.0),
+                metrics,
+                reserved_controls_width,
+            ),
+            Some(false),
+        );
+        assert_eq!(
+            super::floating_column_title_pointer_region(
+                column,
+                Point::new(100.0, 60.0),
+                metrics,
+                reserved_controls_width,
+            ),
             None,
         );
     }
