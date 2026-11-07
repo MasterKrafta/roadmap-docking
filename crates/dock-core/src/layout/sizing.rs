@@ -721,8 +721,8 @@ impl Layout {
 
     /// Computes a floating composition's minimum client size.
     ///
-    /// A Column's minimum already includes its own header. Floating trees that
-    /// contain Columns therefore do not reserve an additional native title row.
+    /// Floating windows have no generic title row. A root Column's minimum
+    /// already includes its own ColumnHeader.
     pub(crate) fn minimum_floating_size(
         &self,
         node_id: NodeId,
