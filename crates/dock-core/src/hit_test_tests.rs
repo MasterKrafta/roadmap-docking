@@ -305,7 +305,7 @@ fn drop_zone_precedence_makes_tab_insertions_and_group_edges_reachable() {
         })
         .expect("the target group should have a top-edge zone");
     let top_point = Point::new(
-        top_zone.rect.origin.x + top_zone.rect.size.width / 2.0,
+        top_zone.rect.origin.x + top_zone.rect.size.width * 0.75,
         top_zone.rect.origin.y + top_zone.rect.size.height / 2.0,
     );
     assert_eq!(
@@ -570,14 +570,14 @@ fn tab_header_uses_half_open_bounds_and_precedes_panel_content() {
 #[test]
 fn vertical_overflow_content_is_not_hit_outside_its_viewport() {
     let metrics = DockMetrics::default();
-    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+    let mut builder = LayoutBuilder::new(Profile::Generic);
     let mut groups = Vec::new();
     for index in 0..3 {
         let (_, panel_node) = builder.panel(key(&format!("offscreen-{index}")), constraints());
         groups.push(builder.tabs(vec![panel_node], 0, index == 0));
     }
-    let column = builder.column(280.0, ColumnMode::Expanded, groups, vec![0.2, 0.3, 0.5]);
-    builder.main_area(DockSide::Left, column);
+    let stack = builder.split(crate::Axis::Y, groups, vec![0.2, 0.3, 0.5]);
+    builder.main_area(DockSide::Left, stack);
     let layout = builder.build();
     let rects = layout
         .compute_rects(viewport(1000.0, 120.0), &metrics)
