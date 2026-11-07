@@ -570,6 +570,7 @@ impl FloatingWindowManager {
 
     /// Starts native movement for a group created by the current main-window drag.
     /// The native host is created on demand only after the drag threshold is crossed.
+    /// Only a DockTab-origin Column drag hides ColumnHeader; ColumnDragArea keeps it.
     pub(crate) fn begin_tearoff_move(
         &mut self,
         group: FloatingGroupId,
