@@ -180,12 +180,13 @@ impl FloatingWindowContent {
                         .top(px(column.rect.origin.y))
                         .w(px(column.rect.size.width))
                         .h(px(column.rect.size.height))
-                        .child(DockColumnView::render_active(
+                        .child(DockColumnView::render_active_with_header(
                             format!("floating-dock-components-{:?}", column.column),
                             title,
                             panel_view,
                             metrics,
                             theme,
+                            !hide_header,
                         )),
                 );
             } else {
@@ -545,6 +546,41 @@ fn floating_column_drag_area(snapshot: &FloatingHostSnapshot) -> Option<(Rect, f
     Some((column.rect, reserved_controls_width))
 }
 
+fn floating_dock_component_group_zones(
+    snapshot: &FloatingHostSnapshot,
+) -> HashMap<NodeId, Rect> {
+    let mut zones = HashMap::new();
+    for column in &snapshot.rects.columns {
+        let group_ids = snapshot
+            .column_groups
+            .get(&column.column)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        let group_rects = snapshot
+            .rects
+            .groups
+            .iter()
+            .filter(|group| group_ids.contains(&group.group))
+            .collect::<Vec<_>>();
+        if group_rects.len() != 1 {
+            continue;
+        }
+        let group = group_rects[0];
+        let Some(presentation) = snapshot.group_presentations.get(&group.group) else {
+            continue;
+        };
+        if presentation.tabs.len() == 1
+            && presentation.active_panel == presentation.tabs.first().map(|tab| tab.panel)
+        {
+            zones.insert(
+                group.group,
+                DockTab::drag_zone(group.rect, snapshot.metrics),
+            );
+        }
+    }
+    zones
+}
+
 fn floating_dock_component_tab_zones(snapshot: &FloatingHostSnapshot) -> HashMap<PanelId, Rect> {
     let mut zones = HashMap::new();
     for column in &snapshot.rects.columns {
@@ -874,10 +910,15 @@ impl Render for FloatingHost {
             .as_ref()
             .map(floating_dock_component_tab_zones)
             .unwrap_or_default();
+        let dock_component_group_zones = snapshot
+            .as_ref()
+            .map(floating_dock_component_group_zones)
+            .unwrap_or_default();
         // Each mouse-event handler owns its map because all three closures are `move`.
         let dock_component_tab_zones_for_down = dock_component_tab_zones.clone();
         let dock_component_tab_zones_for_move = dock_component_tab_zones.clone();
         let dock_component_tab_zones_for_up = dock_component_tab_zones;
+        let dock_component_group_zones_for_down = dock_component_group_zones;
         let column_drag_area = snapshot.as_ref().and_then(floating_column_drag_area);
         let title_input = canvas(
             move |bounds, window, _| Some(window.insert_hitbox(bounds, HitboxBehavior::Normal).id),
@@ -901,6 +942,35 @@ impl Render for FloatingHost {
                                 .hit_floating_window(input_window_id, group, point)
                                 .ok()
                         });
+
+                        // A DockTab inside an already-floating DockColumnView moves
+                        // that same native Column window. It must not run the old
+                        // Panel tear-off path, which would create another Floating.
+                        let dock_component_group = match hit {
+                            Some(dock_core::HitResult::TabHeader { group, .. })
+                            | Some(dock_core::HitResult::TabStrip { group })
+                            | Some(dock_core::HitResult::Group { group }) => Some(group),
+                            _ => None,
+                        };
+                        if let Some(tab_group) = dock_component_group
+                            && dock_component_group_zones_for_down
+                                .get(&tab_group)
+                                .is_some_and(|zone| !DockTab::leaves_strip_zone(*zone, point))
+                        {
+                            if let Some(manager) = manager_for_down.upgrade()
+                                && manager.update(app, |manager, manager_cx| {
+                                    manager.begin_existing_window_move_from_tab(
+                                        group,
+                                        point,
+                                        manager_cx,
+                                    )
+                                })
+                            {
+                                tab_press_for_down.set(None);
+                                app.stop_propagation();
+                            }
+                            return;
+                        }
                         // Give the visible floating header priority over Core hit-testing:
                         // in a one-column Floating composition its header overlaps the root
                         // TabHeaderRect, so Core can otherwise report a tab instead of the
