@@ -276,7 +276,7 @@ impl FloatingWindowManager {
                     return;
                 };
 
-                if let Err(error) = manager.update(app, |manager, _| {
+                manager.update(app, |manager, _| {
                     if !manager.pending_first_frame_show.remove(&group) {
                         return;
                     }
@@ -305,13 +305,7 @@ impl FloatingWindowManager {
                             "could not show floating tear-off after its first GPUI frame"
                         ),
                     }
-                }) {
-                    tracing::warn!(
-                        ?group,
-                        %error,
-                        "could not complete deferred floating-window show"
-                    );
-                }
+                });
             });
         }) {
             Ok(()) => true,
