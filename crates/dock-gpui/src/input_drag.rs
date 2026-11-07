@@ -25,6 +25,10 @@ pub(crate) fn begin_drag_at(
     position: Point,
     app: &mut App,
 ) {
+    eprintln!(
+        "[DOCK-INPUT] begin_drag payload={:?} handle={:?} origin=({:.1}, {:.1})",
+        payload, handle, position.x, position.y
+    );
     if let Err(error) = controller.update(app, |controller, _| {
         controller.begin_drag_interaction(payload, handle, position)
     }) {
@@ -249,6 +253,10 @@ pub(crate) fn begin_floating_tab_tearoff(
     let Some((panel_node, header_rect, preferred_size, origin)) = candidate else {
         return false;
     };
+    eprintln!(
+        "[DOCK-INPUT][floating] tab_tearoff_candidate source_window={:?} source_group={:?} panel={:?} origin=({:.1}, {:.1}) pointer=({:.1}, {:.1})",
+        drag.source_window_id, drag.source_group, drag.panel, origin.x, origin.y, pointer.x, pointer.y
+    );
 
     let Some(local_bounds) =
         desired_floating_bounds(header_rect, preferred_size, origin, pointer)
@@ -293,6 +301,7 @@ pub(crate) fn begin_floating_tab_tearoff(
         }
     });
     let Some(group) = detached else {
+        eprintln!("[DOCK-INPUT][floating] tab_tearoff_result=detach_failed panel={:?}", drag.panel);
         return false;
     };
 
@@ -300,6 +309,7 @@ pub(crate) fn begin_floating_tab_tearoff(
         manager.begin_floating_tab_tearoff_move(group, model_bounds, manager_cx)
     });
     if !started {
+        eprintln!("[DOCK-INPUT][floating] tab_tearoff_result=window_move_start_failed group={:?} panel={:?}", group, drag.panel);
         let _ = controller.update(app, |controller, cx| {
             let result = controller.cancel_pointer_interaction_on_escape();
             controller.flush_events(cx);
@@ -308,6 +318,7 @@ pub(crate) fn begin_floating_tab_tearoff(
         });
         return false;
     }
+    eprintln!("[DOCK-INPUT][floating] tab_tearoff_started group={:?} panel={:?}", group, drag.panel);
     true
 }
 
@@ -439,6 +450,10 @@ pub(crate) fn begin_native_tearoff(
     let Some((command, local_bounds, hide_column_header)) = candidate else {
         return false;
     };
+    eprintln!(
+        "[DOCK-INPUT][main] native_tearoff command={:?} pointer=({:.1}, {:.1}) hide_column_header={} local_bounds={:?}",
+        command, pointer.x, pointer.y, hide_column_header, local_bounds
+    );
     let model_bounds = manager.update(app, |manager, _| {
         manager.screen_bounds_from_main_local(local_bounds)
     });
@@ -478,6 +493,7 @@ pub(crate) fn begin_native_tearoff(
     });
 
     let Some(group) = detached else {
+        eprintln!("[DOCK-INPUT][main] native_tearoff_result=detach_failed");
         return false;
     };
     let started = manager.update(app, |manager, manager_cx| {
@@ -491,6 +507,7 @@ pub(crate) fn begin_native_tearoff(
         )
     });
     if !started {
+        eprintln!("[DOCK-INPUT][main] native_tearoff_result=window_move_start_failed group={:?}", group);
         let _ = controller.update(app, |controller, cx| {
             let result = controller.cancel_pointer_interaction_on_escape();
             controller.flush_events(cx);
@@ -499,6 +516,7 @@ pub(crate) fn begin_native_tearoff(
         });
         return false;
     }
+    eprintln!("[DOCK-INPUT][main] native_tearoff_started group={:?}", group);
     true
 }
 
