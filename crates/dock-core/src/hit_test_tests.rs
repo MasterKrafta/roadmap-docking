@@ -690,7 +690,7 @@ fn collapsed_tab_header_is_hit_without_inventing_a_group_header() {
 #[test]
 fn floating_column_header_area_is_not_blank_floating_group_space() {
     let metrics = DockMetrics::default();
-    let mut builder = LayoutBuilder::new(Profile::Generic);
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
     let (_, panel_node) = builder.panel(key("floating-column-hit-header"), constraints());
     let group = builder.tabs(vec![panel_node], 0, false);
     let column = builder.column(
