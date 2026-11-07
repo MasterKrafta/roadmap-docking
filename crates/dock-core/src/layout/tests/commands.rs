@@ -70,8 +70,13 @@ fn open_panel_floating_creates_a_floating_area_and_close_removes_it() {
     let (floating_id, floating) = layout.floating_groups().next().unwrap();
     assert_eq!(floating.bounds, bounds);
     let root = layout.dock_area(floating.area).unwrap().root;
-    let Node::Tabs(tabs) = layout.node(root).unwrap() else {
-        panic!("Photoshop floating panel must use a Tabs root");
+    let Node::Column(column) = layout.node(root).unwrap() else {
+        panic!("Photoshop floating panel must use a Column root");
+    };
+    assert_eq!(column.groups.len(), 1);
+    assert_eq!(column.width, bounds.size.width.max(metrics.min_column_width));
+    let Node::Tabs(tabs) = layout.node(column.groups[0]).unwrap() else {
+        panic!("Photoshop floating Column must contain a Tabs Group");
     };
     assert_eq!(tabs.active_index, 0);
     assert_eq!(tabs.children.len(), 1);
