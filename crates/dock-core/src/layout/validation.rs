@@ -126,15 +126,24 @@ pub(super) fn validate_photoshop_floating_root(
     errors: &mut Vec<ValidationError>,
 ) {
     match nodes.get(root) {
-        // Tabs and Split(Y) are accepted here only as legacy input. The
-        // Photoshop normalization pass wraps them in a Column before a
-        // command is committed.
-        Some(Node::Tabs(_)) | Some(Node::Split(_)) | Some(Node::Panel(_)) => {}
-        Some(Node::Column(_)) => {}
+        Some(Node::Tabs(_)) | Some(Node::Column(_)) => {}
+        Some(Node::Split(split)) if split.axis == Axis::Y => {
+            if split
+                .children
+                .iter()
+                .any(|child| !matches!(nodes.get(*child), Some(Node::Tabs(_))))
+            {
+                errors.push(ValidationError::InvalidFloatingRoot {
+                    group,
+                    root,
+                    reason: "floating Split(Y) children must all be Tabs nodes",
+                });
+            }
+        }
         Some(_) => errors.push(ValidationError::InvalidFloatingRoot {
             group,
             root,
-            reason: "floating root must be a Column with its own ColumnHeader",
+            reason: "floating root must be Tabs, Column, or Split(Y) of Tabs",
         }),
         None => {}
     }
@@ -771,7 +780,7 @@ impl Layout {
 
         self.normalize_main_areas()?;
 
-        self.normalize_photoshop_floating_roots(metrics)?;
+        self.normalize_photoshop_floating_roots()?;
 
         self.normalize_floating_areas()?;
 
@@ -822,14 +831,13 @@ impl Layout {
         Ok(())
     }
 
-    /// Ensures every Photoshop floating window has a Column root and its own ColumnHeader.
+    /// Migrates legacy Photoshop floating roots that use a horizontal Column composition.
     ///
-    /// Legacy Tabs and Split(Y) roots are wrapped in a Column. Legacy horizontal
-    /// Split(X) compositions are flattened into one Column while preserving their
-    /// Tabs, Panels, and relative group ratios.
+    /// A standalone Column is now a first-class floating root and keeps its NodeId and
+    /// complete component hierarchy. Legacy horizontal Split(X) compositions are still
+    /// flattened into a vertical Split(Y) stack while preserving their Tabs and Panels.
     pub(super) fn normalize_photoshop_floating_roots(
         &mut self,
-        metrics: &DockMetrics,
     ) -> Result<(), Vec<ValidationError>> {
         if self.profile != Profile::Photoshop {
             return Ok(());
@@ -856,44 +864,11 @@ impl Layout {
             };
 
             let (groups, ratios, wrappers) = match root_node {
-                // A Column is already canonical and must retain its identity.
+                Node::Tabs(_) => continue,
+                Node::Split(split) if split.axis == Axis::Y => continue,
+                // Column roots are now the canonical floating representation.
+                // Do not unwrap them: the shared ColumnView owns their header and groups.
                 Node::Column(_) => continue,
-                // Older Photoshop floating windows used a bare Tabs or Panel root.
-                Node::Tabs(_) => (vec![root], vec![1.0], Vec::new()),
-                Node::Panel(_) => {
-                    let group = self.nodes.insert(Node::Tabs(crate::Tabs {
-                        children: vec![root],
-                        active_index: 0,
-                        collapsed: false,
-                    }));
-                    (vec![group], vec![1.0], Vec::new())
-                }
-                // Older vertical floating stacks become a single Column whose Groups
-                // retain the stack ratios.
-                Node::Split(split) if split.axis == Axis::Y => {
-                    if split
-                        .children
-                        .iter()
-                        .any(|child| !matches!(self.nodes.get(*child), Some(Node::Tabs(_))))
-                    {
-                        return Err(vec![ValidationError::InvalidFloatingRoot {
-                            group: group_id,
-                            root,
-                            reason: "legacy floating Split(Y) children must all be Tabs nodes",
-                        }]);
-                    }
-                    let ratios = normalized_ratios(
-                        split
-                            .children
-                            .iter()
-                            .enumerate()
-                            .map(|(index, _)| split.ratios.get(index).copied())
-                            .collect(),
-                    );
-                    (split.children, ratios, vec![root])
-                }
-                // Older horizontal floating compositions are flattened into one
-                // vertical Column while retaining each group's weighted share.
                 Node::Split(split) if split.axis == Axis::X => {
                     let column_ratios = normalized_ratios(
                         split
@@ -955,14 +930,15 @@ impl Layout {
                 continue;
             }
 
-            let width = floating.bounds.size.width.max(metrics.min_column_width);
-            let new_root = self.nodes.insert(Node::Column(crate::Column {
-                width,
-                mode: crate::ColumnMode::Expanded,
-                groups,
-                group_ratios: ratios,
-                last_expanded_width: Some(width),
-            }));
+            let new_root = if groups.len() == 1 {
+                groups[0]
+            } else {
+                self.nodes.insert(Node::Split(Split {
+                    axis: Axis::Y,
+                    children: groups,
+                    ratios,
+                }))
+            };
 
             for wrapper in wrappers {
                 self.nodes.remove(wrapper);
