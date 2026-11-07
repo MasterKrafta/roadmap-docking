@@ -7,8 +7,8 @@
 
 pub mod actions;
 pub mod components;
-/// Visual building blocks for the new main-dock Column presentation.
-#[path = "dock-components/column.rs"]
+/// Visual building blocks for the main-dock group/column composition.
+#[path = "dock-components/group_columns.rs"]
 pub mod dock_components;
 mod app_shell;
 pub mod controller;
