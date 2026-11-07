@@ -704,12 +704,16 @@ impl FloatingWindowManager {
             high_resolution_timer,
             drop_target: None,
         });
-        if !self.show_panel_after_first_frame(panel, group, native_window, cx) {
+        if let Err(error) = self.native_ops.show_no_activate(native_window) {
             self.native_move = None;
             if high_resolution_timer {
                 let _ = self.native_ops.end_high_resolution_timer();
             }
+            tracing::warn!(?group, %error, "could not show floating-tab tear-off window");
             return false;
+        }
+        if let Some(entry) = self.registry.windows.get_mut(&panel) {
+            entry.visibility = PanelWindowVisibility::Visible;
         }
 
         self.schedule_native_move(cx, group, window_id);
