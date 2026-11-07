@@ -179,6 +179,28 @@ fn benchmark_hit_test_multiple_floating_subtrees() {
 
 
 #[test]
+fn floating_root_tab_header_is_not_a_separate_window_title_hit() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+    let (panel, panel_node) = builder.panel(key("floating-root-header"), constraints());
+    let group = builder.tabs(vec![panel_node], 0, false);
+    let bounds = Rect::new(Point::new(100.0, 80.0), Size::new(300.0, 220.0));
+    let floating = builder.floating_group(group, bounds, 1);
+
+    let layout = builder.build();
+    let rects = layout.compute_floating_rects(floating, &metrics).unwrap();
+
+    assert_eq!(
+        layout.hit_test(Point::new(80.0, 10.0), &rects, &metrics).unwrap(),
+        HitResult::TabHeader {
+            group,
+            panel,
+            index: 0,
+        }
+    );
+}
+
+#[test]
 fn floating_window_hit_testing_and_drop_zones_use_its_local_snapshot() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
