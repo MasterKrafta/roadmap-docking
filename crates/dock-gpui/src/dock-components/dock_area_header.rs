@@ -47,12 +47,9 @@ impl DockAreaHeader {
                 theme,
             ));
 
-        let area_right = area_rect.origin.x + area_rect.size.width;
         for (index, column) in columns.iter().enumerate() {
-            let column_right = column.rect.origin.x + column.rect.size.width;
-            let is_area_right_edge = (column_right - area_right).abs() < 0.5;
-            let button_x = column_right - area_rect.origin.x
-                - if is_area_right_edge { 2.0 * button_width } else { button_width };
+            let button_x =
+                DockAreaDragArea::collapse_button_left(area_rect, *column, button_width);
 
             header = header.child(
                 div()
