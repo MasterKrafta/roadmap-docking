@@ -17,6 +17,7 @@ pub enum DockCommand {
     },
     /// Open a panel instance directly in a new floating composition.
     ///
+    /// In the Photoshop profile, the composition has a single-group Column root.
     /// Unlike OpenPanel, this command never resolves a Main Dock destination.
     /// Duplicate behavior follows PanelConstraints::singleton, just like OpenPanel.
     OpenPanelFloating {
