@@ -1,0 +1,65 @@
+#[path = "dock_area_drag_area.rs"]
+mod drag_area;
+#[path = "collapse_column_button.rs"]
+mod collapse_column_button;
+#[path = "close_dock_area_button.rs"]
+mod close_dock_area_button;
+
+use dock_core::{DockMetrics, Rect};
+use gpui::{InteractiveElement, IntoElement, ParentElement, Styled, div, px, rgb};
+use ui::Theme;
+
+pub use collapse_column_button::CollapseColumnButton;
+pub use close_dock_area_button::CloseDockAreaButton;
+pub use drag_area::DockAreaDragArea;
+
+/// Shared header for one complete DockArea composition.
+///
+/// Each Column keeps its own collapse control, while the composition has a
+/// single close control at the far right.
+pub struct DockAreaHeader;
+
+impl DockAreaHeader {
+    pub(crate) fn render(
+        id: String,
+        area_rect: Rect,
+        column_count: usize,
+        metrics: DockMetrics,
+        theme: Theme,
+    ) -> impl IntoElement {
+        let mut header = div()
+            .id(format!("{id}-header"))
+            .absolute()
+            .left(px(area_rect.origin.x))
+            .top(px(area_rect.origin.y))
+            .w(px(area_rect.size.width))
+            .h(px(metrics.column_header_height))
+            .flex()
+            .flex_none()
+            .items_stretch()
+            .overflow_hidden()
+            .bg(rgb(theme.colors.dock_background))
+            .border_1()
+            .border_color(rgb(theme.colors.group_frame_border))
+            .child(DockAreaDragArea::render(
+                format!("{id}-drag-area"),
+                theme,
+            ));
+
+        for index in 0..column_count {
+            header = header.child(CollapseColumnButton::render_with_metrics(
+                format!("{id}-collapse-column-{index}"),
+                theme,
+                metrics.column_control_button_width,
+                metrics.control_icon_size,
+            ));
+        }
+
+        header.child(CloseDockAreaButton::render_with_metrics(
+            format!("{id}-close"),
+            theme,
+            metrics.column_control_button_width,
+            metrics.control_icon_size,
+        ))
+    }
+}
