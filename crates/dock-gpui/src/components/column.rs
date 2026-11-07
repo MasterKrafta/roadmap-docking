@@ -183,7 +183,7 @@ impl ColumnView {
             scroll_viewport = scroll_viewport.child(content);
         }
 
-        let mut root = div()
+        let root = div()
             .id(format!("dock-column-{:?}", column.column))
             .absolute()
             .left(px(column.rect.origin.x - coordinate_origin.x))
