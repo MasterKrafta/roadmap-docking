@@ -794,10 +794,8 @@ impl Render for FloatingHost {
                             }
                             return;
                         }
-                        // Give the visible floating header priority over Core hit-testing:
-                        // in a one-column Floating composition its header overlaps the root
-                        // TabHeaderRect, so Core can otherwise report a tab instead of the
-                        // actual window drag surface.
+                        // The DockAreaHeader has no separate Core hit result. Give its visible
+                        // drag surface priority over any overlapping Group or Tab hit.
                         let floating_title_region = if !hide_header {
                             dock_area_drag_area.as_ref().and_then(
                                 |(area_rect, columns, metrics)| {
@@ -1401,7 +1399,7 @@ mod floating_dock_area_header_hit_tests {
     use slotmap::Key;
 
     #[test]
-    fn column_header_takes_priority_over_its_overlapping_tab_header() {
+    fn dock_area_header_takes_priority_over_its_overlapping_group_header() {
         let column = Rect::new(Point::new(10.0, 20.0), Size::new(240.0, 500.0));
         let metrics = DockMetrics::default();
         let columns = [ColumnRect::new(NodeId::null(), column)];
