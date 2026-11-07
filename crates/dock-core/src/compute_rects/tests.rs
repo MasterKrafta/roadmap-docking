@@ -533,7 +533,7 @@ fn floating_multi_group_column_minimum_allows_compact_group_strips() {
 }
 
 #[test]
-fn floating_vertical_split_minimum_includes_title_for_collapsed_first_branch() {
+fn floating_vertical_split_minimum_has_no_generic_title_row() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
     let (_, collapsed_panel) = builder.panel(key("floating-y-min-collapsed"), constraints());
@@ -547,7 +547,7 @@ fn floating_vertical_split_minimum_includes_title_for_collapsed_first_branch() {
 
     let rects = layout
         .compute_floating_rects(floating, &metrics)
-        .expect("floating vertical split should reserve its title row");
+        .expect("floating vertical split should lay out without a generic title row");
     let actual_bounds = rects.floating_groups[0].rect;
     let group_rect = |group| {
         rects.groups.iter().find(|entry| entry.group == group).unwrap().rect
@@ -562,10 +562,10 @@ fn floating_vertical_split_minimum_includes_title_for_collapsed_first_branch() {
 
     assert_eq!(
         actual_bounds.size.height,
-        required_without_title + metrics.header_height
+        required_without_title
     );
     assert_eq!(actual_bounds.origin, Point::ZERO);
-    assert_eq!(collapsed_rect.origin.y, metrics.header_height);
+    assert_eq!(collapsed_rect.origin.y, 0.0);
     assert_eq!(
         collapsed_rect.size.height,
         metrics.effective_collapsed_group_height()
