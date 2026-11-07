@@ -142,7 +142,7 @@ fn floating_title_released_at_its_original_point_is_a_noop_without_version_chang
     session
         .pointer_down_with_handle(payload, DragHandle::FloatingTitle, Point::new(40.0, 50.0))
         .unwrap();
-    session.pointer_move(Point::new(44.0, 50.0)).unwrap();
+    session.pointer_move(Point::new(48.0, 50.0)).unwrap();
     let request = session
         .pointer_up(Point::new(40.0, 50.0), None)
         .unwrap()
