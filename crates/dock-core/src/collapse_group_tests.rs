@@ -329,7 +329,7 @@ fn reexpand_after_resize_and_reorder_restores_saved_weights_with_current_viewpor
         .unwrap();
 
     let rects = layout
-        .compute_rects(viewport(1200.0, 600.0), &metrics)
+        .compute_rects(viewport(1200.0, 640.0), &metrics)
         .unwrap();
     let height_for = |group| {
         rects
@@ -342,7 +342,7 @@ fn reexpand_after_resize_and_reorder_restores_saved_weights_with_current_viewpor
             .height
     };
     let available_group_height =
-        600.0 - metrics.column_header_height - 2.0 * metrics.splitter_thickness;
+        640.0 - metrics.column_header_height - 2.0 * metrics.splitter_thickness;
     let rendered_total = groups.iter().map(|group| height_for(*group)).sum::<f32>();
     assert!((rendered_total - available_group_height).abs() < 1.0e-3);
 
