@@ -58,9 +58,22 @@ impl DockColumnView {
         metrics: DockMetrics,
         theme: Theme,
     ) -> impl IntoElement {
+        Self::render_active_with_header(id, title, panel_view, metrics, theme, true)
+    }
+
+    /// Floating tear-off uses the same Column renderer but temporarily hides
+    /// the ColumnHeader while the native pointer is held. Its reserved height
+    /// remains in place, so the grabbed tab does not jump under the cursor.
+    pub(crate) fn render_active_with_header(
+        id: String,
+        title: String,
+        panel_view: AnyView,
+        metrics: DockMetrics,
+        theme: Theme,
+        show_column_header: bool,
+    ) -> impl IntoElement {
         let group_id = format!("{id}-group");
         let group_header_height = metrics.header_height.max(metrics.tab_strip_height);
-        let column_header = ColumnHeader::render(id.clone(), metrics, theme);
 
         let mut group_header = div()
             .id(format!("{group_id}-header"))
@@ -103,8 +116,8 @@ impl DockColumnView {
                 ));
         }
 
-        let column = div()
-            .id(id)
+        let mut column = div()
+            .id(id.clone())
             .w_full()
             .h_full()
             .flex()
@@ -112,8 +125,20 @@ impl DockColumnView {
             .overflow_hidden()
             .bg(rgb(theme.colors.dock_background))
             .border_1()
-            .border_color(rgb(theme.colors.group_frame_border))
-            .child(column_header);
+            .border_color(rgb(theme.colors.group_frame_border));
+
+        column = if show_column_header {
+            column.child(ColumnHeader::render(id.clone(), metrics, theme))
+        } else {
+            // Keep the header's layout slot stable while its controls are hidden.
+            column.child(
+                div()
+                    .id(format!("{id}-header"))
+                    .w_full()
+                    .h(px(metrics.column_header_height))
+                    .flex_none(),
+            )
+        };
 
         column.child(
                 div()
