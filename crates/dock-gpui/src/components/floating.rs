@@ -708,14 +708,13 @@ impl Render for FloatingHost {
             .overflow_hidden()
             .bg(rgb(self.theme.colors.panel_surface_background));
 
-        // Existing floating Columns can be moved from ColumnHeader or DockTab.
+        // The shared DockAreaHeader moves the complete floating composition; DockTab remains a tab drag source.
         // Legacy TabHeaderView instances keep their individual-panel tear-off path.
         let manager = self.manager.clone();
         let controller = self.controller.clone();
         let tab_press = self.tab_press.clone();
         let input_window_id = window_id;
         let floating_rect = snapshot.as_ref().map(|snapshot| snapshot.floating.rect);
-        let floating_metrics = snapshot.as_ref().map(|snapshot| snapshot.metrics);
         let dock_component_tab_zones = snapshot
             .as_ref()
             .map(floating_dock_component_tab_zones)
@@ -1399,6 +1398,7 @@ impl Render for FloatingHost {
 #[cfg(test)]
 mod floating_dock_area_header_hit_tests {
     use dock_core::{ColumnRect, DockMetrics, NodeId, Point, Rect, Size};
+    use slotmap::Key;
 
     #[test]
     fn column_header_takes_priority_over_its_overlapping_tab_header() {
