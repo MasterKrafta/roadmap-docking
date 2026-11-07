@@ -36,10 +36,6 @@ pub(super) fn layout_floating_root(
     minimum_sizes: &mut HashMap<NodeId, Size>,
     output: &mut LayoutRects,
 ) -> Result<(), ComputeRectsError> {
-    if matches!(layout.node(id), Some(Node::Column(_))) {
-        return layout_node(layout, id, rect, metrics, minimum_sizes, output);
-    }
-
     let title_height = metrics.header_height.min(rect.size.height);
     if layout.floating_tree_contains_column(id) && rect.size.height > title_height {
         let content_rect = Rect::new(
