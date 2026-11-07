@@ -269,6 +269,7 @@ impl Render for DockHost {
             rects,
             main_node_ids,
             main_column_ids,
+            main_column_sides,
             main_column_groups,
             column_modes,
             group_presentations,
@@ -287,17 +288,28 @@ impl Render for DockHost {
             let chrome = layout.chrome();
             let mut main_node_ids = HashSet::new();
             let mut main_column_ids = HashSet::new();
+            let mut main_column_sides = HashMap::new();
             let mut main_column_groups = HashMap::new();
 
             for side in [DockSide::Left, DockSide::Right] {
                 if let Some(area) = layout.main_area(side) {
+                    let mut area_node_ids = HashSet::new();
+                    let mut area_column_ids = HashSet::new();
+                    let mut area_column_groups = HashMap::new();
                     collect_subtree_nodes(
                         layout,
                         area.root,
-                        &mut main_node_ids,
-                        &mut main_column_ids,
-                        &mut main_column_groups,
+                        &mut area_node_ids,
+                        &mut area_column_ids,
+                        &mut area_column_groups,
                     );
+
+                    main_node_ids.extend(area_node_ids);
+                    for column in &area_column_ids {
+                        main_column_sides.insert(*column, side);
+                    }
+                    main_column_ids.extend(area_column_ids);
+                    main_column_groups.extend(area_column_groups);
                 }
             }
 
@@ -348,6 +360,7 @@ impl Render for DockHost {
                 rects,
                 main_node_ids,
                 main_column_ids,
+                main_column_sides,
                 main_column_groups,
                 column_modes,
                 group_presentations,
@@ -759,6 +772,7 @@ impl Render for DockHost {
                 &rects.splitters,
                 &rects.vertical_overflow,
                 &main_node_ids,
+                &main_column_sides,
                 &main_column_groups,
                 &column_modes,
                 &self.column_scroll_handles,
