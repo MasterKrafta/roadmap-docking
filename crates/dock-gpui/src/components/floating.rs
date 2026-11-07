@@ -297,14 +297,20 @@ impl FloatingWindowContent {
                 }
 
                 // A standalone Panel has no Tabs header to reserve the title
-                // band. Keep its content below the floating title bar.
-                let title_bottom = origin.y + metrics.header_height.min(floating.rect.size.height);
-                if panel.rect.origin.y < title_bottom {
-                    let clipped = (title_bottom - panel.rect.origin.y).min(panel.rect.size.height);
-                    panel.rect.origin.y += clipped;
-                    panel.rect.size.height -= clipped;
-                    if panel.rect.size.height <= 0.0 {
-                        return None;
+                // band. Keep its content below the floating title bar only while
+                // that bar is visible. During tear-off the hidden header must not
+                // leave an empty strip at the top of the floating window.
+                if !hide_header {
+                    let title_bottom =
+                        origin.y + metrics.header_height.min(floating.rect.size.height);
+                    if panel.rect.origin.y < title_bottom {
+                        let clipped =
+                            (title_bottom - panel.rect.origin.y).min(panel.rect.size.height);
+                        panel.rect.origin.y += clipped;
+                        panel.rect.size.height -= clipped;
+                        if panel.rect.size.height <= 0.0 {
+                            return None;
+                        }
                     }
                 }
 
