@@ -727,14 +727,14 @@ impl FloatingWindowManager {
         self.begin_existing_window_move_with_header(group, pointer, false, cx)
     }
 
-    /// Starts the same native move from DockTab, temporarily hiding ColumnHeader.
+    /// Starts a native move from DockTab while keeping ColumnHeader visible.
     pub(crate) fn begin_existing_window_move_from_tab(
         &mut self,
         group: FloatingGroupId,
         pointer: Point,
         cx: &mut Context<Self>,
     ) -> bool {
-        self.begin_existing_window_move_with_header(group, pointer, true, cx)
+        self.begin_existing_window_move_with_header(group, pointer, false, cx)
     }
 
     fn begin_existing_window_move_with_header(
