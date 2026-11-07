@@ -719,12 +719,10 @@ impl Layout {
         Ok(size)
     }
 
-    /// Computes a floating window's minimum size, including its native title row.
+    /// Computes a floating composition's minimum client size.
     ///
-    /// Columns have their own independent header row, so any floating tree that
-    /// contains a Column also reserves the native window title above the complete
-    /// composition. Trees without Columns retain the established collapsed-branch
-    /// title reservation behavior.
+    /// A Column's minimum already includes its own header. Floating trees that
+    /// contain Columns therefore do not reserve an additional native title row.
     pub(crate) fn minimum_floating_size(
         &self,
         node_id: NodeId,
@@ -753,21 +751,19 @@ impl Layout {
                 minimum
             }
             Some(Node::Column(_)) => {
-                let base = self.minimum_node_size_with_cache(node_id, metrics, cache)?;
-                Size::new(base.width, base.height + metrics.header_height)
+                self.minimum_node_size_with_cache(node_id, metrics, cache)?
             }
             Some(Node::Split(split))
                 if split.axis == Axis::Y
-                    && (self.floating_tree_contains_column(node_id)
-                        || self.floating_branch_starts_collapsed(node_id)) =>
+                    && !self.floating_tree_contains_column(node_id)
+                    && self.floating_branch_starts_collapsed(node_id) =>
             {
                 let base = self.minimum_node_size_with_cache(node_id, metrics, cache)?;
                 Size::new(base.width, base.height + metrics.header_height)
             }
             Some(Node::Split(split)) if split.axis == Axis::X => {
                 if self.floating_tree_contains_column(node_id) {
-                    let base = self.minimum_node_size_with_cache(node_id, metrics, cache)?;
-                    Size::new(base.width, base.height + metrics.header_height)
+                    self.minimum_node_size_with_cache(node_id, metrics, cache)?
                 } else {
                     let mut width = 0.0_f32;
                     let mut height = 0.0_f32;
@@ -808,9 +804,8 @@ impl Layout {
 
     /// Whether the floating composition contains a Column anywhere in its tree.
     ///
-    /// A floating Column has its own header row, independent from the native
-    /// floating-window title. The complete composition therefore needs one
-    /// additional title row above its Core geometry.
+    /// Its own ColumnHeader is the composition's top chrome; no second title row
+    /// is reserved above the Core geometry.
     pub(crate) fn floating_tree_contains_column(&self, node_id: NodeId) -> bool {
         match self.nodes.get(node_id) {
             Some(Node::Column(_)) => true,

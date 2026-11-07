@@ -23,10 +23,10 @@ pub(super) fn layout_split(
     )
 }
 
-/// Lays out a floating composition below its native window title row.
+/// Lays out a floating composition in its local client area.
 ///
-/// A Column keeps its own header inside the floating client area, independent
-/// from the title row shared by the native floating window.
+/// A Column's own header is part of the composition. Trees that contain a
+/// Column therefore start at the top edge without reserving a second title row.
 pub(super) fn layout_floating_root(
     layout: &Layout,
     id: NodeId,
@@ -35,15 +35,11 @@ pub(super) fn layout_floating_root(
     minimum_sizes: &mut HashMap<NodeId, Size>,
     output: &mut LayoutRects,
 ) -> Result<(), ComputeRectsError> {
-    let title_height = metrics.header_height.min(rect.size.height);
-    if layout.floating_tree_contains_column(id) && rect.size.height > title_height {
-        let content_rect = Rect::new(
-            Point::new(rect.origin.x, rect.origin.y + title_height),
-            Size::new(rect.size.width, rect.size.height - title_height),
-        );
-        return layout_node(layout, id, content_rect, metrics, minimum_sizes, output);
+    if layout.floating_tree_contains_column(id) {
+        return layout_node(layout, id, rect, metrics, minimum_sizes, output);
     }
 
+    let title_height = metrics.header_height.min(rect.size.height);
     match layout.node(id) {
         Some(Node::Split(split))
             if split.axis == Axis::Y

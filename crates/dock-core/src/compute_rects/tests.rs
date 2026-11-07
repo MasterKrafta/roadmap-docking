@@ -333,7 +333,7 @@ fn floating_geometry_preserves_bounds_and_z_order() {
 }
 
 #[test]
-fn floating_single_group_column_keeps_its_header_below_window_title() {
+fn floating_single_group_column_starts_at_its_own_header() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Generic);
     let (_, panel_node) = builder.panel(key("floating-single-column"), constraints());
@@ -352,9 +352,10 @@ fn floating_single_group_column_keeps_its_header_below_window_title() {
         .rect;
 
     assert_eq!(rects.floating_groups[0].rect, Rect::new(Point::ZERO, bounds.size));
+    assert_eq!(rects.columns[0].rect.origin, Point::ZERO);
     assert_eq!(
         group_rect.origin,
-        Point::new(0.0, metrics.header_height + metrics.column_header_height)
+        Point::new(0.0, metrics.column_header_height)
     );
     assert_eq!(
         group_rect.size.height,
@@ -363,7 +364,7 @@ fn floating_single_group_column_keeps_its_header_below_window_title() {
 }
 
 #[test]
-fn floating_column_reserves_window_title_before_allocating_a_collapsed_first_group() {
+fn floating_column_uses_its_own_header_before_allocating_a_collapsed_first_group() {
     let metrics = DockMetrics {
         header_height: 32.0,
         tab_strip_height: 24.0,
@@ -393,7 +394,7 @@ fn floating_column_reserves_window_title_before_allocating_a_collapsed_first_gro
     assert_eq!(rects.floating_groups[0].rect, Rect::new(Point::ZERO, bounds.size));
     assert_eq!(
         first.origin.y,
-        metrics.header_height + metrics.column_header_height
+        metrics.column_header_height
     );
     assert_eq!(first.size.height, metrics.effective_collapsed_group_height());
     assert!(
@@ -408,7 +409,7 @@ fn floating_column_reserves_window_title_before_allocating_a_collapsed_first_gro
 }
 
 #[test]
-fn floating_horizontal_column_split_places_columns_below_one_shared_title() {
+fn floating_horizontal_column_split_places_each_column_from_the_window_top() {
     let metrics = DockMetrics {
         header_height: 32.0,
         tab_strip_height: 24.0,
@@ -437,15 +438,15 @@ fn floating_horizontal_column_split_places_columns_below_one_shared_title() {
     assert_eq!(rects.floating_groups[0].rect, Rect::new(Point::ZERO, bounds.size));
     assert_eq!(
         collapsed.origin.y,
-        metrics.header_height + metrics.column_header_height
+        metrics.column_header_height
     );
     assert_eq!(
         collapsed_strip.origin.y,
-        metrics.header_height + metrics.column_header_height
+        metrics.column_header_height
     );
     assert_eq!(
         expanded.origin.y,
-        metrics.header_height + metrics.column_header_height
+        metrics.column_header_height
     );
     assert_eq!(expanded_strip.origin, expanded.origin);
     assert_eq!(
@@ -460,7 +461,7 @@ fn floating_horizontal_column_split_places_columns_below_one_shared_title() {
 }
 
 #[test]
-fn floating_horizontal_column_split_minimum_includes_window_and_column_headers() {
+fn floating_horizontal_column_split_minimum_includes_column_headers_only() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Generic);
     let mut columns = Vec::new();
@@ -485,16 +486,14 @@ fn floating_horizontal_column_split_minimum_includes_window_and_column_headers()
     assert_eq!(floating_rect.origin, Point::ZERO);
     assert_eq!(
         floating_rect.size.height,
-        metrics.header_height
-            + metrics.column_header_height
-            + metrics.effective_collapsed_group_height()
+        metrics.column_header_height + metrics.effective_collapsed_group_height()
     );
     assert_eq!(layout.floating_group(floating).unwrap().bounds, requested_bounds);
     for group in groups {
         let group_rect = rects.groups.iter().find(|entry| entry.group == group).unwrap().rect;
         assert_eq!(
             group_rect.origin.y,
-            metrics.header_height + metrics.column_header_height
+            metrics.column_header_height
         );
         assert_eq!(group_rect.size.height, metrics.effective_collapsed_group_height());
     }
@@ -525,7 +524,7 @@ fn floating_multi_group_column_minimum_allows_compact_group_strips() {
     let required_group_height = metrics.effective_collapsed_group_height() * 2.0;
     assert_eq!(
         actual_bounds.size.height,
-        required_group_height + metrics.header_height + metrics.column_header_height
+        required_group_height + metrics.column_header_height
     );
     assert_eq!(actual_bounds.origin, Point::ZERO);
     assert_eq!(rects.auto_collapsed_groups, vec![collapsed_group, expanded_group]);
