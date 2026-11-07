@@ -8,13 +8,13 @@ use dock_core::{
     ColumnDisplayItem, ColumnMode, ColumnRect, ComputeRectsError, DockCommand, DockMetrics,
     DragHandle,
     DragPreview, DropZoneRect, FloatingGroupId, FloatingGroupRect, FlyoutState, GroupRect,
-    Layout, LayoutRects, Node, NodeId, PanelId, PanelRect, Point, Rect, SplitterRect, TabHeaderRect,
+    LayoutRects, Node, NodeId, PanelId, PanelRect, Point, Rect, SplitterRect, TabHeaderRect,
     TabOverflowRect, TabStripRect, VerticalOverflow,
 };
 use gpui::{
     AnyView, Context, DispatchPhase, Entity, HitboxBehavior, IntoElement, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Render, ScrollHandle,
-    FocusHandle, StatefulInteractiveElement, Styled, WeakEntity, Window, WindowId, canvas, div,
+    FocusHandle, Styled, WeakEntity, Window, WindowId, canvas, div,
     prelude::InteractiveElement as _, px, rgb,
 };
 use ui::Theme;

@@ -106,7 +106,7 @@ fn layout_split_inner(
 
             let mut x = rect.origin.x;
             for (index, child) in split.children.iter().enumerate() {
-                let mut child_rect = Rect::new(
+                let child_rect = Rect::new(
                     Point::new(x, rect.origin.y),
                     Size::new(widths[index], rect.size.height),
                 );

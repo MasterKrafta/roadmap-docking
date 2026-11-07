@@ -47,19 +47,8 @@ impl DockColumnView {
         show_column_header: bool,
     ) -> impl IntoElement {
         let group_id = format!("{id}-group");
-        let header = if show_column_header {
-            ColumnHeader::render(id.clone(), metrics, theme).into_element()
-        } else {
-            div()
-                .id(format!("{id}-header-placeholder"))
-                .w_full()
-                .h(gpui::px(metrics.column_header_height))
-                .flex_none()
-                .into_element()
-        };
-
-        div()
-            .id(id)
+        let mut column = div()
+            .id(id.clone())
             .w_full()
             .h_full()
             .flex()
@@ -67,11 +56,23 @@ impl DockColumnView {
             .overflow_hidden()
             .bg(rgb(theme.colors.dock_background))
             .border_1()
-            .border_color(rgb(theme.colors.group_frame_border))
-            .child(header)
-            .child(DockGroupView::render_active(
-                group_id, title, panel_view, metrics, theme,
-            ))
+            .border_color(rgb(theme.colors.group_frame_border));
+
+        if show_column_header {
+            column = column.child(ColumnHeader::render(id.clone(), metrics, theme));
+        } else {
+            column = column.child(
+                div()
+                    .id(format!("{id}-header-placeholder"))
+                    .w_full()
+                    .h(gpui::px(metrics.column_header_height))
+                    .flex_none(),
+            );
+        }
+
+        column.child(DockGroupView::render_active(
+            group_id, title, panel_view, metrics, theme,
+        ))
     }
 
     fn render_groups(
