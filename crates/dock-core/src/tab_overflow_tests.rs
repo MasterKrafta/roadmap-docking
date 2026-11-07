@@ -53,17 +53,17 @@ fn viewport() -> Rect {
 #[test]
 fn tab_headers_compress_before_hidden_tabs_move_to_overflow_menu() {
     let metrics = DockMetrics::default();
-    let (layout, group, panels) = two_or_more_tabs_layout(200.0, 4);
+    let (layout, group, panels) = two_or_more_tabs_layout(228.0, 4);
     let rects = layout.compute_rects(viewport(), &metrics).unwrap();
 
     assert_eq!(rects.tab_headers.len(), 2);
     assert_eq!(rects.tab_headers[0].group, group);
     assert_eq!(rects.tab_headers[0].panel, panels[0]);
     assert_eq!(rects.tab_headers[0].index, 0);
-    assert_eq!(rects.tab_headers[0].rect.size.width, 86.0);
+    assert_eq!(rects.tab_headers[0].rect.size.width, 72.0);
     assert_eq!(rects.tab_headers[1].panel, panels[1]);
     assert_eq!(rects.tab_headers[1].index, 1);
-    assert_eq!(rects.tab_headers[1].rect.size.width, 86.0);
+    assert_eq!(rects.tab_headers[1].rect.size.width, 72.0);
 
     assert_eq!(rects.tab_overflows.len(), 1);
     let overflow = &rects.tab_overflows[0];
@@ -71,7 +71,7 @@ fn tab_headers_compress_before_hidden_tabs_move_to_overflow_menu() {
     assert_eq!(
         overflow.button_rect,
         Rect::new(
-            Point::new(185.0, 45.0),
+            Point::new(157.0, 49.0),
             Size::new(metrics.tab_overflow_button_width, metrics.tab_strip_height),
         ),
     );
@@ -109,7 +109,7 @@ fn active_tab_is_not_hidden_when_its_index_exceeds_visible_overflow_window() {
 }
 
 #[test]
-fn all_tabs_remain_visible_and_share_width_when_minimums_fit() {
+fn all_tabs_remain_visible_at_their_compact_minimum_width_when_minimums_fit() {
     let metrics = DockMetrics::default();
     let (layout, group, panels) = two_or_more_tabs_layout(200.0, 2);
     let rects = layout.compute_rects(viewport(), &metrics).unwrap();
@@ -123,7 +123,7 @@ fn all_tabs_remain_visible_and_share_width_when_minimums_fit() {
         rects
             .tab_headers
             .iter()
-            .all(|header| header.rect.size.width == 100.0)
+            .all(|header| header.rect.size.width == metrics.min_tab_width)
     );
 }
 
