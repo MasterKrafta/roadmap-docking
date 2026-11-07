@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use dock_core::{
-    Axis, ColumnDisplayItem, ColumnMode, ColumnRect, DockMetrics, DragPreview, DropZoneRect,
-    FlyoutState, GroupRect, NodeId, PanelRect, Point, SplitterRect, TabHeaderRect, TabOverflowRect,
+    Axis, ColumnDisplayItem, ColumnMode, ColumnRect, DockMetrics, DockSide, DragPreview, DropZoneRect,
+    FlyoutState, GroupRect, NodeId, PanelRect, Point, Rect, Size, SplitterRect, TabHeaderRect, TabOverflowRect,
     TabStripRect, VerticalOverflow,
 };
 use gpui::{
@@ -42,13 +42,14 @@ impl MainDockView {
         splitters: &[SplitterRect],
         vertical_overflow: &[VerticalOverflow],
         main_node_ids: &HashSet<NodeId>,
+        main_column_sides: &HashMap<NodeId, DockSide>,
         main_column_groups: &HashMap<NodeId, Vec<NodeId>>,
         column_modes: &HashMap<NodeId, ColumnMode>,
         scroll_handles: &HashMap<NodeId, ScrollHandle>,
         controller: Entity<DockController>,
         theme: Theme,
     ) -> impl IntoElement {
-        let mut layer = crate::dock_components::GroupColumnsView::render_root();
+        let mut layer = crate::dock_components::DockAreaView::render_root();
 
         for column in columns {
             let mode = column_modes
@@ -117,7 +118,7 @@ impl MainDockView {
                         .top(px(column.rect.origin.y))
                         .w(px(column.rect.size.width))
                         .h(px(column.rect.size.height))
-                        .child(crate::dock_components::GroupColumnsView::render_active_column(
+                        .child(crate::dock_components::DockColumnView::render_active(
                             format!("dock-components-{:?}", column.column),
                             title,
                             panel_view,
@@ -175,6 +176,49 @@ impl MainDockView {
             ));
         }
 
+        // Each Core DockArea (Left and Right) owns one shared header.
+        // Column group geometry already starts below this reserved header band.
+        for side in [DockSide::Left, DockSide::Right] {
+            let area_columns = columns
+                .iter()
+                .filter(|column| main_column_sides.get(&column.column) == Some(&side))
+                .copied()
+                .collect::<Vec<_>>();
+            if let Some(area_rect) = dock_area_bounds(&area_columns) {
+                let side_name = match side {
+                    DockSide::Left => "left",
+                    DockSide::Right => "right",
+                };
+                layer = layer.child(crate::dock_components::DockAreaView::render_header(
+                    format!("main-dock-area-{side_name}"),
+                    area_rect,
+                    &area_columns,
+                    metrics,
+                    theme,
+                ));
+            }
+        }
+
         layer
     }
+}
+
+fn dock_area_bounds(columns: &[ColumnRect]) -> Option<Rect> {
+    let first = columns.first()?.rect;
+    let mut left = first.origin.x;
+    let mut top = first.origin.y;
+    let mut right = first.origin.x + first.size.width;
+    let mut bottom = first.origin.y + first.size.height;
+
+    for column in columns.iter().skip(1) {
+        left = left.min(column.rect.origin.x);
+        top = top.min(column.rect.origin.y);
+        right = right.max(column.rect.origin.x + column.rect.size.width);
+        bottom = bottom.max(column.rect.origin.y + column.rect.size.height);
+    }
+
+    Some(Rect::new(
+        Point::new(left, top),
+        Size::new(right - left, bottom - top),
+    ))
 }
