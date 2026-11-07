@@ -102,7 +102,14 @@ pub(super) fn layout_column(
         return Ok(());
     }
 
-    let content_top = rect.origin.y + metrics.column_header_height;
+    // Icon rails have no Column header: their flattened panel entries
+    // start at the top edge of the rail. Expanded Columns reserve the header.
+    let reserved_header_height = if column.mode.is_rail() {
+        0.0
+    } else {
+        metrics.column_header_height
+    };
+    let content_top = rect.origin.y + reserved_header_height;
     if !content_top.is_finite() {
         return Err(ComputeRectsError::Geometry(
             GeometryError::ArithmeticOverflow,
@@ -112,7 +119,7 @@ pub(super) fn layout_column(
         Point::new(rect.origin.x, content_top),
         Size::new(
             rect.size.width,
-            (rect.size.height - metrics.column_header_height).max(0.0),
+            (rect.size.height - reserved_header_height).max(0.0),
         ),
     );
     // A viewport shorter than the fixed Column header has no usable Group area.
@@ -342,7 +349,7 @@ pub(super) fn layout_tabs(
         .group_control_button_width
         .min(group_rect.size.width / 3.0)
         .max(1.0);
-    let strip_width = if column_group {
+    let strip_width = if column_group && !collapsed {
         (group_rect.size.width - 2.0 * control_width).max(0.0)
     } else {
         group_rect.size.width
