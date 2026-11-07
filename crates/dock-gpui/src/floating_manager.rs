@@ -765,11 +765,6 @@ impl FloatingWindowManager {
             return false;
         };
         let metrics = self.controller.update(cx, |controller, _| controller.metrics());
-        if !self.controller.update(cx, |controller, _| {
-            controller.begin_floating_window_move(group, pointer)
-        }) {
-            return false;
-        }
         let scale = self.native_ops.scale_factor(native_window).ok()
             .filter(|scale| scale.is_finite() && *scale > 0.0)
             .unwrap_or(1.0);
@@ -785,6 +780,11 @@ impl FloatingWindowManager {
                 .saturating_sub(native_rect.top)
                 .saturating_sub(hidden_header_offset),
         };
+        if !self.controller.update(cx, |controller, _| {
+            controller.begin_floating_window_move(group, pointer)
+        }) {
+            return false;
+        }
         if hide_header {
             let position = PhysicalPoint {
                 x: cursor.x.saturating_sub(grab_offset.x),
@@ -792,6 +792,7 @@ impl FloatingWindowManager {
             };
             if let Err(error) = self.native_ops.move_window(native_window, position) {
                 tracing::warn!(?group, %error, "could not align floating window after hiding ColumnHeader");
+                self.cancel_controller_move(cx);
                 return false;
             }
         }
