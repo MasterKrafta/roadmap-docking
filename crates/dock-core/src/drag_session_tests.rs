@@ -222,12 +222,12 @@ fn preview_exposes_point_and_optional_target_without_mutating_layout() {
     let mut session = session();
 
     session.pointer_down(payload, Point::ZERO).unwrap();
-    session.pointer_move(Point::new(4.0, 1.0)).unwrap();
+    session.pointer_move(Point::new(8.0, 1.0)).unwrap();
     assert_eq!(
         session.preview(),
         Some(DragPreview {
             payload,
-            point: Point::new(4.0, 1.0),
+            point: Point::new(8.0, 1.0),
             target: None,
         })
     );
@@ -238,7 +238,7 @@ fn preview_exposes_point_and_optional_target_without_mutating_layout() {
         session.preview(),
         Some(DragPreview {
             payload,
-            point: Point::new(4.0, 1.0),
+            point: Point::new(8.0, 1.0),
             target: Some(target),
         })
     );
@@ -253,7 +253,7 @@ fn valid_release_emits_exactly_one_request() {
     let target = target_for_layout(&layout);
     let mut session = session();
     session.pointer_down(payload, Point::ZERO).unwrap();
-    session.pointer_move(Point::new(4.0, 0.0)).unwrap();
+    session.pointer_move(Point::new(8.0, 0.0)).unwrap();
     session.set_drop_target(Some(target)).unwrap();
 
     let request = session
@@ -296,7 +296,7 @@ fn cancel_and_release_without_target_emit_no_request_and_preserve_layout() {
     let mut session = session();
 
     session.pointer_down(payload, Point::ZERO).unwrap();
-    session.pointer_move(Point::new(4.0, 0.0)).unwrap();
+    session.pointer_move(Point::new(8.0, 0.0)).unwrap();
     assert_eq!(
         session.pointer_up(Point::new(5.0, 0.0), None).unwrap(),
         None
@@ -314,14 +314,14 @@ fn cancel_and_release_without_target_emit_no_request_and_preserve_layout() {
 
     session.reset().unwrap();
     session.pointer_down(payload, Point::ZERO).unwrap();
-    session.pointer_move(Point::new(4.0, 0.0)).unwrap();
+    session.pointer_move(Point::new(8.0, 0.0)).unwrap();
     session.escape().unwrap();
     assert_eq!(
         session.state(),
         DragState::Cancelled {
             payload,
             origin: Point::ZERO,
-            position: Point::new(4.0, 0.0),
+            position: Point::new(8.0, 0.0),
             reason: DragCancelReason::Escape,
         }
     );
@@ -333,7 +333,7 @@ fn focus_loss_cancels_without_a_drop_request() {
     let payload = panel_payload();
     let mut session = session();
     session.pointer_down(payload, Point::ZERO).unwrap();
-    session.pointer_move(Point::new(4.0, 0.0)).unwrap();
+    session.pointer_move(Point::new(8.0, 0.0)).unwrap();
 
     session.focus_lost().unwrap();
     assert!(matches!(
@@ -356,10 +356,10 @@ fn release_position_can_cross_threshold_without_an_intermediate_move_event() {
 
     session.pointer_down(payload, Point::ZERO).unwrap();
     let request = session
-        .pointer_up(Point::new(0.0, 4.0), Some(DropTarget::FreeArea))
+        .pointer_up(Point::new(0.0, 8.0), Some(DropTarget::FreeArea))
         .unwrap()
         .expect("release point crosses threshold");
-    assert_eq!(request.point, Point::new(0.0, 4.0));
+    assert_eq!(request.point, Point::new(0.0, 8.0));
     assert_eq!(request.target, Some(DropTarget::FreeArea));
 }
 
@@ -402,7 +402,7 @@ fn cancellation_works_before_and_after_drag_and_reset_reuses_session() {
     assert_eq!(session.state(), DragState::Idle);
 
     session.pointer_down(payload, Point::ZERO).unwrap();
-    session.pointer_move(Point::new(4.0, 0.0)).unwrap();
+    session.pointer_move(Point::new(8.0, 0.0)).unwrap();
     session.cancel().unwrap();
     assert!(matches!(session.state(), DragState::Cancelled { .. }));
 
@@ -420,9 +420,9 @@ fn moving_clears_a_stale_target_and_target_cannot_be_set_before_drag() {
     );
 
     session.pointer_down(payload, Point::ZERO).unwrap();
-    session.pointer_move(Point::new(4.0, 0.0)).unwrap();
+    session.pointer_move(Point::new(8.0, 0.0)).unwrap();
     session.set_drop_target(Some(DropTarget::FreeArea)).unwrap();
-    session.pointer_move(Point::new(4.5, 0.0)).unwrap();
+    session.pointer_move(Point::new(8.5, 0.0)).unwrap();
     assert_eq!(session.preview().unwrap().target, None);
 }
 
