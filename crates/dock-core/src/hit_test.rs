@@ -138,11 +138,9 @@ impl Layout {
     /// produced for this same Layout.
     ///
     /// Floating windows form front-to-back layers ordered by descending
-    /// z_order. Their subtree is hit-tested before blank space is assigned to
-    /// the floating window; then splitters, group headers, tab headers,
-    /// drop zones and panel content
-    /// are tested. Blank space inside the topmost floating window belongs to
-    /// that window and does not leak hits to the content beneath it.
+    /// z_order. A point inside a floating window is first tested against that
+    /// window's subtree; otherwise-blank space belongs to the floating window
+    /// and does not leak hits to the content beneath it.
     ///
     /// Rectangles use half-open bounds. Invalid coordinates or malformed hit
     /// rectangles are reported instead of allowing NaN/Infinity to affect hit
