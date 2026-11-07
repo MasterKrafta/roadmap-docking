@@ -641,11 +641,14 @@ impl Layout {
                     width = width.max(child_size.width);
                     content_height = content_height.max(child_size.height);
                 }
+                let chrome_height = if self.find_owner_column(node_id).is_some() {
+                    metrics.header_height.max(metrics.tab_strip_height)
+                } else {
+                    metrics.header_height + metrics.tab_strip_height
+                };
                 Size::new(
                     width,
-                    metrics
-                        .min_group_height
-                        .max(metrics.header_height + metrics.tab_strip_height + content_height),
+                    metrics.min_group_height.max(chrome_height + content_height),
                 )
             }
             Node::Split(split) => {
@@ -681,12 +684,7 @@ impl Layout {
                 let slot_count = self.column_display_order(node_id)?.len();
                 Size::new(
                     width,
-                    if column.groups.is_empty() {
-                        0.0
-                    } else {
-                        metrics.column_header_height
-                            + metrics.effective_collapsed_group_height() * slot_count as f32
-                    },
+                    metrics.effective_collapsed_group_height() * slot_count as f32,
                 )
             }
             Node::Column(column) => {
