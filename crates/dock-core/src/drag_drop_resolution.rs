@@ -82,7 +82,7 @@ fn floating_title_and_capture_handles_are_explicit_and_payload_checked() {
             Point::ZERO,
         )
         .unwrap();
-    session.pointer_move(Point::new(4.0, 0.0)).unwrap();
+    session.pointer_move(Point::new(8.0, 0.0)).unwrap();
     assert_eq!(session.set_drop_target(None), Ok(()));
     assert!(session.preview().unwrap().target.is_none());
 }
