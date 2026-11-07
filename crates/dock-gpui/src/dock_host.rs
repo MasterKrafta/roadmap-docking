@@ -16,7 +16,7 @@ use crate::{
     DockController, DockTheme, FloatingWindowManager,
     components::{
         CanvasSlot, ContextMenu, ContextMenuEntry, ContextMenuItem, ContextMenuTarget,
-        ContextMenuToggle, DragGhost, DropOverlay, FlyoutView, MainDockView,
+        ContextMenuToggle, DropOverlay, FlyoutView, MainDockView,
         collect_group_presentations,
     },
     geometry::{host_geometry_from_gpui_bounds, point_from_gpui},
@@ -803,8 +803,8 @@ impl Render for DockHost {
                 ));
             }
 
-            // One overlay consumes the same resolver snapshot used by hit testing.
-            // Native capture drags move the actual HWND; only in-dock drags show a ghost.
+            // Drop feedback uses the same resolver snapshot as hit testing.
+            // The cursor-following DragGhost is intentionally not rendered.
             workspace = workspace.child(DropOverlay::render(
                 active_drop_zone,
                 drag_preview,
@@ -814,16 +814,6 @@ impl Render for DockHost {
                 &[],
                 theme,
             ));
-            if drag_handle != Some(DragHandle::FloatingCapture)
-                && drag_handle != Some(DragHandle::FloatingTitle)
-            {
-                workspace = workspace.child(DragGhost::render(
-                    drag_preview,
-                    &group_presentations,
-                    rects.viewport,
-                    theme,
-                ));
-            }
         }
 
         if let Some(mut preview) = resize_preview {
