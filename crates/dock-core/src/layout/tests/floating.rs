@@ -343,7 +343,8 @@ fn c47_dock_single_group_floating_column_into_group_tabs_removes_wrapper() {
         .unwrap();
 
     let (floating_id, floating) = layout.floating_groups().next().unwrap();
-    let floating_root = layout.dock_area(floating.area).unwrap().root;
+    let floating_area = floating.area;
+    let floating_root = layout.dock_area(floating_area).unwrap().root;
     assert!(matches!(
         layout.node(floating_root),
         Some(Node::Column(column)) if column.groups == vec![moving_group]
@@ -369,7 +370,7 @@ fn c47_dock_single_group_floating_column_into_group_tabs_removes_wrapper() {
                 && tabs.active_index == 1
     ));
     assert!(layout.floating_group(floating_id).is_none());
-    assert!(layout.dock_area(floating.area).is_none());
+    assert!(layout.dock_area(floating_area).is_none());
     assert!(layout.node(floating_root).is_none());
     assert!(layout.node(moving_group).is_none());
     assert_eq!(layout.panel_instances().count(), 2);
