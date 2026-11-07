@@ -89,7 +89,7 @@ impl GroupColumnView {
         let group_header_height = metrics.header_height.max(metrics.tab_strip_height);
 
         let mut header = div()
-            .id(id)
+            .id(id.clone())
             .w_full()
             .h(px(group_header_height))
             .flex_none()
