@@ -1148,10 +1148,6 @@ fn group_grip_contains(
             0.0
         };
 
-        let control_width = metrics
-            .group_control_button_width
-            .min(group_rect.rect.size.width / 3.0)
-            .max(1.0);
         let requested_header_height = if is_column_group {
             metrics.header_height.max(metrics.tab_strip_height)
         } else {
@@ -1159,7 +1155,9 @@ fn group_grip_contains(
         };
         let header_height = requested_header_height.min(group_rect.rect.size.height);
         let right_edge = group_rect.rect.origin.x + group_rect.rect.size.width;
-        let right_reserve = 2.0 * control_width;
+        let right_reserve =
+            (metrics.group_grip_width + metrics.group_control_button_width)
+                .min(group_rect.rect.size.width);
 
         point.y >= group_rect.rect.origin.y
             && point.y < group_rect.rect.origin.y + header_height
