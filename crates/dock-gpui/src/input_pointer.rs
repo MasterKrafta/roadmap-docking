@@ -235,7 +235,7 @@ pub(crate) fn register_pointer_events(
                     }
                 }
                 PointerDownIntent::GroupCandidate { group } => {
-                    if group_grip_contains(&controller, group, core_point, app)
+                    if group_drag_area_contains(&controller, group, core_point, app)
                     {
                         if matches!(hit, HitResult::TabStrip { .. }) {
                             let layout_version = controller
@@ -1107,7 +1107,7 @@ fn collect_dock_area_columns(
     }
 }
 
-fn group_grip_contains(
+fn group_drag_area_contains(
     controller: &Entity<DockController>,
     group: NodeId,
     point: Point,
