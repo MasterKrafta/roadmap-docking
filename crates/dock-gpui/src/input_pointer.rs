@@ -1341,7 +1341,7 @@ mod hit_dispatch_tests {
         assert!(!crate::dock_components::DockAreaDragArea::contains(
             rect,
             &columns,
-            Point::new(190.0, 30.0),
+            Point::new(200.0, 30.0),
             32.0,
             28.0,
         ));
