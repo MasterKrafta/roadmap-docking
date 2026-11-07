@@ -130,8 +130,7 @@ pub fn run(_options: RunOptions) {
 
 pub use app_shell::AppShell;
 pub use components::{
-    CanvasSlot, ColumnHeaderView, ColumnView, ContextMenu, ContextMenuEntry, ContextMenuItem,
-    DragGhost, DropOverlay,
+    CanvasSlot, ColumnView, ContextMenu, ContextMenuEntry, ContextMenuItem, DragGhost, DropOverlay,
     FloatingHost, FlyoutView, GroupView, MainDockView, PanelHost, RailView, SplitterView,
     TabHeaderView, TabOverflow, TabStripView,
 };
@@ -154,11 +153,10 @@ pub use dock_core::{
     CommandError, CommandOutcome, CommandValue, ComputeRectsError, DEFAULT_UNDO_LIMIT, DockArea,
     DockAreaId, DockAreaKind, DockCommand, DockMetrics, DockSide, DragCancelReason, DragDropAction,
     DragDropRequest, DragHandle, DragPayload, DragPreview, DragSession, DragSessionError,
-    DragState, DropSource, DropTarget, DropZone, DropZoneRect, DropZoneResolver, FloatingGroup,
-    FloatingGroupId, FloatingGroupRect, FlyoutRect, FlyoutState, GeometryError, GroupRect,
-    HitResult, InitialLayoutError, LastDockLocation, Layout, Node, NodeId,
-    OUTER_COLUMN_EDGE_BOUNDARY_INDEX, Panel, PanelConstraints, PanelId, PanelInstance, PanelKey,
-    PanelKeyError, PanelRect, PanelState, Point, Profile, Rect, ResizeEdge, Size, Split,
-    SplitterRect, TabHeaderRect, TabOverflowRect, TabStripRect, Tabs, UndoRedoHistory,
-    ValidationError, ValidationReason, VerticalOverflow,
+    DragState, DropSource, DropTarget, DropZone, DropZoneRect, FloatingGroup, FloatingGroupId,
+    FloatingGroupRect, FlyoutRect, FlyoutState, GeometryError, GroupRect, HitResult,
+    InitialLayoutError, LastDockLocation, Layout, Node, NodeId, OUTER_COLUMN_EDGE_BOUNDARY_INDEX,
+    Panel, PanelConstraints, PanelId, PanelInstance, PanelKey, PanelKeyError, PanelRect, PanelState,
+    Point, Profile, Rect, ResizeEdge, Size, Split, SplitterRect, TabHeaderRect, TabOverflowRect,
+    TabStripRect, Tabs, UndoRedoHistory, ValidationError, ValidationReason, VerticalOverflow,
 };
