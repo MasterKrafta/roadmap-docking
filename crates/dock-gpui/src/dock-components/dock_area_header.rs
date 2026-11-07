@@ -5,7 +5,7 @@ mod collapse_column_button;
 #[path = "close_dock_area_button.rs"]
 mod close_dock_area_button;
 
-use dock_core::{DockMetrics, Rect};
+use dock_core::{ColumnRect, DockMetrics, Rect};
 use gpui::{InteractiveElement, IntoElement, ParentElement, Styled, div, px, rgb};
 use ui::Theme;
 
@@ -23,10 +23,11 @@ impl DockAreaHeader {
     pub(crate) fn render(
         id: String,
         area_rect: Rect,
-        column_count: usize,
+        columns: &[ColumnRect],
         metrics: DockMetrics,
         theme: Theme,
     ) -> impl IntoElement {
+        let button_width = metrics.column_control_button_width;
         let mut header = div()
             .id(format!("{id}-header"))
             .absolute()
@@ -46,20 +47,40 @@ impl DockAreaHeader {
                 theme,
             ));
 
-        for index in 0..column_count {
-            header = header.child(CollapseColumnButton::render_with_metrics(
-                format!("{id}-collapse-column-{index}"),
-                theme,
-                metrics.column_control_button_width,
-                metrics.control_icon_size,
-            ));
+        let area_right = area_rect.origin.x + area_rect.size.width;
+        for (index, column) in columns.iter().enumerate() {
+            let column_right = column.rect.origin.x + column.rect.size.width;
+            let is_area_right_edge = (column_right - area_right).abs() < 0.5;
+            let button_x = column_right - area_rect.origin.x
+                - if is_area_right_edge { 2.0 * button_width } else { button_width };
+
+            header = header.child(
+                div()
+                    .absolute()
+                    .left(px(button_x))
+                    .top_0()
+                    .h_full()
+                    .child(CollapseColumnButton::render_with_metrics(
+                        format!("{id}-collapse-column-{index}"),
+                        theme,
+                        button_width,
+                        metrics.control_icon_size,
+                    )),
+            );
         }
 
-        header.child(CloseDockAreaButton::render_with_metrics(
-            format!("{id}-close"),
-            theme,
-            metrics.column_control_button_width,
-            metrics.control_icon_size,
-        ))
+        header.child(
+            div()
+                .absolute()
+                .left(px((area_rect.size.width - button_width).max(0.0)))
+                .top_0()
+                .h_full()
+                .child(CloseDockAreaButton::render_with_metrics(
+                    format!("{id}-close"),
+                    theme,
+                    button_width,
+                    metrics.control_icon_size,
+                )),
+        )
     }
 }
