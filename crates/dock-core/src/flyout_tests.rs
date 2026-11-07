@@ -567,7 +567,7 @@ fn flyout_panel_drag_keeps_source_open_until_successful_drop_then_closes_it() {
         .unwrap();
     assert_eq!(fixture.layout.flyout(), Some(flyout_before));
 
-    session.pointer_move(Point::new(45.0, 40.0)).unwrap();
+    session.pointer_move(Point::new(48.0, 40.0)).unwrap();
     assert!(matches!(session.state(), DragState::Dragging { .. }));
     assert_eq!(fixture.layout.flyout(), Some(flyout_before));
     let during = fixture.layout.compute_rects(viewport(), &metrics).unwrap();
