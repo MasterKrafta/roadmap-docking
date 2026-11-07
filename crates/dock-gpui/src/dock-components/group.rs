@@ -1,4 +1,19 @@
-use super::super::{DockTab, GroupGrip, GroupMenuButton, PanelContent};
+#[path = "tab.rs"]
+mod tab;
+#[path = "group_grip.rs"]
+mod group_grip;
+#[path = "group_drag_area.rs"]
+mod group_drag_area;
+#[path = "group_menu_button.rs"]
+mod group_menu_button;
+#[path = "panel_content.rs"]
+mod panel_content;
+
+pub use tab::DockTab;
+pub use group_grip::GroupGrip;
+pub use group_drag_area::GroupDragArea;
+pub use group_menu_button::GroupMenuButton;
+pub use panel_content::PanelContent;
 use dock_core::DockMetrics;
 use gpui::{AnyView, InteractiveElement, IntoElement, ParentElement, Styled, div, px, rgb};
 use ui::Theme;
@@ -104,13 +119,7 @@ impl DockGroupView {
                 metrics.min_tab_width,
                 metrics.tab_horizontal_padding,
             ))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .h_full()
-                    .bg(rgb(theme.colors.group_grip_background)),
-            );
+            .child(GroupDragArea::render(format!("{id}-drag-area"), theme));
 
         // Group grip and menu are visual only; their actions are not connected yet.
         if SHOW_GROUP_CONTROLS {
