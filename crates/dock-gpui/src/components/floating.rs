@@ -55,7 +55,6 @@ impl FloatingWindowContent {
     #[allow(clippy::too_many_arguments)]
     fn render(
         floating: FloatingGroupRect,
-        root_is_column: bool,
         columns: &[ColumnRect],
         groups: &[GroupRect],
         panels: Vec<(PanelRect, AnyView)>,
@@ -81,10 +80,6 @@ impl FloatingWindowContent {
         theme: Theme,
     ) -> impl IntoElement {
         let origin = Point::ZERO;
-        // A floating root Column owns its window chrome through the shared
-        // dock-components::ColumnHeader. Do not infer this from matching rects:
-        // geometry can differ slightly while the Core root is still a Column.
-        let column_uses_window_header = root_is_column && columns.len() == 1;
         let mut column_group_ids = HashSet::new();
         for ids in column_groups.values() {
             column_group_ids.extend(ids.iter().copied());
@@ -1297,7 +1292,6 @@ impl Render for FloatingHost {
 
         root = root.child(FloatingWindowContent::render(
             snapshot.floating,
-            snapshot.root_is_column,
             &snapshot.rects.columns,
             &snapshot.rects.groups,
             panel_views,
