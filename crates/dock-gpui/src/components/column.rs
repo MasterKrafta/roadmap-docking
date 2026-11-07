@@ -11,7 +11,7 @@ use gpui::{
 };
 use ui::Theme;
 
-use crate::{DockController, dock_components::ColumnHeader};
+use crate::DockController;
 
 use super::{
     context_menu::GroupMenuToggle,
@@ -53,7 +53,7 @@ impl ColumnView {
         theme: Theme,
         coordinate_origin: Point,
         raise_floating: Option<FloatingGroupId>,
-        show_header: bool,
+        show_area_header: bool,
     ) -> impl IntoElement {
         let content_rect = Rect::new(
             Point::new(
@@ -65,7 +65,7 @@ impl ColumnView {
                 (column.rect.size.height - metrics.column_header_height).max(0.0),
             ),
         );
-        let hidden_header_offset = if show_header {
+        let hidden_header_offset = if show_area_header {
             0.0
         } else {
             metrics.column_header_height
@@ -194,13 +194,6 @@ impl ColumnView {
             .bg(rgb(theme.colors.dock_background))
             .child(scroll_viewport);
 
-        if show_header {
-            root = root.child(ColumnHeader::render(
-                format!("dock-components-{:?}", column.column),
-                metrics,
-                theme,
-            ));
-        }
         root
     }
 }
