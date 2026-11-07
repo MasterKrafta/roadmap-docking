@@ -1,40 +1,13 @@
-#[path = "column_drag_area.rs"]
-mod column_drag_area;
-#[path = "column_header.rs"]
-mod column_header;
-#[path = "collapse_column_button.rs"]
-mod collapse_column_button;
-#[path = "close_column_button.rs"]
-mod close_column_button;
-#[path = "group_column.rs"]
-mod group_column;
-#[path = "group_drag_area.rs"]
-mod group_drag_area;
-#[path = "group_grip.rs"]
-mod group_grip;
-#[path = "group_menu_button.rs"]
-mod group_menu_button;
-#[path = "panel_content.rs"]
-mod panel_content;
-#[path = "tab.rs"]
-mod tab;
+#[path = "group.rs"]
+mod group;
 
 use dock_core::DockMetrics;
 use gpui::{AnyView, InteractiveElement, IntoElement, ParentElement, Styled, div, rgb};
-use group_column::GroupColumnView;
+use group::DockGroupView;
+use super::ColumnHeader;
 use ui::Theme;
 
-pub use column_drag_area::ColumnDragArea;
-pub use column_header::ColumnHeader;
-pub use collapse_column_button::CollapseColumnButton;
-pub use close_column_button::CloseColumnButton;
-pub use group_drag_area::GroupDragArea;
-pub use group_grip::GroupGrip;
-pub use group_menu_button::GroupMenuButton;
-pub use panel_content::PanelContent;
-pub use tab::DockTab;
-
-/// Static visual variants for the new Column composition.
+/// Renders one Column containing one or more vertically stacked Groups.
 pub struct DockColumnView;
 
 impl DockColumnView {
@@ -50,7 +23,7 @@ impl DockColumnView {
 
     /// Renders a live Column with exactly one active tab and its panel view.
     ///
-    /// Core still owns the Column/Group/Panel nodes; this function only composes
+    /// Core still owns the Column/Group/Panel nodes; this function composes
     /// their visual surface inside the rectangle assigned by the main-dock adapter.
     pub fn render_active(
         id: String,
@@ -62,10 +35,8 @@ impl DockColumnView {
         Self::render_active_with_header(id, title, panel_view, metrics, theme, true)
     }
 
-    /// Floating tear-off uses the same Column renderer but temporarily removes
-    /// ColumnHeader and its layout height while a DockTab-origin drag is held.
-    /// The native window bounds are cropped by the same amount to keep the tab
-    /// aligned with the original cursor position.
+    /// Floating tear-off can temporarily remove ColumnHeader and its layout height
+    /// while a DockTab-origin drag is held.
     pub(crate) fn render_active_with_header(
         id: String,
         title: String,
@@ -91,7 +62,7 @@ impl DockColumnView {
             column = column.child(ColumnHeader::render(id.clone(), metrics, theme));
         }
 
-        column.child(GroupColumnView::render_active(
+        column.child(DockGroupView::render_active(
             group_id, title, panel_view, metrics, theme,
         ))
     }
@@ -102,8 +73,6 @@ impl DockColumnView {
         metrics: DockMetrics,
         theme: Theme,
     ) -> impl IntoElement {
-        let column_header = ColumnHeader::render(id.to_owned(), metrics, theme);
-
         let mut column = div()
             .id(id)
             .w_full()
@@ -114,11 +83,11 @@ impl DockColumnView {
             .bg(rgb(theme.colors.dock_background))
             .border_1()
             .border_color(rgb(theme.colors.group_frame_border))
-            .child(column_header);
+            .child(ColumnHeader::render(id.to_owned(), metrics, theme));
 
         for index in 0..group_count {
             let group_id = format!("{id}-group-{index}");
-            column = column.child(GroupColumnView::render_preview(group_id, metrics, theme));
+            column = column.child(DockGroupView::render_preview(group_id, metrics, theme));
         }
 
         column
