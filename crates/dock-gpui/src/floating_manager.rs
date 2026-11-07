@@ -770,7 +770,10 @@ impl FloatingWindowManager {
             .filter(|scale| scale.is_finite() && *scale > 0.0)
             .unwrap_or(1.0);
         let hidden_header_offset = if hide_header {
-            physical_coordinate(metrics.column_header_height, scale)?
+            let Some(offset) = physical_coordinate(metrics.column_header_height, scale) else {
+                return false;
+            };
+            offset
         } else {
             0
         };
