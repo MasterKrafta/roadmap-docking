@@ -54,10 +54,6 @@ pub enum HitResult {
         boundary_index: usize,
         axis: Axis,
     },
-    /// The title band of a floating window, used for moving the window.
-    FloatingTitle {
-        group: FloatingGroupId,
-    },
     /// The body/background of a floating window without a more specific hit.
     FloatingGroup {
         group: FloatingGroupId,
@@ -142,8 +138,9 @@ impl Layout {
     /// produced for this same Layout.
     ///
     /// Floating windows form front-to-back layers ordered by descending
-    /// z_order. Its title band is tested before its subtree; then splitters,
-    /// group headers, tab headers, drop zones and panel content
+    /// z_order. Their subtree is hit-tested before blank space is assigned to
+    /// the floating window; then splitters, group headers, tab headers,
+    /// drop zones and panel content
     /// are tested. Blank space inside the topmost floating window belongs to
     /// that window and does not leak hits to the content beneath it.
     ///
@@ -169,17 +166,6 @@ impl Layout {
         for floating in &floating_order {
             if !contains(floating.rect, point)? {
                 continue;
-            }
-
-            let title_height = metrics.header_height.min(floating.rect.size.height);
-            let title = Rect::new(
-                floating.rect.origin,
-                crate::Size::new(floating.rect.size.width, title_height),
-            );
-            if contains(title, point)? {
-                return Ok(HitResult::FloatingTitle {
-                    group: floating.group,
-                });
             }
 
             if let Some((nodes, panels)) = floating_subtree(self, floating.group)?
