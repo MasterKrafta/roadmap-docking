@@ -987,8 +987,8 @@ fn configurable_metrics_drive_header_strip_and_splitter_geometry() {
             .map(|item| item.rect)
             .collect::<Vec<_>>(),
         vec![
-            Rect::new(Point::new(0.0, 63.5), Size::new(280.0, 20.25)),
-            Rect::new(Point::new(0.0, 299.75), Size::new(280.0, 20.25)),
+            Rect::new(Point::new(0.0, 32.0), Size::new(224.0, 31.5)),
+            Rect::new(Point::new(0.0, 267.75), Size::new(224.0, 31.5)),
         ]
     );
     assert_eq!(
@@ -998,8 +998,8 @@ fn configurable_metrics_drive_header_strip_and_splitter_geometry() {
             .map(|item| item.rect)
             .collect::<Vec<_>>(),
         vec![
-            Rect::new(Point::new(0.0, 83.75), Size::new(280.0, 180.5)),
-            Rect::new(Point::new(0.0, 320.0), Size::new(280.0, 180.5)),
+            Rect::new(Point::new(0.0, 63.5), Size::new(280.0, 200.75)),
+            Rect::new(Point::new(0.0, 299.25), Size::new(280.0, 200.75)),
         ]
     );
     assert_eq!(rects.splitters.len(), 2);
