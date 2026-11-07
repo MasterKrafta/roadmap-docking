@@ -928,8 +928,8 @@ impl Render for FloatingHost {
                                 .ok()
                         });
                         eprintln!(
-                            "[DOCK-INPUT][floating] down window={:?} floating_group={:?} point=({:.1}, {:.1}) hit={:?}",
-                            input_window_id, group, point.x, point.y, hit.unwrap_or(dock_core::HitResult::Miss)
+                            "[DOCK-INPUT][floating] down floating_group={:?} point=({:.1}, {:.1}) hit={:?}",
+                            group, point.x, point.y, hit.unwrap_or(dock_core::HitResult::Miss)
                         );
 
                         // A DockTab inside an already-floating DockColumnView moves
