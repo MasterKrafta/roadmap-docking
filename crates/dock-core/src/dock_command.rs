@@ -130,7 +130,10 @@ pub enum DockCommand {
     ///
     /// Interactive resizing should use ResizeGroups or ResetColumnRatios.
     RestoreGroupRatios { column: NodeId, ratios: Vec<f32> },
-    /// Detach a Panel or Tabs node into a floating group at these bounds.
+    /// Detach a Panel, Tabs group, or Column into a floating composition.
+    ///
+    /// In the Photoshop profile, Panel and Tabs roots are wrapped in a single-group
+    /// Column so every floating window owns a ColumnHeader.
     Float { node: NodeId, bounds: Rect },
     /// Move a floating window by setting its new origin.
     MoveFloating {
