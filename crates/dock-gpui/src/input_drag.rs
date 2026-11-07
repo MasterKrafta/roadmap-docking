@@ -254,8 +254,8 @@ pub(crate) fn begin_floating_tab_tearoff(
         return false;
     };
     eprintln!(
-        "[DOCK-INPUT][floating] tab_tearoff_candidate source_window={:?} source_group={:?} panel={:?} origin=({:.1}, {:.1}) pointer=({:.1}, {:.1})",
-        drag.source_window_id, drag.source_group, drag.panel, origin.x, origin.y, pointer.x, pointer.y
+        "[DOCK-INPUT][floating] tab_tearoff_candidate source_group={:?} panel={:?} origin=({:.1}, {:.1}) pointer=({:.1}, {:.1})",
+        drag.source_group, drag.panel, origin.x, origin.y, pointer.x, pointer.y
     );
 
     let Some(local_bounds) =
@@ -444,15 +444,23 @@ pub(crate) fn begin_native_tearoff(
             }
             _ => return None,
         };
-        Some((command, local_bounds, hide_column_header))
+        Some((command, local_bounds, hide_column_header, payload, handle))
     });
 
-    let Some((command, local_bounds, hide_column_header)) = candidate else {
+    let Some((command, local_bounds, hide_column_header, payload, handle)) = candidate else {
         return false;
     };
     eprintln!(
-        "[DOCK-INPUT][main] native_tearoff command={:?} pointer=({:.1}, {:.1}) hide_column_header={} local_bounds={:?}",
-        command, pointer.x, pointer.y, hide_column_header, local_bounds
+        "[DOCK-INPUT][main] native_tearoff payload={:?} handle={:?} pointer=({:.1}, {:.1}) hide_column_header={} bounds=({:.1}, {:.1}, {:.1}, {:.1})",
+        payload,
+        handle,
+        pointer.x,
+        pointer.y,
+        hide_column_header,
+        local_bounds.origin.x,
+        local_bounds.origin.y,
+        local_bounds.size.width,
+        local_bounds.size.height
     );
     let model_bounds = manager.update(app, |manager, _| {
         manager.screen_bounds_from_main_local(local_bounds)
