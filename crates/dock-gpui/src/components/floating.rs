@@ -823,6 +823,10 @@ impl Render for FloatingHost {
             .as_ref()
             .map(floating_dock_component_tab_zones)
             .unwrap_or_default();
+        // Each mouse-event handler owns its map because all three closures are `move`.
+        let dock_component_tab_zones_for_down = dock_component_tab_zones.clone();
+        let dock_component_tab_zones_for_move = dock_component_tab_zones.clone();
+        let dock_component_tab_zones_for_up = dock_component_tab_zones;
         let column_drag_area = snapshot.as_ref().and_then(floating_column_drag_area);
         let title_input = canvas(
             move |bounds, window, _| Some(window.insert_hitbox(bounds, HitboxBehavior::Normal).id),
@@ -909,7 +913,7 @@ impl Render for FloatingHost {
                                 .find(|header| header.group == tab_group && header.panel == panel)?;
                             // DockTab has no close button: its complete header is draggable.
                             // Legacy TabHeaderView reserves the trailing close-button hit area.
-                            if !dock_component_tab_zones.contains_key(&panel) {
+                            if !dock_component_tab_zones_for_down.contains_key(&panel) {
                                 let close_width = 18.0_f32.min(header.rect.size.width);
                                 let header_right = header.rect.origin.x + header.rect.size.width;
                                 if point.x >= header_right - close_width {
@@ -981,7 +985,7 @@ impl Render for FloatingHost {
                         }
 
                         let leaves_source = if let Some(zone) =
-                            dock_component_tab_zones.get(&press.panel).copied()
+                            dock_component_tab_zones_for_move.get(&press.panel).copied()
                         {
                             DockTab::leaves_strip_zone(zone, point)
                         } else {
@@ -1071,7 +1075,7 @@ impl Render for FloatingHost {
                         );
                         if dragging {
                             let leaves_source = if let Some(zone) =
-                                dock_component_tab_zones.get(&press.panel).copied()
+                                dock_component_tab_zones_for_up.get(&press.panel).copied()
                             {
                                 DockTab::leaves_strip_zone(zone, point)
                             } else {
