@@ -61,9 +61,10 @@ impl DockColumnView {
         Self::render_active_with_header(id, title, panel_view, metrics, theme, true)
     }
 
-    /// Floating tear-off uses the same Column renderer but temporarily hides
-    /// the ColumnHeader while the native pointer is held. Its reserved height
-    /// remains in place, so the grabbed tab does not jump under the cursor.
+    /// Floating tear-off uses the same Column renderer but temporarily removes
+    /// ColumnHeader and its layout height while a DockTab-origin drag is held.
+    /// The native window bounds are cropped by the same amount to keep the tab
+    /// aligned with the original cursor position.
     pub(crate) fn render_active_with_header(
         id: String,
         title: String,
