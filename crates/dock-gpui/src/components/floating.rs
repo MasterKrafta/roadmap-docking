@@ -56,6 +56,7 @@ impl FloatingWindowContent {
     #[allow(clippy::too_many_arguments)]
     fn render(
         floating: FloatingGroupRect,
+        root_is_column: bool,
         columns: &[ColumnRect],
         groups: &[GroupRect],
         panels: Vec<(PanelRect, AnyView)>,
@@ -82,9 +83,10 @@ impl FloatingWindowContent {
         theme: Theme,
     ) -> impl IntoElement {
         let origin = Point::ZERO;
-        let column_uses_window_header = columns.len() == 1
-            && columns[0].rect.origin == floating.rect.origin
-            && columns[0].rect.size == floating.rect.size;
+        // A floating root Column owns its window chrome through the shared
+        // dock-components::ColumnHeader. Do not infer this from matching rects:
+        // geometry can differ slightly while the Core root is still a Column.
+        let column_uses_window_header = root_is_column && columns.len() == 1;
         let mut column_group_ids = HashSet::new();
         for ids in column_groups.values() {
             column_group_ids.extend(ids.iter().copied());
@@ -311,8 +313,9 @@ impl FloatingWindowContent {
             .collect();
         root = root.child(PanelHost::render(loose_panels, origin));
 
-        // A floating root Column uses its own ColumnHeaderView as the
-        // window header. Other floating compositions keep the generic title bar.
+        // A floating root Column already rendered the shared
+        // dock-components::ColumnHeader inside its Column. Only roots without
+        // a Column use this generic title bar.
         if !column_uses_window_header && !hide_header {
             let title_height = metrics.header_height.min(floating.rect.size.height);
             let close_size = metrics.group_control_button_width.min(title_height);
@@ -409,6 +412,7 @@ struct FloatingHostOpenMenu {
 struct FloatingHostSnapshot {
     rects: LayoutRects,
     floating: FloatingGroupRect,
+    root_is_column: bool,
     column_ids: HashSet<NodeId>,
     column_groups: HashMap<NodeId, Vec<NodeId>>,
     column_modes: HashMap<NodeId, ColumnMode>,
@@ -509,9 +513,7 @@ fn floating_column_title_pointer_region(
 
 fn floating_column_drag_area(snapshot: &FloatingHostSnapshot) -> Option<(Rect, f32)> {
     let column = snapshot.rects.columns.first().copied()?;
-    let is_window_header = snapshot.rects.columns.len() == 1
-        && column.rect.origin == snapshot.floating.rect.origin
-        && column.rect.size == snapshot.floating.rect.size;
+    let is_window_header = snapshot.root_is_column && snapshot.rects.columns.len() == 1;
     if !is_window_header {
         return None;
     }
@@ -537,11 +539,7 @@ fn floating_column_drag_area(snapshot: &FloatingHostSnapshot) -> Option<(Rect, f
                         == presentation.tabs.first().map(|tab| tab.panel)
             });
 
-    let reserved_controls_width = if uses_dock_component_header {
-        2.0 * snapshot.metrics.column_control_button_width
-    } else {
-        snapshot.metrics.group_control_button_width
-    };
+    let reserved_controls_width = 2.0 * snapshot.metrics.column_control_button_width;
 
     Some((column.rect, reserved_controls_width))
 }
@@ -633,6 +631,7 @@ fn floating_host_snapshot(
     let Some(area) = layout.dock_area(floating_model.area) else {
         return Ok(None);
     };
+    let root_is_column = matches!(layout.node(area.root), Some(Node::Column(_)));
 
     let mut node_ids = HashSet::new();
     let mut column_ids = HashSet::new();
@@ -688,6 +687,7 @@ fn floating_host_snapshot(
     Ok(Some(FloatingHostSnapshot {
         rects,
         floating,
+        root_is_column,
         column_ids,
         column_groups,
         column_modes,
@@ -1457,6 +1457,7 @@ impl Render for FloatingHost {
 
         root = root.child(FloatingWindowContent::render(
             snapshot.floating,
+            snapshot.root_is_column,
             &snapshot.rects.columns,
             &snapshot.rects.groups,
             panel_views,
