@@ -1074,6 +1074,7 @@ impl FloatingWindowManager {
         // that client height and move the top edge up by exactly the same
         // physical amount. The Group/tab row therefore stays stationary.
         let mut rollback_header_expansion = None;
+        let mut native_bounds_changed = false;
         if state.kind == NativeMoveKind::TearOff && state.hide_header && is_free_release {
             let metrics = self.controller.update(cx, |controller, _| controller.metrics());
             let scale = self.native_ops.scale_factor(state.native_window).ok()
@@ -1114,6 +1115,7 @@ impl FloatingWindowManager {
                                     client_size,
                                     PhysicalPoint { x: rect.left, y: rect.top },
                                 ));
+                                native_bounds_changed = true;
                                 tracing::debug!(
                                     ?state.group,
                                     header_pixels,
@@ -1168,6 +1170,29 @@ impl FloatingWindowManager {
             tracing::warn!(?state.group, %error, "could not commit native floating-window move");
             self.cancel_controller_move(cx);
         }
+
+        // NativeWindowOps changes the HWND directly. Synchronize GPUI's cached
+        // viewport size as well, otherwise the new client area can remain
+        // unpainted until another input event invalidates the floating window.
+        if native_bounds_changed {
+            let host_window = self
+                .host_registry
+                .panel_for_group(state.group)
+                .and_then(|panel| self.registry.windows.get(&panel))
+                .map(|entry| entry.window);
+            if let Some(host_window) = host_window
+                && let Err(error) = host_window.update(cx, |_, window, app| {
+                    window.bounds_changed(app);
+                })
+            {
+                tracing::warn!(
+                    ?state.group,
+                    %error,
+                    "could not synchronize GPUI bounds after restoring floating ColumnHeader"
+                );
+            }
+        }
+
         cx.notify();
     }
 
