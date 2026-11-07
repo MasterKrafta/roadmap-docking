@@ -841,10 +841,10 @@ fn golden_rects_for_1280_by_800_cover_both_docks_columns_groups_and_splitters() 
             .map(|item| item.rect)
             .collect::<Vec<_>>(),
         vec![
-            Rect::new(Point::new(0.0, 88.0), Size::new(240.0, 326.0)),
-            Rect::new(Point::new(0.0, 474.0), Size::new(240.0, 326.0)),
-            Rect::new(Point::new(244.0, 88.0), Size::new(300.0, 712.0)),
-            Rect::new(Point::new(1060.0, 88.0), Size::new(220.0, 712.0)),
+            Rect::new(Point::new(0.0, 60.0), Size::new(240.0, 354.0)),
+            Rect::new(Point::new(0.0, 446.0), Size::new(240.0, 354.0)),
+            Rect::new(Point::new(244.0, 60.0), Size::new(300.0, 740.0)),
+            Rect::new(Point::new(1060.0, 60.0), Size::new(220.0, 740.0)),
         ]
     );
     assert!(rects.vertical_overflow.is_empty());
@@ -883,11 +883,11 @@ fn fractional_logical_viewport_preserves_dpi_independent_geometry_and_reports_sm
     );
     assert_eq!(
         rects.panels[0].rect,
-        Rect::new(Point::new(12.25, 95.5), Size::new(200.25, 108.5),)
+        Rect::new(Point::new(12.25, 67.5), Size::new(200.25, 136.5),)
     );
     assert!(rects.vertical_overflow.is_empty());
 
-    // The 83.5 px Group area cannot hold the expanded 116 px minimum.
+    // The 83.5 px Group area cannot hold the expanded Group minimum.
     // The Group becomes a compact strip instead of creating a scroll extent.
     let short_viewport = Rect::new(Point::new(12.25, 7.5), Size::new(520.75, 115.5));
     let short_rects = layout.compute_rects(short_viewport, &metrics).unwrap();
@@ -920,7 +920,7 @@ fn pixel_snapping_is_deferred_to_the_render_boundary_for_common_dpi_scales() {
     builder.main_area(DockSide::Left, column);
     let layout = builder.build();
     let viewport = Rect::new(Point::new(12.25, 7.5), Size::new(520.75, 196.5));
-    let expected_logical_panel = Rect::new(Point::new(12.25, 95.5), Size::new(200.25, 108.5));
+    let expected_logical_panel = Rect::new(Point::new(12.25, 67.5), Size::new(200.25, 136.5));
     let baseline = layout.compute_rects(viewport, &metrics).unwrap();
     assert_eq!(baseline.panels[0].rect, expected_logical_panel);
 
