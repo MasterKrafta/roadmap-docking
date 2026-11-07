@@ -93,7 +93,7 @@ fn tab_headers_compress_before_hidden_tabs_move_to_overflow_menu() {
 #[test]
 fn active_tab_is_not_hidden_when_its_index_exceeds_visible_overflow_window() {
     let metrics = DockMetrics::default();
-    let (layout, group, panels) = two_or_more_tabs_layout_with_active(200.0, 4, 3);
+    let (layout, group, panels) = two_or_more_tabs_layout_with_active(228.0, 4, 3);
     let rects = layout.compute_rects(viewport(), &metrics).unwrap();
 
     assert_eq!(rects.tab_headers.len(), 2);
