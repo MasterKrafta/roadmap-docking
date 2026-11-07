@@ -156,6 +156,7 @@ struct NativeMoveSession {
     group: FloatingGroupId,
     native_window: NativeWindowId,
     kind: NativeMoveKind,
+    hide_header: bool,
     grab_offset: PhysicalPoint,
     initial_cursor: PhysicalPoint,
     start_bounds: Rect,
@@ -371,9 +372,8 @@ impl FloatingWindowManager {
 
     pub(crate) fn native_move_active(&self) -> bool { self.native_move.is_some() }
     pub(crate) fn hide_floating_header(&self, group: FloatingGroupId) -> bool {
-        self.native_move.is_some_and(|state| {
-            state.group == group && state.kind == NativeMoveKind::TearOff
-        })
+        self.native_move
+            .is_some_and(|state| state.group == group && state.hide_header)
     }
 
 
@@ -617,6 +617,7 @@ impl FloatingWindowManager {
             group,
             native_window,
             kind: NativeMoveKind::TearOff,
+            hide_header: true,
             grab_offset,
             initial_cursor: cursor,
             start_bounds: model_bounds,
@@ -713,36 +714,85 @@ impl FloatingWindowManager {
     }
 
     /// Starts a thresholded native move from an already-floating title grip.
+    /// Starts a thresholded native move from an already-floating Column header.
     pub(crate) fn begin_existing_window_move(
-        &mut self, group: FloatingGroupId, pointer: Point, cx: &mut Context<Self>,
+        &mut self,
+        group: FloatingGroupId,
+        pointer: Point,
+        cx: &mut Context<Self>,
     ) -> bool {
-        if self.native_move.is_some() { return false; }
-        let Some(entry) = self.panel_window_for_group(group) else { return false; };
-        let (Some(native_window), window_id) = (entry.native_window, entry.window_id) else { return false; };
-        let Ok(cursor) = self.native_ops.cursor_position() else { return false; };
-        let Ok(native_rect) = self.native_ops.window_rect(native_window) else { return false; };
+        self.begin_existing_window_move_with_header(group, pointer, false, cx)
+    }
+
+    /// Starts the same native move from DockTab, temporarily hiding ColumnHeader.
+    pub(crate) fn begin_existing_window_move_from_tab(
+        &mut self,
+        group: FloatingGroupId,
+        pointer: Point,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.begin_existing_window_move_with_header(group, pointer, true, cx)
+    }
+
+    fn begin_existing_window_move_with_header(
+        &mut self,
+        group: FloatingGroupId,
+        pointer: Point,
+        hide_header: bool,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.native_move.is_some() {
+            return false;
+        }
+        let Some(entry) = self.panel_window_for_group(group) else {
+            return false;
+        };
+        let (Some(native_window), window_id) = (entry.native_window, entry.window_id) else {
+            return false;
+        };
+        let Ok(cursor) = self.native_ops.cursor_position() else {
+            return false;
+        };
+        let Ok(native_rect) = self.native_ops.window_rect(native_window) else {
+            return false;
+        };
         let start_bounds = self.controller.update(cx, |controller, _| {
             controller.layout().floating_group(group).map(|floating| floating.bounds)
         });
-        let Some(start_bounds) = start_bounds else { return false; };
+        let Some(start_bounds) = start_bounds else {
+            return false;
+        };
         let metrics = self.controller.update(cx, |controller, _| controller.metrics());
-        if !self.controller.update(cx, |controller, _| controller.begin_floating_window_move(group, pointer)) {
+        if !self.controller.update(cx, |controller, _| {
+            controller.begin_floating_window_move(group, pointer)
+        }) {
             return false;
         }
         let scale = self.native_ops.scale_factor(native_window).ok()
-            .filter(|scale| scale.is_finite() && *scale > 0.0).unwrap_or(1.0);
+            .filter(|scale| scale.is_finite() && *scale > 0.0)
+            .unwrap_or(1.0);
         let high_resolution_timer = self.native_ops.begin_high_resolution_timer().is_ok();
         self.native_move = Some(NativeMoveSession {
-            group, native_window, kind: NativeMoveKind::ExistingWindow,
+            group,
+            native_window,
+            kind: NativeMoveKind::ExistingWindow,
+            hide_header,
             grab_offset: PhysicalPoint {
                 x: cursor.x.saturating_sub(native_rect.left),
                 y: cursor.y.saturating_sub(native_rect.top),
             },
-            initial_cursor: cursor, start_bounds, start_pointer: pointer,
-            drag_threshold: metrics.drag_threshold * scale, threshold_crossed: false,
-            high_resolution_timer, drop_target: None,
+            initial_cursor: cursor,
+            start_bounds,
+            start_pointer: pointer,
+            drag_threshold: metrics.drag_threshold * scale,
+            threshold_crossed: false,
+            high_resolution_timer,
+            drop_target: None,
         });
         self.schedule_native_move(cx, group, window_id);
+        if hide_header {
+            cx.notify();
+        }
         true
     }
 
