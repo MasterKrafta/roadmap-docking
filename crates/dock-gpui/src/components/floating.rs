@@ -21,7 +21,7 @@ use ui::Theme;
 
 use crate::{
     DockController, FloatingWindowManager,
-    dock_components::{ColumnDragArea, DockColumnView, DockTab},
+    dock_components::{DockAreaDragArea, DockAreaView, DockColumnView, DockTab},
     input::drag::{
         begin_floating_tab_tearoff, finish_floating_tab_drag, update_floating_tab_drag,
         FloatingTabDrag,
@@ -175,7 +175,7 @@ impl FloatingWindowContent {
                         .top(px(column.rect.origin.y))
                         .w(px(column.rect.size.width))
                         .h(px(column.rect.size.height))
-                        .child(DockColumnView::render_active_with_header(
+                        .child(DockColumnView::render_active_with_area_header(
                             format!("floating-dock-components-{:?}", column.column),
                             title,
                             panel_view,
@@ -291,7 +291,15 @@ impl FloatingWindowContent {
             .collect();
         root = root.child(PanelHost::render(loose_panels, origin));
 
-
+        if !hide_header {
+            root = root.child(DockAreaView::render_header(
+                format!("floating-dock-area-{:?}", floating.group),
+                floating.rect,
+                columns,
+                metrics,
+                theme,
+            ));
+        }
 
         root
     }
@@ -316,7 +324,6 @@ struct FloatingHostOpenMenu {
 struct FloatingHostSnapshot {
     rects: LayoutRects,
     floating: FloatingGroupRect,
-    root_is_column: bool,
     column_ids: HashSet<NodeId>,
     column_groups: HashMap<NodeId, Vec<NodeId>>,
     column_modes: HashMap<NodeId, ColumnMode>,
@@ -329,43 +336,32 @@ struct FloatingHostSnapshot {
     active_drop_zone: Option<dock_core::DropZoneRect>,
 }
 
-/// Gives the visible Column header input priority over its own tab strip.
-/// Returns Some(false) for fixed header controls, reserving them from tab dragging.
-fn floating_column_title_pointer_region(
-    column_rect: Rect,
+/// Gives the shared DockAreaHeader input priority over every Column below it.
+/// Returns Some(false) for the collapse and close controls on the header.
+fn floating_dock_area_title_pointer_region(
+    area_rect: Rect,
+    columns: &[ColumnRect],
     point: Point,
     metrics: DockMetrics,
-    reserved_controls_width: f32,
 ) -> Option<bool> {
-    let header_height = metrics.column_header_height.min(column_rect.size.height);
-    let right = column_rect.origin.x + column_rect.size.width;
-    let bottom = column_rect.origin.y + header_height;
-    if point.x < column_rect.origin.x
+    let header_height = metrics.column_header_height.min(area_rect.size.height);
+    let right = area_rect.origin.x + area_rect.size.width;
+    let bottom = area_rect.origin.y + header_height;
+    if point.x < area_rect.origin.x
         || point.x >= right
-        || point.y < column_rect.origin.y
+        || point.y < area_rect.origin.y
         || point.y >= bottom
     {
         return None;
     }
 
-    Some(ColumnDragArea::contains(
-        column_rect,
+    Some(DockAreaDragArea::contains(
+        area_rect,
+        columns,
         point,
         header_height,
-        reserved_controls_width,
+        metrics.column_control_button_width,
     ))
-}
-
-fn floating_column_drag_area(snapshot: &FloatingHostSnapshot) -> Option<(Rect, f32)> {
-    let column = snapshot.rects.columns.first().copied()?;
-    let is_window_header = snapshot.root_is_column && snapshot.rects.columns.len() == 1;
-    if !is_window_header {
-        return None;
-    }
-
-    let reserved_controls_width = 2.0 * snapshot.metrics.column_control_button_width;
-
-    Some((column.rect, reserved_controls_width))
 }
 
 fn floating_dock_component_group_zones(
@@ -455,7 +451,6 @@ fn floating_host_snapshot(
     let Some(area) = layout.dock_area(floating_model.area) else {
         return Ok(None);
     };
-    let root_is_column = matches!(layout.node(area.root), Some(Node::Column(_)));
 
     let mut node_ids = HashSet::new();
     let mut column_ids = HashSet::new();
@@ -504,7 +499,6 @@ fn floating_host_snapshot(
     Ok(Some(FloatingHostSnapshot {
         rects,
         floating,
-        root_is_column,
         column_ids,
         column_groups,
         column_modes,
@@ -735,7 +729,13 @@ impl Render for FloatingHost {
         let dock_component_tab_zones_for_move = dock_component_tab_zones.clone();
         let dock_component_tab_zones_for_up = dock_component_tab_zones;
         let dock_component_group_zones_for_down = dock_component_group_zones;
-        let column_drag_area = snapshot.as_ref().and_then(floating_column_drag_area);
+        let dock_area_drag_area = snapshot.as_ref().map(|snapshot| {
+            (
+                snapshot.floating.rect,
+                snapshot.rects.columns.clone(),
+                snapshot.metrics,
+            )
+        });
         let title_input = canvas(
             move |bounds, window, _| Some(window.insert_hitbox(bounds, HitboxBehavior::Normal).id),
             move |_, hitbox, window, _| {
@@ -800,16 +800,16 @@ impl Render for FloatingHost {
                         // TabHeaderRect, so Core can otherwise report a tab instead of the
                         // actual window drag surface.
                         let floating_title_region = if !hide_header {
-                            column_drag_area.and_then(|(column_rect, reserved_controls_width)| {
-                                floating_metrics.and_then(|metrics| {
-                                    floating_column_title_pointer_region(
-                                        column_rect,
+                            dock_area_drag_area.as_ref().and_then(
+                                |(area_rect, columns, metrics)| {
+                                    floating_dock_area_title_pointer_region(
+                                        *area_rect,
+                                        columns,
                                         point,
-                                        metrics,
-                                        reserved_controls_width,
+                                        *metrics,
                                     )
-                                })
-                            })
+                                },
+                            )
                         } else {
                             None
                         };
@@ -821,7 +821,7 @@ impl Render for FloatingHost {
                                 })
                             {
                                 eprintln!(
-                                    "[DOCK-INPUT][floating] window_move_start source=ColumnHeader group={:?} point=({:.1}, {:.1})",
+                                    "[DOCK-INPUT][floating] window_move_start source=DockAreaHeader group={:?} point=({:.1}, {:.1})",
                                     group, point.x, point.y
                                 );
                                 app.stop_propagation();
@@ -1397,39 +1397,39 @@ impl Render for FloatingHost {
 }
 
 #[cfg(test)]
-mod floating_column_header_hit_tests {
-    use dock_core::{DockMetrics, Point, Rect, Size};
+mod floating_dock_area_header_hit_tests {
+    use dock_core::{ColumnRect, DockMetrics, NodeId, Point, Rect, Size};
 
     #[test]
     fn column_header_takes_priority_over_its_overlapping_tab_header() {
         let column = Rect::new(Point::new(10.0, 20.0), Size::new(240.0, 500.0));
         let metrics = DockMetrics::default();
-        let reserved_controls_width = 2.0 * metrics.column_control_button_width;
+        let columns = [ColumnRect::new(NodeId::null(), column)];
 
         assert_eq!(
-            super::floating_column_title_pointer_region(
+            super::floating_dock_area_title_pointer_region(
                 column,
+                &columns,
                 Point::new(100.0, 30.0),
                 metrics,
-                reserved_controls_width,
             ),
             Some(true),
         );
         assert_eq!(
-            super::floating_column_title_pointer_region(
+            super::floating_dock_area_title_pointer_region(
                 column,
+                &columns,
                 Point::new(240.0, 30.0),
                 metrics,
-                reserved_controls_width,
             ),
             Some(false),
         );
         assert_eq!(
-            super::floating_column_title_pointer_region(
+            super::floating_dock_area_title_pointer_region(
                 column,
+                &columns,
                 Point::new(100.0, 60.0),
                 metrics,
-                reserved_controls_width,
             ),
             None,
         );
