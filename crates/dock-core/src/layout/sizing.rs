@@ -591,9 +591,10 @@ pub(super) fn distribute_heights_with_minimums(
 
 impl Layout {
     /// Computes the structural minimum layout size using the same rules as geometry.
-    /// Expanded Tabs include their header, strip, and active panel minimum. Columns
-    /// reserve their own header and one compact strip per Group so they can adapt
-    /// to short viewports without scrolling; Expanded Columns retain their width.
+    /// Standalone Tabs reserve separate header and tab-strip rows; a Tabs node owned
+    /// directly by a Column uses one combined row, matching Column Group geometry.
+    /// Expanded Columns reserve their own header and one compact strip per Group;
+    /// rail Columns reserve only their flattened panel slots.
     pub(crate) fn minimum_node_size(
         &self,
         node_id: NodeId,
