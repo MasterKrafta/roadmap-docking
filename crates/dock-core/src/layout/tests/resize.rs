@@ -55,12 +55,12 @@ fn c45_resize_groups_changes_only_adjacent_pair_and_reports_minimum_clamp() {
 
     assert!(matches!(
         outcome.actual_value,
-        Some(CommandValue::GroupBoundaryDelta(delta)) if (delta - 50.0).abs() < 1.0e-3
+        Some(CommandValue::GroupBoundaryDelta(delta)) if (delta - 78.0).abs() < 1.0e-3
     ));
     let Node::Column(value) = layout.node(column).unwrap() else {
         panic!("target should remain a Column");
     };
-    let expected_weight_delta = 50.0 / 824.0;
+    let expected_weight_delta = 78.0 / 824.0;
     assert!((value.group_ratios[0] - (1.0 / 3.0 + expected_weight_delta)).abs() < 1.0e-4);
     assert!((value.group_ratios[1] - (0.25 - expected_weight_delta)).abs() < 1.0e-4);
     assert_eq!(value.group_ratios[2], before_ratios[2]);
@@ -84,14 +84,14 @@ fn c45_resize_groups_changes_only_adjacent_pair_and_reports_minimum_clamp() {
             &metrics,
         )
         .unwrap();
-    let expected_min_delta = 176.0 - 824.0 / 3.0;
+    let expected_min_delta = 148.0 - 824.0 / 3.0;
     assert!(matches!(
         min_clamp.actual_value,
         Some(CommandValue::GroupBoundaryDelta(delta)) if (delta - expected_min_delta).abs() < 1.0e-3
     ));
     assert!(matches!(
         layout.node(column),
-        Some(Node::Column(value)) if (value.group_ratios[0] - (176.0 / 824.0)).abs() < 1.0e-4
+        Some(Node::Column(value)) if (value.group_ratios[0] - (148.0 / 824.0)).abs() < 1.0e-4
     ));
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
@@ -128,15 +128,15 @@ fn c45_resize_groups_cannot_shrink_below_tab_chrome_and_panel_minimum() {
     let mut layout = builder.build();
     let before = format!("{layout:?}");
 
-    // available_height excludes the 4 px splitter. Both groups start at 176 px;
-    // group A requires 28 px header + 28 px strip + 120 px panel content.
+    // available_height excludes the 4 px splitter. Both groups start at 148 px;
+    // group A's one-row chrome plus panel content is exactly 148 px.
     let outcome = layout
         .apply(
             DockCommand::ResizeGroups {
                 column,
                 boundary_index: 0,
                 delta: -1.0,
-                available_height: 352.0,
+                available_height: 296.0,
             },
             &metrics,
         )
@@ -151,7 +151,7 @@ fn c45_resize_groups_cannot_shrink_below_tab_chrome_and_panel_minimum() {
     assert_eq!(format!("{layout:?}"), before);
 
     let rects = layout
-        .compute_rects(Rect::new(Point::ZERO, Size::new(1000.0, 356.0)), &metrics)
+        .compute_rects(Rect::new(Point::ZERO, Size::new(1000.0, 332.0)), &metrics)
         .unwrap();
     assert_eq!(
         rects
@@ -162,7 +162,7 @@ fn c45_resize_groups_cannot_shrink_below_tab_chrome_and_panel_minimum() {
             .rect
             .size
             .height,
-        176.0
+        148.0
     );
     assert_eq!(
         rects
@@ -173,7 +173,7 @@ fn c45_resize_groups_cannot_shrink_below_tab_chrome_and_panel_minimum() {
             .rect
             .size
             .height,
-        176.0
+        148.0
     );
     assert!(rects.vertical_overflow.is_empty());
 }
@@ -209,22 +209,22 @@ fn c45_resize_groups_rejects_height_below_shared_expanded_group_minimums() {
     builder.main_area(DockSide::Right, column);
     let mut layout = builder.build();
 
-    // The common minimum contract is header + tab strip + minimum panel height.
+    // Direct Column Groups share one header/strip row above their minimum panel content.
     let minimum_a = layout.minimum_node_size(group_a, &metrics).unwrap().height;
     let minimum_b = layout.minimum_node_size(group_b, &metrics).unwrap().height;
-    assert_eq!(minimum_a, 176.0);
-    assert_eq!(minimum_b, 156.0);
+    assert_eq!(minimum_a, 148.0);
+    assert_eq!(minimum_b, 128.0);
     let before = format!("{layout:?}");
 
-    // available_height excludes the splitter. 331 px cannot accommodate both
-    // groups' 176 px and 156 px minimums, even before the 4 px splitter gap.
+    // available_height excludes the splitter. 275 px cannot accommodate the
+    // combined 276 px minimum of both Groups.
     let error = layout
         .apply(
             DockCommand::ResizeGroups {
                 column,
                 boundary_index: 0,
                 delta: 1.0,
-                available_height: 331.0,
+                available_height: 275.0,
             },
             &metrics,
         )
@@ -241,7 +241,7 @@ fn c45_resize_groups_rejects_height_below_shared_expanded_group_minimums() {
 
     // Geometry honors those same minima and includes the splitter in the column.
     let rects = layout
-        .compute_rects(Rect::new(Point::ZERO, Size::new(1000.0, 336.0)), &metrics)
+        .compute_rects(Rect::new(Point::ZERO, Size::new(1000.0, 312.0)), &metrics)
         .unwrap();
     assert_eq!(
         rects
@@ -309,19 +309,19 @@ fn c45_resize_groups_uses_effective_collapsed_height_when_tab_strip_is_taller() 
     );
     assert_eq!(
         layout.minimum_node_size(expanded, &metrics).unwrap().height,
-        170.0
+        142.0
     );
     let before = format!("{layout:?}");
 
-    // The effective collapsed height is 42 px, leaving only 169 px for an
-    // expanded group whose minimum is 28 + 42 + 100 = 170 px.
+    // The effective collapsed height is 42 px; the expanded Group needs
+    // 142 px (the taller 42 px row plus 100 px panel content).
     let error = layout
         .apply(
             DockCommand::ResizeGroups {
                 column,
                 boundary_index: 0,
                 delta: 5.0,
-                available_height: 211.0,
+                available_height: 183.0,
             },
             &metrics,
         )
@@ -342,7 +342,7 @@ fn c45_resize_groups_uses_effective_collapsed_height_when_tab_strip_is_taller() 
                 column,
                 boundary_index: 0,
                 delta: 5.0,
-                available_height: 212.0,
+                available_height: 184.0,
             },
             &metrics,
         )
@@ -356,9 +356,9 @@ fn c45_resize_groups_uses_effective_collapsed_height_when_tab_strip_is_taller() 
     assert_eq!(layout.validate(&metrics), Ok(()));
 
     // Geometry consumes the same minimum contract: 42 px collapsed strip,
-    // 170 px expanded group, and one 4 px splitter.
+    // 142 px expanded group, and one 4 px splitter.
     let rects = layout
-        .compute_rects(Rect::new(Point::ZERO, Size::new(1000.0, 216.0)), &metrics)
+        .compute_rects(Rect::new(Point::ZERO, Size::new(1000.0, 220.0)), &metrics)
         .unwrap();
     assert_eq!(
         rects
@@ -380,7 +380,7 @@ fn c45_resize_groups_uses_effective_collapsed_height_when_tab_strip_is_taller() 
             .rect
             .size
             .height,
-        170.0
+        142.0
     );
     assert!(rects.vertical_overflow.is_empty());
 }
@@ -461,12 +461,12 @@ fn c45_collapsed_group_has_fixed_height_and_cannot_be_resized_at_its_boundary() 
         .unwrap();
     assert!(matches!(
         expanded_boundary.actual_value,
-        Some(CommandValue::GroupBoundaryDelta(delta)) if (delta - 100.0).abs() < 1.0e-3
+        Some(CommandValue::GroupBoundaryDelta(delta)) if (delta - 148.0).abs() < 1.0e-3
     ));
     let Node::Column(value) = layout.node(column).unwrap() else {
         panic!("target should remain a Column");
     };
-    let expected_weight_delta = 100.0 * 0.5 / 472.0;
+    let expected_weight_delta = 148.0 * 0.5 / 472.0;
     assert_eq!(value.group_ratios[0], 0.5);
     assert!((value.group_ratios[1] - (0.25 + expected_weight_delta)).abs() < 1.0e-4);
     assert!((value.group_ratios[2] - (0.25 - expected_weight_delta)).abs() < 1.0e-4);
@@ -566,7 +566,7 @@ fn c45_reset_group_ratios_respects_minimums_when_equal_share_would_be_too_small(
         .unwrap();
     assert_eq!(
         outcome.actual_value,
-        Some(CommandValue::GroupRatios(vec![0.6, 0.4]))
+        Some(CommandValue::GroupRatios(vec![188.0 / 360.0, 172.0 / 360.0]))
     );
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
@@ -1107,17 +1107,18 @@ fn c46_resize_groups_clamps_against_tab_chrome_and_restores_inverse_atomically()
     builder.main_area(DockSide::Right, column);
     let mut layout = builder.build();
 
-    // The command minimum must include the header, tab strip and panel content.
+    // Direct Column Groups share one row whose height is the larger of the
+    // header and tab strip, plus the panel content minimum.
     assert_eq!(
         layout.minimum_node_size(group_a, &metrics).unwrap().height,
-        200.0
+        164.0
     );
     assert_eq!(
         layout.minimum_node_size(group_b, &metrics).unwrap().height,
-        160.0
+        124.0
     );
 
-    // 359 px cannot fit both group minima (200 + 160), even before the splitter.
+    // 287 px cannot fit both one-row group minima (164 + 124), even before the splitter.
     let before = format!("{layout:?}");
     let before_version = layout.version();
     let error = layout
@@ -1126,7 +1127,7 @@ fn c46_resize_groups_clamps_against_tab_chrome_and_restores_inverse_atomically()
                 column,
                 boundary_index: 0,
                 delta: 1.0,
-                available_height: 359.0,
+                available_height: 287.0,
             },
             &metrics,
         )
@@ -1141,8 +1142,8 @@ fn c46_resize_groups_clamps_against_tab_chrome_and_restores_inverse_atomically()
     assert_eq!(format!("{layout:?}"), before);
     assert_eq!(layout.version(), before_version);
 
-    // The requested +500 px clamps to +90 px so group B retains its 160 px
-    // minimum (36 header + 44 tab strip + 80 panel content).
+    // The requested +500 px clamps to +126 px so group B retains its 124 px
+    // minimum (44 px shared row + 80 px panel content).
     let outcome = layout
         .apply(
             DockCommand::ResizeGroups {
@@ -1156,13 +1157,13 @@ fn c46_resize_groups_clamps_against_tab_chrome_and_restores_inverse_atomically()
         .unwrap();
     assert!(matches!(
         outcome.actual_value,
-        Some(CommandValue::GroupBoundaryDelta(delta)) if (delta - 90.0).abs() < 1.0e-3
+        Some(CommandValue::GroupBoundaryDelta(delta)) if (delta - 126.0).abs() < 1.0e-3
     ));
     let inverse = outcome
         .inverse
         .expect("successful resize must provide inverse");
 
-    let viewport = Rect::new(Point::ZERO, Size::new(1000.0, 504.0));
+    let viewport = Rect::new(Point::ZERO, Size::new(1000.0, 536.0));
     let group_height = |layout: &Layout, group| {
         let rects = layout.compute_rects(viewport, &metrics).unwrap();
         rects
@@ -1174,8 +1175,8 @@ fn c46_resize_groups_clamps_against_tab_chrome_and_restores_inverse_atomically()
             .size
             .height
     };
-    assert!((group_height(&layout, group_a) - 340.0).abs() < 1.0e-3);
-    assert!((group_height(&layout, group_b) - 160.0).abs() < 1.0e-3);
+    assert!((group_height(&layout, group_a) - 376.0).abs() < 1.0e-3);
+    assert!((group_height(&layout, group_b) - 124.0).abs() < 1.0e-3);
 
     layout.apply(inverse, &metrics).unwrap();
     assert!(matches!(
