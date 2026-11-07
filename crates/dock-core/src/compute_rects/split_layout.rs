@@ -23,11 +23,10 @@ pub(super) fn layout_split(
     )
 }
 
-/// Lays out a floating composition while respecting its root component's header.
+/// Lays out a floating composition below its native window title row.
 ///
-/// A floating root that is itself a Column reuses the Column header as its window
-/// header. More complex compositions containing Columns keep a separate outer
-/// floating title row.
+/// A Column keeps its own header inside the floating client area, independent
+/// from the title row shared by the native floating window.
 pub(super) fn layout_floating_root(
     layout: &Layout,
     id: NodeId,
