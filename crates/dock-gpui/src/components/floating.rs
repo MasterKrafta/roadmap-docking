@@ -927,6 +927,10 @@ impl Render for FloatingHost {
                                 .hit_floating_window(input_window_id, group, point)
                                 .ok()
                         });
+                        eprintln!(
+                            "[DOCK-INPUT][floating] down window={:?} floating_group={:?} point=({:.1}, {:.1}) hit={:?}",
+                            input_window_id, group, point.x, point.y, hit.unwrap_or(dock_core::HitResult::Miss)
+                        );
 
                         // A DockTab inside an already-floating DockColumnView moves
                         // that same native Column window. It must not run the old
@@ -951,6 +955,10 @@ impl Render for FloatingHost {
                                     )
                                 })
                             {
+                                eprintln!(
+                                    "[DOCK-INPUT][floating] window_move_start source=DockTab group={:?} point=({:.1}, {:.1})",
+                                    group, point.x, point.y
+                                );
                                 tab_press_for_down.set(None);
                                 app.stop_propagation();
                             }
@@ -987,6 +995,10 @@ impl Render for FloatingHost {
                                     manager.begin_existing_window_move(group, point, manager_cx)
                                 })
                             {
+                                eprintln!(
+                                    "[DOCK-INPUT][floating] window_move_start source=ColumnHeader group={:?} point=({:.1}, {:.1})",
+                                    group, point.x, point.y
+                                );
                                 app.stop_propagation();
                             }
                             // Also reserve the non-draggable header controls. They must
@@ -1023,6 +1035,10 @@ impl Render for FloatingHost {
                                     manager.begin_existing_window_move(group, point, manager_cx)
                                 })
                             {
+                                eprintln!(
+                                    "[DOCK-INPUT][floating] window_move_start source=HitResult::FloatingTitle group={:?} point=({:.1}, {:.1})",
+                                    group, point.x, point.y
+                                );
                                 app.stop_propagation();
                             }
                             return;
@@ -1063,6 +1079,10 @@ impl Render for FloatingHost {
                                 origin: point,
                                 layout_version,
                             }));
+                            eprintln!(
+                                "[DOCK-INPUT][floating] tab_press group={:?} panel={:?} point=({:.1}, {:.1})",
+                                tab_group, panel, point.x, point.y
+                            );
                             // Capture at press so leaving this native window before
                             // the next GPUI move event still reaches the drag pipeline.
                             window.capture_pointer(hitbox);
@@ -1097,6 +1117,15 @@ impl Render for FloatingHost {
                             press_origin: press.origin,
                             layout_version: press.layout_version,
                         };
+                        let was_dragging = controller_for_move.update(app, |controller, _| {
+                            matches!(
+                                controller.drag().session().state(),
+                                dock_core::DragState::Dragging {
+                                    payload: dock_core::DragPayload::Panel { panel },
+                                    ..
+                                } if panel == press.panel
+                            )
+                        });
                         let dragging = update_floating_tab_drag(
                             &controller_for_move,
                             drag,
@@ -1105,6 +1134,17 @@ impl Render for FloatingHost {
                         );
                         if !dragging {
                             return;
+                        }
+                        if !was_dragging {
+                            let hit = controller_for_move.update(app, |controller, _| {
+                                controller
+                                    .hit_floating_window(input_window_id, group, point)
+                                    .unwrap_or(dock_core::HitResult::Miss)
+                            });
+                            eprintln!(
+                                "[DOCK-INPUT][floating] drag_start group={:?} panel={:?} origin=({:.1}, {:.1}) pointer=({:.1}, {:.1}) hit={:?}",
+                                group, press.panel, press.origin.x, press.origin.y, point.x, point.y, hit
+                            );
                         }
 
                         // Capture only after the Core threshold is crossed. A
@@ -1201,12 +1241,32 @@ impl Render for FloatingHost {
                             press_origin: press.origin,
                             layout_version: press.layout_version,
                         };
+                        let was_dragging = controller_for_up.update(app, |controller, _| {
+                            matches!(
+                                controller.drag().session().state(),
+                                dock_core::DragState::Dragging {
+                                    payload: dock_core::DragPayload::Panel { panel },
+                                    ..
+                                } if panel == press.panel
+                            )
+                        });
                         let dragging = update_floating_tab_drag(
                             &controller_for_up,
                             drag,
                             point,
                             app,
                         );
+                        if dragging && !was_dragging {
+                            let hit = controller_for_up.update(app, |controller, _| {
+                                controller
+                                    .hit_floating_window(input_window_id, group, point)
+                                    .unwrap_or(dock_core::HitResult::Miss)
+                            });
+                            eprintln!(
+                                "[DOCK-INPUT][floating] drag_start_on_release group={:?} panel={:?} origin=({:.1}, {:.1}) pointer=({:.1}, {:.1}) hit={:?}",
+                                group, press.panel, press.origin.x, press.origin.y, point.x, point.y, hit
+                            );
+                        }
                         if dragging {
                             let leaves_source = if let Some(zone) =
                                 dock_component_tab_zones_for_up.get(&press.panel).copied()
