@@ -195,6 +195,8 @@ pub struct FloatingWindowManager {
     /// Group whose floating host is being created for an active native tear-off.
     /// Reconciliation keeps it hidden until the caller positions the HWND.
     pending_tearoff_group: Option<FloatingGroupId>,
+    /// Tear-off hosts that must remain hidden until GPUI renders their first frame.
+    pending_first_frame_show: HashSet<FloatingGroupId>,
     registry: PanelWindowRegistry,
     host_registry: CompositionHostRegistry,
     native_ops: SystemNativeWindowOps,
@@ -212,6 +214,7 @@ impl FloatingWindowManager {
             native_resize: None,
             reconciling: false,
             pending_tearoff_group: None,
+            pending_first_frame_show: HashSet::new(),
             registry: PanelWindowRegistry::default(),
             host_registry: CompositionHostRegistry::default(),
             native_ops: SystemNativeWindowOps,
@@ -249,6 +252,94 @@ impl FloatingWindowManager {
         let panel = self.host_registry.panel_for_group(group)?;
         let entry = self.registry.windows.get(&panel)?;
         Some((panel, entry.native_window?, entry.window_id))
+    }
+
+    /// Reveals a newly assigned tear-off host only after GPUI has rendered the
+    /// first frame containing its complete Dock subtree.
+    fn show_panel_after_first_frame(
+        &mut self,
+        panel: PanelId,
+        group: FloatingGroupId,
+        native_window: NativeWindowId,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(entry) = self.registry.windows.get(&panel) else {
+            return false;
+        };
+        let window = entry.window;
+        let manager = cx.entity().downgrade();
+
+        self.pending_first_frame_show.insert(group);
+        match window.update(cx, move |_, window, _| {
+            window.on_next_frame(move |_, app| {
+                let Some(manager) = manager.upgrade() else {
+                    return;
+                };
+
+                if let Err(error) = manager.update(app, |manager, _| {
+                    if !manager.pending_first_frame_show.remove(&group) {
+                        return;
+                    }
+
+                    let is_current_host = manager
+                        .registry
+                        .windows
+                        .get(&panel)
+                        .is_some_and(|entry| {
+                            entry.host_group == Some(group)
+                                && entry.native_window == Some(native_window)
+                        });
+                    if !is_current_host {
+                        return;
+                    }
+
+                    match manager.native_ops.show_no_activate(native_window) {
+                        Ok(()) => {
+                            if let Some(entry) = manager.registry.windows.get_mut(&panel) {
+                                entry.visibility = PanelWindowVisibility::Visible;
+                            }
+                        }
+                        Err(error) => tracing::warn!(
+                            ?group,
+                            %error,
+                            "could not show floating tear-off after its first GPUI frame"
+                        ),
+                    }
+                }) {
+                    tracing::warn!(
+                        ?group,
+                        %error,
+                        "could not complete deferred floating-window show"
+                    );
+                }
+            });
+        }) {
+            Ok(()) => true,
+            Err(error) => {
+                self.pending_first_frame_show.remove(&group);
+                tracing::warn!(
+                    ?group,
+                    %error,
+                    "could not schedule first-frame show for floating tear-off"
+                );
+                match self.native_ops.show_no_activate(native_window) {
+                    Ok(()) => {
+                        if let Some(entry) = self.registry.windows.get_mut(&panel) {
+                            entry.visibility = PanelWindowVisibility::Visible;
+                        }
+                        true
+                    }
+                    Err(error) => {
+                        tracing::warn!(
+                            ?group,
+                            %error,
+                            "could not show floating tear-off window"
+                        );
+                        false
+                    }
+                }
+            }
+        }
     }
 
     /// Connects the manager to the main GPUI window and the shared controller.
@@ -629,16 +720,12 @@ impl FloatingWindowManager {
             high_resolution_timer,
             drop_target: None,
         });
-        if let Err(error) = self.native_ops.show_no_activate(native_window) {
+        if !self.show_panel_after_first_frame(panel, group, native_window, cx) {
             self.native_move = None;
             if high_resolution_timer {
                 let _ = self.native_ops.end_high_resolution_timer();
             }
-            tracing::warn!(?group, %error, "could not show native tear-off window");
             return false;
-        }
-        if let Some(entry) = self.registry.windows.get_mut(&panel) {
-            entry.visibility = PanelWindowVisibility::Visible;
         }
 
         self.schedule_native_move(cx, group, window_id);
@@ -704,16 +791,12 @@ impl FloatingWindowManager {
             high_resolution_timer,
             drop_target: None,
         });
-        if let Err(error) = self.native_ops.show_no_activate(native_window) {
+        if !self.show_panel_after_first_frame(panel, group, native_window, cx) {
             self.native_move = None;
             if high_resolution_timer {
                 let _ = self.native_ops.end_high_resolution_timer();
             }
-            tracing::warn!(?group, %error, "could not show floating-tab tear-off window");
             return false;
-        }
-        if let Some(entry) = self.registry.windows.get_mut(&panel) {
-            entry.visibility = PanelWindowVisibility::Visible;
         }
 
         self.schedule_native_move(cx, group, window_id);
@@ -1528,6 +1611,7 @@ impl FloatingWindowManager {
         for group in &groups {
             if blocked_groups.contains(&group.id)
                 || self.pending_tearoff_group == Some(group.id)
+                || self.pending_first_frame_show.contains(&group.id)
                 || self.native_move.is_some_and(|session| {
                     session.group == group.id
                         && session.kind == NativeMoveKind::TearOff
