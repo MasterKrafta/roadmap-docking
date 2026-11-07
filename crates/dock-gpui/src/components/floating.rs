@@ -898,8 +898,8 @@ impl Render for FloatingHost {
             .overflow_hidden()
             .bg(rgb(self.theme.colors.panel_surface_background));
 
-        // Existing-window movement starts from the title grip. Tab tear-off
-        // uses the shared TabStrip boundary below; close controls remain clickable.
+        // Existing floating Columns can be moved from ColumnHeader or DockTab.
+        // Legacy TabHeaderView instances keep their individual-panel tear-off path.
         let manager = self.manager.clone();
         let controller = self.controller.clone();
         let tab_press = self.tab_press.clone();
