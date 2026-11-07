@@ -642,6 +642,10 @@ impl FloatingWindowManager {
         }
 
         self.schedule_native_move(cx, group, window_id);
+        // The FloatingHost may have rendered once while the native window was
+        // being created, before native_move carried the final header visibility.
+        // Notify its manager observer so the first visible frame uses hide_header.
+        cx.notify();
         true
     }
 
@@ -713,6 +717,9 @@ impl FloatingWindowManager {
         }
 
         self.schedule_native_move(cx, group, window_id);
+        // This new host also needs a render after its hidden-header move state
+        // has been installed; its initial render can precede this state.
+        cx.notify();
         true
     }
 
