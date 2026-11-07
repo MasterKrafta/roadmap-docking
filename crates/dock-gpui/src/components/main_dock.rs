@@ -48,7 +48,7 @@ impl MainDockView {
         controller: Entity<DockController>,
         theme: Theme,
     ) -> impl IntoElement {
-        let mut layer = div().absolute().top_0().left_0().size_full();
+        let mut layer = crate::dock_components::GroupColumnsView::render_root();
 
         for column in columns {
             let mode = column_modes
@@ -117,7 +117,7 @@ impl MainDockView {
                         .top(px(column.rect.origin.y))
                         .w(px(column.rect.size.width))
                         .h(px(column.rect.size.height))
-                        .child(crate::dock_components::DockColumnView::render_active(
+                        .child(crate::dock_components::GroupColumnsView::render_active_column(
                             format!("dock-components-{:?}", column.column),
                             title,
                             panel_view,
