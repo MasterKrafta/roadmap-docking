@@ -35,8 +35,12 @@ fn c46_float_panel_keeps_panel_instance_and_id() {
 
     let (floating_id, floating) = layout.floating_groups().next().unwrap();
     let floating_root = layout.dock_area(floating.area).unwrap().root;
+    let floating_group = match layout.node(floating_root) {
+        Some(Node::Column(column)) if column.groups.len() == 1 => column.groups[0],
+        other => panic!("expected a floating Column with one Group, got {other:?}"),
+    };
     assert!(matches!(
-        layout.node(floating_root),
+        layout.node(floating_group),
         Some(Node::Tabs(tabs))
             if tabs.children == vec![moving_panel_node]
                 && tabs.active_index == 0
@@ -111,8 +115,12 @@ fn c46_float_panel_from_floating_tabs_keeps_the_source_window_when_tabs_remain()
 
     let extracted = layout.floating_group(extracted_group).unwrap();
     let extracted_root = layout.dock_area(extracted.area).unwrap().root;
+    let extracted_group_node = match layout.node(extracted_root) {
+        Some(Node::Column(column)) if column.groups.len() == 1 => column.groups[0],
+        other => panic!("expected extracted floating Column with one Group, got {other:?}"),
+    };
     assert!(matches!(
-        layout.node(extracted_root),
+        layout.node(extracted_group_node),
         Some(Node::Tabs(tabs))
             if tabs.children == vec![moving_node]
                 && tabs.active_index == 0
@@ -162,8 +170,12 @@ fn c46_extracting_the_last_floating_tab_removes_the_empty_source_window() {
     assert!(layout.panel_instance(panel).is_some());
     let (_, extracted) = layout.floating_groups().next().unwrap();
     let extracted_root = layout.dock_area(extracted.area).unwrap().root;
+    let extracted_group_node = match layout.node(extracted_root) {
+        Some(Node::Column(column)) if column.groups.len() == 1 => column.groups[0],
+        other => panic!("expected extracted floating Column with one Group, got {other:?}"),
+    };
     assert!(matches!(
-        layout.node(extracted_root),
+        layout.node(extracted_group_node),
         Some(Node::Tabs(tabs)) if tabs.children == vec![panel_node]
     ));
     assert_eq!(layout.panel_instances().count(), 1);
@@ -267,7 +279,13 @@ fn float_group_uses_existing_tabs_as_floating_root() {
         .unwrap();
 
     let (_, floating) = layout.floating_groups().next().unwrap();
-    assert_eq!(layout.dock_area(floating.area).unwrap().root, floating_tabs);
+    let floating_root = layout.dock_area(floating.area).unwrap().root;
+    assert!(matches!(
+        layout.node(floating_root),
+        Some(Node::Column(column))
+            if column.groups == vec![floating_tabs]
+                && column.width >= metrics.min_column_width
+    ));
     assert!(matches!(layout.node(floating_tabs), Some(Node::Tabs(_))));
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
@@ -307,8 +325,12 @@ fn float_panel_uses_one_tab_floating_root() {
 
     let (_, floating) = layout.floating_groups().next().unwrap();
     let floating_root = layout.dock_area(floating.area).unwrap().root;
+    let floating_group = match layout.node(floating_root) {
+        Some(Node::Column(column)) if column.groups.len() == 1 => column.groups[0],
+        other => panic!("expected floating Column with one Group, got {other:?}"),
+    };
     assert!(matches!(
-        layout.node(floating_root),
+        layout.node(floating_group),
         Some(Node::Tabs(tabs)) if tabs.children == vec![moving_node]
     ));
     assert!(matches!(
@@ -1327,7 +1349,7 @@ fn floating_geometry_commands_report_the_affected_root_for_ui_invalidation() {
 }
 
 #[test]
-fn floating_vertical_stack_reserves_title_row_when_first_group_collapsed() {
+fn floating_vertical_stack_starts_at_window_top_when_first_group_collapsed() {
     let metrics = DockMetrics::default();
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
 
@@ -1362,7 +1384,7 @@ fn floating_vertical_stack_reserves_title_row_when_first_group_collapsed() {
         .iter()
         .find(|entry| entry.group == top_group)
         .unwrap();
-    assert_eq!(top_rect.rect.origin.y, metrics.header_height);
+    assert_eq!(top_rect.rect.origin.y, 0.0);
     assert!(rects.groups.iter().any(|entry| entry.group == bottom_group));
 }
 
