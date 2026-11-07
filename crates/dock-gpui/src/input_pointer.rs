@@ -913,7 +913,7 @@ fn uses_dock_component_group(
     })
 }
 
-fn is_dock_component_tab_group(layout: &dock_core::Layout, group_id: NodeId) -> bool {
+pub(super) fn is_dock_component_tab_group(layout: &dock_core::Layout, group_id: NodeId) -> bool {
     let is_single_panel_group = matches!(
         layout.node(group_id),
         Some(Node::Tabs(tabs))
