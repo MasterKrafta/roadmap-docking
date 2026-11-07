@@ -400,9 +400,19 @@ pub(crate) fn begin_native_tearoff(
     app: &mut App,
 ) -> bool {
     let candidate = controller.update(app, |controller, _| {
-        let (payload, handle) = match controller.drag().session().state() {
-            DragState::Dragging { payload, .. } => (payload, controller.drag().session().handle()?),
+        let (payload, handle, origin) = match controller.drag().session().state() {
+            DragState::Dragging {
+                payload,
+                origin,
+                ..
+            } => (payload, controller.drag().session().handle()?, origin),
             _ => return None,
+        };
+        let hide_column_header = match (handle, payload) {
+            (DragHandle::ColumnHeader, DragPayload::Column { column }) => {
+                column_drag_started_from_tab(controller, column, origin)
+            }
+            _ => false,
         };
         let local_bounds = floating_bounds(controller, payload, pointer)?;
         let command = match (handle, payload) {
@@ -423,10 +433,10 @@ pub(crate) fn begin_native_tearoff(
             }
             _ => return None,
         };
-        Some((command, local_bounds))
+        Some((command, local_bounds, hide_column_header))
     });
 
-    let Some((command, local_bounds)) = candidate else {
+    let Some((command, local_bounds, hide_column_header)) = candidate else {
         return false;
     };
     let model_bounds = manager.update(app, |manager, _| {
@@ -471,7 +481,14 @@ pub(crate) fn begin_native_tearoff(
         return false;
     };
     let started = manager.update(app, |manager, manager_cx| {
-        manager.begin_tearoff_move(group, pointer, local_bounds, model_bounds, manager_cx)
+        manager.begin_tearoff_move(
+            group,
+            pointer,
+            local_bounds,
+            model_bounds,
+            hide_column_header,
+            manager_cx,
+        )
     });
     if !started {
         let _ = controller.update(app, |controller, cx| {
@@ -687,6 +704,7 @@ fn floating_bounds_for_request(
     // Capture the source rectangle from the same Core geometry used by the
     // drag hit-testing pipeline. The press point then gives us the cursor's
     // offset within the dragged element.
+    let column_header_height = controller.metrics().column_header_height;
     let source_rect = {
         let rects = controller.geometry().ok()?;
         match (request.handle, request.payload) {
@@ -711,11 +729,14 @@ fn floating_bounds_for_request(
                 .iter()
                 .find(|group_rect| group_rect.group == group)
                 .map(|group_rect| group_rect.rect)?,
-            (DragHandle::ColumnHeader, DragPayload::Column { column }) => rects
-                .columns
-                .iter()
-                .find(|column_rect| column_rect.column == column)
-                .map(|column_rect| column_rect.rect)?,
+            (DragHandle::ColumnHeader, DragPayload::Column { column }) => {
+                let source = rects
+                    .columns
+                    .iter()
+                    .find(|column_rect| column_rect.column == column)?
+                    .rect;
+                column_tab_floating_bounds(source, request.origin, column_header_height)?
+            }
             (
                 DragHandle::FloatingCapture | DragHandle::FloatingTitle,
                 DragPayload::FloatingGroup { group },
@@ -743,6 +764,54 @@ fn floating_bounds_for_request(
     };
 
     desired_floating_bounds(source_rect, preferred_size, request.origin, request.point)
+}
+
+/// True when a ColumnHeader drag was initiated from the DockTab row,
+/// rather than from ColumnDragArea. Both use the same Core handle and payload;
+/// their original pointer position distinguishes the visual grip.
+fn column_drag_started_from_tab(
+    controller: &mut DockController,
+    column: NodeId,
+    origin: Point,
+) -> bool {
+    let header_height = controller.metrics().column_header_height;
+    let source = controller
+        .geometry()
+        .ok()
+        .and_then(|rects| {
+            rects
+                .columns
+                .iter()
+                .find(|rect| rect.column == column)
+                .map(|rect| rect.rect)
+        });
+    source.is_some_and(|rect| {
+        origin.y >= rect.origin.y + header_height.min(rect.size.height)
+    })
+}
+
+/// Crops the hidden ColumnHeader out of the detached native window bounds.
+/// The pointer offset is then measured from DockTab's new top edge, not from
+/// the removed header, keeping the tab under the cursor without moving it.
+fn column_tab_floating_bounds(
+    source: Rect,
+    origin: Point,
+    header_height: f32,
+) -> Option<Rect> {
+    let hidden_height = header_height.max(0.0).min(source.size.height);
+    if origin.y < source.origin.y + hidden_height {
+        return Some(source);
+    }
+
+    let height = source.size.height - hidden_height;
+    if height <= 0.0 {
+        return None;
+    }
+
+    Some(Rect::new(
+        Point::new(source.origin.x, source.origin.y + hidden_height),
+        Size::new(source.size.width, height),
+    ))
 }
 
 /// Builds an adapter-side bounds proposal without applying viewport or
@@ -777,7 +846,7 @@ fn desired_floating_bounds(
 mod floating_bounds_tests {
     use dock_core::{Point, Rect, Size};
 
-    use super::desired_floating_bounds;
+    use super::{column_tab_floating_bounds, desired_floating_bounds};
 
     #[test]
     fn desired_bounds_preserve_the_cursor_offset_without_viewport_clamping() {
@@ -793,6 +862,39 @@ mod floating_bounds_tests {
         assert_eq!(
             bounds,
             Rect::new(Point::new(1_360.0, 925.0), Size::new(640.0, 480.0))
+        );
+    }
+
+    #[test]
+    fn dock_tab_detach_removes_column_header_area_and_preserves_grab_offset() {
+        let source = Rect::new(Point::new(100.0, 200.0), Size::new(300.0, 500.0));
+        let pointer_origin = Point::new(120.0, 250.0);
+        let detached = column_tab_floating_bounds(source, pointer_origin, 32.0).unwrap();
+
+        assert_eq!(
+            detached,
+            Rect::new(Point::new(100.0, 232.0), Size::new(300.0, 468.0))
+        );
+
+        let floating = desired_floating_bounds(
+            detached,
+            detached.size,
+            pointer_origin,
+            Point::new(500.0, 600.0),
+        )
+        .unwrap();
+        assert_eq!(
+            floating,
+            Rect::new(Point::new(480.0, 582.0), Size::new(300.0, 468.0))
+        );
+    }
+
+    #[test]
+    fn column_header_drag_keeps_the_full_column_bounds() {
+        let source = Rect::new(Point::new(100.0, 200.0), Size::new(300.0, 500.0));
+        assert_eq!(
+            column_tab_floating_bounds(source, Point::new(120.0, 220.0), 32.0),
+            Some(source),
         );
     }
 
