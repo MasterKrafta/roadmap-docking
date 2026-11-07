@@ -11,10 +11,9 @@ use gpui::{
 };
 use ui::Theme;
 
-use crate::DockController;
+use crate::{DockController, dock_components::ColumnHeader};
 
 use super::{
-    column_header::ColumnHeaderView,
     context_menu::GroupMenuToggle,
     group::GroupView,
     panel_host::PanelHost,
@@ -196,17 +195,12 @@ impl ColumnView {
             .bg(rgb(theme.colors.dock_background))
             .child(scroll_viewport);
 
-        let header = ColumnHeaderView::render(
-            column.column,
-            mode,
-            column.rect.size.width,
-            metrics,
-            controller,
-            theme,
-        );
-
         if show_header {
-            root = root.child(header);
+            root = root.child(ColumnHeader::render(
+                format!("dock-components-{:?}", column.column),
+                metrics,
+                theme,
+            ));
         }
         root
     }
@@ -242,4 +236,3 @@ pub(crate) fn group_surface(
                 .bg(rgb(theme.colors.group_grip_background)),
         )
 }
-
