@@ -127,18 +127,9 @@ impl DockColumnView {
             .border_1()
             .border_color(rgb(theme.colors.group_frame_border));
 
-        column = if show_column_header {
-            column.child(ColumnHeader::render(id.clone(), metrics, theme))
-        } else {
-            // Keep the header's layout slot stable while its controls are hidden.
-            column.child(
-                div()
-                    .id(format!("{id}-header"))
-                    .w_full()
-                    .h(px(metrics.column_header_height))
-                    .flex_none(),
-            )
-        };
+        if show_column_header {
+            column = column.child(ColumnHeader::render(id.clone(), metrics, theme));
+        }
 
         column.child(
                 div()
