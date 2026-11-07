@@ -113,7 +113,6 @@ impl ColumnView {
                         raise_floating,
                         toggle_group_menu.clone(),
                         middle_click_closes_tabs,
-                        false,
                     ));
                 } else {
                     content = content.child(group_surface(*group, content_origin, metrics, theme));
