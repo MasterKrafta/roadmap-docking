@@ -880,7 +880,7 @@ fn dock_component_column_drag_target(
     hit: HitResult,
     point: Point,
 ) -> Option<NodeId> {
-    let column_id = {
+    let (column_id, group_id) = {
         let layout = controller.layout();
         let group_id = match hit {
             HitResult::TabHeader { group, .. }
@@ -899,7 +899,7 @@ fn dock_component_column_drag_target(
             return None;
         }
 
-        layout.nodes().find_map(|(column_id, node)| {
+        let column_id = layout.nodes().find_map(|(column_id, node)| {
             let Node::Column(column) = node else {
                 return None;
             };
@@ -907,7 +907,8 @@ fn dock_component_column_drag_target(
                 && column.groups.first() == Some(&group_id)
                 && is_main_dock_column(layout, column_id))
                 .then_some(column_id)
-        })?
+        })?;
+        (column_id, group_id)
     };
 
     let group_rect = {
@@ -915,11 +916,7 @@ fn dock_component_column_drag_target(
         rects
             .groups
             .iter()
-            .find(|rect| rect.group == controller.layout().nodes().find_map(|(id, node)| {
-                matches!(node, Node::Column(column) if id == column_id)
-                    .then(|| column.groups.first().copied())
-                    .flatten()
-            }).flatten()?)
+            .find(|rect| rect.group == group_id)
             .map(|rect| rect.rect)?
     };
     let drag_zone = DockTab::drag_zone(group_rect, controller.metrics());
