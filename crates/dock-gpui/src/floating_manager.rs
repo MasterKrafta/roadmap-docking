@@ -1079,40 +1079,32 @@ impl FloatingWindowManager {
             let scale = self.native_ops.scale_factor(state.native_window).ok()
                 .filter(|scale| scale.is_finite() && *scale > 0.0);
             let client_size = self.native_ops.client_size(state.native_window).ok();
-            let Some(rect) = native_rect else {
-                tracing::warn!(
-                    ?state.group,
-                    "could not read floating window bounds to restore ColumnHeader space"
-                );
-                self.native_move = None;
-                self.complete_native_move(state, floating_bounds, drop_target, cx);
-                return;
-            };
 
-            if let (Some(scale), Some(client_size)) = (scale, client_size) {
-                let header_pixels = physical_coordinate(metrics.column_header_height, scale);
-                let expanded_height = client_size.height.checked_add(header_pixels.unwrap_or(0));
-                let expanded_model_height = floating_bounds.size.height + metrics.column_header_height;
-                let new_position = header_pixels.and_then(|height| {
-                    rect.top.checked_sub(height).map(|top| PhysicalPoint {
-                        x: rect.left,
-                        y: top,
-                    })
-                });
-                let expanded_bounds = new_position.and_then(|position| {
-                    let bounds = Rect::new(
-                        Point::new(position.x as f32, position.y as f32),
-                        Size::new(floating_bounds.size.width, expanded_model_height),
-                    );
-                    bounds.validate_non_empty().ok().map(|_| (position, bounds))
-                });
+            if let (Some(rect), Some(scale), Some(client_size)) = (native_rect, scale, client_size) {
+                let expansion = physical_coordinate(metrics.column_header_height, scale)
+                    .and_then(|header_pixels| {
+                        let client_height = client_size.height.checked_add(header_pixels)?;
+                        let top = rect.top.checked_sub(header_pixels)?;
+                        let bounds = Rect::new(
+                            Point::new(rect.left as f32, top as f32),
+                            Size::new(
+                                floating_bounds.size.width,
+                                floating_bounds.size.height + metrics.column_header_height,
+                            ),
+                        );
+                        bounds.validate_non_empty().ok()?;
+                        Some((
+                            header_pixels,
+                            client_height,
+                            PhysicalPoint { x: rect.left, y: top },
+                            bounds,
+                        ))
+                    });
 
-                if let (Some(header_pixels), Some(height), Some((position, bounds))) =
-                    (header_pixels, expanded_height, expanded_bounds)
-                {
+                if let Some((header_pixels, client_height, position, bounds)) = expansion {
                     let expanded_client_size = PhysicalSize {
                         width: client_size.width,
-                        height,
+                        height: client_height,
                     };
                     match self.native_ops.resize_window(state.native_window, expanded_client_size) {
                         Ok(()) => match self.native_ops.move_window(state.native_window, position) {
@@ -1120,10 +1112,7 @@ impl FloatingWindowManager {
                                 floating_bounds = bounds;
                                 rollback_header_expansion = Some((
                                     client_size,
-                                    PhysicalPoint {
-                                        x: rect.left,
-                                        y: rect.top,
-                                    },
+                                    PhysicalPoint { x: rect.left, y: rect.top },
                                 ));
                                 tracing::debug!(
                                     ?state.group,
@@ -1148,7 +1137,17 @@ impl FloatingWindowManager {
                             );
                         }
                     }
+                } else {
+                    tracing::warn!(
+                        ?state.group,
+                        "could not calculate floating bounds with restored ColumnHeader"
+                    );
                 }
+            } else {
+                tracing::warn!(
+                    ?state.group,
+                    "could not read native floating geometry to restore ColumnHeader space"
+                );
             }
         }
 
@@ -1166,28 +1165,6 @@ impl FloatingWindowManager {
                 let _ = self.native_ops.resize_window(state.native_window, client_size);
                 let _ = self.native_ops.move_window(state.native_window, position);
             }
-            tracing::warn!(?state.group, %error, "could not commit native floating-window move");
-            self.cancel_controller_move(cx);
-        }
-        cx.notify();
-    }
-
-    fn complete_native_move(
-        &mut self,
-        state: NativeMoveSession,
-        floating_bounds: Rect,
-        drop_target: Option<(DropTarget, Point)>,
-        cx: &mut Context<Self>,
-    ) {
-        let result = self.controller.update(cx, |controller, controller_cx| {
-            controller.finish_tearoff_move_in(
-                state.group,
-                floating_bounds,
-                drop_target,
-                controller_cx,
-            )
-        });
-        if let Err(error) = result {
             tracing::warn!(?state.group, %error, "could not commit native floating-window move");
             self.cancel_controller_move(cx);
         }
