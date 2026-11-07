@@ -76,8 +76,14 @@ fn c46_float_panel_from_floating_tabs_keeps_the_source_window_when_tabs_remain()
         descriptors()[0].1,
     );
     let source_tabs = builder.tabs(vec![remaining_node, moving_node], 0, false);
+    let source_column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![source_tabs],
+        vec![1.0],
+    );
     let source_floating = builder.floating_group(
-        source_tabs,
+        source_column,
         Rect::new(Point::new(120.0, 140.0), Size::new(420.0, 300.0)),
         1,
     );
@@ -103,9 +109,13 @@ fn c46_float_panel_from_floating_tabs_keeps_the_source_window_when_tabs_remain()
     assert_eq!(source.area, source_area);
     assert_eq!(
         layout.dock_area(source_area).unwrap().root,
-        source_tabs,
-        "the original floating window keeps its remaining Tabs group"
+        source_column,
+        "the original floating window keeps its Column root"
     );
+    assert!(matches!(
+        layout.node(source_column),
+        Some(Node::Column(column)) if column.groups == vec![source_tabs]
+    ));
     assert!(matches!(
         layout.node(source_tabs),
         Some(Node::Tabs(tabs))
@@ -145,8 +155,14 @@ fn c46_extracting_the_last_floating_tab_removes_the_empty_source_window() {
         descriptors()[0].1,
     );
     let source_tabs = builder.tabs(vec![panel_node], 0, false);
+    let source_column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![source_tabs],
+        vec![1.0],
+    );
     let source_floating = builder.floating_group(
-        source_tabs,
+        source_column,
         Rect::new(Point::new(80.0, 100.0), Size::new(400.0, 280.0)),
         1,
     );
@@ -166,6 +182,7 @@ fn c46_extracting_the_last_floating_tab_removes_the_empty_source_window() {
     assert!(layout.floating_group(source_floating).is_none());
     assert!(layout.dock_area(source_area).is_none());
     assert!(layout.node(source_tabs).is_none());
+    assert!(layout.node(source_column).is_none());
     assert_eq!(layout.floating_groups().count(), 1);
     assert!(layout.panel_instance(panel).is_some());
     let (_, extracted) = layout.floating_groups().next().unwrap();
@@ -1418,7 +1435,7 @@ fn floating_geometry_commands_report_the_affected_root_for_ui_invalidation() {
 }
 
 #[test]
-fn floating_vertical_stack_starts_at_window_top_when_first_group_collapsed() {
+fn floating_column_starts_groups_below_its_own_header() {
     let metrics = DockMetrics::default();
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
 
@@ -1434,7 +1451,12 @@ fn floating_vertical_stack_starts_at_window_top_when_first_group_collapsed() {
     );
     let bottom_group = builder.tabs(vec![bottom_panel], 0, false);
 
-    let root = builder.split(Axis::Y, vec![top_group, bottom_group], vec![0.5, 0.5]);
+    let root = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![top_group, bottom_group],
+        vec![0.5, 0.5],
+    );
     let floating = builder.floating_group(
         root,
         Rect::new(Point::new(20.0, 30.0), Size::new(440.0, 400.0)),
@@ -1453,7 +1475,7 @@ fn floating_vertical_stack_starts_at_window_top_when_first_group_collapsed() {
         .iter()
         .find(|entry| entry.group == top_group)
         .unwrap();
-    assert_eq!(top_rect.rect.origin.y, 0.0);
+    assert_eq!(top_rect.rect.origin.y, metrics.column_header_height);
     assert!(rects.groups.iter().any(|entry| entry.group == bottom_group));
 }
 
