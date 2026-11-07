@@ -688,6 +688,7 @@ impl FloatingWindowManager {
             group,
             native_window,
             kind: NativeMoveKind::TearOff,
+            hide_header: true,
             grab_offset,
             initial_cursor: cursor,
             start_bounds: model_bounds,
