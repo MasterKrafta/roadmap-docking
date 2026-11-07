@@ -2,7 +2,6 @@
 
 pub mod canvas_slot;
 pub mod column;
-pub mod column_header;
 pub mod context_menu;
 pub mod drop_overlay;
 pub mod floating;
@@ -17,7 +16,6 @@ pub mod tab_strip;
 
 pub use canvas_slot::CanvasSlot;
 pub use column::ColumnView;
-pub use column_header::ColumnHeaderView;
 pub use context_menu::{ContextMenu, ContextMenuCallbacks, ContextMenuEntry, ContextMenuItem};
 pub use drop_overlay::{DragGhost, DropOverlay};
 pub use floating::FloatingHost;
