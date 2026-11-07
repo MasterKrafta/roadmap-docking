@@ -518,27 +518,6 @@ fn floating_column_drag_area(snapshot: &FloatingHostSnapshot) -> Option<(Rect, f
         return None;
     }
 
-    let group_ids = snapshot
-        .column_groups
-        .get(&column.column)
-        .map(Vec::as_slice)
-        .unwrap_or(&[]);
-    let group_rects = snapshot
-        .rects
-        .groups
-        .iter()
-        .filter(|group| group_ids.contains(&group.group))
-        .collect::<Vec<_>>();
-    let uses_dock_component_header = group_rects.len() == 1
-        && snapshot
-            .group_presentations
-            .get(&group_rects[0].group)
-            .is_some_and(|presentation| {
-                presentation.tabs.len() == 1
-                    && presentation.active_panel
-                        == presentation.tabs.first().map(|tab| tab.panel)
-            });
-
     let reserved_controls_width = 2.0 * snapshot.metrics.column_control_button_width;
 
     Some((column.rect, reserved_controls_width))
