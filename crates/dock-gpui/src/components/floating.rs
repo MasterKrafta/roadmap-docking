@@ -75,7 +75,6 @@ impl FloatingWindowContent {
         drag_zones: &[DropZoneRect],
         metrics: DockMetrics,
         hide_header: bool,
-        title: &str,
         menu_group: Option<NodeId>,
         context_menu: GroupMenuToggle,
         middle_click_closes_tabs: bool,
@@ -291,27 +290,9 @@ impl FloatingWindowContent {
         // split children) are hosted directly in the floating composition.
         let loose_panels = panels
             .into_iter()
-            .filter_map(|(mut panel, view)| {
+            .filter_map(|(panel, view)| {
                 if column_active_panels.contains(&panel.panel) {
                     return None;
-                }
-
-                // A standalone Panel has no Tabs header to reserve the title
-                // band. Keep its content below the floating title bar only while
-                // that bar is visible. During tear-off the hidden header must not
-                // leave an empty strip at the top of the floating window.
-                if !hide_header {
-                    let title_bottom =
-                        origin.y + metrics.header_height.min(floating.rect.size.height);
-                    if panel.rect.origin.y < title_bottom {
-                        let clipped =
-                            (title_bottom - panel.rect.origin.y).min(panel.rect.size.height);
-                        panel.rect.origin.y += clipped;
-                        panel.rect.size.height -= clipped;
-                        if panel.rect.size.height <= 0.0 {
-                            return None;
-                        }
-                    }
                 }
 
                 Some((panel, view))
@@ -319,80 +300,6 @@ impl FloatingWindowContent {
             .collect();
         root = root.child(PanelHost::render(loose_panels, origin));
 
-        // A floating root Column already rendered the shared
-        // dock-components::ColumnHeader inside its Column. Only roots without
-        // a Column use this generic title bar.
-        if !column_uses_window_header && !hide_header {
-            let title_height = metrics.header_height.min(floating.rect.size.height);
-            let close_size = metrics.group_control_button_width.min(title_height);
-            let title_grip = div()
-                .id(format!("floating-title-{:?}", floating.group))
-                .flex_1()
-                .min_w_0()
-                .h_full()
-                .flex()
-                .items_center()
-                .px(px(8.0))
-                .overflow_hidden()
-                .cursor_move()
-                .text_color(rgb(theme.colors.primary_text))
-                .text_size(px(theme.typography.tab_size))
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .overflow_hidden()
-                        .whitespace_nowrap()
-                        .text_ellipsis()
-                        .child(title.to_owned()),
-                );
-
-            let close_button = div()
-                .id(format!("floating-close-{:?}", floating.group))
-                .w(px(close_size.max(1.0)))
-                .h(px(close_size.max(1.0)))
-                .flex_none()
-                .flex()
-                .items_center()
-                .justify_center()
-                .cursor_pointer()
-                .bg(rgb(theme.colors.icon_button_background))
-                .border_1()
-                .border_color(rgb(theme.colors.icon_button_border))
-                .text_color(rgb(theme.colors.primary_text))
-                .text_size(px(18.0))
-                .child("×")
-                .on_click({
-                    let controller = controller.clone();
-                    move |_, _, app| {
-                        dispatch_command(
-                            &controller,
-                            DockCommand::CloseFloatingGroup {
-                                group: floating.group,
-                            },
-                            app,
-                        );
-                    }
-                });
-
-            let title_bar = div()
-                .id(format!("floating-title-bar-{:?}", floating.group))
-                .absolute()
-                .top_0()
-                .left_0()
-                .w_full()
-                .h(px(title_height))
-                .flex()
-                .items_center()
-                .gap(px(theme.metrics.button_gap))
-                .pr(px(4.0))
-                .bg(rgb(theme.colors.flyout_header_background))
-                .border_1()
-                .border_color(rgb(theme.colors.group_frame_border))
-                .child(title_grip)
-                .child(close_button);
-            root = root.child(title_bar);
-        }
 
 
         root
@@ -424,70 +331,11 @@ struct FloatingHostSnapshot {
     column_modes: HashMap<NodeId, ColumnMode>,
     group_presentations: HashMap<NodeId, GroupPresentation>,
     rail_display_orders: HashMap<NodeId, Vec<ColumnDisplayItem>>,
-    title: String,
     metrics: DockMetrics,
     drag_preview: Option<DragPreview>,
     drag_handle: Option<DragHandle>,
     drag_zones: Vec<DropZoneRect>,
     active_drop_zone: Option<dock_core::DropZoneRect>,
-}
-
-/// Resolves the display title from the first active tab in tree order.
-fn floating_root_title(
-    layout: &Layout,
-    root: NodeId,
-    presentations: &HashMap<NodeId, GroupPresentation>,
-    registry: &crate::PanelRegistry,
-) -> Option<String> {
-    match layout.node(root)? {
-        Node::Split(split) => split
-            .children
-            .iter()
-            .find_map(|child| floating_root_title(layout, *child, presentations, registry)),
-        Node::Column(column) => column
-            .groups
-            .iter()
-            .find_map(|group| floating_root_title(layout, *group, presentations, registry)),
-        Node::Tabs(_) => {
-            let presentation = presentations.get(&root)?;
-            let active_panel = presentation.active_panel?;
-            presentation
-                .tabs
-                .iter()
-                .find(|tab| tab.panel == active_panel)
-                .map(|tab| tab.title.to_string())
-        }
-        Node::Panel(panel) => {
-            let instance = layout.panel_instance(panel.panel_id)?;
-            registry
-                .get(&instance.key)
-                .map(|descriptor| descriptor.title().to_string())
-                .or_else(|| Some(instance.key.to_string()))
-        }
-    }
-}
-
-/// Returns whether a point belongs to the visible generic Floating title row.
-///
-/// `Some(true)` is the draggable title grip, `Some(false)` is the trailing close-button area, and `None` is outside the row.
-fn floating_title_pointer_region(
-    floating_rect: Rect,
-    point: Point,
-    metrics: DockMetrics,
-) -> Option<bool> {
-    let title_height = metrics.header_height.min(floating_rect.size.height);
-    let title_right = floating_rect.origin.x + floating_rect.size.width;
-    let title_bottom = floating_rect.origin.y + title_height;
-    if point.x < floating_rect.origin.x
-        || point.x >= title_right
-        || point.y < floating_rect.origin.y
-        || point.y >= title_bottom
-    {
-        return None;
-    }
-
-    let close_width = metrics.group_control_button_width.min(title_height);
-    Some(point.x < title_right - close_width)
 }
 
 /// Gives the visible Column header input priority over its own tab strip.
@@ -648,13 +496,6 @@ fn floating_host_snapshot(
                 .map(|order| (*column, order))
         })
         .collect::<HashMap<NodeId, Vec<ColumnDisplayItem>>>();
-    let title = floating_root_title(
-        layout,
-        area.root,
-        &group_presentations,
-        controller.registry(),
-    )
-    .unwrap_or_else(|| "Floating panels".to_string());
     let drag_preview = controller.floating_window_drag_preview(window_id, group);
     let drag_handle = controller.drag().session().handle();
     let drag_resolver = controller.floating_window_drop_resolver(window_id, group);
@@ -678,7 +519,6 @@ fn floating_host_snapshot(
         column_modes,
         group_presentations,
         rail_display_orders,
-        title,
         metrics,
         drag_preview,
         drag_handle,
@@ -969,7 +809,7 @@ impl Render for FloatingHost {
                         // TabHeaderRect, so Core can otherwise report a tab instead of the
                         // actual window drag surface.
                         let floating_title_region = if !hide_header {
-                            if let Some((column_rect, reserved_controls_width)) = column_drag_area {
+                            column_drag_area.and_then(|(column_rect, reserved_controls_width)| {
                                 floating_metrics.and_then(|metrics| {
                                     floating_column_title_pointer_region(
                                         column_rect,
@@ -978,13 +818,7 @@ impl Render for FloatingHost {
                                         reserved_controls_width,
                                     )
                                 })
-                            } else {
-                                floating_rect
-                                    .zip(floating_metrics)
-                                    .and_then(|(rect, metrics)| {
-                                        floating_title_pointer_region(rect, point, metrics)
-                                    })
-                            }
+                            })
                         } else {
                             None
                         };
@@ -1005,10 +839,6 @@ impl Render for FloatingHost {
                             // never fall through and start a tab tear-off underneath.
                             return;
                         }
-
-                        // HitResult::FloatingTitle is deliberately not a drag handle.
-                        // Floating windows move only from the explicit ColumnHeader/DockTab
-                        // drag surfaces handled above.
 
                         let press = controller_for_down.update(app, |controller, _| {
                             let dock_core::HitResult::TabHeader {
@@ -1487,7 +1317,6 @@ impl Render for FloatingHost {
             &snapshot.drag_zones,
             snapshot.metrics,
             hide_header,
-            &snapshot.title,
             None,
             toggle_context_menu,
             self.middle_click_closes_tabs,
@@ -1578,39 +1407,8 @@ impl Render for FloatingHost {
 }
 
 #[cfg(test)]
-mod floating_title_hit_tests {
+mod floating_column_header_hit_tests {
     use dock_core::{DockMetrics, Point, Rect, Size};
-
-    use super::floating_title_pointer_region;
-
-    #[test]
-    fn generic_floating_title_takes_priority_over_overlapping_root_tab_strip() {
-        let floating = Rect::new(Point::new(10.0, 20.0), Size::new(240.0, 160.0));
-        let metrics = DockMetrics::default();
-        let close_button_left = floating.origin.x + floating.size.width
-            - metrics.group_control_button_width.min(metrics.header_height);
-
-        assert_eq!(
-            floating_title_pointer_region(floating, Point::new(100.0, 25.0), metrics),
-            Some(true),
-        );
-        assert_eq!(
-            floating_title_pointer_region(
-                floating,
-                Point::new(close_button_left + 1.0, 25.0),
-                metrics,
-            ),
-            Some(false),
-        );
-        assert_eq!(
-            floating_title_pointer_region(floating, Point::new(100.0, 60.0), metrics),
-            None,
-        );
-        assert_eq!(
-            floating_title_pointer_region(floating, Point::new(5.0, 25.0), metrics),
-            None,
-        );
-    }
 
     #[test]
     fn column_header_takes_priority_over_its_overlapping_tab_header() {
