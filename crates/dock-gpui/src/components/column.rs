@@ -65,11 +65,6 @@ impl ColumnView {
                 (column.rect.size.height - metrics.column_header_height).max(0.0),
             ),
         );
-        let hidden_header_offset = if show_header {
-            0.0
-        } else {
-            metrics.column_header_height
-        };
         let viewport = overflow.map_or(content_rect, |value| value.viewport);
         let content_extent = overflow.map_or(content_rect, |value| value.content_extent);
         let content_origin = content_extent.origin;
@@ -166,12 +161,10 @@ impl ColumnView {
         let mut scroll_viewport = div()
             .id(format!("dock-column-scroll-{:?}", column.column))
             .absolute()
-            .top(px(
-                viewport.origin.y - column.rect.origin.y - hidden_header_offset,
-            ))
+            .top(px(viewport.origin.y - column.rect.origin.y))
             .left(px(viewport.origin.x - column.rect.origin.x))
             .w(px(viewport.size.width))
-            .h(px(viewport.size.height + hidden_header_offset))
+            .h(px(viewport.size.height))
             .bg(rgb(theme.colors.dock_background));
 
         if let Some(handle) = scroll_handle.as_ref() {

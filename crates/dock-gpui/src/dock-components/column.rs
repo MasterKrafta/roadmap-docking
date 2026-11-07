@@ -35,8 +35,9 @@ impl DockColumnView {
         Self::render_active_with_header(id, title, panel_view, metrics, theme, true)
     }
 
-    /// Floating tear-off can temporarily remove ColumnHeader and its layout height
-    /// while a DockTab-origin drag is held.
+    /// Hides the ColumnHeader during a DockTab-origin tear-off without
+    /// changing the Group's layout position. The header slot remains reserved,
+    /// so showing the header after release does not push the tab row downward.
     pub(crate) fn render_active_with_header(
         id: String,
         title: String,
@@ -46,9 +47,19 @@ impl DockColumnView {
         show_column_header: bool,
     ) -> impl IntoElement {
         let group_id = format!("{id}-group");
+        let header = if show_column_header {
+            ColumnHeader::render(id.clone(), metrics, theme).into_element()
+        } else {
+            div()
+                .id(format!("{id}-header-placeholder"))
+                .w_full()
+                .h(gpui::px(metrics.column_header_height))
+                .flex_none()
+                .into_element()
+        };
 
-        let mut column = div()
-            .id(id.clone())
+        div()
+            .id(id)
             .w_full()
             .h_full()
             .flex()
@@ -56,15 +67,11 @@ impl DockColumnView {
             .overflow_hidden()
             .bg(rgb(theme.colors.dock_background))
             .border_1()
-            .border_color(rgb(theme.colors.group_frame_border));
-
-        if show_column_header {
-            column = column.child(ColumnHeader::render(id.clone(), metrics, theme));
-        }
-
-        column.child(DockGroupView::render_active(
-            group_id, title, panel_view, metrics, theme,
-        ))
+            .border_color(rgb(theme.colors.group_frame_border))
+            .child(header)
+            .child(DockGroupView::render_active(
+                group_id, title, panel_view, metrics, theme,
+            ))
     }
 
     fn render_groups(
