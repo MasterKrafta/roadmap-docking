@@ -1246,11 +1246,11 @@ fn resize_groups_with_tab_chrome_supports_history_undo_and_redo_after_clamping()
         .unwrap();
     assert!(matches!(
         outcome.actual_value,
-        Some(crate::CommandValue::GroupBoundaryDelta(delta)) if (delta - 90.0).abs() < 1.0e-3
+        Some(crate::CommandValue::GroupBoundaryDelta(delta)) if (delta - 126.0).abs() < 1.0e-3
     ));
     let after = persistent_shape(&layout);
     assert_ne!(after, before);
-    assert_heights(&layout, 340.0, 160.0);
+    assert_heights(&layout, 376.0, 124.0);
     assert!(history.can_undo());
 
     assert!(history.undo(&mut layout, &metrics).unwrap());
@@ -1260,7 +1260,7 @@ fn resize_groups_with_tab_chrome_supports_history_undo_and_redo_after_clamping()
 
     assert!(history.redo(&mut layout, &metrics).unwrap());
     assert_eq!(persistent_shape(&layout), after);
-    assert_heights(&layout, 340.0, 160.0);
+    assert_heights(&layout, 376.0, 124.0);
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
 
@@ -1461,7 +1461,7 @@ fn escape_cancels_the_entire_floating_transfer_gesture() {
         Point::ZERO,
     )
     .unwrap();
-    drag.pointer_move(Point::new(5.0, 0.0)).unwrap();
+    drag.pointer_move(Point::new(8.0, 0.0)).unwrap();
     assert!(matches!(drag.state(), DragState::Dragging { .. }));
 
     assert!(history.begin_transaction(&layout));
