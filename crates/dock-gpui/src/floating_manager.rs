@@ -576,6 +576,7 @@ impl FloatingWindowManager {
         pointer: Point,
         local_bounds: Rect,
         model_bounds: Rect,
+        hide_header: bool,
         cx: &mut Context<Self>,
     ) -> bool {
         if self.native_move.is_some() {
@@ -617,7 +618,7 @@ impl FloatingWindowManager {
             group,
             native_window,
             kind: NativeMoveKind::TearOff,
-            hide_header: true,
+            hide_header,
             grab_offset,
             initial_cursor: cursor,
             start_bounds: model_bounds,
@@ -772,16 +773,35 @@ impl FloatingWindowManager {
         let scale = self.native_ops.scale_factor(native_window).ok()
             .filter(|scale| scale.is_finite() && *scale > 0.0)
             .unwrap_or(1.0);
+        let hidden_header_offset = if hide_header {
+            physical_coordinate(metrics.column_header_height, scale)?
+        } else {
+            0
+        };
+        let grab_offset = PhysicalPoint {
+            x: cursor.x.saturating_sub(native_rect.left),
+            y: cursor
+                .y
+                .saturating_sub(native_rect.top)
+                .saturating_sub(hidden_header_offset),
+        };
+        if hide_header {
+            let position = PhysicalPoint {
+                x: cursor.x.saturating_sub(grab_offset.x),
+                y: cursor.y.saturating_sub(grab_offset.y),
+            };
+            if let Err(error) = self.native_ops.move_window(native_window, position) {
+                tracing::warn!(?group, %error, "could not align floating window after hiding ColumnHeader");
+                return false;
+            }
+        }
         let high_resolution_timer = self.native_ops.begin_high_resolution_timer().is_ok();
         self.native_move = Some(NativeMoveSession {
             group,
             native_window,
             kind: NativeMoveKind::ExistingWindow,
             hide_header,
-            grab_offset: PhysicalPoint {
-                x: cursor.x.saturating_sub(native_rect.left),
-                y: cursor.y.saturating_sub(native_rect.top),
-            },
+            grab_offset,
             initial_cursor: cursor,
             start_bounds,
             start_pointer: pointer,
