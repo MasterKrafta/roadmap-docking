@@ -587,7 +587,7 @@ fn drop_request_keeps_group_grip_semantics_distinct_from_panel_tab_drag() {
     let group_payload = DragPayload::Group { group };
     let mut session = DragSession::new(&metrics).unwrap();
     session.pointer_down(group_payload, Point::ZERO).unwrap();
-    session.pointer_move(Point::new(4.0, 0.0)).unwrap();
+    session.pointer_move(Point::new(8.0, 0.0)).unwrap();
     let target = DropTarget::GroupTabs {
         group: target_group,
         index: 1,
