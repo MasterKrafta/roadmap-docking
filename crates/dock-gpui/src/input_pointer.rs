@@ -1,4 +1,4 @@
-use std::{cell::Cell, collections::HashMap, rc::Rc};
+use std::{cell::{Cell, RefCell}, collections::HashMap, rc::Rc};
 
 use dock_core::{
     Axis, DockCommand, DockSide, DragHandle, DragPayload, DragState, HitResult, Node, NodeId,
@@ -136,6 +136,9 @@ pub(crate) fn register_pointer_events(
         pointer_capture,
         pointer_press,
     } = pointer_state;
+    // Keep console output focused: during a drag we print only when the
+    // Core hit-test result changes under the pointer.
+    let last_drag_hit = Rc::new(RefCell::new(None::<String>));
 
     window.on_mouse_event({
         let controller = controller.clone();
@@ -143,6 +146,7 @@ pub(crate) fn register_pointer_events(
         let toggle_context_menu = toggle_context_menu.clone();
         let pointer_capture = pointer_capture.clone();
         let pointer_press = pointer_press.clone();
+        let last_drag_hit_for_down = last_drag_hit.clone();
         move |event: &MouseDownEvent, phase, window, app| {
             if phase != DispatchPhase::Capture
                 || !root_hitbox.is_hovered(window)
@@ -153,6 +157,7 @@ pub(crate) fn register_pointer_events(
             }
 
             pointer_press.set(None);
+            *last_drag_hit_for_down.borrow_mut() = None;
             let Ok(host_point) = host_point_from_gpui_window(event.position, window_origin) else {
                 return;
             };
@@ -162,6 +167,14 @@ pub(crate) fn register_pointer_events(
                 return;
             };
             let hit = controller.update(app, |controller, _| controller.hit(core_point).ok());
+            let hit_label = hit
+                .as_ref()
+                .map(|hit| format!("{hit:?}"))
+                .unwrap_or_else(|| "Miss".to_owned());
+            eprintln!(
+                "[DOCK-INPUT][main] down button={:?} host=({:.1}, {:.1}) core=({:.1}, {:.1}) hit={}",
+                event.button, host_point.x, host_point.y, core_point.x, core_point.y, hit_label
+            );
 
             if event.button == MouseButton::Right {
                 let target = hit
@@ -184,6 +197,10 @@ pub(crate) fn register_pointer_events(
             let Some(hit) = hit else {
                 return;
             };
+            eprintln!(
+                "[DOCK-INPUT][main] down_intent={:?}",
+                pointer_down_intent_for_hit(hit)
+            );
 
             // DockTab is the alternate drag grip for its owning Column. Start
             // the exact same Core drag session as ColumnDragArea, so the whole
@@ -335,6 +352,7 @@ pub(crate) fn register_pointer_events(
         let scroll_handles = scroll_handles.clone();
         let pointer_capture = pointer_capture.clone();
         let pointer_press = pointer_press.clone();
+        let last_drag_hit_for_move = last_drag_hit.clone();
         move |event: &MouseMoveEvent, phase, window, app| {
             if manager.update(app, |manager, _| manager.native_move_active()) {
                 if pointer_capture.get().is_some() {
@@ -404,10 +422,37 @@ pub(crate) fn register_pointer_events(
                 return;
             };
 
-            if drag_active && update_drag_at(&controller, point, app) {
+            let drag_just_started = drag_active && update_drag_at(&controller, point, app);
+            if drag_just_started {
                 // Once Core crosses the drag threshold, this press can no
                 // longer be dispatched as a tab click if the gesture is cancelled.
                 pointer_press.set(None);
+            }
+
+            let drag_details = controller.update(app, |controller, _| {
+                match controller.drag().session().state() {
+                    DragState::Dragging { payload, origin, .. } => {
+                        Some((payload, controller.drag().session().handle(), origin))
+                    }
+                    _ => None,
+                }
+            });
+            if let Some((payload, handle, origin)) = drag_details {
+                let hit_label = controller.update(app, |controller, _| {
+                    controller
+                        .hit(point)
+                        .map(|hit| format!("{hit:?}"))
+                        .unwrap_or_else(|_| "Miss".to_owned())
+                });
+                let mut previous_hit = last_drag_hit_for_move.borrow_mut();
+                if previous_hit.as_deref() != Some(hit_label.as_str()) {
+                    let phase_label = if drag_just_started { "drag_start" } else { "drag_over" };
+                    eprintln!(
+                        "[DOCK-INPUT][main] {} payload={:?} handle={:?} origin=({:.1}, {:.1}) pointer=({:.1}, {:.1}) hit={}",
+                        phase_label, payload, handle, origin.x, origin.y, point.x, point.y, hit_label
+                    );
+                    *previous_hit = Some(hit_label);
+                }
             }
 
             let should_tearoff = controller.update(app, |controller, _| {
@@ -470,6 +515,7 @@ pub(crate) fn register_pointer_events(
         let toggle_context_menu = toggle_context_menu.clone();
         let pointer_capture = pointer_capture.clone();
         let pointer_press = pointer_press.clone();
+        let last_drag_hit_for_up = last_drag_hit.clone();
         move |event: &MouseUpEvent, phase, window, app| {
             if phase != DispatchPhase::Capture || event.button != MouseButton::Left {
                 return;
@@ -528,6 +574,16 @@ pub(crate) fn register_pointer_events(
                 );
                 return;
             };
+            let release_hit = controller.update(app, |controller, _| {
+                controller
+                    .hit(point)
+                    .map(|hit| format!("{hit:?}"))
+                    .unwrap_or_else(|_| "Miss".to_owned())
+            });
+            eprintln!(
+                "[DOCK-INPUT][main] up host=({:.1}, {:.1}) core=({:.1}, {:.1}) drag_active={} resize_active={} hit={}",
+                host_point.x, host_point.y, point.x, point.y, drag_active, resize_active, release_hit
+            );
 
             let drag_was_started = if drag_active {
                 // MouseUp can be the first event delivered beyond the drag threshold.
@@ -562,6 +618,7 @@ pub(crate) fn register_pointer_events(
             pointer_capture.set(None);
 
             pointer_press.set(None);
+            *last_drag_hit_for_up.borrow_mut() = None;
             if drag_was_started || resize_active {
                 return;
             }
@@ -587,6 +644,10 @@ pub(crate) fn register_pointer_events(
                 app,
             );
             let intent = pointer_click_intent_for_hit(release_hit, event.click_count);
+            eprintln!(
+                "[DOCK-INPUT][main] click_dispatch click_count={} hit={:?} intent={:?}",
+                event.click_count, release_hit, intent
+            );
             let intent = if disable_component_actions
                 && matches!(intent, PointerClickIntent::CollapseGroup { .. })
             {
