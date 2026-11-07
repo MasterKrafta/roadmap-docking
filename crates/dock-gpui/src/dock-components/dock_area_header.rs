@@ -15,8 +15,8 @@ pub use drag_area::DockAreaDragArea;
 
 /// Shared header for one complete DockArea composition.
 ///
-/// Each Column keeps its own collapse control, while the composition has a
-/// single close control at the far right.
+/// Each Column has one collapse control aligned to its right edge, while the
+/// whole composition has a single close control at the far right.
 pub struct DockAreaHeader;
 
 impl DockAreaHeader {
