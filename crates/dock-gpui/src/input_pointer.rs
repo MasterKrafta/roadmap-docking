@@ -12,7 +12,7 @@ use gpui::{
 use crate::{
     DockController, FloatingWindowManager,
     components::context_menu::{ContextMenuTarget, ContextMenuToggle},
-    dock_components::{DockAreaDragArea, DockTab},
+    dock_components::DockAreaDragArea,
     geometry::host_point_from_gpui_window,
 };
 
@@ -201,23 +201,6 @@ pub(crate) fn register_pointer_events(
                 pointer_down_intent_for_hit(hit)
             );
 
-            // DockTab is the alternate drag grip for its owning Column. Start
-            // the exact same Core drag session as DockAreaDragArea, so the whole
-            // Column (not just its Panel node) moves into the Floating host.
-            let dock_column = controller.update(app, |controller, _| {
-                dock_component_column_drag_target(controller, hit, core_point)
-            });
-            if let Some(column) = dock_column {
-                begin_drag_at(
-                    &controller,
-                    DragPayload::Column { column },
-                    DragHandle::ColumnHeader,
-                    core_point,
-                    app,
-                );
-                return;
-            }
-
             match pointer_down_intent_for_hit(hit) {
                 PointerDownIntent::TabHeaderCandidate { group, panel } => {
                     let tab_is_clickable = tab_header_clickable_contains(
@@ -252,8 +235,7 @@ pub(crate) fn register_pointer_events(
                     }
                 }
                 PointerDownIntent::GroupCandidate { group } => {
-                    if !uses_dock_component_group(&controller, group, app)
-                        && group_grip_contains(&controller, group, core_point, app)
+                    if group_grip_contains(&controller, group, core_point, app)
                     {
                         if matches!(hit, HitResult::TabStrip { .. }) {
                             let layout_version = controller
@@ -931,59 +913,6 @@ fn uses_dock_component_group(
     })
 }
 
-/// Resolves the alternate DockTab drag surface to its owning main Column.
-///
-/// A DockTab drag deliberately uses the Column payload and ColumnHeader handle,
-/// exactly like DockAreaDragArea. This keeps the Core tear-off path and floating
-/// renderer identical regardless of which visible grip initiated the gesture.
-fn dock_component_column_drag_target(
-    controller: &mut DockController,
-    hit: HitResult,
-    point: Point,
-) -> Option<NodeId> {
-    let (column_id, group_id) = {
-        let layout = controller.layout();
-        let group_id = match hit {
-            HitResult::TabHeader { group, .. }
-            | HitResult::TabStrip { group }
-            | HitResult::Group { group } => group,
-            HitResult::Column { column } => {
-                let Node::Column(column) = layout.node(column)? else {
-                    return None;
-                };
-                *column.groups.first()?
-            }
-            _ => return None,
-        };
-
-        if !is_dock_component_tab_group(layout, group_id) {
-            return None;
-        }
-
-        let column_id = layout.nodes().find_map(|(column_id, node)| {
-            let Node::Column(column) = node else {
-                return None;
-            };
-            (column.groups.len() == 1
-                && column.groups.first() == Some(&group_id)
-                && is_main_dock_column(layout, column_id))
-                .then_some(column_id)
-        })?;
-        (column_id, group_id)
-    };
-
-    let group_rect = {
-        let rects = controller.geometry().ok()?;
-        rects
-            .groups
-            .iter()
-            .find(|rect| rect.group == group_id)
-            .map(|rect| rect.rect)?
-    };
-    let drag_zone = DockTab::drag_zone(group_rect, controller.metrics());
-    (!DockTab::leaves_strip_zone(drag_zone, point)).then_some(column_id)
-}
-
 fn is_dock_component_tab_group(layout: &dock_core::Layout, group_id: NodeId) -> bool {
     let is_single_panel_group = matches!(
         layout.node(group_id),
@@ -1199,19 +1128,26 @@ fn group_grip_contains(
                 Some(Node::Column(column)) if column.groups.contains(&group)
             )
         });
-        let reserved_grip_left = if !is_column_group
-            && rects.columns.iter().any(|column_rect| {
-                column_rect.rect.origin.y == group_rect.rect.origin.y
-                    && matches!(
-                        controller.layout().node(column_rect.column),
-                        Some(Node::Column(column)) if column.groups.first() == Some(&group)
-                    )
-            })
-        {
+        let reserved_grip_left = if is_column_group {
+            rects
+                .tab_headers
+                .iter()
+                .filter(|header| header.group == group)
+                .map(|header| header.rect.origin.x + header.rect.size.width)
+                .fold(group_rect.rect.origin.x, f32::max)
+                - group_rect.rect.origin.x
+        } else if rects.columns.iter().any(|column_rect| {
+            column_rect.rect.origin.y == group_rect.rect.origin.y
+                && matches!(
+                    controller.layout().node(column_rect.column),
+                    Some(Node::Column(column)) if column.groups.first() == Some(&group)
+                )
+        }) {
             metrics.group_control_button_width + 8.0
         } else {
             0.0
         };
+
         let control_width = metrics
             .group_control_button_width
             .min(group_rect.rect.size.width / 3.0)
@@ -1222,15 +1158,13 @@ fn group_grip_contains(
             metrics.header_height
         };
         let header_height = requested_header_height.min(group_rect.rect.size.height);
-        let right_reserve = if is_column_group {
-            control_width
-        } else {
-            2.0 * control_width
-        };
+        let right_edge = group_rect.rect.origin.x + group_rect.rect.size.width;
+        let right_reserve = 2.0 * control_width;
+
         point.y >= group_rect.rect.origin.y
             && point.y < group_rect.rect.origin.y + header_height
             && point.x >= group_rect.rect.origin.x + reserved_grip_left
-            && point.x < group_rect.rect.origin.x + group_rect.rect.size.width - right_reserve
+            && point.x < right_edge - right_reserve
     })
 }
 
