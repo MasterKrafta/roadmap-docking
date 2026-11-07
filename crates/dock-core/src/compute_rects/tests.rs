@@ -204,11 +204,13 @@ fn ratio_allocation_clamps_small_group_to_its_panel_minimum_and_redistributes_re
         .iter()
         .map(|group| group.rect.size.height)
         .collect();
-    let minimum = metrics.header_height + metrics.tab_strip_height + constraints().min_size.height;
+    let minimum = metrics.min_group_height.max(
+        metrics.header_height.max(metrics.tab_strip_height) + constraints().min_size.height,
+    );
 
     assert_eq!(heights[0], metrics.collapsed_group_height);
     assert!((heights[2] - minimum).abs() < PIXEL_TOLERANCE);
-    assert!((heights[1] - 316.0).abs() < PIXEL_TOLERANCE);
+    assert!((heights[1] - 344.0).abs() < PIXEL_TOLERANCE);
     assert!(heights[2] >= minimum);
     assert!(
         (heights.iter().sum::<f32>()
@@ -1558,10 +1560,12 @@ fn zero_weight_child_keeps_its_minimum_without_changing_positive_weight_proporti
     let quarter_height = height(group_quarter);
     let three_quarters_height = height(group_three_quarters);
 
-    let minimum = metrics.header_height + metrics.tab_strip_height + constraints().min_size.height;
+    let minimum = metrics.min_group_height.max(
+        metrics.header_height.max(metrics.tab_strip_height) + constraints().min_size.height,
+    );
     assert!((zero_height - minimum).abs() < PIXEL_TOLERANCE);
-    assert!((quarter_height - 211.0).abs() < PIXEL_TOLERANCE);
-    assert!((three_quarters_height - 633.0).abs() < PIXEL_TOLERANCE);
+    assert!((quarter_height - 218.0).abs() < PIXEL_TOLERANCE);
+    assert!((three_quarters_height - 654.0).abs() < PIXEL_TOLERANCE);
     assert!((quarter_height / three_quarters_height - 0.25 / 0.75).abs() < PIXEL_TOLERANCE);
     assert!(rects.vertical_overflow.is_empty());
 }
@@ -1603,7 +1607,9 @@ fn dominant_ratio_keeps_zero_weight_groups_at_minimum_and_gives_remainder_to_dom
             .size
             .height
     };
-    let minimum = metrics.header_height + metrics.tab_strip_height + constraints().min_size.height;
+    let minimum = metrics.min_group_height.max(
+        metrics.header_height.max(metrics.tab_strip_height) + constraints().min_size.height,
+    );
 
     assert!((height(zero_a) - minimum).abs() < PIXEL_TOLERANCE);
     assert!((height(zero_b) - minimum).abs() < PIXEL_TOLERANCE);
