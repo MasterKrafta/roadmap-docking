@@ -653,7 +653,8 @@ pub(crate) fn register_pointer_events(
 }
 
 /// Selects which semantic drag areas may start a native tear-off.
-/// Panel tabs become native windows only after leaving their complete TabStripRect.
+/// DockTab in the new Column renderer routes as a Column drag; legacy PanelTab
+/// gestures become native windows after leaving their source TabStripRect.
 fn native_tearoff_enabled_for(handle: Option<DragHandle>, payload: DragPayload) -> bool {
     match (handle, payload) {
         (Some(DragHandle::ColumnHeader), DragPayload::Column { .. }) => true,
