@@ -22,7 +22,6 @@ use ui::Theme;
 use crate::{
     DockController, FloatingWindowManager,
     dock_components::{ColumnDragArea, DockColumnView, DockTab},
-    actions::dispatch_command,
     input::drag::{
         begin_floating_tab_tearoff, finish_floating_tab_drag, update_floating_tab_drag,
         FloatingTabDrag,
