@@ -2,10 +2,11 @@
 mod group;
 
 use dock_core::DockMetrics;
-use gpui::{AnyView, InteractiveElement, IntoElement, ParentElement, Styled, div, rgb};
+use gpui::{AnyView, InteractiveElement, IntoElement, ParentElement, Styled, div, px, rgb};
 use group::DockGroupView;
-use super::ColumnHeader;
 use ui::Theme;
+
+pub use group::{DockTab, GroupDragArea, GroupGrip, GroupMenuButton, PanelContent};
 
 /// Renders one Column containing one or more vertically stacked Groups.
 pub struct DockColumnView;
@@ -32,21 +33,21 @@ impl DockColumnView {
         metrics: DockMetrics,
         theme: Theme,
     ) -> impl IntoElement {
-        Self::render_active_with_header(id, title, panel_view, metrics, theme, true)
+        Self::render_active_with_area_header(id, title, panel_view, metrics, theme, true)
     }
 
-    /// Hides the ColumnHeader during a DockTab-origin tear-off.
+    /// Reserves the shared DockAreaHeader space unless it is hidden during a DockTab-origin tear-off.
     ///
     /// While hidden, the Group occupies the full client area. On release the
     /// native window grows upward before the header is shown, keeping the tab
     /// row at the same screen position.
-    pub(crate) fn render_active_with_header(
+    pub(crate) fn render_active_with_area_header(
         id: String,
         title: String,
         panel_view: AnyView,
         metrics: DockMetrics,
         theme: Theme,
-        show_column_header: bool,
+        show_area_header: bool,
     ) -> impl IntoElement {
         let group_id = format!("{id}-group");
         let mut column = div()
@@ -60,8 +61,14 @@ impl DockColumnView {
             .border_1()
             .border_color(rgb(theme.colors.group_frame_border));
 
-        if show_column_header {
-            column = column.child(ColumnHeader::render(id.clone(), metrics, theme));
+        if show_area_header {
+            column = column.child(
+                div()
+                    .id(format!("{id}-dock-area-header-space"))
+                    .w_full()
+                    .h(px(metrics.column_header_height))
+                    .flex_none(),
+            );
         }
 
         column.child(DockGroupView::render_active(
@@ -85,7 +92,12 @@ impl DockColumnView {
             .bg(rgb(theme.colors.dock_background))
             .border_1()
             .border_color(rgb(theme.colors.group_frame_border))
-            .child(ColumnHeader::render(id.to_owned(), metrics, theme));
+            .child(
+                div()
+                    .w_full()
+                    .h(px(metrics.column_header_height))
+                    .flex_none(),
+            );
 
         for index in 0..group_count {
             let group_id = format!("{id}-group-{index}");
