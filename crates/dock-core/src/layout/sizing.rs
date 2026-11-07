@@ -750,39 +750,6 @@ impl Layout {
                 }
                 minimum
             }
-            Some(Node::Column(_)) => {
-                self.minimum_node_size_with_cache(node_id, metrics, cache)?
-            }
-            Some(Node::Split(split))
-                if split.axis == Axis::Y
-                    && !self.floating_tree_contains_column(node_id)
-                    && self.floating_branch_starts_collapsed(node_id) =>
-            {
-                let base = self.minimum_node_size_with_cache(node_id, metrics, cache)?;
-                Size::new(base.width, base.height + metrics.header_height)
-            }
-            Some(Node::Split(split)) if split.axis == Axis::X => {
-                if self.floating_tree_contains_column(node_id) {
-                    self.minimum_node_size_with_cache(node_id, metrics, cache)?
-                } else {
-                    let mut width = 0.0_f32;
-                    let mut height = 0.0_f32;
-                    for child in &split.children {
-                        let child_size =
-                            self.minimum_node_size_with_cache(*child, metrics, cache)?;
-                        width += child_size.width;
-                        let title_reserve = if self.floating_branch_starts_collapsed(*child) {
-                            metrics.header_height
-                        } else {
-                            0.0
-                        };
-                        height = height.max(child_size.height + title_reserve);
-                    }
-                    width +=
-                        metrics.splitter_thickness * split.children.len().saturating_sub(1) as f32;
-                    Size::new(width, height)
-                }
-            }
             Some(_) => self.minimum_node_size_with_cache(node_id, metrics, cache)?,
             None => return Err(CommandError::MissingNode { node: node_id }),
         };
@@ -802,40 +769,5 @@ impl Layout {
         Ok(minimum)
     }
 
-    /// Whether the floating composition contains a Column anywhere in its tree.
-    ///
-    /// Its own ColumnHeader is the composition's top chrome; no second title row
-    /// is reserved above the Core geometry.
-    pub(crate) fn floating_tree_contains_column(&self, node_id: NodeId) -> bool {
-        match self.nodes.get(node_id) {
-            Some(Node::Column(_)) => true,
-            Some(Node::Split(split)) => split
-                .children
-                .iter()
-                .any(|child| self.floating_tree_contains_column(*child)),
-            Some(Node::Tabs(tabs)) => tabs
-                .children
-                .iter()
-                .any(|child| self.floating_tree_contains_column(*child)),
-            Some(Node::Panel(_)) | None => false,
-        }
-    }
 
-    /// Whether the first visible vertical branch starts with a collapsed group.
-    ///
-    /// Horizontal floating compositions reserve a window-title row above such
-    /// branches. A vertical split follows its first child to identify that row.
-    pub(crate) fn floating_branch_starts_collapsed(&self, node_id: NodeId) -> bool {
-        match self.nodes.get(node_id) {
-            Some(Node::Tabs(tabs)) => tabs.collapsed,
-            Some(Node::Column(column)) => column.groups.first().is_some_and(
-                |group| matches!(self.nodes.get(*group), Some(Node::Tabs(tabs)) if tabs.collapsed),
-            ),
-            Some(Node::Split(split)) if split.axis == Axis::Y => split
-                .children
-                .first()
-                .is_some_and(|child| self.floating_branch_starts_collapsed(*child)),
-            _ => false,
-        }
-    }
 }
