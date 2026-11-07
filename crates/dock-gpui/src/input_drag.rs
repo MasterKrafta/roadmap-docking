@@ -36,6 +36,15 @@ pub(crate) fn begin_drag_at(
     }
 }
 
+/// Main-host tab and column gestures detach into native Floating windows.
+/// They must not resolve dock targets before that transition is complete.
+fn main_drag_uses_drop_targets(handle: Option<DragHandle>) -> bool {
+    !matches!(
+        handle,
+        Some(DragHandle::PanelTab | DragHandle::ColumnHeader | DragHandle::FloatingTitle)
+    )
+}
+
 /// Updates a drag using a host-local point, including points translated out of a rail scroll.
 pub(crate) fn update_drag_at(
     controller: &Entity<DockController>,
@@ -68,9 +77,10 @@ pub(crate) fn update_drag_at(
             return false;
         }
 
-        // A floating title moves its own window. It never enters dock target
-        // resolution and therefore never owns a DropZoneResolver.
-        if handle == Some(DragHandle::FloatingTitle) {
+        // Main-window tab/column drags are tear-off gestures first. Their
+        // drop targets become available only after they exist in a FloatingHost.
+        // A floating title also moves its own window and never resolves dock targets.
+        if !main_drag_uses_drop_targets(handle) {
             cx.notify();
             return was_pressed;
         }
@@ -563,7 +573,7 @@ pub(crate) fn finish_drag_at(
             controller.drag().session().state(),
             DragState::Dragging { .. }
         );
-        let mut target = if !drag_started || handle == Some(DragHandle::FloatingTitle) {
+        let mut target = if !drag_started || !main_drag_uses_drop_targets(handle) {
             None
         } else {
             match drop_source(controller, payload) {
@@ -586,7 +596,7 @@ pub(crate) fn finish_drag_at(
         // Keep DragPreview.target synchronized with the final pointer position
         // before asking DragSession to finish the gesture.
         if drag_started
-            && handle != Some(DragHandle::FloatingTitle)
+            && main_drag_uses_drop_targets(handle)
             && let Err(error) = controller.drag_mut().session_mut().set_drop_target(target)
         {
             tracing::debug!(%error, "could not set final dock drop target");
@@ -866,6 +876,25 @@ fn desired_floating_bounds(
     );
     bounds.validate_non_empty().ok()?;
     Some(bounds)
+}
+
+#[cfg(test)]
+mod main_drop_resolution_tests {
+    use dock_core::DragHandle;
+
+    use super::main_drag_uses_drop_targets;
+
+    #[test]
+    fn main_tab_and_column_tearoffs_do_not_resolve_drop_targets() {
+        assert!(!main_drag_uses_drop_targets(Some(DragHandle::PanelTab)));
+        assert!(!main_drag_uses_drop_targets(Some(DragHandle::ColumnHeader)));
+        assert!(!main_drag_uses_drop_targets(Some(DragHandle::FloatingTitle)));
+    }
+
+    #[test]
+    fn ordinary_main_group_drags_keep_drop_target_resolution() {
+        assert!(main_drag_uses_drop_targets(Some(DragHandle::GroupGrip)));
+    }
 }
 
 #[cfg(test)]
