@@ -171,7 +171,7 @@ fn c46_extracting_the_last_floating_tab_removes_the_empty_source_window() {
 }
 
 #[test]
-fn photoshop_floating_roots_reject_columns_and_horizontal_compositions() {
+fn photoshop_floating_roots_accept_columns_but_reject_horizontal_compositions() {
     let metrics = DockMetrics::default();
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
 
@@ -228,7 +228,7 @@ fn photoshop_floating_roots_reject_columns_and_horizontal_compositions() {
             .iter()
             .filter(|error| matches!(error, ValidationError::InvalidFloatingRoot { .. }))
             .count(),
-        2
+        1
     );
 }
 
