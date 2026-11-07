@@ -1,7 +1,7 @@
 use gpui::{IntoElement, InteractiveElement, ParentElement, Styled, div, px, rgb};
 use ui::Theme;
 
-/// Visual collapse-to-icons control in the Column header.
+/// Visual collapse-to-icons control aligned with a Column in the shared DockArea header.
 pub struct CollapseColumnButton;
 
 impl CollapseColumnButton {
