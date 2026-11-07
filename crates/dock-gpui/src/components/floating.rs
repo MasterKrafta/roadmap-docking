@@ -762,6 +762,40 @@ impl Render for FloatingHost {
                             group, point.x, point.y, hit.unwrap_or(dock_core::HitResult::Miss)
                         );
 
+                        // The DockAreaHeader has no separate Core hit result. Give its visible
+                        // drag surface priority over any overlapping Group or Tab hit.
+                        let floating_title_region = if !hide_header {
+                            dock_area_drag_area.as_ref().and_then(
+                                |(area_rect, columns, metrics)| {
+                                    floating_dock_area_title_pointer_region(
+                                        *area_rect,
+                                        columns,
+                                        point,
+                                        *metrics,
+                                    )
+                                },
+                            )
+                        } else {
+                            None
+                        };
+                        if let Some(is_title_grip) = floating_title_region {
+                            if is_title_grip
+                                && let Some(manager) = manager_for_down.upgrade()
+                                && manager.update(app, |manager, manager_cx| {
+                                    manager.begin_existing_window_move(group, point, manager_cx)
+                                })
+                            {
+                                eprintln!(
+                                    "[DOCK-INPUT][floating] window_move_start source=DockAreaHeader group={:?} point=({:.1}, {:.1})",
+                                    group, point.x, point.y
+                                );
+                            }
+                            // The header owns this point, including the fixed controls.
+                            // Do not let a button press fall through to the Group or Tab below.
+                            app.stop_propagation();
+                            return;
+                        }
+
                         // The free drag area of a one-tab floating Group remains an
                         // alternate grip for moving its native composition window.
                         let dock_component_group = match hit {
@@ -793,40 +827,6 @@ impl Render for FloatingHost {
                             }
                             return;
                         }
-                        // The DockAreaHeader has no separate Core hit result. Give its visible
-                        // drag surface priority over any overlapping Group or Tab hit.
-                        let floating_title_region = if !hide_header {
-                            dock_area_drag_area.as_ref().and_then(
-                                |(area_rect, columns, metrics)| {
-                                    floating_dock_area_title_pointer_region(
-                                        *area_rect,
-                                        columns,
-                                        point,
-                                        *metrics,
-                                    )
-                                },
-                            )
-                        } else {
-                            None
-                        };
-                        if let Some(is_title_grip) = floating_title_region {
-                            if is_title_grip
-                                && let Some(manager) = manager_for_down.upgrade()
-                                && manager.update(app, |manager, manager_cx| {
-                                    manager.begin_existing_window_move(group, point, manager_cx)
-                                })
-                            {
-                                eprintln!(
-                                    "[DOCK-INPUT][floating] window_move_start source=DockAreaHeader group={:?} point=({:.1}, {:.1})",
-                                    group, point.x, point.y
-                                );
-                                app.stop_propagation();
-                            }
-                            // Also reserve the non-draggable header controls. They must
-                            // never fall through and start a tab tear-off underneath.
-                            return;
-                        }
-
                         let press = controller_for_down.update(app, |controller, _| {
                             let dock_core::HitResult::TabHeader {
                                 group: tab_group,
