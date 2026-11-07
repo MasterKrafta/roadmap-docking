@@ -1006,43 +1006,9 @@ impl Render for FloatingHost {
                             return;
                         }
 
-                        let is_floating_title = matches!(
-                            hit,
-                            Some(dock_core::HitResult::FloatingTitle { group: hit_group })
-                                if hit_group == group
-                        );
-                        if is_floating_title {
-                            let is_title_grip = controller_for_down.update(app, |controller, _| {
-                                let metrics = controller.metrics();
-                                let width = controller
-                                    .floating_geometry(input_window_id, group)
-                                    .ok()
-                                    .and_then(|rects| rects.floating_groups.first())
-                                    .map(|floating| floating.rect.size.width);
-                                let title_height = controller
-                                    .floating_geometry(input_window_id, group)
-                                    .ok()
-                                    .and_then(|rects| rects.floating_groups.first())
-                                    .map(|floating| metrics.header_height.min(floating.rect.size.height))
-                                    .unwrap_or(0.0);
-                                let close_width =
-                                    metrics.group_control_button_width.min(title_height);
-                                width.is_some_and(|width| point.x < width - close_width)
-                            });
-                            if is_title_grip
-                                && let Some(manager) = manager_for_down.upgrade()
-                                && manager.update(app, |manager, manager_cx| {
-                                    manager.begin_existing_window_move(group, point, manager_cx)
-                                })
-                            {
-                                eprintln!(
-                                    "[DOCK-INPUT][floating] window_move_start source=HitResult::FloatingTitle group={:?} point=({:.1}, {:.1})",
-                                    group, point.x, point.y
-                                );
-                                app.stop_propagation();
-                            }
-                            return;
-                        }
+                        // HitResult::FloatingTitle is deliberately not a drag handle.
+                        // Floating windows move only from the explicit ColumnHeader/DockTab
+                        // drag surfaces handled above.
 
                         let press = controller_for_down.update(app, |controller, _| {
                             let dock_core::HitResult::TabHeader {
