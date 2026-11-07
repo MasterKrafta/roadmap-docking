@@ -762,9 +762,8 @@ impl Render for FloatingHost {
                             group, point.x, point.y, hit.unwrap_or(dock_core::HitResult::Miss)
                         );
 
-                        // A DockTab inside an already-floating DockColumnView moves
-                        // that same native Column window. It must not run the old
-                        // Panel tear-off path, which would create another Floating.
+                        // The free drag area of a one-tab floating Group remains an
+                        // alternate grip for moving its native composition window.
                         let dock_component_group = match hit {
                             Some(dock_core::HitResult::TabHeader { group, .. })
                             | Some(dock_core::HitResult::TabStrip { group })
