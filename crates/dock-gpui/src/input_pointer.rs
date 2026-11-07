@@ -12,7 +12,7 @@ use gpui::{
 use crate::{
     DockController, FloatingWindowManager,
     components::context_menu::{ContextMenuTarget, ContextMenuToggle},
-    dock_components::{ColumnDragArea, DockTab},
+    dock_components::{DockAreaDragArea, DockTab},
     geometry::host_point_from_gpui_window,
 };
 
@@ -202,7 +202,7 @@ pub(crate) fn register_pointer_events(
             );
 
             // DockTab is the alternate drag grip for its owning Column. Start
-            // the exact same Core drag session as ColumnDragArea, so the whole
+            // the exact same Core drag session as DockAreaDragArea, so the whole
             // Column (not just its Panel node) moves into the Floating host.
             let dock_column = controller.update(app, |controller, _| {
                 dock_component_column_drag_target(controller, hit, core_point)
@@ -273,7 +273,7 @@ pub(crate) fn register_pointer_events(
                     }
                 }
                 PointerDownIntent::ColumnCandidate { column } => {
-                    if column_header_drag_handle_contains(
+                    if dock_area_drag_handle_contains(
                         &controller,
                         column,
                         core_point,
@@ -934,7 +934,7 @@ fn uses_dock_component_group(
 /// Resolves the alternate DockTab drag surface to its owning main Column.
 ///
 /// A DockTab drag deliberately uses the Column payload and ColumnHeader handle,
-/// exactly like ColumnDragArea. This keeps the Core tear-off path and floating
+/// exactly like DockAreaDragArea. This keeps the Core tear-off path and floating
 /// renderer identical regardless of which visible grip initiated the gesture.
 fn dock_component_column_drag_target(
     controller: &mut DockController,
@@ -1121,42 +1121,61 @@ fn tab_header_drag_handle_contains(
     })
 }
 
-fn column_header_drag_handle_contains(
+fn dock_area_drag_handle_contains(
     controller: &Entity<DockController>,
     column: NodeId,
     point: Point,
     app: &mut App,
 ) -> bool {
-    // DockColumnView renders two fixed-width controls; the standard ColumnHeaderView
-    // renders only its single mode button. Keep the hit-test drag zone aligned with
-    // the actual flexible ColumnDragArea in each presentation.
-    let uses_component_header = uses_dock_component_column(controller, column, app);
     controller.update(app, |controller, _| {
         let metrics = controller.metrics();
         let Ok(rects) = controller.geometry().cloned() else {
             return false;
         };
-        let Some(column_rect) = rects.columns.iter().find(|rect| rect.column == column) else {
-            return false;
-        };
-
         let layout = controller.layout();
-        if !is_main_dock_column(layout, column) {
-            return false;
+
+        // Core currently starts a Column drag only when the DockArea contains
+        // exactly one Column. Do not detach a single child from a multi-Column area.
+        for side in [DockSide::Left, DockSide::Right] {
+            let Some(area) = layout.main_area(side) else {
+                continue;
+            };
+            let mut area_column_ids = Vec::new();
+            collect_dock_area_columns(layout, area.root, &mut area_column_ids);
+            if area_column_ids.len() != 1 || area_column_ids[0] != column {
+                continue;
+            }
+            let Some(column_rect) = rects.columns.iter().find(|rect| rect.column == column) else {
+                return false;
+            };
+            let area_columns = [*column_rect];
+            return DockAreaDragArea::contains(
+                column_rect.rect,
+                &area_columns,
+                point,
+                metrics.column_header_height,
+                metrics.column_control_button_width,
+            );
         }
 
-        let reserved_controls_width = if uses_component_header {
-            2.0 * metrics.column_control_button_width
-        } else {
-            metrics.group_control_button_width
-        };
-        ColumnDragArea::contains(
-            column_rect.rect,
-            point,
-            metrics.column_header_height,
-            reserved_controls_width,
-        )
+        false
     })
+}
+
+fn collect_dock_area_columns(
+    layout: &dock_core::Layout,
+    node: NodeId,
+    columns: &mut Vec<NodeId>,
+) {
+    match layout.node(node) {
+        Some(Node::Split(split)) => {
+            for child in &split.children {
+                collect_dock_area_columns(layout, *child, columns);
+            }
+        }
+        Some(Node::Column(_)) => columns.push(node),
+        _ => {}
+    }
 }
 
 fn group_grip_contains(
@@ -1370,32 +1389,38 @@ mod hit_dispatch_tests {
     }
 
     #[test]
-    fn column_header_drag_zone_excludes_the_mode_button_and_column_content() {
+    fn dock_area_header_drag_zone_excludes_collapse_and_close_controls() {
         let rect = Rect::new(
             Point::new(10.0, 20.0),
             dock_core::Size::new(240.0, 500.0),
         );
 
-        assert!(crate::dock_components::ColumnDragArea::contains(
+        let columns = [dock_core::ColumnRect::new(NodeId::null(), rect)];
+
+        assert!(crate::dock_components::DockAreaDragArea::contains(
             rect,
+            &columns,
             Point::new(100.0, 30.0),
             32.0,
             28.0,
         ));
-        assert!(crate::dock_components::ColumnDragArea::contains(
+        assert!(!crate::dock_components::DockAreaDragArea::contains(
             rect,
-            Point::new(221.0, 30.0),
+            &columns,
+            Point::new(190.0, 30.0),
             32.0,
             28.0,
         ));
-        assert!(!crate::dock_components::ColumnDragArea::contains(
+        assert!(!crate::dock_components::DockAreaDragArea::contains(
             rect,
-            Point::new(222.0, 30.0),
+            &columns,
+            Point::new(240.0, 30.0),
             32.0,
             28.0,
         ));
-        assert!(!crate::dock_components::ColumnDragArea::contains(
+        assert!(!crate::dock_components::DockAreaDragArea::contains(
             rect,
+            &columns,
             Point::new(100.0, 52.0),
             32.0,
             28.0,
