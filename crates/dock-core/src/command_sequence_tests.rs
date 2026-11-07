@@ -327,10 +327,6 @@ fn existing_but_wrong_node_types_and_forbidden_targets_are_rejected_atomically()
     let panel_node = panel_node_and_id.0;
 
     let wrong_type_commands = vec![
-        DockCommand::Float {
-            node: column,
-            bounds: Rect::new(Point::new(20.0, 30.0), Size::new(320.0, 220.0)),
-        },
         DockCommand::CloseGroup { group: column },
         DockCommand::ActivateTab {
             group: column,
@@ -400,7 +396,8 @@ fn existing_but_wrong_node_types_and_forbidden_targets_are_rejected_atomically()
     }
 
     // A Photoshop panel can be detached independently. Core wraps it in
-    // the required one-tab floating root; a Column itself is not a valid root.
+    // the required one-tab floating root. Whole-Column floating is covered by
+    // the dedicated composition round-trip regression test.
     let mut floating_panel_layout = layout.clone();
     floating_panel_layout
         .apply(
