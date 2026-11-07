@@ -19,14 +19,13 @@ pub(super) fn layout_split(
         id,
         split,
         rect,
-        false,
     )
 }
 
-/// Lays out a floating composition in its local client area.
+/// Lays out a floating composition directly in its local client area.
 ///
-/// A Column's own header is part of the composition. Trees that contain a
-/// Column therefore start at the top edge without reserving a second title row.
+/// Floating windows have no generic title row. A Column contributes its own
+/// ColumnHeader as part of the normal Core subtree geometry.
 pub(super) fn layout_floating_root(
     layout: &Layout,
     id: NodeId,
@@ -35,37 +34,7 @@ pub(super) fn layout_floating_root(
     minimum_sizes: &mut HashMap<NodeId, Size>,
     output: &mut LayoutRects,
 ) -> Result<(), ComputeRectsError> {
-    if layout.floating_tree_contains_column(id) {
-        return layout_node(layout, id, rect, metrics, minimum_sizes, output);
-    }
-
-    let title_height = metrics.header_height.min(rect.size.height);
-    match layout.node(id) {
-        Some(Node::Split(split))
-            if split.axis == Axis::Y
-                && layout.floating_branch_starts_collapsed(id)
-                && rect.size.height > title_height =>
-        {
-            let content_rect = Rect::new(
-                Point::new(rect.origin.x, rect.origin.y + title_height),
-                Size::new(rect.size.width, rect.size.height - title_height),
-            );
-            layout_node(layout, id, content_rect, metrics, minimum_sizes, output)
-        }
-        Some(Node::Split(split)) if split.axis == Axis::X => layout_split_inner(
-            SplitLayoutContext {
-                layout,
-                metrics,
-                minimum_sizes,
-                output,
-            },
-            id,
-            split,
-            rect,
-            true,
-        ),
-        _ => layout_node(layout, id, rect, metrics, minimum_sizes, output),
-    }
+    layout_node(layout, id, rect, metrics, minimum_sizes, output)
 }
 
 struct SplitLayoutContext<'a> {
@@ -80,7 +49,6 @@ fn layout_split_inner(
     id: NodeId,
     split: &crate::Split,
     rect: Rect,
-    reserve_title_for_collapsed_branches: bool,
 ) -> Result<(), ComputeRectsError> {
     let SplitLayoutContext {
         layout,
@@ -142,15 +110,6 @@ fn layout_split_inner(
                     Point::new(x, rect.origin.y),
                     Size::new(widths[index], rect.size.height),
                 );
-                if reserve_title_for_collapsed_branches
-                    && layout.floating_branch_starts_collapsed(*child)
-                {
-                    let title_height = metrics.header_height.min(child_rect.size.height);
-                    if child_rect.size.height > title_height {
-                        child_rect.origin.y += title_height;
-                        child_rect.size.height -= title_height;
-                    }
-                }
                 layout_node(layout, *child, child_rect, metrics, minimum_sizes, output)?;
                 x += widths[index];
                 if index + 1 < split.children.len() {
