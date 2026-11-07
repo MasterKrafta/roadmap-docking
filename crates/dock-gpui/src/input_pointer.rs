@@ -666,18 +666,27 @@ fn native_tearoff_boundary_reached(
     match (handle, payload) {
         (Some(DragHandle::ColumnHeader), DragPayload::Column { .. }) => true,
         (Some(DragHandle::PanelTab), DragPayload::Panel { panel }) => {
+            // Resolve the group first, then release the mutable geometry borrow before
+            // consulting the layout to determine which renderer owns its header.
+            let group = {
+                let Ok(rects) = controller.geometry() else {
+                    return false;
+                };
+                let Some(group) = rects
+                    .tab_headers
+                    .iter()
+                    .find(|header| header.panel == panel)
+                    .map(|header| header.group)
+                else {
+                    return false;
+                };
+                group
+            };
+            let uses_dock_component = is_dock_component_tab_group(controller.layout(), group);
             let Ok(rects) = controller.geometry() else {
                 return false;
             };
-            let Some(group) = rects
-                .tab_headers
-                .iter()
-                .find(|header| header.panel == panel)
-                .map(|header| header.group)
-            else {
-                return false;
-            };
-            let drag_zone = if is_dock_component_tab_group(controller.layout(), group) {
+            let drag_zone = if uses_dock_component {
                 let Some(group_rect) = rects.groups.iter().find(|rect| rect.group == group) else {
                     return false;
                 };
