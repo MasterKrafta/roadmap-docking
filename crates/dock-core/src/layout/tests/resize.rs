@@ -461,12 +461,12 @@ fn c45_collapsed_group_has_fixed_height_and_cannot_be_resized_at_its_boundary() 
         .unwrap();
     assert!(matches!(
         expanded_boundary.actual_value,
-        Some(CommandValue::GroupBoundaryDelta(delta)) if (delta - 148.0).abs() < 1.0e-3
+        Some(CommandValue::GroupBoundaryDelta(delta)) if (delta - 128.0).abs() < 1.0e-3
     ));
     let Node::Column(value) = layout.node(column).unwrap() else {
         panic!("target should remain a Column");
     };
-    let expected_weight_delta = 148.0 * 0.5 / 472.0;
+    let expected_weight_delta = 128.0 * 0.5 / 472.0;
     assert_eq!(value.group_ratios[0], 0.5);
     assert!((value.group_ratios[1] - (0.25 + expected_weight_delta)).abs() < 1.0e-4);
     assert!((value.group_ratios[2] - (0.25 - expected_weight_delta)).abs() < 1.0e-4);
