@@ -377,6 +377,89 @@ fn c47_dock_single_group_floating_column_into_group_tabs_removes_wrapper() {
 }
 
 #[test]
+fn c47_dock_single_tab_floating_column_into_tabs_unwraps_panel() {
+    let metrics = DockMetrics::default();
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, target_panel_node) = builder.panel(
+        PanelKey::new("c47-floating-tab-target").unwrap(),
+        descriptors()[0].1,
+    );
+    let target_group = builder.tabs(vec![target_panel_node], 0, false);
+    let target_column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![target_group],
+        vec![1.0],
+    );
+    builder.main_area(DockSide::Left, target_column);
+
+    let (_, moving_panel_node) = builder.panel(
+        PanelKey::new("c47-floating-tab-moving").unwrap(),
+        descriptors()[0].1,
+    );
+    let (_, remaining_panel_node) = builder.panel(
+        PanelKey::new("c47-floating-tab-remaining").unwrap(),
+        descriptors()[0].1,
+    );
+    let source_group = builder.tabs(
+        vec![moving_panel_node, remaining_panel_node],
+        0,
+        false,
+    );
+    let source_column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![source_group],
+        vec![1.0],
+    );
+    builder.main_area(DockSide::Right, source_column);
+
+    let mut layout = builder.build();
+    layout
+        .apply(
+            DockCommand::Float {
+                node: moving_panel_node,
+                bounds: Rect::new(Point::new(520.0, 80.0), Size::new(360.0, 260.0)),
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    let (floating_id, floating) = layout.floating_groups().next().unwrap();
+    let floating_root = layout.dock_area(floating.area).unwrap().root;
+    assert!(matches!(layout.node(floating_root), Some(Node::Column(_))));
+
+    layout
+        .apply(
+            DockCommand::DockFloating {
+                group: floating_id,
+                target: DropTarget::Tabs {
+                    group: target_group,
+                    index: 1,
+                },
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    assert!(matches!(
+        layout.node(target_group),
+        Some(Node::Tabs(tabs))
+            if tabs.children == vec![target_panel_node, moving_panel_node]
+                && tabs.active_index == 1
+    ));
+    assert!(matches!(
+        layout.node(source_group),
+        Some(Node::Tabs(tabs)) if tabs.children == vec![remaining_panel_node]
+    ));
+    assert!(layout.floating_group(floating_id).is_none());
+    assert!(layout.node(floating_root).is_none());
+    assert_eq!(layout.panel_instances().count(), 3);
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
 fn float_panel_uses_one_tab_floating_root() {
     let metrics = DockMetrics::default();
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
