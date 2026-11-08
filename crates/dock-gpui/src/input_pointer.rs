@@ -690,8 +690,8 @@ pub(crate) fn register_pointer_events(
 }
 
 /// Selects which semantic drag areas may start a native tear-off.
-/// A PanelTab becomes a native window after the pointer leaves its DockTab drag
-/// zone. Column and DockArea headers still detach as soon as their drag threshold is crossed.
+/// PanelTab and GroupGrip gestures become native windows after leaving their
+/// respective drag zones. Column and DockArea headers detach at the drag threshold.
 fn native_tearoff_enabled_for(handle: Option<DragHandle>, payload: DragPayload) -> bool {
     match (handle, payload) {
         (Some(DragHandle::ColumnHeader), DragPayload::Column { .. }) => true,
