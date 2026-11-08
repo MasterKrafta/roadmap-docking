@@ -2,10 +2,10 @@ use std::collections::{HashMap, HashSet};
 
 use dock_core::{
     ColumnDisplayItem, ColumnMode, ColumnRect, DockMetrics, DragPreview, DropZoneRect,
-    FloatingGroupId, FlyoutState, GroupRect, NodeId, PanelId, PanelRect, Point, ScrollHandle,
+    FloatingGroupId, FlyoutState, GroupRect, NodeId, PanelId, PanelRect, Point,
     SplitterRect, TabHeaderRect, TabOverflowRect, TabStripRect, VerticalOverflow,
 };
-use gpui::{AnyView, Entity, IntoElement, ParentElement, div, px};
+use gpui::{AnyView, Entity, IntoElement, ParentElement, ScrollHandle, div, px};
 use ui::Theme;
 
 use crate::{
@@ -48,7 +48,6 @@ impl DockCompositionView {
         scroll_handle: Option<ScrollHandle>,
         controller: Entity<DockController>,
         theme: Theme,
-        coordinate_origin: Point,
         raise_floating: Option<FloatingGroupId>,
         show_area_header: bool,
     ) -> impl IntoElement {
@@ -156,10 +155,6 @@ impl DockCompositionView {
             ));
         }
 
-        // Keep this parameter as part of the shared API contract. The legacy
-        // renderer now receives a Column-local origin above, while the wrapper
-        // itself is always placed directly in host-local Core coordinates.
-        let _ = coordinate_origin;
         surface
     }
 }
