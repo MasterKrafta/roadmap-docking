@@ -970,7 +970,6 @@ fn tab_header_clickable_contains(
     point: Point,
     app: &mut App,
 ) -> bool {
-    let uses_component_tab = uses_dock_component_group(controller, group, app);
     controller.update(app, |controller, _| {
         let Ok(rects) = controller.geometry().cloned() else {
             return false;
@@ -992,9 +991,6 @@ fn tab_header_clickable_contains(
         else {
             return false;
         };
-        if uses_component_tab {
-            return matches!(header.rect.contains(point), Ok(true));
-        }
         let close_width = 18.0_f32.min(header.rect.size.width.max(0.0));
         point.x < header.rect.origin.x + header.rect.size.width - close_width
     })
@@ -1007,7 +1003,6 @@ fn tab_header_drag_handle_contains(
     point: Point,
     app: &mut App,
 ) -> bool {
-    let uses_component_tab = uses_dock_component_group(controller, group, app);
     controller.update(app, |controller, _| {
         let Ok(rects) = controller.geometry().cloned() else {
             return false;
@@ -1027,8 +1022,8 @@ fn tab_header_drag_handle_contains(
                     if column.mode.is_rail() && column.groups.contains(&group)
             )
         });
-        if is_rail || uses_component_tab {
-            return matches!(header.rect.contains(point), Ok(true));
+        if is_rail {
+            return false;
         }
 
         let close_width = 18.0_f32.min(header.rect.size.width.max(0.0));
