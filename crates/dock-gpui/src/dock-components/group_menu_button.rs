@@ -1,13 +1,8 @@
 use dock_core::NodeId;
-use gpui::{
-    Entity, IntoElement, InteractiveElement, ParentElement, Styled, div, px, rgb,
-};
+use gpui::{IntoElement, InteractiveElement, ParentElement, Styled, div, px, rgb};
 use ui::Theme;
 
-use crate::{
-    DockController,
-    components::context_menu::{ContextMenuTarget, GroupMenuToggle},
-};
+use crate::components::context_menu::{ContextMenuTarget, GroupMenuToggle};
 
 /// Fixed-width menu control for the Group.
 pub struct GroupMenuButton;
