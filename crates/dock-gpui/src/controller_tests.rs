@@ -698,7 +698,7 @@ fn floating_geometry_hit_test_and_drop_resolver_are_window_local() {
 }
 
 #[test]
-fn native_tearoff_replaces_source_drag_with_floating_capture_and_escape_rolls_back() {
+fn native_tearoff_preserves_original_drag_source_and_escape_rolls_back() {
     let mut controller = DockController::empty(
         Profile::Photoshop,
         DockMetrics::default(),
@@ -743,17 +743,20 @@ fn native_tearoff_replaces_source_drag_with_floating_capture_and_escape_rolls_ba
     let Some(dock_core::CommandValue::FloatingGroup(floating_group)) = outcome.actual_value else {
         panic!("Float must return the newly created floating group id");
     };
+    assert!(controller.layout.floating_group(floating_group).is_some());
     controller.drag.layout_version = Some(controller.layout.version());
 
-    controller
-        .continue_tearoff_as_floating_capture(floating_group)
-        .unwrap();
+    // The temporary FloatingGroup is only the native transport window. The
+    // logical drag remains the original Group/GroupGrip gesture.
+    controller.continue_tearoff_drag().unwrap();
     assert!(matches!(
         controller.drag().session().state(),
-        DragState::Dragging { payload: dock_core::DragPayload::FloatingGroup { group }, .. }
-            if group == floating_group
+        DragState::Dragging {
+            payload: dock_core::DragPayload::Group { group },
+            ..
+        } if group == source_group
     ));
-    assert_eq!(controller.drag().session().handle(), Some(DragHandle::FloatingCapture));
+    assert_eq!(controller.drag().session().handle(), Some(DragHandle::GroupGrip));
     assert!(controller.tearoff_transaction_active);
 
     controller.cancel_pointer_interaction_on_escape().unwrap();
