@@ -140,7 +140,7 @@ impl DropOverlay {
         let (Some(zone), Some(preview)) = (zone, preview) else {
             return layer;
         };
-        if zone.target != preview.target.unwrap_or(zone.target)
+        if preview.target != Some(zone.target)
             || !zone.rect.contains(preview.point).unwrap_or(false)
         {
             return layer;
