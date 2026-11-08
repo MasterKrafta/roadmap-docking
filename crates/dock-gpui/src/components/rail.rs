@@ -9,7 +9,7 @@ use ui::Theme;
 
 use crate::DockController;
 
-use super::tab_strip::GroupPresentation;
+use crate::dock_components::GroupPresentation;
 
 /// Flattened icon-rail presentation. The item order and rectangles are supplied
 /// by dock-core; this component never traverses or changes the model tree.
