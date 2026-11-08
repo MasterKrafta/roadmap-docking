@@ -706,13 +706,12 @@ fn drop_source(controller: &DockController, payload: DragPayload) -> Option<Drop
                 .floating_group(group)
                 .and_then(|floating| controller.layout().dock_area(floating.area))
                 .map(|area| area.root)?;
-            match controller.layout().node(root) {
-                Some(Node::Column(_)) => Some(DropSource::Column { column: root }),
-                Some(Node::Tabs(_)) => Some(DropSource::Group { group: root }),
-                // A multi-column FloatingGroup needs composition-aware drop zones;
-                // do not misrepresent its Split(X) root as a Tabs group.
-                _ => None,
-            }
+            Some(if matches!(controller.layout().node(root), Some(Node::Column(_))) {
+                DropSource::Column { column: root }
+            } else {
+                // Floating compositions may use a Tabs, Split or Column root.
+                DropSource::Group { group: root }
+            })
         }
     }
 }
