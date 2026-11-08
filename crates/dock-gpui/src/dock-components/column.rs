@@ -24,6 +24,7 @@ use crate::{
 use group::DockGroupView;
 
 pub use group::{DockTab, GroupDragArea, GroupGrip, GroupMenuButton, PanelContent};
+pub(crate) use group::DockGroupView;
 
 /// Renders one Column containing one or more vertically stacked Groups.
 pub struct DockColumnView;
