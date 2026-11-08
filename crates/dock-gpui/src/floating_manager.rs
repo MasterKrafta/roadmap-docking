@@ -699,8 +699,7 @@ impl FloatingWindowManager {
         true
     }
 
-    /// Starts a thresholded native move from an already-floating title grip.
-    /// Starts a thresholded native move from an already-floating Column header.
+    /// Starts a thresholded native move from the shared floating DockAreaHeader.
     pub(crate) fn begin_existing_window_move(
         &mut self,
         group: FloatingGroupId,
