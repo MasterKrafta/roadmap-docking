@@ -19,8 +19,9 @@ use crate::{
     DockController,
     components::{
         context_menu::GroupMenuToggle, panel_host::PanelHost, rail::RailView,
-        splitter::SplitterView, tab_strip::GroupPresentation,
+        splitter::SplitterView,
     },
+    dock_components::GroupPresentation,
 };
 pub use group::{DockTab, GroupDragArea, GroupGrip, GroupMenuButton, PanelContent};
 pub(crate) use group::DockGroupView;
