@@ -856,8 +856,20 @@ impl Render for FloatingHost {
                         if manager_entity.as_ref().is_some_and(|manager| {
                             manager
                                 .update(app, |manager, _| manager.native_move_active())
-                                
                         }) {
+                            return;
+                        }
+                        if DockInteractionCoordinator::capture_was_lost(
+                            window,
+                            &pointer_capture_for_move,
+                        ) {
+                            tab_press_for_move.set(None);
+                            DockInteractionCoordinator::cancel(
+                                &controller_for_move,
+                                window,
+                                &pointer_capture_for_move,
+                                app,
+                            );
                             return;
                         }
                         let Ok(point) = crate::geometry::DockGeometry::point_from_gpui(event.position) else {
@@ -994,8 +1006,20 @@ impl Render for FloatingHost {
                         if let Some(manager) = manager_for_up.upgrade()
                             && manager
                                 .update(app, |manager, _| manager.native_move_active())
-                                
                         {
+                            return;
+                        }
+                        if DockInteractionCoordinator::capture_was_lost(
+                            window,
+                            &pointer_capture_for_up,
+                        ) {
+                            tab_press_for_up.set(None);
+                            DockInteractionCoordinator::cancel(
+                                &controller_for_up,
+                                window,
+                                &pointer_capture_for_up,
+                                app,
+                            );
                             return;
                         }
                         let Some(press) = tab_press_for_up.get() else {
