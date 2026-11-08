@@ -350,7 +350,9 @@ impl Layout {
         // A panel dropped on a Main Dock tab strip always appends to the
         // target group. Emit one zone for the whole strip, not one insertion
         // slot per existing tab header.
-        if matches!(source, DropSource::Panel { .. }) {
+        if matches!(source, DropSource::Panel { .. })
+            && source_allows(self, source_panels, AllowedArea::MAIN_DOCK)
+        {
             for strip in &rects.tab_strips {
                 if target_area(self, tree_index, strip.group) != Some(AllowedArea::MAIN_DOCK) {
                     continue;
