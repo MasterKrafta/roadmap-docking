@@ -632,9 +632,18 @@ fn floating_geometry_hit_test_and_drop_resolver_are_window_local() {
     let first_rects = controller.floating_geometry(first_window, first_group).unwrap();
     assert_eq!(first_rects.floating_groups.len(), 1);
     assert_eq!(first_rects.floating_groups[0].rect.origin, Point::ZERO);
+    let first_root = controller
+        .layout()
+        .floating_group(first_group)
+        .and_then(|floating| controller.layout().dock_area(floating.area))
+        .map(|area| area.root)
+        .unwrap();
+
+    // The floating title no longer has a dedicated Core hit result.
+    // Its top strip belongs to the floating Column; GPUI handles title dragging.
     assert!(matches!(
         controller.hit_floating_window(first_window, first_group, Point::new(10.0, 10.0)),
-        Ok(HitResult::FloatingTitle { group }) if group == first_group
+        Ok(HitResult::Column { column }) if column == first_root
     ));
 
     // A hidden PopUp can be rebound to another group without retaining its old snapshot.
