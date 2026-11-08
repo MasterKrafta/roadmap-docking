@@ -1,6 +1,6 @@
 use super::{DockController, DockEvent, ResolverCacheKey};
 use dock_core::{
-    CommandError, DockCommand, DockMetrics, DragHandle, DragPayload, DragState, DropSource,
+    CommandError, DockCommand, DockMetrics, DockSide, DragHandle, DragPayload, DragState, DropSource,
     HitResult, InitialLayoutError, LayoutRects, PanelConstraints, PanelId, PanelKey, Point,
     Node, Profile, Rect, Size,
 };
@@ -708,6 +708,25 @@ fn native_tearoff_preserves_original_drag_source_and_escape_rolls_back() {
     .unwrap();
     controller.reset_layout().unwrap();
 
+    let initial_version = controller.layout().version();
+    let initial_nodes = controller
+        .layout()
+        .nodes()
+        .map(|(id, node)| (id, format!("{node:?}")))
+        .collect::<Vec<_>>();
+    let initial_panels = controller
+        .layout()
+        .panel_instances()
+        .map(|(id, panel)| (id, format!("{panel:?}")))
+        .collect::<Vec<_>>();
+    let initial_areas = controller
+        .layout()
+        .dock_areas()
+        .map(|(id, area)| (id, format!("{area:?}")))
+        .collect::<Vec<_>>();
+    let initial_main_roots = [DockSide::Left, DockSide::Right]
+        .map(|side| controller.layout().main_area(side).map(|area| area.root));
+
     let source_group = controller
         .layout()
         .nodes()
@@ -760,7 +779,46 @@ fn native_tearoff_preserves_original_drag_source_and_escape_rolls_back() {
     assert!(controller.tearoff_transaction_active);
 
     controller.cancel_pointer_interaction_on_escape().unwrap();
-    assert_eq!(controller.layout.floating_groups().count(), 0);
+    assert_eq!(controller.layout().version(), initial_version);
+    assert_eq!(
+        controller
+            .layout()
+            .nodes()
+            .map(|(id, node)| (id, format!("{node:?}")))
+            .collect::<Vec<_>>(),
+        initial_nodes
+    );
+    assert_eq!(
+        controller
+            .layout()
+            .panel_instances()
+            .map(|(id, panel)| (id, format!("{panel:?}")))
+            .collect::<Vec<_>>(),
+        initial_panels
+    );
+    assert_eq!(
+        controller
+            .layout()
+            .dock_areas()
+            .map(|(id, area)| (id, format!("{area:?}")))
+            .collect::<Vec<_>>(),
+        initial_areas
+    );
+    assert_eq!(
+        [DockSide::Left, DockSide::Right]
+            .map(|side| controller.layout().main_area(side).map(|area| area.root)),
+        initial_main_roots
+    );
+    assert_eq!(controller.layout().floating_groups().count(), 0);
     assert!(!controller.tearoff_transaction_active);
     assert_eq!(controller.drag().session().state(), DragState::Idle);
+    assert!(!controller.history.can_undo());
+
+    // A fresh transaction must be possible: cancellation did not leave an
+    // orphaned UndoRedoHistory transaction behind.
+    assert!(controller.history.begin_transaction(controller.layout()));
+    assert!(controller
+        .history
+        .cancel_transaction(&mut controller.layout, &controller.metrics)
+        .unwrap());
 }
