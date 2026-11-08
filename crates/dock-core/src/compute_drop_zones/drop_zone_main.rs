@@ -347,14 +347,15 @@ impl Layout {
             rects,
             ..
         } = *context;
-        // A panel dropped on a Main Dock tab strip always appends to the
-        // target group. Emit one zone for the whole strip, not one insertion
-        // slot per existing tab header.
-        if matches!(source, DropSource::Panel { .. })
-            && source_allows(self, source_panels, AllowedArea::MAIN_DOCK)
-        {
+
+        // A dragged Panel appends to the end of any eligible Main or Floating
+        // tab strip. It does not expose arbitrary header insertion slots.
+        if matches!(source, DropSource::Panel { .. }) {
             for strip in &rects.tab_strips {
-                if target_area(self, tree_index, strip.group) != Some(AllowedArea::MAIN_DOCK) {
+                let Some(area) = target_area(self, tree_index, strip.group) else {
+                    continue;
+                };
+                if area == AllowedArea::ICON_RAIL || !source_allows(self, source_panels, area) {
                     continue;
                 }
                 let Some(Node::Tabs(tabs)) = self.node(strip.group) else {
@@ -372,8 +373,45 @@ impl Layout {
             }
         }
 
-        // Whole Group drags retain exact insertion positions. Floating panel
-        // insertion also retains its existing header-based behavior until Stage 5.
+        // A Floating composition whose root is a single-group Column may be
+        // merged into another Floating tab strip as one complete Group.
+        let floating_single_group_column = matches!(source, DropSource::Column { .. })
+            && source_is_floating_root(self, source_root_id)
+            && matches!(
+                self.node(source_root_id),
+                Some(Node::Column(column)) if column.groups.len() == 1
+            );
+        if floating_single_group_column
+            && source_allows(self, source_panels, AllowedArea::FLOATING)
+        {
+            for strip in &rects.tab_strips {
+                if target_area(self, tree_index, strip.group) != Some(AllowedArea::FLOATING) {
+                    continue;
+                }
+                let Some(Node::Tabs(tabs)) = self.node(strip.group) else {
+                    continue;
+                };
+                push_zone(
+                    zones,
+                    DropTarget::GroupTabs {
+                        group: strip.group,
+                        index: tabs.children.len(),
+                    },
+                    DropZone::TabInsertion,
+                    strip.rect,
+                )?;
+            }
+        }
+
+        // Whole Tabs Group drags keep exact insertion positions in both Main
+        // and Floating. A Floating root that is a Split/Column is not a Group
+        // payload and must use its composition-level targets instead.
+        if !matches!(source, DropSource::Group { .. })
+            || !matches!(self.node(source_root_id), Some(Node::Tabs(_)))
+        {
+            return Ok(());
+        }
+
         for header in &rects.tab_headers {
             let Some(area) = target_area(self, tree_index, header.group) else {
                 continue;
@@ -381,15 +419,8 @@ impl Layout {
             if area == AllowedArea::ICON_RAIL || !source_allows(self, source_panels, area) {
                 continue;
             }
-            // Main Dock panels already have one full-strip append zone above.
-            // Keep header halves only for whole Group drags and current Floating
-            // panel insertion behavior.
-            if matches!(source, DropSource::Panel { .. }) && area != AllowedArea::FLOATING {
-                continue;
-            }
-            if matches!(source, DropSource::Group { .. })
-                && (contains_node(tree_index, source_root_id, header.group)
-                    || contains_node(tree_index, header.group, source_root_id))
+            if contains_node(tree_index, source_root_id, header.group)
+                || contains_node(tree_index, header.group, source_root_id)
             {
                 continue;
             }
@@ -399,30 +430,24 @@ impl Layout {
                 Point::new(header.rect.origin.x + half, header.rect.origin.y),
                 Size::new(header.rect.size.width - half, header.rect.size.height),
             );
-            let target = match source {
-                DropSource::Panel { .. } => DropTarget::Tabs {
+            push_zone(
+                zones,
+                DropTarget::GroupTabs {
                     group: header.group,
                     index: header.index,
                 },
-                DropSource::Group { .. } => DropTarget::GroupTabs {
-                    group: header.group,
-                    index: header.index,
-                },
-                DropSource::Column { .. } => continue,
-            };
-            push_zone(zones, target, DropZone::TabInsertion, left_rect)?;
-            let right_target = match source {
-                DropSource::Panel { .. } => DropTarget::Tabs {
+                DropZone::TabInsertion,
+                left_rect,
+            )?;
+            push_zone(
+                zones,
+                DropTarget::GroupTabs {
                     group: header.group,
                     index: header.index + 1,
                 },
-                DropSource::Group { .. } => DropTarget::GroupTabs {
-                    group: header.group,
-                    index: header.index + 1,
-                },
-                DropSource::Column { .. } => continue,
-            };
-            push_zone(zones, right_target, DropZone::TabInsertion, right_rect)?;
+                DropZone::TabInsertion,
+                right_rect,
+            )?;
         }
         Ok(())
     }
