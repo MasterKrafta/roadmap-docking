@@ -567,13 +567,13 @@ pub(crate) fn register_pointer_events(
 
             let drag_was_started = if drag_active {
                 // MouseUp can be the first event delivered beyond the drag threshold.
-                // Update the session once more so a tab released outside the main
-                // Main-window exit still becomes floating without an intermediate move event.
+                // Update the session once more so a tab released outside its DockTab
+                // drag zone still becomes floating without an intermediate move event.
                 if update_drag_at(&controller, point, app) {
                     pointer_press.set(None);
                 }
-                let should_tearoff =
-                    controller.update(app, |controller, _| native_tearoff_required(controller));
+                let should_tearoff = controller
+                    .update(app, |controller, _| native_tearoff_required(controller, point));
                 if should_tearoff
                     && super::drag::begin_native_tearoff(&controller, &manager, point, app)
                 {
