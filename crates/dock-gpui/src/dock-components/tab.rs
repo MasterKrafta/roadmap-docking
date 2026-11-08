@@ -1,11 +1,10 @@
-use dock_core::{DockMetrics, FloatingGroupId, NodeId, Point, Rect, TabHeaderRect};
+use dock_core::{DockMetrics, NodeId, Point, Rect, TabHeaderRect};
 use gpui::{
-    Entity, IntoElement, InteractiveElement, MouseButton, ParentElement, SharedString,
-    StatefulInteractiveElement, Styled, div, img, px, rgb,
+    IntoElement, InteractiveElement, ParentElement, SharedString, StatefulInteractiveElement,
+    Styled, div, img, px, rgb,
 };
 use ui::Theme;
 
-use crate::DockController;
 
 /// Reusable tab header. The shared DockHost/FloatingHost pointer pipelines
 /// handle its drag gesture from Core tab geometry.
@@ -44,10 +43,7 @@ impl DockTab {
         title: SharedString,
         icon: Option<SharedString>,
         active: bool,
-        controller: Entity<DockController>,
         theme: Theme,
-        _raise_floating: Option<FloatingGroupId>,
-        _middle_click_closes_tabs: bool,
     ) -> impl IntoElement {
         let left = header.rect.origin.x - strip_rect.origin.x;
         let top = header.rect.origin.y - strip_rect.origin.y;
@@ -100,6 +96,7 @@ impl DockTab {
             .cursor_pointer()
             .child(title_row);
 
+        tab
     }
 
     pub fn render(
