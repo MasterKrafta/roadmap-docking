@@ -514,7 +514,7 @@ fn floating_multi_group_column_minimum_allows_compact_group_strips() {
         vec![collapsed_group, expanded_group],
         vec![0.5, 0.5],
     );
-    let requested_bounds = Rect::new(Point::new(40.0, 50.0), Size::new(300.0, 100.0));
+    let requested_bounds = Rect::new(Point::new(40.0, 50.0), Size::new(300.0, 80.0));
     let floating = builder.floating_group(column, requested_bounds, 1);
     let layout = builder.build();
 
@@ -527,6 +527,7 @@ fn floating_multi_group_column_minimum_allows_compact_group_strips() {
         required_group_height + metrics.column_header_height
     );
     assert_eq!(actual_bounds.origin, Point::ZERO);
+    assert_eq!(layout.floating_group(floating).unwrap().bounds, requested_bounds);
     assert_eq!(rects.auto_collapsed_groups, vec![collapsed_group, expanded_group]);
     assert!(rects.auto_expanded_groups.is_empty());
     assert!(rects.vertical_overflow.is_empty());
