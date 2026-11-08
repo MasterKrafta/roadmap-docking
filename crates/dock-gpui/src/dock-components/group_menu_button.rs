@@ -47,7 +47,7 @@ impl GroupMenuButton {
         width: f32,
         icon_size: f32,
         glyph: &'static str,
-    ) -> impl IntoElement {
+    ) -> impl IntoElement + InteractiveElement {
         div()
             .id(id)
             .w(px(width))
