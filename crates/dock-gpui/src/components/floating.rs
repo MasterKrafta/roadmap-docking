@@ -387,13 +387,8 @@ fn floating_host_snapshot(
     let drag_zones = drag_resolver
         .map(|resolver| resolver.zones().to_vec())
         .unwrap_or_default();
-    let active_drop_zone = drag_preview.and_then(|preview| {
-        let zone = drag_resolver?
-            .resolve_zone(preview.point)
-            .ok()?
-            .filter(|zone| preview.target == Some(zone.target))?;
-        Some(zone)
-    });
+    let active_drop_zone =
+        DropOverlay::resolve_active_zone(drag_resolver, drag_preview);
 
     Ok(Some(FloatingHostSnapshot {
         rects,
