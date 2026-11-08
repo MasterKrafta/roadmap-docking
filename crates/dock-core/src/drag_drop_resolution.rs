@@ -1521,7 +1521,12 @@ fn photoshop_main_column_tearoff_can_join_an_existing_floating_column() {
         zone: crate::DropZone::Left,
     };
 
-    assert_eq!(layout.resolve_drop(point, source, &target_rects, &metrics).unwrap(), Some(target));
+    assert_eq!(
+        layout
+            .resolve_drop(point, source, &target_rects, &metrics)
+            .unwrap(),
+        Some(target)
+    );
 
     // The native tear-off retains ColumnHeader + Column even though Core has
     // already moved that Column into the temporary Floating composition.
