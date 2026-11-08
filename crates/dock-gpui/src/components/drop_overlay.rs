@@ -127,8 +127,6 @@ impl DropOverlay {
 
         layer
     }
-
-
 }
 
 impl DragGhost {
