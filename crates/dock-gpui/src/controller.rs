@@ -414,10 +414,15 @@ impl DockController {
             DragPayload::Column { column } => {
                 matches!(self.layout.node(column), Some(Node::Column(_)))
             }
-            DragPayload::DockArea { side } => self
-                .layout
-                .main_area(side)
-                .is_some_and(|area| self.layout.node(area.root).is_some()),
+            // Floating a complete Main DockArea removes its old main-area
+            // registration. During the active tear-off transaction the source
+            // is still valid in the temporary Floating host.
+            DragPayload::DockArea { side } => {
+                self.layout
+                    .main_area(side)
+                    .is_some_and(|area| self.layout.node(area.root).is_some())
+                    || self.tearoff_transaction_active
+            },
             DragPayload::FloatingGroup { group } => self
                 .layout
                 .floating_group(group)
@@ -501,56 +506,35 @@ impl DockController {
         self.history.commit_transaction(&self.layout)
     }
 
-    /// Continues a whole-group or whole-column tear-off as a floating-composition
-    /// capture. The history transaction is deliberately left open.
-    pub(crate) fn continue_tearoff_as_floating_capture(
-        &mut self,
-        group: FloatingGroupId,
-    ) -> Result<(), DragSessionError> {
-        let (origin, position) = match self.drag.session().state() {
+    /// Continues a native tear-off without replacing the logical drag source
+    /// with the temporary FloatingGroup that hosts the detached content.
+    ///
+    /// The original DragPayload and DragHandle remain unchanged. The native
+    /// FloatingWindowManager tracks the transport window independently.
+    /// The history transaction is deliberately left open.
+    pub(crate) fn continue_tearoff_drag(&mut self) -> Result<(), DragSessionError> {
+        let (payload, origin, position) = match self.drag.session().state() {
             DragState::Pressed {
-                origin, position, ..
+                payload,
+                origin,
+                position,
             }
             | DragState::Dragging {
-                origin, position, ..
-            } => (origin, position),
+                payload,
+                origin,
+                position,
+                ..
+            } => (payload, origin, position),
             _ => return Err(DragSessionError::NoActiveGesture),
         };
-        self.drag.cancel_gesture();
-        self.begin_drag_interaction(
-            DragPayload::FloatingGroup { group },
-            DragHandle::FloatingCapture,
-            origin,
-        )?;
-        if let Err(error) = self.drag.session_mut().pointer_move(position) {
-            self.drag.cancel_gesture();
-            return Err(error);
-        }
-        Ok(())
-    }
+        let handle = self
+            .drag
+            .session()
+            .handle()
+            .ok_or(DragSessionError::NoActiveGesture)?;
 
-    /// Continues a native tear-off while preserving the identity of the
-    /// individual Panel. The temporary floating window is only its transport
-    /// surface; drop resolution must still treat the source as a Panel tab.
-    pub(crate) fn continue_tearoff_as_panel_capture(
-        &mut self,
-        panel: PanelId,
-    ) -> Result<(), DragSessionError> {
-        let (origin, position) = match self.drag.session().state() {
-            DragState::Pressed {
-                origin, position, ..
-            }
-            | DragState::Dragging {
-                origin, position, ..
-            } => (origin, position),
-            _ => return Err(DragSessionError::NoActiveGesture),
-        };
         self.drag.cancel_gesture();
-        self.begin_drag_interaction(
-            DragPayload::Panel { panel },
-            DragHandle::PanelTab,
-            origin,
-        )?;
+        self.begin_drag_interaction(payload, handle, origin)?;
         if let Err(error) = self.drag.session_mut().pointer_move(position) {
             self.drag.cancel_gesture();
             return Err(error);
