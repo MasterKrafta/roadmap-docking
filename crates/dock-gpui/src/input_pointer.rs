@@ -12,7 +12,7 @@ use gpui::{
 use crate::{
     DockController, FloatingWindowManager,
     components::context_menu::{ContextMenuTarget, ContextMenuToggle},
-    dock_components::{DockAreaDragArea, DockTab},
+    dock_components::{DockAreaDragArea, DockTab, GroupDragArea},
     geometry::host_point_from_gpui_window,
 };
 
@@ -697,7 +697,7 @@ fn native_tearoff_enabled_for(handle: Option<DragHandle>, payload: DragPayload) 
         (Some(DragHandle::ColumnHeader), DragPayload::Column { .. }) => true,
         (Some(DragHandle::DockAreaHeader), DragPayload::DockArea { .. }) => true,
         (Some(DragHandle::PanelTab), DragPayload::Panel { .. }) => true,
-        (Some(DragHandle::GroupGrip), DragPayload::Group { .. }) => false,
+        (Some(DragHandle::GroupGrip), DragPayload::Group { .. }) => true,
         _ => false,
     }
 }
@@ -736,6 +736,10 @@ fn native_tearoff_required(controller: &mut DockController, pointer: Point) -> b
             };
             let drag_zone = DockTab::drag_zone(group_rect, controller.metrics());
             DockTab::leaves_strip_zone(drag_zone, pointer)
+        }
+        (Some(DragHandle::GroupGrip), DragPayload::Group { group }) => {
+            group_drag_zone(controller, group)
+                .is_some_and(|zone| !GroupDragArea::contains(zone, pointer))
         }
         _ => true,
     }
@@ -1084,56 +1088,26 @@ fn group_drag_area_contains(
     app: &mut App,
 ) -> bool {
     controller.update(app, |controller, _| {
-        let metrics = controller.metrics();
-        let Ok(rects) = controller.geometry().cloned() else {
-            return false;
-        };
-        let Some(group_rect) = rects.groups.iter().find(|rect| rect.group == group) else {
-            return false;
-        };
-
-        let is_column_group = rects.columns.iter().any(|column_rect| {
-            matches!(
-                controller.layout().node(column_rect.column),
-                Some(Node::Column(column)) if column.groups.contains(&group)
-            )
-        });
-        let reserved_grip_left = if is_column_group {
-            rects
-                .tab_headers
-                .iter()
-                .filter(|header| header.group == group)
-                .map(|header| header.rect.origin.x + header.rect.size.width)
-                .fold(group_rect.rect.origin.x, f32::max)
-                - group_rect.rect.origin.x
-        } else if rects.columns.iter().any(|column_rect| {
-            column_rect.rect.origin.y == group_rect.rect.origin.y
-                && matches!(
-                    controller.layout().node(column_rect.column),
-                    Some(Node::Column(column)) if column.groups.first() == Some(&group)
-                )
-        }) {
-            metrics.group_control_button_width + 8.0
-        } else {
-            0.0
-        };
-
-        let requested_header_height = if is_column_group {
-            metrics.header_height.max(metrics.tab_strip_height)
-        } else {
-            metrics.header_height
-        };
-        let header_height = requested_header_height.min(group_rect.rect.size.height);
-        let right_edge = group_rect.rect.origin.x + group_rect.rect.size.width;
-        let right_reserve =
-            (metrics.group_grip_width + metrics.group_control_button_width)
-                .min(group_rect.rect.size.width);
-
-        point.y >= group_rect.rect.origin.y
-            && point.y < group_rect.rect.origin.y + header_height
-            && point.x >= group_rect.rect.origin.x + reserved_grip_left
-            && point.x < right_edge - right_reserve
+        group_drag_zone(controller, group)
+            .is_some_and(|zone| GroupDragArea::contains(zone, point))
     })
+}
+
+fn group_drag_zone(controller: &mut DockController, group: NodeId) -> Option<Rect> {
+    let rects = controller.geometry().cloned().ok()?;
+    let group_rect = rects
+        .groups
+        .iter()
+        .find(|group_rect| group_rect.group == group)?
+        .rect;
+    let in_column = rects.columns.iter().any(|column_rect| {
+        matches!(
+            controller.layout().node(column_rect.column),
+            Some(Node::Column(column)) if column.groups.contains(&group)
+        )
+    });
+
+    Some(GroupDragArea::drag_zone(group_rect, controller.metrics(), in_column))
 }
 
 fn flyout_title_grip_contains(
