@@ -27,11 +27,8 @@ use ui::Theme;
 
 use crate::{
     DockController,
-    components::{
-        context_menu::GroupMenuToggle,
-        tab_overflow::TabOverflow,
-        tab_strip::GroupPresentation,
-    },
+    components::{context_menu::GroupMenuToggle, tab_overflow::TabOverflow},
+    dock_components::GroupPresentation,
 };
 
 const SHOW_GROUP_CONTROLS: bool = true;
