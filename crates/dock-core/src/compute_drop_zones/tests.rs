@@ -1301,6 +1301,125 @@ fn resolver_exposes_the_exact_legal_zone_selected_for_a_pointer() {
 }
 
 #[test]
+fn main_column_drop_zones_are_centered_on_the_splitter_between_columns() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, source_node) = builder.panel(key("splitter-source"), constraints());
+    let source_group = builder.tabs(vec![source_node], 0, false);
+    let source_column =
+        builder.column(280.0, ColumnMode::Expanded, vec![source_group], vec![1.0]);
+    builder.main_area(DockSide::Right, source_column);
+
+    let (source_panel, target_left_node) =
+        builder.panel(key("splitter-target-left"), constraints());
+    let target_left_group = builder.tabs(vec![target_left_node], 0, false);
+    let target_left_column =
+        builder.column(280.0, ColumnMode::Expanded, vec![target_left_group], vec![1.0]);
+
+    let (_, target_right_node) =
+        builder.panel(key("splitter-target-right"), constraints());
+    let target_right_group = builder.tabs(vec![target_right_node], 0, false);
+    let target_right_column =
+        builder.column(280.0, ColumnMode::Expanded, vec![target_right_group], vec![1.0]);
+
+    let root = builder.split(
+        Axis::X,
+        vec![target_left_column, target_right_column],
+        vec![0.5, 0.5],
+    );
+    builder.main_area(DockSide::Left, root);
+
+    let layout = builder.build();
+    let rects = layout.compute_rects(viewport(), &metrics).unwrap();
+    let splitter = rects
+        .splitters
+        .iter()
+        .find(|splitter| {
+            splitter.owner == root && splitter.axis == Axis::X && splitter.boundary_index == 0
+        })
+        .expect("the horizontal main split should expose its inter-column splitter");
+    let splitter_center = splitter.rect.origin.x + splitter.rect.size.width * 0.5;
+
+    let zones = layout
+        .compute_drop_zones(DropSource::Panel { panel: source_panel }, &rects, &metrics)
+        .unwrap();
+    let boundary_zones: Vec<_> = zones
+        .iter()
+        .filter(|zone| {
+            zone.target
+                == DropTarget::MainColumn {
+                    side: DockSide::Left,
+                    index: 1,
+                }
+                && matches!(zone.zone, DropZone::ColumnLeft | DropZone::ColumnRight)
+        })
+        .collect();
+
+    assert!(!boundary_zones.is_empty());
+    for zone in boundary_zones {
+        let zone_center = zone.rect.origin.x + zone.rect.size.width * 0.5;
+        assert!((zone_center - splitter_center).abs() < 0.001);
+        assert_eq!(zone.rect.size.width, metrics.edge_drop_width);
+    }
+}
+
+#[test]
+fn canvas_facing_column_drop_zone_shifts_slightly_into_the_free_space() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, source_node) = builder.panel(key("canvas-edge-source"), constraints());
+    let source_group = builder.tabs(vec![source_node], 0, false);
+    let source_column =
+        builder.column(280.0, ColumnMode::Expanded, vec![source_group], vec![1.0]);
+    builder.main_area(DockSide::Right, source_column);
+
+    let (source_panel, target_node) =
+        builder.panel(key("canvas-edge-target"), constraints());
+    let target_group = builder.tabs(vec![target_node], 0, false);
+    let target_column =
+        builder.column(280.0, ColumnMode::Expanded, vec![target_group], vec![1.0]);
+    builder.main_area(DockSide::Left, target_column);
+
+    let layout = builder.build();
+    let rects = layout.compute_rects(viewport(), &metrics).unwrap();
+    let splitter = rects
+        .splitters
+        .iter()
+        .find(|splitter| {
+            splitter.owner == target_column
+                && splitter.axis == Axis::X
+                && splitter.boundary_index == crate::OUTER_COLUMN_EDGE_BOUNDARY_INDEX
+        })
+        .expect("the canvas-facing column edge should expose its sentinel splitter");
+    let splitter_center = splitter.rect.origin.x + splitter.rect.size.width * 0.5;
+
+    let zones = layout
+        .compute_drop_zones(DropSource::Panel { panel: source_panel }, &rects, &metrics)
+        .unwrap();
+    let boundary_zones: Vec<_> = zones
+        .iter()
+        .filter(|zone| {
+            zone.target
+                == DropTarget::MainColumn {
+                    side: DockSide::Left,
+                    index: 1,
+                }
+                && zone.zone == DropZone::ColumnRight
+        })
+        .collect();
+
+    assert!(!boundary_zones.is_empty());
+    let expected_center = splitter_center + metrics.splitter_thickness;
+    for zone in boundary_zones {
+        let zone_center = zone.rect.origin.x + zone.rect.size.width * 0.5;
+        assert!((zone_center - expected_center).abs() < 0.001);
+        assert_eq!(zone.rect.size.width, metrics.edge_drop_width);
+    }
+}
+
+#[test]
 fn empty_main_dock_side_exposes_first_column_drop_zone() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
