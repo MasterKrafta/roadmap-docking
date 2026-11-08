@@ -154,7 +154,11 @@ impl DockGroupView {
             .h(px(strip.rect.size.height))
             .flex()
             .items_stretch()
-            .bg(rgb(theme.colors.tab_strip_background));
+            .bg(rgb(theme.colors.tab_strip_background))
+            .child(GroupDragArea::render(
+                format!("group-drag-area-{:?}", group.group),
+                theme,
+            ));
 
         // Paint inactive tabs first so that the active tab remains in front.
         let mut ordered_headers = headers.to_vec();
