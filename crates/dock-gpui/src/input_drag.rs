@@ -5,7 +5,7 @@ use dock_core::{
 };
 use gpui::{App, Entity, WindowId};
 
-use crate::{dock_components::DockTab, DockController, FloatingWindowManager};
+use crate::{DockController, FloatingWindowManager};
 
 /// Identifies the floating tab gesture across pointer updates and tear-off.
 #[derive(Clone, Copy)]
@@ -438,9 +438,9 @@ pub(crate) fn begin_native_tearoff(
             (DragHandle::ColumnHeader, DragPayload::Column { column }) => {
                 column_drag_started_from_tab(controller, column, origin)
             }
-            (DragHandle::PanelTab, DragPayload::Panel { panel }) => {
-                panel_tab_drag_started_from_dock_tab(controller, panel, origin)
-            }
+            // Every DockTab tear-off temporarily hides DockAreaHeader. It is
+            // restored by FloatingWindowManager when the mouse is released.
+            (DragHandle::PanelTab, DragPayload::Panel { .. }) => true,
             _ => false,
         };
         let local_bounds = floating_bounds(controller, payload, pointer)?;
@@ -895,48 +895,6 @@ fn column_drag_started_from_tab(
     source.is_some_and(|rect| {
         origin.y >= rect.origin.y + header_height.min(rect.size.height)
     })
-}
-
-/// True when a PanelTab gesture was initiated from the DockTab component row.
-/// Such a tear-off must hide the shared DockArea header until the native move ends:
-/// otherwise the newly visible header shifts the tab away from the pointer.
-fn panel_tab_drag_started_from_dock_tab(
-    controller: &mut DockController,
-    panel: PanelId,
-    origin: Point,
-) -> bool {
-    let group = {
-        let Ok(rects) = controller.geometry() else {
-            return false;
-        };
-        let Some(group) = rects
-            .tab_headers
-            .iter()
-            .find(|header| header.panel == panel)
-            .map(|header| header.group)
-        else {
-            return false;
-        };
-        group
-    };
-
-    if !super::pointer::is_dock_component_tab_group(controller.layout(), group) {
-        return false;
-    }
-
-    let Ok(rects) = controller.geometry() else {
-        return false;
-    };
-    let Some(group_rect) = rects
-        .groups
-        .iter()
-        .find(|rect| rect.group == group)
-        .map(|rect| rect.rect)
-    else {
-        return false;
-    };
-    let drag_zone = DockTab::drag_zone(group_rect, controller.metrics());
-    !DockTab::leaves_strip_zone(drag_zone, origin)
 }
 
 /// Crops the hidden ColumnHeader out of the detached native window bounds.
