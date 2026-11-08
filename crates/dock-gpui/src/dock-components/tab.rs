@@ -1,11 +1,11 @@
-use dock_core::{DockCommand, DockMetrics, FloatingGroupId, NodeId, Point, Rect, TabHeaderRect};
+use dock_core::{DockMetrics, FloatingGroupId, NodeId, Point, Rect, TabHeaderRect};
 use gpui::{
     Entity, IntoElement, InteractiveElement, MouseButton, ParentElement, SharedString,
     StatefulInteractiveElement, Styled, div, img, px, rgb,
 };
 use ui::Theme;
 
-use crate::{DockController, actions::dispatch_command};
+use crate::DockController;
 
 /// Reusable tab header. The shared DockHost/FloatingHost pointer pipelines
 /// handle its drag gesture from Core tab geometry.
@@ -34,7 +34,8 @@ impl DockTab {
         !matches!(strip_rect.contains(point), Ok(true))
     }
 
-    /// Renders a tab from Core geometry and keeps the existing close/activation behavior.
+    /// Renders the visual tab surface from Core geometry. Activation and drag are
+    /// handled by the shared host pointer pipeline; closing lives in group controls.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn render_core(
         group: NodeId,
@@ -45,20 +46,19 @@ impl DockTab {
         active: bool,
         controller: Entity<DockController>,
         theme: Theme,
-        raise_floating: Option<FloatingGroupId>,
-        middle_click_closes_tabs: bool,
+        _raise_floating: Option<FloatingGroupId>,
+        _middle_click_closes_tabs: bool,
     ) -> impl IntoElement {
         let left = header.rect.origin.x - strip_rect.origin.x;
         let top = header.rect.origin.y - strip_rect.origin.y;
         let width = header.rect.size.width.max(0.0);
         let height = header.rect.size.height.max(0.0);
-        let close_width = 18.0_f32.min(width);
         let hover_group = format!("dock-tab-{:?}-{:?}", group, header.panel);
 
         let mut title_row = div()
             .absolute()
             .left(px(6.0))
-            .right(px(close_width))
+            .right_0()
             .top_0()
             .h_full()
             .flex()
@@ -98,58 +98,8 @@ impl DockTab {
             }))
             .text_color(rgb(theme.colors.primary_text))
             .cursor_pointer()
-            .child(title_row)
-            .on_aux_click({
-                let controller = controller.clone();
-                let panel = header.panel;
-                move |event, _, app| {
-                    // Singleton constrains opening multiplicity; it does not prevent closing.
-                    if middle_click_closes_tabs && event.is_middle_click() {
-                        dispatch_command(&controller, DockCommand::ClosePanel { panel }, app);
-                        app.stop_propagation();
-                    }
-                }
-            });
+            .child(title_row);
 
-        let close_controller = controller.clone();
-        let close_panel = header.panel;
-        let close_button = div()
-            .id(format!("tab-close-{:?}-{:?}", group, header.panel))
-            .absolute()
-            .top_0()
-            .right_0()
-            .w(px(close_width))
-            .h_full()
-            .flex()
-            .items_center()
-            .justify_center()
-            .cursor_pointer()
-            .opacity(0.0)
-            .group_hover(hover_group, |style| style.opacity(1.0))
-            .hover(|style| style.bg(rgb(theme.colors.icon_button_hover)))
-            .text_color(rgb(theme.colors.primary_text))
-            .child("×")
-            .on_mouse_down(MouseButton::Left, {
-                let controller = controller.clone();
-                move |_, _, app| {
-                    // The close control stops bubbling to avoid starting a tab drag,
-                    // so it raises its owning floating composition explicitly.
-                    if let Some(group) = raise_floating {
-                        dispatch_command(&controller, DockCommand::RaiseFloating { group }, app);
-                    }
-                    app.stop_propagation();
-                }
-            })
-            .on_click(move |_, _, app| {
-                dispatch_command(
-                    &close_controller,
-                    DockCommand::ClosePanel { panel: close_panel },
-                    app,
-                );
-                app.stop_propagation();
-            });
-
-        tab.child(close_button)
     }
 
     pub fn render(
