@@ -28,7 +28,7 @@ use ui::Theme;
 use crate::{
     DockController,
     components::{
-        context_menu::{ContextMenuTarget, GroupMenuToggle},
+        context_menu::GroupMenuToggle,
         tab_overflow::TabOverflow,
         tab_strip::GroupPresentation,
     },
@@ -126,22 +126,21 @@ impl DockGroupView {
             .border_color(rgb(theme.colors.group_frame_border));
 
         if column.is_none() && header_height > 0.0 {
+            let grip_width =
+                (group.rect.size.width - reserved_grip_left - 2.0 * control_width).max(0.0);
             let grip = div()
                 .id(format!("group-grip-{:?}", group.group))
                 .absolute()
                 .top_0()
                 .left(px(reserved_grip_left))
-                .w(px(
-                    (group.rect.size.width - reserved_grip_left - 2.0 * control_width).max(0.0),
-                ))
+                .w(px(grip_width))
                 .h(px(header_height))
-                .flex()
-                .items_center()
-                .justify_center()
-                .cursor_pointer()
-                .bg(rgb(theme.colors.group_grip_background))
-                .text_color(rgb(theme.colors.primary_text))
-                .child("⠿");
+                .child(GroupGrip::render_with_metrics(
+                    format!("group-grip-visual-{:?}", group.group),
+                    theme,
+                    grip_width,
+                    metrics.control_icon_size,
+                ));
             root = root.child(grip);
         }
 
@@ -207,48 +206,36 @@ impl DockGroupView {
             header_height
         };
 
-        let menu_toggle = toggle_menu.clone();
         let menu_button = div()
-            .id(format!("group-menu-button-{:?}", group.group))
             .absolute()
             .top(px(controls_top))
-            .right(px(0.0))
+            .right_0()
             .w(px(control_width))
             .h(px(controls_height))
-            .flex()
-            .items_center()
-            .justify_center()
-            .cursor_pointer()
-            .bg(rgb(theme.colors.group_menu_button))
-            .text_color(rgb(theme.colors.primary_text))
-            .child(if column.is_some() { "☰" } else { "⋮" })
-            .on_click(move |event, _, app| {
-                (menu_toggle)(
-                    ContextMenuTarget::Group(group.group),
-                    match crate::geometry::point_from_gpui(event.position()) {
-                        Ok(anchor) => anchor,
-                        Err(_) => return,
-                    },
-                    app,
-                );
-            });
+            .child(GroupMenuButton::render_for_group(
+                format!("group-menu-button-{:?}", group.group),
+                group.group,
+                theme,
+                control_width,
+                metrics.control_icon_size,
+                if column.is_some() { "☰" } else { "⋮" },
+                toggle_menu.clone(),
+            ));
         if column.is_some() {
             // Column Groups use one compact toolbar: tabs on the left, a
             // flexible drag lane in the middle, a fixed Group grip, and Menu.
             let group_grip = div()
-                .id(format!("group-grip-handle-{:?}", group.group))
                 .absolute()
                 .left(px((group.rect.size.width - 2.0 * control_width).max(0.0)))
                 .top(px(controls_top))
                 .w(px(control_width))
                 .h(px(controls_height))
-                .flex()
-                .items_center()
-                .justify_center()
-                .cursor_pointer()
-                .bg(rgb(theme.colors.group_grip_background))
-                .text_color(rgb(theme.colors.primary_text))
-                .child("⠿");
+                .child(GroupGrip::render_with_metrics(
+                    format!("group-grip-handle-{:?}", group.group),
+                    theme,
+                    control_width,
+                    metrics.control_icon_size,
+                ));
             return root.child(group_grip).child(menu_button);
         }
 
