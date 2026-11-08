@@ -18,7 +18,7 @@ fn viewport() -> Rect {
 }
 
 #[test]
-fn groups_have_center_and_tab_insertion_targets_but_not_static_default_zones() {
+fn main_panel_targets_append_to_the_end_of_a_tab_strip() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
     let (source_panel, source_node) = builder.panel(key("drop-source-tab"), constraints());
@@ -53,22 +53,32 @@ fn groups_have_center_and_tab_insertion_targets_but_not_static_default_zones() {
             }
             && zone.zone == DropZone::Center
     }));
-    assert!(zones.iter().any(|zone| {
-        zone.target
-            == DropTarget::Tabs {
-                group: target_group,
-                index: 0,
-            }
-            && zone.zone == DropZone::TabInsertion
-    }));
-    assert!(zones.iter().any(|zone| {
-        zone.target
-            == DropTarget::Tabs {
-                group: target_group,
-                index: 1,
-            }
-            && zone.zone == DropZone::TabInsertion
-    }));
+    assert!(
+        !zones.iter().any(|zone| {
+            matches!(zone.zone, DropZone::TabInsertion)
+                && zone.target.referenced_node_id() == Some(target_group)
+        }),
+        "a Main Dock panel drag must not expose arbitrary tab insertion indices"
+    );
+
+    let group_zones = layout
+        .compute_drop_zones(
+            DropSource::Group { group: source_group },
+            &rects,
+            &metrics,
+        )
+        .unwrap();
+    assert!(
+        group_zones.iter().any(|zone| {
+            zone.target
+                == DropTarget::GroupTabs {
+                    group: target_group,
+                    index: 0,
+                }
+                && zone.zone == DropZone::TabInsertion
+        }),
+        "whole Group drags retain explicit insertion positions in a tab strip"
+    );
     assert!(zones.iter().any(|zone| {
         zone.target
             == DropTarget::GroupEdge {
@@ -153,6 +163,104 @@ fn groups_have_center_and_tab_insertion_targets_but_not_static_default_zones() {
     assert_eq!(wide_metrics.splitter_thickness, 4.0);
     assert_eq!(wide_metrics.splitter_hit_zone, 8.0);
     assert_ne!(source_panel, target_panel);
+}
+
+#[test]
+fn adjacent_main_groups_have_non_overlapping_vertical_drop_boundaries() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, first_node) = builder.panel(key("boundary-first"), constraints());
+    let first_group = builder.tabs(vec![first_node], 0, false);
+    let (_, second_node) = builder.panel(key("boundary-second"), constraints());
+    let second_group = builder.tabs(vec![second_node], 0, false);
+    let (_, third_node) = builder.panel(key("boundary-third"), constraints());
+    let third_group = builder.tabs(vec![third_node], 0, false);
+    let target_column = builder.column(
+        280.0,
+        ColumnMode::Expanded,
+        vec![first_group, second_group, third_group],
+        vec![0.34, 0.33, 0.33],
+    );
+    builder.main_area(DockSide::Left, target_column);
+
+    let (_, source_node) = builder.panel(key("boundary-source"), constraints());
+    let source_group = builder.tabs(vec![source_node], 0, false);
+    let source_column =
+        builder.column(280.0, ColumnMode::Expanded, vec![source_group], vec![1.0]);
+    builder.main_area(DockSide::Right, source_column);
+
+    let layout = builder.build();
+    let rects = layout.compute_rects(viewport(), &metrics).unwrap();
+    let zones = layout
+        .compute_drop_zones(
+            DropSource::Group { group: source_group },
+            &rects,
+            &metrics,
+        )
+        .unwrap();
+
+    let first_bottom = zones
+        .iter()
+        .find(|zone| {
+            zone.zone == DropZone::Bottom
+                && zone.target
+                    == DropTarget::GroupEdge {
+                        group: first_group,
+                        zone: DropZone::Bottom,
+                    }
+        })
+        .expect("the first group should expose its bottom edge");
+    let second_top = zones
+        .iter()
+        .find(|zone| {
+            zone.zone == DropZone::Top
+                && zone.target
+                    == DropTarget::GroupEdge {
+                        group: second_group,
+                        zone: DropZone::Top,
+                    }
+        })
+        .expect("the second group should expose its top edge");
+
+    let first_right = first_bottom.rect.checked_right().unwrap();
+    let second_right = second_top.rect.checked_right().unwrap();
+    let horizontal_overlap = first_right.min(second_right)
+        - first_bottom.rect.origin.x.max(second_top.rect.origin.x);
+    let first_bottom_y = first_bottom.rect.checked_bottom().unwrap();
+    let second_bottom_y = second_top.rect.checked_bottom().unwrap();
+    let vertical_overlap = first_bottom_y.min(second_bottom_y)
+        - first_bottom.rect.origin.y.max(second_top.rect.origin.y);
+    assert!(
+        horizontal_overlap <= 0.0 || vertical_overlap <= 0.0,
+        "neighboring GroupEdge zones must not overlap: {first_bottom:?} vs {second_top:?}"
+    );
+
+    let splitter = rects
+        .splitters
+        .iter()
+        .find(|splitter| {
+            splitter.owner == target_column
+                && splitter.axis == Axis::Y
+                && splitter.boundary_index == 0
+        })
+        .expect("the target Column should expose its first vertical splitter");
+    let boundary_point = Point::new(
+        splitter.rect.origin.x + splitter.rect.size.width * 0.5,
+        splitter.rect.origin.y + splitter.rect.size.height * 0.5,
+    );
+    let resolver = layout
+        .prepare_drop_resolver(
+            DropSource::Group { group: source_group },
+            &rects,
+            &metrics,
+        )
+        .unwrap();
+    assert_eq!(
+        resolver.resolve_zone(boundary_point).unwrap(),
+        None,
+        "the shared splitter hit area must not choose between the two neighboring Group targets"
+    );
 }
 
 #[test]
