@@ -345,7 +345,7 @@ impl FloatingZoneContext<'_> {
         }
         Ok(())
     }
-
+}
 
 fn floating_group_edge_rect(
     rect: Rect,
