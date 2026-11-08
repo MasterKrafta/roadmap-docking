@@ -1241,7 +1241,7 @@ mod hit_dispatch_tests {
     }
 
     #[test]
-    fn native_tearoff_routing_enables_dock_areas_columns_and_individual_tabs() {
+    fn native_tearoff_routing_enables_dock_areas_columns_groups_and_tabs() {
         let column = NodeId::null();
         let group = NodeId::null();
         let panel = PanelId::null();
@@ -1258,7 +1258,7 @@ mod hit_dispatch_tests {
             Some(DragHandle::PanelTab),
             DragPayload::Panel { panel },
         ));
-        assert!(!native_tearoff_enabled_for(
+        assert!(native_tearoff_enabled_for(
             Some(DragHandle::GroupGrip),
             DragPayload::Group { group },
         ));
