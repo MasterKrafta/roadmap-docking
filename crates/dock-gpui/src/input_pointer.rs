@@ -440,12 +440,8 @@ pub(crate) fn register_pointer_events(
                 }
             }
 
-            let main_window_viewport = manager.update(app, |manager, _| {
-                manager.main_client_viewport_in_host_coordinates()
-            });
-            let should_tearoff = controller.update(app, |controller, _| {
-                native_tearoff_required(controller, host_point, main_window_viewport)
-            });
+            let should_tearoff =
+                controller.update(app, |controller, _| native_tearoff_required(controller));
             if should_tearoff
                 && super::drag::begin_native_tearoff(&controller, &manager, point, app)
             {
@@ -576,12 +572,8 @@ pub(crate) fn register_pointer_events(
                 if update_drag_at(&controller, point, app) {
                     pointer_press.set(None);
                 }
-                let main_window_viewport = manager.update(app, |manager, _| {
-                    manager.main_client_viewport_in_host_coordinates()
-                });
-                let should_tearoff = controller.update(app, |controller, _| {
-                    native_tearoff_required(controller, host_point, main_window_viewport)
-                });
+                let should_tearoff =
+                    controller.update(app, |controller, _| native_tearoff_required(controller));
                 if should_tearoff
                     && super::drag::begin_native_tearoff(&controller, &manager, point, app)
                 {
@@ -698,8 +690,8 @@ pub(crate) fn register_pointer_events(
 }
 
 /// Selects which semantic drag areas may start a native tear-off.
-/// A PanelTab becomes a native window only after leaving the main DockHost.
-/// Column and DockArea headers keep their own threshold-based tear-off behavior.
+/// A PanelTab becomes a native window immediately after Core crosses its drag
+/// threshold. Column and DockArea headers use the same threshold-based path.
 fn native_tearoff_enabled_for(handle: Option<DragHandle>, payload: DragPayload) -> bool {
     match (handle, payload) {
         (Some(DragHandle::ColumnHeader), DragPayload::Column { .. }) => true,
@@ -710,31 +702,13 @@ fn native_tearoff_enabled_for(handle: Option<DragHandle>, payload: DragPayload) 
     }
 }
 
-/// Checks whether the active gesture has crossed its native tear-off boundary.
-/// The point is in main-host coordinates. The optional viewport describes the
-/// complete native main-window client area in that same coordinate space.
-fn native_tearoff_required(
-    controller: &mut DockController,
-    host_point: Point,
-    main_window_viewport: Option<Rect>,
-) -> bool {
+/// Checks whether Core has crossed the drag threshold for a gesture that
+/// creates a native floating window.
+fn native_tearoff_required(controller: &mut DockController) -> bool {
     let DragState::Dragging { payload, .. } = controller.drag().session().state() else {
         return false;
     };
-    let handle = controller.drag().session().handle();
-    native_tearoff_enabled_for(handle, payload)
-        && native_tearoff_boundary_reached(
-            handle,
-            payload,
-            host_point,
-            main_window_viewport,
-        )
-}
-
-/// A tab remains in the main DockArea while the pointer is inside the main
-/// window client area. Leaving its tab strip alone does not create a Floating window.
-fn panel_tab_tearoff_boundary_reached(viewport: Rect, host_point: Point) -> bool {
-    !matches!(viewport.contains(host_point), Ok(true))
+    native_tearoff_enabled_for(controller.drag().session().handle(), payload)
 }
 
 /// Resolves a visible DockTab component to the semantic Core tab hit.
@@ -759,22 +733,6 @@ fn dock_component_tab_hit_at_point(
             })
         })
     })
-}
-
-/// Checks the semantic boundary that turns an in-layout drag into a native tear-off.
-fn native_tearoff_boundary_reached(
-    handle: Option<DragHandle>,
-    payload: DragPayload,
-    host_point: Point,
-    main_window_viewport: Option<Rect>,
-) -> bool {
-    match (handle, payload) {
-        (Some(DragHandle::ColumnHeader), DragPayload::Column { .. }) => true,
-        (Some(DragHandle::DockAreaHeader), DragPayload::DockArea { .. }) => true,
-        (Some(DragHandle::PanelTab), DragPayload::Panel { .. }) => main_window_viewport
-            .is_some_and(|viewport| panel_tab_tearoff_boundary_reached(viewport, host_point)),
-        _ => false,
-    }
 }
 
 fn dispatch_pointer_click(
@@ -1167,46 +1125,6 @@ fn flyout_title_grip_contains(
             && point.y < flyout.rect.origin.y + header_height
             && point.x < flyout.rect.origin.x + flyout.rect.size.width - close_width
     })
-}
-
-#[cfg(test)]
-mod panel_tab_tearoff_tests {
-    use dock_core::{Point, Rect, Size};
-
-    use super::panel_tab_tearoff_boundary_reached;
-
-    #[test]
-    fn tab_does_not_detach_while_pointer_remains_inside_main_window() {
-        let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
-
-        assert!(!panel_tab_tearoff_boundary_reached(
-            viewport,
-            Point::new(300.0, 400.0),
-        ));
-        // Leaving the tab strip or moving over another dock surface is not a tear-off.
-        assert!(!panel_tab_tearoff_boundary_reached(
-            viewport,
-            Point::new(1190.0, 400.0),
-        ));
-    }
-
-    #[test]
-    fn tab_detaches_only_after_pointer_leaves_main_window() {
-        let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
-
-        assert!(panel_tab_tearoff_boundary_reached(
-            viewport,
-            Point::new(-1.0, 400.0),
-        ));
-        assert!(panel_tab_tearoff_boundary_reached(
-            viewport,
-            Point::new(1201.0, 400.0),
-        ));
-        assert!(panel_tab_tearoff_boundary_reached(
-            viewport,
-            Point::new(600.0, 801.0),
-        ));
-    }
 }
 
 #[cfg(test)]
