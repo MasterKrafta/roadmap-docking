@@ -646,7 +646,7 @@ fn floating_geometry_hit_test_and_drop_resolver_are_window_local() {
         Ok(HitResult::Column { column }) if column == first_root
     ));
 
-    // A hidden PopUp can be rebound to another group without retaining its old snapshot.
+    // A hidden Floating host can be rebound to another group without retaining its old snapshot.
     controller.floating_geometry(first_window, second_group).unwrap();
     assert_eq!(controller.floating_rects[&first_window].key.group, second_group);
     assert_eq!(controller.floating_rects[&second_window].key.group, second_group);
