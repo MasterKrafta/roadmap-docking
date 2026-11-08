@@ -1208,7 +1208,9 @@ mod drop_window_target_tests {
         let mut index = 0;
         topmost_known_window_under_point(point, known, exclude, || {
             let result = windows.get(index).copied();
-            index += usize::from(result.is_some());
+            if result.is_some() {
+                index += 1;
+            }
             result
         })
     }
