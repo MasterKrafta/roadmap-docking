@@ -709,17 +709,11 @@ impl Render for DockHost {
 
                 let cancel_pointer = pointer_active || pointer_capture_for_escape.get().is_some();
                 if cancel_pointer {
-                    let result = controller_for_escape.update(app, |controller, controller_cx| {
-                        let result = controller.cancel_pointer_interaction_on_escape();
-                        controller_cx.notify();
-                        result
-                    });
-                    if let Err(error) = result {
-                        tracing::debug!(%error, "could not cancel dock interaction with Escape");
-                    }
-                    DockInteractionCoordinator::release(
+                    DockInteractionCoordinator::cancel_on_escape(
+                        &controller_for_escape,
                         window,
                         &pointer_capture_for_escape,
+                        app,
                     );
                 } else if flyout_open {
                     let result = controller_for_escape.update(app, |controller, controller_cx| {
