@@ -795,21 +795,8 @@ impl Render for FloatingHost {
                             else {
                                 return None;
                             };
-                            let header = controller
-                                .floating_geometry(input_window_id, group)
-                                .ok()?
-                                .tab_headers
-                                .iter()
-                                .find(|header| header.group == tab_group && header.panel == panel)?;
-                            // Only the legacy TabHeaderView has a close control.
-                            // New DockTab uses its full header for activation and dragging.
-                            if !dock_component_tab_zones_for_down.contains_key(&panel) {
-                                let close_width = 18.0_f32.min(header.rect.size.width);
-                                let header_right = header.rect.origin.x + header.rect.size.width;
-                                if point.x >= header_right - close_width {
-                                    return None;
-                                }
-                            }
+                            // FloatingWindowContent uses DockTab for every Group.
+                            // The complete header is available for activation and drag.
                             Some((tab_group, panel, controller.layout().version()))
                         });
                         if let Some((tab_group, panel, layout_version)) = press {
@@ -1191,28 +1178,16 @@ impl Render for FloatingHost {
                             if released_group != press.tab_group || released_panel != press.panel {
                                 return false;
                             }
-                            let Some(header) = controller
+                            controller
                                 .floating_geometry(input_window_id, group)
                                 .ok()
-                                .and_then(|rects| {
-                                    rects
-                                        .tab_headers
-                                        .iter()
-                                        .find(|header| {
-                                            header.group == released_group
-                                                && header.panel == released_panel
-                                        })
-                                        .copied()
+                                .is_some_and(|rects| {
+                                    rects.tab_headers.iter().any(|header| {
+                                        header.group == released_group
+                                            && header.panel == released_panel
+                                            && matches!(header.rect.contains(point), Ok(true))
+                                    })
                                 })
-                            else {
-                                return false;
-                            };
-                            if dock_component_tab_zones_for_up.contains_key(&released_panel) {
-                                true
-                            } else {
-                                let close_width = 18.0_f32.min(header.rect.size.width);
-                                point.x < header.rect.origin.x + header.rect.size.width - close_width
-                            }
                         });
                         if should_activate {
                             controller_for_up.update(app, |controller, cx| {
