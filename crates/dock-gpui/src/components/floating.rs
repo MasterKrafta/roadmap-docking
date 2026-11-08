@@ -183,9 +183,7 @@ impl FloatingWindowContent {
                 0.0,
                 controller.clone(),
                 theme,
-                Some(floating.group),
                 context_menu.clone(),
-                middle_click_closes_tabs,
             ));
         }
 
