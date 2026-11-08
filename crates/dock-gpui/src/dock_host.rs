@@ -381,7 +381,7 @@ impl Render for DockHost {
             }
         };
 
-        // Main-column panels are mounted by ColumnView. Floating panels are mounted
+        // Main-column panels are mounted by DockColumnView. Floating panels are mounted
         // only by their matching FloatingHost native window.
         let main_active_panels = main_column_groups
             .values()
