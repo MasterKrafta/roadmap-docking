@@ -694,7 +694,7 @@ impl Layout {
         })
     }
 
-    pub(super) fn allowed_area_for_column_target(
+    pub(super) fn allowed_area_for_column_slot_target(
         &self,
         column: NodeId,
     ) -> Result<AllowedArea, CommandError> {
@@ -736,7 +736,7 @@ impl Layout {
             | DropTarget::GroupTabs { group, .. }
             | DropTarget::GroupEdge { group, .. } => self.allowed_area_for_group_target(group),
             DropTarget::MainColumn { .. } => Ok(AllowedArea::MAIN_DOCK),
-            DropTarget::ColumnSlot { column, .. } => self.allowed_area_for_column_target(column),
+            DropTarget::ColumnSlot { column, .. } => self.allowed_area_for_column_slot_target(column),
             DropTarget::RailSlot { .. } => Ok(AllowedArea::ICON_RAIL),
             DropTarget::FreeArea => Ok(AllowedArea::FLOATING),
         }
@@ -893,7 +893,7 @@ impl Layout {
                 }
             }
             DropTarget::ColumnSlot { column, index } => {
-                self.allowed_area_for_column_target(column)?;
+                self.allowed_area_for_column_slot_target(column)?;
                 match self.nodes.get(column) {
                     Some(Node::Column(value)) if index <= value.groups.len() => Ok(()),
                     Some(Node::Column(_)) => Err(CommandError::InvalidValue {
