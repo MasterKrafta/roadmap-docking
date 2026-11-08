@@ -43,6 +43,8 @@ use super::{
         ContextMenu, ContextMenuCallbacks, ContextMenuDismiss, ContextMenuSubmenuToggle,
         ContextMenuTarget, GroupMenuToggle,
     },
+    panel_host::PanelHost,
+    splitter::SplitterView,
 };
 
 /// Content view for one native floating window.
