@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use dock_core::{
-    DragPayload, DragPreview, DropTarget, DropZone, DropZoneRect, FloatingGroupRect, GroupRect,
+    DragPayload, DragPreview, DropTarget, DropZone, DropZoneRect, DropZoneResolver, FloatingGroupRect, GroupRect,
     DockSide, Point, Rect, TabHeaderRect, TabStripRect,
 };
 use gpui::{
@@ -22,6 +22,19 @@ pub struct DropOverlay;
 pub struct DragGhost;
 
 impl DropOverlay {
+    /// Resolves the preview zone from the resolver owned by the current host.
+    ///
+    /// Main and Floating hosts call the same path, but each supplies only its
+    /// own window-local resolver snapshot.
+    pub(crate) fn resolve_active_zone(
+        resolver: Option<&DropZoneResolver>,
+        preview: Option<DragPreview>,
+    ) -> Option<DropZoneRect> {
+        let preview = preview?;
+        let zone = resolver?.resolve_zone(preview.point).ok()??;
+        zone_matches_preview(&zone, preview.target, preview.point).then_some(zone)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn render(
         resolved_zone: Option<DropZoneRect>,
@@ -41,9 +54,9 @@ impl DropOverlay {
         };
         // Core has already selected the exact affordance from its resolver.
         // The overlay only verifies that it still corresponds to this preview.
-        let Some(zone) = resolved_zone.filter(|zone| {
-            zone.target == target && zone.rect.contains(preview.point).unwrap_or(false)
-        }) else {
+        let Some(zone) = resolved_zone
+            .filter(|zone| zone_matches_preview(zone, Some(target), preview.point))
+        else {
             return layer;
         };
 
@@ -282,6 +295,14 @@ fn ghost_presentation(
     }
 }
 
+fn zone_matches_preview(
+    zone: &DropZoneRect,
+    target: Option<DropTarget>,
+    point: Point,
+) -> bool {
+    target == Some(zone.target) && zone.rect.contains(point).unwrap_or(false)
+}
+
 fn target_group(target: DropTarget) -> Option<dock_core::NodeId> {
     match target {
         DropTarget::Tabs { group, .. }
@@ -448,9 +469,11 @@ fn guide_rect(rect: Rect, theme: Theme) -> impl IntoElement {
 
 #[cfg(test)]
 mod tests {
-    use dock_core::{DockSide, DropZone, Point, Rect, Size};
+    use dock_core::{
+        DockSide, DropTarget, DropZone, DropZoneRect, Point, Rect, Size,
+    };
 
-    use super::{group_edge_half, main_dock_edge_guide_rect};
+    use super::{group_edge_half, main_dock_edge_guide_rect, zone_matches_preview};
 
     #[test]
     fn group_edge_preview_covers_half_of_the_target_group() {
@@ -464,6 +487,44 @@ mod tests {
             group_edge_half(rect, DropZone::Bottom),
             Rect::new(Point::new(10.0, 70.0), Size::new(200.0, 50.0))
         );
+    }
+
+    #[test]
+    fn drop_feedback_requires_the_core_selected_target() {
+        let zone = DropZoneRect::new(
+            DropTarget::FreeArea,
+            DropZone::FreeArea,
+            Rect::new(Point::new(10.0, 20.0), Size::new(100.0, 80.0)),
+        );
+
+        assert!(zone_matches_preview(
+            &zone,
+            Some(DropTarget::FreeArea),
+            Point::new(50.0, 60.0),
+        ));
+        assert!(!zone_matches_preview(
+            &zone,
+            Some(DropTarget::MainColumn {
+                side: DockSide::Left,
+                index: 0,
+            }),
+            Point::new(50.0, 60.0),
+        ));
+    }
+
+    #[test]
+    fn drop_feedback_disappears_when_the_pointer_leaves_the_resolved_zone() {
+        let zone = DropZoneRect::new(
+            DropTarget::FreeArea,
+            DropZone::FreeArea,
+            Rect::new(Point::new(10.0, 20.0), Size::new(100.0, 80.0)),
+        );
+
+        assert!(!zone_matches_preview(
+            &zone,
+            Some(DropTarget::FreeArea),
+            Point::new(111.0, 60.0),
+        ));
     }
 
     #[test]
