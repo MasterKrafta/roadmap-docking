@@ -23,6 +23,7 @@ use crate::{
     input::{
         PointerPress, ResizePreview, ResizePreviewKind, floating_bounds, map_hit_test_point,
         register_pointer_events, resize_preview_for_interaction, scroll_adjusted_hit_test_point,
+        interaction::DockInteractionCoordinator,
     },
 };
 
@@ -221,15 +222,12 @@ impl Render for DockHost {
                 }) {
                     return;
                 }
-                controller.update(app, |controller, controller_cx| {
-                    let result = controller.cancel_pointer_interaction_on_focus_loss();
-                    controller_cx.notify();
-                    if let Err(error) = result {
-                        tracing::warn!(%error, "could not cancel dock interaction on focus loss");
-                    }
-                });
-                window.release_pointer();
-                pointer_capture.set(None);
+                DockInteractionCoordinator::cancel_on_focus_loss(
+                    &controller,
+                    window,
+                    &pointer_capture,
+                    app,
+                );
                 pointer_press.set(None);
             })
             .detach();
@@ -244,8 +242,7 @@ impl Render for DockHost {
                 controller.has_active_pointer_interaction()
             });
             if !interaction_active {
-                window.release_pointer();
-                self.pointer_capture.set(None);
+                DockInteractionCoordinator::release(window, &self.pointer_capture);
                 self.pointer_press.set(None);
             }
         }
@@ -581,8 +578,10 @@ impl Render for DockHost {
                         Ok(true) => {
                             pointer_press_for_measurement.set(None);
                             if pointer_capture_for_measurement.get().is_some() {
-                                window.release_pointer();
-                                pointer_capture_for_measurement.set(None);
+                                DockInteractionCoordinator::release(
+                                    window,
+                                    &pointer_capture_for_measurement,
+                                );
                             }
                             // geometry() performs a fresh valid calculation and updates
                             // Layout::canvas_bounds only when the measured Canvas rect changed.
@@ -718,8 +717,10 @@ impl Render for DockHost {
                     if let Err(error) = result {
                         tracing::debug!(%error, "could not cancel dock interaction with Escape");
                     }
-                    window.release_pointer();
-                    pointer_capture_for_escape.set(None);
+                    DockInteractionCoordinator::release(
+                        window,
+                        &pointer_capture_for_escape,
+                    );
                 } else if flyout_open {
                     let result = controller_for_escape.update(app, |controller, controller_cx| {
                         controller.dispatch_transient_in(DockCommand::DismissFlyout, controller_cx)
