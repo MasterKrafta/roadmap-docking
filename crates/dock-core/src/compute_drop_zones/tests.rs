@@ -1847,3 +1847,307 @@ fn empty_main_dock_side_exposes_first_column_drop_zone() {
                 }
     }));
 }
+
+
+#[test]
+fn floating_panel_tab_strip_uses_one_append_zone() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+    let (source_panel, source_node) =
+        builder.panel(key("floating-strip-source"), constraints());
+    let source_group = builder.tabs(vec![source_node], 0, false);
+    let source_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![source_group],
+        vec![1.0],
+    );
+    builder.main_area(DockSide::Left, source_column);
+
+    let (_, first_target_node) =
+        builder.panel(key("floating-strip-target-first"), constraints());
+    let (_, second_target_node) =
+        builder.panel(key("floating-strip-target-second"), constraints());
+    let target_group = builder.tabs(vec![first_target_node, second_target_node], 0, false);
+    let target_float = builder.floating_group(
+        target_group,
+        Rect::new(Point::new(520.0, 120.0), Size::new(420.0, 320.0)),
+        1,
+    );
+
+    let layout = builder.build();
+    let rects = layout.compute_floating_rects(target_float, &metrics).unwrap();
+    let strip = rects
+        .tab_strips
+        .iter()
+        .find(|strip| strip.group == target_group)
+        .expect("the Floating target must have a tab strip");
+    let zones = layout
+        .compute_drop_zones(DropSource::Panel { panel: source_panel }, &rects, &metrics)
+        .unwrap();
+
+    let append_zones: Vec<_> = zones
+        .iter()
+        .filter(|zone| {
+            zone.zone == DropZone::TabInsertion
+                && zone.target
+                    == (DropTarget::Tabs {
+                        group: target_group,
+                        index: 2,
+                    })
+        })
+        .collect();
+    assert_eq!(append_zones.len(), 1);
+    assert_eq!(append_zones[0].rect, strip.rect);
+    assert!(!zones.iter().any(|zone| {
+        zone.zone == DropZone::TabInsertion
+            && matches!(
+                zone.target,
+                DropTarget::Tabs { group, index } if group == target_group && index < 2
+            )
+    }));
+
+    let point = Point::new(
+        strip.rect.origin.x + strip.rect.size.width / 2.0,
+        strip.rect.origin.y + strip.rect.size.height / 2.0,
+    );
+    assert_eq!(
+        layout.resolve_drop(
+            point,
+            DropSource::Panel { panel: source_panel },
+            &rects,
+            &metrics,
+        ).unwrap(),
+        Some(DropTarget::Tabs {
+            group: target_group,
+            index: 2,
+        })
+    );
+}
+
+#[test]
+fn floating_group_edges_resolve_above_and_below_each_group() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, source_node) = builder.panel(key("floating-edge-source"), constraints());
+    let source_group = builder.tabs(vec![source_node], 0, false);
+    let source_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![source_group],
+        vec![1.0],
+    );
+    builder.main_area(DockSide::Left, source_column);
+
+    let (_, first_node) = builder.panel(key("floating-edge-first"), constraints());
+    let first_group = builder.tabs(vec![first_node], 0, false);
+    let (_, second_node) = builder.panel(key("floating-edge-second"), constraints());
+    let second_group = builder.tabs(vec![second_node], 0, false);
+    let target_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![first_group, second_group],
+        vec![0.5, 0.5],
+    );
+    let target_float = builder.floating_group(
+        target_column,
+        Rect::new(Point::new(520.0, 120.0), Size::new(420.0, 520.0)),
+        1,
+    );
+
+    let layout = builder.build();
+    let rects = layout.compute_floating_rects(target_float, &metrics).unwrap();
+    let zones = layout
+        .compute_drop_zones(DropSource::Group { group: source_group }, &rects, &metrics)
+        .unwrap();
+
+    let second_top = zones.iter().find(|zone| {
+        zone.zone == DropZone::Top
+            && zone.target
+                == (DropTarget::GroupEdge {
+                    group: second_group,
+                    zone: DropZone::Top,
+                })
+    }).expect("the second Floating group must expose its top edge");
+    let first_bottom = zones.iter().find(|zone| {
+        zone.zone == DropZone::Bottom
+            && zone.target
+                == (DropTarget::GroupEdge {
+                    group: first_group,
+                    zone: DropZone::Bottom,
+                })
+    }).expect("the first Floating group must expose its bottom edge");
+
+    for zone in [second_top, first_bottom] {
+        let point = Point::new(
+            zone.rect.origin.x + zone.rect.size.width / 2.0,
+            zone.rect.origin.y + zone.rect.size.height / 2.0,
+        );
+        assert_eq!(
+            layout.resolve_drop(
+                point,
+                DropSource::Group { group: source_group },
+                &rects,
+                &metrics,
+            ).unwrap(),
+            Some(zone.target)
+        );
+    }
+}
+
+#[test]
+fn floating_stack_exposes_column_end_for_another_floating_column() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, source_first_node) =
+        builder.panel(key("floating-stack-source-first"), constraints());
+    let source_first_group = builder.tabs(vec![source_first_node], 0, false);
+    let (_, source_second_node) =
+        builder.panel(key("floating-stack-source-second"), constraints());
+    let source_second_group = builder.tabs(vec![source_second_node], 0, false);
+    let source_stack = builder.split(
+        Axis::Y,
+        vec![source_first_group, source_second_group],
+        vec![0.25, 0.75],
+    );
+    let source_float = builder.floating_group(
+        source_stack,
+        Rect::new(Point::new(80.0, 80.0), Size::new(420.0, 520.0)),
+        2,
+    );
+
+    let (_, target_first_node) =
+        builder.panel(key("floating-stack-target-first"), constraints());
+    let target_first_group = builder.tabs(vec![target_first_node], 0, false);
+    let (_, target_second_node) =
+        builder.panel(key("floating-stack-target-second"), constraints());
+    let target_second_group = builder.tabs(vec![target_second_node], 0, false);
+    let target_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![target_first_group, target_second_group],
+        vec![0.4, 0.6],
+    );
+    let target_float = builder.floating_group(
+        target_column,
+        Rect::new(Point::new(520.0, 120.0), Size::new(420.0, 520.0)),
+        1,
+    );
+
+    let mut layout = builder.build();
+    let rects = layout.compute_floating_rects(target_float, &metrics).unwrap();
+    let source = DropSource::Group { group: source_stack };
+    let zones = layout.compute_drop_zones(source, &rects, &metrics).unwrap();
+    let expected_target = DropTarget::ColumnSlot {
+        column: target_column,
+        index: 2,
+    };
+    let end_zone = zones.iter().find(|zone| {
+        zone.zone == DropZone::ColumnEnd && zone.target == expected_target
+    }).expect("a Floating Column must expose its end slot to a whole vertical stack");
+
+    assert!(!zones.iter().any(|zone| {
+        matches!(zone.target, DropTarget::GroupTabs { .. } | DropTarget::GroupEdge { .. })
+    }));
+    let point = Point::new(
+        end_zone.rect.origin.x + end_zone.rect.size.width / 2.0,
+        end_zone.rect.origin.y + end_zone.rect.size.height / 2.0,
+    );
+    assert_eq!(
+        layout.resolve_drop(point, source, &rects, &metrics).unwrap(),
+        Some(expected_target)
+    );
+
+    layout.apply(
+        DockCommand::DockFloating {
+            group: source_float,
+            target: expected_target,
+        },
+        &metrics,
+    ).unwrap();
+    let Some(crate::Node::Column(column)) = layout.node(target_column) else {
+        panic!("the target Floating composition must remain a Column");
+    };
+    assert_eq!(
+        column.groups,
+        vec![
+            target_first_group,
+            target_second_group,
+            source_first_group,
+            source_second_group,
+        ]
+    );
+    assert!(layout.floating_group(source_float).is_none());
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
+fn single_group_floating_column_can_merge_into_another_floating_tab_strip() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, source_first_node) =
+        builder.panel(key("floating-column-source-first"), constraints());
+    let (_, source_second_node) =
+        builder.panel(key("floating-column-source-second"), constraints());
+    let source_group = builder.tabs(vec![source_first_node, source_second_node], 0, false);
+    let source_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![source_group],
+        vec![1.0],
+    );
+    let source_float = builder.floating_group(
+        source_column,
+        Rect::new(Point::new(80.0, 80.0), Size::new(420.0, 320.0)),
+        2,
+    );
+
+    let (_, target_node) = builder.panel(key("floating-column-target"), constraints());
+    let target_group = builder.tabs(vec![target_node], 0, false);
+    let target_float = builder.floating_group(
+        target_group,
+        Rect::new(Point::new(520.0, 120.0), Size::new(420.0, 320.0)),
+        1,
+    );
+
+    let mut layout = builder.build();
+    assert!(layout.floating_group(source_float).is_some());
+    let rects = layout.compute_floating_rects(target_float, &metrics).unwrap();
+    let source = DropSource::Column { column: source_column };
+    let zones = layout.compute_drop_zones(source, &rects, &metrics).unwrap();
+    let expected_target = DropTarget::GroupTabs {
+        group: target_group,
+        index: 1,
+    };
+    let strip = rects.tab_strips.iter().find(|strip| strip.group == target_group).unwrap();
+    let zone = zones.iter().find(|zone| {
+        zone.zone == DropZone::TabInsertion && zone.target == expected_target
+    }).expect("a one-group Floating Column must expose the target tab strip");
+
+    assert_eq!(zone.rect, strip.rect);
+    let point = Point::new(
+        strip.rect.origin.x + strip.rect.size.width / 2.0,
+        strip.rect.origin.y + strip.rect.size.height / 2.0,
+    );
+    assert_eq!(
+        layout.resolve_drop(point, source, &rects, &metrics).unwrap(),
+        Some(expected_target)
+    );
+    layout.apply(
+        DockCommand::DockFloating {
+            group: source_float,
+            target: expected_target,
+        },
+        &metrics,
+    ).unwrap();
+    let Some(crate::Node::Tabs(tabs)) = layout.node(target_group) else {
+        panic!("the destination must remain a Tabs group");
+    };
+    assert_eq!(tabs.children, vec![target_node, source_first_node, source_second_node]);
+    assert!(layout.floating_group(source_float).is_none());
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
