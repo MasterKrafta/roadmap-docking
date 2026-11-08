@@ -511,11 +511,53 @@ impl Layout {
                 reason: "floating stack contains a non-Tabs group",
             });
         }
+
+        let target = match self.nodes.get(column) {
+            Some(Node::Column(value)) => value.clone(),
+            Some(_) => {
+                return Err(CommandError::InvalidTarget {
+                    reason: "column slot target must be a Column node",
+                });
+            }
+            None => return Err(CommandError::MissingNode { node: column }),
+        };
+        if index > target.groups.len() {
+            return Err(CommandError::InvalidValue {
+                field: "index",
+                reason: "column group insertion index is outside the column",
+            });
+        }
+
+        // The incoming floating stack and the existing column each retain half
+        // of the available vertical space. Preserve the internal proportions of
+        // both layouts instead of assigning every incoming group an equal share.
+        let target_ratios = normalized_ratios(
+            target
+                .groups
+                .iter()
+                .enumerate()
+                .map(|(group_index, _)| target.group_ratios.get(group_index).copied())
+                .collect(),
+        );
+        let source_ratios = normalized_ratios(split.ratios.into_iter().map(Some).collect());
+
+        let mut groups = target.groups;
+        groups.splice(index..index, split.children);
+        let mut ratios = Vec::with_capacity(groups.len());
+        ratios.extend(target_ratios[..index].iter().map(|ratio| ratio * 0.5));
+        ratios.extend(source_ratios.iter().map(|ratio| ratio * 0.5));
+        ratios.extend(target_ratios[index..].iter().map(|ratio| ratio * 0.5));
+        let ratios = normalized_ratios(ratios.into_iter().map(Some).collect());
+
         self.detach_node(root)?;
         self.nodes.remove(root);
-        for (insert_at, child) in (index..).zip(split.children) {
-            self.insert_group_at_column(column, child, insert_at, None)?;
-        }
+        let Some(Node::Column(target)) = self.nodes.get_mut(column) else {
+            return Err(CommandError::InvalidTarget {
+                reason: "column slot target changed unexpectedly",
+            });
+        };
+        target.groups = groups;
+        target.group_ratios = ratios;
         Ok(())
     }
 
