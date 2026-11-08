@@ -21,8 +21,6 @@ use crate::{
         splitter::SplitterView, tab_strip::GroupPresentation,
     },
 };
-use group::DockGroupView;
-
 pub use group::{DockTab, GroupDragArea, GroupGrip, GroupMenuButton, PanelContent};
 pub(crate) use group::DockGroupView;
 
