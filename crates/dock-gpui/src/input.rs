@@ -8,6 +8,8 @@ pub mod pointer;
 pub mod resize;
 #[path = "input_scroll.rs"]
 pub mod scroll;
+#[path = "input_interaction.rs"]
+pub(crate) mod interaction;
 
 pub(crate) use drag::floating_bounds;
 pub(crate) use pointer::{PointerEventState, PointerPress, register_pointer_events};
