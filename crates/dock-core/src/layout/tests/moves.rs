@@ -146,9 +146,12 @@ fn c44_group_move_preserves_tabs_state_across_column_floating_and_docking() {
         .dock_area(layout.floating_group(floating_id).unwrap().area)
         .unwrap()
         .root;
-    assert_eq!(floating_root, source_group);
     assert!(matches!(
         layout.node(floating_root),
+        Some(Node::Column(column)) if column.groups == vec![source_group]
+    ));
+    assert!(matches!(
+        layout.node(source_group),
         Some(Node::Tabs(tabs))
             if tabs.children == expected_children && tabs.active_index == 1 && tabs.collapsed
     ));
