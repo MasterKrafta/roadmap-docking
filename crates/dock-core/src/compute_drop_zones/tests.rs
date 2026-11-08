@@ -75,6 +75,25 @@ fn main_panel_targets_append_to_the_end_of_a_tab_strip() {
         .find(|strip| strip.group == target_group)
         .expect("the target group should have a tab strip");
     assert_eq!(append_zones[0].rect, target_strip.rect);
+    let strip_center = Point::new(
+        target_strip.rect.origin.x + target_strip.rect.size.width * 0.5,
+        target_strip.rect.origin.y + target_strip.rect.size.height * 0.5,
+    );
+    assert_eq!(
+        layout
+            .resolve_drop(
+                strip_center,
+                DropSource::Panel { panel: source_panel },
+                &rects,
+                &metrics,
+            )
+            .unwrap(),
+        Some(DropTarget::Tabs {
+            group: target_group,
+            index: 1,
+        }),
+        "dropping on a Main Dock tab strip must append to its end"
+    );
     assert!(
         !zones.iter().any(|zone| {
             zone.target
