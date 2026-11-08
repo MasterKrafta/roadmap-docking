@@ -12,9 +12,9 @@ use dock_core::{
     TabOverflowRect, TabStripRect, VerticalOverflow,
 };
 use gpui::{
-    AnyView, Context, DispatchPhase, Entity, HitboxBehavior, IntoElement, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Render, ScrollHandle,
-    FocusHandle, Styled, WeakEntity, Window, WindowId, canvas, div,
+    AnyView, Context, DispatchPhase, Entity, HitboxBehavior, HitboxId, IntoElement,
+    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Render,
+    ScrollHandle, FocusHandle, Styled, WeakEntity, Window, WindowId, canvas, div,
     prelude::InteractiveElement as _, px, rgb,
 };
 use ui::Theme;
@@ -22,9 +22,12 @@ use ui::Theme;
 use crate::{
     DockController, FloatingWindowManager,
     dock_components::{DockAreaDragArea, DockAreaView, DockCompositionView, DockGroupView, DockTab},
-    input::drag::{
-        begin_floating_tab_tearoff, finish_floating_tab_drag, update_floating_tab_drag,
-        FloatingTabDrag,
+    input::{
+        drag::{
+            begin_floating_tab_tearoff, finish_floating_tab_drag, update_floating_tab_drag,
+            FloatingTabDrag,
+        },
+        interaction::DockInteractionCoordinator,
     },
     dock_host::{
         build_context_menu_entries, collect_subtree_nodes, context_menu_target_exists,
@@ -462,6 +465,7 @@ pub struct FloatingHost {
     column_scroll_handles: HashMap<NodeId, ScrollHandle>,
     open_context_menu: Option<FloatingHostOpenMenu>,
     tab_press: Rc<Cell<Option<FloatingTabPress>>>,
+    pointer_capture: Rc<Cell<Option<HitboxId>>>,
     controller_observed: bool,
     manager_observed: bool,
     native_resize_observation_pending: bool,
@@ -511,6 +515,7 @@ impl FloatingHost {
             column_scroll_handles: HashMap::new(),
             open_context_menu: None,
             tab_press: Rc::new(Cell::new(None)),
+            pointer_capture: Rc::new(Cell::new(None)),
             controller_observed: false,
             manager_observed: false,
             native_resize_observation_pending: false,
@@ -534,6 +539,7 @@ impl FloatingHost {
         self.column_scroll_handles.clear();
         self.open_context_menu = None;
         self.tab_press.set(None);
+        self.pointer_capture.set(None);
     }
 
     /// Enables or disables closing a tab with the middle mouse button.
@@ -577,6 +583,7 @@ impl Render for FloatingHost {
             let controller = self.controller.clone();
             let manager = self.manager.clone();
             let tab_press = self.tab_press.clone();
+            let pointer_capture = self.pointer_capture.clone();
             cx.on_focus_out(&focus_handle, window, move |_host, _event, window, app| {
                 let preserve_interaction = manager.upgrade().is_some_and(|manager| {
                     manager.update(app, |manager, manager_cx| {
@@ -596,7 +603,7 @@ impl Render for FloatingHost {
                         );
                     }
                 });
-                window.release_pointer();
+                DockInteractionCoordinator::release(window, &pointer_capture);
                 tab_press.set(None);
             })
             .detach();
@@ -649,6 +656,8 @@ impl Render for FloatingHost {
         let manager = self.manager.clone();
         let controller = self.controller.clone();
         let tab_press = self.tab_press.clone();
+        let pointer_capture = self.pointer_capture.clone();
+        let pointer_capture_for_escape = pointer_capture.clone();
         let input_window_id = window_id;
         let floating_rect = snapshot.as_ref().map(|snapshot| snapshot.floating.rect);
         let dock_component_tab_zones = snapshot
@@ -678,6 +687,7 @@ impl Render for FloatingHost {
                     let manager_for_down = manager.clone();
                     let controller_for_down = controller.clone();
                     let tab_press_for_down = tab_press.clone();
+                    let pointer_capture_for_down = pointer_capture.clone();
                     window.on_mouse_event(move |event: &MouseDownEvent, phase, window, app| {
                         if phase != DispatchPhase::Capture
                             || event.button != MouseButton::Left
@@ -685,7 +695,7 @@ impl Render for FloatingHost {
                         {
                             return;
                         }
-                        let Ok(point) = crate::geometry::point_from_gpui(event.position) else {
+                        let Ok(point) = crate::geometry::DockGeometry::point_from_gpui(event.position) else {
                             return;
                         };
                         let core_hit = controller_for_down.update(app, |controller, _| {
@@ -824,13 +834,20 @@ impl Render for FloatingHost {
                             );
                             // Capture at press so leaving this native window before
                             // the next GPUI move event still reaches the drag pipeline.
-                            window.capture_pointer(hitbox);
+                            if !DockInteractionCoordinator::capture(
+                                window,
+                                hitbox,
+                                &pointer_capture_for_down,
+                            ) {
+                                tab_press_for_down.set(None);
+                            }
                         }
                     });
 
                     let manager_for_move = manager.clone();
                     let controller_for_move = controller.clone();
                     let tab_press_for_move = tab_press.clone();
+                    let pointer_capture_for_move = pointer_capture.clone();
                     window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, app| {
                         if phase != DispatchPhase::Capture || !event.dragging() {
                             return;
@@ -846,7 +863,7 @@ impl Render for FloatingHost {
                         }) {
                             return;
                         }
-                        let Ok(point) = crate::geometry::point_from_gpui(event.position) else {
+                        let Ok(point) = crate::geometry::DockGeometry::point_from_gpui(event.position) else {
                             return;
                         };
                         let drag = FloatingTabDrag {
@@ -888,12 +905,18 @@ impl Render for FloatingHost {
 
                         // Capture only after the Core threshold is crossed. A
                         // normal click therefore continues to reach tab controls.
-                        window.capture_pointer(hitbox);
-                        if window.captured_hitbox() != Some(hitbox) {
+                        if !DockInteractionCoordinator::capture(
+                            window,
+                            hitbox,
+                            &pointer_capture_for_move,
+                        ) {
                             tab_press_for_move.set(None);
-                            let _ = controller_for_move.update(app, |controller, _| {
-                                controller.cancel_pointer_interaction()
-                            });
+                            DockInteractionCoordinator::cancel(
+                                &controller_for_move,
+                                window,
+                                &pointer_capture_for_move,
+                                app,
+                            );
                             return;
                         }
 
@@ -945,7 +968,10 @@ impl Render for FloatingHost {
                             )
                         {
                             tab_press_for_move.set(None);
-                            window.release_pointer();
+                            DockInteractionCoordinator::release(
+                                window,
+                                &pointer_capture_for_move,
+                            );
                             app.stop_propagation();
                             return;
                         }
@@ -955,6 +981,7 @@ impl Render for FloatingHost {
                     let manager_for_up = manager.clone();
                     let controller_for_up = controller.clone();
                     let tab_press_for_up = tab_press.clone();
+                    let pointer_capture_for_up = pointer_capture.clone();
                     window.on_mouse_event(move |event: &MouseUpEvent, phase, window, app| {
                         if phase != DispatchPhase::Capture || event.button != MouseButton::Left {
                             return;
@@ -970,8 +997,11 @@ impl Render for FloatingHost {
                             return;
                         };
                         tab_press_for_up.set(None);
-                        let Ok(point) = crate::geometry::point_from_gpui(event.position) else {
-                            window.release_pointer();
+                        let Ok(point) = crate::geometry::DockGeometry::point_from_gpui(event.position) else {
+                            DockInteractionCoordinator::release(
+                                window,
+                                &pointer_capture_for_up,
+                            );
                             return;
                         };
 
@@ -1058,7 +1088,10 @@ impl Render for FloatingHost {
                                     app,
                                 )
                             {
-                                window.release_pointer();
+                                DockInteractionCoordinator::release(
+                                    window,
+                                    &pointer_capture_for_up,
+                                );
                                 app.stop_propagation();
                                 return;
                             }
@@ -1087,12 +1120,18 @@ impl Render for FloatingHost {
                                 point,
                                 app,
                             );
-                            window.release_pointer();
+                            DockInteractionCoordinator::release(
+                                window,
+                                &pointer_capture_for_up,
+                            );
                             app.stop_propagation();
                             return;
                         }
 
-                        window.release_pointer();
+                        DockInteractionCoordinator::release(
+                            window,
+                            &pointer_capture_for_up,
+                        );
                         if was_pressed {
                             let _ = controller_for_up.update(app, |controller, _| {
                                 controller.cancel_pointer_interaction()
@@ -1369,7 +1408,10 @@ impl Render for FloatingHost {
                 }
                 controller_cx.notify();
             });
-            window.release_pointer();
+            DockInteractionCoordinator::release(
+                window,
+                &pointer_capture_for_escape,
+            );
             app.stop_propagation();
         });
 
