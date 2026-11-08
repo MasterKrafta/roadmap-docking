@@ -724,7 +724,6 @@ fn native_tearoff_required(
     let handle = controller.drag().session().handle();
     native_tearoff_enabled_for(handle, payload)
         && native_tearoff_boundary_reached(
-            controller,
             handle,
             payload,
             host_point,
@@ -764,7 +763,6 @@ fn dock_component_tab_hit_at_point(
 
 /// Checks the semantic boundary that turns an in-layout drag into a native tear-off.
 fn native_tearoff_boundary_reached(
-    controller: &mut DockController,
     handle: Option<DragHandle>,
     payload: DragPayload,
     host_point: Point,
@@ -773,10 +771,8 @@ fn native_tearoff_boundary_reached(
     match (handle, payload) {
         (Some(DragHandle::ColumnHeader), DragPayload::Column { .. }) => true,
         (Some(DragHandle::DockAreaHeader), DragPayload::DockArea { .. }) => true,
-        (Some(DragHandle::PanelTab), DragPayload::Panel { .. }) => {
-            let viewport = main_window_viewport.unwrap_or_else(|| controller.viewport());
-            panel_tab_tearoff_boundary_reached(viewport, host_point)
-        }
+        (Some(DragHandle::PanelTab), DragPayload::Panel { .. }) => main_window_viewport
+            .is_some_and(|viewport| panel_tab_tearoff_boundary_reached(viewport, host_point)),
         _ => false,
     }
 }
