@@ -413,8 +413,12 @@ fn existing_but_wrong_node_types_and_forbidden_targets_are_rejected_atomically()
         .next()
         .and_then(|(_, group)| floating_panel_layout.dock_area(group.area))
         .expect("detached panel should create a floating dock area");
+    let Some(Node::Column(floating_column)) = floating_panel_layout.node(floating_area.root) else {
+        panic!("detached Photoshop panel must use a floating Column root");
+    };
+    assert_eq!(floating_column.groups.len(), 1);
     assert!(matches!(
-        floating_panel_layout.node(floating_area.root),
+        floating_panel_layout.node(floating_column.groups[0]),
         Some(Node::Tabs(tabs)) if tabs.children.len() == 1
     ));
     assert_eq!(floating_panel_layout.validate(&metrics), Ok(()));
@@ -2024,8 +2028,11 @@ fn float_group_float_preserves_tabs_root_identity() {
     assert_eq!(layout.validate(&metrics), Ok(()));
     let (_, floating) = layout.floating_groups().next().expect("floating group");
     let root = layout.dock_area(floating.area).expect("floating area").root;
-    assert_eq!(root, moved_group);
-    assert!(matches!(layout.node(root), Some(Node::Tabs(_))));
+    assert!(matches!(
+        layout.node(root),
+        Some(Node::Column(column)) if column.groups == vec![moved_group]
+    ));
+    assert!(matches!(layout.node(moved_group), Some(Node::Tabs(_))));
     assert!(matches!(
         layout.node(source_column),
         Some(Node::Column(column)) if !column.groups.contains(&moved_group)
@@ -2057,8 +2064,12 @@ fn float_panel_float_creates_a_one_tab_floating_root() {
     assert_eq!(layout.validate(&metrics), Ok(()));
     let (_, floating) = layout.floating_groups().next().expect("floating group");
     let root = layout.dock_area(floating.area).expect("floating area").root;
-    let Some(Node::Tabs(tabs)) = layout.node(root) else {
-        panic!("detached tab must be the floating Tabs root");
+    let Some(Node::Column(column)) = layout.node(root) else {
+        panic!("detached tab must be wrapped in a floating Column");
+    };
+    assert_eq!(column.groups.len(), 1);
+    let Some(Node::Tabs(tabs)) = layout.node(column.groups[0]) else {
+        panic!("floating Column must contain a Tabs group");
     };
     assert_eq!(tabs.children, vec![source_panel_node]);
     assert_eq!(tabs.active_index, 0);
@@ -2094,10 +2105,11 @@ fn floating_last_group_removes_its_empty_source_column() {
         .unwrap();
 
     let (_, floating) = layout.floating_groups().next().unwrap();
-    assert_eq!(
-        layout.dock_area(floating.area).unwrap().root,
-        retained_group
-    );
+    let floating_root = layout.dock_area(floating.area).unwrap().root;
+    assert!(matches!(
+        layout.node(floating_root),
+        Some(Node::Column(column)) if column.groups == vec![retained_group]
+    ));
     assert!(layout.node(column).is_none());
     assert!(matches!(layout.node(retained_group), Some(Node::Tabs(_))));
     assert_eq!(layout.validate(&metrics), Ok(()));
@@ -2137,8 +2149,12 @@ fn floating_last_tab_removes_empty_source_group() {
 
     let (_, floating) = layout.floating_groups().next().unwrap();
     let root = layout.dock_area(floating.area).unwrap().root;
+    let Some(Node::Column(column)) = layout.node(root) else {
+        panic!("last floating tab must be wrapped in a Column");
+    };
+    assert_eq!(column.groups.len(), 1);
     assert!(matches!(
-        layout.node(root),
+        layout.node(column.groups[0]),
         Some(Node::Tabs(tabs)) if tabs.children == vec![panel_nodes[1]]
     ));
     assert!(layout.node(group).is_none());
