@@ -568,8 +568,8 @@ pub(crate) fn register_pointer_events(
 
             let drag_was_started = if drag_active {
                 // MouseUp can be the first event delivered beyond the drag threshold.
-                // Update the session once more so a tab released outside its strip
-                // still becomes a floating window instead of being treated as a failed drop.
+                // Update the session once more so a tab released outside the main
+                // DockHost viewport still becomes a floating window without a move event.
                 if update_drag_at(&controller, point, app) {
                     pointer_press.set(None);
                 }
@@ -692,8 +692,8 @@ pub(crate) fn register_pointer_events(
 }
 
 /// Selects which semantic drag areas may start a native tear-off.
-/// The main DockTab component becomes a native window as soon as Core crosses
-/// the drag threshold; legacy multi-tab strips retain in-strip reordering.
+/// A PanelTab becomes a native window only after leaving the main DockHost.
+/// Column and DockArea headers keep their own threshold-based tear-off behavior.
 fn native_tearoff_enabled_for(handle: Option<DragHandle>, payload: DragPayload) -> bool {
     match (handle, payload) {
         (Some(DragHandle::ColumnHeader), DragPayload::Column { .. }) => true,
@@ -751,13 +751,13 @@ fn native_tearoff_boundary_reached(
     controller: &mut DockController,
     handle: Option<DragHandle>,
     payload: DragPayload,
-    point: Point,
+    host_point: Point,
 ) -> bool {
     match (handle, payload) {
         (Some(DragHandle::ColumnHeader), DragPayload::Column { .. }) => true,
         (Some(DragHandle::DockAreaHeader), DragPayload::DockArea { .. }) => true,
         (Some(DragHandle::PanelTab), DragPayload::Panel { .. }) => {
-            panel_tab_tearoff_boundary_reached(controller.viewport(), point)
+            panel_tab_tearoff_boundary_reached(controller.viewport(), host_point)
         }
         _ => false,
     }
