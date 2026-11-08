@@ -59,17 +59,25 @@ impl Layout {
                 }
                 for (index, (_, column_rect)) in columns.iter().enumerate() {
                     let edge_width = metrics.edge_drop_width.min(column_rect.size.width / 3.0);
-                    let left_rect = Rect::new(
+                    let left_fallback = Rect::new(
                         column_rect.origin,
                         Size::new(edge_width, column_rect.size.height),
                     );
-                    let right_rect = Rect::new(
+                    let right_fallback = Rect::new(
                         Point::new(
                             column_rect.origin.x + column_rect.size.width - edge_width,
                             column_rect.origin.y,
                         ),
                         Size::new(edge_width, column_rect.size.height),
                     );
+                    let left_rect = main_column_boundary_drop_rect(
+                        self, rects, side, columns, index, metrics,
+                    )?
+                    .unwrap_or(left_fallback);
+                    let right_rect = main_column_boundary_drop_rect(
+                        self, rects, side, columns, index + 1, metrics,
+                    )?
+                    .unwrap_or(right_fallback);
 
                     if !is_same_position(side, index) {
                         push_zone(
@@ -249,6 +257,20 @@ impl Layout {
                 right_columns,
             ) {
                 if may_add_column(side) {
+                    let columns = match side {
+                        DockSide::Left => left_columns,
+                        DockSide::Right => right_columns,
+                    };
+                    let left_zone_rect = main_column_boundary_drop_rect(
+                        self, rects, side, columns, column_index, metrics,
+                    )?
+                    .map(|boundary| preserve_vertical_span(boundary, left_edge))
+                    .unwrap_or(left_edge);
+                    let right_zone_rect = main_column_boundary_drop_rect(
+                        self, rects, side, columns, column_index + 1, metrics,
+                    )?
+                    .map(|boundary| preserve_vertical_span(boundary, right_edge))
+                    .unwrap_or(right_edge);
                     let left_target = match source {
                         DropSource::Panel { .. } => DropTarget::MainColumn {
                             side,
@@ -278,7 +300,7 @@ impl Layout {
                         group_rect.group,
                         DropZone::Left,
                     ) {
-                        push_zone(zones, left_target, DropZone::ColumnLeft, left_edge)?;
+                        push_zone(zones, left_target, DropZone::ColumnLeft, left_zone_rect)?;
                     }
                     if !group_edge_is_noop(
                         self,
@@ -287,7 +309,7 @@ impl Layout {
                         group_rect.group,
                         DropZone::Right,
                     ) {
-                        push_zone(zones, right_target, DropZone::ColumnRight, right_edge)?;
+                        push_zone(zones, right_target, DropZone::ColumnRight, right_zone_rect)?;
                     }
                 }
             } else if self.profile() == Profile::Generic {
@@ -375,6 +397,89 @@ impl Layout {
     }
 }
 
+/// Returns a drop strip aligned with one insertion boundary in a main Dock.
+///
+/// Interior boundaries use the Split(X) hit geometry. The Canvas-facing outer
+/// boundary uses the owning Column's sentinel splitter and shifts slightly into
+/// the free Canvas side. The window-facing boundary is left to DockEdge.
+fn main_column_boundary_drop_rect(
+    layout: &Layout,
+    rects: &LayoutRects,
+    side: DockSide,
+    columns: &[(NodeId, Rect)],
+    index: usize,
+    metrics: &DockMetrics,
+) -> Result<Option<Rect>, ComputeRectsError> {
+    if columns.is_empty() || index > columns.len() {
+        return Ok(None);
+    }
+
+    let is_window_edge = match side {
+        DockSide::Left => index == 0,
+        DockSide::Right => index == columns.len(),
+    };
+    if is_window_edge {
+        return Ok(None);
+    }
+
+    let is_canvas_edge = match side {
+        DockSide::Left => index == columns.len(),
+        DockSide::Right => index == 0,
+    };
+    let splitter = if is_canvas_edge {
+        let edge_column = match side {
+            DockSide::Left => columns.last().map(|(id, _)| *id),
+            DockSide::Right => columns.first().map(|(id, _)| *id),
+        };
+        edge_column.and_then(|column| {
+            rects.splitters.iter().find(|splitter| {
+                splitter.owner == column
+                    && splitter.axis == crate::Axis::X
+                    && splitter.boundary_index == crate::OUTER_COLUMN_EDGE_BOUNDARY_INDEX
+            })
+        })
+    } else {
+        let root = layout.main_area(side).map(|area| area.root);
+        root.and_then(|root| {
+            rects.splitters.iter().find(|splitter| {
+                splitter.owner == root
+                    && splitter.axis == crate::Axis::X
+                    && splitter.boundary_index == index - 1
+            })
+        })
+    };
+
+    let Some(splitter) = splitter else {
+        return Ok(None);
+    };
+
+    let width = metrics.edge_drop_width.max(splitter.rect.size.width);
+    let mut center_x = splitter.rect.origin.x + splitter.rect.size.width * 0.5;
+    if is_canvas_edge {
+        let offset = metrics.splitter_thickness;
+        center_x += match side {
+            DockSide::Left => offset,
+            DockSide::Right => -offset,
+        };
+    }
+
+    let result = Rect::new(
+        Point::new(center_x - width * 0.5, splitter.rect.origin.y),
+        Size::new(width, splitter.rect.size.height),
+    );
+    result.validate().map_err(ComputeRectsError::Geometry)?;
+    Ok(Some(result))
+}
+
+/// Uses the splitter-aligned horizontal band while preserving a group's own
+/// vertical extent, so stacked groups keep independent drop targets.
+fn preserve_vertical_span(boundary: Rect, group_edge: Rect) -> Rect {
+    Rect::new(
+        Point::new(boundary.origin.x, group_edge.origin.y),
+        Size::new(boundary.size.width, group_edge.size.height),
+    )
+}
+
 impl Layout {
     pub(in crate::compute_drop_zones) fn append_main_column_zones(
         &self,
@@ -385,6 +490,7 @@ impl Layout {
             source,
             source_panels,
             tree_index,
+            rects,
             metrics,
             left_columns,
             right_columns,
@@ -445,17 +551,25 @@ impl Layout {
                 // The top/bottom halves of the column boundary zones are represented
                 // by group targets; the outer side itself can safely use full height.
                 let edge_width = metrics.edge_drop_width.min(column_rect.size.width / 3.0);
-                let left_rect = Rect::new(
+                let left_fallback = Rect::new(
                     column_rect.origin,
                     Size::new(edge_width, column_rect.size.height),
                 );
-                let right_rect = Rect::new(
+                let right_fallback = Rect::new(
                     Point::new(
                         column_rect.origin.x + column_rect.size.width - edge_width,
                         column_rect.origin.y,
                     ),
                     Size::new(edge_width, column_rect.size.height),
                 );
+                let left_rect = main_column_boundary_drop_rect(
+                    self, rects, side, columns, index, metrics,
+                )?
+                .unwrap_or(left_fallback);
+                let right_rect = main_column_boundary_drop_rect(
+                    self, rects, side, columns, index + 1, metrics,
+                )?
+                .unwrap_or(right_fallback);
                 if may_add_column(side) {
                     let targets = match source {
                         DropSource::Panel { .. } => Some((
