@@ -115,7 +115,7 @@ impl DockColumnView {
         metrics: DockMetrics,
         menu_group: Option<NodeId>,
         toggle_group_menu: GroupMenuToggle,
-        middle_click_closes_tabs: bool,
+        _middle_click_closes_tabs: bool,
         splitters: &[SplitterRect],
         overflow: Option<VerticalOverflow>,
         scroll_handle: Option<ScrollHandle>,
@@ -179,9 +179,7 @@ impl DockColumnView {
                         0.0,
                         controller.clone(),
                         theme,
-                        raise_floating,
                         toggle_group_menu.clone(),
-                        middle_click_closes_tabs,
                     ));
                 } else {
                     content = content.child(group_surface(*group, content_origin, metrics, theme));
