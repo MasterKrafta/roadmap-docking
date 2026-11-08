@@ -21,7 +21,10 @@ use ui::Theme;
 
 use crate::{
     DockController, FloatingWindowManager,
-    dock_components::{DockAreaDragArea, DockAreaView, DockCompositionView, DockGroupView, DockTab},
+    dock_components::{
+        collect_group_presentations, DockAreaDragArea, DockAreaView, DockCompositionView,
+        DockGroupView, DockTab, GroupPresentation,
+    },
     input::{
         drag::{
             begin_floating_tab_tearoff, finish_floating_tab_drag, update_floating_tab_drag,
@@ -40,10 +43,6 @@ use super::{
         ContextMenu, ContextMenuCallbacks, ContextMenuDismiss, ContextMenuSubmenuToggle,
         ContextMenuTarget, GroupMenuToggle,
     },
-    panel_host::PanelHost,
-    splitter::SplitterView,
-    tab_strip::GroupPresentation,
-    collect_group_presentations,
 };
 
 /// Content view for one native floating window.
