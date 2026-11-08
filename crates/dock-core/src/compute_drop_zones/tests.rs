@@ -1305,13 +1305,13 @@ fn main_column_drop_zones_are_centered_on_the_splitter_between_columns() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
 
-    let (_, source_node) = builder.panel(key("splitter-source"), constraints());
+    let (source_panel, source_node) = builder.panel(key("splitter-source"), constraints());
     let source_group = builder.tabs(vec![source_node], 0, false);
     let source_column =
         builder.column(280.0, ColumnMode::Expanded, vec![source_group], vec![1.0]);
     builder.main_area(DockSide::Right, source_column);
 
-    let (source_panel, target_left_node) =
+    let (_, target_left_node) =
         builder.panel(key("splitter-target-left"), constraints());
     let target_left_group = builder.tabs(vec![target_left_node], 0, false);
     let target_left_column =
@@ -1369,13 +1369,13 @@ fn canvas_facing_column_drop_zone_shifts_slightly_into_the_free_space() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
 
-    let (_, source_node) = builder.panel(key("canvas-edge-source"), constraints());
+    let (source_panel, source_node) = builder.panel(key("canvas-edge-source"), constraints());
     let source_group = builder.tabs(vec![source_node], 0, false);
     let source_column =
         builder.column(280.0, ColumnMode::Expanded, vec![source_group], vec![1.0]);
     builder.main_area(DockSide::Right, source_column);
 
-    let (source_panel, target_node) =
+    let (_, target_node) =
         builder.panel(key("canvas-edge-target"), constraints());
     let target_group = builder.tabs(vec![target_node], 0, false);
     let target_column =
