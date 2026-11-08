@@ -1420,6 +1420,172 @@ fn canvas_facing_column_drop_zone_shifts_slightly_into_the_free_space() {
 }
 
 #[test]
+fn floating_panel_can_drop_into_a_main_dock_group() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+    let (moving_panel, moving_node) =
+        builder.panel(key("floating-to-main-moving"), constraints());
+    let (_, source_keep_node) =
+        builder.panel(key("floating-to-main-keep"), constraints());
+    let source_group = builder.tabs(vec![moving_node, source_keep_node], 0, false);
+    let source_float = builder.floating_group(
+        source_group,
+        Rect::new(Point::new(120.0, 100.0), Size::new(420.0, 320.0)),
+        1,
+    );
+
+    let (_, target_node) = builder.panel(key("floating-to-main-target"), constraints());
+    let target_group = builder.tabs(vec![target_node], 0, false);
+    let target_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![target_group],
+        vec![1.0],
+    );
+    builder.main_area(DockSide::Right, target_column);
+
+    let mut layout = builder.build();
+    let rects = layout.compute_rects(viewport(), &metrics).unwrap();
+    let zones = layout
+        .compute_drop_zones(DropSource::Panel { panel: moving_panel }, &rects, &metrics)
+        .unwrap();
+    let target_zone = zones
+        .iter()
+        .find(|zone| {
+            zone.zone == DropZone::Center
+                && zone.target
+                    == DropTarget::Tabs {
+                        group: target_group,
+                        index: 1,
+                    }
+        })
+        .expect("a floating panel must expose the center of a main Dock group");
+
+    let request = crate::DragDropRequest {
+        payload: crate::DragPayload::Panel { panel: moving_panel },
+        handle: crate::DragHandle::PanelTab,
+        origin: Point::ZERO,
+        point: Point::new(
+            target_zone.rect.origin.x + target_zone.rect.size.width * 0.5,
+            target_zone.rect.origin.y + target_zone.rect.size.height * 0.5,
+        ),
+        target: Some(target_zone.target),
+        floating_bounds: None,
+    };
+    assert_eq!(
+        layout.resolve_drag_drop(&request, &metrics).unwrap(),
+        crate::DragDropAction::Command(DockCommand::MovePanel {
+            panel: moving_panel,
+            target: target_zone.target,
+        })
+    );
+    layout
+        .apply(
+            DockCommand::MovePanel {
+                panel: moving_panel,
+                target: target_zone.target,
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    let Some(Node::Tabs(source)) = layout.node(source_group) else {
+        panic!("the source floating group must remain for its sibling panel");
+    };
+    assert_eq!(source.children, vec![source_keep_node]);
+    let Some(Node::Tabs(target)) = layout.node(target_group) else {
+        panic!("the destination main group must remain Tabs");
+    };
+    assert_eq!(target.children, vec![target_node, moving_node]);
+    assert!(layout.floating_group(source_float).is_some());
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
+fn main_dock_panel_can_drop_into_a_floating_group() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+    let (moving_panel, moving_node) =
+        builder.panel(key("main-to-floating-moving"), constraints());
+    let (_, source_keep_node) =
+        builder.panel(key("main-to-floating-keep"), constraints());
+    let source_group = builder.tabs(vec![moving_node, source_keep_node], 0, false);
+    let source_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![source_group],
+        vec![1.0],
+    );
+    builder.main_area(DockSide::Left, source_column);
+
+    let (_, target_node) = builder.panel(key("main-to-floating-target"), constraints());
+    let target_group = builder.tabs(vec![target_node], 0, false);
+    let target_float = builder.floating_group(
+        target_group,
+        Rect::new(Point::new(540.0, 100.0), Size::new(420.0, 320.0)),
+        1,
+    );
+
+    let mut layout = builder.build();
+    let rects = layout.compute_floating_rects(target_float, &metrics).unwrap();
+    let zones = layout
+        .compute_drop_zones(DropSource::Panel { panel: moving_panel }, &rects, &metrics)
+        .unwrap();
+    let target_zone = zones
+        .iter()
+        .find(|zone| {
+            zone.zone == DropZone::FloatingCenter
+                && zone.target
+                    == DropTarget::Tabs {
+                        group: target_group,
+                        index: 1,
+                    }
+        })
+        .expect("a floating group must expose its center for a main-dock panel");
+
+    let request = crate::DragDropRequest {
+        payload: crate::DragPayload::Panel { panel: moving_panel },
+        handle: crate::DragHandle::PanelTab,
+        origin: Point::ZERO,
+        point: Point::new(
+            target_zone.rect.origin.x + target_zone.rect.size.width * 0.5,
+            target_zone.rect.origin.y + target_zone.rect.size.height * 0.5,
+        ),
+        target: Some(target_zone.target),
+        floating_bounds: None,
+    };
+    assert_eq!(
+        layout.resolve_drag_drop(&request, &metrics).unwrap(),
+        crate::DragDropAction::Command(DockCommand::MovePanel {
+            panel: moving_panel,
+            target: target_zone.target,
+        })
+    );
+    layout
+        .apply(
+            DockCommand::MovePanel {
+                panel: moving_panel,
+                target: target_zone.target,
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    let Some(Node::Tabs(source)) = layout.node(source_group) else {
+        panic!("the source main group must remain for its sibling panel");
+    };
+    assert_eq!(source.children, vec![source_keep_node]);
+    let Some(Node::Tabs(target)) = layout.node(target_group) else {
+        panic!("the destination floating group must remain Tabs");
+    };
+    assert_eq!(target.children, vec![target_node, moving_node]);
+    assert!(layout.floating_group(target_float).is_some());
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
 fn empty_main_dock_side_exposes_first_column_drop_zone() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
