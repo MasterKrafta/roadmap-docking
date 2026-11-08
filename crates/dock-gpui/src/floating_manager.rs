@@ -21,6 +21,7 @@ use platform::{
 
 use crate::{
     DockController, DockEvent, DockTheme, components::FloatingHost,
+    geometry::DockGeometry,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -307,7 +308,7 @@ impl FloatingWindowManager {
         let main = self.main_native_window?;
         let client = self.native_ops.client_origin(main).ok()?;
         let scale = self.native_ops.scale_factor(main).ok()?;
-        let origin = screen_position_from_main_local(
+        let origin = DockGeometry::screen_position_from_host_local(
             bounds.origin,
             self.main_host_origin,
             client,
@@ -327,7 +328,7 @@ impl FloatingWindowManager {
         let native_window = self.panel_window_for_group(source_group)?.native_window?;
         let client = self.native_ops.client_origin(native_window).ok()?;
         let scale = self.native_ops.scale_factor(native_window).ok()?;
-        let origin = screen_position_from_main_local(
+        let origin = DockGeometry::screen_position_from_host_local(
             bounds.origin,
             Point::ZERO,
             client,
@@ -549,23 +550,8 @@ impl FloatingWindowManager {
     fn core_bounds_from_native_window(&self, native_window: NativeWindowId) -> Option<Rect> {
         let rect = self.native_ops.window_rect(native_window).ok()?;
         let client_size = self.native_ops.client_size(native_window).ok()?;
-        if !client_size.is_valid() {
-            return None;
-        }
         let scale = self.native_ops.scale_factor(native_window).ok()?;
-        if !scale.is_finite() || scale <= 0.0 {
-            return None;
-        }
-
-        let bounds = Rect::new(
-            Point::new(rect.left as f32, rect.top as f32),
-            Size::new(
-                client_size.width as f32 / scale,
-                client_size.height as f32 / scale,
-            ),
-        );
-        bounds.validate_non_empty().ok()?;
-        Some(bounds)
+        DockGeometry::core_bounds_from_native(rect, client_size, scale)
     }
 
     /// Starts native movement for a group created by the current main-window drag.
@@ -598,10 +584,10 @@ impl FloatingWindowManager {
             .and_then(|main| self.native_ops.scale_factor(main).ok())
             .filter(|scale| scale.is_finite() && *scale > 0.0)
             .unwrap_or(1.0);
-        let Some(offset_x) = physical_coordinate(pointer.x - local_bounds.origin.x, scale) else {
+        let Some(offset_x) = DockGeometry::physical_coordinate(pointer.x - local_bounds.origin.x, scale) else {
             return false;
         };
-        let Some(offset_y) = physical_coordinate(pointer.y - local_bounds.origin.y, scale) else {
+        let Some(offset_y) = DockGeometry::physical_coordinate(pointer.y - local_bounds.origin.y, scale) else {
             return false;
         };
         let grab_offset = PhysicalPoint { x: offset_x, y: offset_y };
@@ -670,10 +656,10 @@ impl FloatingWindowManager {
             tracing::warn!(?group, "could not read cursor position for floating-tab tear-off");
             return false;
         };
-        let Some(origin_x) = integer_physical_coordinate(model_bounds.origin.x) else {
+        let Some(origin_x) = DockGeometry::integer_physical_coordinate(model_bounds.origin.x) else {
             return false;
         };
-        let Some(origin_y) = integer_physical_coordinate(model_bounds.origin.y) else {
+        let Some(origin_y) = DockGeometry::integer_physical_coordinate(model_bounds.origin.y) else {
             return false;
         };
         let grab_offset = PhysicalPoint {
@@ -777,7 +763,7 @@ impl FloatingWindowManager {
             .filter(|scale| scale.is_finite() && *scale > 0.0)
             .unwrap_or(1.0);
         let hidden_header_offset = if hide_header {
-            let Some(offset) = physical_coordinate(metrics.column_header_height, scale) else {
+            let Some(offset) = DockGeometry::physical_coordinate(metrics.column_header_height, scale) else {
                 return false;
             };
             offset
@@ -1036,17 +1022,18 @@ impl FloatingWindowManager {
         let main = self.main_native_window?;
         let client = self.native_ops.client_origin(main).ok()?;
         let scale = self.native_ops.scale_factor(main).ok()?;
-        if !scale.is_finite() || scale <= 0.0 { return None; }
-        main_local_point_from_screen(screen, client, self.main_host_origin, scale)
+        DockGeometry::host_local_point_from_screen(
+            screen,
+            client,
+            self.main_host_origin,
+            scale,
+        )
     }
 
     fn core_point_for_floating(&self, window: NativeWindowId, screen: PhysicalPoint) -> Option<Point> {
         let client = self.native_ops.client_origin(window).ok()?;
         let scale = self.native_ops.scale_factor(window).ok()?;
-        if !scale.is_finite() || scale <= 0.0 { return None; }
-        let point = Point::new((screen.x - client.x) as f32 / scale, (screen.y - client.y) as f32 / scale);
-        point.validate().ok()?;
-        Some(point)
+        DockGeometry::host_local_point_from_screen(screen, client, Point::ZERO, scale)
     }
 
     fn finish_native_move(&mut self, state: NativeMoveSession, cx: &mut Context<Self>) {
@@ -1085,7 +1072,7 @@ impl FloatingWindowManager {
             let client_size = self.native_ops.client_size(state.native_window).ok();
 
             if let (Some(rect), Some(scale), Some(client_size)) = (native_rect, scale, client_size) {
-                let expansion = physical_coordinate(metrics.column_header_height, scale)
+                let expansion = DockGeometry::physical_coordinate(metrics.column_header_height, scale)
                     .and_then(|header_pixels| {
                         let client_height = client_size.height.checked_add(header_pixels)?;
                         let top = rect.top.checked_sub(header_pixels)?;
@@ -1229,10 +1216,7 @@ impl FloatingWindowManager {
     }
 
     fn physical_origin_for_bounds(&self, bounds: Rect) -> Option<PhysicalPoint> {
-        Some(PhysicalPoint {
-            x: integer_physical_coordinate(bounds.origin.x)?,
-            y: integer_physical_coordinate(bounds.origin.y)?,
-        })
+        DockGeometry::physical_point_from_core(bounds.origin)
     }
 
     fn core_origin_from_screen(&self, screen: PhysicalPoint) -> Option<Point> {
@@ -1250,7 +1234,8 @@ impl FloatingWindowManager {
             .and_then(|main| self.native_ops.scale_factor(main).ok())
             .filter(|scale| scale.is_finite() && *scale > 0.0)
             .unwrap_or(1.0);
-        Point::new(bounds.origin.x / scale, bounds.origin.y / scale)
+        DockGeometry::logical_point_from_core_physical(bounds.origin, scale)
+            .unwrap_or(Point::ZERO)
     }
 
     /// Makes the PanelId registry and composition-host map match the current Layout.
@@ -1890,8 +1875,8 @@ impl FloatingWindowManager {
             .filter(|scale| scale.is_finite() && *scale > 0.0)
             .unwrap_or(1.0);
         if let (Some(width), Some(height)) = (
-            physical_coordinate(entry.bounds.size.width, destination_scale),
-            physical_coordinate(entry.bounds.size.height, destination_scale),
+            DockGeometry::physical_coordinate(entry.bounds.size.width, destination_scale),
+            DockGeometry::physical_coordinate(entry.bounds.size.height, destination_scale),
         ) {
             let desired_size = PhysicalSize { width, height };
             if desired_size.is_valid()
@@ -1952,8 +1937,8 @@ impl FloatingWindowManager {
                 .ok()
                 .filter(|scale| scale.is_finite() && *scale > 0.0)
                 .unwrap_or(1.0);
-            let width = physical_coordinate(minimum.width, scale)?;
-            let height = physical_coordinate(minimum.height, scale)?;
+            let width = DockGeometry::physical_coordinate(minimum.width, scale)?;
+            let height = DockGeometry::physical_coordinate(minimum.height, scale)?;
             let size = PhysicalSize { width, height };
             size.is_valid().then_some(size)
         });
@@ -2050,8 +2035,8 @@ impl FloatingWindowManager {
         });
 
         if entry.bounds.size != group.bounds.size || effective_scale_changed {
-            let desired_size = physical_coordinate(group.bounds.size.width, effective_scale)
-                .zip(physical_coordinate(group.bounds.size.height, effective_scale));
+            let desired_size = DockGeometry::physical_coordinate(group.bounds.size.width, effective_scale)
+                .zip(DockGeometry::physical_coordinate(group.bounds.size.height, effective_scale));
             match desired_size {
                 Some((width, height)) if width > 0 && height > 0 => {
                     if let Err(error) = self
@@ -2181,47 +2166,6 @@ fn restored_window_origin(
     })
 }
 
-fn screen_position_from_main_local(
-    local: Point,
-    host_origin: Point,
-    client_origin: PhysicalPoint,
-    scale: f32,
-) -> Option<PhysicalPoint> {
-    if !scale.is_finite() || scale <= 0.0 { return None; }
-    let x = physical_coordinate(host_origin.x + local.x, scale)?;
-    let y = physical_coordinate(host_origin.y + local.y, scale)?;
-    Some(PhysicalPoint {
-        x: client_origin.x.checked_add(x)?,
-        y: client_origin.y.checked_add(y)?,
-    })
-}
-
-fn main_local_point_from_screen(
-    screen: PhysicalPoint,
-    client_origin: PhysicalPoint,
-    host_origin: Point,
-    scale: f32,
-) -> Option<Point> {
-    if !scale.is_finite() || scale <= 0.0 { return None; }
-    let point = Point::new(
-        (screen.x - client_origin.x) as f32 / scale - host_origin.x,
-        (screen.y - client_origin.y) as f32 / scale - host_origin.y,
-    );
-    point.validate().ok()?;
-    Some(point)
-}
-
-fn integer_physical_coordinate(value: f32) -> Option<i32> {
-    (value.is_finite() && value >= i32::MIN as f32 && value <= i32::MAX as f32)
-        .then(|| value.round() as i32)
-}
-
-fn physical_coordinate(value: f32, scale: f32) -> Option<i32> {
-    let scaled = value * scale;
-    (scaled.is_finite() && scaled >= i32::MIN as f32 && scaled <= i32::MAX as f32)
-        .then(|| scaled.round() as i32)
-}
-
 impl Drop for FloatingWindowManager {
     fn drop(&mut self) {
         if self.native_move.is_some_and(|state| state.high_resolution_timer) {
@@ -2298,7 +2242,7 @@ mod coordinate_tests {
 
     #[test]
     fn main_host_local_bounds_convert_to_virtual_desktop_physical_origin() {
-        let screen = screen_position_from_main_local(
+        let screen = DockGeometry::screen_position_from_host_local(
             Point::new(120.0, 56.0),
             Point::new(32.0, 48.0),
             PhysicalPoint { x: 1400, y: 80 },
@@ -2306,7 +2250,7 @@ mod coordinate_tests {
         ).unwrap();
         assert_eq!(screen, PhysicalPoint { x: 1628, y: 236 });
         assert_eq!(
-            main_local_point_from_screen(
+            DockGeometry::host_local_point_from_screen(
                 screen,
                 PhysicalPoint { x: 1400, y: 80 },
                 Point::new(32.0, 48.0),
@@ -2324,9 +2268,9 @@ mod coordinate_tests {
         let scale = 1.25;
 
         let screen =
-            screen_position_from_main_local(local, host_origin, client_origin, scale).unwrap();
+            DockGeometry::screen_position_from_host_local(local, host_origin, client_origin, scale).unwrap();
         let restored =
-            main_local_point_from_screen(screen, client_origin, host_origin, scale).unwrap();
+            DockGeometry::host_local_point_from_screen(screen, client_origin, host_origin, scale).unwrap();
 
         assert!((restored.x - local.x).abs() <= 0.25);
         assert!((restored.y - local.y).abs() <= 0.25);
@@ -2335,7 +2279,7 @@ mod coordinate_tests {
     #[test]
     fn screen_coordinate_conversion_rejects_invalid_monitor_scale() {
         assert!(
-            screen_position_from_main_local(
+            DockGeometry::screen_position_from_host_local(
                 Point::new(1.0, 1.0),
                 Point::ZERO,
                 PhysicalPoint::default(),
@@ -2344,7 +2288,7 @@ mod coordinate_tests {
             .is_none()
         );
         assert!(
-            main_local_point_from_screen(
+            DockGeometry::host_local_point_from_screen(
                 PhysicalPoint::default(),
                 PhysicalPoint::default(),
                 Point::ZERO,
