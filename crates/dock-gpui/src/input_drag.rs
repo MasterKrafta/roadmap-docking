@@ -1,7 +1,7 @@
 use dock_core::{
-    CommandValue, ComputeRectsError, DockCommand, DragDropAction, DragDropRequest, DragHandle,
-    DragPayload, DragState, DropSource, DropTarget, FloatingGroupId, Node, NodeId, PanelId, Point,
-    Rect, Size,
+    ColumnRect, CommandValue, ComputeRectsError, DockCommand, DragDropAction, DragDropRequest,
+    DragHandle, DragPayload, DragState, DropSource, DropTarget, FloatingGroupId, Node, NodeId,
+    PanelId, Point, Rect, Size,
 };
 use gpui::{App, Entity, WindowId};
 
@@ -41,7 +41,12 @@ pub(crate) fn begin_drag_at(
 fn main_drag_uses_drop_targets(handle: Option<DragHandle>) -> bool {
     !matches!(
         handle,
-        Some(DragHandle::PanelTab | DragHandle::ColumnHeader | DragHandle::FloatingTitle)
+        Some(
+            DragHandle::PanelTab
+                | DragHandle::ColumnHeader
+                | DragHandle::DockAreaHeader
+                | DragHandle::FloatingTitle
+        )
     )
 }
 
@@ -455,6 +460,10 @@ pub(crate) fn begin_native_tearoff(
             (DragHandle::ColumnHeader, DragPayload::Column { column }) => {
                 DockCommand::Float { node: column, bounds: local_bounds }
             }
+            (DragHandle::DockAreaHeader, DragPayload::DockArea { side }) => {
+                let root = controller.layout().main_area(side)?.root;
+                DockCommand::Float { node: root, bounds: local_bounds }
+            }
             _ => return None,
         };
         Some((command, local_bounds, hide_column_header, payload, handle))
@@ -690,17 +699,20 @@ fn drop_source(controller: &DockController, payload: DragPayload) -> Option<Drop
         DragPayload::Panel { panel } => Some(DropSource::Panel { panel }),
         DragPayload::Group { group } => Some(DropSource::Group { group }),
         DragPayload::Column { column } => Some(DropSource::Column { column }),
+        DragPayload::DockArea { .. } => None,
         DragPayload::FloatingGroup { group } => {
             let root = controller
                 .layout()
                 .floating_group(group)
                 .and_then(|floating| controller.layout().dock_area(floating.area))
                 .map(|area| area.root)?;
-            Some(if matches!(controller.layout().node(root), Some(Node::Column(_))) {
-                DropSource::Column { column: root }
-            } else {
-                DropSource::Group { group: root }
-            })
+            match controller.layout().node(root) {
+                Some(Node::Column(_)) => Some(DropSource::Column { column: root }),
+                Some(Node::Tabs(_)) => Some(DropSource::Group { group: root }),
+                // A multi-column FloatingGroup needs composition-aware drop zones;
+                // do not misrepresent its Split(X) root as a Tabs group.
+                _ => None,
+            }
         }
     }
 }
@@ -744,6 +756,15 @@ fn floating_bounds_for_request(
     // drag hit-testing pipeline. The press point then gives us the cursor's
     // offset within the dragged element.
     let column_header_height = controller.metrics().column_header_height;
+    let dock_area_column_ids = match request.payload {
+        DragPayload::DockArea { side } => {
+            let root = controller.layout().main_area(side)?.root;
+            let mut columns = Vec::new();
+            collect_dock_area_columns(controller.layout(), root, &mut columns);
+            Some(columns)
+        }
+        _ => None,
+    };
     let source_rect = {
         let rects = controller.geometry().ok()?;
         match (request.handle, request.payload) {
@@ -776,6 +797,16 @@ fn floating_bounds_for_request(
                     .rect;
                 column_tab_floating_bounds(source, request.origin, column_header_height)?
             }
+            (DragHandle::DockAreaHeader, DragPayload::DockArea { .. }) => {
+                let ids = dock_area_column_ids.as_ref()?;
+                let columns = ids
+                    .iter()
+                    .filter_map(|id| {
+                        rects.columns.iter().find(|column| column.column == *id).copied()
+                    })
+                    .collect::<Vec<_>>();
+                dock_area_bounds(&columns)?
+            }
             (
                 DragHandle::FloatingCapture | DragHandle::FloatingTitle,
                 DragPayload::FloatingGroup { group },
@@ -796,13 +827,51 @@ fn floating_bounds_for_request(
                 .constraints
                 .preferred_size
         }
-        DragPayload::Group { .. } | DragPayload::Column { .. } => source_rect.size,
+        DragPayload::Group { .. }
+        | DragPayload::Column { .. }
+        | DragPayload::DockArea { .. } => source_rect.size,
         DragPayload::FloatingGroup { group } => {
             controller.layout().floating_group(group)?.bounds.size
         }
     };
 
     desired_floating_bounds(source_rect, preferred_size, request.origin, request.point)
+}
+
+fn collect_dock_area_columns(
+    layout: &dock_core::Layout,
+    node: NodeId,
+    columns: &mut Vec<NodeId>,
+) {
+    match layout.node(node) {
+        Some(Node::Split(split)) => {
+            for child in &split.children {
+                collect_dock_area_columns(layout, *child, columns);
+            }
+        }
+        Some(Node::Column(_)) => columns.push(node),
+        _ => {}
+    }
+}
+
+fn dock_area_bounds(columns: &[ColumnRect]) -> Option<Rect> {
+    let first = columns.first()?.rect;
+    let mut left = first.origin.x;
+    let mut top = first.origin.y;
+    let mut right = first.origin.x + first.size.width;
+    let mut bottom = first.origin.y + first.size.height;
+
+    for column in columns.iter().skip(1) {
+        left = left.min(column.rect.origin.x);
+        top = top.min(column.rect.origin.y);
+        right = right.max(column.rect.origin.x + column.rect.size.width);
+        bottom = bottom.max(column.rect.origin.y + column.rect.size.height);
+    }
+
+    Some(Rect::new(
+        Point::new(left, top),
+        Size::new(right - left, bottom - top),
+    ))
 }
 
 /// True when a ColumnHeader drag was initiated from the DockTab row,

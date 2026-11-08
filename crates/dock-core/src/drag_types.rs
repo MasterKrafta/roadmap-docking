@@ -1,6 +1,6 @@
 //! Semantic types and outcomes used by the drag interaction state machine.
 
-use crate::{DockCommand, DropTarget, FloatingGroupId, NodeId, PanelId, Point, Rect};
+use crate::{DockCommand, DockSide, DropTarget, FloatingGroupId, NodeId, PanelId, Point, Rect};
 
 /// Why a drag gesture ended without a drop request.
 ///
@@ -36,8 +36,9 @@ pub enum DragDropAction {
 /// The single semantic drop intent emitted by a successful drag release.
 ///
 /// This is not a command and does not mutate Layout. `payload` preserves the source
-/// semantics: Panel means one tab, Group means one Tabs group, Column means a complete
-/// Column composition, and FloatingGroup means the native floating window itself. The adapter translates this one
+/// semantics: Panel means one tab, Group means one Tabs group, Column means one Column,
+/// DockArea means every Column on one main-dock side, and FloatingGroup means the native
+/// floating window itself. The adapter translates this one
 /// request into exactly one `DockCommand` and applies it once. Targets such as
 /// `DropTarget::FreeArea` may require the adapter to supply data such as floating
 /// bounds when forming that command.
@@ -72,6 +73,8 @@ pub enum DragHandle {
     GroupGrip,
     /// A Column header; moves the complete Column composition.
     ColumnHeader,
+    /// The shared header of a main DockArea; detaches its complete Column composition.
+    DockAreaHeader,
     /// A floating window title bar; moves window bounds, never docks it.
     FloatingTitle,
     /// An explicit floating-window capture affordance; may dock/stack the
@@ -86,6 +89,7 @@ impl DragHandle {
             DragPayload::Panel { .. } => Self::PanelTab,
             DragPayload::Group { .. } => Self::GroupGrip,
             DragPayload::Column { .. } => Self::ColumnHeader,
+            DragPayload::DockArea { .. } => Self::DockAreaHeader,
             DragPayload::FloatingGroup { .. } => Self::FloatingTitle,
         }
     }
@@ -97,6 +101,7 @@ impl DragHandle {
                 | (Self::FlyoutPanel, DragPayload::Panel { .. })
                 | (Self::GroupGrip, DragPayload::Group { .. })
                 | (Self::ColumnHeader, DragPayload::Column { .. })
+                | (Self::DockAreaHeader, DragPayload::DockArea { .. })
                 | (Self::FloatingTitle, DragPayload::FloatingGroup { .. })
                 | (Self::FloatingCapture, DragPayload::FloatingGroup { .. })
         )
@@ -123,6 +128,10 @@ pub enum DragPayload {
     /// Unlike Group, this carries every group in the Column together and preserves
     /// the Column node and all of its descendants when moved or floated.
     Column { column: NodeId },
+    /// Every Column in one still-docked main DockArea, identified by its side.
+    ///
+    /// Unlike Column, this keeps a multi-column DockArea together when it is floated.
+    DockArea { side: DockSide },
     /// A floating window moved by its window/title drag surface.
     ///
     /// This is distinct from dragging the Tabs group inside that window.

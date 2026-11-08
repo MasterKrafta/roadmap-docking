@@ -12,7 +12,9 @@ pub use header::{
 /// Root presentation for one Core DockArea.
 ///
 /// A DockArea owns the shared header and the visual composition of its Columns.
-/// Core remains the owner of the tree and all geometry.
+/// Dragging this header is interpreted by the input pipeline; after the drag threshold,
+/// FloatingWindowManager hosts the complete Core DockArea root in one WindowKind::Floating.
+/// This component remains presentation-only; Core owns the tree and all geometry.
 pub struct DockAreaView;
 
 impl DockAreaView {

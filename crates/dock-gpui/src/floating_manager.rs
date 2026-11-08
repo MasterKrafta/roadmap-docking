@@ -936,13 +936,17 @@ impl FloatingWindowManager {
                 DragPayload::Panel { panel } => Some(DropSource::Panel { panel }),
                 DragPayload::Group { group } => Some(DropSource::Group { group }),
                 DragPayload::Column { column } => Some(DropSource::Column { column }),
+                DragPayload::DockArea { .. } => None,
                 DragPayload::FloatingGroup { group } => controller
                     .layout()
                     .floating_group(group)
                     .and_then(|floating| controller.layout().dock_area(floating.area))
-                    .map(|area| match controller.layout().node(area.root) {
-                        Some(Node::Column(_)) => DropSource::Column { column: area.root },
-                        _ => DropSource::Group { group: area.root },
+                    .and_then(|area| match controller.layout().node(area.root) {
+                        Some(Node::Column(_)) => Some(DropSource::Column { column: area.root }),
+                        Some(Node::Tabs(_)) => Some(DropSource::Group { group: area.root }),
+                        // A multi-column Split(X) is a complete DockArea composition,
+                        // not a Tabs group; keep it floating until composition drop zones exist.
+                        _ => None,
                     }),
             }
         });

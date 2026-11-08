@@ -751,6 +751,64 @@ fn extracting_one_panel_from_a_floating_group_returns_its_new_window_id() {
 }
 
 #[test]
+fn photoshop_main_dock_area_can_float_all_columns_as_one_composition() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, left_panel) = builder.panel(key("dock-area-left-panel"), constraints());
+    let left_group = builder.tabs(vec![left_panel], 0, false);
+    let left_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![left_group],
+        vec![1.0],
+    );
+
+    let (_, right_panel) = builder.panel(key("dock-area-right-panel"), constraints());
+    let right_group = builder.tabs(vec![right_panel], 0, false);
+    let right_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![right_group],
+        vec![1.0],
+    );
+
+    let root = builder.split(Axis::X, vec![left_column, right_column], vec![0.5, 0.5]);
+    builder.main_area(DockSide::Right, root);
+    let mut layout = builder.build();
+
+    let outcome = layout
+        .apply(
+            DockCommand::Float {
+                node: root,
+                bounds: Rect::new(Point::new(40.0, 50.0), Size::new(720.0, 420.0)),
+            },
+            &metrics,
+        )
+        .unwrap();
+    let floating = match outcome.actual_value {
+        Some(crate::CommandValue::FloatingGroup(group)) => group,
+        other => panic!("floating the DockArea must return its FloatingGroupId, got {other:?}"),
+    };
+
+    assert!(layout.main_area(DockSide::Right).is_none());
+    let floating_area = layout
+        .dock_area(layout.floating_group(floating).unwrap().area)
+        .unwrap();
+    assert_eq!(floating_area.root, root);
+    let Some(Node::Split(split)) = layout.node(floating_area.root) else {
+        panic!("the floating DockArea must preserve its horizontal Split(X) root");
+    };
+    assert_eq!(split.axis, Axis::X);
+    assert_eq!(split.children, vec![left_column, right_column]);
+    assert!(matches!(layout.node(left_column), Some(Node::Column(_))));
+    assert!(matches!(layout.node(right_column), Some(Node::Column(_))));
+    assert_eq!(layout.panel_instances().count(), 2);
+    assert_eq!(layout.floating_groups().count(), 1);
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
 fn floating_composition_with_split_root_can_build_drop_zones_and_dock() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Generic);

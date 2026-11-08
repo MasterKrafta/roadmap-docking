@@ -49,6 +49,11 @@ impl Layout {
             (DragHandle::ColumnHeader, DragPayload::Column { column }) => {
                 self.resolve_column_header_drag(request, column, metrics)
             }
+            (DragHandle::DockAreaHeader, DragPayload::DockArea { .. }) => {
+                Err(CommandError::InvalidTarget {
+                    reason: "a main DockArea header drag must be converted to a floating window by the adapter",
+                })
+            }
             _ => Err(CommandError::InvalidTarget {
                 reason: "drag handle and payload do not describe a supported drag operation",
             }),

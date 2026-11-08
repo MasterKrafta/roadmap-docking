@@ -414,6 +414,10 @@ impl DockController {
             DragPayload::Column { column } => {
                 matches!(self.layout.node(column), Some(Node::Column(_)))
             }
+            DragPayload::DockArea { side } => self
+                .layout
+                .main_area(side)
+                .is_some_and(|area| self.layout.node(area.root).is_some()),
             DragPayload::FloatingGroup { group } => self
                 .layout
                 .floating_group(group)

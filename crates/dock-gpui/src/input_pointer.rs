@@ -1,8 +1,8 @@
 use std::{cell::{Cell, RefCell}, collections::HashMap, rc::Rc};
 
 use dock_core::{
-    Axis, DockCommand, DockSide, DragHandle, DragPayload, DragState, HitResult, Node, NodeId,
-    PanelId, Point,
+    Axis, ColumnRect, DockCommand, DockSide, DragHandle, DragPayload, DragState, HitResult,
+    Node, NodeId, PanelId, Point, Rect, Size,
 };
 use gpui::{
     App, DispatchPhase, Entity, HitboxId, MouseButton, MouseDownEvent, MouseExitEvent,
@@ -255,7 +255,7 @@ pub(crate) fn register_pointer_events(
                     }
                 }
                 PointerDownIntent::ColumnCandidate { column } => {
-                    if dock_area_drag_handle_contains(
+                    if let Some(side) = dock_area_drag_handle_side(
                         &controller,
                         column,
                         core_point,
@@ -263,8 +263,8 @@ pub(crate) fn register_pointer_events(
                     ) {
                         begin_drag_at(
                             &controller,
-                            DragPayload::Column { column },
-                            DragHandle::ColumnHeader,
+                            DragPayload::DockArea { side },
+                            DragHandle::DockAreaHeader,
                             core_point,
                             app,
                         );
@@ -700,6 +700,7 @@ pub(crate) fn register_pointer_events(
 fn native_tearoff_enabled_for(handle: Option<DragHandle>, payload: DragPayload) -> bool {
     match (handle, payload) {
         (Some(DragHandle::ColumnHeader), DragPayload::Column { .. }) => true,
+        (Some(DragHandle::DockAreaHeader), DragPayload::DockArea { .. }) => true,
         (Some(DragHandle::PanelTab), DragPayload::Panel { .. }) => true,
         (Some(DragHandle::GroupGrip), DragPayload::Group { .. }) => false,
         _ => false,
@@ -725,6 +726,7 @@ fn native_tearoff_boundary_reached(
 ) -> bool {
     match (handle, payload) {
         (Some(DragHandle::ColumnHeader), DragPayload::Column { .. }) => true,
+        (Some(DragHandle::DockAreaHeader), DragPayload::DockArea { .. }) => true,
         (Some(DragHandle::PanelTab), DragPayload::Panel { panel }) => {
             // Resolve the group first, then release the mutable geometry borrow before
             // consulting the layout to determine which renderer owns its header.
@@ -1050,45 +1052,67 @@ fn tab_header_drag_handle_contains(
     })
 }
 
-fn dock_area_drag_handle_contains(
+fn dock_area_drag_handle_side(
     controller: &Entity<DockController>,
     column: NodeId,
     point: Point,
     app: &mut App,
-) -> bool {
+) -> Option<DockSide> {
     controller.update(app, |controller, _| {
         let metrics = controller.metrics();
-        let Ok(rects) = controller.geometry().cloned() else {
-            return false;
-        };
+        let rects = controller.geometry().cloned().ok()?;
         let layout = controller.layout();
 
-        // Core currently starts a Column drag only when the DockArea contains
-        // exactly one Column. Do not detach a single child from a multi-Column area.
         for side in [DockSide::Left, DockSide::Right] {
             let Some(area) = layout.main_area(side) else {
                 continue;
             };
             let mut area_column_ids = Vec::new();
             collect_dock_area_columns(layout, area.root, &mut area_column_ids);
-            if area_column_ids.len() != 1 || area_column_ids[0] != column {
+            if !area_column_ids.contains(&column) {
                 continue;
             }
-            let Some(column_rect) = rects.columns.iter().find(|rect| rect.column == column) else {
-                return false;
+
+            let area_columns = area_column_ids
+                .iter()
+                .filter_map(|id| rects.columns.iter().find(|rect| rect.column == *id).copied())
+                .collect::<Vec<_>>();
+            let Some(area_rect) = dock_area_bounds(&area_columns) else {
+                continue;
             };
-            let area_columns = [*column_rect];
-            return DockAreaDragArea::contains(
-                column_rect.rect,
+            if DockAreaDragArea::contains(
+                area_rect,
                 &area_columns,
                 point,
                 metrics.column_header_height,
                 metrics.column_control_button_width,
-            );
+            ) {
+                return Some(side);
+            }
         }
 
-        false
+        None
     })
+}
+
+fn dock_area_bounds(columns: &[ColumnRect]) -> Option<Rect> {
+    let first = columns.first()?.rect;
+    let mut left = first.origin.x;
+    let mut top = first.origin.y;
+    let mut right = first.origin.x + first.size.width;
+    let mut bottom = first.origin.y + first.size.height;
+
+    for column in columns.iter().skip(1) {
+        left = left.min(column.rect.origin.x);
+        top = top.min(column.rect.origin.y);
+        right = right.max(column.rect.origin.x + column.rect.size.width);
+        bottom = bottom.max(column.rect.origin.y + column.rect.size.height);
+    }
+
+    Some(Rect::new(
+        Point::new(left, top),
+        Size::new(right - left, bottom - top),
+    ))
 }
 
 fn collect_dock_area_columns(
@@ -1190,8 +1214,8 @@ fn flyout_title_grip_contains(
 #[cfg(test)]
 mod hit_dispatch_tests {
     use dock_core::{
-        Axis, DragHandle, DragPayload, FloatingGroupId, HitResult, NodeId, PanelId, Point, Rect,
-        ResizeEdge,
+        Axis, DragHandle, DragPayload, DockSide, FloatingGroupId, HitResult, NodeId, PanelId,
+        Point, Rect, ResizeEdge,
     };
     use slotmap::Key;
 
@@ -1297,7 +1321,7 @@ mod hit_dispatch_tests {
     }
 
     #[test]
-    fn native_tearoff_routing_enables_columns_and_individual_tabs() {
+    fn native_tearoff_routing_enables_dock_areas_columns_and_individual_tabs() {
         let column = NodeId::null();
         let group = NodeId::null();
         let panel = PanelId::null();
@@ -1305,6 +1329,10 @@ mod hit_dispatch_tests {
         assert!(native_tearoff_enabled_for(
             Some(DragHandle::ColumnHeader),
             DragPayload::Column { column },
+        ));
+        assert!(native_tearoff_enabled_for(
+            Some(DragHandle::DockAreaHeader),
+            DragPayload::DockArea { side: DockSide::Right },
         ));
         assert!(native_tearoff_enabled_for(
             Some(DragHandle::PanelTab),
@@ -1354,6 +1382,29 @@ mod hit_dispatch_tests {
             rect,
             &columns,
             Point::new(100.0, 52.0),
+            32.0,
+            28.0,
+        ));
+
+        let left = Rect::new(Point::new(10.0, 20.0), dock_core::Size::new(240.0, 500.0));
+        let right = Rect::new(Point::new(250.0, 20.0), dock_core::Size::new(260.0, 500.0));
+        let composition_columns = [
+            dock_core::ColumnRect::new(NodeId::null(), left),
+            dock_core::ColumnRect::new(NodeId::null(), right),
+        ];
+        let composition = Rect::new(Point::new(10.0, 20.0), dock_core::Size::new(500.0, 500.0));
+
+        assert!(crate::dock_components::DockAreaDragArea::contains(
+            composition,
+            &composition_columns,
+            Point::new(350.0, 30.0),
+            32.0,
+            28.0,
+        ));
+        assert!(!crate::dock_components::DockAreaDragArea::contains(
+            composition,
+            &composition_columns,
+            Point::new(490.0, 30.0),
             32.0,
             28.0,
         ));

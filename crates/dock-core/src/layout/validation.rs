@@ -140,10 +140,23 @@ pub(super) fn validate_photoshop_floating_root(
                 });
             }
         }
+        Some(Node::Split(split)) if split.axis == Axis::X => {
+            if split
+                .children
+                .iter()
+                .any(|child| !matches!(nodes.get(*child), Some(Node::Column(_))))
+            {
+                errors.push(ValidationError::InvalidFloatingRoot {
+                    group,
+                    root,
+                    reason: "floating Split(X) children must all be Column nodes",
+                });
+            }
+        }
         Some(_) => errors.push(ValidationError::InvalidFloatingRoot {
             group,
             root,
-            reason: "floating root must be Tabs, Column, or Split(Y) of Tabs",
+            reason: "floating root must be Tabs, Column, Split(Y) of Tabs, or Split(X) of Columns",
         }),
         None => {}
     }
@@ -831,11 +844,10 @@ impl Layout {
         Ok(())
     }
 
-    /// Migrates legacy Photoshop floating roots that use a horizontal Column composition.
+    /// Preserves complete horizontal DockArea compositions in Photoshop floating windows.
     ///
-    /// A standalone Column is now a first-class floating root and keeps its NodeId and
-    /// complete component hierarchy. Legacy horizontal Split(X) compositions are still
-    /// flattened into a vertical Split(Y) stack while preserving their Tabs and Panels.
+    /// A Split(X) whose children are Columns keeps its horizontal arrangement and every
+    /// Column node. Standalone Columns and vertical Split(Y) group stacks are also retained.
     pub(super) fn normalize_photoshop_floating_roots(
         &mut self,
     ) -> Result<(), Vec<ValidationError>> {
@@ -866,9 +878,19 @@ impl Layout {
             let (groups, ratios, wrappers) = match root_node {
                 Node::Tabs(_) => continue,
                 Node::Split(split) if split.axis == Axis::Y => continue,
-                // Column roots are now the canonical floating representation.
+                // Column roots are now the canonical single-column representation.
                 // Do not unwrap them: the shared ColumnView owns their header and groups.
                 Node::Column(_) => continue,
+                // A horizontal Split(X) of Columns is a detached DockArea composition.
+                // Keep its Columns intact so one FloatingHost can render the whole area.
+                Node::Split(split)
+                    if split.axis == Axis::X
+                        && split.children.iter().all(|child| {
+                            matches!(self.nodes.get(*child), Some(Node::Column(_)))
+                        }) =>
+                {
+                    continue;
+                }
                 Node::Split(split) if split.axis == Axis::X => {
                     let column_ratios = normalized_ratios(
                         split
