@@ -356,6 +356,12 @@ impl Layout {
             if area == AllowedArea::ICON_RAIL || !source_allows(self, source_panels, area) {
                 continue;
             }
+            // In Main Dock a panel tab always appends through the group's Center
+            // target. Keep exact strip insertion slots for whole Group drags;
+            // Floating panel insertion is handled in the Floating stage.
+            if matches!(source, DropSource::Panel { .. }) && area != AllowedArea::FLOATING {
+                continue;
+            }
             if matches!(source, DropSource::Group { .. })
                 && (contains_node(tree_index, source_root_id, header.group)
                     || contains_node(tree_index, header.group, source_root_id))
