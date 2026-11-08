@@ -81,6 +81,23 @@ impl DockInteractionCoordinator {
         })
     }
 
+    /// Releases stale host capture after a command or layout change cancelled
+    /// the Core interaction. Returns true while a Core gesture is still active.
+    pub(crate) fn release_if_inactive(
+        controller: &Entity<DockController>,
+        window: &mut Window,
+        capture_state: &Rc<Cell<Option<HitboxId>>>,
+        app: &mut App,
+    ) -> bool {
+        let active = controller.update(app, |controller, _| {
+            controller.has_active_pointer_interaction()
+        });
+        if !active && Self::has_capture(capture_state) {
+            Self::release(window, capture_state);
+        }
+        active
+    }
+
     pub(crate) fn cancel(
         controller: &Entity<DockController>,
         window: &mut Window,
