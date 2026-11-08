@@ -747,9 +747,9 @@ fn native_tearoff_required(controller: &mut DockController, pointer: Point) -> b
 
 /// Resolves a visible DockTab component to the semantic Core tab hit.
 ///
-/// DockColumnView is rendered independently of the legacy GroupView. Prefer
-/// its actual tab-header rectangle over a broader Core Group/TabStrip hit so
-/// the pointer pipeline always starts `DragHandle::PanelTab` on this surface.
+/// Prefer the DockColumnView's exact tab-header rectangle over the broader
+/// Core Group/TabStrip hit so the pointer pipeline starts with
+/// `DragHandle::PanelTab` on the visible dock-component tab surface.
 fn dock_component_tab_hit_at_point(
     controller: &Entity<DockController>,
     point: Point,
