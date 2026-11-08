@@ -263,14 +263,10 @@ struct FloatingHostSnapshot {
     active_drop_zone: Option<dock_core::DropZoneRect>,
 }
 
-/// A single-tab Column detaches as soon as its Core drag threshold is crossed.
-/// Multi-tab and standalone Groups retain their source-strip detach boundary.
-fn floating_tab_tearoff_required(
-    is_dock_component_tab: bool,
-    leaves_source: bool,
-    over_other_window: bool,
-) -> bool {
-    is_dock_component_tab || leaves_source || over_other_window
+/// A single-tab DockColumn inside a FloatingHost moves its existing native window.
+/// Other Groups detach a tab only after it leaves the source strip or enters another window.
+fn floating_tab_tearoff_required(leaves_source: bool, over_other_window: bool) -> bool {
+    leaves_source || over_other_window
 }
 
 /// Gives the shared DockAreaHeader input priority over every Column below it.
@@ -719,7 +715,6 @@ impl Render for FloatingHost {
                                     })
                                 })
                             });
-                        let is_dock_component_tab = dock_component_tab_hit.is_some();
                         let hit = dock_component_tab_hit.or(core_hit);
                         eprintln!(
                             "[DOCK-INPUT][floating] down floating_group={:?} point=({:.1}, {:.1}) hit={:?}",
@@ -769,7 +764,6 @@ impl Render for FloatingHost {
                             _ => None,
                         };
                         if let Some(tab_group) = dock_component_group
-                            && !is_dock_component_tab
                             && dock_component_group_zones_for_down
                                 .get(&tab_group)
                                 .is_some_and(|zone| !DockTab::leaves_strip_zone(*zone, point))
@@ -969,13 +963,7 @@ impl Render for FloatingHost {
                                 })
                                 
                         });
-                        let is_dock_component_tab =
-                            dock_component_tab_zones_for_move.contains_key(&press.panel);
-                        if floating_tab_tearoff_required(
-                            is_dock_component_tab,
-                            leaves_source,
-                            over_other_window,
-                        ) && let Some(manager) = manager_entity.as_ref()
+                        if floating_tab_tearoff_required(leaves_source, over_other_window) && let Some(manager) = manager_entity.as_ref()
                             && begin_floating_tab_tearoff(
                                 &controller_for_move,
                                 manager,
@@ -1108,13 +1096,7 @@ impl Render for FloatingHost {
                                     manager.cursor_over_other_docking_window(group)
                                 })
                             });
-                            let is_dock_component_tab =
-                                dock_component_tab_zones_for_up.contains_key(&press.panel);
-                            if floating_tab_tearoff_required(
-                                is_dock_component_tab,
-                                leaves_source,
-                                over_other_window,
-                            ) && let Some(manager) = manager_entity.as_ref()
+                            if floating_tab_tearoff_required(leaves_source, over_other_window) && let Some(manager) = manager_entity.as_ref()
                                 && begin_floating_tab_tearoff(
                                     &controller_for_up,
                                     manager,
@@ -1459,19 +1441,18 @@ mod floating_tab_tearoff_tests {
     use super::floating_tab_tearoff_required;
 
     #[test]
-    fn dock_component_tab_detaches_as_soon_as_drag_threshold_is_crossed() {
-        assert!(floating_tab_tearoff_required(true, false, false));
+    fn tab_drag_inside_source_window_does_not_create_another_floating_window() {
+        assert!(!floating_tab_tearoff_required(false, false));
     }
 
     #[test]
-    fn legacy_tab_waits_until_it_leaves_its_source_strip() {
-        assert!(!floating_tab_tearoff_required(false, false, false));
-        assert!(floating_tab_tearoff_required(false, true, false));
+    fn tab_detaches_after_leaving_its_source_strip() {
+        assert!(floating_tab_tearoff_required(true, false));
     }
 
     #[test]
-    fn dragging_over_another_docking_window_still_detaches_legacy_tabs() {
-        assert!(floating_tab_tearoff_required(false, false, true));
+    fn dragging_over_another_docking_window_still_detaches_tabs() {
+        assert!(floating_tab_tearoff_required(false, true));
     }
 }
 
