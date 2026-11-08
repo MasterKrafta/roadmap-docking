@@ -290,8 +290,12 @@ fn panel_tab_can_float_without_detaching_its_sibling_tabs() {
     assert_eq!(layout.floating_groups().count(), 1);
     let (floating_id, _) = layout.floating_groups().next().unwrap();
     let root = floating_root(&layout, floating_id);
-    let Node::Tabs(float_tabs) = layout.node(root).unwrap() else {
-        panic!("Photoshop floating panel roots are wrapped in Tabs");
+    let Some(Node::Column(column)) = layout.node(root) else {
+        panic!("Photoshop floating panel roots use a Column root");
+    };
+    assert_eq!(column.groups.len(), 1);
+    let Some(Node::Tabs(float_tabs)) = layout.node(column.groups[0]) else {
+        panic!("floating Column must contain a Tabs group");
     };
     assert_eq!(float_tabs.children, vec![moving_node]);
     assert!(
@@ -506,7 +510,11 @@ fn group_grip_floats_the_entire_tabs_node_without_losing_group_state() {
 
     assert_tabs(&layout, source_group, &original_group);
     let (floating_id, _) = layout.floating_groups().next().unwrap();
-    assert_eq!(floating_root(&layout, floating_id), source_group);
+    let root = floating_root(&layout, floating_id);
+    assert!(matches!(
+        layout.node(root),
+        Some(Node::Column(column)) if column.groups == vec![source_group]
+    ));
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
 
