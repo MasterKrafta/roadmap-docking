@@ -1444,3 +1444,131 @@ fn floating_column_capture_uses_column_drop_zones_and_docks_as_one_column() {
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
 
+#[test]
+fn photoshop_main_column_tearoff_can_join_an_existing_floating_column() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, source_first_panel) =
+        builder.panel(key("main-column-to-floating-first"), constraints());
+    let source_first_group = builder.tabs(vec![source_first_panel], 0, false);
+    let (_, source_second_panel) =
+        builder.panel(key("main-column-to-floating-second"), constraints());
+    let source_second_group = builder.tabs(vec![source_second_panel], 0, false);
+    let source_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![source_first_group, source_second_group],
+        vec![0.35, 0.65],
+    );
+    builder.main_area(DockSide::Left, source_column);
+
+    let (_, target_first_panel) =
+        builder.panel(key("floating-column-target-first"), constraints());
+    let target_first_group = builder.tabs(vec![target_first_panel], 0, false);
+    let (_, target_second_panel) =
+        builder.panel(key("floating-column-target-second"), constraints());
+    let target_second_group = builder.tabs(vec![target_second_panel], 0, false);
+    let target_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![target_first_group, target_second_group],
+        vec![0.4, 0.6],
+    );
+    let target_floating = builder.floating_group(target_column, bounds(620.0, 140.0), 1);
+
+    let mut layout = builder.build();
+    let float_outcome = layout
+        .apply(
+            DockCommand::Float {
+                node: source_column,
+                bounds: bounds(120.0, 140.0),
+            },
+            &metrics,
+        )
+        .unwrap();
+    let Some(crate::CommandValue::FloatingGroup(source_floating)) = float_outcome.actual_value
+    else {
+        panic!("detaching the Main Column must create its temporary Floating host");
+    };
+
+    let target_rects = layout
+        .compute_floating_rects(target_floating, &metrics)
+        .unwrap();
+    let source = DropSource::Column {
+        column: source_column,
+    };
+    let zones = layout
+        .compute_drop_zones(source, &target_rects, &metrics)
+        .unwrap();
+    let left_zone = zones
+        .iter()
+        .find(|zone| {
+            zone.target
+                == DropTarget::GroupEdge {
+                    group: target_first_group,
+                    zone: crate::DropZone::Left,
+                }
+                && zone.zone == crate::DropZone::Left
+        })
+        .expect("a Floating Column must expose its left edge to another Floating Column");
+    let point = Point::new(
+        left_zone.rect.origin.x + left_zone.rect.size.width / 2.0,
+        left_zone.rect.origin.y + left_zone.rect.size.height / 2.0,
+    );
+    let target = DropTarget::GroupEdge {
+        group: target_first_group,
+        zone: crate::DropZone::Left,
+    };
+
+    assert_eq!(layout.resolve_drop(point, source, &target_rects, &metrics).unwrap(), Some(target));
+
+    // The native tear-off retains ColumnHeader + Column even though Core has
+    // already moved that Column into the temporary Floating composition.
+    let request = DragDropRequest {
+        payload: DragPayload::Column {
+            column: source_column,
+        },
+        handle: DragHandle::ColumnHeader,
+        origin: Point::ZERO,
+        point,
+        target: Some(target),
+        floating_bounds: None,
+    };
+    let action = layout.resolve_drag_drop(&request, &metrics).unwrap();
+    assert_eq!(
+        action,
+        DragDropAction::Command(DockCommand::DockFloating {
+            group: source_floating,
+            target,
+        })
+    );
+    let DragDropAction::Command(command) = action else {
+        panic!("the detached Main Column must dock into the existing Floating composition");
+    };
+    layout.apply(command, &metrics).unwrap();
+
+    assert!(layout.floating_group(source_floating).is_none());
+    let target_area = layout.floating_group(target_floating).unwrap().area;
+    let target_root = layout.dock_area(target_area).unwrap().root;
+    let Some(Node::Split(split)) = layout.node(target_root) else {
+        panic!("joining two Floating Columns must create a horizontal composition");
+    };
+    assert_eq!(split.axis, Axis::X);
+    assert_eq!(split.children, vec![source_column, target_column]);
+    assert!(matches!(
+        layout.node(source_column),
+        Some(Node::Column(column))
+            if column.groups == vec![source_first_group, source_second_group]
+                && column.group_ratios == vec![0.35, 0.65]
+    ));
+    assert!(matches!(
+        layout.node(target_column),
+        Some(Node::Column(column))
+            if column.groups == vec![target_first_group, target_second_group]
+                && column.group_ratios == vec![0.4, 0.6]
+    ));
+    assert_eq!(layout.panel_instances().count(), 4);
+    assert_eq!(layout.floating_groups().count(), 1);
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
