@@ -237,14 +237,15 @@ impl Render for DockHost {
         // A model command may cancel a captured gesture from outside the
         // pointer pipeline. The controller observer schedules this render;
         // release any capture whose interaction has already terminated.
-        if self.pointer_capture.get().is_some() {
-            let interaction_active = self.controller.update(cx, |controller, _| {
-                controller.has_active_pointer_interaction()
-            });
-            if !interaction_active {
-                DockInteractionCoordinator::release(window, &self.pointer_capture);
-                self.pointer_press.set(None);
-            }
+        if DockInteractionCoordinator::has_capture(&self.pointer_capture)
+            && !DockInteractionCoordinator::release_if_inactive(
+                &self.controller,
+                window,
+                &self.pointer_capture,
+                cx,
+            )
+        {
+            self.pointer_press.set(None);
         }
 
         if !self.controller_observed {
