@@ -531,7 +531,11 @@ impl FloatingHost {
     }
 
     /// Changes which composition this panel's permanent window hosts.
-    pub(crate) fn set_host_group(&mut self, group: Option<FloatingGroupId>) {
+    pub(crate) fn set_host_group(
+        &mut self,
+        group: Option<FloatingGroupId>,
+        window: &mut Window,
+    ) {
         if self.group == group {
             return;
         }
@@ -539,7 +543,7 @@ impl FloatingHost {
         self.column_scroll_handles.clear();
         self.open_context_menu = None;
         self.tab_press.set(None);
-        self.pointer_capture.set(None);
+        DockInteractionCoordinator::release(window, &self.pointer_capture);
     }
 
     /// Enables or disables closing a tab with the middle mouse button.
