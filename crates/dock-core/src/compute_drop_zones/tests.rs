@@ -1538,10 +1538,10 @@ fn main_dock_panel_can_drop_into_a_floating_group() {
         .find(|zone| {
             zone.zone == DropZone::FloatingCenter
                 && zone.target
-                    == DropTarget::Tabs {
+                    == (DropTarget::Tabs {
                         group: target_group,
                         index: 1,
-                    }
+                    })
         })
         .expect("a floating group must expose its center for a main-dock panel");
 
