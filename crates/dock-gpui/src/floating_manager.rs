@@ -584,17 +584,16 @@ impl FloatingWindowManager {
             .and_then(|main| self.native_ops.scale_factor(main).ok())
             .filter(|scale| scale.is_finite() && *scale > 0.0)
             .unwrap_or(1.0);
-        let Some(offset_x) = DockGeometry::physical_coordinate(pointer.x - local_bounds.origin.x, scale) else {
+        let Some(grab_offset) = DockGeometry::physical_offset_from_logical(
+            Point::new(
+                pointer.x - local_bounds.origin.x,
+                pointer.y - local_bounds.origin.y,
+            ),
+            scale,
+        ) else {
             return false;
         };
-        let Some(offset_y) = DockGeometry::physical_coordinate(pointer.y - local_bounds.origin.y, scale) else {
-            return false;
-        };
-        let grab_offset = PhysicalPoint { x: offset_x, y: offset_y };
-        let position = PhysicalPoint {
-            x: cursor.x.saturating_sub(grab_offset.x),
-            y: cursor.y.saturating_sub(grab_offset.y),
-        };
+        let position = DockGeometry::physical_position_for_grab(cursor, grab_offset);
         if let Err(error) = self.native_ops.move_window(native_window, position) {
             tracing::warn!(?group, %error, "could not position native tear-off window");
             return false;
@@ -656,20 +655,11 @@ impl FloatingWindowManager {
             tracing::warn!(?group, "could not read cursor position for floating-tab tear-off");
             return false;
         };
-        let Some(origin_x) = DockGeometry::integer_physical_coordinate(model_bounds.origin.x) else {
+        let Some(origin) = DockGeometry::physical_point_from_core(model_bounds.origin) else {
             return false;
         };
-        let Some(origin_y) = DockGeometry::integer_physical_coordinate(model_bounds.origin.y) else {
-            return false;
-        };
-        let grab_offset = PhysicalPoint {
-            x: cursor.x.saturating_sub(origin_x),
-            y: cursor.y.saturating_sub(origin_y),
-        };
-        let position = PhysicalPoint {
-            x: cursor.x.saturating_sub(grab_offset.x),
-            y: cursor.y.saturating_sub(grab_offset.y),
-        };
+        let grab_offset = DockGeometry::physical_delta_between(cursor, origin);
+        let position = DockGeometry::physical_position_for_grab(cursor, grab_offset);
         if let Err(error) = self.native_ops.move_window(native_window, position) {
             tracing::warn!(?group, %error, "could not position floating-tab tear-off window");
             return false;
@@ -770,23 +760,18 @@ impl FloatingWindowManager {
         } else {
             0
         };
-        let grab_offset = PhysicalPoint {
-            x: cursor.x.saturating_sub(native_rect.left),
-            y: cursor
-                .y
-                .saturating_sub(native_rect.top)
-                .saturating_sub(hidden_header_offset),
+        let grab_origin = PhysicalPoint {
+            x: native_rect.left,
+            y: native_rect.top.saturating_add(hidden_header_offset),
         };
+        let grab_offset = DockGeometry::physical_delta_between(cursor, grab_origin);
         if !self.controller.update(cx, |controller, _| {
             controller.begin_floating_window_move(group, pointer)
         }) {
             return false;
         }
         if hide_header {
-            let position = PhysicalPoint {
-                x: cursor.x.saturating_sub(grab_offset.x),
-                y: cursor.y.saturating_sub(grab_offset.y),
-            };
+            let position = DockGeometry::physical_position_for_grab(cursor, grab_offset);
             if let Err(error) = self.native_ops.move_window(native_window, position) {
                 tracing::warn!(?group, %error, "could not align floating window after hiding ColumnHeader");
                 self.cancel_controller_move(cx);
@@ -887,17 +872,24 @@ impl FloatingWindowManager {
             }
             let scale = self.native_ops.scale_factor(state.native_window).ok()
                 .filter(|scale| scale.is_finite() && *scale > 0.0).unwrap_or(1.0);
-            let point = Point::new(state.start_pointer.x + dx as f32 / scale, state.start_pointer.y + dy as f32 / scale);
+            let Some(delta) = DockGeometry::logical_delta_from_physical(
+                PhysicalPoint { x: dx, y: dy },
+                scale,
+            ) else {
+                self.cancel_native_move(state, cx);
+                return false;
+            };
+            let Ok(point) = state.start_pointer.checked_offset(delta.x, delta.y) else {
+                self.cancel_native_move(state, cx);
+                return false;
+            };
             self.controller.update(cx, |controller, _| {
                 if matches!(controller.drag().session().state(), DragState::Pressed { .. }) {
                     let _ = controller.drag_mut().session_mut().pointer_move(point);
                 }
             });
         }
-        let position = PhysicalPoint {
-            x: cursor.x.saturating_sub(state.grab_offset.x),
-            y: cursor.y.saturating_sub(state.grab_offset.y),
-        };
+        let position = DockGeometry::physical_position_for_grab(cursor, state.grab_offset);
         if let Err(error) = self.native_ops.move_window(state.native_window, position) {
             tracing::warn!(?group, %error, "native floating-window move failed");
             self.cancel_native_move(state, cx);
@@ -1217,12 +1209,6 @@ impl FloatingWindowManager {
 
     fn physical_origin_for_bounds(&self, bounds: Rect) -> Option<PhysicalPoint> {
         DockGeometry::physical_point_from_core(bounds.origin)
-    }
-
-    fn core_origin_from_screen(&self, screen: PhysicalPoint) -> Option<Point> {
-        let point = Point::new(screen.x as f32, screen.y as f32);
-        point.validate().ok()?;
-        Some(point)
     }
 
     /// WindowOptions bounds use GPUI logical screen coordinates while Core
@@ -1874,14 +1860,10 @@ impl FloatingWindowManager {
             .ok()
             .filter(|scale| scale.is_finite() && *scale > 0.0)
             .unwrap_or(1.0);
-        if let (Some(width), Some(height)) = (
-            DockGeometry::physical_coordinate(entry.bounds.size.width, destination_scale),
-            DockGeometry::physical_coordinate(entry.bounds.size.height, destination_scale),
-        ) {
-            let desired_size = PhysicalSize { width, height };
-            if desired_size.is_valid()
-                && let Err(error) = self.native_ops.resize_window(native_window, desired_size)
-            {
+        if let Some(desired_size) =
+            DockGeometry::physical_size_from_logical(entry.bounds.size, destination_scale)
+            && let Err(error) = self.native_ops.resize_window(native_window, desired_size)
+        {
                 tracing::warn!(
                     %error,
                     "could not rescale a restored floating window for its destination monitor"
@@ -1937,10 +1919,7 @@ impl FloatingWindowManager {
                 .ok()
                 .filter(|scale| scale.is_finite() && *scale > 0.0)
                 .unwrap_or(1.0);
-            let width = DockGeometry::physical_coordinate(minimum.width, scale)?;
-            let height = DockGeometry::physical_coordinate(minimum.height, scale)?;
-            let size = PhysicalSize { width, height };
-            size.is_valid().then_some(size)
+            DockGeometry::physical_size_from_logical(minimum, scale)
         });
 
         if entry.native_min_size != desired_minimum {
@@ -2035,13 +2014,13 @@ impl FloatingWindowManager {
         });
 
         if entry.bounds.size != group.bounds.size || effective_scale_changed {
-            let desired_size = DockGeometry::physical_coordinate(group.bounds.size.width, effective_scale)
-                .zip(DockGeometry::physical_coordinate(group.bounds.size.height, effective_scale));
+            let desired_size = DockGeometry::physical_size_from_logical(
+                group.bounds.size,
+                effective_scale,
+            );
             match desired_size {
-                Some((width, height)) if width > 0 && height > 0 => {
-                    if let Err(error) = self
-                        .native_ops
-                        .resize_window(native_window, PhysicalSize { width, height })
+                Some(desired_size) => {
+                    if let Err(error) = self.native_ops.resize_window(native_window, desired_size)
                     {
                         tracing::warn!(
                             ?group.id,
@@ -2176,10 +2155,8 @@ impl Drop for FloatingWindowManager {
 
 #[cfg(test)]
 mod coordinate_tests {
-    use super::{
-        main_local_point_from_screen, native_rect_has_reachable_title_area,
-        restored_window_origin, screen_position_from_main_local,
-    };
+    use super::{native_rect_has_reachable_title_area, restored_window_origin};
+    use crate::geometry::DockGeometry;
     use dock_core::Point;
     use platform::{PhysicalPoint, PhysicalRect};
 
