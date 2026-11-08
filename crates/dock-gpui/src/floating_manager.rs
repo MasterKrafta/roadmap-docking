@@ -1864,11 +1864,10 @@ impl FloatingWindowManager {
             DockGeometry::physical_size_from_logical(entry.bounds.size, destination_scale)
             && let Err(error) = self.native_ops.resize_window(native_window, desired_size)
         {
-                tracing::warn!(
-                    %error,
-                    "could not rescale a restored floating window for its destination monitor"
-                );
-            }
+            tracing::warn!(
+                %error,
+                "could not rescale a restored floating window for its destination monitor"
+            );
         }
 
         let corrected = self.core_bounds_from_native_window(native_window)?;
