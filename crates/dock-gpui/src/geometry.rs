@@ -89,12 +89,10 @@ impl DockGeometry {
         if !client_size.is_valid() || !valid_scale(scale) {
             return None;
         }
+        let logical_size = Self::logical_size_from_physical(client_size, scale)?;
         let bounds = Rect::new(
             Point::new(window_rect.left as f32, window_rect.top as f32),
-            Size::new(
-                client_size.width as f32 / scale,
-                client_size.height as f32 / scale,
-            ),
+            logical_size,
         );
         bounds.validate_non_empty().ok()?;
         Some(bounds)
@@ -163,18 +161,6 @@ impl DockGeometry {
         let size = Size::new(size.width as f32 / scale, size.height as f32 / scale);
         size.validate_positive().ok()?;
         Some(size)
-    }
-
-    pub(crate) fn logical_point_from_physical(
-        point: PhysicalPoint,
-        scale: f32,
-    ) -> Option<Point> {
-        if !valid_scale(scale) {
-            return None;
-        }
-        let point = Point::new(point.x as f32 / scale, point.y as f32 / scale);
-        point.validate().ok()?;
-        Some(point)
     }
 
     /// Converts a Core desktop origin (stored as physical pixels) to GPUI's
