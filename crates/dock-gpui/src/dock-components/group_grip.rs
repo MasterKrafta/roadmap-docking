@@ -23,7 +23,7 @@ impl GroupGrip {
             .flex()
             .items_center()
             .justify_center()
-            .cursor_pointer()
+            .cursor_move()
             .bg(rgb(theme.colors.group_grip_background))
             .border_1()
             .border_color(rgb(theme.colors.group_frame_border))
