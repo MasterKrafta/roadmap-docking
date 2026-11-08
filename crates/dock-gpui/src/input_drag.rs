@@ -417,8 +417,8 @@ pub(crate) fn finish_floating_tab_drag(
     })
 }
 
-/// Turns an eligible main-window drag into a native floating window after
-/// its semantic boundary is crossed. PanelTab uses the native client boundary.
+/// Turns an eligible main-window drag into a native floating window as soon
+/// as Core crosses the drag threshold. DockTab tear-offs keep DockAreaHeader hidden.
 pub(crate) fn begin_native_tearoff(
     controller: &Entity<DockController>,
     manager: &Entity<FloatingWindowManager>,
@@ -434,7 +434,7 @@ pub(crate) fn begin_native_tearoff(
             } => (payload, controller.drag().session().handle()?, origin),
             _ => return None,
         };
-        let hide_column_header = match (handle, payload) {
+        let hide_header = match (handle, payload) {
             (DragHandle::ColumnHeader, DragPayload::Column { column }) => {
                 column_drag_started_from_tab(controller, column, origin)
             }
@@ -466,19 +466,19 @@ pub(crate) fn begin_native_tearoff(
             }
             _ => return None,
         };
-        Some((command, local_bounds, hide_column_header, payload, handle))
+        Some((command, local_bounds, hide_header, payload, handle))
     });
 
-    let Some((command, local_bounds, hide_column_header, payload, handle)) = candidate else {
+    let Some((command, local_bounds, hide_header, payload, handle)) = candidate else {
         return false;
     };
     eprintln!(
-        "[DOCK-INPUT][main] native_tearoff payload={:?} handle={:?} pointer=({:.1}, {:.1}) hide_column_header={} bounds=({:.1}, {:.1}, {:.1}, {:.1})",
+        "[DOCK-INPUT][main] native_tearoff payload={:?} handle={:?} pointer=({:.1}, {:.1}) hide_header={} bounds=({:.1}, {:.1}, {:.1}, {:.1})",
         payload,
         handle,
         pointer.x,
         pointer.y,
-        hide_column_header,
+        hide_header,
         local_bounds.origin.x,
         local_bounds.origin.y,
         local_bounds.size.width,
@@ -532,7 +532,7 @@ pub(crate) fn begin_native_tearoff(
             pointer,
             local_bounds,
             model_bounds,
-            hide_column_header,
+            hide_header,
             manager_cx,
         )
     });
