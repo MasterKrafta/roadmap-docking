@@ -717,6 +717,18 @@ fn native_tearoff_required(controller: &mut DockController, point: Point) -> boo
         && native_tearoff_boundary_reached(controller, handle, payload, point)
 }
 
+/// DockTab is a single-panel component group, so there is no tab reordering
+/// to preserve: once Core crosses the drag threshold, the Panel leaves DockArea.
+/// Legacy multi-tab strips keep their in-strip reorder behavior.
+fn panel_tab_tearoff_boundary_reached(
+    uses_dock_component: bool,
+    legacy_tab_strip: Option<Rect>,
+    point: Point,
+) -> bool {
+    uses_dock_component
+        || legacy_tab_strip.is_some_and(|strip| DockTab::leaves_strip_zone(strip, point))
+}
+
 /// Checks the semantic boundary that turns an in-layout drag into a native tear-off.
 fn native_tearoff_boundary_reached(
     controller: &mut DockController,
@@ -745,26 +757,19 @@ fn native_tearoff_boundary_reached(
                 group
             };
             let uses_dock_component = is_dock_component_tab_group(controller.layout(), group);
-            let Ok(rects) = controller.geometry() else {
-                return false;
-            };
-            let drag_zone = if uses_dock_component {
-                let Some(group_rect) = rects.groups.iter().find(|rect| rect.group == group) else {
+            let legacy_tab_strip = if uses_dock_component {
+                None
+            } else {
+                let Ok(rects) = controller.geometry() else {
                     return false;
                 };
-                DockTab::drag_zone(group_rect.rect, controller.metrics())
-            } else {
-                let Some(strip) = rects
+                rects
                     .tab_strips
                     .iter()
                     .find(|strip| strip.group == group)
                     .map(|strip| strip.rect)
-                else {
-                    return false;
-                };
-                strip
             };
-            DockTab::leaves_strip_zone(drag_zone, point)
+            panel_tab_tearoff_boundary_reached(uses_dock_component, legacy_tab_strip, point)
         }
         _ => false,
     }
@@ -1209,6 +1214,40 @@ fn flyout_title_grip_contains(
             && point.y < flyout.rect.origin.y + header_height
             && point.x < flyout.rect.origin.x + flyout.rect.size.width - close_width
     })
+}
+
+#[cfg(test)]
+mod panel_tab_tearoff_tests {
+    use dock_core::{Point, Rect, Size};
+
+    use super::panel_tab_tearoff_boundary_reached;
+
+    #[test]
+    fn dock_component_tab_detaches_immediately_after_drag_threshold() {
+        let tab_strip = Rect::new(Point::new(10.0, 20.0), Size::new(220.0, 28.0));
+
+        assert!(panel_tab_tearoff_boundary_reached(
+            true,
+            None,
+            Point::new(30.0, 30.0),
+        ));
+    }
+
+    #[test]
+    fn legacy_multi_tab_strip_keeps_reordering_until_pointer_leaves_strip() {
+        let tab_strip = Rect::new(Point::new(10.0, 20.0), Size::new(220.0, 28.0));
+
+        assert!(!panel_tab_tearoff_boundary_reached(
+            false,
+            Some(tab_strip),
+            Point::new(100.0, 30.0),
+        ));
+        assert!(panel_tab_tearoff_boundary_reached(
+            false,
+            Some(tab_strip),
+            Point::new(100.0, 56.0),
+        ));
+    }
 }
 
 #[cfg(test)]
