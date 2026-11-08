@@ -188,15 +188,15 @@ Overlay Main и Overlay Floating могут визуально различат�
 | Group во Floating | Group в другом Floating | Группа переносится в другое Floating-окно |
 | Column в Main | Main Dock | Column вставляется в допустимый слот или к краю |
 | Column во Floating | Main Dock | Column переносится как целая структура, если операция разрешена |
-| Column в Main | Floating | Column переносится в допустимый слот Floating-композиции |
-| Column во Floating | Floating | Column переносится в допустимый слот другого Floating-окна |
+| Column в Main | существующее Floating | после detach исходная Column стыкуется с Floating-композицией как целая структура |
+| Column во Floating | другое Floating | Column переносится к допустимому внешнему краю другой Floating-композиции |
 | DockArea | Main / Floating | Вся композиция переносится целиком согласно поддерживаемым операциям |
 | Любой источник | Свободная область | Источник остаётся отдельным Floating-окном |
 
 ### Примечания финальной сверки
 
-- **Main Column → существующее Floating-окно сейчас не поддерживается действующим правилом Core.** Для Main Column Core генерирует только цели `MainColumn` и `FreeArea`; `FreeArea` создаёт отдельное Floating-окно. Это соответствует критерию этапа 4 и тесту `main_column_drag_exposes_only_whole_column_destinations`. Строку матрицы «Column в Main → Floating» нельзя считать пройденной как перенос в уже открытое Floating-окно: это отдельное решение по семантике, которое не следует менять в рамках уборки.
-- **Floating Column → Floating зависит от формы источника и Profile.** Для одногрупповой Floating Column есть перенос в полосу вкладок другой Floating Group; для других форм доступны только зоны, которые разрешает Core для соответствующего профиля. Нельзя трактовать это как разрешение на произвольное вложение Column в Column.
+- **Column из Main проходит detach до выбора конечной цели.** После пересечения drag-порога адаптер выполняет `Float` для исходной Column, сохраняя `DragPayload::Column` и `ColumnHeader`. Поэтому при наведении на уже открытое Floating-окно конечная операция выполняется как Floating → Floating: Core находит временный Floating-хост по корню исходной Column и завершает перенос через `DockFloating`.
+- **Целая Floating Column может присоединиться к другой Column-композиции по горизонтальному краю.** Допустимая цель — Floating root типа `Column` или `Split(X)`, состоящий только из Columns. Для горизонтальной композиции зоны показываются только на её внешних краях: Left у первой Column, Right у последней. В Photoshop это разрешение относится именно к переносу целой Column; правила горизонтального разделения отдельных Panel и Group не меняются. Одногрупповая Column дополнительно сохраняет существующий вариант объединения с целевой полосой вкладок. Это не разрешение на произвольное вложение Column в Column.
 - **DockAreaHeader → Floating — отдельный этап detach.** Main DockAreaHeader преобразуется адаптером в новую Floating-композицию; прямой DropTarget для payload `DockArea` не строится. Уже отделённая Floating-композиция может стыковаться последующим drag как `FloatingGroup`.
 - Проверка ссылок показала, что `cursor_over_other_docking_window` по-прежнему вызывается из `components/floating.rs` и участвует в detach вкладки при наведении на другое окно. Этот механизм не является устаревшим и сохранён.
 
