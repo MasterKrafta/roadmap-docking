@@ -1228,7 +1228,7 @@ mod panel_tab_tearoff_tests {
 
         assert!(panel_tab_tearoff_boundary_reached(
             true,
-            None,
+            Some(tab_strip),
             Point::new(30.0, 30.0),
         ));
     }
