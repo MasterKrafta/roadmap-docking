@@ -14,9 +14,24 @@ pub use group_grip::GroupGrip;
 pub use group_drag_area::GroupDragArea;
 pub use group_menu_button::GroupMenuButton;
 pub use panel_content::PanelContent;
-use dock_core::DockMetrics;
-use gpui::{AnyView, InteractiveElement, IntoElement, ParentElement, Styled, div, px, rgb};
+
+use dock_core::{
+    DockCommand, DockMetrics, FloatingGroupId, GroupRect, NodeId, Point, TabHeaderRect,
+    TabOverflowRect, TabStripRect,
+};
+use gpui::{
+    Entity, IntoElement, ParentElement, StatefulInteractiveElement, Styled, div,
+    prelude::InteractiveElement as _, px, rgb,
+};
 use ui::Theme;
+
+use crate::{
+    DockController,
+    components::{
+        context_menu::{ContextMenuTarget, GroupMenuToggle},
+        tab_strip::{GroupPresentation, TabStripView},
+    },
+};
 
 const SHOW_GROUP_CONTROLS: bool = true;
 
@@ -28,7 +43,7 @@ impl DockGroupView {
     pub(super) fn render_active(
         id: String,
         title: String,
-        panel_view: AnyView,
+        panel_view: gpui::AnyView,
         metrics: DockMetrics,
         theme: Theme,
     ) -> impl IntoElement {
@@ -62,6 +77,215 @@ impl DockGroupView {
                     .bg(rgb(theme.colors.panel_surface_background))
                     .child(panel_view),
             )
+    }
+
+    /// Renders a Core Group with its complete tab strip and group controls.
+    ///
+    /// The geometry and tab presentation are supplied by dock-core and the host.
+    /// This keeps the new DockColumn renderer on the same interactive path for
+    /// one-tab, multi-tab and multi-group Columns.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn render_core(
+        column: Option<NodeId>,
+        group: GroupRect,
+        strip: TabStripRect,
+        headers: &[TabHeaderRect],
+        overflow: Option<TabOverflowRect>,
+        presentation: &GroupPresentation,
+        content_origin: Point,
+        metrics: DockMetrics,
+        reserved_grip_left: f32,
+        controller: Entity<DockController>,
+        theme: Theme,
+        raise_floating: Option<FloatingGroupId>,
+        toggle_menu: GroupMenuToggle,
+        middle_click_closes_tabs: bool,
+    ) -> impl IntoElement {
+        let left = group.rect.origin.x - content_origin.x;
+        let top = group.rect.origin.y - content_origin.y;
+        let header_height = if presentation.collapsed {
+            0.0
+        } else {
+            metrics.header_height.min(group.rect.size.height)
+        };
+        let control_width = metrics
+            .group_control_button_width
+            .min(group.rect.size.width / 3.0)
+            .max(1.0);
+
+        let mut root = div()
+            .id(format!("dock-group-{:?}", group.group))
+            .absolute()
+            .left(px(left))
+            .top(px(top))
+            .w(px(group.rect.size.width))
+            .h(px(group.rect.size.height))
+            .bg(rgb(theme.colors.group_frame_background))
+            .border_1()
+            .border_color(rgb(theme.colors.group_frame_border));
+
+        if column.is_none() && header_height > 0.0 {
+            let grip = div()
+                .id(format!("group-grip-{:?}", group.group))
+                .absolute()
+                .top_0()
+                .left(px(reserved_grip_left))
+                .w(px(
+                    (group.rect.size.width - reserved_grip_left - 2.0 * control_width).max(0.0),
+                ))
+                .h(px(header_height))
+                .flex()
+                .items_center()
+                .justify_center()
+                .cursor_pointer()
+                .bg(rgb(theme.colors.group_grip_background))
+                .text_color(rgb(theme.colors.primary_text))
+                .child("⠿");
+            root = root.child(grip);
+        }
+
+        root = root.child(TabStripView::render(
+            group.group,
+            group.rect,
+            strip,
+            headers,
+            overflow,
+            presentation,
+            controller.clone(),
+            theme,
+            raise_floating,
+            middle_click_closes_tabs,
+        ));
+
+        // Collapsed groups have no header rect, so their controls overlay the
+        // trailing edge of the remaining tab strip to keep Expand/Menu reachable.
+        let controls_top = if column.is_some() || presentation.collapsed {
+            strip.rect.origin.y - group.rect.origin.y
+        } else {
+            0.0
+        };
+        let controls_height = if column.is_some() || presentation.collapsed {
+            strip.rect.size.height
+        } else {
+            header_height
+        };
+
+        let menu_toggle = toggle_menu.clone();
+        let menu_button = div()
+            .id(format!("group-menu-button-{:?}", group.group))
+            .absolute()
+            .top(px(controls_top))
+            .right(px(0.0))
+            .w(px(control_width))
+            .h(px(controls_height))
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_pointer()
+            .bg(rgb(theme.colors.group_menu_button))
+            .text_color(rgb(theme.colors.primary_text))
+            .child(if column.is_some() { "☰" } else { "⋮" })
+            .on_click(move |event, _, app| {
+                (menu_toggle)(
+                    ContextMenuTarget::Group(group.group),
+                    match crate::geometry::point_from_gpui(event.position()) {
+                        Ok(anchor) => anchor,
+                        Err(_) => return,
+                    },
+                    app,
+                );
+            });
+        if column.is_some() {
+            // Column Groups use one compact toolbar: tabs on the left, a
+            // flexible drag lane in the middle, a fixed Group grip, and Menu.
+            let group_grip = div()
+                .id(format!("group-grip-handle-{:?}", group.group))
+                .absolute()
+                .left(px((group.rect.size.width - 2.0 * control_width).max(0.0)))
+                .top(px(controls_top))
+                .w(px(control_width))
+                .h(px(controls_height))
+                .flex()
+                .items_center()
+                .justify_center()
+                .cursor_pointer()
+                .bg(rgb(theme.colors.group_grip_background))
+                .text_color(rgb(theme.colors.primary_text))
+                .child("⠿");
+            return root.child(group_grip).child(menu_button);
+        }
+
+        root = root.child(menu_button);
+
+        let collapse_controller = controller.clone();
+        let collapse_group = group.group;
+        let collapse_to = !presentation.collapsed;
+        let model_collapsed = presentation.model_collapsed;
+        let auto_collapsed = presentation.auto_collapsed;
+        let auto_expanded = presentation.auto_expanded;
+        let collapse_button = div()
+            .id(format!("group-collapse-button-{:?}", group.group))
+            .absolute()
+            .top(px(controls_top))
+            .right(px(control_width))
+            .w(px(control_width))
+            .h(px(controls_height))
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_pointer()
+            .bg(rgb(theme.colors.group_menu_button))
+            .text_color(rgb(theme.colors.primary_text))
+            .child(if presentation.collapsed { "＋" } else { "−" })
+            .on_click(move |_, _, app| {
+                let mut commands = Vec::with_capacity(2);
+                if auto_collapsed {
+                    if model_collapsed {
+                        commands.push(DockCommand::CollapseGroup {
+                            group: collapse_group,
+                            collapsed: false,
+                        });
+                    }
+                    if let Some(column) = column {
+                        commands.push(DockCommand::SetColumnExpandedGroup {
+                            column,
+                            group: Some(collapse_group),
+                        });
+                    } else if commands.is_empty() {
+                        commands.push(DockCommand::CollapseGroup {
+                            group: collapse_group,
+                            collapsed: false,
+                        });
+                    }
+                } else if auto_expanded {
+                    commands.push(DockCommand::CollapseGroup {
+                        group: collapse_group,
+                        collapsed: true,
+                    });
+                    if let Some(column) = column {
+                        commands.push(DockCommand::SetColumnExpandedGroup {
+                            column,
+                            group: None,
+                        });
+                    }
+                } else {
+                    commands.push(DockCommand::CollapseGroup {
+                        group: collapse_group,
+                        collapsed: collapse_to,
+                    });
+                }
+
+                collapse_controller.update(app, |controller, controller_cx| {
+                    if let Err(error) =
+                        controller.dispatch_sequence_in(commands, controller_cx)
+                    {
+                        tracing::warn!(%error, "could not change dock Group expansion");
+                    }
+                });
+            });
+        root = root.child(collapse_button);
+
+        root
     }
 
     /// Renders a placeholder Group used by static Column previews.
