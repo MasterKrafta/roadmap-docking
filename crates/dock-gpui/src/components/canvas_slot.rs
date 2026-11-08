@@ -25,7 +25,10 @@ impl CanvasSlot {
             .top(px(rect.origin.y))
             .w(px(rect.size.width))
             .h(px(rect.size.height))
-            .overflow_hidden();
+            .overflow_hidden()
+            // TEMP: keep the central Canvas visibly outlined while tuning dock zones.
+            .border_2()
+            .border_color(rgb(theme.colors.drop_zone_border));
 
         if let Some(content) = content {
             slot = slot.child(div().size_full().child(content));
