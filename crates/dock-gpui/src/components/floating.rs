@@ -263,8 +263,8 @@ struct FloatingHostSnapshot {
     active_drop_zone: Option<dock_core::DropZoneRect>,
 }
 
-/// A DockTab in the new component renderer is detached as soon as its
-/// Core drag threshold is crossed. Legacy tabs keep their strip-exit rule.
+/// A single-tab Column's dedicated DockTab drag zone detaches as soon as its
+/// Core threshold is crossed. Multi-tab strips keep their source-strip boundary.
 fn floating_tab_tearoff_required(
     is_dock_component_tab: bool,
     leaves_source: bool,
