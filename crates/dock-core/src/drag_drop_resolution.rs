@@ -1541,13 +1541,31 @@ fn photoshop_main_column_tearoff_can_join_an_existing_floating_column() {
         floating_bounds: None,
     };
     let action = layout.resolve_drag_drop(&request, &metrics).unwrap();
-    assert_eq!(
-        action,
-        DragDropAction::Command(DockCommand::DockFloating {
+    let expected = DragDropAction::Command(DockCommand::DockFloating {
+        group: source_floating,
+        target,
+    });
+    assert_eq!(action, expected);
+
+    // A drag that starts from an already-floating column uses FloatingCapture
+    // instead of the retained ColumnHeader payload, but resolves to the same Core command.
+    let capture_request = DragDropRequest {
+        payload: DragPayload::FloatingGroup {
             group: source_floating,
-            target,
-        })
+        },
+        handle: DragHandle::FloatingCapture,
+        origin: Point::ZERO,
+        point,
+        target: Some(target),
+        floating_bounds: None,
+    };
+    assert_eq!(
+        layout
+            .resolve_drag_drop(&capture_request, &metrics)
+            .unwrap(),
+        expected
     );
+
     let DragDropAction::Command(command) = action else {
         panic!("the detached Main Column must dock into the existing Floating composition");
     };
