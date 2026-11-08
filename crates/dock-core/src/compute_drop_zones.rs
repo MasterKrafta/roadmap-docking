@@ -175,6 +175,12 @@ impl Layout {
         };
         if matches!(source, DropSource::Column { .. }) {
             self.append_column_drag_zones(&context, &mut zones)?;
+            // A Floating-root Column is a whole native composition, not a Main
+            // ColumnHeader drag. Give it only the compatible Floating targets.
+            if source_is_floating_root(self, source_root) {
+                self.append_tab_insertion_zones(&context, &mut zones)?;
+                self.append_floating_window_zones(&context, &mut zones)?;
+            }
             return Ok(zones);
         }
         self.append_main_group_zones(&context, &mut zones)?;
@@ -462,6 +468,9 @@ impl DropZoneResolver {
                         | DropZone::FloatingTop
                         | DropZone::FloatingBottom
                         | DropZone::TabInsertion
+                        | DropZone::ColumnEnd
+                        | DropZone::Top
+                        | DropZone::Bottom
                         | DropZone::Left
                         | DropZone::Right
                 ) && zone
