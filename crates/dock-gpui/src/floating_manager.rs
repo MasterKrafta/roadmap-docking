@@ -1373,8 +1373,8 @@ impl FloatingWindowManager {
         for panel in detached_panels {
             if let Some(entry) = self.registry.windows.get_mut(&panel) {
                 let previous_group = entry.host_group;
-                let detached = match entry.window.update(cx, |host, _, host_cx| {
-                    host.set_host_group(None);
+                let detached = match entry.window.update(cx, |host, window, host_cx| {
+                    host.set_host_group(None, window);
                     host_cx.notify();
                 }) {
                     Ok(()) => true,
@@ -1465,8 +1465,8 @@ impl FloatingWindowManager {
             };
 
             if entry.host_group != Some(group.id) {
-                match entry.window.update(cx, |host, _, host_cx| {
-                    host.set_host_group(Some(group.id));
+                match entry.window.update(cx, |host, window, host_cx| {
+                    host.set_host_group(Some(group.id), window);
                     host_cx.notify();
                 }) {
                     Ok(()) => entry.host_group = Some(group.id),
@@ -1690,7 +1690,7 @@ impl FloatingWindowManager {
         }
 
         let _ = entry.window.update(cx, |host, window, _| {
-            host.set_host_group(None);
+            host.set_host_group(None, window);
             window.remove_window();
         });
     }
