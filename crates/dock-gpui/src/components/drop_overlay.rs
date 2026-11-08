@@ -128,69 +128,7 @@ impl DropOverlay {
         layer
     }
 
-    /// Paints a Main Dock target inside the moving floating window. The main
-    /// window's own overlay is behind that native window in Z-order, so this
-    /// copy is transformed into the floating host's local coordinate space.
-    pub(crate) fn render_remote(
-        zone: Option<DropZoneRect>,
-        preview: Option<DragPreview>,
-        theme: Theme,
-    ) -> impl IntoElement {
-        let mut layer = div().absolute().top_0().left_0().size_full();
-        let (Some(zone), Some(preview)) = (zone, preview) else {
-            return layer;
-        };
-        if preview.target != Some(zone.target)
-            || !zone.rect.contains(preview.point).unwrap_or(false)
-        {
-            return layer;
-        }
 
-        match zone.zone {
-            DropZone::Center | DropZone::FloatingCenter => {
-                layer = layer.child(highlight_rect(zone.rect, theme, 0.22, true));
-            }
-            DropZone::TabInsertion => {
-                let x = zone.rect.origin.x + zone.rect.size.width * 0.5;
-                let marker = Rect::new(
-                    Point::new(x - 1.5, zone.rect.origin.y),
-                    dock_core::Size::new(3.0, zone.rect.size.height),
-                );
-                layer = layer.child(highlight_rect(zone.rect, theme, 0.08, false));
-                layer = layer.child(guide_rect(marker, theme));
-            }
-            DropZone::Left
-            | DropZone::Right
-            | DropZone::ColumnLeft
-            | DropZone::ColumnRight
-            | DropZone::DockEdge => {
-                let x = zone.rect.origin.x + zone.rect.size.width * 0.5;
-                let marker = Rect::new(
-                    Point::new(x - 2.0, zone.rect.origin.y),
-                    dock_core::Size::new(4.0, zone.rect.size.height),
-                );
-                layer = layer.child(highlight_rect(zone.rect, theme, 0.12, false));
-                layer = layer.child(guide_rect(marker, theme));
-            }
-            DropZone::Top
-            | DropZone::Bottom
-            | DropZone::ColumnEnd
-            | DropZone::FloatingTop
-            | DropZone::FloatingBottom
-            | DropZone::RailInsertion => {
-                let y = zone.rect.origin.y + zone.rect.size.height * 0.5;
-                let marker = Rect::new(
-                    Point::new(zone.rect.origin.x, y - 2.0),
-                    dock_core::Size::new(zone.rect.size.width, 4.0),
-                );
-                layer = layer.child(highlight_rect(zone.rect, theme, 0.12, false));
-                layer = layer.child(guide_rect(marker, theme));
-            }
-            DropZone::FreeArea => {}
-        }
-
-        layer
-    }
 }
 
 impl DragGhost {
