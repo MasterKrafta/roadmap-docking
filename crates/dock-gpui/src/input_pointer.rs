@@ -1023,7 +1023,7 @@ fn tab_header_drag_handle_contains(
             )
         });
         if is_rail {
-            return false;
+            return matches!(header.rect.contains(point), Ok(true));
         }
 
         let close_width = 18.0_f32.min(header.rect.size.width.max(0.0));
