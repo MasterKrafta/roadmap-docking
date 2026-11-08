@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use dock_core::{
     ColumnDisplayItem, ColumnMode, ColumnRect, DockMetrics, DragPreview, DropZoneRect,
-    FloatingGroupId, FlyoutState, GroupRect, NodeId, PanelId, PanelRect, Point,
+    FloatingGroupId, FlyoutState, GroupRect, NodeId, PanelId, PanelRect,
     SplitterRect, TabHeaderRect, TabOverflowRect, TabStripRect, VerticalOverflow,
 };
 use gpui::{AnyView, Entity, IntoElement, ParentElement, ScrollHandle, Styled, div, px};
@@ -84,7 +84,9 @@ impl DockCompositionView {
         // Keep one visual path for both hosts. The compact DockColumn renderer
         // is used only for its supported single-group/single-tab shape; rail,
         // multi-group and multi-tab columns go through the full Core renderer.
-        let single_active_panel = if column_mode == ColumnMode::Expanded && group_rects.len() == 1 {
+        let single_active_panel = if column_mode == ColumnMode::Expanded
+            && group_rects.len() == 1
+        {
             group_rects.first().and_then(|group| {
                 let presentation = group_presentations.get(&group.group)?;
                 if presentation.tabs.len() != 1 {
