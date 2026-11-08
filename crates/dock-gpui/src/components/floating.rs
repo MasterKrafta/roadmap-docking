@@ -1397,15 +1397,11 @@ impl Render for FloatingHost {
                 }
             }
             tab_press_for_escape.set(None);
-            controller_for_escape.update(app, |controller, controller_cx| {
-                if let Err(error) = controller.cancel_pointer_interaction_on_escape() {
-                    tracing::debug!(%error, "could not cancel floating tab drag with Escape");
-                }
-                controller_cx.notify();
-            });
-            DockInteractionCoordinator::release(
+            DockInteractionCoordinator::cancel_on_escape(
+                &controller_for_escape,
                 window,
                 &pointer_capture_for_escape,
+                app,
             );
             app.stop_propagation();
         });
