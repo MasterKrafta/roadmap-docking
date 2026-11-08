@@ -196,6 +196,11 @@ pub(crate) fn register_pointer_events(
             let Some(hit) = hit else {
                 return;
             };
+            // DockColumnView renders DockTab as a dedicated component while Core's
+            // generic hit-test can classify the same header area as Group/TabStrip.
+            // Normalize that area back to its semantic TabHeader before dispatching
+            // the pointer-down intent, so dragging the visible DockTab starts PanelTab.
+            let hit = dock_component_tab_hit_at_point(&controller, core_point, app).unwrap_or(hit);
             eprintln!(
                 "[DOCK-INPUT][main] down_intent={:?}",
                 pointer_down_intent_for_hit(hit)
@@ -695,8 +700,8 @@ pub(crate) fn register_pointer_events(
 }
 
 /// Selects which semantic drag areas may start a native tear-off.
-/// DockTab in the new Column renderer routes as a Column drag; legacy PanelTab
-/// gestures become native windows after leaving their source TabStripRect.
+/// The main DockTab component becomes a native window as soon as Core crosses
+/// the drag threshold; legacy multi-tab strips retain in-strip reordering.
 fn native_tearoff_enabled_for(handle: Option<DragHandle>, payload: DragPayload) -> bool {
     match (handle, payload) {
         (Some(DragHandle::ColumnHeader), DragPayload::Column { .. }) => true,
@@ -727,6 +732,30 @@ fn panel_tab_tearoff_boundary_reached(
 ) -> bool {
     uses_dock_component
         || legacy_tab_strip.is_some_and(|strip| DockTab::leaves_strip_zone(strip, point))
+}
+
+/// Resolves a visible DockTab component to the semantic Core tab hit.
+///
+/// DockColumnView is rendered independently of the legacy GroupView. Prefer
+/// its actual tab-header rectangle over a broader Core Group/TabStrip hit so
+/// the pointer pipeline always starts `DragHandle::PanelTab` on this surface.
+fn dock_component_tab_hit_at_point(
+    controller: &Entity<DockController>,
+    point: Point,
+    app: &mut App,
+) -> Option<HitResult> {
+    controller.update(app, |controller, _| {
+        let rects = controller.geometry().cloned().ok()?;
+        rects.tab_headers.iter().find_map(|header| {
+            (is_dock_component_tab_group(controller.layout(), header.group)
+                && matches!(header.rect.contains(point), Ok(true)))
+            .then_some(HitResult::TabHeader {
+                group: header.group,
+                panel: header.panel,
+                index: header.index,
+            })
+        })
+    })
 }
 
 /// Checks the semantic boundary that turns an in-layout drag into a native tear-off.
