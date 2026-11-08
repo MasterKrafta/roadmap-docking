@@ -12,7 +12,7 @@ use gpui::{
 use crate::{
     DockController, FloatingWindowManager,
     components::context_menu::{ContextMenuTarget, ContextMenuToggle},
-    dock_components::{DockAreaDragArea, DockTab},
+    dock_components::DockAreaDragArea,
     geometry::host_point_from_gpui_window,
 };
 
@@ -441,7 +441,7 @@ pub(crate) fn register_pointer_events(
             }
 
             let should_tearoff = controller.update(app, |controller, _| {
-                native_tearoff_required(controller, point)
+                native_tearoff_required(controller, host_point)
             });
             if should_tearoff
                 && super::drag::begin_native_tearoff(&controller, &manager, point, app)
@@ -574,7 +574,7 @@ pub(crate) fn register_pointer_events(
                     pointer_press.set(None);
                 }
                 let should_tearoff = controller.update(app, |controller, _| {
-                    native_tearoff_required(controller, point)
+                    native_tearoff_required(controller, host_point)
                 });
                 if should_tearoff
                     && super::drag::begin_native_tearoff(&controller, &manager, point, app)
@@ -705,25 +705,21 @@ fn native_tearoff_enabled_for(handle: Option<DragHandle>, payload: DragPayload) 
 }
 
 /// Checks whether the active gesture has crossed its native tear-off boundary.
-fn native_tearoff_required(controller: &mut DockController, point: Point) -> bool {
+/// The point is in main-host coordinates, so it can be compared directly with
+/// the measured DockHost viewport.
+fn native_tearoff_required(controller: &mut DockController, host_point: Point) -> bool {
     let DragState::Dragging { payload, .. } = controller.drag().session().state() else {
         return false;
     };
     let handle = controller.drag().session().handle();
     native_tearoff_enabled_for(handle, payload)
-        && native_tearoff_boundary_reached(controller, handle, payload, point)
+        && native_tearoff_boundary_reached(controller, handle, payload, host_point)
 }
 
-/// DockTab is a single-panel component group, so there is no tab reordering
-/// to preserve: once Core crosses the drag threshold, the Panel leaves DockArea.
-/// Legacy multi-tab strips keep their in-strip reorder behavior.
-fn panel_tab_tearoff_boundary_reached(
-    uses_dock_component: bool,
-    legacy_tab_strip: Option<Rect>,
-    point: Point,
-) -> bool {
-    uses_dock_component
-        || legacy_tab_strip.is_some_and(|strip| DockTab::leaves_strip_zone(strip, point))
+/// A tab remains in the main DockArea while the pointer is inside the main
+/// DockHost. Leaving the tab strip alone does not create a Floating window.
+fn panel_tab_tearoff_boundary_reached(viewport: Rect, host_point: Point) -> bool {
+    !matches!(viewport.contains(host_point), Ok(true))
 }
 
 /// Resolves a visible DockTab component to the semantic Core tab hit.
@@ -760,37 +756,8 @@ fn native_tearoff_boundary_reached(
     match (handle, payload) {
         (Some(DragHandle::ColumnHeader), DragPayload::Column { .. }) => true,
         (Some(DragHandle::DockAreaHeader), DragPayload::DockArea { .. }) => true,
-        (Some(DragHandle::PanelTab), DragPayload::Panel { panel }) => {
-            // Resolve the group first, then release the mutable geometry borrow before
-            // consulting the layout to determine which renderer owns its header.
-            let group = {
-                let Ok(rects) = controller.geometry() else {
-                    return false;
-                };
-                let Some(group) = rects
-                    .tab_headers
-                    .iter()
-                    .find(|header| header.panel == panel)
-                    .map(|header| header.group)
-                else {
-                    return false;
-                };
-                group
-            };
-            let uses_dock_component = is_dock_component_tab_group(controller.layout(), group);
-            let legacy_tab_strip = if uses_dock_component {
-                None
-            } else {
-                let Ok(rects) = controller.geometry() else {
-                    return false;
-                };
-                rects
-                    .tab_strips
-                    .iter()
-                    .find(|strip| strip.group == group)
-                    .map(|strip| strip.rect)
-            };
-            panel_tab_tearoff_boundary_reached(uses_dock_component, legacy_tab_strip, point)
+        (Some(DragHandle::PanelTab), DragPayload::Panel { .. }) => {
+            panel_tab_tearoff_boundary_reached(controller.viewport(), point)
         }
         _ => false,
     }
@@ -1195,29 +1162,35 @@ mod panel_tab_tearoff_tests {
     use super::panel_tab_tearoff_boundary_reached;
 
     #[test]
-    fn dock_component_tab_detaches_immediately_after_drag_threshold() {
-        let tab_strip = Rect::new(Point::new(10.0, 20.0), Size::new(220.0, 28.0));
+    fn tab_does_not_detach_while_pointer_remains_inside_main_host() {
+        let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
 
-        assert!(panel_tab_tearoff_boundary_reached(
-            true,
-            Some(tab_strip),
-            Point::new(30.0, 30.0),
+        assert!(!panel_tab_tearoff_boundary_reached(
+            viewport,
+            Point::new(300.0, 400.0),
+        ));
+        // Leaving the tab strip or moving over another dock surface is not a tear-off.
+        assert!(!panel_tab_tearoff_boundary_reached(
+            viewport,
+            Point::new(1190.0, 400.0),
         ));
     }
 
     #[test]
-    fn legacy_multi_tab_strip_keeps_reordering_until_pointer_leaves_strip() {
-        let tab_strip = Rect::new(Point::new(10.0, 20.0), Size::new(220.0, 28.0));
+    fn tab_detaches_only_after_pointer_leaves_main_host() {
+        let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
 
-        assert!(!panel_tab_tearoff_boundary_reached(
-            false,
-            Some(tab_strip),
-            Point::new(100.0, 30.0),
+        assert!(panel_tab_tearoff_boundary_reached(
+            viewport,
+            Point::new(-1.0, 400.0),
         ));
         assert!(panel_tab_tearoff_boundary_reached(
-            false,
-            Some(tab_strip),
-            Point::new(100.0, 56.0),
+            viewport,
+            Point::new(1201.0, 400.0),
+        ));
+        assert!(panel_tab_tearoff_boundary_reached(
+            viewport,
+            Point::new(600.0, 801.0),
         ));
     }
 }
