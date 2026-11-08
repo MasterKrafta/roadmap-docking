@@ -695,8 +695,8 @@ impl Layout {
         Ok(())
     }
 
-    /// Joins two Photoshop floating areas side-by-side while retaining each
-    /// area's Columns as independent children of one horizontal composition.
+    /// Joins two Floating areas side-by-side while retaining each area's
+    /// Columns as independent children of one horizontal composition.
     ///
     /// The destination FloatingGroup and its DockArea remain the window host;
     /// the source FloatingGroup is removed when its root is detached.
