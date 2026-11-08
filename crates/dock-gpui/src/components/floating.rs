@@ -771,20 +771,21 @@ impl Render for FloatingHost {
                         // legacy GroupView. Normalize the tab's own geometry before the
                         // pointer handler decides between moving this window and tearing
                         // the individual panel off into another Floating window.
-                        let dock_component_tab_hit = controller_for_down.update(app, |controller, _| {
-                            let rects = controller
-                                .floating_geometry(input_window_id, group)
-                                .ok()?;
-                            rects.tab_headers.iter().find_map(|header| {
-                                (dock_component_tab_zones_for_down.contains_key(&header.panel)
-                                    && matches!(header.rect.contains(point), Ok(true)))
-                                .then_some(dock_core::HitResult::TabHeader {
-                                    group: header.group,
-                                    panel: header.panel,
-                                    index: header.index,
+                        let dock_component_tab_hit =
+                            controller_for_down.update(app, |controller, _| {
+                                let rects = controller
+                                    .floating_geometry(input_window_id, group)
+                                    .ok()?;
+                                rects.tab_headers.iter().find_map(|header| {
+                                    (dock_component_tab_zones_for_down.contains_key(&header.panel)
+                                        && matches!(header.rect.contains(point), Ok(true)))
+                                    .then_some(dock_core::HitResult::TabHeader {
+                                        group: header.group,
+                                        panel: header.panel,
+                                        index: header.index,
+                                    })
                                 })
-                            })
-                        });
+                            });
                         let is_dock_component_tab = dock_component_tab_hit.is_some();
                         let hit = dock_component_tab_hit.or(core_hit);
                         eprintln!(
@@ -1004,11 +1005,11 @@ impl Render for FloatingHost {
                         });
                         let is_dock_component_tab =
                             dock_component_tab_zones_for_move.contains_key(&press.panel);
-                        if (floating_tab_tearoff_required(
+                        if floating_tab_tearoff_required(
                             is_dock_component_tab,
                             leaves_source,
                             over_other_window,
-                        )) && let Some(manager) = manager_entity.as_ref()
+                        ) && let Some(manager) = manager_entity.as_ref()
                             && begin_floating_tab_tearoff(
                                 &controller_for_move,
                                 manager,
