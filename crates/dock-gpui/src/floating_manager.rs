@@ -301,22 +301,6 @@ impl FloatingWindowManager {
         self.main_host_origin = origin;
     }
 
-    /// Returns the full native main-window client area in DockHost-local coordinates.
-    /// DockHost can start below toolbar rows, so its own viewport is not always
-    /// the complete boundary that decides when a tab leaves the main window.
-    pub(crate) fn main_client_viewport_in_host_coordinates(&self) -> Option<Rect> {
-        let main = self.main_native_window?;
-        let client_size = self.native_ops.client_size(main).ok()?;
-        let scale = self.native_ops.scale_factor(main).ok()?;
-        let logical_size = DockGeometry::logical_size_from_physical(client_size, scale)?;
-        let bounds = Rect::new(
-            Point::new(-self.main_host_origin.x, -self.main_host_origin.y),
-            logical_size,
-        );
-        bounds.validate_non_empty().ok()?;
-        Some(bounds)
-    }
-
     /// Converts a proposed main-host-local logical rectangle to the Core
     /// floating-bounds contract: physical virtual-desktop origin + logical size.
     pub(crate) fn screen_bounds_from_main_local(&self, bounds: Rect) -> Option<Rect> {
