@@ -179,6 +179,27 @@ pub trait NativeWindowOps {
     fn end_high_resolution_timer(&self) -> Result<(), NativeError>;
 }
 
+/// Resolves the first visible top-level window under a screen point.
+///
+/// The dragged HWND is transparent to docking hit-testing, so lookup continues
+/// behind it. Any other visible window is an occluder: if it is not one of the
+/// registered dock windows, the point must not fall through to a dock window
+/// behind it.
+fn topmost_known_window_under_point(
+    point: PhysicalPoint,
+    windows_in_z_order: &[(NativeWindowId, PhysicalRect)],
+    known_windows: &[NativeWindowId],
+    exclude: Option<NativeWindowId>,
+) -> Option<NativeWindowId> {
+    for (window, rect) in windows_in_z_order {
+        if Some(*window) == exclude || !rect.contains(point) {
+            continue;
+        }
+        return known_windows.contains(window).then_some(*window);
+    }
+    None
+}
+
 #[cfg(windows)]
 mod windows_impl {
     use super::*;
@@ -956,12 +977,9 @@ mod windows_impl {
         ) -> Result<Option<NativeWindowId>, NativeError> {
             // SAFETY: Walk the desktop's top-level Z-order synchronously.
             let mut current = unsafe { GetTopWindow(None) }.ok();
+            let mut windows_in_z_order = Vec::new();
             while let Some(native) = current {
-                let id = NativeWindowId::from_raw(native.0 as isize);
-                if let Some(id) = id
-                    && Some(id) != exclude
-                    && known_windows.contains(&id)
-                {
+                if let Some(id) = NativeWindowId::from_raw(native.0 as isize) {
                     // SAFETY: native is the current top-level HWND.
                     let visible = unsafe {
                         IsWindowVisible(native).as_bool() && !IsIconic(native).as_bool()
@@ -969,10 +987,8 @@ mod windows_impl {
                     if visible {
                         let mut rect = RECT::default();
                         // SAFETY: rect is a valid writable RECT.
-                        if unsafe { GetWindowRect(native, &mut rect) }.is_ok()
-                            && rect_from_native(rect).contains(point)
-                        {
-                            return Ok(Some(id));
+                        if unsafe { GetWindowRect(native, &mut rect) }.is_ok() {
+                            windows_in_z_order.push((id, rect_from_native(rect)));
                         }
                     }
                 }
@@ -980,7 +996,13 @@ mod windows_impl {
                 // SAFETY: Advance to the next top-level HWND in Z-order.
                 current = unsafe { GetWindow(native, GW_HWNDNEXT) }.ok();
             }
-            Ok(None)
+
+            Ok(topmost_known_window_under_point(
+                point,
+                &windows_in_z_order,
+                known_windows,
+                exclude,
+            ))
         }
 
         fn monitor_work_areas(&self) -> Result<Vec<PhysicalRect>, NativeError> {
@@ -1156,4 +1178,103 @@ pub fn hide_from_taskbar(window: NativeWindowId) -> bool {
 #[cfg(not(windows))]
 pub fn hide_from_taskbar(_: NativeWindowId) -> bool {
     false
+}
+
+
+#[cfg(test)]
+mod drop_window_target_tests {
+    use super::{NativeWindowId, PhysicalPoint, PhysicalRect, topmost_known_window_under_point};
+
+    fn window(id: isize) -> NativeWindowId {
+        NativeWindowId::from_raw(id).unwrap()
+    }
+
+    fn bounds() -> PhysicalRect {
+        PhysicalRect {
+            left: 100,
+            top: 100,
+            right: 500,
+            bottom: 400,
+        }
+    }
+
+    #[test]
+    fn unrelated_topmost_window_blocks_a_dock_window_behind_it() {
+        let point = PhysicalPoint { x: 200, y: 200 };
+        let foreign_window = window(1);
+        let main_window = window(2);
+        let windows = [
+            (foreign_window, bounds()),
+            (main_window, bounds()),
+        ];
+
+        assert_eq!(
+            topmost_known_window_under_point(point, &windows, &[main_window], None),
+            None,
+        );
+    }
+
+    #[test]
+    fn dragged_source_window_is_skipped_so_target_behind_it_can_receive_drop() {
+        let point = PhysicalPoint { x: 200, y: 200 };
+        let source_window = window(1);
+        let target_window = window(2);
+        let windows = [
+            (source_window, bounds()),
+            (target_window, bounds()),
+        ];
+
+        assert_eq!(
+            topmost_known_window_under_point(
+                point,
+                &windows,
+                &[source_window, target_window],
+                Some(source_window),
+            ),
+            Some(target_window),
+        );
+    }
+
+    #[test]
+    fn topmost_registered_dock_window_wins_when_floating_windows_overlap() {
+        let point = PhysicalPoint { x: 200, y: 200 };
+        let topmost_floating = window(1);
+        let lower_main = window(2);
+        let windows = [
+            (topmost_floating, bounds()),
+            (lower_main, bounds()),
+        ];
+
+        assert_eq!(
+            topmost_known_window_under_point(
+                point,
+                &windows,
+                &[topmost_floating, lower_main],
+                None,
+            ),
+            Some(topmost_floating),
+        );
+    }
+
+    #[test]
+    fn windows_not_covering_the_pointer_do_not_occlude_a_target() {
+        let point = PhysicalPoint { x: 200, y: 200 };
+        let unrelated_window = window(1);
+        let main_window = window(2);
+        let outside = PhysicalRect {
+            left: 600,
+            top: 100,
+            right: 900,
+            bottom: 400,
+        };
+        let windows = [
+            (unrelated_window, outside),
+            (main_window, bounds()),
+        ];
+
+        assert_eq!(
+            topmost_known_window_under_point(point, &windows, &[main_window], None),
+            Some(main_window),
+        );
+    }
 }
