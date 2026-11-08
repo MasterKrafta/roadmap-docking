@@ -12,7 +12,7 @@ use gpui::{
 use crate::{
     DockController, FloatingWindowManager,
     components::context_menu::{ContextMenuTarget, ContextMenuToggle},
-    dock_components::DockAreaDragArea,
+    dock_components::{DockAreaDragArea, DockTab},
     geometry::host_point_from_gpui_window,
 };
 
@@ -441,7 +441,7 @@ pub(crate) fn register_pointer_events(
             }
 
             let should_tearoff =
-                controller.update(app, |controller, _| native_tearoff_required(controller));
+                controller.update(app, |controller, _| native_tearoff_required(controller, point));
             if should_tearoff
                 && super::drag::begin_native_tearoff(&controller, &manager, point, app)
             {
@@ -690,8 +690,8 @@ pub(crate) fn register_pointer_events(
 }
 
 /// Selects which semantic drag areas may start a native tear-off.
-/// A PanelTab becomes a native window immediately after Core crosses its drag
-/// threshold. Column and DockArea headers use the same threshold-based path.
+/// A PanelTab becomes a native window after the pointer leaves its DockTab drag
+/// zone. Column and DockArea headers still detach as soon as their drag threshold is crossed.
 fn native_tearoff_enabled_for(handle: Option<DragHandle>, payload: DragPayload) -> bool {
     match (handle, payload) {
         (Some(DragHandle::ColumnHeader), DragPayload::Column { .. }) => true,
@@ -702,13 +702,43 @@ fn native_tearoff_enabled_for(handle: Option<DragHandle>, payload: DragPayload) 
     }
 }
 
-/// Checks whether Core has crossed the drag threshold for a gesture that
-/// creates a native floating window.
-fn native_tearoff_required(controller: &mut DockController) -> bool {
+/// Checks whether the active drag has reached the semantic boundary for a
+/// native floating window. A PanelTab must leave its DockTab drag zone first.
+fn native_tearoff_required(controller: &mut DockController, pointer: Point) -> bool {
     let DragState::Dragging { payload, .. } = controller.drag().session().state() else {
         return false;
     };
-    native_tearoff_enabled_for(controller.drag().session().handle(), payload)
+    let handle = controller.drag().session().handle();
+    if !native_tearoff_enabled_for(handle, payload) {
+        return false;
+    }
+
+    match (handle, payload) {
+        (Some(DragHandle::PanelTab), DragPayload::Panel { panel }) => {
+            let Ok(rects) = controller.geometry() else {
+                return false;
+            };
+            let Some(group) = rects
+                .tab_headers
+                .iter()
+                .find(|header| header.panel == panel)
+                .map(|header| header.group)
+            else {
+                return false;
+            };
+            let Some(group_rect) = rects
+                .groups
+                .iter()
+                .find(|group_rect| group_rect.group == group)
+                .map(|group_rect| group_rect.rect)
+            else {
+                return false;
+            };
+            let drag_zone = DockTab::drag_zone(group_rect, controller.metrics());
+            DockTab::leaves_strip_zone(drag_zone, pointer)
+        }
+        _ => true,
+    }
 }
 
 /// Resolves a visible DockTab component to the semantic Core tab hit.
