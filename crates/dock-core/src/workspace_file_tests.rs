@@ -1326,8 +1326,12 @@ fn workspace_migrates_legacy_floating_composition_before_clamping_bounds() {
     assert!(report.layout.validate(&metrics).is_ok());
     let floating = report.layout.floating_groups_in_paint_order();
     let area = report.layout.dock_area(floating[0].1.area).unwrap();
+    let Some(crate::Node::Column(column)) = report.layout.node(area.root) else {
+        panic!("legacy horizontal floating root should normalize to a Column");
+    };
+    assert_eq!(column.groups.len(), 1);
     assert!(matches!(
-        report.layout.node(area.root),
+        report.layout.node(column.groups[0]),
         Some(crate::Node::Tabs(tabs)) if tabs.children.len() == 1
     ));
     assert!(report.diagnostics.iter().any(|diagnostic| {
