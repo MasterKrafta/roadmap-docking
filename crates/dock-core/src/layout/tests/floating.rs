@@ -200,7 +200,7 @@ fn c46_extracting_the_last_floating_tab_removes_the_empty_source_window() {
 }
 
 #[test]
-fn photoshop_floating_roots_accept_columns_but_reject_horizontal_compositions() {
+fn photoshop_floating_roots_accept_columns_and_horizontal_compositions() {
     let metrics = DockMetrics::default();
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
 
@@ -215,7 +215,7 @@ fn photoshop_floating_roots_accept_columns_but_reject_horizontal_compositions() 
         vec![first_group],
         vec![1.0],
     );
-    builder.floating_group(
+    let column_floating = builder.floating_group(
         first_column,
         Rect::new(Point::new(20.0, 30.0), Size::new(360.0, 260.0)),
         1,
@@ -244,21 +244,28 @@ fn photoshop_floating_roots_accept_columns_but_reject_horizontal_compositions() 
         vec![1.0],
     );
     let horizontal = builder.split(Axis::X, vec![second_column, third_column], vec![0.5, 0.5]);
-    builder.floating_group(
+    let horizontal_floating = builder.floating_group(
         horizontal,
         Rect::new(Point::new(420.0, 30.0), Size::new(600.0, 260.0)),
         2,
     );
 
     let layout = builder.build();
-    let errors = layout.validate(&metrics).unwrap_err();
-    assert_eq!(
-        errors
-            .iter()
-            .filter(|error| matches!(error, ValidationError::InvalidFloatingRoot { .. }))
-            .count(),
-        1
-    );
+    assert_eq!(layout.validate(&metrics), Ok(()));
+    let column_root = layout
+        .dock_area(layout.floating_group(column_floating).unwrap().area)
+        .unwrap()
+        .root;
+    assert!(matches!(layout.node(column_root), Some(Node::Column(_))));
+    let horizontal_root = layout
+        .dock_area(layout.floating_group(horizontal_floating).unwrap().area)
+        .unwrap()
+        .root;
+    assert!(matches!(
+        layout.node(horizontal_root),
+        Some(Node::Split(split))
+            if split.axis == Axis::X && split.children == vec![second_column, third_column]
+    ));
 }
 
 #[test]
