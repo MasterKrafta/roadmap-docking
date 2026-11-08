@@ -991,8 +991,7 @@ fn tab_header_clickable_contains(
         else {
             return false;
         };
-        let close_width = 18.0_f32.min(header.rect.size.width.max(0.0));
-        point.x < header.rect.origin.x + header.rect.size.width - close_width
+        matches!(header.rect.contains(point), Ok(true))
     })
 }
 
@@ -1026,8 +1025,7 @@ fn tab_header_drag_handle_contains(
             return matches!(header.rect.contains(point), Ok(true));
         }
 
-        let close_width = 18.0_f32.min(header.rect.size.width.max(0.0));
-        point.x < header.rect.origin.x + header.rect.size.width - close_width
+        matches!(header.rect.contains(point), Ok(true))
     })
 }
 
