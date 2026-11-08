@@ -304,7 +304,7 @@ pub(crate) fn begin_floating_tab_tearoff(
         };
         match outcome.actual_value {
             Some(CommandValue::FloatingGroup(group))
-                if controller.continue_tearoff_as_floating_capture(group).is_ok() =>
+                if controller.continue_tearoff_as_panel_capture(drag.panel).is_ok() =>
             {
                 Some(group)
             }
@@ -510,10 +510,21 @@ pub(crate) fn begin_native_tearoff(
             Err(_) => return None,
         };
         match outcome.actual_value {
-            Some(CommandValue::FloatingGroup(group))
-                if controller.continue_tearoff_as_floating_capture(group).is_ok() =>
-            {
-                Some(group)
+            Some(CommandValue::FloatingGroup(group)) => {
+                let continued = match payload {
+                    DragPayload::Panel { panel } => {
+                        controller.continue_tearoff_as_panel_capture(panel)
+                    }
+                    _ => controller.continue_tearoff_as_floating_capture(group),
+                };
+                if continued.is_ok() {
+                    Some(group)
+                } else {
+                    let _ = controller.cancel_pointer_interaction_on_escape();
+                    controller.flush_events(cx);
+                    cx.notify();
+                    None
+                }
             }
             _ => {
                 let _ = controller.cancel_pointer_interaction_on_escape();
