@@ -1,5 +1,5 @@
 use dock_core::NodeId;
-use gpui::{IntoElement, InteractiveElement, ParentElement, Styled, div, px, rgb};
+use gpui::{IntoElement, InteractiveElement, ParentElement, StatefulInteractiveElement, Styled, div, px, rgb};
 use ui::Theme;
 
 use crate::components::context_menu::{ContextMenuTarget, GroupMenuToggle};
