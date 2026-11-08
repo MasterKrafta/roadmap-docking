@@ -21,7 +21,7 @@ use ui::Theme;
 
 use crate::{
     DockController, FloatingWindowManager,
-    dock_components::{DockAreaDragArea, DockAreaView, DockColumnView, DockTab},
+    dock_components::{DockAreaDragArea, DockAreaView, DockCompositionView, DockTab},
     input::drag::{
         begin_floating_tab_tearoff, finish_floating_tab_drag, update_floating_tab_drag,
         FloatingTabDrag,
@@ -32,7 +32,6 @@ use crate::{
 };
 
 use super::{
-    column::ColumnView,
     drop_overlay::{DragGhost, DropOverlay},
     context_menu::{
         ContextMenu, ContextMenuCallbacks, ContextMenuDismiss, ContextMenuSubmenuToggle,
@@ -101,120 +100,48 @@ impl FloatingWindowContent {
             .overflow_hidden()
             .bg(rgb(theme.colors.panel_surface_background));
 
-        // Each Column remains a normal Core subtree. Its groups, tab strips,
-        // panel views and internal vertical splitters use the same components
-        // as the main dock, only translated into this window's local space.
+        // MainDockView and FloatingWindowContent use the same composition
+        // renderer. Only the host-local coordinates, floating identity and
+        // shared DockAreaHeader visibility differ between the two windows.
         for column in columns {
             let group_ids = column_groups
                 .get(&column.column)
                 .map(Vec::as_slice)
                 .unwrap_or(&[]);
-            let column_group_rects = groups
-                .iter()
-                .filter(|group| group_ids.contains(&group.group))
-                .copied()
-                .collect::<Vec<_>>();
-            let column_splitters = splitters
-                .iter()
-                .filter(|splitter| {
-                    splitter.owner == column.column && splitter.axis == dock_core::Axis::Y
-                })
-                .copied()
-                .collect::<Vec<_>>();
-            let overflow = vertical_overflow
-                .iter()
-                .find(|overflow| overflow.owner == column.column)
-                .copied();
-            let column_active = group_ids
-                .iter()
-                .filter_map(|group| {
-                    group_presentations
-                        .get(group)
-                        .and_then(|presentation| presentation.active_panel)
-                })
-                .collect::<HashSet<_>>();
-            let column_panels = panels
-                .iter()
-                .filter(|(panel, _)| column_active.contains(&panel.panel))
-                .cloned()
-                .collect::<Vec<_>>();
             let mode = column_modes
                 .get(&column.column)
                 .copied()
                 .unwrap_or(ColumnMode::Expanded);
 
-            // Use the same dock-components Column implementation as MainDockView
-            // when this Core Column is the supported single-group/single-tab shape.
-            // Its AnyView is the controller's cached panel view; it is not rebuilt.
-            let single_active_panel = if column_group_rects.len() == 1 {
-                column_group_rects.first().and_then(|group| {
-                    let presentation = group_presentations.get(&group.group)?;
-                    if presentation.tabs.len() != 1 {
-                        return None;
-                    }
-                    let tab = presentation.tabs.first()?;
-                    if presentation.active_panel != Some(tab.panel) {
-                        return None;
-                    }
-                    let panel_view = column_panels
-                        .iter()
-                        .find(|(panel, _)| panel.panel == tab.panel)
-                        .map(|(_, view)| view.clone())?;
-                    Some((tab.title.to_string(), panel_view))
-                })
-            } else {
-                None
-            };
-
-            if let Some((title, panel_view)) = single_active_panel {
-                root = root.child(
-                    div()
-                        .id(format!("floating-dock-components-column-{:?}", column.column))
-                        .absolute()
-                        .left(px(column.rect.origin.x))
-                        .top(px(column.rect.origin.y))
-                        .w(px(column.rect.size.width))
-                        .h(px(column.rect.size.height))
-                        .child(DockColumnView::render_active_with_area_header(
-                            format!("floating-dock-components-{:?}", column.column),
-                            title,
-                            panel_view,
-                            metrics,
-                            theme,
-                            !hide_header,
-                        )),
-                );
-            } else {
-                root = root.child(ColumnView::render(
-                    *column,
-                    mode,
-                    &column_group_rects,
-                    column_panels,
-                    tab_strips,
-                    tab_headers,
-                    tab_overflows,
-                    group_presentations,
-                    rail_display_orders
-                        .get(&column.column)
-                        .map(Vec::as_slice)
-                        .unwrap_or(&[]),
-                    active_flyout,
-                    drag_preview,
-                    drag_zones,
-                    metrics,
-                    menu_group,
-                    context_menu.clone(),
-                    middle_click_closes_tabs,
-                    &column_splitters,
-                    overflow,
-                    scroll_handles.get(&column.column).cloned(),
-                    controller.clone(),
-                    theme,
-                    origin,
-                    Some(floating.group),
-                    !hide_header,
-                ));
-            }
+            root = root.child(DockCompositionView::render_column(
+                *column,
+                groups,
+                &panels,
+                tab_strips,
+                tab_headers,
+                tab_overflows,
+                group_presentations,
+                group_ids,
+                mode,
+                rail_display_orders
+                    .get(&column.column)
+                    .map(Vec::as_slice)
+                    .unwrap_or(&[]),
+                active_flyout,
+                drag_preview,
+                drag_zones,
+                metrics,
+                menu_group,
+                context_menu.clone(),
+                middle_click_closes_tabs,
+                splitters,
+                vertical_overflow,
+                scroll_handles.get(&column.column).cloned(),
+                controller.clone(),
+                theme,
+                Some(floating.group),
+                !hide_header,
+            ));
         }
 
         // Tabs nodes that are not owned by a Column still use GroupView.
