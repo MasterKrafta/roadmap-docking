@@ -17,6 +17,7 @@ use crate::{
 };
 
 use super::{
+    interaction::DockInteractionCoordinator,
     drag::{begin_drag_at, finish_drag_at, update_drag_at},
     resize::{begin_resize_hit, finish_resize, update_resize},
     scroll::map_hit_test_point,
@@ -149,7 +150,7 @@ pub(crate) fn register_pointer_events(
         move |event: &MouseDownEvent, phase, window, app| {
             if phase != DispatchPhase::Capture
                 || !root_hitbox.is_hovered(window)
-                || pointer_capture.get().is_some()
+                || DockInteractionCoordinator::has_capture(&pointer_capture)
                 || window.captured_hitbox().is_some()
             {
                 return;
@@ -291,10 +292,11 @@ pub(crate) fn register_pointer_events(
                     let resize_started = controller
                         .update(app, |controller, _| controller.resize_interaction().is_some());
                     if resize_started {
-                        window.capture_pointer(root_hitbox);
-                        if window.captured_hitbox() == Some(root_hitbox) {
-                            pointer_capture.set(Some(root_hitbox));
-                        } else {
+                        if !DockInteractionCoordinator::capture(
+                            window,
+                            root_hitbox,
+                            &pointer_capture,
+                        ) {
                             cancel_pointer_interaction(
                                 &controller,
                                 window,
@@ -341,9 +343,8 @@ pub(crate) fn register_pointer_events(
         let last_drag_hit_for_move = last_drag_hit.clone();
         move |event: &MouseMoveEvent, phase, window, app| {
             if manager.update(app, |manager, _| manager.native_move_active()) {
-                if pointer_capture.get().is_some() {
-                    window.release_pointer();
-                    pointer_capture.set(None);
+                if DockInteractionCoordinator::has_capture(&pointer_capture) {
+                    DockInteractionCoordinator::release(window, &pointer_capture);
                     pointer_press.set(None);
                 }
                 return;
@@ -352,11 +353,11 @@ pub(crate) fn register_pointer_events(
                 return;
             }
 
-            if !ensure_pointer_interaction_current(&controller, window, &pointer_capture, app) {
+            if !DockInteractionCoordinator::ensure_current(&controller, window, &pointer_capture, app) {
                 pointer_press.set(None);
                 return;
             }
-            let (drag_active, _, resize_active) = active_interactions(&controller, app);
+            let (drag_active, _, resize_active) = DockInteractionCoordinator::active_interactions(&controller, app);
             if !drag_active && !resize_active {
                 return;
             }
@@ -371,9 +372,7 @@ pub(crate) fn register_pointer_events(
                 return;
             }
 
-            if pointer_capture
-                .get()
-                .is_some_and(|captured| window.captured_hitbox() != Some(captured))
+            if DockInteractionCoordinator::capture_was_lost(window, &pointer_capture)
             {
                 cancel_pointer_interaction(
                     &controller,
@@ -447,8 +446,7 @@ pub(crate) fn register_pointer_events(
             if should_tearoff
                 && super::drag::begin_native_tearoff(&controller, &manager, point, app)
             {
-                window.release_pointer();
-                pointer_capture.set(None);
+                DockInteractionCoordinator::release(window, &pointer_capture);
                 pointer_press.set(None);
                 app.stop_propagation();
                 return;
@@ -460,11 +458,12 @@ pub(crate) fn register_pointer_events(
                     DragState::Dragging { .. }
                 ) || controller.resize_interaction().is_some()
             });
-            if capture_needed && pointer_capture.get().is_none() {
-                window.capture_pointer(root_hitbox);
-                if window.captured_hitbox() == Some(root_hitbox) {
-                    pointer_capture.set(Some(root_hitbox));
-                } else {
+            if capture_needed && !DockInteractionCoordinator::has_capture(&pointer_capture) {
+                if !DockInteractionCoordinator::capture(
+                    window,
+                    root_hitbox,
+                    &pointer_capture,
+                ) {
                     cancel_pointer_interaction(
                         &controller,
                         window,
@@ -507,19 +506,16 @@ pub(crate) fn register_pointer_events(
                 return;
             }
             if manager.update(app, |manager, _| manager.native_move_active()) {
-                window.release_pointer();
-                pointer_capture.set(None);
+                DockInteractionCoordinator::release(window, &pointer_capture);
                 pointer_press.set(None);
                 return;
             }
-            if !ensure_pointer_interaction_current(&controller, window, &pointer_capture, app) {
+            if !DockInteractionCoordinator::ensure_current(&controller, window, &pointer_capture, app) {
                 pointer_press.set(None);
                 return;
             }
-            let (drag_active, _, resize_active) = active_interactions(&controller, app);
-            if pointer_capture
-                .get()
-                .is_some_and(|captured| window.captured_hitbox() != Some(captured))
+            let (drag_active, _, resize_active) = DockInteractionCoordinator::active_interactions(&controller, app);
+            if DockInteractionCoordinator::capture_was_lost(window, &pointer_capture)
             {
                 cancel_pointer_interaction(
                     &controller,
@@ -533,8 +529,7 @@ pub(crate) fn register_pointer_events(
 
             let pending_press = pointer_press.get();
             if !drag_active && !resize_active && pending_press.is_none() {
-                window.release_pointer();
-                pointer_capture.set(None);
+                DockInteractionCoordinator::release(window, &pointer_capture);
                 return;
             }
 
@@ -584,8 +579,7 @@ pub(crate) fn register_pointer_events(
                 if should_tearoff
                     && super::drag::begin_native_tearoff(&controller, &manager, point, app)
                 {
-                    window.release_pointer();
-                    pointer_capture.set(None);
+                    DockInteractionCoordinator::release(window, &pointer_capture);
                     pointer_press.set(None);
                     app.stop_propagation();
                     return;
@@ -600,8 +594,7 @@ pub(crate) fn register_pointer_events(
                 });
                 finish_resize(&controller, point, event.click_count, app);
             }
-            window.release_pointer();
-            pointer_capture.set(None);
+            DockInteractionCoordinator::release(window, &pointer_capture);
 
             pointer_press.set(None);
             *last_drag_hit_for_up.borrow_mut() = None;
@@ -657,15 +650,14 @@ pub(crate) fn register_pointer_events(
                 return;
             }
             if manager.update(app, |manager, _| manager.native_move_active()) {
-                window.release_pointer();
-                pointer_capture.set(None);
+                DockInteractionCoordinator::release(window, &pointer_capture);
                 pointer_press.set(None);
                 return;
             }
             pointer_press.set(None);
 
-            let (drag_active, _, resize_active) = active_interactions(&controller, app);
-            if drag_active || resize_active || pointer_capture.get().is_some() {
+            let (drag_active, _, resize_active) = DockInteractionCoordinator::active_interactions(&controller, app);
+            if drag_active || resize_active || DockInteractionCoordinator::has_capture(&pointer_capture) {
                 cancel_pointer_interaction(
                     &controller,
                     window,
@@ -870,40 +862,6 @@ fn core_point_at_host_point(
     })
 }
 
-fn ensure_pointer_interaction_current(
-    controller: &Entity<DockController>,
-    window: &mut Window,
-    pointer_capture: &Rc<Cell<Option<HitboxId>>>,
-    app: &mut App,
-) -> bool {
-    let (current, active) = controller.update(app, |controller, cx| {
-        let current = controller.ensure_pointer_interaction_current();
-        if !current {
-            cx.notify();
-        }
-        (current, controller.has_active_pointer_interaction())
-    });
-    if !current || (!active && pointer_capture.get().is_some()) {
-        window.release_pointer();
-        pointer_capture.set(None);
-    }
-    current
-}
-
-fn active_interactions(controller: &Entity<DockController>, app: &mut App) -> (bool, bool, bool) {
-    controller.update(app, |controller, _| {
-        let state = controller.drag().session().state();
-        (
-            matches!(
-                state,
-                DragState::Pressed { .. } | DragState::Dragging { .. }
-            ),
-            matches!(state, DragState::Dragging { .. }),
-            controller.resize_interaction().is_some(),
-        )
-    })
-}
-
 fn cancel_pointer_interaction(
     controller: &Entity<DockController>,
     window: &mut Window,
@@ -911,15 +869,7 @@ fn cancel_pointer_interaction(
     pointer_press: &Rc<Cell<Option<PointerPress>>>,
     app: &mut App,
 ) {
-    if let Err(error) = controller.update(app, |controller, cx| {
-        let result = controller.cancel_pointer_interaction();
-        cx.notify();
-        result
-    }) {
-        tracing::debug!(%error, "could not cancel pointer interaction");
-    }
-    window.release_pointer();
-    pointer_capture.set(None);
+    DockInteractionCoordinator::cancel(controller, window, pointer_capture, app);
     pointer_press.set(None);
 }
 
