@@ -1444,6 +1444,80 @@ fn docking_floating_stack_into_column_preserves_existing_group_ratio_proportions
 }
 
 #[test]
+fn docking_floating_stack_into_another_floating_column_slot_is_valid() {
+    let metrics = DockMetrics::default();
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, target_panel_node) = builder.panel(
+        PanelKey::new("floating-slot-target").unwrap(),
+        descriptors()[0].1,
+    );
+    let target_group = builder.tabs(vec![target_panel_node], 0, false);
+    let target_column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![target_group],
+        vec![1.0],
+    );
+    let target_floating = builder.floating_group(
+        target_column,
+        Rect::new(Point::new(480.0, 50.0), Size::new(380.0, 300.0)),
+        1,
+    );
+
+    let (_, source_panel_a) = builder.panel(
+        PanelKey::new("floating-slot-source-a").unwrap(),
+        descriptors()[0].1,
+    );
+    let (_, source_panel_b) = builder.panel(
+        PanelKey::new("floating-slot-source-b").unwrap(),
+        descriptors()[0].1,
+    );
+    let source_group_a = builder.tabs(vec![source_panel_a], 0, false);
+    let source_group_b = builder.tabs(vec![source_panel_b], 0, false);
+    let source_stack = builder.split(
+        Axis::Y,
+        vec![source_group_a, source_group_b],
+        vec![0.5, 0.5],
+    );
+    let source_floating = builder.floating_group(
+        source_stack,
+        Rect::new(Point::new(40.0, 50.0), Size::new(380.0, 300.0)),
+        2,
+    );
+
+    let mut layout = builder.build();
+    assert_eq!(layout.validate(&metrics), Ok(()));
+
+    layout
+        .apply(
+            DockCommand::DockFloating {
+                group: source_floating,
+                target: DropTarget::ColumnSlot {
+                    column: target_column,
+                    index: 1,
+                },
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    assert!(layout.floating_group(source_floating).is_none());
+    let target = layout.floating_group(target_floating).unwrap();
+    assert_eq!(
+        layout.dock_area(target.area).map(|area| area.root),
+        Some(target_column)
+    );
+    assert!(matches!(
+        layout.node(target_column),
+        Some(Node::Column(column))
+            if column.groups == vec![target_group, source_group_a, source_group_b]
+    ));
+    assert_eq!(layout.panel_instances().count(), 3);
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
 fn docking_floating_group_onto_its_own_descendant_is_a_no_op() {
     let metrics = DockMetrics::default();
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
