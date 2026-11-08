@@ -264,8 +264,8 @@ struct FloatingHostSnapshot {
     active_drop_zone: Option<dock_core::DropZoneRect>,
 }
 
-/// A single-tab DockColumn inside a FloatingHost moves its existing native window.
-/// Other Groups detach a tab only after it leaves the source strip or enters another window.
+/// Floating tab drags detach one Panel after leaving the source strip or
+/// entering another docking window. The shared DockAreaHeader moves the whole window.
 fn floating_tab_tearoff_required(leaves_source: bool, over_other_window: bool) -> bool {
     leaves_source || over_other_window
 }
