@@ -1888,3 +1888,73 @@ fn docking_floating_horizontal_composition_before_existing_main_column_keeps_all
     ));
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
+
+#[test]
+fn column_slot_uses_the_area_of_its_main_or_floating_column() {
+    let metrics = DockMetrics::default();
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+
+    let (floating_panel, floating_panel_node) = builder.panel(
+        PanelKey::new("drop-target-floating-column").unwrap(),
+        descriptors()[0].1,
+    );
+    let floating_group = builder.tabs(vec![floating_panel_node], 0, false);
+    let floating_column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![floating_group],
+        vec![1.0],
+    );
+    builder.floating_group(
+        floating_column,
+        Rect::new(Point::new(80.0, 60.0), Size::new(420.0, 320.0)),
+        1,
+    );
+
+    let main_only_constraints =
+        descriptors()[0].1.with_allowed_areas(AllowedArea::MAIN_DOCK);
+    let (main_only_panel, main_only_panel_node) = builder.panel(
+        PanelKey::new("drop-source-main-only").unwrap(),
+        main_only_constraints,
+    );
+    let main_group = builder.tabs(vec![main_only_panel_node], 0, false);
+    let main_column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![main_group],
+        vec![1.0],
+    );
+    builder.main_area(DockSide::Right, main_column);
+
+    let layout = builder.build();
+    let floating_target = DropTarget::ColumnSlot {
+        column: floating_column,
+        index: 1,
+    };
+    let main_target = DropTarget::ColumnSlot {
+        column: main_column,
+        index: 1,
+    };
+
+    assert_eq!(
+        layout.allowed_area_for_target(floating_target),
+        Ok(AllowedArea::FLOATING)
+    );
+    assert_eq!(layout.validate_drop_target(floating_target, &metrics), Ok(()));
+    assert_eq!(
+        layout.validate_panel_ids_allowed_for_target(&[floating_panel], floating_target),
+        Ok(())
+    );
+    assert!(matches!(
+        layout.validate_panel_ids_allowed_for_target(&[main_only_panel], floating_target),
+        Err(CommandError::InvalidTarget { .. })
+    ));
+
+    assert_eq!(
+        layout.allowed_area_for_target(main_target),
+        Ok(AllowedArea::MAIN_DOCK)
+    );
+    assert_eq!(layout.validate_drop_target(main_target, &metrics), Ok(()));
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
