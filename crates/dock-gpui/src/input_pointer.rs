@@ -151,7 +151,7 @@ pub(crate) fn register_pointer_events(
             if phase != DispatchPhase::Capture
                 || !root_hitbox.is_hovered(window)
                 || DockInteractionCoordinator::has_capture(&pointer_capture)
-                || window.captured_hitbox().is_some()
+                || DockInteractionCoordinator::window_has_capture(window)
             {
                 return;
             }
