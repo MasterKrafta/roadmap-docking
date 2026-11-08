@@ -17,8 +17,8 @@ use crate::{
     components::{
         CanvasSlot, ContextMenu, ContextMenuEntry, ContextMenuItem, ContextMenuTarget,
         ContextMenuToggle, DropOverlay, FlyoutView, MainDockView,
-        collect_group_presentations,
     },
+    dock_components::{collect_group_presentations, GroupPresentation},
     geometry::{host_geometry_from_gpui_bounds, point_from_gpui},
     input::{
         PointerPress, ResizePreview, ResizePreviewKind, floating_bounds, map_hit_test_point,
@@ -870,7 +870,7 @@ fn render_resize_preview(preview: ResizePreview, theme: DockTheme) -> impl IntoE
 
 pub(crate) fn context_menu_target_exists(
     target: ContextMenuTarget,
-    presentations: &HashMap<NodeId, crate::components::tab_strip::GroupPresentation>,
+    presentations: &HashMap<NodeId, GroupPresentation>,
     columns: &HashSet<NodeId>,
     rects: Option<&LayoutRects>,
 ) -> bool {
@@ -903,7 +903,7 @@ fn command_menu_item(
 pub(crate) fn build_context_menu_entries(
     target: ContextMenuTarget,
     rects: &LayoutRects,
-    presentations: &HashMap<NodeId, crate::components::tab_strip::GroupPresentation>,
+    presentations: &HashMap<NodeId, GroupPresentation>,
     column_modes: &HashMap<NodeId, ColumnMode>,
     controller: Entity<DockController>,
     allow_float: bool,
