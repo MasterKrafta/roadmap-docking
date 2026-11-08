@@ -130,9 +130,8 @@ pub fn run(_options: RunOptions) {
 
 pub use app_shell::AppShell;
 pub use components::{
-    CanvasSlot, ColumnView, ContextMenu, ContextMenuEntry, ContextMenuItem, DragGhost, DropOverlay,
-    FloatingHost, FlyoutView, GroupView, MainDockView, PanelHost, RailView, SplitterView,
-    TabHeaderView, TabOverflow, TabStripView,
+    CanvasSlot, ContextMenu, ContextMenuEntry, ContextMenuItem, DragGhost, DropOverlay,
+    FloatingHost, FlyoutView, MainDockView, PanelHost, RailView, SplitterView, TabOverflow,
 };
 pub use dock_host::DockHost;
 pub use floating_manager::{
