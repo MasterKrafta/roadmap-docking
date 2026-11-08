@@ -572,7 +572,7 @@ pub(crate) fn register_pointer_events(
             let drag_was_started = if drag_active {
                 // MouseUp can be the first event delivered beyond the drag threshold.
                 // Update the session once more so a tab released outside the main
-                // DockHost viewport still becomes a floating window without a move event.
+                // Main-window exit still becomes floating without an intermediate move event.
                 if update_drag_at(&controller, point, app) {
                     pointer_press.set(None);
                 }
@@ -711,8 +711,8 @@ fn native_tearoff_enabled_for(handle: Option<DragHandle>, payload: DragPayload) 
 }
 
 /// Checks whether the active gesture has crossed its native tear-off boundary.
-/// The point is in main-host coordinates, so it can be compared directly with
-/// the measured DockHost viewport.
+/// The point is in main-host coordinates. The optional viewport describes the
+/// complete native main-window client area in that same coordinate space.
 fn native_tearoff_required(
     controller: &mut DockController,
     host_point: Point,
@@ -733,7 +733,7 @@ fn native_tearoff_required(
 }
 
 /// A tab remains in the main DockArea while the pointer is inside the main
-/// DockHost. Leaving the tab strip alone does not create a Floating window.
+/// window client area. Leaving its tab strip alone does not create a Floating window.
 fn panel_tab_tearoff_boundary_reached(viewport: Rect, host_point: Point) -> bool {
     !matches!(viewport.contains(host_point), Ok(true))
 }
@@ -1180,7 +1180,7 @@ mod panel_tab_tearoff_tests {
     use super::panel_tab_tearoff_boundary_reached;
 
     #[test]
-    fn tab_does_not_detach_while_pointer_remains_inside_main_host() {
+    fn tab_does_not_detach_while_pointer_remains_inside_main_window() {
         let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
 
         assert!(!panel_tab_tearoff_boundary_reached(
@@ -1195,7 +1195,7 @@ mod panel_tab_tearoff_tests {
     }
 
     #[test]
-    fn tab_detaches_only_after_pointer_leaves_main_host() {
+    fn tab_detaches_only_after_pointer_leaves_main_window() {
         let viewport = Rect::new(Point::ZERO, Size::new(1200.0, 800.0));
 
         assert!(panel_tab_tearoff_boundary_reached(
