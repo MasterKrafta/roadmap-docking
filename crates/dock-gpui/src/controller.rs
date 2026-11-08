@@ -501,8 +501,8 @@ impl DockController {
         self.history.commit_transaction(&self.layout)
     }
 
-    /// Replaces the source tab/group drag with a capture drag for the newly created
-    /// floating composition. The history transaction is deliberately left open.
+    /// Continues a whole-group or whole-column tear-off as a floating-composition
+    /// capture. The history transaction is deliberately left open.
     pub(crate) fn continue_tearoff_as_floating_capture(
         &mut self,
         group: FloatingGroupId,
