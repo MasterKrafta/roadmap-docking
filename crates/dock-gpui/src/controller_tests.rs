@@ -816,7 +816,7 @@ fn native_tearoff_preserves_original_drag_source_and_escape_rolls_back() {
 
     // A fresh transaction must be possible: cancellation did not leave an
     // orphaned UndoRedoHistory transaction behind.
-    assert!(controller.history.begin_transaction(controller.layout()));
+    assert!(controller.history.begin_transaction(&controller.layout));
     assert!(controller
         .history
         .cancel_transaction(&mut controller.layout, &controller.metrics)
