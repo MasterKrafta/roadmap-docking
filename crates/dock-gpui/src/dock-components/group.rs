@@ -29,7 +29,8 @@ use crate::{
     DockController,
     components::{
         context_menu::{ContextMenuTarget, GroupMenuToggle},
-        tab_strip::{GroupPresentation, TabStripView},
+        tab_overflow::TabOverflow,
+        tab_strip::GroupPresentation,
     },
 };
 
@@ -144,18 +145,50 @@ impl DockGroupView {
             root = root.child(grip);
         }
 
-        root = root.child(TabStripView::render(
-            group.group,
-            group.rect,
-            strip,
-            headers,
-            overflow,
-            presentation,
-            controller.clone(),
-            theme,
-            raise_floating,
-            middle_click_closes_tabs,
-        ));
+        let mut strip_root = div()
+            .id(format!("tab-strip-{:?}", group.group))
+            .absolute()
+            .left(px(strip.rect.origin.x - group.rect.origin.x))
+            .top(px(strip.rect.origin.y - group.rect.origin.y))
+            .w(px(strip.rect.size.width))
+            .h(px(strip.rect.size.height))
+            .flex()
+            .items_stretch()
+            .bg(rgb(theme.colors.tab_strip_background));
+
+        // Paint inactive tabs first so that the active tab remains in front.
+        let mut ordered_headers = headers.to_vec();
+        ordered_headers.sort_by_key(|header| presentation.active_panel == Some(header.panel));
+        for header in ordered_headers {
+            let tab = presentation
+                .tabs
+                .iter()
+                .find(|tab| tab.panel == header.panel && tab.index == header.index);
+            let title = tab
+                .map(|tab| tab.title.clone())
+                .unwrap_or_else(|| format!("Panel {}", header.index + 1).into());
+            let icon = tab.and_then(|tab| tab.icon.clone());
+            let active = presentation.active_panel == Some(header.panel);
+
+            strip_root = strip_root.child(DockTab::render_core(
+                group.group,
+                header,
+                strip.rect,
+                title,
+                icon,
+                active,
+                controller.clone(),
+                theme,
+                raise_floating,
+                middle_click_closes_tabs,
+            ));
+        }
+
+        if let Some(overflow) = overflow {
+            strip_root = strip_root.child(TabOverflow::render(strip.rect, overflow, theme));
+        }
+
+        root = root.child(strip_root);
 
         // Collapsed groups have no header rect, so their controls overlay the
         // trailing edge of the remaining tab strip to keep Expand/Menu reachable.
