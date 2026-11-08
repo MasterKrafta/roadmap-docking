@@ -2,17 +2,15 @@ use std::collections::{HashMap, HashSet};
 
 use dock_core::{
     ColumnDisplayItem, ColumnMode, ColumnRect, DockMetrics, DragPreview, DropZoneRect,
-    FloatingGroupId, FlyoutState, GroupRect, NodeId, PanelId, PanelRect,
-    SplitterRect, TabHeaderRect, TabOverflowRect, TabStripRect, VerticalOverflow,
+    FloatingGroupId, FlyoutState, GroupRect, NodeId, PanelId, PanelRect, SplitterRect,
+    TabHeaderRect, TabOverflowRect, TabStripRect, VerticalOverflow,
 };
-use gpui::{
-    AnyView, Entity, IntoElement, InteractiveElement, ParentElement, ScrollHandle, Styled, div, px,
-};
+use gpui::{AnyView, Entity, IntoElement, InteractiveElement, ParentElement, ScrollHandle, Styled, div, px};
 use ui::Theme;
 
 use crate::{
     DockController,
-    components::{column::ColumnView, context_menu::GroupMenuToggle, tab_strip::GroupPresentation},
+    components::tab_strip::GroupPresentation,
 };
 
 use super::DockColumnView;
@@ -43,7 +41,7 @@ impl DockCompositionView {
         drag_zones: &[DropZoneRect],
         metrics: DockMetrics,
         menu_group: Option<NodeId>,
-        context_menu: GroupMenuToggle,
+        context_menu: crate::components::context_menu::GroupMenuToggle,
         middle_click_closes_tabs: bool,
         splitters: &[SplitterRect],
         vertical_overflow: &[VerticalOverflow],
@@ -83,35 +81,9 @@ impl DockCompositionView {
             .cloned()
             .collect::<Vec<_>>();
 
-        // Keep one visual path for both hosts. The compact DockColumn renderer
-        // is used only for its supported single-group/single-tab shape; rail,
-        // multi-group and multi-tab columns go through the full Core renderer.
-        let single_active_panel = if column_mode == ColumnMode::Expanded
-            && group_rects.len() == 1
-        {
-            group_rects.first().and_then(|group| {
-                let presentation = group_presentations.get(&group.group)?;
-                if presentation.tabs.len() != 1 {
-                    return None;
-                }
-                let tab = presentation.tabs.first()?;
-                if presentation.active_panel != Some(tab.panel) {
-                    return None;
-                }
-                let panel_view = column_panels
-                    .iter()
-                    .find(|(panel, _)| panel.panel == tab.panel)
-                    .map(|(_, view)| view.clone())?;
-                Some((tab.title.to_string(), panel_view))
-            })
-        } else {
-            None
-        };
-
-        // Give both branches the exact same Core-assigned Column rectangle.
-        // Legacy ColumnView is translated into this local surface rather than
-        // computing its position independently in Main and Floating hosts.
-        let mut surface = div()
+        // Every Core Column shape now enters DockColumnView. Its group/tab,
+        // rail, splitter and panel-host children are shared by Main and Floating.
+        let surface = div()
             .id(format!("dock-composition-column-{:?}", column.column))
             .absolute()
             .left(px(column.rect.origin.x))
@@ -119,19 +91,8 @@ impl DockCompositionView {
             .w(px(column.rect.size.width))
             .h(px(column.rect.size.height))
             .relative()
-            .overflow_hidden();
-
-        if let Some((title, panel_view)) = single_active_panel {
-            surface = surface.child(DockColumnView::render_active_with_area_header(
-                format!("dock-composition-{:?}", column.column),
-                title,
-                panel_view,
-                metrics,
-                theme,
-                show_area_header,
-            ));
-        } else {
-            surface = surface.child(ColumnView::render(
+            .overflow_hidden()
+            .child(DockColumnView::render_core(
                 column,
                 column_mode,
                 &group_rects,
@@ -153,11 +114,9 @@ impl DockCompositionView {
                 scroll_handle,
                 controller,
                 theme,
-                column.rect.origin,
                 raise_floating,
                 show_area_header,
             ));
-        }
 
         surface
     }
