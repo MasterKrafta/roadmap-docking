@@ -7,8 +7,8 @@ use ui::Theme;
 
 
 /// Reusable tab header. The shared DockHost/FloatingHost pointer pipelines
-/// handle its drag gesture from Core tab geometry. In the main DockHost, crossing
-/// Core's drag threshold detaches the Panel into WindowKind::Floating immediately;
+/// handle its drag gesture from Core tab geometry. In the main DockHost, leaving
+/// the DockTab drag zone detaches the Panel into WindowKind::Floating;
 /// DockAreaHeader remains hidden until the native move ends on mouse release.
 pub struct DockTab;
 
