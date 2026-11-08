@@ -75,6 +75,16 @@ fn main_panel_targets_append_to_the_end_of_a_tab_strip() {
         .find(|strip| strip.group == target_group)
         .expect("the target group should have a tab strip");
     assert_eq!(append_zones[0].rect, target_strip.rect);
+    assert!(
+        !zones.iter().any(|zone| {
+            zone.target
+                == DropTarget::Tabs {
+                    group: target_group,
+                    index: 0,
+                }
+        }),
+        "a Main Dock panel drag must not expose insertion before an existing tab"
+    );
 
     let group_zones = layout
         .compute_drop_zones(
@@ -83,17 +93,19 @@ fn main_panel_targets_append_to_the_end_of_a_tab_strip() {
             &metrics,
         )
         .unwrap();
-    assert!(
-        group_zones.iter().any(|zone| {
-            zone.target
-                == DropTarget::GroupTabs {
-                    group: target_group,
-                    index: 0,
-                }
-                && zone.zone == DropZone::TabInsertion
-        }),
-        "whole Group drags retain explicit insertion positions in a tab strip"
-    );
+    for index in [0, 1] {
+        assert!(
+            group_zones.iter().any(|zone| {
+                zone.target
+                    == DropTarget::GroupTabs {
+                        group: target_group,
+                        index,
+                    }
+                    && zone.zone == DropZone::TabInsertion
+            }),
+            "whole Group drags retain exact tab-strip slot {index}"
+        );
+    }
     assert!(zones.iter().any(|zone| {
         zone.target
             == DropTarget::GroupEdge {
