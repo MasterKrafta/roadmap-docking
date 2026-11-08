@@ -694,6 +694,39 @@ impl Layout {
         })
     }
 
+    pub(super) fn allowed_area_for_column_target(
+        &self,
+        column: NodeId,
+    ) -> Result<AllowedArea, CommandError> {
+        let Some(Node::Column(value)) = self.nodes.get(column) else {
+            return Err(if self.nodes.contains_key(column) {
+                CommandError::InvalidTarget {
+                    reason: "column slot target must be a Column node",
+                }
+            } else {
+                CommandError::MissingNode { node: column }
+            });
+        };
+
+        if value.mode.is_rail() {
+            return Err(CommandError::InvalidTarget {
+                reason: "expanded-column insertion target cannot be a rail; use RailSlot",
+            });
+        }
+
+        if self.main_column_position(column).is_some() {
+            return Ok(AllowedArea::MAIN_DOCK);
+        }
+
+        if self.find_floating_root_containing(column).is_some() {
+            return Ok(AllowedArea::FLOATING);
+        }
+
+        Err(CommandError::InvalidTarget {
+            reason: "column insertion target must belong to a main or floating dock area",
+        })
+    }
+
     pub(super) fn allowed_area_for_target(
         &self,
         target: DropTarget,
@@ -702,9 +735,8 @@ impl Layout {
             DropTarget::Tabs { group, .. }
             | DropTarget::GroupTabs { group, .. }
             | DropTarget::GroupEdge { group, .. } => self.allowed_area_for_group_target(group),
-            DropTarget::MainColumn { .. } | DropTarget::ColumnSlot { .. } => {
-                Ok(AllowedArea::MAIN_DOCK)
-            }
+            DropTarget::MainColumn { .. } => Ok(AllowedArea::MAIN_DOCK),
+            DropTarget::ColumnSlot { column, .. } => self.allowed_area_for_column_target(column),
             DropTarget::RailSlot { .. } => Ok(AllowedArea::ICON_RAIL),
             DropTarget::FreeArea => Ok(AllowedArea::FLOATING),
         }
@@ -860,27 +892,19 @@ impl Layout {
                     })
                 }
             }
-            DropTarget::ColumnSlot { column, index } => match self.nodes.get(column) {
-                Some(Node::Column(value)) if value.mode.is_rail() => {
-                    Err(CommandError::InvalidTarget {
-                        reason: "expanded-column insertion target cannot be a rail; use RailSlot",
-                    })
+            DropTarget::ColumnSlot { column, index } => {
+                self.allowed_area_for_column_target(column)?;
+                match self.nodes.get(column) {
+                    Some(Node::Column(value)) if index <= value.groups.len() => Ok(()),
+                    Some(Node::Column(_)) => Err(CommandError::InvalidValue {
+                        field: "index",
+                        reason: "column group insertion index is outside the column",
+                    }),
+                    Some(_) => Err(CommandError::InvalidTarget {
+                        reason: "column slot target must be a Column node",
+                    }),
+                    None => Err(CommandError::MissingNode { node: column }),
                 }
-                Some(Node::Column(value)) if self.main_column_position(column).is_none() => {
-                    let _ = value;
-                    Err(CommandError::InvalidTarget {
-                        reason: "column insertion target must belong to a main dock",
-                    })
-                }
-                Some(Node::Column(value)) if index <= value.groups.len() => Ok(()),
-                Some(Node::Column(_)) => Err(CommandError::InvalidValue {
-                    field: "index",
-                    reason: "column group insertion index is outside the column",
-                }),
-                Some(_) => Err(CommandError::InvalidTarget {
-                    reason: "column slot target must be a Column node",
-                }),
-                None => Err(CommandError::MissingNode { node: column }),
             },
             DropTarget::FreeArea => Err(CommandError::InvalidTarget {
                 reason: "FreeArea must be resolved by Float with explicit window bounds",
