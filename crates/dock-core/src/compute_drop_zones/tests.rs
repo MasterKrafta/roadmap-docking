@@ -264,6 +264,86 @@ fn adjacent_main_groups_have_non_overlapping_vertical_drop_boundaries() {
 }
 
 #[test]
+fn main_column_drag_exposes_only_whole_column_destinations() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, left_first_panel) = builder.panel(key("column-drag-left-first"), constraints());
+    let left_first_group = builder.tabs(vec![left_first_panel], 0, false);
+    let left_first_column = builder.column(
+        280.0,
+        ColumnMode::Expanded,
+        vec![left_first_group],
+        vec![1.0],
+    );
+
+    let (_, source_panel) = builder.panel(key("column-drag-source"), constraints());
+    let source_group = builder.tabs(vec![source_panel], 0, false);
+    let source_column = builder.column(
+        280.0,
+        ColumnMode::Expanded,
+        vec![source_group],
+        vec![1.0],
+    );
+    let left_root = builder.split(
+        Axis::X,
+        vec![left_first_column, source_column],
+        vec![0.5, 0.5],
+    );
+    builder.main_area(DockSide::Left, left_root);
+
+    let (_, right_panel) = builder.panel(key("column-drag-right"), constraints());
+    let right_group = builder.tabs(vec![right_panel], 0, false);
+    let right_column = builder.column(
+        280.0,
+        ColumnMode::Expanded,
+        vec![right_group],
+        vec![1.0],
+    );
+    builder.main_area(DockSide::Right, right_column);
+
+    let layout = builder.build();
+    let rects = layout.compute_rects(viewport(), &metrics).unwrap();
+    let zones = layout
+        .compute_drop_zones(
+            DropSource::Column {
+                column: source_column,
+            },
+            &rects,
+            &metrics,
+        )
+        .unwrap();
+
+    assert!(zones.iter().any(|zone| {
+        zone.target
+            == DropTarget::MainColumn {
+                side: DockSide::Right,
+                index: 0,
+            }
+            && zone.zone == DropZone::ColumnLeft
+    }));
+    assert!(zones.iter().any(|zone| {
+        zone.target
+            == DropTarget::MainColumn {
+                side: DockSide::Right,
+                index: 1,
+            }
+            && zone.zone == DropZone::ColumnRight
+    }));
+    assert!(
+        zones.iter().any(|zone| zone.target == DropTarget::FreeArea),
+        "a Main Column may be detached into a new Floating area"
+    );
+    assert!(
+        zones.iter().all(|zone| matches!(
+            zone.target,
+            DropTarget::MainColumn { .. } | DropTarget::FreeArea
+        )),
+        "a Column drag must not expose group, tab, or inner-column targets"
+    );
+}
+
+#[test]
 fn a_group_cannot_drop_onto_itself_or_a_noop_neighbor_slot() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
