@@ -257,6 +257,12 @@ fn ghost_presentation(
             Some(SharedString::from("Dock column")),
             true,
         ),
+        DragPayload::DockArea { .. } => (
+            SharedString::from("Dock area"),
+            None,
+            Some(SharedString::from("Dock composition")),
+            true,
+        ),
         DragPayload::FloatingGroup { .. } => (
             SharedString::from("Floating window"),
             None,
