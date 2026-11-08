@@ -181,21 +181,20 @@ pub trait NativeWindowOps {
 
 /// Resolves the first visible top-level window under a screen point.
 ///
-/// The dragged HWND is transparent to docking hit-testing, so lookup continues
-/// behind it. Any other visible window is an occluder: if it is not one of the
-/// registered dock windows, the point must not fall through to a dock window
-/// behind it.
+/// The callback yields windows lazily in native Z-order, avoiding a per-pointer
+/// allocation while the OS drag loop is polling. The dragged HWND is transparent
+/// to docking hit-testing; any other unknown visible window blocks the drop.
 fn topmost_known_window_under_point(
     point: PhysicalPoint,
-    windows_in_z_order: &[(NativeWindowId, PhysicalRect)],
     known_windows: &[NativeWindowId],
     exclude: Option<NativeWindowId>,
+    mut next_window: impl FnMut() -> Option<(NativeWindowId, PhysicalRect)>,
 ) -> Option<NativeWindowId> {
-    for (window, rect) in windows_in_z_order {
-        if Some(*window) == exclude || !rect.contains(point) {
+    while let Some((window, rect)) = next_window() {
+        if Some(window) == exclude || !rect.contains(point) {
             continue;
         }
-        return known_windows.contains(window).then_some(*window);
+        return known_windows.contains(&window).then_some(window);
     }
     None
 }
@@ -977,32 +976,34 @@ mod windows_impl {
         ) -> Result<Option<NativeWindowId>, NativeError> {
             // SAFETY: Walk the desktop's top-level Z-order synchronously.
             let mut current = unsafe { GetTopWindow(None) }.ok();
-            let mut windows_in_z_order = Vec::new();
-            while let Some(native) = current {
-                if let Some(id) = NativeWindowId::from_raw(native.0 as isize) {
-                    // SAFETY: native is the current top-level HWND.
-                    let visible = unsafe {
-                        IsWindowVisible(native).as_bool() && !IsIconic(native).as_bool()
-                    };
-                    if visible {
+            let target = topmost_known_window_under_point(
+                point,
+                known_windows,
+                exclude,
+                || {
+                    while let Some(native) = current {
+                        // SAFETY: Advance to the next top-level HWND in Z-order.
+                        current = unsafe { GetWindow(native, GW_HWNDNEXT) }.ok();
+                        let Some(id) = NativeWindowId::from_raw(native.0 as isize) else {
+                            continue;
+                        };
+                        // SAFETY: native is the current top-level HWND.
+                        let visible = unsafe {
+                            IsWindowVisible(native).as_bool() && !IsIconic(native).as_bool()
+                        };
+                        if !visible {
+                            continue;
+                        }
                         let mut rect = RECT::default();
                         // SAFETY: rect is a valid writable RECT.
                         if unsafe { GetWindowRect(native, &mut rect) }.is_ok() {
-                            windows_in_z_order.push((id, rect_from_native(rect)));
+                            return Some((id, rect_from_native(rect)));
                         }
                     }
-                }
-
-                // SAFETY: Advance to the next top-level HWND in Z-order.
-                current = unsafe { GetWindow(native, GW_HWNDNEXT) }.ok();
-            }
-
-            Ok(topmost_known_window_under_point(
-                point,
-                &windows_in_z_order,
-                known_windows,
-                exclude,
-            ))
+                    None
+                },
+            );
+            Ok(target)
         }
 
         fn monitor_work_areas(&self) -> Result<Vec<PhysicalRect>, NativeError> {
@@ -1198,6 +1199,20 @@ mod drop_window_target_tests {
         }
     }
 
+    fn resolve(
+        point: PhysicalPoint,
+        windows: &[(NativeWindowId, PhysicalRect)],
+        known: &[NativeWindowId],
+        exclude: Option<NativeWindowId>,
+    ) -> Option<NativeWindowId> {
+        let mut index = 0;
+        topmost_known_window_under_point(point, known, exclude, || {
+            let result = windows.get(index).copied();
+            index += usize::from(result.is_some());
+            result
+        })
+    }
+
     #[test]
     fn unrelated_topmost_window_blocks_a_dock_window_behind_it() {
         let point = PhysicalPoint { x: 200, y: 200 };
@@ -1208,10 +1223,7 @@ mod drop_window_target_tests {
             (main_window, bounds()),
         ];
 
-        assert_eq!(
-            topmost_known_window_under_point(point, &windows, &[main_window], None),
-            None,
-        );
+        assert_eq!(resolve(point, &windows, &[main_window], None), None);
     }
 
     #[test]
@@ -1225,7 +1237,7 @@ mod drop_window_target_tests {
         ];
 
         assert_eq!(
-            topmost_known_window_under_point(
+            resolve(
                 point,
                 &windows,
                 &[source_window, target_window],
@@ -1246,12 +1258,7 @@ mod drop_window_target_tests {
         ];
 
         assert_eq!(
-            topmost_known_window_under_point(
-                point,
-                &windows,
-                &[topmost_floating, lower_main],
-                None,
-            ),
+            resolve(point, &windows, &[topmost_floating, lower_main], None),
             Some(topmost_floating),
         );
     }
@@ -1272,9 +1279,6 @@ mod drop_window_target_tests {
             (main_window, bounds()),
         ];
 
-        assert_eq!(
-            topmost_known_window_under_point(point, &windows, &[main_window], None),
-            Some(main_window),
-        );
+        assert_eq!(resolve(point, &windows, &[main_window], None), Some(main_window));
     }
 }
