@@ -10,7 +10,7 @@ use gpui::{
 };
 use ui::Theme;
 
-use super::tab_strip::GroupPresentation;
+use crate::dock_components::GroupPresentation;
 
 /// Visual feedback for the current Core-resolved destination.
 ///
