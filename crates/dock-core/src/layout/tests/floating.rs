@@ -1444,20 +1444,25 @@ fn docking_floating_stack_into_column_preserves_existing_group_ratio_proportions
 }
 
 #[test]
-fn docking_floating_stack_into_another_floating_column_slot_is_valid() {
+fn docking_floating_stack_into_another_floating_column_slot_preserves_order_and_ratios() {
     let metrics = DockMetrics::default();
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
 
-    let (_, target_panel_node) = builder.panel(
-        PanelKey::new("floating-slot-target").unwrap(),
+    let (_, target_panel_a) = builder.panel(
+        PanelKey::new("floating-slot-target-a").unwrap(),
         descriptors()[0].1,
     );
-    let target_group = builder.tabs(vec![target_panel_node], 0, false);
+    let (_, target_panel_b) = builder.panel(
+        PanelKey::new("floating-slot-target-b").unwrap(),
+        descriptors()[0].1,
+    );
+    let target_group_a = builder.tabs(vec![target_panel_a], 0, false);
+    let target_group_b = builder.tabs(vec![target_panel_b], 0, false);
     let target_column = builder.column(
         metrics.default_column_width,
         crate::ColumnMode::Expanded,
-        vec![target_group],
-        vec![1.0],
+        vec![target_group_a, target_group_b],
+        vec![0.8, 0.2],
     );
     let target_floating = builder.floating_group(
         target_column,
@@ -1478,7 +1483,7 @@ fn docking_floating_stack_into_another_floating_column_slot_is_valid() {
     let source_stack = builder.split(
         Axis::Y,
         vec![source_group_a, source_group_b],
-        vec![0.5, 0.5],
+        vec![0.2, 0.8],
     );
     let source_floating = builder.floating_group(
         source_stack,
@@ -1508,15 +1513,21 @@ fn docking_floating_stack_into_another_floating_column_slot_is_valid() {
         layout.dock_area(target.area).map(|area| area.root),
         Some(target_column)
     );
-    assert!(matches!(
-        layout.node(target_column),
-        Some(Node::Column(column))
-            if column.groups == vec![target_group, source_group_a, source_group_b]
-    ));
-    assert_eq!(layout.panel_instances().count(), 3);
+    let Some(Node::Column(column)) = layout.node(target_column) else {
+        panic!("the target Floating root should remain its Column");
+    };
+    assert_eq!(
+        column.groups,
+        vec![target_group_a, source_group_a, source_group_b, target_group_b]
+    );
+    assert_eq!(column.group_ratios.len(), 4);
+    assert!((column.group_ratios[0] - 0.4).abs() < 1.0e-4);
+    assert!((column.group_ratios[1] - 0.1).abs() < 1.0e-4);
+    assert!((column.group_ratios[2] - 0.4).abs() < 1.0e-4);
+    assert!((column.group_ratios[3] - 0.1).abs() < 1.0e-4);
+    assert_eq!(layout.panel_instances().count(), 4);
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
-
 #[test]
 fn docking_floating_group_onto_its_own_descendant_is_a_no_op() {
     let metrics = DockMetrics::default();
