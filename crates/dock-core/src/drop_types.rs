@@ -1,17 +1,18 @@
 use crate::{DockSide, NodeId, Rect};
 
-/// The semantic item currently being dragged, used to compute legal drop targets.
+/// The logical item currently being dragged, independent of its Main/Floating host.
 ///
-/// A whole Tabs group keeps its identity during reorder/split. Column sources carry
-/// an entire main-dock Column composition. A floating-window capture uses the complete
-/// floating composition root, which may be a Column or Split rather than a Tabs node.
-/// Individual panels carry their PanelId so Core can apply area restrictions.
+/// A whole Tabs group keeps its identity during reorder/split. A Column source carries
+/// the Column node itself. When an already-floating window is moved as a whole, its
+/// composition root is represented by its structural kind: a Column root as Column,
+/// and another root shape as Group. Individual panels carry their PanelId so Core can
+/// apply area restrictions.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum DropSource {
     Panel { panel: crate::PanelId },
     Group { group: crate::NodeId },
-    /// A whole Column dragged from the main dock.
+    /// A whole Column node dragged from its current dock-area host.
     Column { column: NodeId },
 }
 
@@ -63,7 +64,7 @@ pub enum DropTarget {
     GroupEdge { group: NodeId, zone: DropZone },
     /// Insert a new main-dock column at an exact position on the given side.
     MainColumn { side: DockSide, index: usize },
-    /// Insert a group into an expanded main-dock column at an exact group slot.
+    /// Insert a group into an expanded Column in either Main or a Floating dock area.
     ColumnSlot { column: NodeId, index: usize },
     /// Insert a group into an icon rail at an exact slot in flattened rail order.
     RailSlot { column: NodeId, index: usize },
@@ -258,5 +259,29 @@ mod drop_target_tests {
             serde_json::from_str::<DropTarget>(&encoded).unwrap(),
             target
         );
+    }
+}
+
+#[cfg(test)]
+mod drop_source_tests {
+    use super::DropSource;
+    use crate::{NodeId, PanelId};
+    use slotmap::Key;
+
+    #[test]
+    fn logical_source_kinds_remain_distinct() {
+        let panel = DropSource::Panel {
+            panel: PanelId::null(),
+        };
+        let group = DropSource::Group {
+            group: NodeId::null(),
+        };
+        let column = DropSource::Column {
+            column: NodeId::null(),
+        };
+
+        assert_ne!(panel, group);
+        assert_ne!(panel, column);
+        assert_ne!(group, column);
     }
 }
