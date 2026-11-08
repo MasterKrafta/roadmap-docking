@@ -336,6 +336,16 @@ struct FloatingHostSnapshot {
     active_drop_zone: Option<dock_core::DropZoneRect>,
 }
 
+/// A DockTab in the new component renderer is detached as soon as its
+/// Core drag threshold is crossed. Legacy tabs keep their strip-exit rule.
+fn floating_tab_tearoff_required(
+    is_dock_component_tab: bool,
+    leaves_source: bool,
+    over_other_window: bool,
+) -> bool {
+    is_dock_component_tab || leaves_source || over_other_window
+}
+
 /// Gives the shared DockAreaHeader input priority over every Column below it.
 /// Returns Some(false) for the collapse and close controls on the header.
 fn floating_dock_area_title_pointer_region(
@@ -752,11 +762,31 @@ impl Render for FloatingHost {
                         let Ok(point) = crate::geometry::point_from_gpui(event.position) else {
                             return;
                         };
-                        let hit = controller_for_down.update(app, |controller, _| {
+                        let core_hit = controller_for_down.update(app, |controller, _| {
                             controller
                                 .hit_floating_window(input_window_id, group, point)
                                 .ok()
                         });
+                        // FloatingWindowContent can render DockTab independently of the
+                        // legacy GroupView. Normalize the tab's own geometry before the
+                        // pointer handler decides between moving this window and tearing
+                        // the individual panel off into another Floating window.
+                        let dock_component_tab_hit = controller_for_down.update(app, |controller, _| {
+                            let rects = controller
+                                .floating_geometry(input_window_id, group)
+                                .ok()?;
+                            rects.tab_headers.iter().find_map(|header| {
+                                (dock_component_tab_zones_for_down.contains_key(&header.panel)
+                                    && matches!(header.rect.contains(point), Ok(true)))
+                                .then_some(dock_core::HitResult::TabHeader {
+                                    group: header.group,
+                                    panel: header.panel,
+                                    index: header.index,
+                                })
+                            })
+                        });
+                        let is_dock_component_tab = dock_component_tab_hit.is_some();
+                        let hit = dock_component_tab_hit.or(core_hit);
                         eprintln!(
                             "[DOCK-INPUT][floating] down floating_group={:?} point=({:.1}, {:.1}) hit={:?}",
                             group, point.x, point.y, hit.unwrap_or(dock_core::HitResult::Miss)
@@ -805,6 +835,7 @@ impl Render for FloatingHost {
                             _ => None,
                         };
                         if let Some(tab_group) = dock_component_group
+                            && !is_dock_component_tab
                             && dock_component_group_zones_for_down
                                 .get(&tab_group)
                                 .is_some_and(|zone| !DockTab::leaves_strip_zone(*zone, point))
@@ -832,9 +863,7 @@ impl Render for FloatingHost {
                                 group: tab_group,
                                 panel,
                                 ..
-                            } = controller
-                                .hit_floating_window(input_window_id, group, point)
-                                .ok()?
+                            } = hit?
                             else {
                                 return None;
                             };
@@ -973,8 +1002,13 @@ impl Render for FloatingHost {
                                 })
                                 
                         });
-                        if (leaves_source || over_other_window)
-                            && let Some(manager) = manager_entity.as_ref()
+                        let is_dock_component_tab =
+                            dock_component_tab_zones_for_move.contains_key(&press.panel);
+                        if (floating_tab_tearoff_required(
+                            is_dock_component_tab,
+                            leaves_source,
+                            over_other_window,
+                        )) && let Some(manager) = manager_entity.as_ref()
                             && begin_floating_tab_tearoff(
                                 &controller_for_move,
                                 manager,
@@ -1082,8 +1116,13 @@ impl Render for FloatingHost {
                                     manager.cursor_over_other_docking_window(group)
                                 })
                             });
-                            if (leaves_source || over_other_window)
-                                && let Some(manager) = manager_entity.as_ref()
+                            let is_dock_component_tab =
+                                dock_component_tab_zones_for_up.contains_key(&press.panel);
+                            if floating_tab_tearoff_required(
+                                is_dock_component_tab,
+                                leaves_source,
+                                over_other_window,
+                            ) && let Some(manager) = manager_entity.as_ref()
                                 && begin_floating_tab_tearoff(
                                     &controller_for_up,
                                     manager,
@@ -1136,14 +1175,29 @@ impl Render for FloatingHost {
                             if controller.layout().version() != press.layout_version {
                                 return false;
                             }
+                            let core_hit = controller
+                                .hit_floating_window(input_window_id, group, point)
+                                .unwrap_or(dock_core::HitResult::Miss);
+                            let released_hit = controller
+                                .floating_geometry(input_window_id, group)
+                                .ok()
+                                .and_then(|rects| {
+                                    rects.tab_headers.iter().find_map(|header| {
+                                        (dock_component_tab_zones_for_up.contains_key(&header.panel)
+                                            && matches!(header.rect.contains(point), Ok(true)))
+                                        .then_some(dock_core::HitResult::TabHeader {
+                                            group: header.group,
+                                            panel: header.panel,
+                                            index: header.index,
+                                        })
+                                    })
+                                })
+                                .unwrap_or(core_hit);
                             let dock_core::HitResult::TabHeader {
                                 group: released_group,
                                 panel: released_panel,
                                 ..
-                            } = controller
-                                .hit_floating_window(input_window_id, group, point)
-                                .ok()
-                                .unwrap_or(dock_core::HitResult::Miss)
+                            } = released_hit
                             else {
                                 return false;
                             };
@@ -1166,8 +1220,12 @@ impl Render for FloatingHost {
                             else {
                                 return false;
                             };
-                            let close_width = 18.0_f32.min(header.rect.size.width);
-                            point.x < header.rect.origin.x + header.rect.size.width - close_width
+                            if dock_component_tab_zones_for_up.contains_key(&released_panel) {
+                                true
+                            } else {
+                                let close_width = 18.0_f32.min(header.rect.size.width);
+                                point.x < header.rect.origin.x + header.rect.size.width - close_width
+                            }
                         });
                         if should_activate {
                             controller_for_up.update(app, |controller, cx| {
@@ -1389,6 +1447,27 @@ impl Render for FloatingHost {
         });
 
         root
+    }
+}
+
+#[cfg(test)]
+mod floating_tab_tearoff_tests {
+    use super::floating_tab_tearoff_required;
+
+    #[test]
+    fn dock_component_tab_detaches_as_soon_as_drag_threshold_is_crossed() {
+        assert!(floating_tab_tearoff_required(true, false, false));
+    }
+
+    #[test]
+    fn legacy_tab_waits_until_it_leaves_its_source_strip() {
+        assert!(!floating_tab_tearoff_required(false, false, false));
+        assert!(floating_tab_tearoff_required(false, true, false));
+    }
+
+    #[test]
+    fn dragging_over_another_docking_window_still_detaches_legacy_tabs() {
+        assert!(floating_tab_tearoff_required(false, false, true));
     }
 }
 
