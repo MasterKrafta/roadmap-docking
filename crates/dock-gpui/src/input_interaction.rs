@@ -92,4 +92,20 @@ impl DockInteractionCoordinator {
         }
         Self::release(window, capture_state);
     }
+
+    pub(crate) fn cancel_on_focus_loss(
+        controller: &Entity<DockController>,
+        window: &mut Window,
+        capture_state: &Rc<Cell<Option<HitboxId>>>,
+        app: &mut App,
+    ) {
+        if let Err(error) = controller.update(app, |controller, cx| {
+            let result = controller.cancel_pointer_interaction_on_focus_loss();
+            cx.notify();
+            result
+        }) {
+            tracing::warn!(%error, "could not cancel dock pointer interaction after focus loss");
+        }
+        Self::release(window, capture_state);
+    }
 }
