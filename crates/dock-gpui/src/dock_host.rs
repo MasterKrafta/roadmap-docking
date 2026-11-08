@@ -338,13 +338,8 @@ impl Render for DockHost {
             let drag_zones = resolver
                 .map(|resolver| resolver.zones().to_vec())
                 .unwrap_or_default();
-            let active_drop_zone = drag_preview.and_then(|preview| {
-                let zone = resolver?
-                    .resolve_zone(preview.point)
-                    .ok()?
-                    .filter(|zone| preview.target == Some(zone.target))?;
-                Some(zone)
-            });
+            let active_drop_zone =
+                DropOverlay::resolve_active_zone(resolver, drag_preview);
             let free_area_preview_bounds = drag_preview
                 .filter(|preview| preview.target == Some(DropTarget::FreeArea))
                 .and_then(|preview| floating_bounds(controller, preview.payload, preview.point));
