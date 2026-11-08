@@ -283,8 +283,7 @@ impl Layout {
                     group: target_group,
                     zone: zone @ (DropZone::Left | DropZone::Right),
                 },
-            ) if self.profile == Profile::Generic
-                && self.is_column_composition_root(root)
+            ) if self.is_column_composition_root(root)
                 && self.floating_group_is_in_column_composition(target_group) =>
             {
                 self.dock_floating_composition_to_edge(group_id, root, target_group, zone)
@@ -593,7 +592,7 @@ impl Layout {
     }
 
     /// Validates a floating-group drop. Horizontal GroupEdge targets inside
-    /// floating areas are reserved for joining complete Photoshop compositions;
+    /// floating areas are reserved for joining complete Column-based compositions;
     /// the general GroupEdge validator remains scoped to main-dock splits.
     fn is_column_composition_root(&self, root: NodeId) -> bool {
         match self.nodes.get(root) {
@@ -622,7 +621,6 @@ impl Layout {
             group,
             zone: zone @ (DropZone::Left | DropZone::Right),
         } = target
-            && self.profile == Profile::Generic
             && source_is_column_composition
             && self.floating_group_is_in_column_composition(group)
         {
