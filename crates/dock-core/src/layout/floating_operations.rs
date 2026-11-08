@@ -610,7 +610,7 @@ impl Layout {
             .is_some_and(|root| self.is_column_composition_root(root))
     }
 
-    fn validate_floating_dock_target(
+    pub(super) fn validate_floating_dock_target(
         &self,
         source_root: NodeId,
         target: DropTarget,
