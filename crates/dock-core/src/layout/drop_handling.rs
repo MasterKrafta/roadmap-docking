@@ -111,7 +111,6 @@ impl Layout {
                 reason: "a floating capture drag requires a dock/stack target",
             });
         }
-        self.validate_drop_target(target, metrics)?;
         let root = self
             .floating_group(group)
             .and_then(|floating| self.dock_area(floating.area))
@@ -123,6 +122,7 @@ impl Layout {
         {
             return Ok(DragDropAction::NoOp);
         }
+        self.validate_floating_dock_target(root, target, metrics)?;
         let moving_panels = self.panel_ids_in_subtree(root);
         self.validate_panel_ids_allowed_for_target(&moving_panels, target)?;
         Ok(DragDropAction::Command(DockCommand::DockFloating {
