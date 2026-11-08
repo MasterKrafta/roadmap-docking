@@ -555,7 +555,7 @@ impl FloatingWindowManager {
     }
 
     /// Starts native movement for a group created by the current main-window drag.
-    /// PanelTab tear-offs hide DockAreaHeader until this native move finishes.
+    /// PanelTab and GroupGrip tear-offs hide DockAreaHeader until this native move finishes.
     /// ColumnHeader drags hide the header only when they start on DockTab, not ColumnDragArea.
     pub(crate) fn begin_tearoff_move(
         &mut self,
@@ -1051,7 +1051,7 @@ impl FloatingWindowManager {
             floating_bounds.origin = Point::new(rect.left as f32, rect.top as f32);
         }
 
-        // A DockTab tear-off temporarily crops ColumnHeader from the native
+        // A DockTab or GroupGrip tear-off temporarily crops ColumnHeader from the native
         // client area. When the pointer is released into free space, restore
         // that client height and move the top edge up by exactly the same
         // physical amount. The Group/tab row therefore stays stationary.
