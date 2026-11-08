@@ -35,6 +35,10 @@ impl DockInteractionCoordinator {
         capture_state.get().is_some()
     }
 
+    pub(crate) fn window_has_capture(window: &Window) -> bool {
+        window.captured_hitbox().is_some()
+    }
+
     pub(crate) fn capture_was_lost(
         window: &Window,
         capture_state: &Rc<Cell<Option<HitboxId>>>,
