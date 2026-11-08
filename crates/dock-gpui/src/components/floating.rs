@@ -645,7 +645,8 @@ impl Render for FloatingHost {
             .bg(rgb(self.theme.colors.panel_surface_background));
 
         // The shared DockAreaHeader moves the complete floating composition.
-        // DockTab starts an individual-panel drag; tear-off timing depends on the source Group shape.
+        // A single-tab DockColumn moves its existing window from the DockTab drag zone;
+        // tabs in multi-tab or standalone Groups can detach from their source strip.
         let manager = self.manager.clone();
         let controller = self.controller.clone();
         let tab_press = self.tab_press.clone();
@@ -950,7 +951,8 @@ impl Render for FloatingHost {
                                 })
                                 
                         });
-                        if floating_tab_tearoff_required(leaves_source, over_other_window) && let Some(manager) = manager_entity.as_ref()
+                        if floating_tab_tearoff_required(leaves_source, over_other_window)
+                            && let Some(manager) = manager_entity.as_ref()
                             && begin_floating_tab_tearoff(
                                 &controller_for_move,
                                 manager,
@@ -1083,7 +1085,8 @@ impl Render for FloatingHost {
                                     manager.cursor_over_other_docking_window(group)
                                 })
                             });
-                            if floating_tab_tearoff_required(leaves_source, over_other_window) && let Some(manager) = manager_entity.as_ref()
+                            if floating_tab_tearoff_required(leaves_source, over_other_window)
+                                && let Some(manager) = manager_entity.as_ref()
                                 && begin_floating_tab_tearoff(
                                     &controller_for_up,
                                     manager,
