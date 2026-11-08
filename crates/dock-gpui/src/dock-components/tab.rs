@@ -1,4 +1,4 @@
-use dock_core::{DockCommand, DockMetrics, FloatingGroupId, NodeId, PanelId, Point, Rect, TabHeaderRect};
+use dock_core::{DockCommand, DockMetrics, FloatingGroupId, NodeId, Point, Rect, TabHeaderRect};
 use gpui::{
     Entity, IntoElement, InteractiveElement, MouseButton, ParentElement, SharedString,
     StatefulInteractiveElement, Styled, div, img, px, rgb,
