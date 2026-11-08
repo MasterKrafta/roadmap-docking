@@ -389,6 +389,17 @@ impl DockController {
                 reason: "a Float command requires an active native tear-off transaction",
             };
             self.finish_failure(&error);
+            // A rejected command must not strand the history transaction
+            // opened by begin_tearoff_transaction. Restore the pre-detach
+            // Layout before allowing the pointer interaction to end.
+            if self.tearoff_transaction_active
+                && let Err(cancel_error) = self.cancel_pointer_interaction()
+            {
+                tracing::warn!(
+                    %cancel_error,
+                    "could not roll back an invalid native tear-off command"
+                );
+            }
             self.flush_events(cx);
             cx.notify();
             return Err(error);
