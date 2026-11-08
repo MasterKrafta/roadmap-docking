@@ -37,7 +37,7 @@ use crate::{
 const SHOW_GROUP_CONTROLS: bool = true;
 
 /// Renders one Group inside a Column.
-pub(super) struct DockGroupView;
+pub(crate) struct DockGroupView;
 
 impl DockGroupView {
     /// Renders a live Group with one active tab and its panel view.
@@ -86,7 +86,7 @@ impl DockGroupView {
     /// This keeps the new DockColumn renderer on the same interactive path for
     /// one-tab, multi-tab and multi-group Columns.
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn render_core(
+    pub(crate) fn render_core(
         column: Option<NodeId>,
         group: GroupRect,
         strip: TabStripRect,
