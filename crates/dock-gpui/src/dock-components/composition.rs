@@ -90,7 +90,8 @@ impl DockCompositionView {
             .top(px(column.rect.origin.y))
             .w(px(column.rect.size.width))
             .h(px(column.rect.size.height))
-            .relative()
+            // Keep the surface absolute: this also establishes the containing
+            // block for DockColumnView's local absolute coordinates.
             .overflow_hidden()
             .child(DockColumnView::render_core(
                 column,
