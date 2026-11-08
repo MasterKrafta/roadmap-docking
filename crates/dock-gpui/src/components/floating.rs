@@ -805,14 +805,12 @@ impl Render for FloatingHost {
                                 .tab_headers
                                 .iter()
                                 .find(|header| header.group == tab_group && header.panel == panel)?;
-                            // DockTab has no close button: its complete header is draggable.
-                            // Legacy TabHeaderView reserves the trailing close-button hit area.
-                            if !dock_component_tab_zones_for_down.contains_key(&panel) {
-                                let close_width = 18.0_f32.min(header.rect.size.width);
-                                let header_right = header.rect.origin.x + header.rect.size.width;
-                                if point.x >= header_right - close_width {
-                                    return None;
-                                }
+                            // Every tab renderer includes a trailing close control.
+                            // Do not start a tab press from the close-button hit area.
+                            let close_width = 18.0_f32.min(header.rect.size.width);
+                            let header_right = header.rect.origin.x + header.rect.size.width;
+                            if point.x >= header_right - close_width {
+                                return None;
                             }
                             Some((tab_group, panel, controller.layout().version()))
                         });
@@ -1199,12 +1197,8 @@ impl Render for FloatingHost {
                             else {
                                 return false;
                             };
-                            if dock_component_tab_zones_for_up.contains_key(&released_panel) {
-                                true
-                            } else {
-                                let close_width = 18.0_f32.min(header.rect.size.width);
-                                point.x < header.rect.origin.x + header.rect.size.width - close_width
-                            }
+                            let close_width = 18.0_f32.min(header.rect.size.width);
+                            point.x < header.rect.origin.x + header.rect.size.width - close_width
                         });
                         if should_activate {
                             controller_for_up.update(app, |controller, cx| {
