@@ -637,37 +637,6 @@ impl Render for FloatingHost {
             manager.update(cx, |manager, _| manager.hide_floating_header(group))
         });
 
-        // A native floating window is above MainWindow in Z-order. Resolve the
-        // same Main Dock target used by hit-testing, then mirror its overlay into
-        // this moving host so the target remains visible beneath the dragged HWND.
-        let main_drop_overlay = self.controller.update(cx, |controller, _| {
-            let preview = controller.main_drag_preview()?;
-            let resolver = controller.main_drop_resolver()?;
-            let zone = resolver
-                .resolve_zone(preview.point)
-                .ok()?
-                .filter(|zone| preview.target == Some(zone.target))?;
-            Some((zone, preview))
-        });
-        let main_drop_overlay = self.manager.upgrade().and_then(|manager| {
-            manager.update(cx, |manager, _| {
-                if !manager.native_move_targets_group(group) {
-                    return None;
-                }
-                let (zone, preview) = main_drop_overlay?;
-                let mapped_zone = dock_core::DropZoneRect::new(
-                    zone.target,
-                    zone.zone,
-                    manager.main_rect_in_floating_local(group, zone.rect)?,
-                );
-                let mapped_preview = DragPreview {
-                    point: manager.main_point_in_floating_local(group, preview.point)?,
-                    ..preview
-                };
-                Some((mapped_zone, mapped_preview))
-            })
-        });
-
         let mut root = div()
             .id(format!("floating-host-root-{:?}", group))
             .track_focus(&focus_handle)
@@ -1386,14 +1355,6 @@ impl Render for FloatingHost {
                     self.theme,
                 ));
             }
-        }
-
-        if let Some((zone, preview)) = main_drop_overlay {
-            root = root.child(DropOverlay::render_remote(
-                Some(zone),
-                Some(preview),
-                self.theme,
-            ));
         }
 
         if let Some(open) = self.open_context_menu.as_ref()
