@@ -440,8 +440,11 @@ pub(crate) fn register_pointer_events(
                 }
             }
 
+            let main_window_viewport = manager.update(app, |manager, _| {
+                manager.main_client_viewport_in_host_coordinates()
+            });
             let should_tearoff = controller.update(app, |controller, _| {
-                native_tearoff_required(controller, host_point)
+                native_tearoff_required(controller, host_point, main_window_viewport)
             });
             if should_tearoff
                 && super::drag::begin_native_tearoff(&controller, &manager, point, app)
@@ -573,8 +576,11 @@ pub(crate) fn register_pointer_events(
                 if update_drag_at(&controller, point, app) {
                     pointer_press.set(None);
                 }
+                let main_window_viewport = manager.update(app, |manager, _| {
+                    manager.main_client_viewport_in_host_coordinates()
+                });
                 let should_tearoff = controller.update(app, |controller, _| {
-                    native_tearoff_required(controller, host_point)
+                    native_tearoff_required(controller, host_point, main_window_viewport)
                 });
                 if should_tearoff
                     && super::drag::begin_native_tearoff(&controller, &manager, point, app)
@@ -707,13 +713,23 @@ fn native_tearoff_enabled_for(handle: Option<DragHandle>, payload: DragPayload) 
 /// Checks whether the active gesture has crossed its native tear-off boundary.
 /// The point is in main-host coordinates, so it can be compared directly with
 /// the measured DockHost viewport.
-fn native_tearoff_required(controller: &mut DockController, host_point: Point) -> bool {
+fn native_tearoff_required(
+    controller: &mut DockController,
+    host_point: Point,
+    main_window_viewport: Option<Rect>,
+) -> bool {
     let DragState::Dragging { payload, .. } = controller.drag().session().state() else {
         return false;
     };
     let handle = controller.drag().session().handle();
     native_tearoff_enabled_for(handle, payload)
-        && native_tearoff_boundary_reached(controller, handle, payload, host_point)
+        && native_tearoff_boundary_reached(
+            controller,
+            handle,
+            payload,
+            host_point,
+            main_window_viewport,
+        )
 }
 
 /// A tab remains in the main DockArea while the pointer is inside the main
@@ -752,12 +768,14 @@ fn native_tearoff_boundary_reached(
     handle: Option<DragHandle>,
     payload: DragPayload,
     host_point: Point,
+    main_window_viewport: Option<Rect>,
 ) -> bool {
     match (handle, payload) {
         (Some(DragHandle::ColumnHeader), DragPayload::Column { .. }) => true,
         (Some(DragHandle::DockAreaHeader), DragPayload::DockArea { .. }) => true,
         (Some(DragHandle::PanelTab), DragPayload::Panel { .. }) => {
-            panel_tab_tearoff_boundary_reached(controller.viewport(), host_point)
+            let viewport = main_window_viewport.unwrap_or_else(|| controller.viewport());
+            panel_tab_tearoff_boundary_reached(viewport, host_point)
         }
         _ => false,
     }
