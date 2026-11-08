@@ -5,7 +5,7 @@ use dock_core::{
     FloatingGroupId, FlyoutState, GroupRect, NodeId, PanelId, PanelRect, Point,
     SplitterRect, TabHeaderRect, TabOverflowRect, TabStripRect, VerticalOverflow,
 };
-use gpui::{AnyView, Entity, IntoElement, ParentElement, ScrollHandle, div, px};
+use gpui::{AnyView, Entity, IntoElement, ParentElement, ScrollHandle, Styled, div, px};
 use ui::Theme;
 
 use crate::{
@@ -18,9 +18,9 @@ use super::DockColumnView;
 /// Shared renderer for a Core DockArea composition.
 ///
 /// MainDockView and FloatingWindowContent both delegate their Column surfaces
-/// here. The host supplies only its coordinate origin, floating identity and
-/// DockAreaHeader visibility; Column selection and component routing stay
-/// identical in both window modes.
+/// here. The host supplies the already host-local Core rectangles, floating
+/// identity and DockAreaHeader visibility; Column selection and component
+/// routing stay identical in both window modes.
 pub(crate) struct DockCompositionView;
 
 impl DockCompositionView {
