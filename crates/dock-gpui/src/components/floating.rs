@@ -145,7 +145,7 @@ impl FloatingWindowContent {
             ));
         }
 
-        // Tabs nodes that are not owned by a Column still use GroupView.
+        // Tabs nodes that are not owned by a Column still use DockGroupView.
         for group in groups
             .iter()
             .filter(|group| !column_group_ids.contains(&group.group))
@@ -188,7 +188,7 @@ impl FloatingWindowContent {
 
         // X splits and splitters outside Columns are painted once above the
         // child surfaces. Column-owned Y splitters were already rendered by
-        // ColumnView, where their scroll offset is available.
+        // DockColumnView, where their scroll offset is available.
         for splitter in splitters.iter().filter(|splitter| {
             !(splitter.axis == dock_core::Axis::Y && column_groups.contains_key(&splitter.owner))
         }) {
@@ -697,7 +697,7 @@ impl Render for FloatingHost {
                                 .ok()
                         });
                         // FloatingWindowContent can render DockTab independently of the
-                        // legacy GroupView. Normalize the tab's own geometry before the
+                        // DockGroupView. Normalize the tab's own geometry before the
                         // pointer handler decides between moving this window and tearing
                         // the individual panel off into another Floating window.
                         let dock_component_tab_hit =
