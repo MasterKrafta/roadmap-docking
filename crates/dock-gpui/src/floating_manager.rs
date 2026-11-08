@@ -1497,37 +1497,7 @@ impl FloatingWindowManager {
         }
         self.host_registry.floating_groups = active_hosts.clone();
 
-        // Only floating-composition hosts become visible. Native resize styles
-        // and minimum size are synchronized before the host window is shown.
-        for group in &groups {
-            if blocked_groups.contains(&group.id)
-                || self.pending_tearoff_group == Some(group.id)
-                || self.native_move.is_some_and(|session| {
-                    session.group == group.id
-                        && session.kind == NativeMoveKind::TearOff
-                        && !session.threshold_crossed
-                })
-            {
-                continue;
-            }
-            let Some(panel) = active_hosts.get(&group.id).copied() else {
-                continue;
-            };
-            let Some(entry) = self.registry.windows.get_mut(&panel) else {
-                continue;
-            };
-            if let Some(native_window) = entry.native_window {
-                match self.native_ops.show_no_activate(native_window) {
-                    Ok(()) => entry.visibility = PanelWindowVisibility::Visible,
-                    Err(error) => tracing::warn!(
-                        ?panel,
-                        ?group.id,
-                        %error,
-                        "could not show the native window hosting a floating composition"
-                    ),
-                }
-            }
-        }
+        self.synchronize_native_z_order(&groups, &active_hosts);
 
         for (panel, entry) in &mut self.registry.windows {
             if entry.host_group.is_none()
@@ -1589,6 +1559,49 @@ impl FloatingWindowManager {
             });
             if applied {
                 self.reconcile(cx);
+            }
+        }
+    }
+
+    /// Applies Core's floating z-order to the native windows.
+    ///
+    /// The snapshots arrive sorted from back to front. Showing each existing
+    /// composition with SW_SHOWNOACTIVATE preserves that order without stealing
+    /// keyboard focus from the window the user is currently interacting with.
+    /// This is the only place that reconciles native floating-window z-order.
+    fn synchronize_native_z_order(
+        &mut self,
+        groups: &[FloatingGroupSnapshot],
+        active_hosts: &HashMap<FloatingGroupId, PanelId>,
+    ) {
+        for group in groups {
+            if self.pending_tearoff_group == Some(group.id)
+                || self.native_move.is_some_and(|session| {
+                    session.group == group.id
+                        && session.kind == NativeMoveKind::TearOff
+                        && !session.threshold_crossed
+                })
+            {
+                continue;
+            }
+            let Some(panel) = active_hosts.get(&group.id).copied() else {
+                continue;
+            };
+            let Some(entry) = self.registry.windows.get_mut(&panel) else {
+                continue;
+            };
+            let Some(native_window) = entry.native_window else {
+                continue;
+            };
+
+            match self.native_ops.show_no_activate(native_window) {
+                Ok(()) => entry.visibility = PanelWindowVisibility::Visible,
+                Err(error) => tracing::warn!(
+                    ?panel,
+                    ?group.id,
+                    %error,
+                    "could not show the native window hosting a floating composition"
+                ),
             }
         }
     }
