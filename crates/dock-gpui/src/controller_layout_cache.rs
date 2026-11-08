@@ -40,7 +40,7 @@ impl DockController {
     /// Returns the cached local geometry for one floating composition in one GPUI window.
     ///
     /// The cache is keyed by both WindowId and FloatingGroupId. This matters when
-    /// FloatingWindowManager reuses a hidden PopUp window for another group.
+    /// FloatingWindowManager reuses a hidden native Floating host for another group.
     pub fn floating_geometry(
         &mut self,
         window_id: WindowId,
