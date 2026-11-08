@@ -1,6 +1,11 @@
-use dock_core::{DockMetrics, Point, Rect};
-use gpui::{IntoElement, InteractiveElement, ParentElement, Styled, div, px, rgb};
+use dock_core::{DockCommand, DockMetrics, FloatingGroupId, NodeId, PanelId, Point, Rect, TabHeaderRect};
+use gpui::{
+    Entity, IntoElement, InteractiveElement, MouseButton, ParentElement, SharedString,
+    StatefulInteractiveElement, Styled, div, img, px, rgb,
+};
 use ui::Theme;
+
+use crate::{DockController, actions::dispatch_command};
 
 /// Reusable tab header. The shared DockHost/FloatingHost pointer pipelines
 /// handle its drag gesture from Core tab geometry.
@@ -27,6 +32,124 @@ impl DockTab {
     /// Returns true once the pointer leaves the complete DockTab drag zone.
     pub(crate) fn leaves_strip_zone(strip_rect: Rect, point: Point) -> bool {
         !matches!(strip_rect.contains(point), Ok(true))
+    }
+
+    /// Renders a tab from Core geometry and keeps the existing close/activation behavior.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn render_core(
+        group: NodeId,
+        header: TabHeaderRect,
+        strip_rect: Rect,
+        title: SharedString,
+        icon: Option<SharedString>,
+        active: bool,
+        controller: Entity<DockController>,
+        theme: Theme,
+        raise_floating: Option<FloatingGroupId>,
+        middle_click_closes_tabs: bool,
+    ) -> impl IntoElement {
+        let left = header.rect.origin.x - strip_rect.origin.x;
+        let top = header.rect.origin.y - strip_rect.origin.y;
+        let width = header.rect.size.width.max(0.0);
+        let height = header.rect.size.height.max(0.0);
+        let close_width = 18.0_f32.min(width);
+        let hover_group = format!("dock-tab-{:?}-{:?}", group, header.panel);
+
+        let mut title_row = div()
+            .absolute()
+            .left(px(6.0))
+            .right(px(close_width))
+            .top_0()
+            .h_full()
+            .flex()
+            .items_center()
+            .overflow_hidden()
+            .text_color(rgb(theme.colors.primary_text))
+            .text_size(px(theme.typography.tab_size));
+
+        if let Some(icon) = icon {
+            title_row = title_row.child(img(icon).size(px(14.0)).flex_none());
+        }
+
+        title_row = title_row.child(
+            div()
+                .flex_1()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .child(title),
+        );
+
+        let tab = div()
+            .id(format!("tab-{:?}-{:?}", group, header.panel))
+            .group(hover_group.clone())
+            .absolute()
+            .left(px(left))
+            .top(px(top))
+            .w(px(width))
+            .h(px(height))
+            .overflow_hidden()
+            .border_1()
+            .border_color(rgb(theme.colors.group_frame_border))
+            .bg(rgb(if active {
+                theme.colors.panel_tab_active
+            } else {
+                theme.colors.panel_tab_inactive
+            }))
+            .text_color(rgb(theme.colors.primary_text))
+            .cursor_pointer()
+            .child(title_row)
+            .on_aux_click({
+                let controller = controller.clone();
+                let panel = header.panel;
+                move |event, _, app| {
+                    // Singleton constrains opening multiplicity; it does not prevent closing.
+                    if middle_click_closes_tabs && event.is_middle_click() {
+                        dispatch_command(&controller, DockCommand::ClosePanel { panel }, app);
+                        app.stop_propagation();
+                    }
+                }
+            });
+
+        let close_controller = controller.clone();
+        let close_panel = header.panel;
+        let close_button = div()
+            .id(format!("tab-close-{:?}-{:?}", group, header.panel))
+            .absolute()
+            .top_0()
+            .right_0()
+            .w(px(close_width))
+            .h_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_pointer()
+            .opacity(0.0)
+            .group_hover(hover_group, |style| style.opacity(1.0))
+            .hover(|style| style.bg(rgb(theme.colors.icon_button_hover)))
+            .text_color(rgb(theme.colors.primary_text))
+            .child("×")
+            .on_mouse_down(MouseButton::Left, {
+                let controller = controller.clone();
+                move |_, _, app| {
+                    // The close control stops bubbling to avoid starting a tab drag,
+                    // so it raises its owning floating composition explicitly.
+                    if let Some(group) = raise_floating {
+                        dispatch_command(&controller, DockCommand::RaiseFloating { group }, app);
+                    }
+                    app.stop_propagation();
+                }
+            })
+            .on_click(move |_, _, app| {
+                dispatch_command(
+                    &close_controller,
+                    DockCommand::ClosePanel { panel: close_panel },
+                    app,
+                );
+                app.stop_propagation();
+            });
+
+        tab.child(close_button)
     }
 
     pub fn render(
@@ -87,7 +210,6 @@ impl DockTab {
             )
     }
 }
-
 
 #[cfg(test)]
 mod tests {
