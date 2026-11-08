@@ -417,8 +417,8 @@ pub(crate) fn finish_floating_tab_drag(
     })
 }
 
-/// Turns an eligible main-window drag into a native floating window after
-/// the pointer leaves the main DockHost viewport.
+/// Turns an eligible main-window tab drag into a native floating window after
+/// the pointer leaves the native main-window client area.
 pub(crate) fn begin_native_tearoff(
     controller: &Entity<DockController>,
     manager: &Entity<FloatingWindowManager>,
