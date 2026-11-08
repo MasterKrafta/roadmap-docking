@@ -35,7 +35,7 @@ use crate::{
 ///
 /// Main-window layer order is deliberate: CanvasSlot, main dock surfaces,
 /// flyout, main-window drop feedback, then the universal ContextMenu.
-/// Floating compositions are rendered by their own FloatingHost PopUp windows;
+/// Floating compositions are rendered by their own native Floating windows;
 /// native WS_THICKFRAME owns their resize interaction.
 pub struct DockHost {
     controller: Entity<DockController>,
