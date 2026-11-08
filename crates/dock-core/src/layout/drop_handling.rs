@@ -309,14 +309,40 @@ impl Layout {
                 CommandError::MissingNode { node: column }
             });
         }
-        let (source_side, source_index) = self
-            .main_column_position(column)
-            .ok_or(CommandError::InvalidTarget {
-                reason: "Column header drag source must belong to a main dock",
-            })?;
         let target = request.target.ok_or(CommandError::InvalidTarget {
             reason: "Column header drag requires a resolved drop target",
         })?;
+
+        // A Main Column is detached into a real Floating root as soon as its
+        // native tear-off begins. Keep the original Column payload, but finish
+        // its drag through the same DockFloating path as any other Floating
+        // composition instead of looking for a Main Dock owner that no longer exists.
+        if let Some(group) = self.floating_groups().find_map(|(group, floating)| {
+            self.dock_area(floating.area)
+                .filter(|area| area.root == column)
+                .map(|_| group)
+        }) {
+            if matches!(target, DropTarget::FreeArea) {
+                // The detached composition is already floating. FreeArea means
+                // release it at its current native bounds, not create another host.
+                return Ok(DragDropAction::NoOp);
+            }
+            self.validate_floating_dock_target(column, target, metrics)?;
+            self.validate_panel_ids_allowed_for_target(
+                &self.panel_ids_in_subtree(column),
+                target,
+            )?;
+            return Ok(DragDropAction::Command(DockCommand::DockFloating {
+                group,
+                target,
+            }));
+        }
+
+        let (source_side, source_index) = self
+            .main_column_position(column)
+            .ok_or(CommandError::InvalidTarget {
+                reason: "Column header drag source must belong to a main dock or be a Floating root",
+            })?;
 
         if matches!(target, DropTarget::FreeArea) {
             let bounds = request.floating_bounds.ok_or(CommandError::InvalidTarget {
@@ -341,7 +367,7 @@ impl Layout {
         self.validate_drop_target(target, metrics)?;
         let DropTarget::MainColumn { side, index } = target else {
             return Err(CommandError::InvalidTarget {
-                reason: "a whole Column can only dock into a Main Dock insertion slot",
+                reason: "a Main Column can only dock into a Main Dock insertion slot",
             });
         };
         let target_columns = self.main_columns(side)?;
