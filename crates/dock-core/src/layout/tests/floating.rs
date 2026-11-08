@@ -330,6 +330,13 @@ fn c47_dock_single_group_floating_column_into_group_tabs_removes_wrapper() {
         descriptors()[0].1,
     );
     let moving_group = builder.tabs(vec![moving_panel_node], 0, false);
+    let moving_column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![moving_group],
+        vec![1.0],
+    );
+    builder.main_area(DockSide::Left, moving_column);
     let mut layout = builder.build();
 
     layout
