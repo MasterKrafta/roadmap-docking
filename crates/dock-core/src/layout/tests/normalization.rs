@@ -43,7 +43,7 @@ fn normalize_preserves_floating_column_composition() {
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
 #[test]
-fn normalize_migrates_legacy_horizontal_floating_composition_to_vertical_stack() {
+fn normalize_preserves_legacy_horizontal_floating_composition() {
     let metrics = DockMetrics::default();
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
 
@@ -84,24 +84,29 @@ fn normalize_migrates_legacy_horizontal_floating_composition_to_vertical_stack()
     );
     let mut layout = builder.build();
 
-    assert!(layout.validate(&metrics).is_err());
+    assert_eq!(layout.validate(&metrics), Ok(()));
     layout.normalize_for_test(&metrics).unwrap();
 
     let area = layout.floating_group(floating).unwrap().area;
-    let migrated_root = layout.dock_area(area).unwrap().root;
+    let normalized_root = layout.dock_area(area).unwrap().root;
+    assert_eq!(normalized_root, legacy_root);
     assert!(matches!(
-        layout.node(migrated_root),
+        layout.node(normalized_root),
         Some(Node::Split(split))
-            if split.axis == Axis::Y
-                && split.children == vec![left_group, right_group_a, right_group_b]
-                && split.ratios.len() == 3
-                && (split.ratios[0] - 0.4).abs() < 1.0e-4
-                && (split.ratios[1] - 0.15).abs() < 1.0e-4
-                && (split.ratios[2] - 0.45).abs() < 1.0e-4
+            if split.axis == Axis::X
+                && split.children == vec![left_column, right_column]
+                && split.ratios == vec![0.4, 0.6]
     ));
-    assert!(layout.node(legacy_root).is_none());
-    assert!(layout.node(left_column).is_none());
-    assert!(layout.node(right_column).is_none());
+    assert!(matches!(
+        layout.node(left_column),
+        Some(Node::Column(column)) if column.groups == vec![left_group]
+    ));
+    assert!(matches!(
+        layout.node(right_column),
+        Some(Node::Column(column))
+            if column.groups == vec![right_group_a, right_group_b]
+                && column.group_ratios == vec![0.25, 0.75]
+    ));
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
 
