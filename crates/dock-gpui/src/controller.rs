@@ -529,6 +529,35 @@ impl DockController {
         Ok(())
     }
 
+    /// Continues a native tear-off while preserving the identity of the
+    /// individual Panel. The temporary floating window is only its transport
+    /// surface; drop resolution must still treat the source as a Panel tab.
+    pub(crate) fn continue_tearoff_as_panel_capture(
+        &mut self,
+        panel: PanelId,
+    ) -> Result<(), DragSessionError> {
+        let (origin, position) = match self.drag.session().state() {
+            DragState::Pressed {
+                origin, position, ..
+            }
+            | DragState::Dragging {
+                origin, position, ..
+            } => (origin, position),
+            _ => return Err(DragSessionError::NoActiveGesture),
+        };
+        self.drag.cancel_gesture();
+        self.begin_drag_interaction(
+            DragPayload::Panel { panel },
+            DragHandle::PanelTab,
+            origin,
+        )?;
+        if let Err(error) = self.drag.session_mut().pointer_move(position) {
+            self.drag.cancel_gesture();
+            return Err(error);
+        }
+        Ok(())
+    }
+
     /// Starts a transaction and Core drag session for an already-floating title bar.
     pub(crate) fn begin_floating_window_move(
         &mut self,
