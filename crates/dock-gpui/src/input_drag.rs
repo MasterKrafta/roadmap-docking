@@ -417,8 +417,8 @@ pub(crate) fn finish_floating_tab_drag(
     })
 }
 
-/// Turns an eligible main-window drag into a native floating window as soon as
-/// its semantic drag area crosses Core's drag threshold.
+/// Turns an eligible main-window drag into a native floating window after
+/// the pointer leaves the main DockHost viewport.
 pub(crate) fn begin_native_tearoff(
     controller: &Entity<DockController>,
     manager: &Entity<FloatingWindowManager>,
