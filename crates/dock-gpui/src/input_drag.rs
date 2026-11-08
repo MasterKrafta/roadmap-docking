@@ -304,7 +304,7 @@ pub(crate) fn begin_floating_tab_tearoff(
         };
         match outcome.actual_value {
             Some(CommandValue::FloatingGroup(group))
-                if controller.continue_tearoff_as_panel_capture(drag.panel).is_ok() =>
+                if controller.continue_tearoff_drag().is_ok() =>
             {
                 Some(group)
             }
@@ -511,13 +511,7 @@ pub(crate) fn begin_native_tearoff(
         };
         match outcome.actual_value {
             Some(CommandValue::FloatingGroup(group)) => {
-                let continued = match payload {
-                    DragPayload::Panel { panel } => {
-                        controller.continue_tearoff_as_panel_capture(panel)
-                    }
-                    _ => controller.continue_tearoff_as_floating_capture(group),
-                };
-                if continued.is_ok() {
+                if controller.continue_tearoff_drag().is_ok() {
                     Some(group)
                 } else {
                     let _ = controller.cancel_pointer_interaction_on_escape();
@@ -713,19 +707,9 @@ fn drop_source(controller: &DockController, payload: DragPayload) -> Option<Drop
         DragPayload::Group { group } => Some(DropSource::Group { group }),
         DragPayload::Column { column } => Some(DropSource::Column { column }),
         DragPayload::DockArea { .. } => None,
-        DragPayload::FloatingGroup { group } => {
-            let root = controller
-                .layout()
-                .floating_group(group)
-                .and_then(|floating| controller.layout().dock_area(floating.area))
-                .map(|area| area.root)?;
-            Some(if matches!(controller.layout().node(root), Some(Node::Column(_))) {
-                DropSource::Column { column: root }
-            } else {
-                // Floating compositions may use a Tabs, Split or Column root.
-                DropSource::Group { group: root }
-            })
-        }
+        // Whole-floating-window captures are routed by FloatingWindowManager,
+        // which knows the actual source HWND. They are not Main-host drag sources.
+        DragPayload::FloatingGroup { .. } => None
     }
 }
 
