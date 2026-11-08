@@ -2151,3 +2151,80 @@ fn single_group_floating_column_can_merge_into_another_floating_tab_strip() {
     assert!(layout.floating_group(source_float).is_none());
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
+
+#[test]
+fn photoshop_floating_column_targets_only_outer_edges_of_a_floating_column_composition() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, source_panel) = builder.panel(key("floating-side-source"), constraints());
+    let source_group = builder.tabs(vec![source_panel], 0, false);
+    let source_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![source_group],
+        vec![1.0],
+    );
+    builder.main_area(DockSide::Left, source_column);
+
+    let (_, left_panel) = builder.panel(key("floating-side-left"), constraints());
+    let left_group = builder.tabs(vec![left_panel], 0, false);
+    let left_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![left_group],
+        vec![1.0],
+    );
+
+    let (_, right_panel) = builder.panel(key("floating-side-right"), constraints());
+    let right_group = builder.tabs(vec![right_panel], 0, false);
+    let right_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![right_group],
+        vec![1.0],
+    );
+
+    let target_root = builder.split(
+        Axis::X,
+        vec![left_column, right_column],
+        vec![0.5, 0.5],
+    );
+    let target_floating = builder.floating_group(target_root, bounds(620.0, 140.0), 1);
+    let mut layout = builder.build();
+
+    layout
+        .apply(
+            DockCommand::Float {
+                node: source_column,
+                bounds: bounds(120.0, 140.0),
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    let target_rects = layout
+        .compute_floating_rects(target_floating, &metrics)
+        .unwrap();
+    let zones = layout
+        .compute_drop_zones(
+            DropSource::Column {
+                column: source_column,
+            },
+            &target_rects,
+            &metrics,
+        )
+        .unwrap();
+
+    let has_edge = |group, edge| {
+        zones.iter().any(|zone| {
+            zone.target == DropTarget::GroupEdge { group, zone: edge } && zone.zone == edge
+        })
+    };
+
+    assert!(has_edge(left_group, DropZone::Left));
+    assert!(!has_edge(left_group, DropZone::Right));
+    assert!(!has_edge(right_group, DropZone::Left));
+    assert!(has_edge(right_group, DropZone::Right));
+}
+
