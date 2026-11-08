@@ -16,7 +16,7 @@ pub use group_menu_button::GroupMenuButton;
 pub use panel_content::PanelContent;
 
 use dock_core::{
-    DockCommand, DockMetrics, FloatingGroupId, GroupRect, NodeId, Point, TabHeaderRect,
+    DockCommand, DockMetrics, GroupRect, NodeId, Point, TabHeaderRect,
     TabOverflowRect, TabStripRect,
 };
 use gpui::{
@@ -98,9 +98,7 @@ impl DockGroupView {
         reserved_grip_left: f32,
         controller: Entity<DockController>,
         theme: Theme,
-        raise_floating: Option<FloatingGroupId>,
         toggle_menu: GroupMenuToggle,
-        middle_click_closes_tabs: bool,
     ) -> impl IntoElement {
         let left = group.rect.origin.x - content_origin.x;
         let top = group.rect.origin.y - content_origin.y;
@@ -180,10 +178,7 @@ impl DockGroupView {
                 title,
                 icon,
                 active,
-                controller.clone(),
                 theme,
-                raise_floating,
-                middle_click_closes_tabs,
             ));
         }
 
