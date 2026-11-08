@@ -347,8 +347,31 @@ impl Layout {
             rects,
             ..
         } = *context;
-        // Tab strips are independent insertion/reorder affordances. Each header
-        // is split into two half-open halves mapping to the exact slots before/after it.
+        // A panel dropped on a Main Dock tab strip always appends to the
+        // target group. Emit one zone for the whole strip, not one insertion
+        // slot per existing tab header.
+        if matches!(source, DropSource::Panel { .. }) {
+            for strip in &rects.tab_strips {
+                if target_area(self, tree_index, strip.group) != Some(AllowedArea::MAIN_DOCK) {
+                    continue;
+                }
+                let Some(Node::Tabs(tabs)) = self.node(strip.group) else {
+                    continue;
+                };
+                push_zone(
+                    zones,
+                    DropTarget::Tabs {
+                        group: strip.group,
+                        index: tabs.children.len(),
+                    },
+                    DropZone::TabInsertion,
+                    strip.rect,
+                )?;
+            }
+        }
+
+        // Whole Group drags retain exact insertion positions. Floating panel
+        // insertion also retains its existing header-based behavior until Stage 5.
         for header in &rects.tab_headers {
             let Some(area) = target_area(self, tree_index, header.group) else {
                 continue;
