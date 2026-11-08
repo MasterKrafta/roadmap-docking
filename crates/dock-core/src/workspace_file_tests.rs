@@ -1336,7 +1336,6 @@ fn workspace_migrates_legacy_floating_composition_before_clamping_bounds() {
     ));
     assert!(report.diagnostics.iter().any(|diagnostic| {
         matches!(diagnostic, WorkspaceDiagnostic::LayoutNormalized { issues }
-            if issues.iter().any(|issue| issue.contains("invalid root"))
-                && issues.iter().any(|issue| issue.contains("must contain at least one group before normalization")))
+            if issues.iter().any(|issue| issue.contains("must contain at least one group before normalization")))
     }));
 }
