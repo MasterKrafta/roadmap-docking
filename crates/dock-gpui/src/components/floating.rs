@@ -21,7 +21,7 @@ use ui::Theme;
 
 use crate::{
     DockController, FloatingWindowManager,
-    dock_components::{DockAreaDragArea, DockAreaView, DockCompositionView, DockTab},
+    dock_components::{DockAreaDragArea, DockAreaView, DockCompositionView, DockGroupView, DockTab},
     input::drag::{
         begin_floating_tab_tearoff, finish_floating_tab_drag, update_floating_tab_drag,
         FloatingTabDrag,
@@ -37,7 +37,6 @@ use super::{
         ContextMenu, ContextMenuCallbacks, ContextMenuDismiss, ContextMenuSubmenuToggle,
         ContextMenuTarget, GroupMenuToggle,
     },
-    group::GroupView,
     panel_host::PanelHost,
     splitter::SplitterView,
     tab_strip::GroupPresentation,
@@ -169,7 +168,7 @@ impl FloatingWindowContent {
                 .find(|overflow| overflow.group == group.group)
                 .cloned();
 
-            root = root.child(GroupView::render(
+            root = root.child(DockGroupView::render_core(
                 None,
                 *group,
                 strip,
