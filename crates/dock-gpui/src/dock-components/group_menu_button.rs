@@ -32,7 +32,21 @@ impl GroupMenuButton {
         glyph: &'static str,
         toggle_menu: GroupMenuToggle,
     ) -> impl IntoElement {
-        Self::render_with_glyph(id, theme, width, icon_size, glyph)
+        div()
+            .id(id)
+            .w(px(width))
+            .h_full()
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_pointer()
+            .bg(rgb(theme.colors.group_menu_button))
+            .border_1()
+            .border_color(rgb(theme.colors.group_frame_border))
+            .text_color(rgb(theme.colors.primary_text))
+            .text_size(px(icon_size))
+            .child(glyph)
             .on_click(move |event, _, app| {
                 let Ok(anchor) = crate::geometry::point_from_gpui(event.position()) else {
                     return;
@@ -47,7 +61,7 @@ impl GroupMenuButton {
         width: f32,
         icon_size: f32,
         glyph: &'static str,
-    ) -> impl IntoElement + InteractiveElement {
+    ) -> impl IntoElement {
         div()
             .id(id)
             .w(px(width))
