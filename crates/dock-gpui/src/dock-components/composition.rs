@@ -8,10 +8,7 @@ use dock_core::{
 use gpui::{AnyView, Entity, IntoElement, InteractiveElement, ParentElement, ScrollHandle, Styled, div, px};
 use ui::Theme;
 
-use crate::{
-    DockController,
-    components::tab_strip::GroupPresentation,
-};
+use crate::{DockController, dock_components::GroupPresentation};
 
 use super::DockColumnView;
 
