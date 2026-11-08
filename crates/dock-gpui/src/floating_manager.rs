@@ -2265,6 +2265,30 @@ mod coordinate_tests {
     }
 
     #[test]
+    fn floating_host_coordinates_use_the_target_windows_client_origin_and_dpi() {
+        let client_origin = PhysicalPoint { x: -1920, y: 120 };
+        let local = Point::new(120.0, 56.0);
+        let scale = 1.5;
+
+        let screen = DockGeometry::screen_position_from_host_local(
+            local,
+            Point::ZERO,
+            client_origin,
+            scale,
+        ).unwrap();
+        assert_eq!(screen, PhysicalPoint { x: -1740, y: 204 });
+        assert_eq!(
+            DockGeometry::host_local_point_from_screen(
+                screen,
+                client_origin,
+                Point::ZERO,
+                scale,
+            ),
+            Some(local),
+        );
+    }
+
+    #[test]
     fn screen_coordinate_conversion_rejects_invalid_monitor_scale() {
         assert!(
             DockGeometry::screen_position_from_host_local(
