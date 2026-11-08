@@ -1510,7 +1510,9 @@ fn docking_floating_column_with_multiple_groups_into_main_preserves_the_column()
         layout.node(source_column),
         Some(Node::Column(column))
             if column.groups == vec![source_group_a, source_group_b]
-                && column.group_ratios == vec![0.7, 0.3]
+                && column.group_ratios.len() == 2
+                && (column.group_ratios[0] - 0.7).abs() < 1.0e-5
+                && (column.group_ratios[1] - 0.3).abs() < 1.0e-5
     ));
     assert_eq!(layout.panel_instances().count(), 3);
     assert_eq!(layout.validate(&metrics), Ok(()));
