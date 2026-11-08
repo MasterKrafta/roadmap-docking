@@ -884,6 +884,14 @@ impl Render for FloatingHost {
                             app,
                         );
                         if !dragging {
+                            if !DockInteractionCoordinator::release_if_inactive(
+                                &controller_for_move,
+                                window,
+                                &pointer_capture_for_move,
+                                app,
+                            ) {
+                                tab_press_for_move.set(None);
+                            }
                             return;
                         }
                         if !was_dragging {
@@ -989,6 +997,12 @@ impl Render for FloatingHost {
                             return;
                         }
                         let Some(press) = tab_press_for_up.get() else {
+                            if DockInteractionCoordinator::has_capture(&pointer_capture_for_up) {
+                                DockInteractionCoordinator::release(
+                                    window,
+                                    &pointer_capture_for_up,
+                                );
+                            }
                             return;
                         };
                         tab_press_for_up.set(None);
@@ -1123,14 +1137,18 @@ impl Render for FloatingHost {
                             return;
                         }
 
-                        DockInteractionCoordinator::release(
-                            window,
-                            &pointer_capture_for_up,
-                        );
                         if was_pressed {
-                            let _ = controller_for_up.update(app, |controller, _| {
-                                controller.cancel_pointer_interaction()
-                            });
+                            DockInteractionCoordinator::cancel(
+                                &controller_for_up,
+                                window,
+                                &pointer_capture_for_up,
+                                app,
+                            );
+                        } else {
+                            DockInteractionCoordinator::release(
+                                window,
+                                &pointer_capture_for_up,
+                            );
                         }
                         let should_activate = controller_for_up.update(app, |controller, _| {
                             if controller.layout().version() != press.layout_version {
