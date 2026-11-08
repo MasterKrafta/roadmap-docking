@@ -177,6 +177,30 @@ impl DockGeometry {
         Some(point)
     }
 
+    /// Converts a Core desktop origin (stored as physical pixels) to GPUI's
+    /// logical desktop coordinates for WindowOptions.
+    pub(crate) fn logical_point_from_core_physical(
+        point: Point,
+        scale: f32,
+    ) -> Option<Point> {
+        if !valid_scale(scale) {
+            return None;
+        }
+        let point = Point::new(point.x / scale, point.y / scale);
+        point.validate().ok()?;
+        Some(point)
+    }
+
+    pub(crate) fn physical_delta_between(
+        to: PhysicalPoint,
+        from: PhysicalPoint,
+    ) -> PhysicalPoint {
+        PhysicalPoint {
+            x: to.x.saturating_sub(from.x),
+            y: to.y.saturating_sub(from.y),
+        }
+    }
+
     pub(crate) fn physical_coordinate(value: f32, scale: f32) -> Option<i32> {
         if !valid_scale(scale) || !value.is_finite() {
             return None;
