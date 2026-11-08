@@ -53,13 +53,28 @@ fn main_panel_targets_append_to_the_end_of_a_tab_strip() {
             }
             && zone.zone == DropZone::Center
     }));
-    assert!(
-        !zones.iter().any(|zone| {
-            matches!(zone.zone, DropZone::TabInsertion)
-                && zone.target.referenced_node_id() == Some(target_group)
-        }),
-        "a Main Dock panel drag must not expose arbitrary tab insertion indices"
+    let append_zones: Vec<_> = zones
+        .iter()
+        .filter(|zone| {
+            zone.zone == DropZone::TabInsertion
+                && zone.target
+                    == DropTarget::Tabs {
+                        group: target_group,
+                        index: 1,
+                    }
+        })
+        .collect();
+    assert_eq!(
+        append_zones.len(),
+        1,
+        "a Main Dock panel drag must expose one append-only tab-strip zone"
     );
+    let target_strip = rects
+        .tab_strips
+        .iter()
+        .find(|strip| strip.group == target_group)
+        .expect("the target group should have a tab strip");
+    assert_eq!(append_zones[0].rect, target_strip.rect);
 
     let group_zones = layout
         .compute_drop_zones(
