@@ -5,7 +5,9 @@ use dock_core::{
     FloatingGroupId, FlyoutState, GroupRect, NodeId, PanelId, PanelRect,
     SplitterRect, TabHeaderRect, TabOverflowRect, TabStripRect, VerticalOverflow,
 };
-use gpui::{AnyView, Entity, IntoElement, ParentElement, ScrollHandle, Styled, div, px};
+use gpui::{
+    AnyView, Entity, IntoElement, InteractiveElement, ParentElement, ScrollHandle, Styled, div, px,
+};
 use ui::Theme;
 
 use crate::{
