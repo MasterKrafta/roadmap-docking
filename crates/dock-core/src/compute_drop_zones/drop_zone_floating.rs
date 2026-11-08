@@ -344,6 +344,12 @@ impl FloatingZoneContext<'_> {
                 else {
                     continue;
                 };
+                if matches!(
+                    self.layout.node(target_column),
+                    Some(Node::Column(column)) if column.mode.is_rail()
+                ) {
+                    continue;
+                }
                 match target_columns {
                     // A single-Column Floating composition exposes both sides
                     // along the full stack of Groups.
