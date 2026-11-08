@@ -1912,7 +1912,7 @@ fn column_slot_uses_the_area_of_its_main_or_floating_column() {
     );
 
     let main_only_constraints =
-        descriptors()[0].1.with_allowed_areas(AllowedArea::MAIN_DOCK);
+        descriptors()[0].1.with_allowed_areas(crate::AllowedArea::MAIN_DOCK);
     let (main_only_panel, main_only_panel_node) = builder.panel(
         PanelKey::new("drop-source-main-only").unwrap(),
         main_only_constraints,
@@ -1938,7 +1938,7 @@ fn column_slot_uses_the_area_of_its_main_or_floating_column() {
 
     assert_eq!(
         layout.allowed_area_for_target(floating_target),
-        Ok(AllowedArea::FLOATING)
+        Ok(crate::AllowedArea::FLOATING)
     );
     assert_eq!(layout.validate_drop_target(floating_target, &metrics), Ok(()));
     assert_eq!(
@@ -1952,7 +1952,7 @@ fn column_slot_uses_the_area_of_its_main_or_floating_column() {
 
     assert_eq!(
         layout.allowed_area_for_target(main_target),
-        Ok(AllowedArea::MAIN_DOCK)
+        Ok(crate::AllowedArea::MAIN_DOCK)
     );
     assert_eq!(layout.validate_drop_target(main_target, &metrics), Ok(()));
     assert_eq!(layout.validate(&metrics), Ok(()));
