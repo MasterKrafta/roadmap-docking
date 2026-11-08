@@ -265,8 +265,8 @@ struct FloatingHostSnapshot {
     active_drop_zone: Option<dock_core::DropZoneRect>,
 }
 
-/// A single-tab Column's dedicated DockTab drag zone detaches as soon as its
-/// Core threshold is crossed. Multi-tab strips keep their source-strip boundary.
+/// A single-tab Column detaches as soon as its Core drag threshold is crossed.
+/// Multi-tab and standalone Groups retain their source-strip detach boundary.
 fn floating_tab_tearoff_required(
     is_dock_component_tab: bool,
     leaves_source: bool,
@@ -646,8 +646,8 @@ impl Render for FloatingHost {
             .overflow_hidden()
             .bg(rgb(self.theme.colors.panel_surface_background));
 
-        // The shared DockAreaHeader moves the complete floating composition; DockTab remains a tab drag source.
-        // Legacy TabHeaderView instances keep their individual-panel tear-off path.
+        // The shared DockAreaHeader moves the complete floating composition.
+        // DockTab starts an individual-panel drag; tear-off timing depends on the source Group shape.
         let manager = self.manager.clone();
         let controller = self.controller.clone();
         let tab_press = self.tab_press.clone();
