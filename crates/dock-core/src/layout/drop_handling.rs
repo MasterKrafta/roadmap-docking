@@ -322,9 +322,14 @@ impl Layout {
                 .filter(|area| area.root == column)
                 .map(|_| group)
         }) {
-            if matches!(target, DropTarget::FreeArea) {
+            if matches!(target, DropTarget::FreeArea)
+                || target
+                    .referenced_node_id()
+                    .is_some_and(|node| self.is_descendant_or_same(column, node))
+            {
                 // The detached composition is already floating. FreeArea means
                 // release it at its current native bounds, not create another host.
+                // A target inside the same Column is also a no-op.
                 return Ok(DragDropAction::NoOp);
             }
             self.validate_floating_dock_target(column, target, metrics)?;
