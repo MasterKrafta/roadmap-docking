@@ -226,9 +226,9 @@ pub(crate) fn update_floating_tab_drag(
     })
 }
 
-/// Detaches one tab after its pointer leaves the source TabStrip region. The
-/// existing tear-off transaction then continues as a native move of the new
-/// single-panel floating group.
+/// Detaches one tab after it leaves the source strip or enters another
+/// docking window. The temporary native window moves, but the drag payload
+/// remains the individual Panel so it can join an existing Tabs group.
 pub(crate) fn begin_floating_tab_tearoff(
     controller: &Entity<DockController>,
     manager: &Entity<FloatingWindowManager>,
