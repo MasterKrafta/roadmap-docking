@@ -15,7 +15,7 @@ use gpui::{
     AnyView, Context, DispatchPhase, Entity, HitboxBehavior, HitboxId, IntoElement,
     MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Render,
     ScrollHandle, FocusHandle, Styled, WeakEntity, Window, WindowId, canvas, div,
-    prelude::InteractiveElement as _, px, rgb,
+    prelude::InteractiveElement as _, rgb,
 };
 use ui::Theme;
 
