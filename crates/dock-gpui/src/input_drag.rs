@@ -91,7 +91,7 @@ pub(crate) fn update_drag_at(
             return was_pressed;
         }
 
-        let Some(source) = drop_source(controller, payload) else {
+        let Some(source) = drop_source(payload) else {
             tracing::debug!("dock drag source no longer exists");
             cancel_drag(controller);
             cx.notify();
@@ -304,7 +304,7 @@ pub(crate) fn begin_floating_tab_tearoff(
         };
         match outcome.actual_value {
             Some(CommandValue::FloatingGroup(group))
-                if controller.continue_tearoff_as_panel_capture(drag.panel).is_ok() =>
+                if controller.continue_tearoff_drag().is_ok() =>
             {
                 Some(group)
             }
@@ -511,13 +511,7 @@ pub(crate) fn begin_native_tearoff(
         };
         match outcome.actual_value {
             Some(CommandValue::FloatingGroup(group)) => {
-                let continued = match payload {
-                    DragPayload::Panel { panel } => {
-                        controller.continue_tearoff_as_panel_capture(panel)
-                    }
-                    _ => controller.continue_tearoff_as_floating_capture(group),
-                };
-                if continued.is_ok() {
+                if controller.continue_tearoff_drag().is_ok() {
                     Some(group)
                 } else {
                     let _ = controller.cancel_pointer_interaction_on_escape();
@@ -601,7 +595,7 @@ pub(crate) fn finish_drag_at(
         let mut target = if !drag_started || !main_drag_uses_drop_targets(handle) {
             None
         } else {
-            match drop_source(controller, payload) {
+            match drop_source(payload) {
                 Some(source) => {
                     match resolve_drop_target(controller, source, position, was_pressed) {
                         Ok(target) => target,
@@ -707,25 +701,14 @@ fn cancel_drag(controller: &mut DockController) {
     }
 }
 
-fn drop_source(controller: &DockController, payload: DragPayload) -> Option<DropSource> {
+fn drop_source(payload: DragPayload) -> Option<DropSource> {
     match payload {
         DragPayload::Panel { panel } => Some(DropSource::Panel { panel }),
         DragPayload::Group { group } => Some(DropSource::Group { group }),
         DragPayload::Column { column } => Some(DropSource::Column { column }),
-        DragPayload::DockArea { .. } => None,
-        DragPayload::FloatingGroup { group } => {
-            let root = controller
-                .layout()
-                .floating_group(group)
-                .and_then(|floating| controller.layout().dock_area(floating.area))
-                .map(|area| area.root)?;
-            Some(if matches!(controller.layout().node(root), Some(Node::Column(_))) {
-                DropSource::Column { column: root }
-            } else {
-                // Floating compositions may use a Tabs, Split or Column root.
-                DropSource::Group { group: root }
-            })
-        }
+        // DockArea and whole-floating-window captures are routed by
+        // FloatingWindowManager, not by the Main-host resolver.
+        DragPayload::DockArea { .. } | DragPayload::FloatingGroup { .. } => None
     }
 }
 

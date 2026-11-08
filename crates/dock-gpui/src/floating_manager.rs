@@ -900,20 +900,30 @@ impl FloatingWindowManager {
                 _ => return None,
             };
             match payload {
+                // A tear-off keeps the original logical source. state.group is
+                // only the temporary native host and must never be used to
+                // reconstruct whether the user dragged a Panel, Group or Column.
                 DragPayload::Panel { panel } => Some(DropSource::Panel { panel }),
                 DragPayload::Group { group } => Some(DropSource::Group { group }),
                 DragPayload::Column { column } => Some(DropSource::Column { column }),
                 DragPayload::DockArea { .. } => None,
-                DragPayload::FloatingGroup { group } => controller
-                    .layout()
-                    .floating_group(group)
-                    .and_then(|floating| controller.layout().dock_area(floating.area))
-                    .map(|area| match controller.layout().node(area.root) {
-                        Some(Node::Column(_)) => DropSource::Column { column: area.root },
-                        // The floating composition resolver accepts its complete root,
-                        // including Split(X)/Split(Y) compositions.
-                        _ => DropSource::Group { group: area.root },
-                    }),
+                // An already-floating window is a different gesture: its entire
+                // FloatingGroup is the source, so its root is resolved as one
+                // complete composition. Main-originated tear-offs never enter
+                // this branch because their original payload is preserved.
+                DragPayload::FloatingGroup { group }
+                    if state.kind == NativeMoveKind::ExistingWindow && group == state.group =>
+                {
+                    controller
+                        .layout()
+                        .floating_group(group)
+                        .and_then(|floating| controller.layout().dock_area(floating.area))
+                        .map(|area| match controller.layout().node(area.root) {
+                            Some(Node::Column(_)) => DropSource::Column { column: area.root },
+                            _ => DropSource::Group { group: area.root },
+                        })
+                }
+                DragPayload::FloatingGroup { .. } => None,
             }
         });
         let Some(source) = source else {

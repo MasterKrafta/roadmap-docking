@@ -132,9 +132,11 @@ pub enum DragPayload {
     ///
     /// Unlike Column, this keeps a multi-column DockArea together when it is floated.
     DockArea { side: DockSide },
-    /// A floating window moved by its window/title drag surface.
+    /// An already-floating window moved/captured by its shared window surface.
     ///
-    /// This is distinct from dragging the Tabs group inside that window.
+    /// This is distinct from a Main-originated tear-off: those gestures retain
+    /// their original Panel, Group, Column, or DockArea payload. The temporary
+    /// Floating host for such a tear-off is tracked separately by the adapter.
     FloatingGroup { group: FloatingGroupId },
 }
 
