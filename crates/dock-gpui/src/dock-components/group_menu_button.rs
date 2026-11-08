@@ -56,6 +56,7 @@ impl GroupMenuButton {
             .flex()
             .items_center()
             .justify_center()
+            .cursor_pointer()
             .bg(rgb(theme.colors.group_menu_button))
             .border_1()
             .border_color(rgb(theme.colors.group_frame_border))
