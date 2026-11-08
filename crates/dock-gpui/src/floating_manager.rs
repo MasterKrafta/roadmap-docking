@@ -1010,63 +1010,6 @@ impl FloatingWindowManager {
         });
     }
 
-    /// Returns true while this floating composition is the native window
-    /// currently being dragged over a resolved target.
-    pub(crate) fn native_move_targets_group(&self, group: FloatingGroupId) -> bool {
-        self.native_move
-            .is_some_and(|state| state.group == group && state.drop_target.is_some())
-    }
-
-    /// Converts one point from the main DockHost's local coordinates into the
-    /// dragged floating host's local coordinates. This lets its overlay paint
-    /// above the native floating window that would otherwise cover MainWindow.
-    pub(crate) fn main_point_in_floating_local(
-        &self,
-        group: FloatingGroupId,
-        point: Point,
-    ) -> Option<Point> {
-        let main = self.main_native_window?;
-        let panel = self.host_registry.panel_for_group(group)?;
-        let floating = self.registry.windows.get(&panel)?.native_window?;
-
-        let main_client = self.native_ops.client_origin(main).ok()?;
-        let main_scale = self.native_ops.scale_factor(main).ok()?;
-        let floating_client = self.native_ops.client_origin(floating).ok()?;
-        let floating_scale = self.native_ops.scale_factor(floating).ok()?;
-
-        let screen_point = DockGeometry::screen_position_from_host_local(
-            point,
-            self.main_host_origin,
-            main_client,
-            main_scale,
-        )?;
-        DockGeometry::host_local_point_from_screen(
-            screen_point,
-            floating_client,
-            Point::ZERO,
-            floating_scale,
-        )
-    }
-
-    /// Converts a main-host rectangle into the current floating host's local
-    /// coordinates, preserving its full bounds across different display scales.
-    pub(crate) fn main_rect_in_floating_local(
-        &self,
-        group: FloatingGroupId,
-        rect: Rect,
-    ) -> Option<Rect> {
-        let right = rect.checked_right().ok()?;
-        let bottom = rect.checked_bottom().ok()?;
-        let origin = self.main_point_in_floating_local(group, rect.origin)?;
-        let end = self.main_point_in_floating_local(group, Point::new(right, bottom))?;
-        let mapped = Rect::new(
-            origin,
-            Size::new(end.x - origin.x, end.y - origin.y),
-        );
-        mapped.validate_non_empty().ok()?;
-        Some(mapped)
-    }
-
     fn core_point_for_main(&self, screen: PhysicalPoint) -> Option<Point> {
         let main = self.main_native_window?;
         let client = self.native_ops.client_origin(main).ok()?;
