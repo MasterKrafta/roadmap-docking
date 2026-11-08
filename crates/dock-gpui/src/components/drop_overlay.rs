@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use dock_core::{
     DragPayload, DragPreview, DropTarget, DropZone, DropZoneRect, FloatingGroupRect, GroupRect,
-    Point, Rect, TabHeaderRect, TabStripRect,
+    DockSide, Point, Rect, TabHeaderRect, TabStripRect,
 };
 use gpui::{
     IntoElement, ParentElement, SharedString, Styled, div, img, prelude::InteractiveElement as _,
@@ -76,7 +76,7 @@ impl DropOverlay {
                         layer = layer.child(highlight_rect(half, theme, 0.25, true));
                     }
                 }
-                DropZone::ColumnLeft | DropZone::ColumnRight | DropZone::DockEdge => {
+                DropZone::ColumnLeft | DropZone::ColumnRight => {
                     let x = zone.rect.origin.x + zone.rect.size.width * 0.5;
                     let line = Rect::new(
                         Point::new(x - 2.0, zone.rect.origin.y),
@@ -84,6 +84,16 @@ impl DropOverlay {
                     );
                     layer = layer.child(highlight_rect(zone.rect, theme, 0.10, false));
                     layer = layer.child(guide_rect(line, theme));
+                }
+                DropZone::DockEdge => {
+                    // Keep the full edge hit target, but place its visible guide
+                    // close to the actual outer window border instead of centering
+                    // the marker 12 px inside the main viewport.
+                    if let DropTarget::MainColumn { side, .. } = target {
+                        let line = main_dock_edge_guide_rect(zone.rect, side);
+                        layer = layer.child(highlight_rect(zone.rect, theme, 0.10, false));
+                        layer = layer.child(guide_rect(line, theme));
+                    }
                 }
                 DropZone::ColumnEnd => {
                     let y = zone.rect.origin.y;
@@ -394,6 +404,21 @@ fn rail_insertion_rect(zone: &DropZoneRect, headers: &[TabHeaderRect]) -> Option
     ))
 }
 
+fn main_dock_edge_guide_rect(rect: Rect, side: DockSide) -> Rect {
+    const GUIDE_WIDTH: f32 = 4.0;
+    const EDGE_INSET: f32 = 2.0;
+
+    let x = match side {
+        DockSide::Left => rect.origin.x + EDGE_INSET,
+        DockSide::Right => rect.origin.x + rect.size.width - EDGE_INSET - GUIDE_WIDTH,
+    };
+
+    Rect::new(
+        Point::new(x, rect.origin.y),
+        dock_core::Size::new(GUIDE_WIDTH, rect.size.height),
+    )
+}
+
 fn highlight_rect(rect: Rect, theme: Theme, opacity: f32, border: bool) -> impl IntoElement {
     let mut element = div()
         .absolute()
@@ -423,9 +448,9 @@ fn guide_rect(rect: Rect, theme: Theme) -> impl IntoElement {
 
 #[cfg(test)]
 mod tests {
-    use dock_core::{DropZone, Point, Rect, Size};
+    use dock_core::{DockSide, DropZone, Point, Rect, Size};
 
-    use super::group_edge_half;
+    use super::{group_edge_half, main_dock_edge_guide_rect};
 
     #[test]
     fn group_edge_preview_covers_half_of_the_target_group() {
@@ -438,6 +463,21 @@ mod tests {
         assert_eq!(
             group_edge_half(rect, DropZone::Bottom),
             Rect::new(Point::new(10.0, 70.0), Size::new(200.0, 50.0))
+        );
+    }
+
+    #[test]
+    fn main_dock_edge_guides_stay_close_to_the_outer_window_border() {
+        let left = Rect::new(Point::new(100.0, 20.0), Size::new(24.0, 300.0));
+        let right = Rect::new(Point::new(976.0, 20.0), Size::new(24.0, 300.0));
+
+        assert_eq!(
+            main_dock_edge_guide_rect(left, DockSide::Left),
+            Rect::new(Point::new(102.0, 20.0), Size::new(4.0, 300.0))
+        );
+        assert_eq!(
+            main_dock_edge_guide_rect(right, DockSide::Right),
+            Rect::new(Point::new(994.0, 20.0), Size::new(4.0, 300.0))
         );
     }
 }
