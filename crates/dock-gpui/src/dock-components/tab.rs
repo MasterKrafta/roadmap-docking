@@ -49,7 +49,6 @@ impl DockTab {
         let top = header.rect.origin.y - strip_rect.origin.y;
         let width = header.rect.size.width.max(0.0);
         let height = header.rect.size.height.max(0.0);
-        let hover_group = format!("dock-tab-{:?}-{:?}", group, header.panel);
 
         let mut title_row = div()
             .absolute()
@@ -78,7 +77,6 @@ impl DockTab {
 
         let tab = div()
             .id(format!("tab-{:?}-{:?}", group, header.panel))
-            .group(hover_group.clone())
             .absolute()
             .left(px(left))
             .top(px(top))
