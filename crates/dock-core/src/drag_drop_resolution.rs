@@ -739,8 +739,12 @@ fn extracting_one_panel_from_a_floating_group_returns_its_new_window_id() {
     ));
     let new_area = layout.floating_group(new_float).unwrap().area;
     let new_root = layout.dock_area(new_area).unwrap().root;
+    let Some(Node::Column(column)) = layout.node(new_root) else {
+        panic!("a detached Photoshop panel must use a floating Column root");
+    };
+    assert_eq!(column.groups.len(), 1);
     assert!(matches!(
-        layout.node(new_root),
+        layout.node(column.groups[0]),
         Some(Node::Tabs(tabs)) if tabs.children == vec![moving_node]
     ));
     assert!(layout.panel_instance(moving_panel).is_some());
