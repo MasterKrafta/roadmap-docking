@@ -8,9 +8,9 @@ use dock_core::{
 use gpui::{AnyView, Entity, IntoElement, ParentElement, ScrollHandle};
 use ui::Theme;
 
-use crate::DockController;
+use crate::{DockController, dock_components::GroupPresentation};
 
-use super::{context_menu::GroupMenuToggle, splitter::SplitterView, tab_strip::GroupPresentation};
+use super::{context_menu::GroupMenuToggle, splitter::SplitterView};
 
 /// Main-dock presentation layer. All geometry comes from a Core snapshot;
 /// this component stores no second copy of the docking tree.
