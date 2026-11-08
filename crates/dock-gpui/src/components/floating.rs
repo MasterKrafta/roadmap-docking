@@ -593,17 +593,12 @@ impl Render for FloatingHost {
                 if preserve_interaction {
                     return;
                 }
-                controller.update(app, |controller, controller_cx| {
-                    let result = controller.cancel_pointer_interaction_on_focus_loss();
-                    controller_cx.notify();
-                    if let Err(error) = result {
-                        tracing::warn!(
-                            %error,
-                            "could not cancel floating dock interaction on focus loss"
-                        );
-                    }
-                });
-                DockInteractionCoordinator::release(window, &pointer_capture);
+                DockInteractionCoordinator::cancel_on_focus_loss(
+                    &controller,
+                    window,
+                    &pointer_capture,
+                    app,
+                );
                 tab_press.set(None);
             })
             .detach();
