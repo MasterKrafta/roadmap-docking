@@ -779,7 +779,8 @@ fn native_tearoff_preserves_original_drag_source_and_escape_rolls_back() {
     assert!(controller.tearoff_transaction_active);
 
     controller.cancel_pointer_interaction_on_escape().unwrap();
-    assert_eq!(controller.layout().version(), initial_version);
+    // Restoring a history snapshot advances the revision monotonically.
+    assert!(controller.layout().version() > initial_version);
     assert_eq!(
         controller
             .layout()
