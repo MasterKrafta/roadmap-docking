@@ -36,13 +36,14 @@ pub(crate) fn begin_drag_at(
     }
 }
 
-/// Main-host tab and column gestures detach into native Floating windows.
+/// Main-host tab, group, and column gestures detach into native Floating windows.
 /// They must not resolve dock targets before that transition is complete.
 fn main_drag_uses_drop_targets(handle: Option<DragHandle>) -> bool {
     !matches!(
         handle,
         Some(
             DragHandle::PanelTab
+                | DragHandle::GroupGrip
                 | DragHandle::ColumnHeader
                 | DragHandle::DockAreaHeader
                 | DragHandle::FloatingTitle
@@ -438,9 +439,10 @@ pub(crate) fn begin_native_tearoff(
             (DragHandle::ColumnHeader, DragPayload::Column { column }) => {
                 column_drag_started_from_tab(controller, column, origin)
             }
-            // Every DockTab tear-off temporarily hides DockAreaHeader. It is
-            // restored by FloatingWindowManager when the mouse is released.
-            (DragHandle::PanelTab, DragPayload::Panel { .. }) => true,
+            // DockTab and GroupGrip tear-offs temporarily hide DockAreaHeader.
+            // FloatingWindowManager restores it when the native move is released.
+            (DragHandle::PanelTab, DragPayload::Panel { .. })
+            | (DragHandle::GroupGrip, DragPayload::Group { .. }) => true,
             _ => false,
         };
         let local_bounds = floating_bounds(controller, payload, pointer)?;
@@ -956,15 +958,16 @@ mod main_drop_resolution_tests {
     use super::main_drag_uses_drop_targets;
 
     #[test]
-    fn main_tab_and_column_tearoffs_do_not_resolve_drop_targets() {
+    fn main_tab_group_and_column_tearoffs_do_not_resolve_drop_targets() {
         assert!(!main_drag_uses_drop_targets(Some(DragHandle::PanelTab)));
+        assert!(!main_drag_uses_drop_targets(Some(DragHandle::GroupGrip)));
         assert!(!main_drag_uses_drop_targets(Some(DragHandle::ColumnHeader)));
         assert!(!main_drag_uses_drop_targets(Some(DragHandle::FloatingTitle)));
     }
 
     #[test]
-    fn ordinary_main_group_drags_keep_drop_target_resolution() {
-        assert!(main_drag_uses_drop_targets(Some(DragHandle::GroupGrip)));
+    fn unrelated_main_drag_handles_keep_drop_target_resolution() {
+        assert!(main_drag_uses_drop_targets(None));
     }
 }
 
