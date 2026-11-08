@@ -108,4 +108,20 @@ impl DockInteractionCoordinator {
         }
         Self::release(window, capture_state);
     }
+
+    pub(crate) fn cancel_on_escape(
+        controller: &Entity<DockController>,
+        window: &mut Window,
+        capture_state: &Rc<Cell<Option<HitboxId>>>,
+        app: &mut App,
+    ) {
+        if let Err(error) = controller.update(app, |controller, cx| {
+            let result = controller.cancel_pointer_interaction_on_escape();
+            cx.notify();
+            result
+        }) {
+            tracing::debug!(%error, "could not cancel dock pointer interaction with Escape");
+        }
+        Self::release(window, capture_state);
+    }
 }
