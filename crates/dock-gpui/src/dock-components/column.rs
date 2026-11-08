@@ -9,7 +9,8 @@ use dock_core::{
     TabHeaderRect, TabOverflowRect, TabStripRect, VerticalOverflow,
 };
 use gpui::{
-    AnyView, Entity, IntoElement, InteractiveElement, ParentElement, ScrollHandle, Styled, div, px,
+    AnyView, Entity, IntoElement, InteractiveElement, ParentElement, ScrollHandle,
+    StatefulInteractiveElement, Styled, div, px,
     rgb,
 };
 use ui::Theme;
