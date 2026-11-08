@@ -34,7 +34,12 @@ impl Layout {
 
 impl FloatingZoneContext<'_> {
     fn append_all(&mut self) -> Result<(), ComputeRectsError> {
-        if matches!(self.source, DropSource::Column { .. }) {
+        // A Main Column drag is restricted to Main slots and FreeArea. A
+        // floating-root Column is different: it represents an existing native
+        // Floating composition and may target compatible Floating structures.
+        if matches!(self.source, DropSource::Column { .. })
+            && !source_is_floating_root(self.layout, self.source_root)
+        {
             return Ok(());
         }
         // Floating-window drop zones are stacked over their contents. Their outer
@@ -79,9 +84,11 @@ impl FloatingZoneContext<'_> {
         }
 
         self.append_center_zones(&target_groups)?;
+        self.append_group_edge_zones(&target_groups)?;
+        self.append_column_slot_zones(area.root)?;
         self.append_edge_zones(floating_rect, area.root, &target_groups)?;
         if self.layout.profile() == Profile::Generic {
-            self.append_side_zones(&target_groups)?;
+            self.append_side_zones(&target_groups, area.root)?;
         }
         Ok(())
     }
@@ -119,11 +126,27 @@ impl FloatingZoneContext<'_> {
                     group: target_group.group,
                     index: tabs.children.len(),
                 },
-                DropSource::Group { .. } => DropTarget::GroupTabs {
-                    group: target_group.group,
-                    index: tabs.children.len(),
-                },
-                DropSource::Column { .. } => continue,
+                DropSource::Group { .. }
+                    if matches!(self.layout.node(self.source_root), Some(Node::Tabs(_))) =>
+                {
+                    DropTarget::GroupTabs {
+                        group: target_group.group,
+                        index: tabs.children.len(),
+                    }
+                }
+                DropSource::Column { .. }
+                    if source_is_floating_root(self.layout, self.source_root)
+                        && matches!(
+                            self.layout.node(self.source_root),
+                            Some(Node::Column(column)) if column.groups.len() == 1
+                        ) =>
+                {
+                    DropTarget::GroupTabs {
+                        group: target_group.group,
+                        index: tabs.children.len(),
+                    }
+                }
+                _ => continue,
             };
             push_zone(
                 self.zones,
@@ -137,10 +160,157 @@ impl FloatingZoneContext<'_> {
 }
 
 impl FloatingZoneContext<'_> {
-    pub(super) fn append_side_zones(
+    pub(super) fn append_group_edge_zones(
         &mut self,
         target_groups: &[GroupRect],
     ) -> Result<(), ComputeRectsError> {
+        let source_can_split_vertically = match self.source {
+            DropSource::Panel { .. } => true,
+            DropSource::Group { .. } => {
+                matches!(self.layout.node(self.source_root), Some(Node::Tabs(_)))
+            }
+            DropSource::Column { .. } => {
+                self.layout.profile() == Profile::Generic
+                    && source_is_floating_root(self.layout, self.source_root)
+            }
+        };
+        if !source_can_split_vertically {
+            return Ok(());
+        }
+
+        for target_group in target_groups {
+            for edge in [DropZone::Top, DropZone::Bottom] {
+                if group_edge_is_noop(
+                    self.layout,
+                    self.tree_index,
+                    self.source,
+                    target_group.group,
+                    edge,
+                ) {
+                    continue;
+                }
+
+                push_zone(
+                    self.zones,
+                    DropTarget::GroupEdge {
+                        group: target_group.group,
+                        zone: edge,
+                    },
+                    edge,
+                    floating_group_edge_rect(target_group.rect, edge, self.metrics)?,
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn append_column_slot_zones(
+        &mut self,
+        floating_root: NodeId,
+    ) -> Result<(), ComputeRectsError> {
+        let source_can_enter_column = match self.source {
+            DropSource::Panel { .. } => true,
+            DropSource::Group { .. } => {
+                matches!(self.layout.node(self.source_root), Some(Node::Tabs(_)))
+                    || matches!(
+                        self.layout.node(self.source_root),
+                        Some(Node::Split(split)) if split.axis == crate::Axis::Y
+                    )
+            }
+            DropSource::Column { .. } => false,
+        };
+        if !source_can_enter_column
+            || !source_allows(self.layout, self.source_panels, AllowedArea::FLOATING)
+        {
+            return Ok(());
+        }
+
+        for column_rect in self.rects.columns.iter().filter(|column| {
+            contains_node(self.tree_index, floating_root, column.column)
+        }) {
+            let Some(Node::Column(column)) = self.layout.node(column_rect.column) else {
+                continue;
+            };
+            if column.mode.is_rail() {
+                continue;
+            }
+
+            let bottom = column_rect
+                .rect
+                .checked_bottom()
+                .map_err(ComputeRectsError::Geometry)?;
+            let end_height = self
+                .metrics
+                .edge_drop_width
+                .min(column_rect.rect.size.height / 3.0);
+            let side_inset = self
+                .metrics
+                .edge_drop_width
+                .min(column_rect.rect.size.width / 4.0);
+            let end_rect = Rect::new(
+                Point::new(column_rect.rect.origin.x + side_inset, bottom - end_height),
+                Size::new(
+                    (column_rect.rect.size.width - 2.0 * side_inset).max(0.0),
+                    end_height,
+                ),
+            );
+            let index = column.groups.len();
+            if let DropSource::Group { group } = self.source
+                && matches!(self.layout.node(self.source_root), Some(Node::Tabs(_)))
+                && self.layout.group_slot_is_noop(group, column_rect.column, index)
+            {
+                continue;
+            }
+
+            push_zone(
+                self.zones,
+                DropTarget::ColumnSlot {
+                    column: column_rect.column,
+                    index,
+                },
+                DropZone::ColumnEnd,
+                end_rect,
+            )?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn append_side_zones(
+        &mut self,
+        target_groups: &[GroupRect],
+        floating_root: NodeId,
+    ) -> Result<(), ComputeRectsError> {
+        // Generic profile permits horizontal splits. Whole floating Columns and
+        // horizontal compositions can only join another column composition;
+        // individual Tabs groups may split against any Floating group.
+        let target_is_column_composition = matches!(
+            self.layout.node(floating_root),
+            Some(Node::Column(_))
+                | Some(Node::Split(crate::Split { axis: crate::Axis::X, .. }))
+        );
+        let source_can_split_horizontally = match self.source {
+            DropSource::Panel { .. } => true,
+            DropSource::Group { .. } => {
+                matches!(self.layout.node(self.source_root), Some(Node::Tabs(_)))
+                    || (target_is_column_composition
+                        && source_is_floating_root(self.layout, self.source_root)
+                        && matches!(
+                            self.layout.node(self.source_root),
+                            Some(Node::Split(crate::Split {
+                                axis: crate::Axis::X,
+                                ..
+                            }))
+                        ))
+            }
+            DropSource::Column { .. } => {
+                target_is_column_composition
+                    && source_is_floating_root(self.layout, self.source_root)
+            }
+        };
+        if !source_can_split_horizontally {
+            return Ok(());
+        }
+
         // The Generic profile supports horizontal nested splits within a
         // floating area; Photoshop uses its column-edge policy instead.
         for target_group in target_groups {
@@ -175,6 +345,29 @@ impl FloatingZoneContext<'_> {
         }
         Ok(())
     }
+
+
+fn floating_group_edge_rect(
+    rect: Rect,
+    edge: DropZone,
+    metrics: &DockMetrics,
+) -> Result<Rect, ComputeRectsError> {
+    let content_top = (metrics.header_height + metrics.tab_strip_height).min(rect.size.height);
+    let content_height = (rect.size.height - content_top).max(0.0);
+    let height = metrics.edge_drop_width.min(content_height / 2.0);
+    let bottom = rect.checked_bottom().map_err(ComputeRectsError::Geometry)?;
+    let y = match edge {
+        // The top edge starts below the Floating title and the group's tab strip.
+        DropZone::Top => rect.origin.y + content_top,
+        DropZone::Bottom => bottom - height,
+        _ => return Err(ComputeRectsError::InvalidLayoutState),
+    };
+    let result = Rect::new(
+        Point::new(rect.origin.x, y),
+        Size::new(rect.size.width, height),
+    );
+    result.validate().map_err(ComputeRectsError::Geometry)?;
+    Ok(result)
 }
 
 impl FloatingZoneContext<'_> {
@@ -184,6 +377,20 @@ impl FloatingZoneContext<'_> {
         root: NodeId,
         target_groups: &[GroupRect],
     ) -> Result<(), ComputeRectsError> {
+        let source_can_split_vertically = match self.source {
+            DropSource::Panel { .. } => true,
+            DropSource::Group { .. } => {
+                matches!(self.layout.node(self.source_root), Some(Node::Tabs(_)))
+            }
+            DropSource::Column { .. } => {
+                self.layout.profile() == Profile::Generic
+                    && source_is_floating_root(self.layout, self.source_root)
+            }
+        };
+        if !source_can_split_vertically {
+            return Ok(());
+        }
+
         let top_rect = floating_edge_rect(floating_rect.rect, DropZone::Top, self.metrics)?;
         let bottom_rect = floating_edge_rect(floating_rect.rect, DropZone::Bottom, self.metrics)?;
         let horizontal_composition = matches!(
