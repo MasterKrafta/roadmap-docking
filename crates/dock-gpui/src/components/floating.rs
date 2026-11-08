@@ -611,8 +611,8 @@ impl Render for FloatingHost {
             .bg(rgb(self.theme.colors.panel_surface_background));
 
         // The shared DockAreaHeader moves the complete floating composition.
-        // A single-tab DockColumn moves its existing window from the DockTab drag zone;
-        // tabs in multi-tab or standalone Groups can detach from their source strip.
+        // Every visible DockTab remains an individual panel drag source, including
+        // the only tab in a floating window; it can detach and join another group.
         let manager = self.manager.clone();
         let controller = self.controller.clone();
         let tab_press = self.tab_press.clone();
