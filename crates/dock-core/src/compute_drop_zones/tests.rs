@@ -2190,14 +2190,18 @@ fn photoshop_floating_column_targets_only_outer_edges_of_a_floating_column_compo
         vec![left_column, right_column],
         vec![0.5, 0.5],
     );
-    let target_floating = builder.floating_group(target_root, bounds(620.0, 140.0), 1);
+    let target_floating = builder.floating_group(
+        target_root,
+        Rect::new(Point::new(620.0, 140.0), Size::new(420.0, 320.0)),
+        1,
+    );
     let mut layout = builder.build();
 
     layout
         .apply(
             DockCommand::Float {
                 node: source_column,
-                bounds: bounds(120.0, 140.0),
+                bounds: Rect::new(Point::new(120.0, 140.0), Size::new(420.0, 320.0)),
             },
             &metrics,
         )
