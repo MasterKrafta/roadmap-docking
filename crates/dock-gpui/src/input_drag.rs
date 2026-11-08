@@ -91,7 +91,7 @@ pub(crate) fn update_drag_at(
             return was_pressed;
         }
 
-        let Some(source) = drop_source(controller, payload) else {
+        let Some(source) = drop_source(payload) else {
             tracing::debug!("dock drag source no longer exists");
             cancel_drag(controller);
             cx.notify();
@@ -595,7 +595,7 @@ pub(crate) fn finish_drag_at(
         let mut target = if !drag_started || !main_drag_uses_drop_targets(handle) {
             None
         } else {
-            match drop_source(controller, payload) {
+            match drop_source(payload) {
                 Some(source) => {
                     match resolve_drop_target(controller, source, position, was_pressed) {
                         Ok(target) => target,
@@ -701,15 +701,14 @@ fn cancel_drag(controller: &mut DockController) {
     }
 }
 
-fn drop_source(controller: &DockController, payload: DragPayload) -> Option<DropSource> {
+fn drop_source(payload: DragPayload) -> Option<DropSource> {
     match payload {
         DragPayload::Panel { panel } => Some(DropSource::Panel { panel }),
         DragPayload::Group { group } => Some(DropSource::Group { group }),
         DragPayload::Column { column } => Some(DropSource::Column { column }),
-        DragPayload::DockArea { .. } => None,
-        // Whole-floating-window captures are routed by FloatingWindowManager,
-        // which knows the actual source HWND. They are not Main-host drag sources.
-        DragPayload::FloatingGroup { .. } => None
+        // DockArea and whole-floating-window captures are routed by
+        // FloatingWindowManager, not by the Main-host resolver.
+        DragPayload::DockArea { .. } | DragPayload::FloatingGroup { .. } => None
     }
 }
 
