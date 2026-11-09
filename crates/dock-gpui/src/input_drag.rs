@@ -7,7 +7,7 @@ use gpui::{App, Entity, WindowId};
 
 use crate::{DockController, DragHostManager, DragSourceHost, FloatingWindowManager};
 
-/// Identifies the floating tab gesture across pointer updates and tear-off.
+/// Identifies a FloatingHost tab gesture across pointer updates and DragHost detach.
 #[derive(Clone, Copy)]
 pub(crate) struct FloatingTabDrag {
     pub(crate) source_window_id: WindowId,
@@ -44,8 +44,8 @@ pub(crate) fn begin_drag_at(
     }
 }
 
-/// Main-host tear-off handles bypass regular drop-target tracking until their
-/// temporary DragHost or persistent Floating window is ready.
+/// Content drags transported by DragHost defer drop-target tracking to its
+/// native polling loop. FloatingTitle remains a native move of its own window.
 fn main_drag_uses_drop_targets(handle: Option<DragHandle>) -> bool {
     !matches!(
         handle,
@@ -91,9 +91,8 @@ pub(crate) fn update_drag_at(
             return false;
         }
 
-        // Main-window tab/column drags are tear-off gestures first. Their
-        // drop targets become available only after they exist in a FloatingHost.
-        // A floating title also moves its own window and never resolves dock targets.
+        // Main-host content drags transported by DragHost resolve targets in its
+        // tracking loop. A floating title moves its own window and never resolves dock targets.
         if !main_drag_uses_drop_targets(handle) {
             cx.notify();
             return was_pressed;
@@ -575,8 +574,8 @@ pub(crate) fn update_floating_tab_drag(
     })
 }
 
-/// Finishes a tab drag that remains inside its source TabStrip region. Leaving
-/// that region promotes the gesture to a native tear-off.
+/// Finishes a tab drag that remains inside its source TabStrip. Leaving that
+/// region promotes the gesture to DragHost through the FloatingHost input pipeline.
 pub(crate) fn finish_floating_tab_drag(
     controller: &Entity<DockController>,
     window_id: WindowId,
