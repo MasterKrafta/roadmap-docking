@@ -1189,11 +1189,7 @@ fn column_header_drag_handle_contains(
         else {
             return Some(false);
         };
-        let expanded = matches!(
-            controller.layout().node(column),
-            Some(Node::Column(value)) if !value.mode.is_rail()
-        );
-        Some(expanded && DockAreaDragArea::column_drag_handle_contains(
+        Some(DockAreaDragArea::column_drag_handle_contains(
             column_rect,
             point,
             controller.metrics().column_header_height,
@@ -1229,16 +1225,7 @@ fn dock_area_drag_handle_side(
             let Some(area_rect) = dock_area_bounds(&area_columns) else {
                 continue;
             };
-            let column_grip_columns = area_columns
-                .iter()
-                .filter(|column_rect| {
-                    matches!(
-                        layout.node(column_rect.column),
-                        Some(Node::Column(value)) if !value.mode.is_rail()
-                    )
-                })
-                .copied()
-                .collect::<Vec<_>>();
+            let column_grip_columns = area_columns.clone();
             if DockAreaDragArea::contains(
                 area_rect,
                 &area_columns,

@@ -52,13 +52,7 @@ impl DockAreaHeader {
             ));
 
         for (index, column) in columns.iter().enumerate() {
-            if dragged_column != Some(column.column)
-                && column_modes
-                    .get(&column.column)
-                    .copied()
-                    .unwrap_or(ColumnMode::Expanded)
-                    == ColumnMode::Expanded
-            {
+            if dragged_column != Some(column.column) {
                 header = header.child(DockAreaDragArea::render_column_grip(
                     format!("{id}-column-grip-{index}"),
                     column.rect.origin.x - area_rect.origin.x,

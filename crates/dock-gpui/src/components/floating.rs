@@ -297,11 +297,10 @@ fn floating_tab_drag_host_required(leaves_source: bool, over_other_window: bool)
 }
 
 /// Gives the shared DockAreaHeader input priority over every Column below it.
-/// Returns Some(false) for controls and the separate Column drag grips.
+/// Returns Some(false) for controls and all separate Column drag grips.
 fn floating_dock_area_title_pointer_region(
     area_rect: Rect,
     columns: &[ColumnRect],
-    column_modes: &HashMap<NodeId, ColumnMode>,
     point: Point,
     metrics: DockMetrics,
 ) -> Option<bool> {
@@ -316,21 +315,10 @@ fn floating_dock_area_title_pointer_region(
         return None;
     }
 
-    let column_grip_columns = columns
-        .iter()
-        .filter(|column| {
-            column_modes
-                .get(&column.column)
-                .copied()
-                .unwrap_or(ColumnMode::Expanded)
-                == ColumnMode::Expanded
-        })
-        .copied()
-        .collect::<Vec<_>>();
     Some(DockAreaDragArea::contains(
         area_rect,
         columns,
-        &column_grip_columns,
+        columns,
         point,
         header_height,
         metrics.column_control_button_width,
@@ -678,7 +666,6 @@ impl Render for FloatingHost {
             (
                 snapshot.floating.rect,
                 snapshot.rects.columns.clone(),
-                snapshot.column_modes.clone(),
                 snapshot.metrics,
             )
         });
@@ -736,19 +723,13 @@ impl Render for FloatingHost {
                         // Column grip before allowing the remaining header area to move the window.
                         let column_candidate = if !hide_header {
                             dock_area_drag_area.as_ref().and_then(
-                                |(_, columns, column_modes, metrics)| {
+                                |(_, columns, metrics)| {
                                     columns.iter().find_map(|column| {
-                                        let expanded = column_modes
-                                            .get(&column.column)
-                                            .copied()
-                                            .unwrap_or(ColumnMode::Expanded)
-                                            == ColumnMode::Expanded;
-                                        (expanded
-                                            && DockAreaDragArea::column_drag_handle_contains(
-                                                *column,
-                                                point,
-                                                metrics.column_header_height,
-                                            ))
+                                        DockAreaDragArea::column_drag_handle_contains(
+                                            *column,
+                                            point,
+                                            metrics.column_header_height,
+                                        )
                                         .then_some(column.column)
                                     })
                                 },
@@ -792,11 +773,10 @@ impl Render for FloatingHost {
                         // The remaining DockAreaHeader region controls moving the whole Floating.
                         let floating_title_region = if !hide_header {
                             dock_area_drag_area.as_ref().and_then(
-                                |(area_rect, columns, column_modes, metrics)| {
+                                |(area_rect, columns, metrics)| {
                                     floating_dock_area_title_pointer_region(
                                         *area_rect,
                                         columns,
-                                        column_modes,
                                         point,
                                         *metrics,
                                     )
@@ -1400,7 +1380,9 @@ impl Render for FloatingHost {
                                         &drag_host_manager,
                                         app,
                                     ) {
-                                        tracing::debug!("Floating Column drag could not start DragHost on release");
+                                        tracing::debug!(
+                                            "Floating Column drag could not start DragHost on release"
+                                        );
                                     }
                                 } else {
                                     controller_for_up.update(app, |controller, cx| {
@@ -2029,8 +2011,6 @@ mod floating_tab_drag_host_tests {
 
 #[cfg(test)]
 mod floating_dock_area_header_hit_tests {
-    use std::collections::HashMap;
-
     use dock_core::{ColumnRect, DockMetrics, NodeId, Point, Rect, Size};
     use slotmap::Key;
 
@@ -2044,7 +2024,6 @@ mod floating_dock_area_header_hit_tests {
             super::floating_dock_area_title_pointer_region(
                 column,
                 &columns,
-                &HashMap::new(),
                 Point::new(100.0, 30.0),
                 metrics,
             ),
@@ -2054,7 +2033,6 @@ mod floating_dock_area_header_hit_tests {
             super::floating_dock_area_title_pointer_region(
                 column,
                 &columns,
-                &HashMap::new(),
                 Point::new(240.0, 30.0),
                 metrics,
             ),
@@ -2064,7 +2042,6 @@ mod floating_dock_area_header_hit_tests {
             super::floating_dock_area_title_pointer_region(
                 column,
                 &columns,
-                &HashMap::new(),
                 Point::new(100.0, 60.0),
                 metrics,
             ),
