@@ -199,19 +199,9 @@ pub(crate) fn begin_panel_drag_host(
     match drag_host_manager.update(app, |manager, manager_cx| {
         manager.open_panel_at_cursor(panel, grab_offset, preferred_size, manager_cx)
     }) {
-        Ok(Ok(_)) => true,
-        Ok(Err(error)) => {
-            tracing::warn!(%error, "could not start Panel DragHost");
-            controller.update(app, |controller, cx| {
-                if let Err(cancel_error) = controller.cancel_pointer_interaction() {
-                    tracing::debug!(%cancel_error, "could not cancel failed Panel DragHost start");
-                }
-                cx.notify();
-            });
-            false
-        }
+        Ok(_) => true,
         Err(error) => {
-            tracing::warn!(%error, "could not access DragHostManager for Panel drag");
+            tracing::warn!(%error, "could not start Panel DragHost");
             controller.update(app, |controller, cx| {
                 if let Err(cancel_error) = controller.cancel_pointer_interaction() {
                     tracing::debug!(%cancel_error, "could not cancel failed Panel DragHost start");
