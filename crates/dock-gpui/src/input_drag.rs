@@ -486,8 +486,8 @@ pub(crate) fn finish_floating_tab_drag(
     })
 }
 
-/// Turns an eligible main-window drag into a native floating window as soon
-/// as Core crosses the drag threshold. DockTab tear-offs keep DockAreaHeader hidden.
+/// Handles only the remaining legacy Main tear-offs: FlyoutPanel, Column and
+/// DockArea. PanelTab and GroupGrip content is transported by DragHost.
 pub(crate) fn begin_native_tearoff(
     controller: &Entity<DockController>,
     manager: &Entity<FloatingWindowManager>,
@@ -507,9 +507,6 @@ pub(crate) fn begin_native_tearoff(
             (DragHandle::ColumnHeader, DragPayload::Column { column }) => {
                 column_drag_started_from_tab(controller, column, origin)
             }
-            // Panel tear-offs temporarily hide DockAreaHeader.
-            // FloatingWindowManager restores it when the native move is released.
-            (DragHandle::PanelTab, DragPayload::Panel { .. }) => true,
             _ => false,
         };
         let local_bounds = floating_bounds(controller, payload, pointer)?;
