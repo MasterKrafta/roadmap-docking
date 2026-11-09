@@ -307,6 +307,7 @@ impl Render for DockHost {
             chrome,
             rects,
             main_node_ids,
+            main_node_sides,
             main_column_ids,
             main_column_sides,
             main_column_groups,
@@ -326,6 +327,7 @@ impl Render for DockHost {
             let layout = controller.layout();
             let chrome = layout.chrome();
             let mut main_node_ids = HashSet::new();
+            let mut main_node_sides = HashMap::new();
             let mut main_column_ids = HashSet::new();
             let mut main_column_sides = HashMap::new();
             let mut main_column_groups = HashMap::new();
@@ -343,6 +345,9 @@ impl Render for DockHost {
                         &mut area_column_groups,
                     );
 
+                    for node in &area_node_ids {
+                        main_node_sides.insert(*node, side);
+                    }
                     main_node_ids.extend(area_node_ids);
                     for column in &area_column_ids {
                         main_column_sides.insert(*column, side);
@@ -393,6 +398,7 @@ impl Render for DockHost {
                 chrome,
                 rects,
                 main_node_ids,
+                main_node_sides,
                 main_column_ids,
                 main_column_sides,
                 main_column_groups,
@@ -458,6 +464,9 @@ impl Render for DockHost {
         });
         let dragged_column = self.controller.update(cx, |controller, _| {
             controller.dragged_column_from(source_window_id)
+        });
+        let dragged_dock_area = self.controller.update(cx, |controller, _| {
+            controller.dragged_dock_area_from(source_window_id)
         });
         let pending_transfers = self.controller.update(cx, |controller, _| {
             controller.pending_panel_view_transfers_from(source_window_id)
@@ -836,6 +845,7 @@ impl Render for DockHost {
                 main_panel_views,
                 dragged_group,
                 dragged_column,
+                dragged_dock_area,
                 &rects.tab_strips,
                 &rects.tab_headers,
                 &rects.tab_overflows,
@@ -851,12 +861,14 @@ impl Render for DockHost {
                 &rects.splitters,
                 &rects.vertical_overflow,
                 &main_node_ids,
+                &main_node_sides,
                 &main_column_sides,
                 &main_column_groups,
                 &column_modes,
                 &self.column_scroll_handles,
                 self.controller.clone(),
                 theme,
+                true,
             ));
 
             // Flyout is an interactive overlay above the Canvas and main dock.

@@ -1,14 +1,17 @@
 use std::collections::{HashMap, HashSet};
 
 use dock_core::{
-    Axis, ColumnDisplayItem, ColumnMode, ColumnRect, DockMetrics, DockSide, DragPreview, DropZoneRect,
-    FlyoutState, GroupRect, NodeId, PanelRect, Point, Rect, Size, SplitterRect, TabHeaderRect, TabOverflowRect,
-    TabStripRect, VerticalOverflow,
+    Axis, ColumnDisplayItem, ColumnMode, ColumnRect, DockMetrics, DockSide, DragPreview,
+    DropZoneRect, FlyoutState, GroupRect, NodeId, PanelRect, Point, Rect, Size, SplitterRect,
+    TabHeaderRect, TabOverflowRect, TabStripRect, VerticalOverflow,
 };
 use gpui::{AnyView, Entity, IntoElement, ParentElement, ScrollHandle};
 use ui::Theme;
 
-use crate::{DockController, dock_components::GroupPresentation};
+use crate::{
+    DockController,
+    dock_components::{DockAreaView, GroupPresentation},
+};
 
 use super::{context_menu::GroupMenuToggle, splitter::SplitterView};
 
@@ -24,6 +27,7 @@ impl MainDockView {
         panels: Vec<(PanelRect, Option<AnyView>)>,
         dragged_group: Option<NodeId>,
         dragged_column: Option<NodeId>,
+        dragged_dock_area: Option<DockSide>,
         tab_strips: &[TabStripRect],
         tab_headers: &[TabHeaderRect],
         tab_overflows: &[TabOverflowRect],
@@ -39,16 +43,21 @@ impl MainDockView {
         splitters: &[SplitterRect],
         vertical_overflow: &[VerticalOverflow],
         main_node_ids: &HashSet<NodeId>,
+        main_node_sides: &HashMap<NodeId, DockSide>,
         main_column_sides: &HashMap<NodeId, DockSide>,
         main_column_groups: &HashMap<NodeId, Vec<NodeId>>,
         column_modes: &HashMap<NodeId, ColumnMode>,
         scroll_handles: &HashMap<NodeId, ScrollHandle>,
         controller: Entity<DockController>,
         theme: Theme,
+        render_area_headers: bool,
     ) -> impl IntoElement {
-        let mut layer = crate::dock_components::DockAreaView::render_root();
+        let mut layer = DockAreaView::render_root();
 
         for column in columns {
+            if dragged_dock_area == main_column_sides.get(&column.column).copied() {
+                continue;
+            }
             let group_ids = main_column_groups
                 .get(&column.column)
                 .map(Vec::as_slice)
@@ -95,7 +104,11 @@ impl MainDockView {
         // They are painted after columns so the handles remain visible.
         for splitter in splitters
             .iter()
-            .filter(|splitter| splitter.axis == Axis::X && main_node_ids.contains(&splitter.owner))
+            .filter(|splitter| {
+                splitter.axis == Axis::X
+                    && main_node_ids.contains(&splitter.owner)
+                    && dragged_dock_area != main_node_sides.get(&splitter.owner).copied()
+            })
         {
             layer = layer.child(SplitterView::render(
                 *splitter,
@@ -110,7 +123,34 @@ impl MainDockView {
 
         // Each Core DockArea (Left and Right) owns one shared header.
         // Column group geometry already starts below this reserved header band.
-        for side in [DockSide::Left, DockSide::Right] {
+        if render_area_headers {
+            for side in [DockSide::Left, DockSide::Right] {
+                if dragged_dock_area == Some(side) {
+                    continue;
+                }
+                let area_columns = columns
+                    .iter()
+                    .filter(|column| main_column_sides.get(&column.column) == Some(&side))
+                    .copied()
+                    .collect::<Vec<_>>();
+                if let Some(area_rect) = dock_area_bounds(&area_columns) {
+                    let side_name = match side {
+                        DockSide::Left => "left",
+                        DockSide::Right => "right",
+                    };
+                    layer = layer.child(DockAreaView::render_header(
+                        format!("main-dock-area-{side_name}"),
+                        area_rect,
+                        &area_columns,
+                        dragged_column,
+                        metrics,
+                        theme,
+                    ));
+                }
+            }
+        }
+
+        if let Some(side) = dragged_dock_area {
             let area_columns = columns
                 .iter()
                 .filter(|column| main_column_sides.get(&column.column) == Some(&side))
@@ -121,12 +161,9 @@ impl MainDockView {
                     DockSide::Left => "left",
                     DockSide::Right => "right",
                 };
-                layer = layer.child(crate::dock_components::DockAreaView::render_header(
-                    format!("main-dock-area-{side_name}"),
+                layer = layer.child(DockAreaView::render_drag_placeholder(
+                    format!("main-dock-area-{side_name}-drag-placeholder"),
                     area_rect,
-                    &area_columns,
-                    dragged_column,
-                    metrics,
                     theme,
                 ));
             }

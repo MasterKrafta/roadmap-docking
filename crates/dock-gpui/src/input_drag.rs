@@ -369,6 +369,75 @@ pub(crate) fn begin_column_drag_host(
     }
 }
 
+/// Starts DragHost for a Main DockAreaHeader gesture and transfers every active
+/// PanelView from its Columns as one composition.
+pub(crate) fn begin_dock_area_drag_host(
+    controller: &Entity<DockController>,
+    drag_host_manager: &Entity<DragHostManager>,
+    app: &mut App,
+) -> bool {
+    let candidate = controller.update(app, |controller, _| {
+        let (side, origin) = match controller.drag().session().state() {
+            DragState::Dragging {
+                payload: DragPayload::DockArea { side },
+                origin,
+                ..
+            } if controller.drag().session().handle() == Some(DragHandle::DockAreaHeader) => {
+                (side, origin)
+            }
+            _ => return None,
+        };
+        let host_session = controller.drag().host_session()?;
+        if host_session.source_host() != DragSourceHost::Main {
+            return None;
+        }
+        host_session.source_window_id()?;
+
+        let root = controller.layout().main_area(side)?.root;
+        let mut column_ids = Vec::new();
+        collect_dock_area_columns(controller.layout(), root, &mut column_ids);
+        let rects = controller.geometry().ok()?;
+        let columns = column_ids
+            .iter()
+            .filter_map(|id| rects.columns.iter().find(|rect| rect.column == *id).copied())
+            .collect::<Vec<_>>();
+        let area_rect = dock_area_bounds(&columns)?;
+        let panels = controller.active_dock_area_panel_ids(side)?;
+        let grab_offset = Point::new(
+            (origin.x - area_rect.origin.x).clamp(0.0, area_rect.size.width),
+            (origin.y - area_rect.origin.y).clamp(0.0, area_rect.size.height),
+        );
+        Some((side, panels, grab_offset, area_rect.size))
+    });
+
+    let Some((side, panels, grab_offset, logical_size)) = candidate else {
+        tracing::debug!("DockAreaHeader drag has no valid source geometry for DragHost");
+        controller.update(app, |controller, cx| {
+            if let Err(error) = controller.cancel_pointer_interaction() {
+                tracing::debug!(%error, "could not cancel DockArea drag without source geometry");
+            }
+            cx.notify();
+        });
+        return false;
+    };
+
+    match drag_host_manager.update(app, |manager, manager_cx| {
+        manager.open_dock_area_at_cursor(side, panels, grab_offset, logical_size, manager_cx)
+    }) {
+        Ok(_) => true,
+        Err(error) => {
+            tracing::warn!(%error, "could not start DockArea DragHost");
+            controller.update(app, |controller, cx| {
+                if let Err(cancel_error) = controller.cancel_pointer_interaction() {
+                    tracing::debug!(%cancel_error, "could not cancel failed DockArea DragHost start");
+                }
+                cx.notify();
+            });
+            false
+        }
+    }
+}
+
 /// Updates a tab drag that started inside a floating host. The resolver is
 /// built from that host's own local geometry, not from the main DockHost.
 pub(crate) fn update_floating_tab_drag(
@@ -560,8 +629,8 @@ pub(crate) fn finish_floating_tab_drag(
     })
 }
 
-/// Handles only the remaining legacy Main tear-offs: FlyoutPanel and DockArea.
-/// PanelTab, GroupGrip and ColumnHeader content is transported by DragHost.
+/// Handles only the remaining legacy Main tear-off: FlyoutPanel.
+/// PanelTab, GroupGrip, ColumnHeader and DockArea content use DragHost.
 pub(crate) fn begin_native_tearoff(
     controller: &Entity<DockController>,
     manager: &Entity<FloatingWindowManager>,
@@ -579,10 +648,6 @@ pub(crate) fn begin_native_tearoff(
         let command = match (handle, payload) {
             (DragHandle::FlyoutPanel, DragPayload::Panel { panel }) => {
                 DockCommand::FloatPanelFromFlyout { panel, bounds: local_bounds }
-            }
-            (DragHandle::DockAreaHeader, DragPayload::DockArea { side }) => {
-                let root = controller.layout().main_area(side)?.root;
-                DockCommand::Float { node: root, bounds: local_bounds }
             }
             _ => return None,
         };

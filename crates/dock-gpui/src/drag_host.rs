@@ -202,6 +202,37 @@ impl DragHostSession {
         true
     }
 
+    pub(crate) fn can_begin_dock_area_view_transfer(
+        &self,
+        side: dock_core::DockSide,
+        panels: &[PanelId],
+    ) -> bool {
+        self.handle == dock_core::DragHandle::DockAreaHeader
+            && matches!(
+                self.payload,
+                dock_core::DragPayload::DockArea { side: active } if active == side
+            )
+            && self.transferred_panels.is_empty()
+            && panels
+                .iter()
+                .enumerate()
+                .all(|(index, panel)| !panels[..index].contains(panel))
+    }
+
+    pub(crate) fn begin_dock_area_view_transfer(
+        &mut self,
+        side: dock_core::DockSide,
+        panels: &[PanelId],
+    ) -> bool {
+        if self.transport_host.is_none()
+            || !self.can_begin_dock_area_view_transfer(side, panels)
+        {
+            return false;
+        }
+        self.transferred_panels.extend_from_slice(panels);
+        true
+    }
+
     pub(crate) fn begin_panel_view_transfer(&mut self, panel: PanelId) -> bool {
         if self.transport_host.is_none() || !self.can_begin_panel_view_transfer(panel) {
             return false;
@@ -384,6 +415,37 @@ mod tests {
         assert!(!session.can_begin_column_view_transfer(column, &panels));
         assert!(!session.begin_column_view_transfer(column, &panels));
         assert_eq!(session.payload(), DragPayload::Column { column });
+    }
+
+    #[test]
+    fn dock_area_drag_transfers_all_active_panel_views_as_one_session() {
+        use dock_core::{DockSide, DragHandle, DragPayload, PanelId};
+        use slotmap::SlotMap;
+
+        let mut panel_ids = SlotMap::<PanelId, ()>::with_key();
+        let first_panel = panel_ids.insert(());
+        let second_panel = panel_ids.insert(());
+        let panels = [first_panel, second_panel];
+        let mut session = super::DragHostSession::new(
+            DragPayload::DockArea { side: DockSide::Right },
+            DragHandle::DockAreaHeader,
+            super::DragSourceHost::Main,
+            None,
+        );
+        let drag_host = DragHostId::from_raw(41);
+
+        assert!(session.can_begin_dock_area_view_transfer(DockSide::Right, &panels));
+        assert!(!session.begin_dock_area_view_transfer(DockSide::Right, &panels));
+        assert!(session.attach_transport_host(drag_host));
+        assert!(session.begin_dock_area_view_transfer(DockSide::Right, &panels));
+        assert_eq!(session.transferred_panels(), &panels);
+        assert!(!session.all_panel_views_source_detached());
+        assert!(!session.can_begin_dock_area_view_transfer(DockSide::Right, &panels));
+        assert!(!session.can_begin_dock_area_view_transfer(DockSide::Left, &panels));
+        assert_eq!(
+            session.payload(),
+            DragPayload::DockArea { side: DockSide::Right }
+        );
     }
 
     #[test]

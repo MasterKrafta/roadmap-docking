@@ -602,10 +602,8 @@ impl FloatingWindowManager {
         DockGeometry::core_bounds_from_native(rect, client_size, scale)
     }
 
-    /// Starts native movement for a persistent Floating window created by a legacy
-    /// FlyoutPanel, Column, or Main DockArea tear-off.
-    /// PanelTab DragHost transfers and Group DragHost transfers never enter this path.
-    /// ColumnHeader drags hide the header only when they start on DockTab, not ColumnDragArea.
+    /// Starts the remaining legacy native move for a FlyoutPanel tear-off.
+    /// PanelTab, GroupGrip, ColumnHeader and DockAreaHeader content drags use DragHost.
     pub(crate) fn begin_tearoff_move(
         &mut self,
         group: FloatingGroupId,

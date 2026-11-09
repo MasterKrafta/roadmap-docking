@@ -861,9 +861,9 @@ pub(crate) fn register_pointer_events(
     });
 }
 
-/// Selects which semantic drag areas start a host transition after the drag threshold.
-/// PanelTab and GroupGrip start DragHost after leaving their source drag zones.
-/// Column starts DragHost at threshold; the complete DockArea header remains legacy.
+/// Selects which semantic drag areas start a DragHost transition after the drag threshold.
+/// PanelTab and GroupGrip start after leaving their source drag zones.
+/// Column and DockArea start DragHost as soon as the common threshold is crossed.
 fn host_transition_enabled_for(handle: Option<DragHandle>, payload: DragPayload) -> bool {
     match (handle, payload) {
         (Some(DragHandle::ColumnHeader), DragPayload::Column { .. }) => true,

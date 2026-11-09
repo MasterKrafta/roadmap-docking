@@ -1,7 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 
 use dock_core::{
-    Axis, CommandError, CommandValue, DockCommand, DockMetrics, DragCancelReason, DragHandle,
+    Axis, CommandError, CommandValue, DockCommand, DockMetrics, DockSide, DragCancelReason, DragHandle,
     DragPayload, DragSession, DragSessionError, DragState, DropSource, DropZoneResolver,
     FloatingGroupId, FlyoutState, GeometryError, HitResult, InitialLayoutError, Layout,
     LayoutRects, Node, NodeId, OUTER_COLUMN_EDGE_BOUNDARY_INDEX, PanelId, PanelKey, Point, Profile,
@@ -515,6 +515,84 @@ impl DockController {
                 .is_some_and(|session| session.begin_column_view_transfer(column, panels))
     }
 
+    pub(crate) fn active_dock_area_panel_ids(&self, side: DockSide) -> Option<Vec<PanelId>> {
+        fn collect_columns(layout: &Layout, node: NodeId, columns: &mut Vec<NodeId>) {
+            match layout.node(node) {
+                Some(Node::Split(split)) => {
+                    for child in &split.children {
+                        collect_columns(layout, *child, columns);
+                    }
+                }
+                Some(Node::Column(_)) => columns.push(node),
+                _ => {}
+            }
+        }
+
+        let area = self.layout.main_area(side)?;
+        let mut columns = Vec::new();
+        collect_columns(&self.layout, area.root, &mut columns);
+        let mut panels = Vec::new();
+        for column in columns {
+            panels.extend(self.active_column_panel_ids(column)?);
+        }
+        Some(panels)
+    }
+
+    pub(crate) fn can_begin_dock_area_view_transfer(
+        &self,
+        side: DockSide,
+        panels: &[PanelId],
+    ) -> bool {
+        let Some(area) = self.layout.main_area(side) else {
+            return false;
+        };
+        let mut columns = Vec::new();
+        fn collect_columns(layout: &Layout, node: NodeId, columns: &mut Vec<NodeId>) {
+            match layout.node(node) {
+                Some(Node::Split(split)) => {
+                    for child in &split.children {
+                        collect_columns(layout, *child, columns);
+                    }
+                }
+                Some(Node::Column(_)) => columns.push(node),
+                _ => {}
+            }
+        }
+        collect_columns(&self.layout, area.root, &mut columns);
+
+        if self
+            .layout
+            .flyout()
+            .is_some_and(|flyout| columns.contains(&flyout.column))
+        {
+            return false;
+        }
+
+        let Some(active_panels) = self.active_dock_area_panel_ids(side) else {
+            return false;
+        };
+        active_panels == panels
+            && panels.iter().all(|panel| self.panel_views.get(*panel).is_some())
+            && self.drag.host_session().is_some_and(|session| {
+                session.source_host() == DragSourceHost::Main
+                    && session.source_window_id().is_some()
+                    && session.can_begin_dock_area_view_transfer(side, panels)
+            })
+    }
+
+    pub(crate) fn begin_dock_area_view_transfer(
+        &mut self,
+        side: DockSide,
+        panels: &[PanelId],
+    ) -> bool {
+        self.can_begin_dock_area_view_transfer(side, panels)
+            && self
+                .drag
+                .host_session
+                .as_mut()
+                .is_some_and(|session| session.begin_dock_area_view_transfer(side, panels))
+    }
+
     /// Returns the Group replaced by a DragHost placeholder in this persistent source window.
     pub(crate) fn dragged_group_from(&self, source_window_id: WindowId) -> Option<NodeId> {
         let session = self.drag.host_session()?;
@@ -540,6 +618,21 @@ impl DockController {
         }
         match session.payload() {
             DragPayload::Column { column } => Some(column),
+            _ => None,
+        }
+    }
+
+    /// Returns the Main DockArea replaced by a DragHost placeholder in this persistent source window.
+    pub(crate) fn dragged_dock_area_from(&self, source_window_id: WindowId) -> Option<DockSide> {
+        let session = self.drag.host_session()?;
+        if session.source_window_id() != Some(source_window_id)
+            || session.source_host() != DragSourceHost::Main
+            || session.transport_host().is_none()
+        {
+            return None;
+        }
+        match session.payload() {
+            DragPayload::DockArea { side } => Some(side),
             _ => None,
         }
     }
