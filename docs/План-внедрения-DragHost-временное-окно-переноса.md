@@ -453,13 +453,34 @@ Core не менялся. `dock-components/tab.rs` не требовал изм�
 
 - источник — `DragPayload::Group`, `DragHandle::GroupGrip`;
 - placeholder сохраняет геометрию всей Group;
-- DragHost показывает все вкладки/PanelView группы;
+- DragHost показывает все вкладки группы и её активную cached `PanelView`;
 - drop сохраняет порядок Tabs;
 - проверить Main → Main, Main → Floating, Floating → Main, Floating → Floating и FreeArea.
 
+**Фактически внедрено:**
+
+- Main GroupGrip и GroupGrip из постоянного FloatingHost запускают общий `begin_group_drag_host` после выхода за drag-зону исходной Group либо при входе в другое Dock-окно.
+- Используется тот же `DragHostManager`, что и для Panel. Семантические источник и payload остаются исходными: `DragSourceHost`, `DragPayload::Group`, `DragHandle::GroupGrip`.
+- Временное окно получает геометрию исходной Group и отображает её через существующий `DockGroupView::render_core`: исходную полосу вкладок, их порядок и активный cached `PanelView`. Повторная factory-вызова не требуется; неактивные представления остаются в общем cache и не монтируются одновременно.
+- В исходном Main/Floating Host вся Group заменяется placeholder с тем же Core-прямоугольником. Активная `PanelView` передаётся по уже используемому протоколу: source placeholder → подтверждение следующего кадра → показ DragHost.
+- Для Main и Floating используется общий drop tracking: Main → Main, Main → Floating, Floating → Main, Floating → Floating и FreeArea разрешаются через существующий Core resolver. Для FreeArea границы вычисляются по исходному прямоугольнику Group, а постоянное Floating создаётся только финальной командой при отпускании.
+- Escape и ошибки запуска используют общий путь отмены DragHost; перемещение заголовка уже существующего FloatingHost не менялось.
+- Удалена ветка `GroupGrip → DockCommand::Float` из старого `begin_native_tearoff`. Старый механизм остаётся только для ещё не переведённых Column и Main DockArea.
+
+Core не менялся.
+
+**Локальная проверка этапа 8.1:**
+
+1. `cargo fmt --all -- --check`
+2. `cargo check -p dock-gpui`
+3. `cargo test -p dock-gpui`
+4. Проверить Main → Main, Main → Floating, Floating → Main, Floating → Floating, оба варианта FreeArea, возврат на исходную Group и Escape. Отдельно убедиться, что перенос Group не превращает её предварительно в постоянное Floating-окно.
+
+**Критерий готовности:** Group переносится как единая исходная сущность через DragHost, порядок Tabs сохраняется, а старый `Float` не участвует в транспортировке Group.
+
 ### 8.2. Column
 
-- источник — `DragPayload::Column), `DragHandle::ColumnHeader`;
+- источник — `DragPayload::Column`, `DragHandle::ColumnHeader`;
 - placeholder сохраняет полную высоту/ширину Column;
 - DragHost показывает все группы и панели Column;
 - drop переносит Column как единое поддерево;
@@ -468,7 +489,7 @@ Core не менялся. `dock-components/tab.rs` не требовал изм�
 
 ### 8.3. Main DockArea
 
-- источник — `DragPayload::DockArea), `DragHandle::DockAreaHeader`;
+- источник — `DragPayload::DockArea`, `DragHandle::DockAreaHeader`;
 - placeholder занимает прежнюю область;
 - DragHost показывает всю переносимую композицию;
 - FreeArea создаёт Floating из корня DockArea только на release;
@@ -612,4 +633,4 @@ Core не менялся. `dock-components/tab.rs` не требовал изм�
 
 Новый план заменяет именно эту транспортную часть. Уже реализованные Core-правила DropTarget, геометрии и стыковки нужно сохранить там, где они подходят новой схеме. Код предыдущих этапов не удаляется заранее: его судьба определяется на Этапе 10 после локальной проверки DragHost.
 
-**Текущая точка: Этап 7 — перенос Panel через DragHost реализован и ожидает локальных проверок; после подтверждения начинается Этап 8.**
+**Текущая точка: Этап 8.1 — перенос Group через DragHost реализован на `main` и ожидает локальных проверок; после подтверждения начинается этап 8.2 (Column). По просьбе пользователя переход к этапу 8 начат до отдельного подтверждения локальных проверок этапа 7.**
