@@ -20,7 +20,7 @@ use platform::{
 };
 
 use crate::{
-    DockController, DockEvent, DockTheme, components::FloatingHost,
+    DockController, DockEvent, DockTheme, DragSourceHost, components::FloatingHost,
     geometry::DockGeometry,
 };
 
@@ -137,6 +137,30 @@ impl CompositionHostRegistry {
 
     pub fn floating_count(&self) -> usize {
         self.floating_groups.len()
+    }
+}
+
+/// A registered persistent DockHost under the physical cursor, together with
+/// the point converted into that host's Core-local coordinate system.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum DockingWindowAtPoint {
+    Main {
+        window_id: WindowId,
+        point: Point,
+    },
+    Floating {
+        group: FloatingGroupId,
+        window_id: WindowId,
+        point: Point,
+    },
+}
+
+impl DockingWindowAtPoint {
+    pub(crate) const fn role(self) -> crate::DockWindowRole {
+        match self {
+            Self::Main { .. } => crate::DockWindowRole::Main,
+            Self::Floating { group, .. } => crate::DockWindowRole::Floating { group },
+        }
     }
 }
 
@@ -257,11 +281,7 @@ impl FloatingWindowManager {
     /// The main HWND is retained as the native owner for each floating host.
     /// The first reconciliation creates windows only for floating compositions
     /// already present in the initial Layout.
-    pub(crate) fn attach_main_window(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    pub(crate) fn attach_main_window_for_drag_routing(&mut self, window: &mut Window) {
         self.host_registry.main_window_id = Some(window.window_handle().window_id());
 
         if self.main_native_window.is_none() {
@@ -270,11 +290,19 @@ impl FloatingWindowManager {
                 Err(error) => {
                     tracing::debug!(
                         %error,
-                        "main window native handle is unavailable; floating windows will use GPUI visibility"
+                        "main native handle is unavailable; cross-window drag routing is deferred"
                     );
                 }
             }
         }
+    }
+
+    pub(crate) fn attach_main_window(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.attach_main_window_for_drag_routing(window);
 
         if self.controller_subscription.is_none() {
             let controller = self.controller.clone();
@@ -1009,7 +1037,90 @@ impl FloatingWindowManager {
         });
     }
 
-    fn core_point_for_main(&self, screen: PhysicalPoint) -> Option<Point> {
+    pub(crate) fn docking_window_at_point(
+        &self,
+        screen: PhysicalPoint,
+        drag_host: NativeWindowId,
+        excluded_source_window: Option<WindowId>,
+    ) -> Option<DockingWindowAtPoint> {
+        let main_window_id = self.host_registry.main_window_id?;
+        let main_native_window = self.main_native_window?;
+        let mut known_windows = Vec::with_capacity(self.registry.windows.len() + 1);
+
+        if excluded_source_window != Some(main_window_id) {
+            known_windows.push(main_native_window);
+        }
+        known_windows.extend(self.registry.windows.values().filter_map(|entry| {
+            (entry.visibility == PanelWindowVisibility::Visible
+                && Some(entry.window_id) != excluded_source_window)
+                .then_some(entry.native_window)
+                .flatten()
+        }));
+
+        // The temporary DragHost is never an input target. The native resolver
+        // skips it and continues through the desktop Z-order to a registered host.
+        let target_native = self
+            .native_ops
+            .window_from_point(screen, &known_windows, Some(drag_host))
+            .ok()
+            .flatten()?;
+
+        if target_native == main_native_window {
+            return Some(DockingWindowAtPoint::Main {
+                window_id: main_window_id,
+                point: self.core_point_for_main(screen)?,
+            });
+        }
+
+        let entry = self.registry.windows.values().find(|entry| {
+            entry.visibility == PanelWindowVisibility::Visible
+                && entry.native_window == Some(target_native)
+        })?;
+        let group = entry.host_group?;
+        Some(DockingWindowAtPoint::Floating {
+            group,
+            window_id: entry.window_id,
+            point: self.core_point_for_floating(target_native, screen)?,
+        })
+    }
+
+    pub(crate) fn core_point_for_drag_source(
+        &self,
+        source_host: DragSourceHost,
+        source_window_id: Option<WindowId>,
+        screen: PhysicalPoint,
+    ) -> Option<Point> {
+        match source_host {
+            DragSourceHost::Main => {
+                if source_window_id.is_some_and(|id| Some(id) != self.host_registry.main_window_id) {
+                    return None;
+                }
+                self.core_point_for_main(screen)
+            }
+            DragSourceHost::Floating { group } => {
+                let entry = self.panel_window_for_group(group)?;
+                if source_window_id.is_some_and(|id| id != entry.window_id) {
+                    return None;
+                }
+                self.core_point_for_floating(entry.native_window?, screen)
+            }
+        }
+    }
+
+    pub(crate) fn screen_bounds_for_drag_source(
+        &self,
+        source_host: DragSourceHost,
+        bounds: Rect,
+    ) -> Option<Rect> {
+        match source_host {
+            DragSourceHost::Main => self.screen_bounds_from_main_local(bounds),
+            DragSourceHost::Floating { group } => {
+                self.screen_bounds_from_floating_local(group, bounds)
+            }
+        }
+    }
+
+    pub(crate) fn core_point_for_main(&self, screen: PhysicalPoint) -> Option<Point> {
         let main = self.main_native_window?;
         let client = self.native_ops.client_origin(main).ok()?;
         let scale = self.native_ops.scale_factor(main).ok()?;
