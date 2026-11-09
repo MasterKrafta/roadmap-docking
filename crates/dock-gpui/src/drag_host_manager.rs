@@ -5,8 +5,8 @@
 //! transfer prototype; pointer-pipeline integration is introduced later.
 
 use gpui::{
-    AppContext, Bounds, Context, Entity, IntoElement, Render, Styled, Window, WindowBounds,
-    WindowHandle, WindowId, WindowKind, WindowOptions, div, point, px, rgb, size,
+    AppContext, Bounds, Context, Entity, IntoElement, ParentElement, Render, Styled, Window,
+    WindowBounds, WindowHandle, WindowId, WindowKind, WindowOptions, div, point, px, rgb, size,
 };
 use platform::{NativeError, NativeWindowId, NativeWindowOps, SystemNativeWindowOps};
 
@@ -330,7 +330,10 @@ impl DragHostManager {
         if let Some(panel) = panel {
             let controller = self.controller.clone();
             cx.observe(&controller, move |manager, controller, manager_cx| {
-                if !controller.drag().panel_view_source_detached(panel) {
+                let source_detached = controller.update(manager_cx, |controller, _| {
+                    controller.drag().panel_view_source_detached(panel)
+                });
+                if !source_detached {
                     return;
                 }
                 if let Err(error) = manager.show_pending_drag_host(id) {
