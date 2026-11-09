@@ -599,7 +599,7 @@ impl DragHostManager {
             Some((target, local_free_area_bounds))
         });
 
-        let Some((target, local_free_area_bounds)) = update.flatten() else {
+        let Some((target, local_free_area_bounds)) = update.ok().flatten() else {
             self.clear_drop_preview(id, cx);
             return true;
         };
