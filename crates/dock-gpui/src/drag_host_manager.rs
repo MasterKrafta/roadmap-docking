@@ -466,7 +466,7 @@ impl DragHostManager {
                     return None;
                 };
                 Some(Some((
-                    *payload,
+                    payload,
                     host_session.handle(),
                     host_session.source_host(),
                     host_session.source_window_id(),
