@@ -321,11 +321,8 @@ impl Layout {
         }
 
         if matches!(target, DropTarget::FreeArea) {
-            // An already-floating Column is already in a persistent native window.
-            // FreeArea therefore leaves it in place instead of creating another one.
-            if source_is_floating {
-                return Ok(DragDropAction::NoOp);
-            }
+            // A ColumnHeader drag detaches this Column from its current owner,
+            // including an existing Floating composition, only on mouse-up.
             let bounds = request.floating_bounds.ok_or(CommandError::InvalidTarget {
                 reason: "FreeArea Float requests require explicit window bounds",
             })?;
