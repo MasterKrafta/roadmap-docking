@@ -130,7 +130,8 @@ impl DragHostSession {
     }
 
     pub(crate) fn can_begin_panel_view_transfer(&self, panel: PanelId) -> bool {
-        matches!(self.payload, dock_core::DragPayload::Panel { panel: active } if active == panel)
+        self.handle == dock_core::DragHandle::PanelTab
+            && matches!(self.payload, dock_core::DragPayload::Panel { panel: active } if active == panel)
             && self.transferred_panel.is_none()
     }
 
@@ -205,6 +206,7 @@ mod tests {
         assert_eq!(session.transport_host(), None);
         assert_eq!(session.transferred_panel(), None);
         assert!(session.can_begin_panel_view_transfer(panel));
+        assert!(!session.begin_panel_view_transfer(panel));
 
         assert!(session.attach_transport_host(drag_host));
         assert_eq!(session.transport_host(), Some(drag_host));
