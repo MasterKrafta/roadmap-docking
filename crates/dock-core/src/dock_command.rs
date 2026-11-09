@@ -73,8 +73,8 @@ pub enum DockCommand {
         side: DockSide,
         index: usize,
     },
-    /// Move an existing Column to a Main insertion slot or an outer edge of a
-    /// Floating Column composition. The Column and its subtree keep their IDs.
+    /// Move an existing Column to a Main insertion slot or a horizontal
+    /// GroupEdge in a Main/Floating Column composition. Its subtree keeps its IDs.
     MoveColumnToTarget {
         column: NodeId,
         target: DropTarget,
