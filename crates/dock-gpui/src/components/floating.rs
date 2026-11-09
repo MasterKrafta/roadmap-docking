@@ -562,6 +562,7 @@ impl Render for FloatingHost {
             let controller = self.controller.clone();
             let manager = self.manager.clone();
             let tab_press = self.tab_press.clone();
+            let group_press = self.group_press.clone();
             let pointer_capture = self.pointer_capture.clone();
             cx.on_focus_out(&focus_handle, window, move |_host, _event, window, app| {
                 let preserve_interaction = manager.upgrade().is_some_and(|manager| {
@@ -579,6 +580,7 @@ impl Render for FloatingHost {
                     app,
                 );
                 tab_press.set(None);
+                group_press.set(None);
             })
             .detach();
             self.focus_observed = true;
@@ -735,7 +737,7 @@ impl Render for FloatingHost {
                         }
 
                         let group_candidate = controller_for_down.update(app, |controller, _| {
-                            let dock_group = match hit? {
+                            let dock_group = match hit.clone()? {
                                 dock_core::HitResult::Group { group }
                                 | dock_core::HitResult::TabStrip { group } => group,
                                 _ => return None,
@@ -793,7 +795,7 @@ impl Render for FloatingHost {
                                 group: tab_group,
                                 panel,
                                 ..
-                            } = hit?
+                            } = hit.clone()?
                             else {
                                 return None;
                             };
@@ -1142,6 +1144,7 @@ impl Render for FloatingHost {
                                 });
                             if drag_host_active {
                                 tab_press_for_up.set(None);
+                                group_press_for_up.set(None);
                                 if DockInteractionCoordinator::has_capture(&pointer_capture_for_up) {
                                     DockInteractionCoordinator::release(window, &pointer_capture_for_up);
                                 }
