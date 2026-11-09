@@ -1,8 +1,10 @@
 //! Runtime owner of temporary native windows used to present dragged dock content.
 //!
 //! A DragHost is deliberately independent from Core Layout and the persistent
-//! FloatingWindowManager. It can host one cached PanelView during the isolated
-//! transfer prototype; pointer-pipeline integration is introduced later.
+//! FloatingWindowManager. It hosts the existing source presentation and routes
+//! drop feedback to the persistent Main/Floating window under the cursor.
+
+use std::time::Duration;
 
 use gpui::{
     AppContext, Bounds, Context, Entity, IntoElement, ParentElement, Render, Styled, Window,
@@ -10,10 +12,13 @@ use gpui::{
 };
 use platform::{NativeError, NativeWindowId, NativeWindowOps, SystemNativeWindowOps};
 
-use dock_core::{PanelId, Point, Size};
+use dock_core::{
+    DragHandle, DragPayload, DragState, DropSource, DropTarget, PanelId, Point, Rect, Size,
+};
 
 use crate::{
-    DockController, DockTheme, DockWindowRole, DragHostId,
+    DockController, DockTheme, DockWindowRole, DragHostId, DragSourceHost,
+    FloatingWindowManager, floating_manager::DockingWindowAtPoint,
     geometry::DockGeometry,
 };
 
@@ -23,7 +28,11 @@ struct ActiveDragHost {
     window_id: WindowId,
     native_window: NativeWindowId,
     panel: Option<PanelId>,
+    grab_offset: Point,
     visible: bool,
+    drop_target: Option<DropTarget>,
+    target_role: Option<DockWindowRole>,
+    free_area_bounds: Option<Rect>,
 }
 
 /// Creates, positions, and closes the single temporary DragHost allowed during
@@ -36,6 +45,7 @@ pub struct DragHostManager {
     controller: Entity<DockController>,
     theme: DockTheme,
     main_native_window: Option<NativeWindowId>,
+    floating_manager: Option<Entity<FloatingWindowManager>>,
     active: Option<ActiveDragHost>,
     next_id: u64,
     native_ops: SystemNativeWindowOps,
@@ -47,6 +57,7 @@ impl DragHostManager {
             controller,
             theme,
             main_native_window: None,
+            floating_manager: None,
             active: None,
             next_id: 1,
             native_ops: SystemNativeWindowOps,
@@ -56,6 +67,14 @@ impl DragHostManager {
     /// Returns the shared controller entity. The manager does not own its Layout.
     pub fn controller(&self) -> &Entity<DockController> {
         &self.controller
+    }
+
+    /// Attaches the persistent-host registry used to route DragHost drop feedback.
+    pub(crate) fn attach_floating_window_manager(
+        &mut self,
+        manager: Entity<FloatingWindowManager>,
+    ) {
+        self.floating_manager = Some(manager);
     }
 
     /// Connects the manager to the application's main native window.
@@ -324,7 +343,11 @@ impl DragHostManager {
             window_id,
             native_window,
             panel,
+            grab_offset,
             visible,
+            drop_target: None,
+            target_role: None,
+            free_area_bounds: None,
         });
 
         if let Some(panel) = panel {
@@ -354,6 +377,7 @@ impl DragHostManager {
             .detach();
         }
 
+        self.schedule_drop_tracking(cx, id);
         Ok(id)
     }
 
@@ -372,6 +396,19 @@ impl DragHostManager {
             .validate()
             .map_err(|_| DragHostError::InvalidGrabOffset)?;
         let cursor = self.native_ops.cursor_position()?;
+        self.move_to_cursor(id, grab_offset, cursor)
+    }
+
+    fn move_to_cursor(
+        &self,
+        id: DragHostId,
+        grab_offset: Point,
+        cursor: platform::PhysicalPoint,
+    ) -> Result<(), DragHostError> {
+        let active = self.active.as_ref().ok_or(DragHostError::NotActive(id))?;
+        if active.id != id {
+            return Err(DragHostError::NotActive(id));
+        }
         let scale = valid_scale(self.native_ops.scale_factor(active.native_window)?)
             .ok_or(DragHostError::InvalidScaleFactor)?;
         let physical_grab_offset =
@@ -380,6 +417,223 @@ impl DragHostManager {
         let position = DockGeometry::physical_position_for_grab(cursor, physical_grab_offset);
         self.native_ops.move_window(active.native_window, position)?;
         Ok(())
+    }
+
+    fn schedule_drop_tracking(&self, cx: &mut Context<Self>, id: DragHostId) {
+        let manager = cx.entity().downgrade();
+        cx.spawn(async move |_, app| {
+            loop {
+                app.background_executor()
+                    .timer(Duration::from_millis(8))
+                    .await;
+                let Ok(keep_tracking) = manager.update(app, |manager, manager_cx| {
+                    manager.tick_drop_tracking(id, manager_cx)
+                }) else {
+                    break;
+                };
+                if !keep_tracking {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn tick_drop_tracking(&mut self, id: DragHostId, cx: &mut Context<Self>) -> bool {
+        let Some(active) = self.active.as_ref().filter(|active| active.id == id) else {
+            return false;
+        };
+        let native_drag_host = active.native_window;
+        let grab_offset = active.grab_offset;
+        let floating_manager = self.floating_manager.clone();
+
+        let tracking_state = self.controller.update(cx, |controller, _| {
+            let Some(host_session) = controller.drag().host_session() else {
+                return None;
+            };
+            if host_session.transport_host() != Some(id) {
+                return None;
+            }
+            if host_session
+                .transferred_panel()
+                .is_some_and(|panel| !host_session.panel_view_source_detached(panel))
+            {
+                return Some(None);
+            }
+            let DragState::Dragging { payload, .. } = controller.drag().session().state() else {
+                return None;
+            };
+            Some(Some((
+                *payload,
+                host_session.handle(),
+                host_session.source_host(),
+                host_session.source_window_id(),
+            )))
+        });
+        let Some(tracking_state) = tracking_state else {
+            return false;
+        };
+        let Some((payload, handle, source_host, source_window_id)) = tracking_state else {
+            return true;
+        };
+
+        let Ok(cursor) = self.native_ops.cursor_position() else {
+            self.clear_drop_preview(id, cx);
+            return false;
+        };
+        if let Err(error) = self.move_to_cursor(id, grab_offset, cursor) {
+            tracing::warn!(?id, %error, "DragHost could not follow the cursor");
+            self.clear_drop_preview(id, cx);
+            return false;
+        }
+
+        let Some(floating_manager) = floating_manager else {
+            self.clear_drop_preview(id, cx);
+            return false;
+        };
+        let excluded_source_window = matches!(
+            handle,
+            DragHandle::FloatingTitle | DragHandle::FloatingCapture
+        )
+        .then_some(source_window_id)
+        .flatten();
+        let target_window = floating_manager
+            .update(cx, |manager, _| {
+                manager.docking_window_at_point(
+                    cursor,
+                    native_drag_host,
+                    excluded_source_window,
+                )
+            })
+            .ok()
+            .flatten();
+        let main_point = floating_manager
+            .update(cx, |manager, _| manager.core_point_for_main(cursor))
+            .ok()
+            .flatten();
+        let source_point = floating_manager
+            .update(cx, |manager, _| {
+                manager.core_point_for_drag_source(source_host, source_window_id, cursor)
+            })
+            .ok()
+            .flatten();
+        let source = crate::input::drag::drop_source(payload);
+
+        let update = self.controller.update(cx, |controller, controller_cx| {
+            let target_result: Result<Option<DropTarget>, dock_core::ComputeRectsError> =
+                match (source, target_window) {
+                    (Some(source), Some(DockingWindowAtPoint::Main { point, .. })) => controller
+                        .prepare_drop_resolver(source)
+                        .and_then(|resolver| resolver.resolve(point)),
+                    (
+                        Some(source),
+                        Some(DockingWindowAtPoint::Floating {
+                            group,
+                            window_id,
+                            point,
+                        }),
+                    ) => controller
+                        .prepare_floating_window_drop_resolver(window_id, group, source)
+                        .and_then(|resolver| resolver.resolve(point)),
+                    (Some(source), None) => controller
+                        .prepare_drop_resolver(source)
+                        .map(|resolver| {
+                            resolver
+                                .zones()
+                                .iter()
+                                .any(|zone| zone.target == DropTarget::FreeArea)
+                                .then_some(DropTarget::FreeArea)
+                        }),
+                    (None, _) => Ok(None),
+                };
+            let target = match target_result {
+                Ok(target) => target,
+                Err(error) => {
+                    tracing::debug!(?id, %error, "DragHost drop-target resolution failed");
+                    None
+                }
+            };
+            let pointer_point = target_window
+                .map(|target| match target {
+                    DockingWindowAtPoint::Main { point, .. }
+                    | DockingWindowAtPoint::Floating { point, .. } => point,
+                })
+                .or_else(|| {
+                    (target == Some(DropTarget::FreeArea))
+                        .then_some(main_point)
+                        .flatten()
+                })
+                .or(main_point)
+                .or(source_point);
+            let Some(pointer_point) = pointer_point else {
+                let _ = controller.drag_mut().session_mut().set_drop_target(None);
+                controller_cx.notify();
+                return Some((None, None));
+            };
+            if let Err(error) = controller.drag_mut().session_mut().pointer_move(pointer_point) {
+                tracing::debug!(?id, %error, "DragHost pointer position was rejected");
+                let _ = controller.drag_mut().session_mut().set_drop_target(None);
+                controller_cx.notify();
+                return Some((None, None));
+            }
+            if let Err(error) = controller.drag_mut().session_mut().set_drop_target(target) {
+                tracing::debug!(?id, %error, "DragHost target update was rejected");
+                controller_cx.notify();
+                return Some((None, None));
+            }
+
+            let local_free_area_bounds = if target == Some(DropTarget::FreeArea) {
+                source_point.and_then(|point| {
+                    crate::input::drag::floating_bounds_for_drag(
+                        controller,
+                        payload,
+                        point,
+                        source_host,
+                        source_window_id,
+                    )
+                })
+            } else {
+                None
+            };
+            controller_cx.notify();
+            Some((target, local_free_area_bounds))
+        });
+
+        let Some((target, local_free_area_bounds)) = update.flatten() else {
+            self.clear_drop_preview(id, cx);
+            return true;
+        };
+        let screen_free_area_bounds = local_free_area_bounds.and_then(|bounds| {
+            floating_manager
+                .update(cx, |manager, _| {
+                    manager.screen_bounds_for_drag_source(source_host, bounds)
+                })
+                .ok()
+                .flatten()
+        });
+        if let Some(active) = self.active.as_mut().filter(|active| active.id == id) {
+            active.drop_target = target;
+            active.target_role = target_window.map(DockingWindowAtPoint::role);
+            active.free_area_bounds = screen_free_area_bounds;
+        }
+
+        if !self.native_ops.left_button_down().unwrap_or(false) {
+            return false;
+        }
+        true
+    }
+
+    fn clear_drop_preview(&mut self, id: DragHostId, cx: &mut Context<Self>) {
+        if let Some(active) = self.active.as_mut().filter(|active| active.id == id) {
+            active.drop_target = None;
+            active.target_role = None;
+            active.free_area_bounds = None;
+        }
+        self.controller.update(cx, |controller, controller_cx| {
+            controller.drag_mut().clear_resolver();
+            let _ = controller.drag_mut().session_mut().set_drop_target(None);
+            controller_cx.notify();
+        });
     }
 
     fn show_pending_drag_host(&mut self, id: DragHostId) -> Result<(), DragHostError> {
@@ -461,6 +715,21 @@ impl DragHostManager {
     /// Returns the identifier of the currently active DragHost, if present.
     pub fn active_drag_host_id(&self) -> Option<DragHostId> {
         self.active.as_ref().map(|active| active.id)
+    }
+
+    /// Returns the selected Core target for the active DragHost gesture.
+    pub fn active_drop_target(&self) -> Option<DropTarget> {
+        self.active.as_ref()?.drop_target
+    }
+
+    /// Returns the persistent host currently under the cursor, when registered.
+    pub fn active_target_role(&self) -> Option<DockWindowRole> {
+        self.active.as_ref()?.target_role
+    }
+
+    /// Returns the proposed persistent Floating bounds in virtual-desktop pixels.
+    pub fn active_free_area_bounds(&self) -> Option<Rect> {
+        self.active.as_ref()?.free_area_bounds
     }
 
     fn discard_unregistered_window(
