@@ -1965,3 +1965,73 @@ fn direct_column_move_rejects_invalid_target_atomically_and_undo_restores_source
     ));
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
+
+
+#[test]
+fn floating_column_header_dropped_in_free_area_detaches_only_on_release() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, source_panel) = builder.panel(key("floating-column-free-area"), constraints());
+    let source_group = builder.tabs(vec![source_panel], 0, false);
+    let source_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![source_group],
+        vec![1.0],
+    );
+    let (_, sibling_panel) = builder.panel(key("floating-column-free-area-sibling"), constraints());
+    let sibling_group = builder.tabs(vec![sibling_panel], 0, false);
+    let sibling_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![sibling_group],
+        vec![1.0],
+    );
+    let source_root = builder.split(
+        Axis::X,
+        vec![source_column, sibling_column],
+        vec![0.4, 0.6],
+    );
+    let source_floating = builder.floating_group(source_root, bounds(100.0, 140.0), 1);
+    let mut layout = builder.build();
+
+    let floating_bounds = bounds(900.0, 220.0);
+    let request = DragDropRequest {
+        payload: DragPayload::Column {
+            column: source_column,
+        },
+        handle: DragHandle::ColumnHeader,
+        origin: Point::ZERO,
+        point: Point::new(1000.0, 300.0),
+        target: Some(DropTarget::FreeArea),
+        floating_bounds: Some(floating_bounds),
+    };
+
+    let action = layout.resolve_drag_drop(&request, &metrics).unwrap();
+    assert_eq!(
+        action,
+        DragDropAction::Command(DockCommand::Float {
+            node: source_column,
+            bounds: floating_bounds,
+        })
+    );
+    let DragDropAction::Command(command) = action else {
+        panic!("a Column released in free space must create its Floating host on release");
+    };
+    let outcome = layout.apply(command, &metrics).unwrap();
+    let Some(crate::CommandValue::FloatingGroup(detached_floating)) = outcome.actual_value else {
+        panic!("floating a detached Column must return its new FloatingGroupId");
+    };
+
+    let original_area = layout.floating_group(source_floating).unwrap().area;
+    assert_eq!(layout.dock_area(original_area).unwrap().root, sibling_column);
+    let detached_area = layout.floating_group(detached_floating).unwrap().area;
+    assert_eq!(layout.dock_area(detached_area).unwrap().root, source_column);
+    assert_eq!(
+        layout.floating_group(detached_floating).unwrap().bounds,
+        floating_bounds
+    );
+    assert_eq!(layout.floating_groups().count(), 2);
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
