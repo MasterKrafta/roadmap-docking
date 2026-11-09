@@ -671,7 +671,8 @@ impl DragHostManager {
         };
         let source = crate::input::drag::drop_source(payload);
 
-        let update = self.controller.update(cx, |controller, controller_cx| {
+        let update: Result<(Option<DropTarget>, Option<Rect>), String> =
+            self.controller.update(cx, |controller, controller_cx| {
             let target_result: Result<Option<DropTarget>, dock_core::ComputeRectsError> =
                 if matches!(payload, DragPayload::DockArea { .. }) {
                     Ok(target_window.is_none().then_some(DropTarget::FreeArea))
