@@ -35,7 +35,9 @@ impl Layout {
                     .position(|(id, _)| *id == source_column)
                     .map(|index| (DockSide::Right, index))
             });
-        if source_position.is_none() && !source_is_floating_root(self, source_column) {
+        if source_position.is_none()
+            && self.find_floating_root_containing(source_column).is_none()
+        {
             return Err(ComputeRectsError::InvalidLayoutState);
         }
 
