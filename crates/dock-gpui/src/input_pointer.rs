@@ -10,7 +10,7 @@ use gpui::{
 };
 
 use crate::{
-    DockController, DragSourceHost, FloatingWindowManager,
+    DockController, DragHostManager, DragSourceHost, FloatingWindowManager,
     components::context_menu::{ContextMenuTarget, ContextMenuToggle},
     dock_components::{DockAreaDragArea, DockTab, GroupDragArea},
     geometry::host_point_from_gpui_window,
@@ -18,7 +18,9 @@ use crate::{
 
 use super::{
     interaction::DockInteractionCoordinator,
-    drag::{begin_drag_at, finish_drag_at, update_drag_at},
+    drag::{
+        begin_drag_at, begin_panel_drag_host, finish_drag_at, update_drag_at,
+    },
     resize::{begin_resize_hit, finish_resize, update_resize},
     scroll::map_hit_test_point,
 };
@@ -115,6 +117,7 @@ fn pointer_click_intent_for_hit(hit: HitResult, click_count: usize) -> PointerCl
 /// Shared pointer state retained by DockHost across rerenders.
 pub(crate) struct PointerEventState {
     pub(crate) manager: Entity<FloatingWindowManager>,
+    pub(crate) drag_host_manager: Entity<DragHostManager>,
     pub(crate) pointer_capture: Rc<Cell<Option<HitboxId>>>,
     pub(crate) pointer_press: Rc<Cell<Option<PointerPress>>>,
 }
@@ -133,6 +136,7 @@ pub(crate) fn register_pointer_events(
 ) {
     let PointerEventState {
         manager,
+        drag_host_manager,
         pointer_capture,
         pointer_press,
     } = pointer_state;
@@ -345,12 +349,20 @@ pub(crate) fn register_pointer_events(
 
     window.on_mouse_event({
         let manager = manager.clone();
+        let drag_host_manager = drag_host_manager.clone();
         let controller = controller.clone();
         let scroll_handles = scroll_handles.clone();
         let pointer_capture = pointer_capture.clone();
         let pointer_press = pointer_press.clone();
         let last_drag_hit_for_move = last_drag_hit.clone();
         move |event: &MouseMoveEvent, phase, window, app| {
+            if drag_host_manager.update(app, |manager, _| manager.active_drag_host_id().is_some()) {
+                if DockInteractionCoordinator::has_capture(&pointer_capture) {
+                    DockInteractionCoordinator::release(window, &pointer_capture);
+                }
+                pointer_press.set(None);
+                return;
+            }
             if manager.update(app, |manager, _| manager.native_move_active()) {
                 if DockInteractionCoordinator::has_capture(&pointer_capture) {
                     DockInteractionCoordinator::release(window, &pointer_capture);
@@ -451,6 +463,29 @@ pub(crate) fn register_pointer_events(
 
             let should_tearoff =
                 controller.update(app, |controller, _| native_tearoff_required(controller, point));
+            let panel_tab_active = controller.update(app, |controller, _| {
+                matches!(
+                    controller.drag().session().state(),
+                    DragState::Dragging {
+                        payload: DragPayload::Panel { .. },
+                        ..
+                    }
+                ) && controller.drag().session().handle() == Some(DragHandle::PanelTab)
+            });
+            let over_floating = panel_tab_active
+                && manager.update(app, |manager, _| {
+                    manager.cursor_over_floating_window_from_main()
+                });
+            if panel_tab_active && (should_tearoff || over_floating) {
+                let started = begin_panel_drag_host(&controller, &drag_host_manager, app);
+                if !started {
+                    tracing::debug!("Panel drag could not start DragHost; source gesture was cancelled");
+                }
+                DockInteractionCoordinator::release(window, &pointer_capture);
+                pointer_press.set(None);
+                app.stop_propagation();
+                return;
+            }
             if should_tearoff
                 && super::drag::begin_native_tearoff(&controller, &manager, point, app)
             {
@@ -503,6 +538,7 @@ pub(crate) fn register_pointer_events(
 
     window.on_mouse_event({
         let manager = manager.clone();
+        let drag_host_manager = drag_host_manager.clone();
         let controller = controller.clone();
         let scroll_handles = scroll_handles.clone();
         let toggle_context_menu = toggle_context_menu.clone();
@@ -511,6 +547,13 @@ pub(crate) fn register_pointer_events(
         let last_drag_hit_for_up = last_drag_hit.clone();
         move |event: &MouseUpEvent, phase, window, app| {
             if phase != DispatchPhase::Capture || event.button != MouseButton::Left {
+                return;
+            }
+            if drag_host_manager.update(app, |manager, _| manager.active_drag_host_id().is_some()) {
+                if DockInteractionCoordinator::has_capture(&pointer_capture) {
+                    DockInteractionCoordinator::release(window, &pointer_capture);
+                }
+                pointer_press.set(None);
                 return;
             }
             if manager.update(app, |manager, _| manager.native_move_active()) {
@@ -583,6 +626,29 @@ pub(crate) fn register_pointer_events(
                 }
                 let should_tearoff = controller
                     .update(app, |controller, _| native_tearoff_required(controller, point));
+                let panel_tab_active = controller.update(app, |controller, _| {
+                    matches!(
+                        controller.drag().session().state(),
+                        DragState::Dragging {
+                            payload: DragPayload::Panel { .. },
+                            ..
+                        }
+                    ) && controller.drag().session().handle() == Some(DragHandle::PanelTab)
+                });
+                let over_floating = panel_tab_active
+                    && manager.update(app, |manager, _| {
+                        manager.cursor_over_floating_window_from_main()
+                    });
+                if panel_tab_active && (should_tearoff || over_floating) {
+                    let started = begin_panel_drag_host(&controller, &drag_host_manager, app);
+                    if !started {
+                        tracing::debug!("Panel drag could not start DragHost on release");
+                    }
+                    DockInteractionCoordinator::release(window, &pointer_capture);
+                    pointer_press.set(None);
+                    app.stop_propagation();
+                    return;
+                }
                 if should_tearoff
                     && super::drag::begin_native_tearoff(&controller, &manager, point, app)
                 {
@@ -649,11 +715,19 @@ pub(crate) fn register_pointer_events(
 
     window.on_mouse_event({
         let manager = manager.clone();
+        let drag_host_manager = drag_host_manager.clone();
         let controller = controller.clone();
         let pointer_capture = pointer_capture.clone();
         let pointer_press = pointer_press.clone();
         move |_event: &MouseExitEvent, phase, window, app| {
             if phase != DispatchPhase::Capture {
+                return;
+            }
+            if drag_host_manager.update(app, |manager, _| manager.active_drag_host_id().is_some()) {
+                if DockInteractionCoordinator::has_capture(&pointer_capture) {
+                    DockInteractionCoordinator::release(window, &pointer_capture);
+                }
+                pointer_press.set(None);
                 return;
             }
             if manager.update(app, |manager, _| manager.native_move_active()) {
