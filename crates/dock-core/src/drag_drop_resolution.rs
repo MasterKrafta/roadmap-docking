@@ -1878,7 +1878,7 @@ fn main_panel_can_split_into_the_outer_edge_of_a_floating_column() {
     };
     assert!(matches!(
         layout.node(*new_group),
-        Some(Node::Tabs(tabs)) if tabs.children.len() == 1
+        Some(Node::Tabs(tabs)) if tabs.children == vec![source_panel_node]
             && matches!(layout.node(tabs.children[0]), Some(Node::Panel(panel)) if panel.panel_id == source_panel)
     ));
     assert!(matches!(
