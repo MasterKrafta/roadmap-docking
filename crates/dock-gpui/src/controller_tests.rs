@@ -934,11 +934,24 @@ fn drag_host_keeps_source_layout_unchanged_until_release_and_escape_cancels() {
         .next()
         .map(|(panel, _)| panel)
         .expect("baseline workspace should contain a Panel");
+    let source_column = controller
+        .layout()
+        .nodes()
+        .find_map(|(id, node)| matches!(node, Node::Column(_)).then_some(id))
+        .expect("baseline workspace should contain a Column");
     let source_group = controller
         .layout()
         .nodes()
         .find_map(|(id, node)| matches!(node, Node::Tabs(_)).then_some(id))
         .expect("baseline workspace should contain a Group");
+    controller
+        .dispatch_transient(DockCommand::OpenFlyout {
+            column: source_column,
+            panel: source_panel,
+        })
+        .expect("the baseline Column should open a flyout for its Panel");
+    assert!(controller.layout().flyout().is_some());
+
     let initial_layout = format!("{:?}", controller.layout());
     let initial_version = controller.layout().version();
     let drag_host = DragHostId::from_raw(201);
@@ -989,6 +1002,7 @@ fn drag_host_keeps_source_layout_unchanged_until_release_and_escape_cancels() {
     assert_eq!(format!("{:?}", controller.layout()), initial_layout);
     assert_eq!(controller.layout().version(), initial_version);
     assert_eq!(controller.layout().floating_groups().count(), 0);
+    assert!(controller.layout().flyout().is_some());
     assert_eq!(controller.drag().session().state(), DragState::Idle);
     assert!(controller.drag().host_session().is_none());
     assert!(!controller.has_active_pointer_interaction());
