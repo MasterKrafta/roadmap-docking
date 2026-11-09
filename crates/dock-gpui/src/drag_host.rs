@@ -147,7 +147,7 @@ impl DragHostSession {
     }
 
     /// Returns whether the source host has rendered its placeholder frame.
-    pub const fn panel_view_source_detached(&self, panel: PanelId) -> bool {
+    pub fn panel_view_source_detached(&self, panel: PanelId) -> bool {
         self.transferred_panel == Some(panel) && self.source_detached
     }
 
