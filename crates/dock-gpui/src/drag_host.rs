@@ -284,6 +284,35 @@ mod tests {
     }
 
     #[test]
+    fn group_drag_transfers_only_the_active_panel_view_after_host_is_attached() {
+        use dock_core::{DragHandle, DragPayload, NodeId, PanelId};
+        use slotmap::SlotMap;
+
+        let mut group_ids = SlotMap::<NodeId, ()>::with_key();
+        let group = group_ids.insert(());
+        let mut panel_ids = SlotMap::<PanelId, ()>::with_key();
+        let panel = panel_ids.insert(());
+        let mut session = super::DragHostSession::new(
+            DragPayload::Group { group },
+            DragHandle::GroupGrip,
+            super::DragSourceHost::Main,
+            None,
+        );
+        let drag_host = DragHostId::from_raw(21);
+
+        assert_eq!(session.payload(), DragPayload::Group { group });
+        assert!(session.can_begin_group_view_transfer(group, panel));
+        assert!(!session.begin_group_view_transfer(group, panel));
+
+        assert!(session.attach_transport_host(drag_host));
+        assert!(session.begin_group_view_transfer(group, panel));
+        assert_eq!(session.transferred_panel(), Some(panel));
+        assert!(!session.can_begin_group_view_transfer(group, panel));
+        assert!(!session.begin_group_view_transfer(group, panel));
+        assert_eq!(session.payload(), DragPayload::Group { group });
+    }
+
+    #[test]
     fn dock_window_roles_keep_dragging_separate_from_floating_groups() {
         let drag_id = DragHostId::from_raw(7);
         let dragging = DockWindowRole::Dragging { id: drag_id };
