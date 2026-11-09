@@ -61,10 +61,7 @@ impl DragHostManager {
     /// DragHost windows use MainHost as their native owner for application
     /// lifetime and taskbar behavior. Returns false when GPUI cannot provide
     /// the main HWND yet; DockHost may retry on a later render.
-    pub(crate) fn attach_main_window(
-        &mut self,
-        window: &mut Window,
-    ) -> bool {
+    pub(crate) fn attach_main_window(&mut self, window: &mut Window) -> bool {
         if self.main_native_window.is_some() {
             return true;
         }
