@@ -5,7 +5,7 @@ use dock_core::{
 };
 use gpui::{App, Entity, WindowId};
 
-use crate::{DockController, FloatingWindowManager};
+use crate::{DockController, DragSourceHost, FloatingWindowManager};
 
 /// Identifies the floating tab gesture across pointer updates and tear-off.
 #[derive(Clone, Copy)]
@@ -23,6 +23,7 @@ pub(crate) fn begin_drag_at(
     payload: DragPayload,
     handle: DragHandle,
     position: Point,
+    source_host: DragSourceHost,
     app: &mut App,
 ) {
     eprintln!(
@@ -30,7 +31,7 @@ pub(crate) fn begin_drag_at(
         payload, handle, position.x, position.y
     );
     if let Err(error) = controller.update(app, |controller, _| {
-        controller.begin_drag_interaction(payload, handle, position)
+        controller.begin_content_drag_interaction(payload, handle, position, source_host)
     }) {
         tracing::debug!(%error, "could not begin dock drag gesture");
     }
@@ -148,10 +149,11 @@ pub(crate) fn update_floating_tab_drag(
         let payload = DragPayload::Panel { panel: drag.panel };
         match controller.drag().session().state() {
             DragState::Idle => {
-                if let Err(error) = controller.begin_drag_interaction(
+                if let Err(error) = controller.begin_content_drag_interaction(
                     payload,
                     DragHandle::PanelTab,
                     drag.press_origin,
+                    DragSourceHost::Floating { group: drag.source_group },
                 ) {
                     tracing::debug!(%error, "could not begin floating tab drag");
                     return false;
@@ -164,10 +166,11 @@ pub(crate) fn update_floating_tab_drag(
                 }
                 controller.drag_mut().clear_resolver();
                 controller.drag_mut().clear_layout_version();
-                if let Err(error) = controller.begin_drag_interaction(
+                if let Err(error) = controller.begin_content_drag_interaction(
                     payload,
                     DragHandle::PanelTab,
                     drag.press_origin,
+                    DragSourceHost::Floating { group: drag.source_group },
                 ) {
                     tracing::debug!(%error, "could not begin floating tab drag");
                     return false;
@@ -413,6 +416,7 @@ pub(crate) fn finish_floating_tab_drag(
         let _ = controller.drag_mut().session_mut().reset();
         controller.drag_mut().clear_resolver();
         controller.drag_mut().clear_layout_version();
+        controller.drag_mut().finish_host_session();
         cx.notify();
         true
     })
@@ -574,6 +578,7 @@ pub(crate) fn finish_drag_at(
                 let _ = controller.drag_mut().session_mut().reset();
                 controller.drag_mut().clear_resolver();
                 controller.drag_mut().clear_layout_version();
+                controller.drag_mut().finish_host_session();
                 return false;
             }
         };
@@ -671,6 +676,7 @@ pub(crate) fn finish_drag_at(
         let _ = controller.drag_mut().session_mut().reset();
         controller.drag_mut().clear_resolver();
         controller.drag_mut().clear_layout_version();
+        controller.drag_mut().finish_host_session();
         cx.notify();
         drag_started
     })

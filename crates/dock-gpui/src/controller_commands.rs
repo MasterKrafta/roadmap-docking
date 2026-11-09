@@ -420,6 +420,7 @@ impl DockController {
                 let _ = self.history.cancel_transaction(&mut self.layout, &self.metrics);
                 self.tearoff_transaction_active = false;
                 self.drag.cancel_gesture();
+                self.drag.cancel_host_session();
                 self.flush_events(cx);
                 cx.notify();
                 Err(error)
@@ -487,6 +488,7 @@ impl DockController {
                 self.tearoff_transaction_active = false;
                 self.drag.cancel_gesture();
                 self.drag.clear_layout_version();
+                self.drag.finish_host_session();
                 self.flush_events(cx);
                 cx.notify();
                 Ok(())
@@ -497,6 +499,7 @@ impl DockController {
                 self.tearoff_transaction_active = false;
                 self.drag.cancel_gesture();
                 self.drag.clear_layout_version();
+                self.drag.cancel_host_session();
                 if cancel_result.is_ok() && self.layout.version() != previous_version {
                     self.pending_events.push_back(DockEvent::LayoutChanged {
                         version: self.layout.version(),

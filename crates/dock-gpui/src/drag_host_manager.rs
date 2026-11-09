@@ -261,6 +261,14 @@ impl DragHostManager {
             window_id,
             native_window,
         });
+        self.controller.update(cx, |controller, _| {
+            if !controller.drag_mut().attach_transport_host(id) {
+                tracing::debug!(
+                    ?id,
+                    "DragHost opened without an active content-drag source session"
+                );
+            }
+        });
         Ok(id)
     }
 
@@ -302,6 +310,10 @@ impl DragHostManager {
             self.active = Some(active);
             return Err(DragHostError::NotActive(id));
         }
+
+        self.controller.update(cx, |controller, _| {
+            controller.drag_mut().clear_transport_host(id);
+        });
 
         if let Err(error) = self.native_ops.hide(active.native_window) {
             tracing::debug!(

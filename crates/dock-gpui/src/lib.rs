@@ -136,7 +136,7 @@ pub use components::{
     FloatingHost, FlyoutView, MainDockView, PanelHost, RailView, SplitterView, TabOverflow,
 };
 pub use dock_host::DockHost;
-pub use drag_host::{DockWindowRole, DragHostId};
+pub use drag_host::{DockWindowRole, DragHostId, DragHostSession, DragSourceHost};
 pub use drag_host_manager::{DragHostError, DragHostManager};
 pub use floating_manager::{
     CompositionHostRegistry, FloatingWindowManager, PanelLayoutLocation, PanelWindowRegistry,

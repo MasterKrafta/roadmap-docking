@@ -10,7 +10,7 @@ use gpui::{
 };
 
 use crate::{
-    DockController, FloatingWindowManager,
+    DockController, DragSourceHost, FloatingWindowManager,
     components::context_menu::{ContextMenuTarget, ContextMenuToggle},
     dock_components::{DockAreaDragArea, DockTab, GroupDragArea},
     geometry::host_point_from_gpui_window,
@@ -236,6 +236,7 @@ pub(crate) fn register_pointer_events(
                             DragPayload::Panel { panel },
                             DragHandle::PanelTab,
                             core_point,
+                            DragSourceHost::Main,
                             app,
                         );
                     }
@@ -256,6 +257,7 @@ pub(crate) fn register_pointer_events(
                             DragPayload::Group { group },
                             DragHandle::GroupGrip,
                             core_point,
+                            DragSourceHost::Main,
                             app,
                         );
                     }
@@ -272,6 +274,7 @@ pub(crate) fn register_pointer_events(
                             DragPayload::DockArea { side },
                             DragHandle::DockAreaHeader,
                             core_point,
+                            DragSourceHost::Main,
                             app,
                         );
                     }
@@ -283,6 +286,7 @@ pub(crate) fn register_pointer_events(
                             DragPayload::Panel { panel },
                             DragHandle::FlyoutPanel,
                             core_point,
+                            DragSourceHost::Main,
                             app,
                         );
                     }

@@ -10,7 +10,10 @@ use dock_core::{
 use gpui::{AnyView, EventEmitter, WindowId};
 use thiserror::Error;
 
-use crate::registry::{PanelRegistry, PanelViewCache};
+use crate::{
+    drag_host::{DragHostSession, DragSourceHost},
+    registry::{PanelRegistry, PanelViewCache},
+};
 
 #[path = "controller_commands.rs"]
 mod commands;
@@ -122,6 +125,8 @@ pub struct DragController {
     resolver_source: Option<DropSource>,
     /// Layout revision captured when the current drag press began.
     layout_version: Option<u64>,
+    /// Adapter context keeps the original source host separate from its transport host.
+    host_session: Option<DragHostSession>,
 }
 
 impl DragController {
@@ -132,6 +137,7 @@ impl DragController {
             resolver_key: None,
             resolver_source: None,
             layout_version: None,
+            host_session: None,
         })
     }
 
@@ -145,6 +151,33 @@ impl DragController {
 
     pub fn resolver(&self) -> Option<&DropZoneResolver> {
         self.resolver.as_ref()
+    }
+
+    /// Returns the adapter's source/transport context for the active content drag.
+    pub fn host_session(&self) -> Option<&DragHostSession> {
+        self.host_session.as_ref()
+    }
+
+    pub(crate) fn begin_host_session(&mut self, session: DragHostSession) {
+        self.host_session = Some(session);
+    }
+
+    pub(crate) fn attach_transport_host(&mut self, id: crate::DragHostId) -> bool {
+        self.host_session.as_mut().is_some_and(|session| session.attach_transport_host(id))
+    }
+
+    pub(crate) fn clear_transport_host(&mut self, id: crate::DragHostId) -> bool {
+        self.host_session.as_mut().is_some_and(|session| session.clear_transport_host(id))
+    }
+
+    /// Finishes a successfully released content drag and discards its adapter context.
+    pub(crate) fn finish_host_session(&mut self) -> Option<DragHostSession> {
+        self.host_session.take()
+    }
+
+    /// Cancels a content drag and discards its adapter context.
+    pub(crate) fn cancel_host_session(&mut self) -> Option<DragHostSession> {
+        self.host_session.take()
     }
 
     fn set_resolver(&mut self, resolver: DropZoneResolver, key: ResolverCacheKey, source: DropSource) {
@@ -349,18 +382,44 @@ impl DockController {
             )
     }
 
-    /// Begins a drag and remembers the Layout revision that owns its model IDs.
+    /// Begins the Core pointer state without changing adapter source/transport context.
+    ///
+    /// Used when the legacy tear-off restarts Core's DragSession after applying
+    /// its temporary Float command: the original adapter source must survive.
+    fn begin_core_drag_interaction(
+        &mut self,
+        payload: DragPayload,
+        handle: DragHandle,
+        point: Point,
+    ) -> Result<(), DragSessionError> {
+        self.drag.session_mut().pointer_down_with_handle(payload, handle, point)?;
+        self.drag.clear_resolver();
+        self.drag.layout_version = Some(self.layout.version());
+        Ok(())
+    }
+
+    /// Begins a drag that is not transporting dock content, such as a floating title move.
     pub(crate) fn begin_drag_interaction(
         &mut self,
         payload: DragPayload,
         handle: DragHandle,
         point: Point,
     ) -> Result<(), DragSessionError> {
-        self.drag
-            .session_mut()
-            .pointer_down_with_handle(payload, handle, point)?;
-        self.drag.clear_resolver();
-        self.drag.layout_version = Some(self.layout.version());
+        self.begin_core_drag_interaction(payload, handle, point)?;
+        self.drag.cancel_host_session();
+        Ok(())
+    }
+
+    /// Begins a content drag while preserving its original semantic source and host.
+    pub(crate) fn begin_content_drag_interaction(
+        &mut self,
+        payload: DragPayload,
+        handle: DragHandle,
+        point: Point,
+        source_host: DragSourceHost,
+    ) -> Result<(), DragSessionError> {
+        self.begin_core_drag_interaction(payload, handle, point)?;
+        self.drag.begin_host_session(DragHostSession::new(payload, handle, source_host));
         Ok(())
     }
 
@@ -534,9 +593,10 @@ impl DockController {
             .ok_or(DragSessionError::NoActiveGesture)?;
 
         self.drag.cancel_gesture();
-        self.begin_drag_interaction(payload, handle, origin)?;
+        self.begin_core_drag_interaction(payload, handle, origin)?;
         if let Err(error) = self.drag.session_mut().pointer_move(position) {
             self.drag.cancel_gesture();
+            self.drag.cancel_host_session();
             return Err(error);
         }
         Ok(())
@@ -743,6 +803,7 @@ impl DockController {
         self.rects = None;
         self.rects_key = None;
         self.drag.clear_resolver();
+        self.drag.cancel_host_session();
 
         if let Err(error) = cancel_result {
             // Never leave an open history transaction after capture is lost.

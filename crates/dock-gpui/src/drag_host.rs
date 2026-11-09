@@ -50,6 +50,78 @@ pub enum DockWindowRole {
     },
 }
 
+/// Identifies the persistent host where dragged dock content originated.
+///
+/// Main is unique within one DockHost. Floating uses its Core group identity,
+/// which remains stable even if the panel view later moves to another host.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DragSourceHost {
+    /// Content originated in the persistent main dock window.
+    Main,
+    /// Content originated in a persistent floating composition.
+    Floating {
+        /// Core identity of the source floating composition.
+        group: FloatingGroupId,
+    },
+}
+
+/// Adapter-only context retained for one content drag across host transitions.
+///
+/// The semantic payload and handle remain the original source values. The
+/// optional DragHostId identifies only the temporary presentation surface and
+/// never replaces the source host or the Core payload.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DragHostSession {
+    payload: dock_core::DragPayload,
+    handle: dock_core::DragHandle,
+    source_host: DragSourceHost,
+    transport_host: Option<DragHostId>,
+}
+
+impl DragHostSession {
+    /// Starts runtime tracking for a content drag after Core accepts pointer-down.
+    pub(crate) const fn new(
+        payload: dock_core::DragPayload,
+        handle: dock_core::DragHandle,
+        source_host: DragSourceHost,
+    ) -> Self {
+        Self { payload, handle, source_host, transport_host: None }
+    }
+
+    /// Returns the original semantic object carried by this drag.
+    pub const fn payload(&self) -> dock_core::DragPayload { self.payload }
+
+    /// Returns the original interaction surface that initiated this drag.
+    pub const fn handle(&self) -> dock_core::DragHandle { self.handle }
+
+    /// Returns the persistent host where the content originated.
+    pub const fn source_host(&self) -> DragSourceHost { self.source_host }
+
+    /// Returns the temporary DragHost identity currently presenting the content.
+    pub const fn transport_host(&self) -> Option<DragHostId> { self.transport_host }
+
+    /// Returns the transport window role without changing the original source.
+    pub const fn transport_role(&self) -> Option<DockWindowRole> {
+        match self.transport_host {
+            Some(id) => Some(DockWindowRole::Dragging { id }),
+            None => None,
+        }
+    }
+
+    pub(crate) fn attach_transport_host(&mut self, id: DragHostId) -> bool {
+        match self.transport_host {
+            None => { self.transport_host = Some(id); true }
+            Some(active) => active == id,
+        }
+    }
+
+    pub(crate) fn clear_transport_host(&mut self, id: DragHostId) -> bool {
+        if self.transport_host != Some(id) { return false; }
+        self.transport_host = None;
+        true
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use dock_core::FloatingGroupId;
@@ -65,6 +137,36 @@ mod tests {
         assert_ne!(first, second);
         assert_eq!(first.get(), 1);
         assert_eq!(second.get(), 2);
+    }
+
+    #[test]
+    fn drag_host_session_keeps_original_payload_and_source_separate_from_transport() {
+        use dock_core::{DragHandle, DragPayload, PanelId};
+        use slotmap::Key as _;
+
+        let panel = PanelId::null();
+        let source_group = FloatingGroupId::null();
+        let mut session = super::DragHostSession::new(
+            DragPayload::Panel { panel },
+            DragHandle::PanelTab,
+            super::DragSourceHost::Floating { group: source_group },
+        );
+        let drag_host = DragHostId::from_raw(11);
+
+        assert_eq!(session.payload(), DragPayload::Panel { panel });
+        assert_eq!(session.handle(), DragHandle::PanelTab);
+        assert_eq!(session.source_host(), super::DragSourceHost::Floating { group: source_group });
+        assert_eq!(session.transport_host(), None);
+
+        assert!(session.attach_transport_host(drag_host));
+        assert_eq!(session.transport_host(), Some(drag_host));
+        assert_eq!(session.transport_role(), Some(DockWindowRole::Dragging { id: drag_host }));
+        assert_eq!(session.payload(), DragPayload::Panel { panel });
+        assert_eq!(session.source_host(), super::DragSourceHost::Floating { group: source_group });
+
+        assert!(!session.clear_transport_host(DragHostId::from_raw(12)));
+        assert!(session.clear_transport_host(drag_host));
+        assert_eq!(session.transport_host(), None);
     }
 
     #[test]
