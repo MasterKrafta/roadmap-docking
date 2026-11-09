@@ -453,6 +453,9 @@ impl Render for DockHost {
             .unwrap_or_default();
 
         let source_window_id = window.window_handle().window_id();
+        let dragged_group = self.controller.update(cx, |controller, _| {
+            controller.dragged_group_from(source_window_id)
+        });
         let pending_transfer = self.controller.update(cx, |controller, _| {
             controller.pending_panel_view_transfer_from(source_window_id)
         });
@@ -821,6 +824,7 @@ impl Render for DockHost {
                 &main_columns,
                 &rects.groups,
                 main_panel_views,
+                dragged_group,
                 &rects.tab_strips,
                 &rects.tab_headers,
                 &rects.tab_overflows,
