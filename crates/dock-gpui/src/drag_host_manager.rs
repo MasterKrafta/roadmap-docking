@@ -851,11 +851,11 @@ impl DragHostManager {
         (active.window_id == window_id).then_some(DockWindowRole::Dragging { id: active.id })
     }
 
-    /// Returns the active DragHost HWND for native drop-target exclusion.
+    /// Returns the active DragHost HWND for drop-target exclusion and focus handoff.
     ///
-    /// The drag/drop router must pass this value as `exclude` to
-    /// `NativeWindowOps::window_from_point`. The platform resolver skips the
-    /// temporary surface and continues through the desktop Z-order.
+    /// The drag/drop router passes this value as `exclude` to
+    /// `NativeWindowOps::window_from_point`. Focus-loss handling also uses it
+    /// to distinguish a transfer into DragHost from a gesture leaving the app.
     pub(crate) fn active_native_window_id(&self) -> Option<NativeWindowId> {
         self.active.as_ref().map(|active| active.native_window)
     }
