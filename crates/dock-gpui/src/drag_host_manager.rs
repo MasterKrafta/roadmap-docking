@@ -589,6 +589,47 @@ impl DragHostManager {
         let grab_offset = active.grab_offset;
         let floating_manager = self.floating_manager.clone();
 
+        // DragHost is shown without activation, so a valid cross-window drag
+        // may leave either MainHost or FloatingHost as the OS foreground window.
+        // Those windows and DragHost itself belong to the same managed session.
+        // An external foreground HWND means the application really lost focus;
+        // cancel before interpreting a later mouse-up as a successful drop.
+        let foreground = match self.native_ops.foreground_window() {
+            Ok(Some(window)) => window,
+            Ok(None) => {
+                tracing::debug!(
+                    ?id,
+                    "application has no foreground window; cancelling DragHost"
+                );
+                self.cancel_active_drag_on_focus_loss(id, cx);
+                return false;
+            }
+            Err(error) => {
+                tracing::warn!(
+                    ?id,
+                    %error,
+                    "could not verify foreground window during DragHost tracking"
+                );
+                self.cancel_active_drag_on_focus_loss(id, cx);
+                return false;
+            }
+        };
+        let drag_host_is_foreground = foreground == native_drag_host;
+        let managed_host_is_foreground = floating_manager.as_ref().is_some_and(|manager| {
+            manager.update(cx, |manager, _| {
+                manager.is_managed_native_window(foreground)
+            })
+        });
+        if !drag_host_is_foreground && !managed_host_is_foreground {
+            tracing::debug!(
+                ?id,
+                ?foreground,
+                "foreground moved outside managed docking windows; cancelling DragHost"
+            );
+            self.cancel_active_drag_on_focus_loss(id, cx);
+            return false;
+        }
+
         let tracking_state = self
             .controller
             .update(cx, |controller, _| {
@@ -877,6 +918,26 @@ impl DragHostManager {
         self.controller.update(cx, |controller, controller_cx| {
             if let Err(error) = controller.cancel_pointer_interaction_on_escape() {
                 tracing::debug!(?id, %error, "could not cancel DragHost pointer interaction");
+            }
+            controller_cx.notify();
+        });
+    }
+
+    fn cancel_active_drag_on_focus_loss(&mut self, id: DragHostId, cx: &mut Context<Self>) {
+        if let Err(error) = self.close(id, cx) {
+            tracing::warn!(
+                ?id,
+                %error,
+                "could not close DragHost after application focus loss"
+            );
+        }
+        self.controller.update(cx, |controller, controller_cx| {
+            if let Err(error) = controller.cancel_pointer_interaction_on_focus_loss() {
+                tracing::debug!(
+                    ?id,
+                    %error,
+                    "could not cancel DragHost pointer interaction after focus loss"
+                );
             }
             controller_cx.notify();
         });
