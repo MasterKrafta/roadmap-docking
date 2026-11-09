@@ -21,7 +21,7 @@ impl MainDockView {
     pub(crate) fn render(
         columns: &[ColumnRect],
         groups: &[GroupRect],
-        panels: Vec<(PanelRect, AnyView)>,
+        panels: Vec<(PanelRect, Option<AnyView>)>,
         tab_strips: &[TabStripRect],
         tab_headers: &[TabHeaderRect],
         tab_overflows: &[TabOverflowRect],

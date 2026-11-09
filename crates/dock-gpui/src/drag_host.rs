@@ -8,7 +8,7 @@
 //! FloatingWindowManager. Both managers receive the same DockController entity;
 //! neither manager owns or duplicates the Core Layout.
 
-use dock_core::FloatingGroupId;
+use dock_core::{FloatingGroupId, PanelId};
 use gpui::WindowId;
 
 /// Runtime identity of one temporary drag-presentation window.
@@ -78,6 +78,7 @@ pub struct DragHostSession {
     source_host: DragSourceHost,
     source_window_id: Option<WindowId>,
     transport_host: Option<DragHostId>,
+    transferred_panel: Option<PanelId>,
 }
 
 impl DragHostSession {
@@ -94,6 +95,7 @@ impl DragHostSession {
             source_host,
             source_window_id,
             transport_host: None,
+            transferred_panel: None,
         }
     }
 
@@ -120,6 +122,30 @@ impl DragHostSession {
             Some(id) => Some(DockWindowRole::Dragging { id }),
             None => None,
         }
+    }
+
+    /// Returns the Panel whose cached view is currently presented by DragHost.
+    pub const fn transferred_panel(&self) -> Option<PanelId> {
+        self.transferred_panel
+    }
+
+    pub(crate) fn begin_panel_view_transfer(&mut self, panel: PanelId) -> bool {
+        if self.transport_host.is_none()
+            || !matches!(self.payload, dock_core::DragPayload::Panel { panel: active } if active == panel)
+            || self.transferred_panel.is_some()
+        {
+            return false;
+        }
+        self.transferred_panel = Some(panel);
+        true
+    }
+
+    pub(crate) fn finish_panel_view_transfer(&mut self, panel: PanelId) -> bool {
+        if self.transferred_panel != Some(panel) {
+            return false;
+        }
+        self.transferred_panel = None;
+        true
     }
 
     pub(crate) fn attach_transport_host(&mut self, id: DragHostId) -> bool {
@@ -175,6 +201,7 @@ mod tests {
         );
         assert_eq!(session.source_window_id(), None);
         assert_eq!(session.transport_host(), None);
+        assert_eq!(session.transferred_panel(), None);
 
         assert!(session.attach_transport_host(drag_host));
         assert_eq!(session.transport_host(), Some(drag_host));
@@ -182,12 +209,18 @@ mod tests {
             session.transport_role(),
             Some(DockWindowRole::Dragging { id: drag_host })
         );
+        assert!(session.begin_panel_view_transfer(panel));
+        assert_eq!(session.transferred_panel(), Some(panel));
+        assert!(!session.begin_panel_view_transfer(panel));
         assert_eq!(session.payload(), DragPayload::Panel { panel });
         assert_eq!(
             session.source_host(),
             super::DragSourceHost::Floating { group: source_group }
         );
 
+        assert!(!session.finish_panel_view_transfer(PanelId::null()));
+        assert!(session.finish_panel_view_transfer(panel));
+        assert_eq!(session.transferred_panel(), None);
         assert!(!session.clear_transport_host(DragHostId::from_raw(12)));
         assert!(session.clear_transport_host(drag_host));
         assert_eq!(session.transport_host(), None);

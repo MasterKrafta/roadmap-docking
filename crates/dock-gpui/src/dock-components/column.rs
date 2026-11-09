@@ -104,7 +104,7 @@ impl DockColumnView {
         column: ColumnRect,
         mode: ColumnMode,
         groups: &[GroupRect],
-        panels: Vec<(PanelRect, AnyView)>,
+        panels: Vec<(PanelRect, Option<AnyView>)>,
         tab_strips: &[TabStripRect],
         tab_headers: &[TabHeaderRect],
         tab_overflows: &[TabOverflowRect],
@@ -206,7 +206,7 @@ impl DockColumnView {
             }
 
             // Active panel content is mounted at the exact rectangles returned by Core.
-            content = content.child(PanelHost::render(panels, content_origin));
+            content = content.child(PanelHost::render(panels, content_origin, theme));
         } else {
             let pointer_offset = Point::new(
                 0.0,

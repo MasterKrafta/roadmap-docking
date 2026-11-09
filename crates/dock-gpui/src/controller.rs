@@ -174,6 +174,32 @@ impl DragController {
             .is_some_and(|session| session.clear_transport_host(id))
     }
 
+    pub(crate) fn can_begin_panel_view_transfer(&self, panel: PanelId) -> bool {
+        self.host_session.as_ref().is_some_and(|session| {
+            session.payload() == DragPayload::Panel { panel }
+                && session.transport_host().is_some()
+                && session.transferred_panel().is_none()
+        })
+    }
+
+    pub(crate) fn begin_panel_view_transfer(&mut self, panel: PanelId) -> bool {
+        self.host_session
+            .as_mut()
+            .is_some_and(|session| session.begin_panel_view_transfer(panel))
+    }
+
+    pub(crate) fn finish_panel_view_transfer(&mut self, panel: PanelId) -> bool {
+        self.host_session
+            .as_mut()
+            .is_some_and(|session| session.finish_panel_view_transfer(panel))
+    }
+
+    pub(crate) fn panel_view_is_transferred(&self, panel: PanelId) -> bool {
+        self.host_session
+            .as_ref()
+            .is_some_and(|session| session.transferred_panel() == Some(panel))
+    }
+
     /// Finishes a successfully released content drag and discards its adapter context.
     pub(crate) fn finish_host_session(&mut self) {
         self.host_session = None;
@@ -376,6 +402,31 @@ impl DockController {
 
     pub fn resize_interaction(&self) -> Option<ResizeInteraction> {
         self.interaction
+    }
+
+    /// Returns whether the current content drag can transfer this cached PanelView.
+    pub(crate) fn can_begin_panel_view_transfer(&self, panel: PanelId) -> bool {
+        self.panel_views.get(panel).is_some()
+            && self.drag.can_begin_panel_view_transfer(panel)
+    }
+
+    /// Marks the current PanelView as owned by the temporary DragHost surface.
+    pub(crate) fn begin_panel_view_transfer(&mut self, panel: PanelId) -> bool {
+        self.can_begin_panel_view_transfer(panel)
+            && self.drag.begin_panel_view_transfer(panel)
+    }
+
+    /// Returns the original cached AnyView only while DragHost owns presentation.
+    pub(crate) fn panel_view_for_drag(&self, panel: PanelId) -> Option<AnyView> {
+        self.drag
+            .panel_view_is_transferred(panel)
+            .then(|| self.panel_views.get(panel).cloned())
+            .flatten()
+    }
+
+    /// Ends presentation transfer after DragHost has stopped mounting the view.
+    pub(crate) fn finish_panel_view_transfer(&mut self, panel: PanelId) -> bool {
+        self.drag.finish_panel_view_transfer(panel)
     }
 
     pub(crate) fn has_active_pointer_interaction(&self) -> bool {

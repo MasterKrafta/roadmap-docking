@@ -335,6 +335,9 @@ impl DockController {
         window: &mut Window,
         app: &mut App,
     ) -> Option<AnyView> {
+        if self.drag.panel_view_is_transferred(panel) {
+            return None;
+        }
         if let Some(view) = self.panel_views.get(panel) {
             return Some(view.clone());
         }

@@ -25,7 +25,7 @@ impl DockCompositionView {
     pub(crate) fn render_column(
         column: ColumnRect,
         groups: &[GroupRect],
-        panels: &[(PanelRect, AnyView)],
+        panels: &[(PanelRect, Option<AnyView>)],
         tab_strips: &[TabStripRect],
         tab_headers: &[TabHeaderRect],
         tab_overflows: &[TabOverflowRect],
