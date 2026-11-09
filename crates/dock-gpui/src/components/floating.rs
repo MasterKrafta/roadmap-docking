@@ -915,34 +915,35 @@ impl Render for FloatingHost {
                             if dragging {
                                 let leaves_source =
                                     controller_for_move.update(app, |controller, _| {
-                                    let Some(rects) = controller
-                                        .floating_geometry(input_window_id, group)
-                                        .ok()
-                                    else {
-                                        return true;
-                                    };
-                                    let Some(group_rect) = rects
-                                        .groups
-                                        .iter()
-                                        .find(|rect| rect.group == group_press.group)
-                                        .map(|rect| rect.rect)
-                                    else {
-                                        return true;
-                                    };
-                                    let in_column = controller.layout().nodes().any(|(_, node)| {
-                                        matches!(
-                                            node,
-                                            Node::Column(column)
-                                                if column.groups.contains(&group_press.group)
-                                        )
+                                        let Some(rects) = controller
+                                            .floating_geometry(input_window_id, group)
+                                            .ok()
+                                        else {
+                                            return true;
+                                        };
+                                        let Some(group_rect) = rects
+                                            .groups
+                                            .iter()
+                                            .find(|rect| rect.group == group_press.group)
+                                            .map(|rect| rect.rect)
+                                        else {
+                                            return true;
+                                        };
+                                        let in_column =
+                                            controller.layout().nodes().any(|(_, node)| {
+                                                matches!(
+                                                    node,
+                                                    Node::Column(column)
+                                                        if column.groups.contains(&group_press.group)
+                                                )
+                                            });
+                                        let zone = GroupDragArea::drag_zone(
+                                            group_rect,
+                                            controller.metrics(),
+                                            in_column,
+                                        );
+                                        !GroupDragArea::contains(zone, point)
                                     });
-                                    let zone = GroupDragArea::drag_zone(
-                                        group_rect,
-                                        controller.metrics(),
-                                        in_column,
-                                    );
-                                    !GroupDragArea::contains(zone, point)
-                                });
                                 let over_other_window =
                                     manager_entity.as_ref().is_some_and(|manager| {
                                         manager.update(app, |manager, _| {
@@ -1165,8 +1166,13 @@ impl Render for FloatingHost {
                             if drag_host_active {
                                 tab_press_for_up.set(None);
                                 group_press_for_up.set(None);
-                                if DockInteractionCoordinator::has_capture(&pointer_capture_for_up) {
-                                    DockInteractionCoordinator::release(window, &pointer_capture_for_up);
+                                if DockInteractionCoordinator::has_capture(
+                                    &pointer_capture_for_up,
+                                ) {
+                                    DockInteractionCoordinator::release(
+                                        window,
+                                        &pointer_capture_for_up,
+                                    );
                                 }
                                 return;
                             }
@@ -1190,9 +1196,10 @@ impl Render for FloatingHost {
                         }
                         if let Some(group_press) = group_press_for_up.get() {
                             group_press_for_up.set(None);
-                            let layout_is_current = controller_for_up.update(app, |controller, _| {
-                                controller.layout().version() == group_press.layout_version
-                            });
+                            let layout_is_current =
+                                controller_for_up.update(app, |controller, _| {
+                                    controller.layout().version() == group_press.layout_version
+                                });
                             if !layout_is_current {
                                 DockInteractionCoordinator::cancel(
                                     &controller_for_up,
@@ -1206,7 +1213,10 @@ impl Render for FloatingHost {
                             let Ok(point) =
                                 crate::geometry::DockGeometry::point_from_gpui(event.position)
                             else {
-                                DockInteractionCoordinator::release(window, &pointer_capture_for_up);
+                                DockInteractionCoordinator::release(
+                                    window,
+                                    &pointer_capture_for_up,
+                                );
                                 app.stop_propagation();
                                 return;
                             };
@@ -1221,7 +1231,8 @@ impl Render for FloatingHost {
                                     )
                                 });
                             if dragging {
-                                let leaves_source = controller_for_up.update(app, |controller, _| {
+                                let leaves_source =
+                                controller_for_up.update(app, |controller, _| {
                                     let Some(rects) = controller
                                         .floating_geometry(input_window_id, group)
                                         .ok()
@@ -1236,13 +1247,14 @@ impl Render for FloatingHost {
                                     else {
                                         return true;
                                     };
-                                    let in_column = controller.layout().nodes().any(|(_, node)| {
-                                        matches!(
-                                            node,
-                                            Node::Column(column)
-                                                if column.groups.contains(&group_press.group)
-                                        )
-                                    });
+                                    let in_column =
+                                        controller.layout().nodes().any(|(_, node)| {
+                                            matches!(
+                                                node,
+                                                Node::Column(column)
+                                                    if column.groups.contains(&group_press.group)
+                                            )
+                                        });
                                     let zone = GroupDragArea::drag_zone(
                                         group_rect,
                                         controller.metrics(),
@@ -1704,7 +1716,6 @@ impl Render for FloatingHost {
                 ));
             }
         }
-
 
         let manager_for_escape = self.manager.clone();
         let controller_for_escape = self.controller.clone();
