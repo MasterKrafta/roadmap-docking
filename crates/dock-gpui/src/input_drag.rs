@@ -507,10 +507,9 @@ pub(crate) fn begin_native_tearoff(
             (DragHandle::ColumnHeader, DragPayload::Column { column }) => {
                 column_drag_started_from_tab(controller, column, origin)
             }
-            // DockTab and GroupGrip tear-offs temporarily hide DockAreaHeader.
+            // Panel tear-offs temporarily hide DockAreaHeader.
             // FloatingWindowManager restores it when the native move is released.
-            (DragHandle::PanelTab, DragPayload::Panel { .. })
-            | (DragHandle::GroupGrip, DragPayload::Group { .. }) => true,
+            (DragHandle::PanelTab, DragPayload::Panel { .. }) => true,
             _ => false,
         };
         let local_bounds = floating_bounds(controller, payload, pointer)?;
@@ -523,9 +522,6 @@ pub(crate) fn begin_native_tearoff(
             }
             (DragHandle::FlyoutPanel, DragPayload::Panel { panel }) => {
                 DockCommand::FloatPanelFromFlyout { panel, bounds: local_bounds }
-            }
-            (DragHandle::GroupGrip, DragPayload::Group { group }) => {
-                DockCommand::Float { node: group, bounds: local_bounds }
             }
             (DragHandle::ColumnHeader, DragPayload::Column { column }) => {
                 DockCommand::Float { node: column, bounds: local_bounds }
