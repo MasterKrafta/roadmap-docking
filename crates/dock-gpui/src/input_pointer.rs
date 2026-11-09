@@ -19,7 +19,7 @@ use crate::{
 use super::{
     interaction::DockInteractionCoordinator,
     drag::{
-        begin_drag_at, begin_panel_drag_host, finish_drag_at, update_drag_at,
+        begin_drag_at, begin_group_drag_host, begin_panel_drag_host, finish_drag_at, update_drag_at,
     },
     resize::{begin_resize_hit, finish_resize, update_resize},
     scroll::map_hit_test_point,
@@ -472,7 +472,16 @@ pub(crate) fn register_pointer_events(
                     }
                 ) && controller.drag().session().handle() == Some(DragHandle::PanelTab)
             });
-            let over_floating = panel_tab_active
+            let group_grip_active = controller.update(app, |controller, _| {
+                matches!(
+                    controller.drag().session().state(),
+                    DragState::Dragging {
+                        payload: DragPayload::Group { .. },
+                        ..
+                    }
+                ) && controller.drag().session().handle() == Some(DragHandle::GroupGrip)
+            });
+            let over_floating = (panel_tab_active || group_grip_active)
                 && manager.update(app, |manager, _| {
                     manager.cursor_over_floating_window_from_main()
                 });
@@ -480,6 +489,16 @@ pub(crate) fn register_pointer_events(
                 let started = begin_panel_drag_host(&controller, &drag_host_manager, app);
                 if !started {
                     tracing::debug!("Panel drag could not start DragHost; source gesture was cancelled");
+                }
+                DockInteractionCoordinator::release(window, &pointer_capture);
+                pointer_press.set(None);
+                app.stop_propagation();
+                return;
+            }
+            if group_grip_active && (should_tearoff || over_floating) {
+                let started = begin_group_drag_host(&controller, &drag_host_manager, app);
+                if !started {
+                    tracing::debug!("Group drag could not start DragHost; source gesture was cancelled");
                 }
                 DockInteractionCoordinator::release(window, &pointer_capture);
                 pointer_press.set(None);
@@ -635,7 +654,16 @@ pub(crate) fn register_pointer_events(
                         }
                     ) && controller.drag().session().handle() == Some(DragHandle::PanelTab)
                 });
-                let over_floating = panel_tab_active
+                let group_grip_active = controller.update(app, |controller, _| {
+                    matches!(
+                        controller.drag().session().state(),
+                        DragState::Dragging {
+                            payload: DragPayload::Group { .. },
+                            ..
+                        }
+                    ) && controller.drag().session().handle() == Some(DragHandle::GroupGrip)
+                });
+                let over_floating = (panel_tab_active || group_grip_active)
                     && manager.update(app, |manager, _| {
                         manager.cursor_over_floating_window_from_main()
                     });
@@ -643,6 +671,16 @@ pub(crate) fn register_pointer_events(
                     let started = begin_panel_drag_host(&controller, &drag_host_manager, app);
                     if !started {
                         tracing::debug!("Panel drag could not start DragHost on release");
+                    }
+                    DockInteractionCoordinator::release(window, &pointer_capture);
+                    pointer_press.set(None);
+                    app.stop_propagation();
+                    return;
+                }
+                if group_grip_active && (should_tearoff || over_floating) {
+                    let started = begin_group_drag_host(&controller, &drag_host_manager, app);
+                    if !started {
+                        tracing::debug!("Group drag could not start DragHost on release");
                     }
                     DockInteractionCoordinator::release(window, &pointer_capture);
                     pointer_press.set(None);
