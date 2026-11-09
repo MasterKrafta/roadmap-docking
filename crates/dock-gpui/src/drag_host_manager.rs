@@ -4,21 +4,21 @@
 //! FloatingWindowManager. It hosts the existing source presentation and routes
 //! drop feedback to the persistent Main/Floating window under the cursor.
 
-use std::time::Duration;
+use std::{collections::HashSet, rc::Rc, time::Duration};
 
 use gpui::{
-    AppContext, Bounds, Context, Entity, IntoElement, ParentElement, Render, Styled, Window,
+    AnyView, AppContext, Bounds, Context, Entity, IntoElement, ParentElement, Render, Styled, Window,
     WindowBounds, WindowHandle, WindowId, WindowKind, WindowOptions, div, point, px, rgb, size,
 };
 use platform::{NativeError, NativeKey, NativeWindowId, NativeWindowOps, SystemNativeWindowOps};
 
 use dock_core::{
-    DragDropAction, DragHandle, DragPayload, DragState, DropTarget, PanelId, Point, Rect, Size,
+    DockMetrics, DragDropAction, DragHandle, DragPayload, DragState, DropTarget, GroupRect, Node, NodeId, PanelId, PanelRect, Point, Rect, Size, TabHeaderRect, TabOverflowRect, TabStripRect,
 };
 
 use crate::{
-    DockController, DockTheme, DockWindowRole, DragHostId, DragSourceHost,
-    FloatingWindowManager, floating_manager::DockingWindowAtPoint,
+    DockController, DockTheme, DockWindowRole, DockGroupView, DragHostId, DragSourceHost,
+    FloatingWindowManager, components::{PanelHost, context_menu::GroupMenuToggle}, dock_components::{GroupPresentation, collect_group_presentations}, floating_manager::DockingWindowAtPoint,
     geometry::DockGeometry,
 };
 
@@ -28,6 +28,7 @@ struct ActiveDragHost {
     window_id: WindowId,
     native_window: NativeWindowId,
     panel: Option<PanelId>,
+    group: Option<NodeId>,
     grab_offset: Point,
     visible: bool,
     drop_target: Option<DropTarget>,
@@ -113,7 +114,7 @@ impl DragHostManager {
         logical_size: Size,
         cx: &mut Context<Self>,
     ) -> Result<DragHostId, DragHostError> {
-        self.open_at_cursor_with_panel(grab_offset, logical_size, None, cx)
+        self.open_at_cursor_with_content(grab_offset, logical_size, None, None, cx)
     }
 
     /// Opens DragHost with the existing cached view for one active Panel drag.
@@ -133,14 +134,39 @@ impl DragHostManager {
         if !can_transfer {
             return Err(DragHostError::PanelTransferUnavailable(panel));
         }
-        self.open_at_cursor_with_panel(grab_offset, logical_size, Some(panel), cx)
+        self.open_at_cursor_with_content(grab_offset, logical_size, Some(panel), None, cx)
     }
 
-    fn open_at_cursor_with_panel(
+    /// Opens DragHost with the source Group's original tabs and active cached PanelView.
+    pub fn open_group_at_cursor(
+        &mut self,
+        group: NodeId,
+        panel: PanelId,
+        grab_offset: Point,
+        logical_size: Size,
+        cx: &mut Context<Self>,
+    ) -> Result<DragHostId, DragHostError> {
+        let can_transfer = self.controller.update(cx, |controller, _| {
+            controller.can_begin_group_view_transfer(group, panel)
+        });
+        if !can_transfer {
+            return Err(DragHostError::PanelTransferUnavailable(panel));
+        }
+        self.open_at_cursor_with_content(
+            grab_offset,
+            logical_size,
+            Some(panel),
+            Some(group),
+            cx,
+        )
+    }
+
+    fn open_at_cursor_with_content(
         &mut self,
         grab_offset: Point,
         logical_size: Size,
         panel: Option<PanelId>,
+        group: Option<NodeId>,
         cx: &mut Context<Self>,
     ) -> Result<DragHostId, DragHostError> {
         if self.active.is_some() {
@@ -201,6 +227,7 @@ impl DragHostManager {
                     controller,
                     controller_observed: false,
                     panel,
+                    group,
                 })
             })
             .map_err(|error| DragHostError::OpenWindow(error.to_string()))?;
@@ -309,8 +336,12 @@ impl DragHostManager {
 
         let host_state_ready = self.controller.update(cx, |controller, controller_cx| {
             let attached = controller.drag_mut().attach_transport_host(id);
-            let transferred =
-                panel.is_none_or(|panel| controller.begin_panel_view_transfer(panel));
+            let transferred = match (panel, group) {
+                (Some(panel), Some(group)) => controller.begin_group_view_transfer(group, panel),
+                (Some(panel), None) => controller.begin_panel_view_transfer(panel),
+                (None, None) => true,
+                (None, Some(_)) => false,
+            };
             if transferred {
                 controller_cx.notify();
             }
@@ -343,6 +374,7 @@ impl DragHostManager {
             window_id,
             native_window,
             panel,
+            group,
             grab_offset,
             visible,
             drop_target: None,
@@ -874,7 +906,7 @@ pub enum DragHostError {
     InvalidScreenPosition,
     #[error("no active DragHost matches {0:?}")]
     NotActive(DragHostId),
-    #[error("Panel {0:?} has no cached view or matching active Panel drag session")]
+    #[error("Panel {0:?} has no cached view or matching active content drag session")]
     PanelTransferUnavailable(PanelId),
     #[error("DragHost runtime identifiers are exhausted")]
     IdExhausted,
@@ -891,6 +923,18 @@ struct DragHostSurface {
     controller: Entity<DockController>,
     controller_observed: bool,
     panel: Option<PanelId>,
+    group: Option<NodeId>,
+}
+
+struct DragGroupPresentation {
+    group: GroupRect,
+    strip: TabStripRect,
+    headers: Vec<TabHeaderRect>,
+    overflow: Option<TabOverflowRect>,
+    presentation: GroupPresentation,
+    column: Option<NodeId>,
+    panel: Option<(PanelRect, AnyView)>,
+    metrics: DockMetrics,
 }
 
 impl Render for DragHostSurface {
@@ -903,10 +947,93 @@ impl Render for DragHostSurface {
         }
 
         let mut root = div()
+            .relative()
             .size_full()
+            .overflow_hidden()
             .bg(rgb(self.theme.colors.window_background));
 
-        if let Some(panel) = self.panel
+        if let Some(group) = self.group
+            && let Some(snapshot) = self.controller.update(cx, |controller, _| {
+                let session = controller.drag().host_session()?;
+                if !matches!(session.payload(), DragPayload::Group { group: active } if active == group)
+                    || session.transferred_panel().is_none()
+                    || !session
+                        .transferred_panel()
+                        .is_some_and(|panel| session.panel_view_source_detached(panel))
+                {
+                    return None;
+                }
+                let source_window_id = session.source_window_id()?;
+                let rects = match session.source_host() {
+                    DragSourceHost::Main => controller.geometry().ok()?.clone(),
+                    DragSourceHost::Floating { group: floating } => {
+                        controller.floating_geometry(source_window_id, floating).ok()?.clone()
+                    }
+                };
+                let group_rect = rects.groups.iter().find(|rect| rect.group == group).copied()?;
+                let strip = rects.tab_strips.iter().find(|strip| strip.group == group).copied()?;
+                let headers = rects
+                    .tab_headers
+                    .iter()
+                    .filter(|header| header.group == group)
+                    .copied()
+                    .collect::<Vec<_>>();
+                let overflow = rects
+                    .tab_overflows
+                    .iter()
+                    .find(|overflow| overflow.group == group)
+                    .cloned();
+                let ids = HashSet::from([group]);
+                let presentations = collect_group_presentations(
+                    controller.layout(),
+                    controller.registry(),
+                    &ids,
+                    Some(&rects),
+                );
+                let presentation = presentations.get(&group)?.clone();
+                let panel = session.transferred_panel()?;
+                let panel_view = controller.panel_view_for_drag(panel);
+                let panel_rect = rects.panels.iter().find(|rect| rect.panel == panel).copied();
+                let panel = panel_rect.zip(panel_view);
+                let column = controller.layout().nodes().find_map(|(id, node)| {
+                    matches!(node, Node::Column(value) if value.groups.contains(&group))
+                        .then_some(id)
+                });
+                Some(DragGroupPresentation {
+                    group: group_rect,
+                    strip,
+                    headers,
+                    overflow,
+                    presentation,
+                    column,
+                    panel,
+                    metrics: controller.metrics(),
+                })
+            })
+        {
+            let toggle_menu: GroupMenuToggle = Rc::new(|_, _, _| {});
+            root = root.child(DockGroupView::render_core(
+                snapshot.column,
+                snapshot.group,
+                snapshot.strip,
+                &snapshot.headers,
+                snapshot.overflow,
+                &snapshot.presentation,
+                snapshot.group.rect.origin,
+                snapshot.metrics,
+                0.0,
+                self.controller.clone(),
+                self.theme,
+                toggle_menu,
+            ));
+            if let Some(panel) = snapshot.panel {
+                root = root.child(PanelHost::render(
+                    vec![(panel.0, Some(panel.1))],
+                    snapshot.group.rect.origin,
+                    self.theme,
+                ));
+            }
+        } else if let Some(panel) = self.panel
             && let Some(view) = self.controller.update(cx, |controller, _| {
                 controller.panel_view_for_drag(panel)
             })
