@@ -295,6 +295,80 @@ pub(crate) fn begin_group_drag_host(
     }
 }
 
+/// Starts DragHost for a ColumnHeader gesture and transfers every active
+/// Group PanelView while preserving the complete Column composition.
+pub(crate) fn begin_column_drag_host(
+    controller: &Entity<DockController>,
+    drag_host_manager: &Entity<DragHostManager>,
+    app: &mut App,
+) -> bool {
+    let candidate = controller.update(app, |controller, _| {
+        let (column, origin) = match controller.drag().session().state() {
+            DragState::Dragging {
+                payload: DragPayload::Column { column },
+                origin,
+                ..
+            } if controller.drag().session().handle() == Some(DragHandle::ColumnHeader) => {
+                (column, origin)
+            }
+            _ => return None,
+        };
+        let host_session = controller.drag().host_session()?;
+        let source_host = host_session.source_host();
+        let source_window_id = host_session.source_window_id()?;
+        let column_rect = match source_host {
+            DragSourceHost::Main => controller
+                .geometry()
+                .ok()?
+                .columns
+                .iter()
+                .find(|rect| rect.column == column)
+                .copied()?,
+            DragSourceHost::Floating { group } => controller
+                .floating_geometry(source_window_id, group)
+                .ok()?
+                .columns
+                .iter()
+                .find(|rect| rect.column == column)
+                .copied()?,
+        };
+        let panels = controller.active_column_panel_ids(column)?;
+        let grab_offset = Point::new(
+            (origin.x - column_rect.rect.origin.x)
+                .clamp(0.0, column_rect.rect.size.width),
+            (origin.y - column_rect.rect.origin.y)
+                .clamp(0.0, column_rect.rect.size.height),
+        );
+        Some((column, panels, grab_offset, column_rect.rect.size))
+    });
+    let Some((column, panels, grab_offset, logical_size)) = candidate else {
+        tracing::debug!("ColumnHeader drag has no valid source geometry for DragHost");
+        controller.update(app, |controller, cx| {
+            if let Err(error) = controller.cancel_pointer_interaction() {
+                tracing::debug!(%error, "could not cancel Column drag without source geometry");
+            }
+            cx.notify();
+        });
+        return false;
+    };
+
+    match drag_host_manager.update(app, |manager, manager_cx| {
+        manager.open_column_at_cursor(column, panels, grab_offset, logical_size, manager_cx)
+    }) {
+        Ok(_) => true,
+        Err(error) => {
+            tracing::warn!(%error, "could not start Column DragHost");
+            controller.update(app, |controller, cx| {
+                if let Err(cancel_error) = controller.cancel_pointer_interaction() {
+                    tracing::debug!(%cancel_error, "could not cancel failed Column DragHost start");
+                }
+                cx.notify();
+            });
+            false
+        }
+    }
+}
+
 /// Updates a tab drag that started inside a floating host. The resolver is
 /// built from that host's own local geometry, not from the main DockHost.
 pub(crate) fn update_floating_tab_drag(

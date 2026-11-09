@@ -457,35 +457,43 @@ impl DockController {
                 .is_some_and(|session| session.begin_group_view_transfer(group, panel))
     }
 
+    pub(crate) fn active_column_panel_ids(&self, column: NodeId) -> Option<Vec<PanelId>> {
+        let Some(Node::Column(value)) = self.layout.node(column) else {
+            return None;
+        };
+        Some(
+            value
+                .groups
+                .iter()
+                .filter_map(|group| match self.layout.node(*group) {
+                    Some(Node::Tabs(tabs)) => tabs.active_child().and_then(|child| {
+                        match self.layout.node(child) {
+                            Some(Node::Panel(panel)) => Some(panel.panel_id),
+                            _ => None,
+                        }
+                    }),
+                    _ => None,
+                })
+                .collect(),
+        )
+    }
+
     pub(crate) fn can_begin_column_view_transfer(
         &self,
         column: NodeId,
         panels: &[PanelId],
     ) -> bool {
-        let Some(Node::Column(value)) = self.layout.node(column) else {
-            return false;
-        };
-        if self
-            .layout
-            .flyout()
-            .is_some_and(|flyout| flyout.column == column)
+        if !matches!(self.layout.node(column), Some(Node::Column(_)))
+            || self
+                .layout
+                .flyout()
+                .is_some_and(|flyout| flyout.column == column)
         {
             return false;
         }
-
-        let active_panels = value
-            .groups
-            .iter()
-            .filter_map(|group| match self.layout.node(*group) {
-                Some(Node::Tabs(tabs)) => tabs.active_child().and_then(|child| {
-                    match self.layout.node(child) {
-                        Some(Node::Panel(panel)) => Some(panel.panel_id),
-                        _ => None,
-                    }
-                }),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
+        let Some(active_panels) = self.active_column_panel_ids(column) else {
+            return false;
+        };
         active_panels == panels
             && panels.iter().all(|panel| self.panel_views.get(*panel).is_some())
             && self
