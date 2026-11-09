@@ -34,14 +34,8 @@ impl Layout {
 
 impl FloatingZoneContext<'_> {
     fn append_all(&mut self) -> Result<(), ComputeRectsError> {
-        // A Column receives Floating-window targets only after tear-off has
-        // made it the root of a real Floating composition. A still-Main Column
-        // is handled by the Main Dock insertion slots.
-        if matches!(self.source, DropSource::Column { .. })
-            && !source_is_floating_root(self.layout, self.source_root)
-        {
-            return Ok(());
-        }
+        // Main and Floating Columns can target compatible Floating compositions
+        // directly; the source remains in its original owner until the final command.
         // Floating-window drop zones are stacked over their contents. Their outer
         // top/bottom targets address the first/last group in a vertical stack.
         for index in (0..self.rects.floating_groups.len()).rev() {
@@ -323,7 +317,6 @@ impl FloatingZoneContext<'_> {
             }
             DropSource::Column { .. } => {
                 target_is_column_composition
-                    && source_is_floating_root(self.layout, self.source_root)
                     && matches!(self.layout.node(self.source_root), Some(Node::Column(_)))
             }
         };
