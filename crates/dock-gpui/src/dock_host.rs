@@ -459,7 +459,7 @@ impl Render for DockHost {
         if let Some(panel) = pending_transfer
             && panel_views
                 .iter()
-                .any(|(rect, view)| rect.panel == panel && view.is_none())
+                .all(|(rect, view)| rect.panel != panel || view.is_none())
         {
             let controller = self.controller.clone();
             window.on_next_frame(move |_, app| {
