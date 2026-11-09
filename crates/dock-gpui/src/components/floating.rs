@@ -2032,6 +2032,15 @@ mod floating_dock_area_header_hit_tests {
             super::floating_dock_area_title_pointer_region(
                 column,
                 &columns,
+                Point::new(20.0, 30.0),
+                metrics,
+            ),
+            Some(false),
+        );
+        assert_eq!(
+            super::floating_dock_area_title_pointer_region(
+                column,
+                &columns,
                 Point::new(240.0, 30.0),
                 metrics,
             ),

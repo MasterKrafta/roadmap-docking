@@ -182,7 +182,10 @@ impl DragHostSession {
                 dock_core::DragPayload::Column { column: active } if active == column
             )
             && self.transferred_panels.is_empty()
-            && panels.iter().enumerate().all(|(index, panel)| !panels[..index].contains(panel))
+            && panels
+                .iter()
+                .enumerate()
+                .all(|(index, panel)| !panels[..index].contains(panel))
     }
 
     pub(crate) fn begin_column_view_transfer(
