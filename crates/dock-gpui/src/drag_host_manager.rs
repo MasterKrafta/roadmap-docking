@@ -447,29 +447,33 @@ impl DragHostManager {
         let grab_offset = active.grab_offset;
         let floating_manager = self.floating_manager.clone();
 
-        let tracking_state = self.controller.update(cx, |controller, _| {
-            let Some(host_session) = controller.drag().host_session() else {
-                return None;
-            };
-            if host_session.transport_host() != Some(id) {
-                return None;
-            }
-            if host_session
-                .transferred_panel()
-                .is_some_and(|panel| !host_session.panel_view_source_detached(panel))
-            {
-                return Some(None);
-            }
-            let DragState::Dragging { payload, .. } = controller.drag().session().state() else {
-                return None;
-            };
-            Some(Some((
-                *payload,
-                host_session.handle(),
-                host_session.source_host(),
-                host_session.source_window_id(),
-            )))
-        });
+        let tracking_state = self
+            .controller
+            .update(cx, |controller, _| {
+                let Some(host_session) = controller.drag().host_session() else {
+                    return None;
+                };
+                if host_session.transport_host() != Some(id) {
+                    return None;
+                }
+                if host_session
+                    .transferred_panel()
+                    .is_some_and(|panel| !host_session.panel_view_source_detached(panel))
+                {
+                    return Some(None);
+                }
+                let DragState::Dragging { payload, .. } = controller.drag().session().state() else {
+                    return None;
+                };
+                Some(Some((
+                    *payload,
+                    host_session.handle(),
+                    host_session.source_host(),
+                    host_session.source_window_id(),
+                )))
+            })
+            .ok()
+            .flatten();
         let Some(tracking_state) = tracking_state else {
             return false;
         };
