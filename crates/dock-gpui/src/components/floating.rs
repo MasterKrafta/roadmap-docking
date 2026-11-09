@@ -20,15 +20,15 @@ use gpui::{
 use ui::Theme;
 
 use crate::{
-    DockController, FloatingWindowManager,
+    DockController, DragSourceHost, FloatingWindowManager,
     dock_components::{
         collect_group_presentations, DockAreaDragArea, DockAreaView, DockCompositionView,
-        DockGroupView, DockTab, GroupPresentation,
+        DockGroupView, DockTab, GroupDragArea, GroupPresentation,
     },
     input::{
         drag::{
-            begin_panel_drag_host, finish_floating_tab_drag, update_floating_tab_drag,
-            FloatingTabDrag,
+            begin_drag_at, begin_group_drag_host, begin_panel_drag_host, finish_floating_tab_drag,
+            update_drag_at, update_floating_tab_drag, FloatingTabDrag,
         },
         interaction::DockInteractionCoordinator,
     },
@@ -253,6 +253,13 @@ struct FloatingTabPress {
     layout_version: u64,
 }
 
+#[derive(Clone, Copy)]
+struct FloatingGroupPress {
+    group: NodeId,
+    origin: Point,
+    layout_version: u64,
+}
+
 #[derive(Clone)]
 struct FloatingHostOpenMenu {
     target: ContextMenuTarget,
@@ -431,6 +438,7 @@ pub struct FloatingHost {
     column_scroll_handles: HashMap<NodeId, ScrollHandle>,
     open_context_menu: Option<FloatingHostOpenMenu>,
     tab_press: Rc<Cell<Option<FloatingTabPress>>>,
+    group_press: Rc<Cell<Option<FloatingGroupPress>>>,
     pointer_capture: Rc<Cell<Option<HitboxId>>>,
     controller_observed: bool,
     manager_observed: bool,
@@ -481,6 +489,7 @@ impl FloatingHost {
             column_scroll_handles: HashMap::new(),
             open_context_menu: None,
             tab_press: Rc::new(Cell::new(None)),
+            group_press: Rc::new(Cell::new(None)),
             pointer_capture: Rc::new(Cell::new(None)),
             controller_observed: false,
             manager_observed: false,
@@ -509,6 +518,7 @@ impl FloatingHost {
         self.column_scroll_handles.clear();
         self.open_context_menu = None;
         self.tab_press.set(None);
+        self.group_press.set(None);
         DockInteractionCoordinator::release(window, &self.pointer_capture);
     }
 
