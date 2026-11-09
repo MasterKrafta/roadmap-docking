@@ -321,8 +321,8 @@ pub struct DockController {
     drag: DragController,
     interaction: Option<ResizeInteraction>,
     resize_frame: ResizeFrameThrottle,
-    /// An undocked drag remains one history transaction until its native move ends.
-    tearoff_transaction_active: bool,
+    /// One history transaction remains open while an existing FloatingHost moves natively.
+    native_window_move_transaction_active: bool,
     /// The native adapter must place restored floating windows on available monitors.
     /// Initial native bounds may come from a caller-provided Layout and need monitor recovery.
     initial_monitor_recovery_pending: bool,
@@ -365,7 +365,7 @@ impl DockController {
             floating_rects: HashMap::new(),
             interaction: None,
             resize_frame: ResizeFrameThrottle::default(),
-            tearoff_transaction_active: false,
+            native_window_move_transaction_active: false,
             initial_monitor_recovery_pending,
             registry,
             panel_views: PanelViewCache::default(),
@@ -784,15 +784,12 @@ impl DockController {
             DragPayload::Column { column } => {
                 matches!(self.layout.node(column), Some(Node::Column(_)))
             }
-            // Floating a complete Main DockArea removes its old main-area
-            // registration. During the active tear-off transaction the source
-            // is still valid in the temporary Floating host.
-            DragPayload::DockArea { side } => {
-                self.layout
-                    .main_area(side)
-                    .is_some_and(|area| self.layout.node(area.root).is_some())
-                    || self.tearoff_transaction_active
-            },
+            // A Main DockArea remains in its original Layout until DragHost
+            // releases and applies the one final drop command.
+            DragPayload::DockArea { side } => self
+                .layout
+                .main_area(side)
+                .is_some_and(|area| self.layout.node(area.root).is_some()),
             DragPayload::FloatingGroup { group } => self
                 .layout
                 .floating_group(group)
@@ -817,7 +814,7 @@ impl DockController {
         if corrections.is_empty() {
             return Ok(());
         }
-        if self.has_active_pointer_interaction() || self.tearoff_transaction_active {
+        if self.has_active_pointer_interaction() || self.native_window_move_transaction_active {
             return Err(CommandError::InvalidValue {
                 field: "initial_monitor_bounds",
                 reason: "cannot repair initial monitor bounds during an active pointer interaction",
@@ -850,19 +847,19 @@ impl DockController {
         }
     }
 
-    /// Opens one history transaction for a native tear-off / floating-window move.
-    pub(crate) fn begin_tearoff_transaction(&mut self) -> bool {
-        if self.tearoff_transaction_active || !self.history.begin_transaction(&self.layout) {
+    /// Opens one history transaction while an existing FloatingHost moves natively.
+    pub(crate) fn begin_native_window_move_transaction(&mut self) -> bool {
+        if self.native_window_move_transaction_active || !self.history.begin_transaction(&self.layout) {
             return false;
         }
-        self.tearoff_transaction_active = true;
+        self.native_window_move_transaction_active = true;
         true
     }
 
     /// Opens a single history transaction for one continuous native OS resize.
     /// The adapter streams ResizeFloatingBounds commands until WM_EXITSIZEMOVE.
     pub(crate) fn begin_native_resize_transaction(&mut self) -> bool {
-        if self.tearoff_transaction_active
+        if self.native_window_move_transaction_active
             || self.interaction.is_some()
             || !self.history.begin_transaction(&self.layout)
         {
@@ -876,50 +873,13 @@ impl DockController {
         self.history.commit_transaction(&self.layout)
     }
 
-    /// Continues a native tear-off without replacing the logical drag source
-    /// with the temporary FloatingGroup that hosts the detached content.
-    ///
-    /// The original DragPayload and DragHandle remain unchanged. The native
-    /// FloatingWindowManager tracks the transport window independently.
-    /// The history transaction is deliberately left open.
-    pub(crate) fn continue_tearoff_drag(&mut self) -> Result<(), DragSessionError> {
-        let (payload, origin, position) = match self.drag.session().state() {
-            DragState::Pressed {
-                payload,
-                origin,
-                position,
-            }
-            | DragState::Dragging {
-                payload,
-                origin,
-                position,
-                ..
-            } => (payload, origin, position),
-            _ => return Err(DragSessionError::NoActiveGesture),
-        };
-        let handle = self
-            .drag
-            .session()
-            .handle()
-            .ok_or(DragSessionError::NoActiveGesture)?;
-
-        self.drag.cancel_gesture();
-        self.begin_core_drag_interaction(payload, handle, origin)?;
-        if let Err(error) = self.drag.session_mut().pointer_move(position) {
-            self.drag.cancel_gesture();
-            self.drag.cancel_host_session();
-            return Err(error);
-        }
-        Ok(())
-    }
-
     /// Starts a transaction and Core drag session for an already-floating title bar.
     pub(crate) fn begin_floating_window_move(
         &mut self,
         group: FloatingGroupId,
         point: Point,
     ) -> bool {
-        if self.has_active_pointer_interaction() || !self.begin_tearoff_transaction() {
+        if self.has_active_pointer_interaction() || !self.begin_native_window_move_transaction() {
             return false;
         }
         if let Err(error) = self.begin_drag_interaction(
@@ -929,7 +889,7 @@ impl DockController {
         ) {
             tracing::debug!(%error, ?group, "could not begin floating-window title drag");
             let _ = self.history.cancel_transaction(&mut self.layout, &self.metrics);
-            self.tearoff_transaction_active = false;
+            self.native_window_move_transaction_active = false;
             return false;
         }
         true
@@ -1098,7 +1058,7 @@ impl DockController {
     ) -> Result<(), CommandError> {
         self.drag.cancel_gesture_with_reason(reason);
         let interaction = self.interaction;
-        let tearoff_was_active = self.tearoff_transaction_active;
+        let tearoff_was_active = self.native_window_move_transaction_active;
         let previous_version = self.layout.version();
 
         let cancel_result = if interaction.is_some() || tearoff_was_active {
@@ -1119,11 +1079,11 @@ impl DockController {
         if let Err(error) = cancel_result {
             // Never leave an open history transaction after capture is lost.
             self.history.commit_transaction(&self.layout);
-            self.tearoff_transaction_active = false;
+            self.native_window_move_transaction_active = false;
             return Err(error);
         }
         if tearoff_was_active {
-            self.tearoff_transaction_active = false;
+            self.native_window_move_transaction_active = false;
             if self.layout.version() != previous_version {
                 self.pending_events.push_back(DockEvent::LayoutChanged {
                     version: self.layout.version(),
