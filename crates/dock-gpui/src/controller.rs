@@ -175,11 +175,9 @@ impl DragController {
     }
 
     pub(crate) fn can_begin_panel_view_transfer(&self, panel: PanelId) -> bool {
-        self.host_session.as_ref().is_some_and(|session| {
-            session.payload() == DragPayload::Panel { panel }
-                && session.transport_host().is_some()
-                && session.transferred_panel().is_none()
-        })
+        self.host_session
+            .as_ref()
+            .is_some_and(|session| session.can_begin_panel_view_transfer(panel))
     }
 
     pub(crate) fn begin_panel_view_transfer(&mut self, panel: PanelId) -> bool {
