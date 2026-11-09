@@ -1177,6 +1177,24 @@ impl Render for FloatingHost {
             })
             .collect::<Vec<_>>();
 
+        let pending_transfer = self.controller.update(cx, |controller, _| {
+            controller.pending_panel_view_transfer_from(window_id)
+        });
+        if let Some(panel) = pending_transfer
+            && panel_views
+                .iter()
+                .any(|(rect, view)| rect.panel == panel && view.is_none())
+        {
+            let controller = self.controller.clone();
+            window.on_next_frame(move |_, app| {
+                controller.update(app, |controller, controller_cx| {
+                    if controller.confirm_panel_view_source_detached(panel, window_id) {
+                        controller_cx.notify();
+                    }
+                });
+            });
+        }
+
         if self.open_context_menu.as_ref().is_some_and(|open| {
             !context_menu_target_exists(
                 open.target,

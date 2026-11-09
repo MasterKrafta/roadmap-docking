@@ -438,6 +438,26 @@ impl Render for DockHost {
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
+
+        let source_window_id = window.window_handle().window_id();
+        let pending_transfer = self.controller.update(cx, |controller, _| {
+            controller.pending_panel_view_transfer_from(source_window_id)
+        });
+        if let Some(panel) = pending_transfer
+            && panel_views
+                .iter()
+                .any(|(rect, view)| rect.panel == panel && view.is_none())
+        {
+            let controller = self.controller.clone();
+            window.on_next_frame(move |_, app| {
+                controller.update(app, |controller, controller_cx| {
+                    if controller.confirm_panel_view_source_detached(panel, source_window_id) {
+                        controller_cx.notify();
+                    }
+                });
+            });
+        }
+
         // A PanelId can be mounted in one host only during this render pass.
         // This also protects against stale/overlapping geometry snapshots.
         let mut mounted_panel_ids = HashSet::new();
