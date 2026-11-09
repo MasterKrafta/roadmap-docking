@@ -658,6 +658,7 @@ impl Render for FloatingHost {
                     let manager_for_down = manager.clone();
                     let controller_for_down = controller.clone();
                     let tab_press_for_down = tab_press.clone();
+                    let group_press_for_down = group_press.clone();
                     let pointer_capture_for_down = pointer_capture.clone();
                     window.on_mouse_event(move |event: &MouseDownEvent, phase, window, app| {
                         if phase != DispatchPhase::Capture
@@ -733,6 +734,61 @@ impl Render for FloatingHost {
                             return;
                         }
 
+                        let group_candidate = controller_for_down.update(app, |controller, _| {
+                            let dock_group = match hit? {
+                                dock_core::HitResult::Group { group }
+                                | dock_core::HitResult::TabStrip { group } => group,
+                                _ => return None,
+                            };
+                            let rects = controller.floating_geometry(input_window_id, group).ok()?;
+                            let group_rect = rects
+                                .groups
+                                .iter()
+                                .find(|rect| rect.group == dock_group)?
+                                .rect;
+                            let in_column = controller.layout().nodes().any(|(_, node)| {
+                                matches!(node, Node::Column(column) if column.groups.contains(&dock_group))
+                            });
+                            let zone = GroupDragArea::drag_zone(
+                                group_rect,
+                                controller.metrics(),
+                                in_column,
+                            );
+                            GroupDragArea::contains(zone, point)
+                                .then_some((dock_group, controller.layout().version()))
+                        });
+                        if let Some((dock_group, layout_version)) = group_candidate {
+                            begin_drag_at(
+                                &controller_for_down,
+                                dock_core::DragPayload::Group { group: dock_group },
+                                dock_core::DragHandle::GroupGrip,
+                                point,
+                                DragSourceHost::Floating { group },
+                                input_window_id,
+                                app,
+                            );
+                            group_press_for_down.set(Some(FloatingGroupPress {
+                                group: dock_group,
+                                origin: point,
+                                layout_version,
+                            }));
+                            if !DockInteractionCoordinator::capture(
+                                window,
+                                hitbox,
+                                &pointer_capture_for_down,
+                            ) {
+                                group_press_for_down.set(None);
+                                DockInteractionCoordinator::cancel(
+                                    &controller_for_down,
+                                    window,
+                                    &pointer_capture_for_down,
+                                    app,
+                                );
+                            }
+                            app.stop_propagation();
+                            return;
+                        }
+
                         let press = controller_for_down.update(app, |controller, _| {
                             let dock_core::HitResult::TabHeader {
                                 group: tab_group,
@@ -772,11 +828,128 @@ impl Render for FloatingHost {
                     let manager_for_move = manager.clone();
                     let controller_for_move = controller.clone();
                     let tab_press_for_move = tab_press.clone();
+                    let group_press_for_move = group_press.clone();
                     let pointer_capture_for_move = pointer_capture.clone();
                     window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, app| {
                         if phase != DispatchPhase::Capture || !event.dragging() {
                             return;
                         }
+                        if let Some(group_press) = group_press_for_move.get() {
+                            let manager_entity = manager_for_move.upgrade();
+                            let drag_host_active = manager_entity
+                                .as_ref()
+                                .and_then(|manager| {
+                                    manager.update(app, |manager, _| manager.drag_host_manager())
+                                })
+                                .is_some_and(|drag_host| {
+                                    drag_host.update(app, |manager, _| {
+                                        manager.active_drag_host_id().is_some()
+                                    })
+                                });
+                            if drag_host_active {
+                                group_press_for_move.set(None);
+                                if DockInteractionCoordinator::has_capture(&pointer_capture_for_move) {
+                                    DockInteractionCoordinator::release(window, &pointer_capture_for_move);
+                                }
+                                app.stop_propagation();
+                                return;
+                            }
+                            if manager_entity.as_ref().is_some_and(|manager| {
+                                manager.update(app, |manager, _| manager.native_move_active())
+                            }) {
+                                app.stop_propagation();
+                                return;
+                            }
+                            if DockInteractionCoordinator::capture_was_lost(
+                                window,
+                                &pointer_capture_for_move,
+                            ) {
+                                group_press_for_move.set(None);
+                                DockInteractionCoordinator::cancel(
+                                    &controller_for_move,
+                                    window,
+                                    &pointer_capture_for_move,
+                                    app,
+                                );
+                                app.stop_propagation();
+                                return;
+                            }
+                            let Ok(point) = crate::geometry::DockGeometry::point_from_gpui(event.position) else {
+                                app.stop_propagation();
+                                return;
+                            };
+                            let dragging = update_drag_at(&controller_for_move, point, app)
+                                || controller_for_move.update(app, |controller, _| {
+                                    matches!(
+                                        controller.drag().session().state(),
+                                        dock_core::DragState::Dragging {
+                                            payload: dock_core::DragPayload::Group { group },
+                                            ..
+                                        } if group == group_press.group
+                                    )
+                                });
+                            if dragging {
+                                let leaves_source = controller_for_move.update(app, |controller, _| {
+                                    let Some(rects) = controller
+                                        .floating_geometry(input_window_id, group)
+                                        .ok()
+                                    else {
+                                        return true;
+                                    };
+                                    let Some(group_rect) = rects
+                                        .groups
+                                        .iter()
+                                        .find(|rect| rect.group == group_press.group)
+                                        .map(|rect| rect.rect)
+                                    else {
+                                        return true;
+                                    };
+                                    let in_column = controller.layout().nodes().any(|(_, node)| {
+                                        matches!(node, Node::Column(column) if column.groups.contains(&group_press.group))
+                                    });
+                                    let zone = GroupDragArea::drag_zone(
+                                        group_rect,
+                                        controller.metrics(),
+                                        in_column,
+                                    );
+                                    !GroupDragArea::contains(zone, point)
+                                });
+                                let over_other_window = manager_entity.as_ref().is_some_and(|manager| {
+                                    manager.update(app, |manager, _| {
+                                        manager.cursor_over_other_docking_window(group)
+                                    })
+                                });
+                                if leaves_source || over_other_window {
+                                    let drag_host_manager = manager_entity.as_ref().and_then(|manager| {
+                                        manager.update(app, |manager, _| manager.drag_host_manager())
+                                    });
+                                    if let Some(drag_host_manager) = drag_host_manager {
+                                        if !begin_group_drag_host(
+                                            &controller_for_move,
+                                            &drag_host_manager,
+                                            app,
+                                        ) {
+                                            tracing::debug!("Floating Group drag could not start DragHost");
+                                        }
+                                    } else {
+                                        controller_for_move.update(app, |controller, cx| {
+                                            let _ = controller.cancel_pointer_interaction();
+                                            cx.notify();
+                                        });
+                                    }
+                                    group_press_for_move.set(None);
+                                    DockInteractionCoordinator::release(
+                                        window,
+                                        &pointer_capture_for_move,
+                                    );
+                                    app.stop_propagation();
+                                    return;
+                                }
+                            }
+                            app.stop_propagation();
+                            return;
+                        }
+
                         let Some(press) = tab_press_for_move.get() else {
                             return;
                         };
@@ -940,6 +1113,7 @@ impl Render for FloatingHost {
                     let manager_for_up = manager.clone();
                     let controller_for_up = controller.clone();
                     let tab_press_for_up = tab_press.clone();
+                    let group_press_for_up = group_press.clone();
                     let pointer_capture_for_up = pointer_capture.clone();
                     window.on_mouse_event(move |event: &MouseUpEvent, phase, window, app| {
                         if phase != DispatchPhase::Capture || event.button != MouseButton::Left {
@@ -969,12 +1143,95 @@ impl Render for FloatingHost {
                             &pointer_capture_for_up,
                         ) {
                             tab_press_for_up.set(None);
+                            group_press_for_up.set(None);
                             DockInteractionCoordinator::cancel(
                                 &controller_for_up,
                                 window,
                                 &pointer_capture_for_up,
                                 app,
                             );
+                            return;
+                        }
+                        if let Some(group_press) = group_press_for_up.get() {
+                            group_press_for_up.set(None);
+                            let Ok(point) = crate::geometry::DockGeometry::point_from_gpui(event.position) else {
+                                DockInteractionCoordinator::release(window, &pointer_capture_for_up);
+                                app.stop_propagation();
+                                return;
+                            };
+                            let dragging = update_drag_at(&controller_for_up, point, app)
+                                || controller_for_up.update(app, |controller, _| {
+                                    matches!(
+                                        controller.drag().session().state(),
+                                        dock_core::DragState::Dragging {
+                                            payload: dock_core::DragPayload::Group { group },
+                                            ..
+                                        } if group == group_press.group
+                                    )
+                                });
+                            if dragging {
+                                let leaves_source = controller_for_up.update(app, |controller, _| {
+                                    let Some(rects) = controller
+                                        .floating_geometry(input_window_id, group)
+                                        .ok()
+                                    else {
+                                        return true;
+                                    };
+                                    let Some(group_rect) = rects
+                                        .groups
+                                        .iter()
+                                        .find(|rect| rect.group == group_press.group)
+                                        .map(|rect| rect.rect)
+                                    else {
+                                        return true;
+                                    };
+                                    let in_column = controller.layout().nodes().any(|(_, node)| {
+                                        matches!(node, Node::Column(column) if column.groups.contains(&group_press.group))
+                                    });
+                                    let zone = GroupDragArea::drag_zone(
+                                        group_rect,
+                                        controller.metrics(),
+                                        in_column,
+                                    );
+                                    !GroupDragArea::contains(zone, point)
+                                });
+                                let manager_entity = manager_for_up.upgrade();
+                                let over_other_window = manager_entity.as_ref().is_some_and(|manager| {
+                                    manager.update(app, |manager, _| {
+                                        manager.cursor_over_other_docking_window(group)
+                                    })
+                                });
+                                if leaves_source || over_other_window {
+                                    if let Some(drag_host_manager) = manager_entity.as_ref().and_then(|manager| {
+                                        manager.update(app, |manager, _| manager.drag_host_manager())
+                                    }) {
+                                        if !begin_group_drag_host(
+                                            &controller_for_up,
+                                            &drag_host_manager,
+                                            app,
+                                        ) {
+                                            tracing::debug!("Floating Group drag could not start DragHost on release");
+                                        }
+                                    } else {
+                                        controller_for_up.update(app, |controller, cx| {
+                                            let _ = controller.cancel_pointer_interaction();
+                                            cx.notify();
+                                        });
+                                    }
+                                } else {
+                                    controller_for_up.update(app, |controller, cx| {
+                                        let _ = controller.cancel_pointer_interaction();
+                                        cx.notify();
+                                    });
+                                }
+                            } else {
+                                controller_for_up.update(app, |controller, cx| {
+                                    let _ = controller.cancel_pointer_interaction();
+                                    cx.notify();
+                                });
+                            }
+                            DockInteractionCoordinator::release(window, &pointer_capture_for_up);
+                            app.stop_propagation();
                             return;
                         }
                         let Some(press) = tab_press_for_up.get() else {
@@ -1390,6 +1647,7 @@ impl Render for FloatingHost {
         let manager_for_escape = self.manager.clone();
         let controller_for_escape = self.controller.clone();
         let tab_press_for_escape = self.tab_press.clone();
+        let group_press_for_escape = self.group_press.clone();
         let context_menu_is_open = self.open_context_menu.is_some();
         root = root.capture_key_down(move |event, window, app| {
             if context_menu_is_open
@@ -1409,6 +1667,7 @@ impl Render for FloatingHost {
                     })
                 }) {
                     tab_press_for_escape.set(None);
+                    group_press_for_escape.set(None);
                     if DockInteractionCoordinator::has_capture(&pointer_capture_for_escape) {
                         DockInteractionCoordinator::release(window, &pointer_capture_for_escape);
                     }
@@ -1416,10 +1675,11 @@ impl Render for FloatingHost {
                     return;
                 }
             }
-            if tab_press_for_escape.get().is_none() {
+            if tab_press_for_escape.get().is_none() && group_press_for_escape.get().is_none() {
                 return;
             }
             tab_press_for_escape.set(None);
+            group_press_for_escape.set(None);
             DockInteractionCoordinator::cancel_on_escape(
                 &controller_for_escape,
                 window,
