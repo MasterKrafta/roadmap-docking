@@ -448,13 +448,11 @@ impl FloatingWindowManager {
             }
         };
 
-        let drag_host_is_foreground = self
-            .drag_host_manager()
-            .is_some_and(|manager| {
-                manager.update(cx, |manager, _| {
-                    manager.active_native_window_id() == Some(foreground)
-                })
-            });
+        let drag_host_is_foreground = self.drag_host_manager().is_some_and(|manager| {
+            manager.update(cx, |manager, _| {
+                manager.active_native_window_id() == Some(foreground)
+            })
+        });
 
         self.main_native_window == Some(foreground)
             || self.registry.windows.values().any(|entry| {
