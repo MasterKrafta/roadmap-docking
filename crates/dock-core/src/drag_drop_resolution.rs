@@ -1482,9 +1482,30 @@ fn photoshop_main_column_moves_directly_into_an_existing_floating_column() {
     let target_floating = builder.floating_group(target_column, bounds(620.0, 140.0), 1);
     let mut layout = builder.build();
 
-    let target_rects = layout
+    // Drop-zone resolution needs one snapshot containing both the Main
+    // source geometry and the Floating target geometry.
+    let mut target_rects = layout
+        .compute_rects(
+            Rect::new(Point::ZERO, Size::new(1200.0, 800.0)),
+            &metrics,
+        )
+        .unwrap();
+    let floating_rects = layout
         .compute_floating_rects(target_floating, &metrics)
         .unwrap();
+    target_rects.columns.extend(floating_rects.columns);
+    target_rects.groups.extend(floating_rects.groups);
+    target_rects.tab_strips.extend(floating_rects.tab_strips);
+    target_rects.tab_headers.extend(floating_rects.tab_headers);
+    target_rects.tab_overflows.extend(floating_rects.tab_overflows);
+    target_rects.panels.extend(floating_rects.panels);
+    target_rects.splitters.extend(floating_rects.splitters);
+    target_rects
+        .floating_groups
+        .extend(floating_rects.floating_groups);
+    target_rects
+        .vertical_overflow
+        .extend(floating_rects.vertical_overflow);
     let source = DropSource::Column {
         column: source_column,
     };
