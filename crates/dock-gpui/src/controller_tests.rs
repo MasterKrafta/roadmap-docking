@@ -918,7 +918,7 @@ fn floating_geometry_hit_test_and_drop_resolver_are_window_local() {
 }
 
 #[test]
-fn native_tearoff_preserves_original_drag_source_and_escape_rolls_back() {
+fn drag_host_keeps_source_layout_unchanged_until_release_and_escape_cancels() {
     let mut controller = DockController::empty(
         Profile::Photoshop,
         DockMetrics::default(),
@@ -928,118 +928,93 @@ fn native_tearoff_preserves_original_drag_source_and_escape_rolls_back() {
     .unwrap();
     controller.reset_layout().unwrap();
 
-    let initial_version = controller.layout().version();
-    let initial_nodes = controller
-        .layout()
-        .nodes()
-        .map(|(id, node)| (id, format!("{node:?}")))
-        .collect::<Vec<_>>();
-    let initial_panels = controller
+    let source_panel = controller
         .layout()
         .panel_instances()
-        .map(|(id, panel)| (id, format!("{panel:?}")))
-        .collect::<Vec<_>>();
-    let initial_areas = controller
-        .layout()
-        .dock_areas()
-        .map(|(id, area)| (id, format!("{area:?}")))
-        .collect::<Vec<_>>();
-    let initial_main_roots = [DockSide::Left, DockSide::Right]
-        .map(|side| controller.layout().main_area(side).map(|area| area.root));
-
+        .next()
+        .map(|(panel, _)| panel)
+        .expect("baseline workspace should contain a Panel");
     let source_group = controller
         .layout()
         .nodes()
         .find_map(|(id, node)| matches!(node, Node::Tabs(_)).then_some(id))
-        .unwrap();
-    let press = Point::new(40.0, 20.0);
+        .expect("baseline workspace should contain a Group");
+    let initial_layout = format!("{:?}", controller.layout());
+    let initial_version = controller.layout().version();
+    let drag_host = DragHostId::from_raw(201);
+    let source_window = WindowId::from(201);
+
+    // A FlyoutPanel uses the same transport lifecycle as PanelTab. Its
+    // Flyout-specific command is deferred to Core resolution on mouse-up.
     controller
-        .begin_drag_interaction(
-            dock_core::DragPayload::Group { group: source_group },
-            DragHandle::GroupGrip,
-            press,
+        .begin_content_drag_interaction(
+            DragPayload::Panel { panel: source_panel },
+            DragHandle::FlyoutPanel,
+            Point::new(40.0, 20.0),
+            DragSourceHost::Main,
+            source_window,
         )
-        .unwrap();
+        .expect("FlyoutPanel content drag should start");
+    assert!(controller.drag_mut().attach_transport_host(drag_host));
     controller
         .drag_mut()
         .session_mut()
         .pointer_move(Point::new(60.0, 20.0))
         .unwrap();
-    assert!(matches!(controller.drag().session().state(), DragState::Dragging { .. }));
-    assert!(controller.begin_tearoff_transaction());
 
-    let outcome = controller
-        .history
-        .apply(
-            &mut controller.layout,
-            DockCommand::Float {
-                node: source_group,
-                bounds: Rect::new(Point::new(1500.0, 500.0), Size::new(440.0, 360.0)),
-            },
-            &controller.metrics,
-        )
-        .unwrap();
-    let Some(dock_core::CommandValue::FloatingGroup(floating_group)) = outcome.actual_value else {
-        panic!("Float must return the newly created floating group id");
-    };
-    assert!(controller.layout.floating_group(floating_group).is_some());
-    controller.drag.layout_version = Some(controller.layout.version());
-
-    // The temporary FloatingGroup is only the native transport window. The
-    // logical drag remains the original Group/GroupGrip gesture.
-    controller.continue_tearoff_drag().unwrap();
+    assert_eq!(format!("{:?}", controller.layout()), initial_layout);
+    assert_eq!(controller.layout().version(), initial_version);
+    assert_eq!(controller.layout().floating_groups().count(), 0);
     assert!(matches!(
         controller.drag().session().state(),
         DragState::Dragging {
-            payload: dock_core::DragPayload::Group { group },
+            payload: DragPayload::Panel { panel },
+            ..
+        } if panel == source_panel
+    ));
+    assert_eq!(
+        controller.drag().session().handle(),
+        Some(DragHandle::FlyoutPanel)
+    );
+    assert_eq!(
+        controller.drag().host_session().unwrap().transport_host(),
+        Some(drag_host)
+    );
+    assert!(!controller.native_window_move_transaction_active);
+
+    controller
+        .cancel_pointer_interaction_on_escape()
+        .expect("Escape should cancel the in-flight DragHost gesture");
+
+    assert_eq!(format!("{:?}", controller.layout()), initial_layout);
+    assert_eq!(controller.layout().version(), initial_version);
+    assert_eq!(controller.layout().floating_groups().count(), 0);
+    assert_eq!(controller.drag().session().state(), DragState::Idle);
+    assert!(controller.drag().host_session().is_none());
+    assert!(!controller.has_active_pointer_interaction());
+    assert!(!controller.native_window_move_transaction_active);
+    assert!(!controller.can_undo());
+    assert!(!controller.can_redo());
+
+    // The same controller can immediately start another content drag. No
+    // temporary FloatingGroup or history transaction was left behind.
+    controller
+        .begin_content_drag_interaction(
+            DragPayload::Group { group: source_group },
+            DragHandle::GroupGrip,
+            Point::new(60.0, 20.0),
+            DragSourceHost::Main,
+            WindowId::from(202),
+        )
+        .expect("a fresh Group drag should start after Escape");
+    assert!(matches!(
+        controller.drag().session().state(),
+        DragState::Pressed {
+            payload: DragPayload::Group { group },
             ..
         } if group == source_group
     ));
-    assert_eq!(controller.drag().session().handle(), Some(DragHandle::GroupGrip));
-    assert!(controller.tearoff_transaction_active);
-
-    controller.cancel_pointer_interaction_on_escape().unwrap();
-    // Restoring a history snapshot advances the revision monotonically.
-    assert!(controller.layout().version() > initial_version);
-    assert_eq!(
-        controller
-            .layout()
-            .nodes()
-            .map(|(id, node)| (id, format!("{node:?}")))
-            .collect::<Vec<_>>(),
-        initial_nodes
-    );
-    assert_eq!(
-        controller
-            .layout()
-            .panel_instances()
-            .map(|(id, panel)| (id, format!("{panel:?}")))
-            .collect::<Vec<_>>(),
-        initial_panels
-    );
-    assert_eq!(
-        controller
-            .layout()
-            .dock_areas()
-            .map(|(id, area)| (id, format!("{area:?}")))
-            .collect::<Vec<_>>(),
-        initial_areas
-    );
-    assert_eq!(
-        [DockSide::Left, DockSide::Right]
-            .map(|side| controller.layout().main_area(side).map(|area| area.root)),
-        initial_main_roots
-    );
-    assert_eq!(controller.layout().floating_groups().count(), 0);
-    assert!(!controller.tearoff_transaction_active);
-    assert_eq!(controller.drag().session().state(), DragState::Idle);
-    assert!(!controller.history.can_undo());
-
-    // A fresh transaction must be possible: cancellation did not leave an
-    // orphaned UndoRedoHistory transaction behind.
-    assert!(controller.history.begin_transaction(&controller.layout));
-    assert!(controller
-        .history
-        .cancel_transaction(&mut controller.layout, &controller.metrics)
-        .unwrap());
+    controller
+        .cancel_pointer_interaction_on_escape()
+        .expect("the fresh gesture should also be cancellable");
 }
