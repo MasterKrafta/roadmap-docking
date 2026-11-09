@@ -1,6 +1,6 @@
 use dock_core::{
-    ColumnRect, CommandValue, ComputeRectsError, DockCommand, DragDropAction, DragDropRequest,
-    DragHandle, DragPayload, DragState, DropSource, DropTarget, FloatingGroupId, Node, NodeId,
+    ColumnRect, ComputeRectsError, DragDropAction, DragDropRequest, DragHandle, DragPayload,
+    DragState, DropSource, DropTarget, FloatingGroupId, Node, NodeId,
     LayoutRects, PanelId, Point, Rect, Size,
 };
 use gpui::{App, Entity, WindowId};
@@ -128,7 +128,7 @@ pub(crate) fn update_drag_at(
     })
 }
 
-/// Starts the temporary DragHost for the active PanelTab gesture.
+/// Starts the temporary DragHost for an active PanelTab or FlyoutPanel gesture.
 /// The source host and original pointer origin always come from DragHostSession;
 /// the temporary window never becomes the semantic drag source.
 pub(crate) fn begin_panel_drag_host(
@@ -137,56 +137,83 @@ pub(crate) fn begin_panel_drag_host(
     app: &mut App,
 ) -> bool {
     let candidate = controller.update(app, |controller, _| {
-        let (panel, origin) = match controller.drag().session().state() {
+        let (panel, origin, handle) = match controller.drag().session().state() {
             DragState::Dragging {
                 payload: DragPayload::Panel { panel },
                 origin,
                 ..
-            } if controller.drag().session().handle() == Some(DragHandle::PanelTab) => {
-                (panel, origin)
+            } => {
+                let handle = controller.drag().session().handle()?;
+                if !matches!(handle, DragHandle::PanelTab | DragHandle::FlyoutPanel) {
+                    return None;
+                }
+                (panel, origin, handle)
             }
             _ => return None,
         };
         let host_session = controller.drag().host_session()?;
         let source_host = host_session.source_host();
         let source_window_id = host_session.source_window_id()?;
+        let preferred_size = controller.layout().panel_instance(panel)?.constraints.preferred_size;
 
-        let (header_rect, preferred_size) = match source_host {
+        let source_rect = match source_host {
             DragSourceHost::Main => {
-                let header = controller
-                    .geometry()
-                    .ok()?
-                    .tab_headers
-                    .iter()
-                    .find(|header| header.panel == panel)?
-                    .rect;
-                let size = controller.layout().panel_instance(panel)?.constraints.preferred_size;
-                (header, size)
+                let rects = controller.geometry().ok()?;
+                match handle {
+                    DragHandle::PanelTab => rects
+                        .tab_headers
+                        .iter()
+                        .find(|header| header.panel == panel)
+                        .map(|header| header.rect)?,
+                    DragHandle::FlyoutPanel => rects
+                        .flyout
+                        .filter(|flyout| flyout.panel == panel)
+                        .map(|flyout| flyout.rect)
+                        .or_else(|| {
+                            rects
+                                .panels
+                                .iter()
+                                .find(|panel_rect| panel_rect.panel == panel)
+                                .map(|panel_rect| panel_rect.rect)
+                        })?,
+                    _ => return None,
+                }
             }
             DragSourceHost::Floating { group } => {
-                let header = controller
-                    .floating_geometry(source_window_id, group)
-                    .ok()?
-                    .tab_headers
-                    .iter()
-                    .find(|header| header.panel == panel)?
-                    .rect;
-                let size = controller.layout().panel_instance(panel)?.constraints.preferred_size;
-                (header, size)
+                let rects = controller.floating_geometry(source_window_id, group).ok()?;
+                match handle {
+                    DragHandle::PanelTab => rects
+                        .tab_headers
+                        .iter()
+                        .find(|header| header.panel == panel)
+                        .map(|header| header.rect)?,
+                    DragHandle::FlyoutPanel => rects
+                        .flyout
+                        .filter(|flyout| flyout.panel == panel)
+                        .map(|flyout| flyout.rect)
+                        .or_else(|| {
+                            rects
+                                .panels
+                                .iter()
+                                .find(|panel_rect| panel_rect.panel == panel)
+                                .map(|panel_rect| panel_rect.rect)
+                        })?,
+                    _ => return None,
+                }
             }
         };
         let grab_offset = Point::new(
-            (origin.x - header_rect.origin.x)
-                .clamp(0.0, header_rect.size.width)
+            (origin.x - source_rect.origin.x)
+                .clamp(0.0, source_rect.size.width)
                 .min(preferred_size.width),
-            (origin.y - header_rect.origin.y)
-                .clamp(0.0, header_rect.size.height)
+            (origin.y - source_rect.origin.y)
+                .clamp(0.0, source_rect.size.height)
                 .min(preferred_size.height),
         );
         Some((panel, grab_offset, preferred_size))
     });
     let Some((panel, grab_offset, preferred_size)) = candidate else {
-        tracing::debug!("PanelTab drag has no valid source geometry for DragHost");
+        tracing::debug!("Panel drag has no valid source geometry for DragHost");
         controller.update(app, |controller, cx| {
             if let Err(error) = controller.cancel_pointer_interaction() {
                 tracing::debug!(%error, "could not cancel Panel drag without source geometry");
@@ -627,117 +654,6 @@ pub(crate) fn finish_floating_tab_drag(
         cx.notify();
         true
     })
-}
-
-/// Handles only the remaining legacy Main tear-off: FlyoutPanel.
-/// PanelTab, GroupGrip, ColumnHeader and DockArea content use DragHost.
-pub(crate) fn begin_native_tearoff(
-    controller: &Entity<DockController>,
-    manager: &Entity<FloatingWindowManager>,
-    pointer: Point,
-    app: &mut App,
-) -> bool {
-    let candidate = controller.update(app, |controller, _| {
-        let (payload, handle) = match controller.drag().session().state() {
-            DragState::Dragging { payload, .. } => {
-                (payload, controller.drag().session().handle()?)
-            }
-            _ => return None,
-        };
-        let local_bounds = floating_bounds(controller, payload, pointer)?;
-        let command = match (handle, payload) {
-            (DragHandle::FlyoutPanel, DragPayload::Panel { panel }) => {
-                DockCommand::FloatPanelFromFlyout { panel, bounds: local_bounds }
-            }
-            _ => return None,
-        };
-        Some((command, local_bounds, payload, handle))
-    });
-
-    let Some((command, local_bounds, payload, handle)) = candidate else {
-        return false;
-    };
-    eprintln!(
-        "[DOCK-INPUT][main] native_tearoff payload={:?} handle={:?} \
-         pointer=({:.1}, {:.1}) bounds=({:.1}, {:.1}, {:.1}, {:.1})",
-        payload,
-        handle,
-        pointer.x,
-        pointer.y,
-        local_bounds.origin.x,
-        local_bounds.origin.y,
-        local_bounds.size.width,
-        local_bounds.size.height
-    );
-    let model_bounds = manager.update(app, |manager, _| {
-        manager.screen_bounds_from_main_local(local_bounds)
-    });
-    let Some(model_bounds) = model_bounds else {
-        tracing::warn!("could not convert main-host bounds into physical screen coordinates");
-        return false;
-    };
-    let command = match command {
-        DockCommand::Float { node, .. } => DockCommand::Float { node, bounds: model_bounds },
-        DockCommand::FloatPanelFromFlyout { panel, .. } => {
-            DockCommand::FloatPanelFromFlyout { panel, bounds: model_bounds }
-        }
-        _ => return false,
-    };
-
-    let detached = controller.update(app, |controller, cx| {
-        if !controller.begin_tearoff_transaction() {
-            return None;
-        }
-        let outcome = match controller.dispatch_tearoff_float_in(command, cx) {
-            Ok(outcome) => outcome,
-            Err(_) => return None,
-        };
-        match outcome.actual_value {
-            Some(CommandValue::FloatingGroup(group)) => {
-                if controller.continue_tearoff_drag().is_ok() {
-                    Some(group)
-                } else {
-                    let _ = controller.cancel_pointer_interaction_on_escape();
-                    controller.flush_events(cx);
-                    cx.notify();
-                    None
-                }
-            }
-            _ => {
-                let _ = controller.cancel_pointer_interaction_on_escape();
-                controller.flush_events(cx);
-                cx.notify();
-                None
-            }
-        }
-    });
-
-    let Some(group) = detached else {
-        eprintln!("[DOCK-INPUT][main] native_tearoff_result=detach_failed");
-        return false;
-    };
-    let started = manager.update(app, |manager, manager_cx| {
-        manager.begin_tearoff_move(
-            group,
-            pointer,
-            local_bounds,
-            model_bounds,
-            false,
-            manager_cx,
-        )
-    });
-    if !started {
-        eprintln!("[DOCK-INPUT][main] native_tearoff_result=window_move_start_failed group={:?}", group);
-        let _ = controller.update(app, |controller, cx| {
-            let result = controller.cancel_pointer_interaction_on_escape();
-            controller.flush_events(cx);
-            cx.notify();
-            result
-        });
-        return false;
-    }
-    eprintln!("[DOCK-INPUT][main] native_tearoff_started group={:?}", group);
-    true
 }
 
 /// Ends a drag from a host-local release point. It prepares a resolver only when
