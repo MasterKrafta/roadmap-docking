@@ -163,12 +163,6 @@ impl DockingWindowAtPoint {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum NativeMoveKind {
-    TearOff,
-    ExistingWindow,
-}
-
 #[derive(Clone, Copy)]
 struct NativeMoveTarget {
     target: DropTarget,
@@ -179,7 +173,6 @@ struct NativeMoveTarget {
 struct NativeMoveSession {
     group: FloatingGroupId,
     native_window: NativeWindowId,
-    kind: NativeMoveKind,
     hide_header: bool,
     grab_offset: PhysicalPoint,
     initial_cursor: PhysicalPoint,
@@ -217,9 +210,6 @@ pub struct FloatingWindowManager {
     native_resize: Option<NativeResizeSession>,
     drag_host_manager: Option<WeakEntity<DragHostManager>>,
     reconciling: bool,
-    /// Group whose floating host is being created for an active native tear-off.
-    /// Reconciliation keeps it hidden until the caller positions the HWND.
-    pending_tearoff_group: Option<FloatingGroupId>,
     registry: PanelWindowRegistry,
     host_registry: CompositionHostRegistry,
     native_ops: SystemNativeWindowOps,
@@ -237,7 +227,6 @@ impl FloatingWindowManager {
             native_resize: None,
             drag_host_manager: None,
             reconciling: false,
-            pending_tearoff_group: None,
             registry: PanelWindowRegistry::default(),
             host_registry: CompositionHostRegistry::default(),
             native_ops: SystemNativeWindowOps,
@@ -268,25 +257,6 @@ impl FloatingWindowManager {
     fn panel_window_for_group(&self, group: FloatingGroupId) -> Option<&PanelWindowEntry> {
         let panel = self.host_registry.panel_for_group(group)?;
         self.registry.windows.get(&panel)
-    }
-
-    /// Ensures a newly floated composition has its one native host window.
-    /// The temporary visibility guard lets the caller position the HWND before
-    /// showing it at the pointer, instead of flashing at its initial bounds.
-    fn ensure_panel_window_for_group(
-        &mut self,
-        group: FloatingGroupId,
-        cx: &mut Context<Self>,
-    ) -> Option<(PanelId, NativeWindowId, WindowId)> {
-        if self.panel_window_for_group(group).is_none() {
-            let previous_pending = self.pending_tearoff_group.replace(group);
-            self.reconcile(cx);
-            self.pending_tearoff_group = previous_pending;
-        }
-
-        let panel = self.host_registry.panel_for_group(group)?;
-        let entry = self.registry.windows.get(&panel)?;
-        Some((panel, entry.native_window?, entry.window_id))
     }
 
     /// Connects the manager to the main GPUI window and the shared controller.
@@ -616,150 +586,6 @@ impl FloatingWindowManager {
         DockGeometry::core_bounds_from_native(rect, client_size, scale)
     }
 
-    /// Starts the remaining legacy native move for a FlyoutPanel tear-off.
-    /// PanelTab, GroupGrip, ColumnHeader and DockAreaHeader content drags use DragHost.
-    pub(crate) fn begin_tearoff_move(
-        &mut self,
-        group: FloatingGroupId,
-        pointer: Point,
-        local_bounds: Rect,
-        model_bounds: Rect,
-        hide_header: bool,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        if self.native_move.is_some() {
-            return false;
-        }
-        let Some((panel, native_window, window_id)) =
-            self.ensure_panel_window_for_group(group, cx)
-        else {
-            tracing::warn!(?group, "could not prepare a native host for the detached composition");
-            return false;
-        };
-        let Ok(cursor) = self.native_ops.cursor_position() else {
-            tracing::warn!(?group, "could not read cursor position for native tear-off");
-            return false;
-        };
-        let scale = self
-            .main_native_window
-            .and_then(|main| self.native_ops.scale_factor(main).ok())
-            .filter(|scale| scale.is_finite() && *scale > 0.0)
-            .unwrap_or(1.0);
-        let Some(grab_offset) = DockGeometry::physical_offset_from_logical(
-            Point::new(
-                pointer.x - local_bounds.origin.x,
-                pointer.y - local_bounds.origin.y,
-            ),
-            scale,
-        ) else {
-            return false;
-        };
-        let position = DockGeometry::physical_position_for_grab(cursor, grab_offset);
-        if let Err(error) = self.native_ops.move_window(native_window, position) {
-            tracing::warn!(?group, %error, "could not position native tear-off window");
-            return false;
-        }
-
-        let high_resolution_timer = self.native_ops.begin_high_resolution_timer().is_ok();
-        self.native_move = Some(NativeMoveSession {
-            group,
-            native_window,
-            kind: NativeMoveKind::TearOff,
-            hide_header,
-            grab_offset,
-            initial_cursor: cursor,
-            start_bounds: model_bounds,
-            start_pointer: pointer,
-            drag_threshold: 0.0,
-            threshold_crossed: true,
-            high_resolution_timer,
-            drop_target: None,
-        });
-        if let Err(error) = self.native_ops.show_no_activate(native_window) {
-            self.native_move = None;
-            if high_resolution_timer {
-                let _ = self.native_ops.end_high_resolution_timer();
-            }
-            tracing::warn!(?group, %error, "could not show native tear-off window");
-            return false;
-        }
-        if let Some(entry) = self.registry.windows.get_mut(&panel) {
-            entry.visibility = PanelWindowVisibility::Visible;
-        }
-
-        self.schedule_native_move(cx, group, window_id);
-        // The FloatingHost may have rendered once while the native window was
-        // being created, before native_move carried the final header visibility.
-        // Notify its manager observer so the first visible frame uses hide_header.
-        cx.notify();
-        true
-    }
-
-    /// Starts native movement for a newly-created floating-tab composition.
-    /// Its single native host window is created only after the tab drag detaches.
-    pub(crate) fn begin_floating_tab_tearoff_move(
-        &mut self,
-        group: FloatingGroupId,
-        model_bounds: Rect,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        if self.native_move.is_some() {
-            return false;
-        }
-        let Some((panel, native_window, window_id)) =
-            self.ensure_panel_window_for_group(group, cx)
-        else {
-            tracing::warn!(?group, "could not prepare a native host for the detached tab");
-            return false;
-        };
-        let Ok(cursor) = self.native_ops.cursor_position() else {
-            tracing::warn!(?group, "could not read cursor position for floating-tab tear-off");
-            return false;
-        };
-        let Some(origin) = DockGeometry::physical_point_from_core(model_bounds.origin) else {
-            return false;
-        };
-        let grab_offset = DockGeometry::physical_delta_between(cursor, origin);
-        let position = DockGeometry::physical_position_for_grab(cursor, grab_offset);
-        if let Err(error) = self.native_ops.move_window(native_window, position) {
-            tracing::warn!(?group, %error, "could not position floating-tab tear-off window");
-            return false;
-        }
-
-        let high_resolution_timer = self.native_ops.begin_high_resolution_timer().is_ok();
-        self.native_move = Some(NativeMoveSession {
-            group,
-            native_window,
-            kind: NativeMoveKind::TearOff,
-            hide_header: true,
-            grab_offset,
-            initial_cursor: cursor,
-            start_bounds: model_bounds,
-            start_pointer: Point::ZERO,
-            drag_threshold: 0.0,
-            threshold_crossed: true,
-            high_resolution_timer,
-            drop_target: None,
-        });
-        if let Err(error) = self.native_ops.show_no_activate(native_window) {
-            self.native_move = None;
-            if high_resolution_timer {
-                let _ = self.native_ops.end_high_resolution_timer();
-            }
-            tracing::warn!(?group, %error, "could not show floating-tab tear-off window");
-            return false;
-        }
-        if let Some(entry) = self.registry.windows.get_mut(&panel) {
-            entry.visibility = PanelWindowVisibility::Visible;
-        }
-
-        self.schedule_native_move(cx, group, window_id);
-        // This new host also needs a render after its hidden-header move state
-        // has been installed; its initial render can precede this state.
-        cx.notify();
-        true
-    }
-
     /// Starts a thresholded native move from the shared floating DockAreaHeader.
     pub(crate) fn begin_existing_window_move(
         &mut self,
@@ -832,7 +658,6 @@ impl FloatingWindowManager {
         self.native_move = Some(NativeMoveSession {
             group,
             native_window,
-            kind: NativeMoveKind::ExistingWindow,
             hide_header,
             grab_offset,
             initial_cursor: cursor,
@@ -898,28 +723,12 @@ impl FloatingWindowManager {
             let distance = ((dx as f64).powi(2) + (dy as f64).powi(2)).sqrt();
             if distance < state.drag_threshold as f64 {
                 if !self.native_ops.left_button_down().unwrap_or(false) {
-                    if state.kind == NativeMoveKind::TearOff {
-                        self.cancel_native_move(state, cx);
-                    } else {
-                        self.finish_native_move(state, cx);
-                    }
+                    self.finish_native_move(state, cx);
                     return false;
                 }
                 return true;
             }
             state.threshold_crossed = true;
-            if state.kind == NativeMoveKind::TearOff {
-                if let Err(error) = self.native_ops.show_no_activate(state.native_window) {
-                    tracing::warn!(?group, %error, "could not show the temporary floating window after drag threshold");
-                    self.cancel_native_move(state, cx);
-                    return false;
-                }
-                if let Some(panel) = self.host_registry.panel_for_group(group)
-                    && let Some(entry) = self.registry.windows.get_mut(&panel)
-                {
-                    entry.visibility = PanelWindowVisibility::Visible;
-                }
-            }
             let scale = self.native_ops.scale_factor(state.native_window).ok()
                 .filter(|scale| scale.is_finite() && *scale > 0.0).unwrap_or(1.0);
             let Some(delta) = DockGeometry::logical_delta_from_physical(
@@ -961,31 +770,15 @@ impl FloatingWindowManager {
                 _ => return None,
             };
             match payload {
-                // A legacy tear-off keeps the original logical source. state.group is
-                // only the temporary native host and must never replace its payload.
-                DragPayload::Panel { panel } => Some(DropSource::Panel { panel }),
-                // Column, Group and DockArea content is transported exclusively
-                // by DragHost and never enters the legacy persistent-Floating resolver.
-                DragPayload::Column { .. }
-                | DragPayload::Group { .. }
-                | DragPayload::DockArea { .. } => None,
-                // An already-floating window is a different gesture: its entire
-                // FloatingGroup is the source, so its root is resolved as one
-                // complete composition. Main-originated tear-offs never enter
-                // this branch because their original payload is preserved.
-                DragPayload::FloatingGroup { group }
-                    if state.kind == NativeMoveKind::ExistingWindow && group == state.group =>
-                {
-                    controller
-                        .layout()
-                        .floating_group(group)
-                        .and_then(|floating| controller.layout().dock_area(floating.area))
-                        .map(|area| match controller.layout().node(area.root) {
-                            Some(Node::Column(_)) => DropSource::Column { column: area.root },
-                            _ => DropSource::Group { group: area.root },
-                        })
-                }
-                DragPayload::FloatingGroup { .. } => None,
+                DragPayload::FloatingGroup { group } if group == state.group => controller
+                    .layout()
+                    .floating_group(group)
+                    .and_then(|floating| controller.layout().dock_area(floating.area))
+                    .map(|area| match controller.layout().node(area.root) {
+                        Some(Node::Column(_)) => DropSource::Column { column: area.root },
+                        _ => DropSource::Group { group: area.root },
+                    }),
+                _ => None,
             }
         });
         let Some(source) = source else {
@@ -1215,93 +1008,9 @@ impl FloatingWindowManager {
             floating_bounds.origin = Point::new(rect.left as f32, rect.top as f32);
         }
 
-        // A PanelTab tear-off may temporarily crop ColumnHeader from the native
-        // client area. When the pointer is released into free space, restore
-        // that client height and move the top edge up by exactly the same
-        // physical amount. The tab row therefore stays stationary.
-        let mut rollback_header_expansion = None;
-        let mut native_bounds_changed = false;
-        if state.kind == NativeMoveKind::TearOff && state.hide_header && is_free_release {
-            let metrics = self.controller.update(cx, |controller, _| controller.metrics());
-            let scale = self.native_ops.scale_factor(state.native_window).ok()
-                .filter(|scale| scale.is_finite() && *scale > 0.0);
-            let client_size = self.native_ops.client_size(state.native_window).ok();
-
-            if let (Some(rect), Some(scale), Some(client_size)) = (native_rect, scale, client_size) {
-                let expansion = DockGeometry::physical_coordinate(metrics.column_header_height, scale)
-                    .and_then(|header_pixels| {
-                        let client_height = client_size.height.checked_add(header_pixels)?;
-                        let top = rect.top.checked_sub(header_pixels)?;
-                        let bounds = Rect::new(
-                            Point::new(rect.left as f32, top as f32),
-                            Size::new(
-                                floating_bounds.size.width,
-                                floating_bounds.size.height + metrics.column_header_height,
-                            ),
-                        );
-                        bounds.validate_non_empty().ok()?;
-                        Some((
-                            header_pixels,
-                            client_height,
-                            PhysicalPoint { x: rect.left, y: top },
-                            bounds,
-                        ))
-                    });
-
-                if let Some((header_pixels, client_height, position, bounds)) = expansion {
-                    let expanded_client_size = PhysicalSize {
-                        width: client_size.width,
-                        height: client_height,
-                    };
-                    match self.native_ops.resize_window(state.native_window, expanded_client_size) {
-                        Ok(()) => match self.native_ops.move_window(state.native_window, position) {
-                            Ok(()) => {
-                                floating_bounds = bounds;
-                                rollback_header_expansion = Some((
-                                    client_size,
-                                    PhysicalPoint { x: rect.left, y: rect.top },
-                                ));
-                                native_bounds_changed = true;
-                                tracing::debug!(
-                                    ?state.group,
-                                    header_pixels,
-                                    "restored floating ColumnHeader space above the dragged tab"
-                                );
-                            }
-                            Err(error) => {
-                                let _ = self.native_ops.resize_window(state.native_window, client_size);
-                                tracing::warn!(
-                                    ?state.group,
-                                    %error,
-                                    "could not raise floating window top edge for ColumnHeader"
-                                );
-                            }
-                        },
-                        Err(error) => {
-                            tracing::warn!(
-                                ?state.group,
-                                %error,
-                                "could not expand floating client area for ColumnHeader"
-                            );
-                        }
-                    }
-                } else {
-                    tracing::warn!(
-                        ?state.group,
-                        "could not calculate floating bounds with restored ColumnHeader"
-                    );
-                }
-            } else {
-                tracing::warn!(
-                    ?state.group,
-                    "could not read native floating geometry to restore ColumnHeader space"
-                );
-            }
-        }
-
         self.native_move = None;
         let result = self.controller.update(cx, |controller, controller_cx| {
-            controller.finish_tearoff_move_in(
+            controller.finish_floating_window_move_in(
                 state.group,
                 floating_bounds,
                 drop_target,
@@ -1315,28 +1024,6 @@ impl FloatingWindowManager {
             }
             tracing::warn!(?state.group, %error, "could not commit native floating-window move");
             self.cancel_controller_move(cx);
-        }
-
-        // NativeWindowOps changes the HWND directly. Synchronize GPUI's cached
-        // viewport size as well, otherwise the new client area can remain
-        // unpainted until another input event invalidates the floating window.
-        if native_bounds_changed {
-            let host_window = self
-                .host_registry
-                .panel_for_group(state.group)
-                .and_then(|panel| self.registry.windows.get(&panel))
-                .map(|entry| entry.window);
-            if let Some(host_window) = host_window
-                && let Err(error) = host_window.update(cx, |_, window, app| {
-                    window.bounds_changed(app);
-                })
-            {
-                tracing::warn!(
-                    ?state.group,
-                    %error,
-                    "could not synchronize GPUI bounds after restoring floating ColumnHeader"
-                );
-            }
         }
 
         cx.notify();
@@ -1353,8 +1040,7 @@ impl FloatingWindowManager {
             controller_cx.notify();
             result
         });
-        if state.kind == NativeMoveKind::ExistingWindow
-            && let Some(position) = self.physical_origin_for_bounds(state.start_bounds)
+        if let Some(position) = self.physical_origin_for_bounds(state.start_bounds)
             && let Err(error) = self.native_ops.move_window(state.native_window, position)
         {
             tracing::warn!(?state.group, %error, "could not restore floating window after Escape");
@@ -1739,13 +1425,7 @@ impl FloatingWindowManager {
         active_hosts: &HashMap<FloatingGroupId, PanelId>,
     ) {
         for group in groups {
-            if self.pending_tearoff_group == Some(group.id)
-                || self.native_move.is_some_and(|session| {
-                    session.group == group.id
-                        && session.kind == NativeMoveKind::TearOff
-                        && !session.threshold_crossed
-                })
-            {
+            if self.native_move.is_some_and(|session| session.group == group.id) {
                 continue;
             }
             let Some(panel) = active_hosts.get(&group.id).copied() else {
