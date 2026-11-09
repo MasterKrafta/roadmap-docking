@@ -179,6 +179,7 @@ impl DragHostManager {
                 app.new(|_| DragHostSurface {
                     theme,
                     controller,
+                    controller_observed: false,
                     panel,
                 })
             })
@@ -450,11 +451,19 @@ pub enum DragHostError {
 struct DragHostSurface {
     theme: DockTheme,
     controller: Entity<DockController>,
+    controller_observed: bool,
     panel: Option<PanelId>,
 }
 
 impl Render for DragHostSurface {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if !self.controller_observed {
+            let controller = self.controller.clone();
+            cx.observe(&controller, |_, _, host_cx| host_cx.notify())
+                .detach();
+            self.controller_observed = true;
+        }
+
         let mut root = div()
             .size_full()
             .bg(rgb(self.theme.colors.window_background));
