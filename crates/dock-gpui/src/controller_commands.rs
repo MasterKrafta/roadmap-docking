@@ -377,74 +377,20 @@ impl DockController {
         result
     }
 
-    /// Applies the initial Float command inside an already-open native tear-off transaction.
-    /// The active DragSession survives and adopts the new Layout revision.
-    pub(crate) fn dispatch_tearoff_float_in(
-        &mut self,
-        command: DockCommand,
-        cx: &mut Context<Self>,
-    ) -> Result<CommandOutcome, CommandError> {
-        if !self.tearoff_transaction_active
-            || !matches!(command, DockCommand::Float { .. } | DockCommand::FloatPanelFromFlyout { .. })
-        {
-            let error = CommandError::InvalidValue {
-                field: "tearoff",
-                reason: "a Float command requires an active native tear-off transaction",
-            };
-            self.finish_failure(&error);
-            // A rejected command must not strand the history transaction
-            // opened by begin_tearoff_transaction. Restore the pre-detach
-            // Layout before allowing the pointer interaction to end.
-            if self.tearoff_transaction_active
-                && let Err(cancel_error) = self.cancel_pointer_interaction()
-            {
-                tracing::warn!(
-                    %cancel_error,
-                    "could not roll back an invalid native tear-off command"
-                );
-            }
-            self.flush_events(cx);
-            cx.notify();
-            return Err(error);
-        }
-
-        let before_panels = self.panel_keys();
-        let previous_version = self.layout.version();
-        match self.history.apply(&mut self.layout, command, &self.metrics) {
-            Ok(outcome) => {
-                self.finish_success(before_panels, previous_version, std::iter::empty());
-                self.drag.layout_version = Some(self.layout.version());
-                self.flush_events(cx);
-                cx.notify();
-                Ok(outcome)
-            }
-            Err(error) => {
-                self.finish_failure(&error);
-                let _ = self.history.cancel_transaction(&mut self.layout, &self.metrics);
-                self.tearoff_transaction_active = false;
-                self.drag.cancel_gesture();
-                self.drag.cancel_host_session();
-                self.flush_events(cx);
-                cx.notify();
-                Err(error)
-            }
-        }
-    }
-
-    /// Completes a native move as one undo step. A valid drop on the main or
-    /// another floating window docks the detached payload; an empty-space drop
-    /// commits the final floating bounds, including any restored ColumnHeader space.
-    pub(crate) fn finish_tearoff_move_in(
+    /// Completes a native move of an existing FloatingHost as one undo step.
+    /// A valid dock target docks the complete composition; free space commits
+    /// its final native bounds.
+    pub(crate) fn finish_floating_window_move_in(
         &mut self,
         group: FloatingGroupId,
         floating_bounds: Rect,
         drop_target: Option<(DropTarget, Point)>,
         cx: &mut Context<Self>,
     ) -> Result<(), CommandError> {
-        if !self.tearoff_transaction_active {
+        if !self.native_window_move_transaction_active {
             return Err(CommandError::InvalidValue {
-                field: "tearoff",
-                reason: "there is no active native move transaction",
+                field: "native_floating_move",
+                reason: "there is no active native floating-window move transaction",
             });
         }
 
@@ -467,7 +413,7 @@ impl DockController {
                         Ok(DragDropAction::Command(command)) => Some(command),
                         Ok(DragDropAction::NoOp) => None,
                         Err(error) => {
-                            tracing::debug!(%error, "native tear-off drop was rejected; keeping the floating window");
+                            tracing::debug!(%error, "native FloatingHost drop was rejected; keeping the floating window");
                             None
                         }
                     }
@@ -488,7 +434,7 @@ impl DockController {
             Ok(_) => {
                 self.finish_success(before_panels, previous_version, std::iter::empty());
                 self.history.commit_transaction(&self.layout);
-                self.tearoff_transaction_active = false;
+                self.native_window_move_transaction_active = false;
                 self.drag.cancel_gesture();
                 self.drag.clear_layout_version();
                 self.drag.finish_host_session();
@@ -499,7 +445,7 @@ impl DockController {
             Err(error) => {
                 self.finish_failure(&error);
                 let cancel_result = self.history.cancel_transaction(&mut self.layout, &self.metrics);
-                self.tearoff_transaction_active = false;
+                self.native_window_move_transaction_active = false;
                 self.drag.cancel_gesture();
                 self.drag.clear_layout_version();
                 self.drag.cancel_host_session();
