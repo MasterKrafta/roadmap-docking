@@ -8,9 +8,7 @@ use gpui::{
     AppContext, Bounds, Context, Entity, IntoElement, Render, Window, WindowBounds,
     WindowHandle, WindowId, WindowKind, WindowOptions, div, point, px, rgb, size,
 };
-use platform::{
-    NativeError, NativeWindowId, NativeWindowOps, PhysicalPoint, SystemNativeWindowOps,
-};
+use platform::{NativeError, NativeWindowId, NativeWindowOps, SystemNativeWindowOps};
 
 use dock_core::{Point, Size};
 
@@ -18,8 +16,6 @@ use crate::{
     DockController, DockTheme, DockWindowRole, DragHostId,
     geometry::DockGeometry,
 };
-
-const DEFAULT_DRAG_HOST_SIZE: Size = Size::new(280.0, 180.0);
 
 struct ActiveDragHost {
     id: DragHostId,
