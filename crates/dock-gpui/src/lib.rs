@@ -13,6 +13,7 @@ pub mod dock_components;
 mod app_shell;
 pub mod controller;
 pub mod dock_host;
+pub mod drag_host;
 pub mod floating_manager;
 
 mod geometry;
@@ -134,6 +135,7 @@ pub use components::{
     FloatingHost, FlyoutView, MainDockView, PanelHost, RailView, SplitterView, TabOverflow,
 };
 pub use dock_host::DockHost;
+pub use drag_host::{DockWindowRole, DragHostId};
 pub use floating_manager::{
     CompositionHostRegistry, FloatingWindowManager, PanelLayoutLocation, PanelWindowRegistry,
     PanelWindowVisibility,
