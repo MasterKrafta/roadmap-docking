@@ -528,8 +528,6 @@ impl DragHostManager {
                     excluded_source_window,
                 )
             });
-        let main_point = floating_manager
-            .update(cx, |manager, _| manager.core_point_for_main(cursor));
         let source_point = floating_manager.update(cx, |manager, _| {
             manager.core_point_for_drag_source(source_host, source_window_id, cursor)
         });
@@ -569,17 +567,15 @@ impl DragHostManager {
                     None
                 }
             };
+            // A resolved dock target supplies coordinates in that target Host.
+            // FreeArea has no target Host, so keep the pointer in the original
+            // source Host's local coordinate system instead of mixing Main/Floating
+            // coordinate spaces in the DragDropRequest.
             let pointer_point = target_window
                 .map(|target| match target {
                     DockingWindowAtPoint::Main { point, .. }
                     | DockingWindowAtPoint::Floating { point, .. } => point,
                 })
-                .or_else(|| {
-                    (target == Some(DropTarget::FreeArea))
-                        .then_some(main_point)
-                        .flatten()
-                })
-                .or(main_point)
                 .or(source_point);
             let Some(pointer_point) = pointer_point else {
                 let _ = controller.drag_mut().session_mut().set_drop_target(None);
