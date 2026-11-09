@@ -487,17 +487,17 @@ impl DragHostManager {
         };
 
         let Ok(cursor) = self.native_ops.cursor_position() else {
-            self.clear_drop_preview(id, cx);
+            self.cancel_active_drag(id, cx);
             return false;
         };
         if let Err(error) = self.move_to_cursor(id, grab_offset, cursor) {
             tracing::warn!(?id, %error, "DragHost could not follow the cursor");
-            self.clear_drop_preview(id, cx);
+            self.cancel_active_drag(id, cx);
             return false;
         }
 
         let Some(floating_manager) = floating_manager else {
-            self.clear_drop_preview(id, cx);
+            self.cancel_active_drag(id, cx);
             return false;
         };
         let excluded_source_window = matches!(
