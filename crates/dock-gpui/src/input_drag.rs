@@ -44,8 +44,8 @@ pub(crate) fn begin_drag_at(
     }
 }
 
-/// Main-host tab, group, and column gestures detach into native Floating windows.
-/// They must not resolve dock targets before that transition is complete.
+/// Main-host tear-off handles bypass regular drop-target tracking until their
+/// temporary DragHost or persistent Floating window is ready.
 fn main_drag_uses_drop_targets(handle: Option<DragHandle>) -> bool {
     !matches!(
         handle,
