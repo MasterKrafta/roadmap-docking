@@ -37,6 +37,16 @@ const SHOW_GROUP_CONTROLS: bool = true;
 pub(crate) struct DockGroupView;
 
 impl DockGroupView {
+    /// Renders a static placeholder for a Group whose content is mounted by DragHost.
+    pub(crate) fn render_placeholder(
+        group: GroupRect,
+        content_origin: Point,
+        metrics: DockMetrics,
+        theme: Theme,
+    ) -> impl IntoElement {
+        super::group_surface(group, content_origin, metrics, theme)
+    }
+
     /// Renders a live Group with one active tab and its panel view.
     pub(super) fn render_active(
         id: String,
