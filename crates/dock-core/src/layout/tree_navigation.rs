@@ -231,7 +231,7 @@ impl Layout {
         None
     }
 
-    pub(super) fn find_floating_root_containing(&self, node_id: NodeId) -> Option<NodeId> {
+    pub(crate) fn find_floating_root_containing(&self, node_id: NodeId) -> Option<NodeId> {
         self.floating_groups.values().find_map(|group| {
             let root = self.dock_areas.get(group.area)?.root;
             self.is_descendant_or_same(root, node_id).then_some(root)
