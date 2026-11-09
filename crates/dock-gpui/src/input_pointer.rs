@@ -19,7 +19,8 @@ use crate::{
 use super::{
     interaction::DockInteractionCoordinator,
     drag::{
-        begin_drag_at, begin_group_drag_host, begin_panel_drag_host, finish_drag_at, update_drag_at,
+        begin_column_drag_host, begin_drag_at, begin_group_drag_host, begin_panel_drag_host,
+        finish_drag_at, update_drag_at,
     },
     resize::{begin_resize_hit, finish_resize, update_resize},
     scroll::map_hit_test_point,
@@ -270,7 +271,17 @@ pub(crate) fn register_pointer_events(
                     }
                 }
                 PointerDownIntent::ColumnCandidate { column } => {
-                    if let Some(side) = dock_area_drag_handle_side(
+                    if column_header_drag_handle_contains(&controller, column, core_point, app) {
+                        begin_drag_at(
+                            &controller,
+                            DragPayload::Column { column },
+                            DragHandle::ColumnHeader,
+                            core_point,
+                            DragSourceHost::Main,
+                            source_window_id,
+                            app,
+                        );
+                    } else if let Some(side) = dock_area_drag_handle_side(
                         &controller,
                         column,
                         core_point,
@@ -481,6 +492,15 @@ pub(crate) fn register_pointer_events(
                     }
                 ) && controller.drag().session().handle() == Some(DragHandle::GroupGrip)
             });
+            let column_header_active = controller.update(app, |controller, _| {
+                matches!(
+                    controller.drag().session().state(),
+                    DragState::Dragging {
+                        payload: DragPayload::Column { .. },
+                        ..
+                    }
+                ) && controller.drag().session().handle() == Some(DragHandle::ColumnHeader)
+            });
             let over_floating = (panel_tab_active || group_grip_active)
                 && manager.update(app, |manager, _| {
                     manager.cursor_over_floating_window_from_main()
@@ -499,6 +519,16 @@ pub(crate) fn register_pointer_events(
                 let started = begin_group_drag_host(&controller, &drag_host_manager, app);
                 if !started {
                     tracing::debug!("Group drag could not start DragHost; source gesture was cancelled");
+                }
+                DockInteractionCoordinator::release(window, &pointer_capture);
+                pointer_press.set(None);
+                app.stop_propagation();
+                return;
+            }
+            if column_header_active && should_tearoff {
+                let started = begin_column_drag_host(&controller, &drag_host_manager, app);
+                if !started {
+                    tracing::debug!("Column drag could not start DragHost; source gesture was cancelled");
                 }
                 DockInteractionCoordinator::release(window, &pointer_capture);
                 pointer_press.set(None);
@@ -663,6 +693,15 @@ pub(crate) fn register_pointer_events(
                         }
                     ) && controller.drag().session().handle() == Some(DragHandle::GroupGrip)
                 });
+                let column_header_active = controller.update(app, |controller, _| {
+                    matches!(
+                        controller.drag().session().state(),
+                        DragState::Dragging {
+                            payload: DragPayload::Column { .. },
+                            ..
+                        }
+                    ) && controller.drag().session().handle() == Some(DragHandle::ColumnHeader)
+                });
                 let over_floating = (panel_tab_active || group_grip_active)
                     && manager.update(app, |manager, _| {
                         manager.cursor_over_floating_window_from_main()
@@ -681,6 +720,16 @@ pub(crate) fn register_pointer_events(
                     let started = begin_group_drag_host(&controller, &drag_host_manager, app);
                     if !started {
                         tracing::debug!("Group drag could not start DragHost on release");
+                    }
+                    DockInteractionCoordinator::release(window, &pointer_capture);
+                    pointer_press.set(None);
+                    app.stop_propagation();
+                    return;
+                }
+                if column_header_active && should_tearoff {
+                    let started = begin_column_drag_host(&controller, &drag_host_manager, app);
+                    if !started {
+                        tracing::debug!("Column drag could not start DragHost on release");
                     }
                     DockInteractionCoordinator::release(window, &pointer_capture);
                     pointer_press.set(None);
@@ -812,7 +861,7 @@ pub(crate) fn register_pointer_events(
 
 /// Selects which semantic drag areas start a host transition after the drag threshold.
 /// PanelTab and GroupGrip start DragHost after leaving their source drag zones.
-/// Column and DockArea headers still use the legacy persistent-Floating tear-off.
+/// Column starts DragHost at threshold; the complete DockArea header remains legacy.
 fn host_transition_enabled_for(handle: Option<DragHandle>, payload: DragPayload) -> bool {
     match (handle, payload) {
         (Some(DragHandle::ColumnHeader), DragPayload::Column { .. }) => true,
@@ -1123,6 +1172,35 @@ fn tab_header_drag_handle_contains(
     })
 }
 
+fn column_header_drag_handle_contains(
+    controller: &Entity<DockController>,
+    column: NodeId,
+    point: Point,
+    app: &mut App,
+) -> bool {
+    controller.update(app, |controller, _| {
+        let Some(column_rect) = controller
+            .geometry()
+            .ok()?
+            .columns
+            .iter()
+            .find(|rect| rect.column == column)
+            .copied()
+        else {
+            return Some(false);
+        };
+        let expanded = matches!(
+            controller.layout().node(column),
+            Some(Node::Column(value)) if !value.mode.is_rail()
+        );
+        Some(expanded && DockAreaDragArea::column_drag_handle_contains(
+            column_rect,
+            point,
+            controller.metrics().column_header_height,
+        ))
+    }).unwrap_or(false)
+}
+
 fn dock_area_drag_handle_side(
     controller: &Entity<DockController>,
     column: NodeId,
@@ -1151,9 +1229,20 @@ fn dock_area_drag_handle_side(
             let Some(area_rect) = dock_area_bounds(&area_columns) else {
                 continue;
             };
+            let column_grip_columns = area_columns
+                .iter()
+                .filter(|column_rect| {
+                    matches!(
+                        layout.node(column_rect.column),
+                        Some(Node::Column(value)) if !value.mode.is_rail()
+                    )
+                })
+                .copied()
+                .collect::<Vec<_>>();
             if DockAreaDragArea::contains(
                 area_rect,
                 &area_columns,
+                &column_grip_columns,
                 point,
                 metrics.column_header_height,
                 metrics.column_control_button_width,
@@ -1401,6 +1490,7 @@ mod hit_dispatch_tests {
         assert!(crate::dock_components::DockAreaDragArea::contains(
             rect,
             &columns,
+            &[],
             Point::new(100.0, 30.0),
             32.0,
             28.0,
@@ -1438,6 +1528,7 @@ mod hit_dispatch_tests {
         assert!(crate::dock_components::DockAreaDragArea::contains(
             composition,
             &composition_columns,
+            &[],
             Point::new(350.0, 30.0),
             32.0,
             28.0,
