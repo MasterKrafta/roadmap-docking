@@ -210,7 +210,9 @@ mod tests {
     fn drag_host_session_keeps_original_payload_and_source_separate_from_transport() {
         use dock_core::{DragHandle, DragPayload, PanelId};
 
-        let panel = PanelId::null();
+        let mut panel_ids = slotmap::SlotMap::<PanelId, ()>::with_key();
+        let panel = panel_ids.insert(());
+        let other_panel = panel_ids.insert(());
         let source_group = FloatingGroupId::null();
         let mut session = super::DragHostSession::new(
             DragPayload::Panel { panel },
@@ -249,7 +251,7 @@ mod tests {
             super::DragSourceHost::Floating { group: source_group }
         );
 
-        assert!(!session.finish_panel_view_transfer(PanelId::null()));
+        assert!(!session.finish_panel_view_transfer(other_panel));
         assert!(session.finish_panel_view_transfer(panel));
         assert_eq!(session.transferred_panel(), None);
         assert!(!session.panel_view_source_detached(panel));
