@@ -27,7 +27,7 @@ use crate::{
     },
     input::{
         drag::{
-            begin_floating_tab_tearoff, finish_floating_tab_drag, update_floating_tab_drag,
+            begin_panel_drag_host, finish_floating_tab_drag, update_floating_tab_drag,
             FloatingTabDrag,
         },
         interaction::DockInteractionCoordinator,
@@ -760,6 +760,23 @@ impl Render for FloatingHost {
                             return;
                         };
                         let manager_entity = manager_for_move.upgrade();
+                        let drag_host_active = manager_entity
+                            .as_ref()
+                            .and_then(|manager| {
+                                manager.update(app, |manager, _| manager.drag_host_manager())
+                            })
+                            .is_some_and(|drag_host| {
+                                drag_host.update(app, |manager, _| {
+                                    manager.active_drag_host_id().is_some()
+                                })
+                            });
+                        if drag_host_active {
+                            tab_press_for_move.set(None);
+                            if DockInteractionCoordinator::has_capture(&pointer_capture_for_move) {
+                                DockInteractionCoordinator::release(window, &pointer_capture_for_move);
+                            }
+                            return;
+                        }
                         if manager_entity.as_ref().is_some_and(|manager| {
                             manager
                                 .update(app, |manager, _| manager.native_move_active())
@@ -877,15 +894,17 @@ impl Render for FloatingHost {
                                 
                         });
                         if floating_tab_tearoff_required(leaves_source, over_other_window)
-                            && let Some(manager) = manager_entity.as_ref()
-                            && begin_floating_tab_tearoff(
-                                &controller_for_move,
-                                manager,
-                                drag,
-                                point,
-                                app,
-                            )
+                            && let Some(drag_host_manager) = manager_entity.as_ref().and_then(|manager| {
+                                manager.update(app, |manager, _| manager.drag_host_manager())
+                            })
                         {
+                            if !begin_panel_drag_host(
+                                &controller_for_move,
+                                &drag_host_manager,
+                                app,
+                            ) {
+                                tracing::debug!("Floating Panel drag could not start DragHost");
+                            }
                             tab_press_for_move.set(None);
                             DockInteractionCoordinator::release(
                                 window,
@@ -905,11 +924,24 @@ impl Render for FloatingHost {
                         if phase != DispatchPhase::Capture || event.button != MouseButton::Left {
                             return;
                         }
-                        if let Some(manager) = manager_for_up.upgrade()
-                            && manager
-                                .update(app, |manager, _| manager.native_move_active())
-                        {
-                            return;
+                        if let Some(manager) = manager_for_up.upgrade() {
+                            let drag_host_active = manager
+                                .update(app, |manager, _| manager.drag_host_manager())
+                                .is_some_and(|drag_host| {
+                                    drag_host.update(app, |manager, _| {
+                                        manager.active_drag_host_id().is_some()
+                                    })
+                                });
+                            if drag_host_active {
+                                tab_press_for_up.set(None);
+                                if DockInteractionCoordinator::has_capture(&pointer_capture_for_up) {
+                                    DockInteractionCoordinator::release(window, &pointer_capture_for_up);
+                                }
+                                return;
+                            }
+                            if manager.update(app, |manager, _| manager.native_move_active()) {
+                                return;
+                            }
                         }
                         if DockInteractionCoordinator::capture_was_lost(
                             window,
@@ -1011,15 +1043,17 @@ impl Render for FloatingHost {
                                 })
                             });
                             if floating_tab_tearoff_required(leaves_source, over_other_window)
-                                && let Some(manager) = manager_entity.as_ref()
-                                && begin_floating_tab_tearoff(
-                                    &controller_for_up,
-                                    manager,
-                                    drag,
-                                    point,
-                                    app,
-                                )
+                                && let Some(drag_host_manager) = manager_entity.as_ref().and_then(|manager| {
+                                    manager.update(app, |manager, _| manager.drag_host_manager())
+                                })
                             {
+                                if !begin_panel_drag_host(
+                                    &controller_for_up,
+                                    &drag_host_manager,
+                                    app,
+                                ) {
+                                    tracing::debug!("Floating Panel drag could not start DragHost on release");
+                                }
                                 DockInteractionCoordinator::release(
                                     window,
                                     &pointer_capture_for_up,
