@@ -198,6 +198,24 @@ impl DragController {
             .is_some_and(|session| session.transferred_panel() == Some(panel))
     }
 
+    pub(crate) fn panel_view_source_detached(&self, panel: PanelId) -> bool {
+        self.host_session
+            .as_ref()
+            .is_some_and(|session| session.panel_view_source_detached(panel))
+    }
+
+    pub(crate) fn confirm_panel_view_source_detached(
+        &mut self,
+        panel: PanelId,
+        source_window_id: WindowId,
+    ) -> bool {
+        self.host_session
+            .as_mut()
+            .is_some_and(|session| {
+                session.confirm_panel_view_source_detached(panel, source_window_id)
+            })
+    }
+
     /// Finishes a successfully released content drag and discards its adapter context.
     pub(crate) fn finish_host_session(&mut self) {
         self.host_session = None;
@@ -414,12 +432,32 @@ impl DockController {
             && self.drag.begin_panel_view_transfer(panel)
     }
 
-    /// Returns the original cached AnyView only while DragHost owns presentation.
+    /// Returns the original cached AnyView after the source placeholder frame has rendered.
     pub(crate) fn panel_view_for_drag(&self, panel: PanelId) -> Option<AnyView> {
         self.drag
-            .panel_view_is_transferred(panel)
+            .panel_view_source_detached(panel)
             .then(|| self.panel_views.get(panel).cloned())
             .flatten()
+    }
+
+    pub(crate) fn pending_panel_view_transfer_from(
+        &self,
+        source_window_id: WindowId,
+    ) -> Option<PanelId> {
+        let session = self.drag.host_session()?;
+        let panel = session.transferred_panel()?;
+        (session.source_window_id() == Some(source_window_id)
+            && !session.panel_view_source_detached(panel))
+        .then_some(panel)
+    }
+
+    pub(crate) fn confirm_panel_view_source_detached(
+        &mut self,
+        panel: PanelId,
+        source_window_id: WindowId,
+    ) -> bool {
+        self.drag
+            .confirm_panel_view_source_detached(panel, source_window_id)
     }
 
     /// Ends presentation transfer after DragHost has stopped mounting the view.

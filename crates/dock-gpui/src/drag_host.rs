@@ -79,6 +79,7 @@ pub struct DragHostSession {
     source_window_id: Option<WindowId>,
     transport_host: Option<DragHostId>,
     transferred_panel: Option<PanelId>,
+    source_detached: bool,
 }
 
 impl DragHostSession {
@@ -96,6 +97,7 @@ impl DragHostSession {
             source_window_id,
             transport_host: None,
             transferred_panel: None,
+            source_detached: false,
         }
     }
 
@@ -140,6 +142,27 @@ impl DragHostSession {
             return false;
         }
         self.transferred_panel = Some(panel);
+        self.source_detached = false;
+        true
+    }
+
+    /// Returns whether the source host has rendered its placeholder frame.
+    pub const fn panel_view_source_detached(&self, panel: PanelId) -> bool {
+        self.transferred_panel == Some(panel) && self.source_detached
+    }
+
+    pub(crate) fn confirm_panel_view_source_detached(
+        &mut self,
+        panel: PanelId,
+        source_window_id: WindowId,
+    ) -> bool {
+        if self.transferred_panel != Some(panel)
+            || self.source_window_id != Some(source_window_id)
+            || self.source_detached
+        {
+            return false;
+        }
+        self.source_detached = true;
         true
     }
 
@@ -148,6 +171,7 @@ impl DragHostSession {
             return false;
         }
         self.transferred_panel = None;
+        self.source_detached = false;
         true
     }
 
@@ -205,6 +229,7 @@ mod tests {
         assert_eq!(session.source_window_id(), None);
         assert_eq!(session.transport_host(), None);
         assert_eq!(session.transferred_panel(), None);
+        assert!(!session.panel_view_source_detached(panel));
         assert!(session.can_begin_panel_view_transfer(panel));
         assert!(!session.begin_panel_view_transfer(panel));
 
@@ -216,6 +241,7 @@ mod tests {
         );
         assert!(session.begin_panel_view_transfer(panel));
         assert_eq!(session.transferred_panel(), Some(panel));
+        assert!(!session.panel_view_source_detached(panel));
         assert!(!session.begin_panel_view_transfer(panel));
         assert_eq!(session.payload(), DragPayload::Panel { panel });
         assert_eq!(
@@ -226,6 +252,7 @@ mod tests {
         assert!(!session.finish_panel_view_transfer(PanelId::null()));
         assert!(session.finish_panel_view_transfer(panel));
         assert_eq!(session.transferred_panel(), None);
+        assert!(!session.panel_view_source_detached(panel));
         assert!(!session.clear_transport_host(DragHostId::from_raw(12)));
         assert!(session.clear_transport_host(drag_host));
         assert_eq!(session.transport_host(), None);
