@@ -570,15 +570,6 @@ impl DockController {
             .collect()
     }
 
-    pub(crate) fn pending_panel_view_transfer_from(
-        &self,
-        source_window_id: WindowId,
-    ) -> Option<PanelId> {
-        self.pending_panel_view_transfers_from(source_window_id)
-            .into_iter()
-            .next()
-    }
-
     pub(crate) fn confirm_panel_view_source_detached(
         &mut self,
         panel: PanelId,

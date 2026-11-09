@@ -1479,6 +1479,28 @@ mod hit_dispatch_tests {
     }
 
     #[test]
+    fn column_header_grip_occupies_only_the_left_header_strip() {
+        let rect = Rect::new(Point::new(10.0, 20.0), dock_core::Size::new(240.0, 500.0));
+        let column = dock_core::ColumnRect::new(NodeId::null(), rect);
+
+        assert!(crate::dock_components::DockAreaDragArea::column_drag_handle_contains(
+            column,
+            Point::new(12.0, 30.0),
+            32.0,
+        ));
+        assert!(!crate::dock_components::DockAreaDragArea::column_drag_handle_contains(
+            column,
+            Point::new(35.0, 30.0),
+            32.0,
+        ));
+        assert!(!crate::dock_components::DockAreaDragArea::column_drag_handle_contains(
+            column,
+            Point::new(12.0, 52.0),
+            32.0,
+        ));
+    }
+
+    #[test]
     fn dock_area_header_drag_zone_excludes_collapse_and_close_controls() {
         let rect = Rect::new(
             Point::new(10.0, 20.0),

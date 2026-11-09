@@ -569,12 +569,10 @@ pub(crate) fn begin_native_tearoff(
     app: &mut App,
 ) -> bool {
     let candidate = controller.update(app, |controller, _| {
-        let (payload, handle, origin) = match controller.drag().session().state() {
-            DragState::Dragging {
-                payload,
-                origin,
-                ..
-            } => (payload, controller.drag().session().handle()?, origin),
+        let (payload, handle) = match controller.drag().session().state() {
+            DragState::Dragging { payload, .. } => {
+                (payload, controller.drag().session().handle()?)
+            }
             _ => return None,
         };
         let local_bounds = floating_bounds(controller, payload, pointer)?;
@@ -1031,9 +1029,8 @@ fn dock_area_bounds(columns: &[ColumnRect]) -> Option<Rect> {
     ))
 }
 
-/// Crops the hidden ColumnHeader out of the detached native window bounds.
-/// The pointer offset is then measured from DockTab's new top edge, not from
-/// the removed header, keeping the tab under the cursor without moving it.
+/// Preserves the full Column rectangle for a ColumnHeader drag. The fallback
+/// crop keeps older content-row drag origins from carrying the shared header band.
 fn column_tab_floating_bounds(
     source: Rect,
     origin: Point,

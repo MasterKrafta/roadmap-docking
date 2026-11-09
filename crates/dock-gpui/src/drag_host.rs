@@ -351,6 +351,36 @@ mod tests {
     }
 
     #[test]
+    fn column_drag_transfers_all_active_panel_views_as_one_session() {
+        use dock_core::{DragHandle, DragPayload, NodeId, PanelId};
+        use slotmap::SlotMap;
+
+        let mut column_ids = SlotMap::<NodeId, ()>::with_key();
+        let column = column_ids.insert(());
+        let mut panel_ids = SlotMap::<PanelId, ()>::with_key();
+        let first_panel = panel_ids.insert(());
+        let second_panel = panel_ids.insert(());
+        let panels = [first_panel, second_panel];
+        let mut session = super::DragHostSession::new(
+            DragPayload::Column { column },
+            DragHandle::ColumnHeader,
+            super::DragSourceHost::Main,
+            None,
+        );
+        let drag_host = DragHostId::from_raw(31);
+
+        assert!(session.can_begin_column_view_transfer(column, &panels));
+        assert!(!session.begin_column_view_transfer(column, &panels));
+        assert!(session.attach_transport_host(drag_host));
+        assert!(session.begin_column_view_transfer(column, &panels));
+        assert_eq!(session.transferred_panels(), &panels);
+        assert!(!session.all_panel_views_source_detached());
+        assert!(!session.can_begin_column_view_transfer(column, &panels));
+        assert!(!session.begin_column_view_transfer(column, &panels));
+        assert_eq!(session.payload(), DragPayload::Column { column });
+    }
+
+    #[test]
     fn dock_window_roles_keep_dragging_separate_from_floating_groups() {
         let drag_id = DragHostId::from_raw(7);
         let dragging = DockWindowRole::Dragging { id: drag_id };
