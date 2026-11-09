@@ -1250,6 +1250,31 @@ mod drop_window_target_tests {
     }
 
     #[test]
+    fn drag_host_overlay_is_skipped_so_a_dock_window_behind_it_can_receive_drop() {
+        let point = PhysicalPoint { x: 200, y: 200 };
+        let drag_host = window(1);
+        let topmost_floating = window(2);
+        let lower_floating = window(3);
+        let main_window = window(4);
+        let windows = [
+            (drag_host, bounds()),
+            (topmost_floating, bounds()),
+            (lower_floating, bounds()),
+            (main_window, bounds()),
+        ];
+
+        assert_eq!(
+            resolve(
+                point,
+                &windows,
+                &[topmost_floating, lower_floating, main_window],
+                Some(drag_host),
+            ),
+            Some(topmost_floating),
+        );
+    }
+
+    #[test]
     fn topmost_registered_dock_window_wins_when_floating_windows_overlap() {
         let point = PhysicalPoint { x: 200, y: 200 };
         let topmost_floating = window(1);

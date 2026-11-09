@@ -323,6 +323,16 @@ impl DragHostManager {
         (active.window_id == window_id).then_some(DockWindowRole::Dragging { id: active.id })
     }
 
+    /// Returns the active DragHost HWND for native drop-target exclusion.
+    ///
+    /// The drag/drop router must pass this value as `exclude` to
+    /// `NativeWindowOps::window_from_point`. The platform resolver skips the
+    /// temporary surface and continues through the desktop Z-order.
+    pub(crate) fn active_native_window_id(&self) -> Option<NativeWindowId> {
+        self.active.as_ref().map(|active| active.native_window)
+    }
+
+    /// Returns the identifier of the currently active DragHost, if present.
     pub fn active_drag_host_id(&self) -> Option<DragHostId> {
         self.active.as_ref().map(|active| active.id)
     }
