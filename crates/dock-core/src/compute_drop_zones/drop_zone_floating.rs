@@ -81,9 +81,9 @@ impl FloatingZoneContext<'_> {
         self.append_group_edge_zones(&target_groups)?;
         self.append_column_slot_zones(area.root)?;
         self.append_edge_zones(floating_rect, area.root, &target_groups)?;
-        // Horizontal Panel/Group splits remain Generic-only. A complete
-        // Floating Column may join another Column-based Floating composition
-        // in either profile.
+        // Generic floating stacks retain their flexible edge behavior.
+        // In either profile, Panel/Group/Column sources may also target the
+        // outer sides of a Floating Column composition.
         if self.layout.profile() == Profile::Generic
             || matches!(self.source, DropSource::Column { .. })
         {
@@ -301,19 +301,22 @@ impl FloatingZoneContext<'_> {
         };
         let target_is_column_composition = target_columns.is_some();
         let source_can_split_horizontally = match self.source {
-            DropSource::Panel { .. } => self.layout.profile() == Profile::Generic,
+            DropSource::Panel { .. } => {
+                self.layout.profile() == Profile::Generic || target_is_column_composition
+            }
             DropSource::Group { .. } => {
-                self.layout.profile() == Profile::Generic
+                (self.layout.profile() == Profile::Generic
                     && (matches!(self.layout.node(self.source_root), Some(Node::Tabs(_)))
-                        || (target_is_column_composition
-                            && source_is_floating_root(self.layout, self.source_root)
+                        || (source_is_floating_root(self.layout, self.source_root)
                             && matches!(
                                 self.layout.node(self.source_root),
                                 Some(Node::Split(crate::Split {
                                     axis: crate::Axis::X,
                                     ..
                                 }))
-                            )))
+                            ))))
+                    || (target_is_column_composition
+                        && matches!(self.layout.node(self.source_root), Some(Node::Tabs(_))))
             }
             DropSource::Column { .. } => {
                 target_is_column_composition
