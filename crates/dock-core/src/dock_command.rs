@@ -73,6 +73,12 @@ pub enum DockCommand {
         side: DockSide,
         index: usize,
     },
+    /// Move an existing Column to a Main insertion slot or an outer edge of a
+    /// Floating Column composition. The Column and its subtree keep their IDs.
+    MoveColumnToTarget {
+        column: NodeId,
+        target: DropTarget,
+    },
     /// Merge a whole Tabs group into another Tabs group at an exact tab slot.
     /// The source group container is removed; its Panel nodes and instances survive.
     /// In the Photoshop profile, a successful merge also expands a collapsed target.
@@ -271,6 +277,10 @@ mod tests {
                 side: DockSide::Left,
                 index: 1,
             },
+            DockCommand::MoveColumnToTarget {
+                column: NodeId::null(),
+                target,
+            },
             DockCommand::MergeGroup {
                 group: NodeId::null(),
                 target_group: NodeId::null(),
@@ -366,7 +376,7 @@ mod tests {
                 mode: ChromeMode::AllHidden,
             },
         ];
-        assert_eq!(commands.len(), 37);
+        assert_eq!(commands.len(), 38);
     }
 
     #[cfg(feature = "serde")]
