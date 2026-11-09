@@ -14,6 +14,9 @@ impl Layout {
             DockCommand::MoveColumnToMainColumn { column, side, index } => {
                 self.apply_move_column_to_main_column_command(column, side, index, metrics)
             }
+            DockCommand::MoveColumnToTarget { column, target } => {
+                self.apply_move_column_to_target_command(column, target, metrics)
+            }
             _ => Err(CommandError::InvalidTarget {
                 reason: "column transfer dispatcher received an unsupported command",
             }),
@@ -36,11 +39,12 @@ impl Layout {
                 CommandError::MissingNode { node: *column }
             });
         }
-        let (source_side, source_index) = self
-            .main_column_position(*column)
-            .ok_or(CommandError::InvalidTarget {
-                reason: "MoveColumnToMainColumn source must belong to a main dock",
-            })?;
+        let source_position = self.main_column_position(*column);
+        if source_position.is_none() && self.find_floating_root_containing(*column).is_none() {
+            return Err(CommandError::InvalidTarget {
+                reason: "column source must belong to a main or floating dock area",
+            });
+        }
         let target_columns = self.main_columns(*side)?;
         if *index > target_columns.len() {
             return Err(CommandError::InvalidValue {
@@ -52,7 +56,9 @@ impl Layout {
         let moving_panels = self.panel_ids_in_subtree(*column);
         self.validate_panel_ids_allowed_for_area(&moving_panels, AllowedArea::MAIN_DOCK)?;
 
-        if source_side == *side {
+        if let Some((source_side, source_index)) = source_position
+            && source_side == *side
+        {
             return self
                 .reorder_main_column(*column, *side, *index, source_index)
                 .map(|application| application.unwrap_or_else(CommandApplication::persistent));
@@ -63,11 +69,13 @@ impl Layout {
             });
         }
 
-        let inverse = DockCommand::MoveColumnToMainColumn {
-            column: *column,
-            side: source_side,
-            index: source_index,
-        };
+        let inverse = source_position.map(|(source_side, source_index)| {
+            DockCommand::MoveColumnToMainColumn {
+                column: *column,
+                side: source_side,
+                index: source_index,
+            }
+        });
         self.remember_subtree_dock_locations(*column);
         self.detach_node(*column)?;
         self.insert_existing_column_at(*side, *index, *column, None, metrics)?;
@@ -76,9 +84,195 @@ impl Layout {
 
         Ok(CommandApplication {
             actual_value: None,
-            inverse: Some(inverse),
+            inverse,
             persistent: true,
         })
+    }
+
+    pub(super) fn apply_move_column_to_target_command(
+        &mut self,
+        column: &NodeId,
+        target: &DropTarget,
+        metrics: &DockMetrics,
+    ) -> Result<CommandApplication, CommandError> {
+        if !matches!(self.nodes.get(*column), Some(Node::Column(_))) {
+            return Err(if self.nodes.contains_key(*column) {
+                CommandError::InvalidTarget {
+                    reason: "MoveColumnToTarget source must be a Column node",
+                }
+            } else {
+                CommandError::MissingNode { node: *column }
+            });
+        }
+
+        match *target {
+            DropTarget::MainColumn { side, index } => {
+                self.apply_move_column_to_main_column_command(column, &side, &index, metrics)
+            }
+            DropTarget::GroupEdge {
+                group,
+                zone: zone @ (DropZone::Left | DropZone::Right),
+            } => {
+                self.validate_drop_target(*target, metrics)?;
+                if self.is_descendant_or_same(*column, group) {
+                    return Ok(CommandApplication::persistent());
+                }
+
+                let target_column = self.find_owner_column(group).ok_or(
+                    CommandError::InvalidTarget {
+                        reason: "column edge target must belong to a Column",
+                    },
+                )?;
+                if target_column == *column {
+                    return Ok(CommandApplication::persistent());
+                }
+
+                let moving_panels = self.panel_ids_in_subtree(*column);
+                self.validate_panel_ids_allowed_for_target(&moving_panels, *target)?;
+
+                if let Some((side, target_index)) = self.main_column_position(target_column) {
+                    let index = if zone == DropZone::Left {
+                        target_index
+                    } else {
+                        target_index + 1
+                    };
+                    self.apply_move_column_to_main_column_command(
+                        column, &side, &index, metrics,
+                    )
+                } else if self.find_floating_root_containing(target_column).is_some() {
+                    self.remember_subtree_dock_locations(*column);
+                    self.detach_node(*column)?;
+                    self.insert_column_adjacent_to_target(
+                        *column,
+                        target_column,
+                        zone,
+                        0.5,
+                        metrics,
+                    )?;
+                    self.remember_subtree_dock_locations(*column);
+                    Ok(CommandApplication::persistent())
+                } else {
+                    Err(CommandError::InvalidTarget {
+                        reason: "column edge target must belong to a main or floating composition",
+                    })
+                }
+            }
+            _ => Err(CommandError::InvalidTarget {
+                reason: "a Column can only be moved to a MainColumn or a horizontal GroupEdge",
+            }),
+        }
+    }
+
+    /// Inserts an unattached Column beside a target Column in either a Main dock
+    /// or a Floating horizontal composition.
+    pub(super) fn insert_column_adjacent_to_target(
+        &mut self,
+        new_column: NodeId,
+        target_column: NodeId,
+        zone: DropZone,
+        ratio: f32,
+        metrics: &DockMetrics,
+    ) -> Result<(), CommandError> {
+        if !matches!(self.nodes.get(new_column), Some(Node::Column(_))) {
+            return Err(CommandError::InvalidTarget {
+                reason: "inserted node must be a Column",
+            });
+        }
+        if !matches!(zone, DropZone::Left | DropZone::Right) {
+            return Err(CommandError::InvalidTarget {
+                reason: "column insertion requires a left or right edge",
+            });
+        }
+        if !ratio.is_finite() || ratio <= 0.0 || ratio >= 1.0 {
+            return Err(CommandError::InvalidValue {
+                field: "ratio",
+                reason: "split ratio must be between zero and one",
+            });
+        }
+
+        if let Some((side, target_index)) = self.main_column_position(target_column) {
+            let insert_at = if zone == DropZone::Left {
+                target_index
+            } else {
+                target_index + 1
+            };
+            return self.insert_existing_column_at(
+                side,
+                insert_at,
+                new_column,
+                Some((ratio, target_index)),
+                metrics,
+            );
+        }
+
+        let floating_root = self.find_floating_root_containing(target_column).ok_or(
+            CommandError::InvalidTarget {
+                reason: "target Column is not attached to a dock area",
+            },
+        )?;
+        match self.nodes.get(floating_root).cloned() {
+            Some(Node::Column(_)) if floating_root == target_column => {
+                let (children, ratios) = if zone == DropZone::Left {
+                    (vec![new_column, target_column], vec![ratio, 1.0 - ratio])
+                } else {
+                    (vec![target_column, new_column], vec![1.0 - ratio, ratio])
+                };
+                let split = self.nodes.insert(Node::Split(crate::Split {
+                    axis: Axis::X,
+                    children,
+                    ratios,
+                }));
+                self.set_area_root(target_column, split)
+            }
+            Some(Node::Split(split))
+                if split.axis == Axis::X
+                    && split
+                        .children
+                        .iter()
+                        .all(|child| matches!(self.nodes.get(*child), Some(Node::Column(_)))) =>
+            {
+                let target_index = split
+                    .children
+                    .iter()
+                    .position(|child| *child == target_column)
+                    .ok_or(CommandError::InvalidTarget {
+                        reason: "target Column is absent from its Floating composition",
+                    })?;
+                let is_outer_edge = if zone == DropZone::Left {
+                    target_index == 0
+                } else {
+                    target_index + 1 == split.children.len()
+                };
+                if !is_outer_edge {
+                    return Err(CommandError::InvalidTarget {
+                        reason: "Floating Column compositions accept horizontal drops only at their outer edges",
+                    });
+                }
+                let insert_at = if zone == DropZone::Left {
+                    target_index
+                } else {
+                    target_index + 1
+                };
+                let ratios = split_sibling_ratios(
+                    &split.ratios,
+                    split.children.len(),
+                    target_index,
+                    insert_at,
+                    ratio,
+                );
+                let Some(Node::Split(current)) = self.nodes.get_mut(floating_root) else {
+                    return Err(CommandError::InvalidTarget {
+                        reason: "Floating composition changed unexpectedly",
+                    });
+                };
+                current.children.insert(insert_at, new_column);
+                current.ratios = ratios;
+                Ok(())
+            }
+            _ => Err(CommandError::InvalidTarget {
+                reason: "horizontal insertion target must belong to a Floating Column composition",
+            }),
+        }
     }
 
     fn reorder_main_column(
