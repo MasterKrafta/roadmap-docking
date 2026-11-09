@@ -955,19 +955,21 @@ impl Render for DragHostSurface {
 
         if let Some(group) = self.group
             && let Some(snapshot) = self.controller.update(cx, |controller, _| {
-                let session = controller.drag().host_session()?;
-                if !matches!(
-                    session.payload(),
-                    DragPayload::Group { group: active } if active == group
-                ) || session.transferred_panel().is_none()
-                    || !session
-                        .transferred_panel()
-                        .is_some_and(|panel| session.panel_view_source_detached(panel))
-                {
-                    return None;
-                }
-                let source_window_id = session.source_window_id()?;
-                let rects = match session.source_host() {
+                let (source_host, source_window_id, panel) = {
+                    let session = controller.drag().host_session()?;
+                    if !matches!(
+                        session.payload(),
+                        DragPayload::Group { group: active } if active == group
+                    ) {
+                        return None;
+                    }
+                    let panel = session.transferred_panel()?;
+                    if !session.panel_view_source_detached(panel) {
+                        return None;
+                    }
+                    (session.source_host(), session.source_window_id()?, panel)
+                };
+                let rects = match source_host {
                     DragSourceHost::Main => controller.geometry().ok()?.clone(),
                     DragSourceHost::Floating { group: floating } => {
                         controller.floating_geometry(source_window_id, floating).ok()?.clone()
@@ -1002,7 +1004,6 @@ impl Render for DragHostSurface {
                     Some(&rects),
                 );
                 let presentation = presentations.get(&group)?.clone();
-                let panel = session.transferred_panel()?;
                 let panel_view = controller.panel_view_for_drag(panel);
                 let panel_rect = rects
                     .panels
