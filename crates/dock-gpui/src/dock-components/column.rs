@@ -124,6 +124,7 @@ impl DockColumnView {
         theme: Theme,
         raise_floating: Option<FloatingGroupId>,
         show_area_header: bool,
+        dragged_group: Option<NodeId>,
     ) -> impl IntoElement {
         let content_rect = Rect::new(
             Point::new(
@@ -153,6 +154,10 @@ impl DockColumnView {
             let mut ordered_groups = groups.to_vec();
             ordered_groups.sort_by_key(|group| menu_group == Some(group.group));
             for group in &ordered_groups {
+                if dragged_group == Some(group.group) {
+                    content = content.child(group_surface(*group, content_origin, metrics, theme));
+                    continue;
+                }
                 let strip = tab_strips
                     .iter()
                     .find(|strip| strip.group == group.group)
