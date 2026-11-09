@@ -432,6 +432,46 @@ impl DockController {
             && self.drag.begin_panel_view_transfer(panel)
     }
 
+    pub(crate) fn can_begin_group_view_transfer(&self, group: NodeId, panel: PanelId) -> bool {
+        let active_panel = match self.layout.node(group) {
+            Some(Node::Tabs(tabs)) => tabs.active_child().and_then(|child| {
+                match self.layout.node(child) {
+                    Some(Node::Panel(value)) => Some(value.panel_id),
+                    _ => None,
+                }
+            }),
+            _ => None,
+        };
+        active_panel == Some(panel)
+            && self.panel_views.get(panel).is_some()
+            && self.drag
+                .host_session()
+                .is_some_and(|session| session.can_begin_group_view_transfer(group, panel))
+    }
+
+    pub(crate) fn begin_group_view_transfer(&mut self, group: NodeId, panel: PanelId) -> bool {
+        self.can_begin_group_view_transfer(group, panel)
+            && self.drag
+                .host_session
+                .as_mut()
+                .is_some_and(|session| session.begin_group_view_transfer(group, panel))
+    }
+
+    /// Returns the Group replaced by a DragHost placeholder in this persistent source window.
+    pub(crate) fn dragged_group_from(&self, source_window_id: WindowId) -> Option<NodeId> {
+        let session = self.drag.host_session()?;
+        if session.source_window_id() != Some(source_window_id)
+            || session.transport_host().is_none()
+            || session.transferred_panel().is_none()
+        {
+            return None;
+        }
+        match session.payload() {
+            DragPayload::Group { group } => Some(group),
+            _ => None,
+        }
+    }
+
     /// Returns the original cached AnyView after the source placeholder frame has rendered.
     pub(crate) fn panel_view_for_drag(&self, panel: PanelId) -> Option<AnyView> {
         self.drag
