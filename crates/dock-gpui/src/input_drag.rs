@@ -716,7 +716,7 @@ fn cancel_drag(controller: &mut DockController) {
     }
 }
 
-fn drop_source(payload: DragPayload) -> Option<DropSource> {
+pub(crate) fn drop_source(payload: DragPayload) -> Option<DropSource> {
     match payload {
         DragPayload::Panel { panel } => Some(DropSource::Panel { panel }),
         DragPayload::Group { group } => Some(DropSource::Group { group }),
