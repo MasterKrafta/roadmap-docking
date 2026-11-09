@@ -477,6 +477,9 @@ impl DragHostManager {
                 )))
             });
         let Some(tracking_state) = tracking_state else {
+            if let Err(error) = self.close(id, cx) {
+                tracing::warn!(?id, %error, "could not close DragHost after its source gesture ended");
+            }
             return false;
         };
         let Some((payload, handle, source_host, source_window_id)) = tracking_state else {
