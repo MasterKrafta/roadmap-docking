@@ -423,9 +423,15 @@ impl DockController {
         handle: DragHandle,
         point: Point,
         source_host: DragSourceHost,
+        source_window_id: WindowId,
     ) -> Result<(), DragSessionError> {
         self.begin_core_drag_interaction(payload, handle, point)?;
-        self.drag.begin_host_session(DragHostSession::new(payload, handle, source_host));
+        self.drag.begin_host_session(DragHostSession::new(
+            payload,
+            handle,
+            source_host,
+            Some(source_window_id),
+        ));
         Ok(())
     }
 

@@ -24,6 +24,7 @@ pub(crate) fn begin_drag_at(
     handle: DragHandle,
     position: Point,
     source_host: DragSourceHost,
+    source_window_id: WindowId,
     app: &mut App,
 ) {
     eprintln!(
@@ -31,7 +32,13 @@ pub(crate) fn begin_drag_at(
         payload, handle, position.x, position.y
     );
     if let Err(error) = controller.update(app, |controller, _| {
-        controller.begin_content_drag_interaction(payload, handle, position, source_host)
+        controller.begin_content_drag_interaction(
+            payload,
+            handle,
+            position,
+            source_host,
+            source_window_id,
+        )
     }) {
         tracing::debug!(%error, "could not begin dock drag gesture");
     }
@@ -154,6 +161,7 @@ pub(crate) fn update_floating_tab_drag(
                     DragHandle::PanelTab,
                     drag.press_origin,
                     DragSourceHost::Floating { group: drag.source_group },
+                    drag.source_window_id,
                 ) {
                     tracing::debug!(%error, "could not begin floating tab drag");
                     return false;
@@ -171,6 +179,7 @@ pub(crate) fn update_floating_tab_drag(
                     DragHandle::PanelTab,
                     drag.press_origin,
                     DragSourceHost::Floating { group: drag.source_group },
+                    drag.source_window_id,
                 ) {
                     tracing::debug!(%error, "could not begin floating tab drag");
                     return false;

@@ -9,6 +9,7 @@
 //! neither manager owns or duplicates the Core Layout.
 
 use dock_core::FloatingGroupId;
+use gpui::WindowId;
 
 /// Runtime identity of one temporary drag-presentation window.
 ///
@@ -75,6 +76,7 @@ pub struct DragHostSession {
     payload: dock_core::DragPayload,
     handle: dock_core::DragHandle,
     source_host: DragSourceHost,
+    source_window_id: Option<WindowId>,
     transport_host: Option<DragHostId>,
 }
 
@@ -84,8 +86,15 @@ impl DragHostSession {
         payload: dock_core::DragPayload,
         handle: dock_core::DragHandle,
         source_host: DragSourceHost,
+        source_window_id: Option<WindowId>,
     ) -> Self {
-        Self { payload, handle, source_host, transport_host: None }
+        Self {
+            payload,
+            handle,
+            source_host,
+            source_window_id,
+            transport_host: None,
+        }
     }
 
     /// Returns the original semantic object carried by this drag.
@@ -96,6 +105,11 @@ impl DragHostSession {
 
     /// Returns the persistent host where the content originated.
     pub const fn source_host(&self) -> DragSourceHost { self.source_host }
+
+    /// Returns the GPUI WindowId of the persistent source host, when recorded.
+    pub const fn source_window_id(&self) -> Option<WindowId> {
+        self.source_window_id
+    }
 
     /// Returns the temporary DragHost identity currently presenting the content.
     pub const fn transport_host(&self) -> Option<DragHostId> { self.transport_host }
@@ -149,6 +163,7 @@ mod tests {
             DragPayload::Panel { panel },
             DragHandle::PanelTab,
             super::DragSourceHost::Floating { group: source_group },
+            None,
         );
         let drag_host = DragHostId::from_raw(11);
 
@@ -158,6 +173,7 @@ mod tests {
             session.source_host(),
             super::DragSourceHost::Floating { group: source_group }
         );
+        assert_eq!(session.source_window_id(), None);
         assert_eq!(session.transport_host(), None);
 
         assert!(session.attach_transport_host(drag_host));

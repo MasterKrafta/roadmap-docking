@@ -262,9 +262,9 @@ Runtime-сессия должна хранить как минимум:
 
 **Фактически внедрено:**
 
-- В `drag_host.rs` добавлены `DragSourceHost` и `DragHostSession`. Сессия хранит исходные `DragPayload` и `DragHandle` отдельно от источника (`Main` или `Floating { group }`) и транспортного `DragHostId`.
+- В `drag_host.rs` добавлены `DragSourceHost` и `DragHostSession`. Сессия хранит исходные `DragPayload` и `DragHandle`, роль исходного Host, его GPUI `WindowId` и транспортный `DragHostId` отдельно друг от друга.
 - `DragController` хранит runtime-контекст рядом с Core `DragSession`, но не меняет Core-модель.
-- Main-host content drag создаёт сессию с источником `Main`; floating tab drag — с источником конкретной `FloatingGroupId`.
+- Main-host content drag создаёт сессию с источником `Main` и Main `WindowId`; floating tab drag — с источником конкретной `FloatingGroupId` и исходным Floating `WindowId`.
 - `DragHostManager` привязывает активный `DragHostId` как транспортный Host при открытии окна и снимает ссылку при закрытии.
 - `continue_tearoff_drag` перезапускает только Core DragSession и сохраняет исходный runtime-контекст. Обычный FloatingTitle move и resize не создают content-drag session.
 - Завершение drop, native tear-off и отмена явно очищают runtime-сессию. Legacy `begin_native_tearoff` и `DockCommand::Float` остаются рабочим маршрутом; новая передача содержимого ещё не включена.

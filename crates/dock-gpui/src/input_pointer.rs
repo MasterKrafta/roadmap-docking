@@ -207,6 +207,7 @@ pub(crate) fn register_pointer_events(
                 pointer_down_intent_for_hit(hit)
             );
 
+            let source_window_id = window.window_handle().window_id();
             match pointer_down_intent_for_hit(hit) {
                 PointerDownIntent::TabHeaderCandidate { group, panel } => {
                     let tab_is_clickable = tab_header_clickable_contains(
@@ -237,6 +238,7 @@ pub(crate) fn register_pointer_events(
                             DragHandle::PanelTab,
                             core_point,
                             DragSourceHost::Main,
+                            source_window_id,
                             app,
                         );
                     }
@@ -258,6 +260,7 @@ pub(crate) fn register_pointer_events(
                             DragHandle::GroupGrip,
                             core_point,
                             DragSourceHost::Main,
+                            source_window_id,
                             app,
                         );
                     }
@@ -275,6 +278,7 @@ pub(crate) fn register_pointer_events(
                             DragHandle::DockAreaHeader,
                             core_point,
                             DragSourceHost::Main,
+                            source_window_id,
                             app,
                         );
                     }
@@ -287,6 +291,7 @@ pub(crate) fn register_pointer_events(
                             DragHandle::FlyoutPanel,
                             core_point,
                             DragSourceHost::Main,
+                            source_window_id,
                             app,
                         );
                     }
